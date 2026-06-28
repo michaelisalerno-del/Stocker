@@ -1,0 +1,25 @@
+data:
+  data_dir: /srv/stocker/data
+  timezone: UTC
+  default_currency: GBP
+
+costs:
+  spread_bps: 2.0
+  commission_bps: 0.5
+  slippage_bps: 1.0
+
+risk:
+  max_position_size: 5000
+  max_order_size: 1000
+  max_daily_loss: 250
+  max_orders_per_day: 5
+  trading_enabled: false
+
+server:
+  mode: paper
+  host: 127.0.0.1
+  port: 8000
+  broker:
+    provider: placeholder
+    account_id_env: STOCKER_BROKER_ACCOUNT_ID
+    api_key_env: STOCKER_BROKER_API_KEY

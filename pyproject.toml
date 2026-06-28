@@ -1,0 +1,114 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stocker"
+version = "0.1.0"
+description = "Trading research and execution foundation with strict research, backtest, risk, and execution boundaries."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Proprietary" }
+authors = [{ name = "Stocker" }]
+dependencies = [
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "pyyaml>=6.0",
+  "structlog>=24.1",
+  "typer>=0.12",
+  "rich>=13.7",
+]
+
+[project.scripts]
+stocker = "stocker_core.cli:app"
+
+[dependency-groups]
+research = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "polars>=1.0",
+  "duckdb>=1.0",
+  "pyarrow>=16.0",
+  "scipy>=1.13",
+  "statsmodels>=0.14",
+  "scikit-learn>=1.5",
+  "matplotlib>=3.9",
+  "plotly>=5.22",
+  "jupyterlab>=4.2",
+  "ipykernel>=6.29",
+  "pandas-market-calendars>=4.4",
+  "vectorbt>=0.28",
+  "backtesting>=0.6",
+]
+server = [
+  "httpx>=0.27",
+  "tenacity>=8.4",
+  "prometheus-client>=0.20",
+  "fastapi>=0.111",
+  "uvicorn>=0.30",
+]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "pre-commit>=3.7",
+  "types-PyYAML>=6.0",
+  "pandas-stubs>=2.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "packages/stocker_core/src/stocker_core",
+  "packages/stocker_data/src/stocker_data",
+  "packages/stocker_research/src/stocker_research",
+  "packages/stocker_backtest/src/stocker_backtest",
+  "packages/stocker_execution/src/stocker_execution",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+  "packages/stocker_core/src",
+  "packages/stocker_data/src",
+  "packages/stocker_research/src",
+  "packages/stocker_backtest/src",
+  "packages/stocker_execution/src",
+]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = [
+  "packages/stocker_core/src",
+  "packages/stocker_data/src",
+  "packages/stocker_research/src",
+  "packages/stocker_backtest/src",
+  "packages/stocker_execution/src",
+  "apps",
+  "tests",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["B008"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+packages = [
+  "stocker_core",
+  "stocker_data",
+  "stocker_research",
+  "stocker_backtest",
+  "stocker_execution",
+]
+ignore_missing_imports = true
+
+[tool.uv]
+default-groups = ["dev"]

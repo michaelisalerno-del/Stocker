@@ -1,0 +1,20 @@
+data:
+  data_dir: data
+  timezone: Europe/London
+  default_currency: GBP
+
+costs:
+  spread_bps: 2.0
+  commission_bps: 0.5
+  slippage_bps: 1.0
+
+risk:
+  max_position_size: 10000
+  max_order_size: 2500
+  max_daily_loss: 500
+  max_orders_per_day: 10
+  trading_enabled: false
+
+research:
+  starting_cash: 100000
+  benchmark_symbol: SPY

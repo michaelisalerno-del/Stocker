@@ -14,9 +14,10 @@ risk boundaries.
 - `packages/stocker_core/`: config, logging, time, shared types, and CLI entry points.
 - `packages/stocker_data/`: local dataset paths, Parquet storage, validators, and
   exchange-calendar helpers.
-- `packages/stocker_research/`: features, labels, baselines, walk-forward splits, and
-  research metrics.
-- `packages/stocker_backtest/`: cost models and future vectorized/event-driven
+- `packages/stocker_research/`: written hypotheses, simple strategy templates,
+  baselines, walk-forward splits, leakage checks, regime labels, stability analysis,
+  and research reports.
+- `packages/stocker_backtest/`: cost models and transparent vectorized/event-driven
   backtest interfaces.
 - `packages/stocker_execution/`: broker interface, orders, paper broker placeholder,
   risk checks, and execution state.
@@ -57,6 +58,10 @@ uv run stocker data import-csv \
   --currency USD
 uv run stocker data audit --symbol AAPL --timeframe 1d
 uv run stocker research baseline --symbol AAPL --timeframe 1d
+uv run stocker research run \
+  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
+  --symbol AAPL \
+  --timeframe 1d
 uv run pytest
 uv run jupyter lab apps/desktop/notebooks
 ```
@@ -104,13 +109,35 @@ updates `data/catalog.json`, and can generate audit and baseline reports.
 
 See [docs/data_pipeline.md](docs/data_pipeline.md) before researching any edge.
 
+## Research Harness
+
+Stage 3 adds a hypothesis-first research harness. Each experiment starts from a YAML
+hypothesis, loads an audited local Parquet dataset, builds chronological walk-forward
+splits, evaluates a small guarded parameter grid, applies explicit costs, checks
+parameter stability, summarizes performance by simple historical regimes, and writes
+Markdown/JSON reports under `data/reports/research/`.
+
+The initial templates are deliberately basic: moving-average momentum, mean reversion
+after a large down day, and volatility breakout. They are test vehicles for the
+harness, not claims of edge.
+
+Example:
+
+```bash
+uv run stocker research run \
+  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
+  --symbol AAPL \
+  --timeframe 1d
+```
+
+See [docs/research_harness.md](docs/research_harness.md) for the full workflow and
+classification rules.
+
 ## Next Development Stages
 
-1. Add a reproducible market-data ingest path with raw-data immutability.
-2. Expand strict data audit reports before researching signals.
-3. Add stronger null models and baseline comparisons.
-4. Add cost-adjusted vectorized backtests only after a hypothesis is written down.
-5. Add walk-forward and regime evaluation.
-6. Add event-driven backtests for candidates that survive.
-7. Add paper trading with stale-data checks and broker-state reconciliation.
-8. Add tiny live tests only after paper results and operational safety are proven.
+1. Add stronger null models and benchmark comparisons.
+2. Expand event-driven accounting for candidates that survive the harness.
+3. Add paper trading with stale-data checks and broker-state reconciliation.
+4. Add tiny live tests only after paper results and operational safety are proven.
+5. Add production monitoring, deployment, and operational runbooks only after the
+   execution boundary is proven in paper mode.

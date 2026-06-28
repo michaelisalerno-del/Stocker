@@ -17,6 +17,10 @@ Desktop responsibilities:
 - Store audited datasets as partitioned Parquet.
 - Query local datasets through DuckDB.
 - Build baseline summaries and null comparisons.
+- Load written hypothesis definitions before running experiments.
+- Generate chronological walk-forward splits with embargo gaps.
+- Check parameter stability rather than selecting one lucky setting.
+- Label simple historical regimes and compare performance across them.
 - Generate features and labels from audited data.
 - Run vectorized and future event-driven backtests.
 - Produce reports that document why an idea failed or deserves more testing.
@@ -40,8 +44,11 @@ Server responsibilities:
 - `stocker_core`: shared config, logging, time, CLI, and type helpers.
 - `stocker_data`: CSV ingestion, schema, Parquet I/O, catalog, DuckDB queries,
   validation, audit reports, vendor placeholders, and calendars.
-- `stocker_research`: features, labels, baseline reports, splits, and metrics.
-- `stocker_backtest`: cost models and backtest interfaces.
+- `stocker_research`: written hypotheses, features, labels, baseline reports,
+  walk-forward splits, parameter grids, stability checks, leakage checks, regime
+  labels, experiment runner, and research report indexes.
+- `stocker_backtest`: cost models, transparent vectorized evaluation, and future
+  event-driven interfaces.
 - `stocker_execution`: broker abstraction, orders, risk, state, and paper broker.
 
 ## Separation Rules
@@ -53,6 +60,11 @@ orders and current state, not research notebooks.
 Data trust is a separate boundary too. CSV ingestion, validation, audit reporting, and
 baseline reporting happen before edge discovery. A dataset that fails audit should not
 be used for backtests without a written reason.
+
+Research discipline is another boundary. A strategy test should be attached to a
+written hypothesis, chronological walk-forward split, explicit cost model, and
+conservative classification. Random train/test splits are not valid for trading
+research because they let future market regimes influence past decisions.
 
 This separation makes it easier to prove that a weak signal is weak, identify whether
 a result came from costs or market behavior, and keep future live execution from

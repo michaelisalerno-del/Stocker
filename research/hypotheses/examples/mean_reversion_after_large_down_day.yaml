@@ -1,0 +1,35 @@
+id: mean_reversion_after_large_down_day_example
+name: Mean Reversion After Large Down Day Example
+description: Educational long-only mean reversion template after outsized down bars.
+market_universe: Local CSV fixture data
+instrument_type: stock
+symbol_filter: "*"
+timeframe: 1d
+signal_family: mean_reversion_after_large_down_day
+entry_logic: Long after a negative return exceeds the configured threshold.
+exit_logic: Hold for a fixed small number of bars, then flat.
+holding_period: 2 bars
+direction: long_only
+cost_model:
+  spread_bps: 1.0
+  commission_bps: 0.5
+  slippage_bps: 0.5
+risk_model:
+  max_drawdown: 0.25
+  min_trades: 3
+parameter_space:
+  down_threshold: [-0.015, -0.02]
+  hold_bars: [1, 2]
+validation_method:
+  type: walk_forward
+  mode: rolling
+  train_size: 24
+  test_size: 12
+  step_size: 12
+  embargo_bars: 1
+  min_rows: 40
+expected_edge_reason: Short-term overreaction can sometimes mean revert.
+invalidation_rules:
+  - Reject if costs remove the gross edge.
+  - Reject if trades only occur in one tiny period.
+created_at: "2026-06-28T00:00:00Z"

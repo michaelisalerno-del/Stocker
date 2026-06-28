@@ -1,0 +1,35 @@
+id: volatility_breakout_example
+name: Volatility Breakout Example
+description: Educational breakout template using prior range expansion.
+market_universe: Local CSV fixture data
+instrument_type: stock
+symbol_filter: "*"
+timeframe: 1d
+signal_family: volatility_breakout
+entry_logic: Long when close breaks above prior rolling high by a multiple of recent range.
+exit_logic: Flat when breakout condition no longer holds.
+holding_period: variable
+direction: long_only
+cost_model:
+  spread_bps: 1.0
+  commission_bps: 0.5
+  slippage_bps: 0.5
+risk_model:
+  max_drawdown: 0.25
+  min_trades: 3
+parameter_space:
+  lookback: [5, 10]
+  range_multiplier: [0.25, 0.5]
+validation_method:
+  type: walk_forward
+  mode: rolling
+  train_size: 24
+  test_size: 12
+  step_size: 12
+  embargo_bars: 1
+  min_rows: 40
+expected_edge_reason: Breakouts can capture continuation after volatility expansion.
+invalidation_rules:
+  - Reject if walk-forward test splits fail.
+  - Reject if nearby breakout settings do not work.
+created_at: "2026-06-28T00:00:00Z"

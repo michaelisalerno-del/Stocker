@@ -95,11 +95,21 @@ def infer_column_mapping(columns: list[str], explicit: ColumnMap | None = None) 
 
 
 def _parse_timestamp_column(series: pd.Series, timezone: str) -> pd.Series:
+    zone = ZoneInfo(timezone)
+    values = series.dropna().astype(str)
+    has_explicit_offset = values.str.contains(r"(?:Z|[+-]\d{2}:?\d{2})$", regex=True).any()
+    if has_explicit_offset:
+        parsed_utc = pd.to_datetime(series, errors="coerce", utc=True)
+        return parsed_utc.dt.tz_convert(zone)
     parsed = pd.to_datetime(series, errors="coerce")
     if parsed.isna().any():
         return parsed
-    zone = ZoneInfo(timezone)
-    if getattr(parsed.dt, "tz", None) is None:
+    try:
+        current_tz = getattr(parsed.dt, "tz", None)
+    except AttributeError:
+        parsed = pd.to_datetime(series, errors="coerce", utc=True)
+        return parsed.dt.tz_convert(zone)
+    if current_tz is None:
         return parsed.dt.tz_localize(zone)
     return parsed.dt.tz_convert(zone)
 

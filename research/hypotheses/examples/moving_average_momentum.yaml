@@ -1,0 +1,36 @@
+id: moving_average_momentum_example
+name: Moving Average Momentum Example
+description: Educational long-only momentum template using fast/slow moving averages.
+market_universe: Local CSV fixture data
+instrument_type: stock
+symbol_filter: "*"
+timeframe: 1d
+signal_family: moving_average_momentum
+entry_logic: Long when fast moving average is above slow moving average.
+exit_logic: Flat when fast moving average is at or below slow moving average.
+holding_period: variable
+direction: long_only
+cost_model:
+  spread_bps: 1.0
+  commission_bps: 0.5
+  slippage_bps: 0.5
+risk_model:
+  max_drawdown: 0.25
+  min_trades: 3
+parameter_space:
+  fast_window: [2, 3]
+  slow_window: [5, 8]
+validation_method:
+  type: walk_forward
+  mode: rolling
+  train_size: 24
+  test_size: 12
+  step_size: 12
+  embargo_bars: 1
+  min_rows: 40
+expected_edge_reason: Momentum can persist when trend followers reinforce recent direction.
+invalidation_rules:
+  - Reject if after-cost test return is not positive.
+  - Reject if only one isolated parameter set works.
+  - Reject if walk-forward splits fail after costs.
+created_at: "2026-06-28T00:00:00Z"

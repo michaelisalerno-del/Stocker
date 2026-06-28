@@ -200,6 +200,37 @@ def research_baseline(
     console.print(summary)
 
 
+@research_app.command("run")
+def research_run(
+    hypothesis: Annotated[Path, typer.Option("--hypothesis", exists=True, file_okay=True)],
+    symbol: Annotated[str, typer.Option("--symbol")],
+    timeframe: Annotated[str, typer.Option("--timeframe")],
+    source: Annotated[str, typer.Option("--source")] = "manual",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+) -> None:
+    """Run a disciplined research experiment from a written hypothesis."""
+
+    from stocker_research.experiments import run_research_experiment
+
+    result = run_research_experiment(
+        hypothesis_path=hypothesis,
+        data_dir=data_dir,
+        symbol=symbol,
+        timeframe=timeframe,
+        source=source,
+        instrument_type=instrument_type,
+    )
+    console.print(
+        {
+            "experiment_id": result.experiment_id,
+            "classification": result.classification,
+            "report": str(result.markdown_path),
+            "json": str(result.json_path),
+        }
+    )
+
+
 @server_app.command("dry-run")
 def server_dry_run(
     config: Annotated[Path, typer.Option("--config", "-c")] = Path("configs/server.example.yaml"),

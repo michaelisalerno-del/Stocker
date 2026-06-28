@@ -15,19 +15,23 @@ The first research funnel is designed to reject bad ideas quickly.
 
 3. Simple statistical hypothesis.
    Write down the hypothesis before coding the strategy. Define the expected effect,
-   instrument universe, timeframe, and failure condition.
+   instrument universe, timeframe, costs, parameter space, validation method, and
+   invalidation rules. Store examples under `research/hypotheses/examples/`.
 
 4. Cost-adjusted vectorized backtest.
    Apply spread, commission, and slippage assumptions from the start. Ideas that only
-   work before costs are rejected.
+   work before costs are rejected. The Stage 3 vectorized evaluator reports gross
+   return, net return, total costs, trades, exposure, drawdown, volatility, and a
+   Sharpe-like metric.
 
 5. Walk-forward evaluation.
    Use chronological train/test splits. Do not tune on the whole history and call it
-   evidence.
+   evidence. Do not use random train/test splits for trading data because future
+   regimes would leak backward into model selection.
 
 6. Regime split.
    Check whether results survive different volatility, trend, liquidity, and market
-   session regimes.
+   session regimes. Regime labels must be based only on prior bars.
 
 7. Event-driven backtest.
    Only candidates that survive earlier filters deserve slower accounting, order, and
@@ -43,3 +47,34 @@ The first research funnel is designed to reject bad ideas quickly.
 
 10. Scale only after evidence.
    Increase size only when research, backtest, paper, and tiny-live evidence agree.
+
+## Stage 3 Experiment Flow
+
+Run the current disciplined harness with:
+
+```bash
+uv run stocker data catalog
+uv run stocker data audit --symbol AAPL --timeframe 1d
+uv run stocker research baseline --symbol AAPL --timeframe 1d
+uv run stocker research run \
+  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
+  --symbol AAPL \
+  --timeframe 1d
+```
+
+The research runner writes Markdown and JSON reports to `data/reports/research/` and
+updates `index.md` plus `index.json`.
+
+Classifications are intentionally conservative:
+
+- `rejected_data_issue`
+- `rejected_no_edge`
+- `rejected_costs_kill_edge`
+- `rejected_unstable_parameters`
+- `rejected_walkforward_failure`
+- `interesting_needs_more_tests`
+- `candidate_paper_test`
+
+Most ideas should be rejected. A paper-test candidate must survive costs, multiple
+walk-forward splits, nearby parameter settings, meaningful trade counts, tolerable
+drawdown, and more than one tiny favorable period.

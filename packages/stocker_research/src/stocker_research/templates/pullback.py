@@ -16,7 +16,8 @@ class PullbackInUptrendTemplate(StrategyTemplate):
 
     def required_lookback_bars(self, params: dict[str, Any]) -> int:
         trend_window = int(params["trend_window"])
-        return trend_window + 2
+        holding_period = int(params["holding_period"])
+        return trend_window + holding_period - 1
 
     def generate_positions(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
         trend_window = int(params["trend_window"])

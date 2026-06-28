@@ -119,6 +119,7 @@ def analyze_holding_policy(
     positions: pd.Series,
     *,
     result: VectorizedBacktestResult | None,
+    selected_net_return: float | None = None,
     timeframe: str,
     policy: HypothesisHoldingPolicy,
     window_ids: pd.Series | None = None,
@@ -201,7 +202,9 @@ def analyze_holding_policy(
             if previous_close:
                 intraday_contribution += previous_position * (current_close / previous_close - 1.0)
 
-    total_return = abs(float(result.net_return)) if result is not None else 0.0
+    total_return = abs(float(selected_net_return)) if selected_net_return is not None else 0.0
+    if total_return == 0.0 and result is not None:
+        total_return = abs(float(result.net_return))
     if total_return == 0.0:
         total_return = abs(gap_contribution) + abs(intraday_contribution)
     gap_pct = abs(gap_contribution) / total_return if total_return else 0.0

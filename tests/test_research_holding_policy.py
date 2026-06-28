@@ -2,13 +2,14 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from stocker_backtest.costs import CostModel
 from stocker_backtest.vectorized import evaluate_positions
 from stocker_data.storage import DatasetKey, dataset_path, write_parquet
 from stocker_research.classification import classify_research_result
 from stocker_research.experiments import run_research_experiment
-from stocker_research.holding_policy import analyze_holding_policy
+from stocker_research.holding_policy import analyze_holding_policy, build_holding_policy_decision
 from stocker_research.hypothesis import HypothesisHoldingPolicy
 
 
@@ -33,6 +34,21 @@ def _daily_frame(rows: int = 6) -> pd.DataFrame:
             "low": close - 1.0,
             "close": close,
             "volume": [1000] * rows,
+        }
+    )
+
+
+def _weekday_daily_frame() -> pd.DataFrame:
+    timestamps = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"], utc=True)
+    close = pd.Series([100.0, 112.0, 120.0])
+    return pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": [100.0, 110.0, 113.0],
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": [1000] * len(timestamps),
         }
     )
 
@@ -163,6 +179,25 @@ def test_weekend_hold_creates_exceptional_only_warning() -> None:
     assert "weekend_exceptional_only" in report.holding_policy_warning_reasons
 
 
+def test_gap_contribution_pct_uses_selected_test_return_denominator() -> None:
+    frame = _weekday_daily_frame()
+    positions = pd.Series([1.0, 0.0, 0.0])
+
+    report = analyze_holding_policy(
+        frame,
+        positions,
+        result=None,
+        selected_net_return=0.20,
+        timeframe="1d",
+        policy=HypothesisHoldingPolicy(max_overnight_exposure_count=1),
+    )
+
+    assert report.gap_return_contribution == pytest.approx(0.10)
+    assert report.gap_return_contribution_pct == pytest.approx(0.50)
+    assert report.gap_return_contribution_pct != 1.0
+    assert "daily data cannot prove session-flat tradability" in report.attribution_note
+
+
 def test_profitable_gap_dependent_candidate_is_rejected_for_overnight_risk() -> None:
     classification = classify_research_result(
         net_test_return=0.12,
@@ -218,6 +253,147 @@ def test_swing_strategy_needs_exceptional_holding_gate_to_be_candidate() -> None
 
     assert weak.classification == "interesting_swing_needs_more_tests"
     assert strong.classification == "candidate_swing_exceptional"
+
+
+def test_conditional_overnight_weak_swing_evidence_needs_more_tests() -> None:
+    frame = _weekday_daily_frame()
+    positions = pd.Series([1.0, 1.0, 0.0])
+    policy = HypothesisHoldingPolicy(
+        allow_overnight="conditional",
+        allow_weekend="exceptional_only",
+        max_overnight_exposure_count=2,
+        max_weekend_exposure_count=0,
+        max_gap_return_contribution_pct=0.75,
+        min_swing_excess_vs_benchmark=0.05,
+        min_swing_excess_vs_null=0.03,
+        min_swing_trade_count=50,
+        max_swing_drawdown=0.15,
+    )
+    report = analyze_holding_policy(
+        frame,
+        positions,
+        result=None,
+        selected_net_return=0.25,
+        timeframe="1d",
+        policy=policy,
+    )
+
+    decision = build_holding_policy_decision(
+        report,
+        policy,
+        selected_excess_vs_benchmark=0.02,
+        selected_excess_vs_null=0.01,
+        trade_count=20,
+        max_drawdown=-0.10,
+    )
+
+    assert report.weekend_exposure_count == 0
+    assert decision.classification == "interesting_swing_needs_more_tests"
+    assert "swing_not_exceptional" in decision.reasons
+
+
+def test_conditional_overnight_exceptional_swing_evidence_can_be_candidate() -> None:
+    frame = _weekday_daily_frame()
+    positions = pd.Series([1.0, 1.0, 0.0])
+    policy = HypothesisHoldingPolicy(
+        allow_overnight="conditional",
+        allow_weekend="exceptional_only",
+        max_overnight_exposure_count=2,
+        max_weekend_exposure_count=0,
+        max_gap_return_contribution_pct=0.75,
+        min_swing_excess_vs_benchmark=0.05,
+        min_swing_excess_vs_null=0.03,
+        min_swing_trade_count=50,
+        max_swing_drawdown=0.15,
+    )
+    report = analyze_holding_policy(
+        frame,
+        positions,
+        result=None,
+        selected_net_return=0.25,
+        timeframe="1d",
+        policy=policy,
+    )
+
+    decision = build_holding_policy_decision(
+        report,
+        policy,
+        selected_excess_vs_benchmark=0.08,
+        selected_excess_vs_null=0.04,
+        trade_count=80,
+        max_drawdown=-0.08,
+    )
+
+    assert report.weekend_exposure_count == 0
+    assert decision.classification == "candidate_swing_exceptional"
+    assert decision.swing_exceptional_pass is True
+
+
+def test_weekend_exposure_under_strict_policy_is_rejected() -> None:
+    frame = _daily_frame(rows=4)
+    positions = pd.Series([0.0, 1.0, 1.0, 0.0])
+    policy = HypothesisHoldingPolicy(
+        allow_overnight="conditional",
+        allow_weekend="exceptional_only",
+        max_overnight_exposure_count=5,
+        max_weekend_exposure_count=0,
+        max_gap_return_contribution_pct=0.75,
+        min_swing_trade_count=0,
+    )
+    report = analyze_holding_policy(
+        frame,
+        positions,
+        result=None,
+        selected_net_return=0.25,
+        timeframe="1d",
+        policy=policy,
+    )
+
+    decision = build_holding_policy_decision(
+        report,
+        policy,
+        selected_excess_vs_benchmark=1.0,
+        selected_excess_vs_null=1.0,
+        trade_count=100,
+        max_drawdown=0.0,
+    )
+
+    assert report.weekend_exposure_count == 1
+    assert decision.classification == "rejected_weekend_risk"
+    assert "weekend_risk_too_high" in decision.reasons
+
+
+def test_gap_dependent_returns_are_rejected_for_overnight_risk() -> None:
+    frame = _weekday_daily_frame()
+    positions = pd.Series([1.0, 0.0, 0.0])
+    policy = HypothesisHoldingPolicy(
+        allow_overnight="conditional",
+        allow_weekend="exceptional_only",
+        max_overnight_exposure_count=2,
+        max_gap_return_contribution_pct=0.25,
+        min_swing_trade_count=0,
+    )
+    report = analyze_holding_policy(
+        frame,
+        positions,
+        result=None,
+        selected_net_return=0.20,
+        timeframe="1d",
+        policy=policy,
+    )
+
+    decision = build_holding_policy_decision(
+        report,
+        policy,
+        selected_excess_vs_benchmark=1.0,
+        selected_excess_vs_null=1.0,
+        trade_count=100,
+        max_drawdown=0.0,
+    )
+
+    assert report.gap_return_contribution_pct == pytest.approx(0.50)
+    assert decision.classification == "rejected_overnight_risk"
+    assert "gap_dependent_returns" in decision.reasons
 
 
 def _write_dataset(data_dir: Path, frame: pd.DataFrame, symbol: str = "AAPL.US") -> None:
@@ -324,10 +500,27 @@ def test_runner_report_includes_holding_policy_section(tmp_path: Path) -> None:
     payload = json.loads(result.json_path.read_text(encoding="utf-8"))
     markdown = result.markdown_path.read_text(encoding="utf-8")
 
+    for key in {
+        "evaluation_policy",
+        "indicator_context_policy",
+        "context_summary",
+        "holding_policy",
+        "holding_policy_analysis",
+        "holding_policy_decision",
+        "classification_reasons",
+    }:
+        assert key in payload
     assert "holding_policy" in payload
     assert "holding_policy_analysis" in payload
     assert "holding_policy_decision" in payload
     assert payload["holding_policy_analysis"]["session_flat_compliant"] is False
+    gap_contribution = float(payload["holding_policy_analysis"]["gap_return_contribution"])
+    selected_net_return = float(payload["selected_result"]["test_net_return"])
+    if gap_contribution and selected_net_return:
+        assert payload["holding_policy_analysis"]["gap_return_contribution_pct"] == pytest.approx(
+            abs(gap_contribution) / abs(selected_net_return)
+        )
+        assert payload["holding_policy_analysis"]["gap_return_contribution_pct"] != 1.0
     assert "daily_bars_are_swing_research_vehicle" in payload["classification_reasons"]
     assert "## Holding Policy" in markdown
     assert "daily data cannot prove session-flat tradability" in markdown

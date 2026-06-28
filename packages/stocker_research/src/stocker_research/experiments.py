@@ -696,6 +696,7 @@ def run_research_experiment(
         holding_frame,
         holding_positions,
         result=None,
+        selected_net_return=_metric_float(selected_result, "test_net_return"),
         timeframe=key.timeframe,
         policy=hypothesis.holding_policy,
         window_ids=holding_window_ids,

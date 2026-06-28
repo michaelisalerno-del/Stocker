@@ -36,14 +36,16 @@ that train rows always come before test rows.
 ## Indicator Context And Warmup
 
 Walk-forward train and test windows may use historical rows before the scoring
-window to warm up rolling indicators. The required lookback comes from the selected
-strategy template and parameter set. For example, a moving-average template with a
-200-bar slow window can use up to 201 prior rows before a 125-bar test window.
+window to warm up rolling indicators and preserve fixed-hold carryover positions
+that were opened before `eval_start` but remain active inside the scored window. The
+required lookback comes from the selected strategy template and parameter set. For
+example, a moving-average template with a 200-bar slow window can use up to 201 prior
+rows before a 125-bar test window.
 
 The policy is strict:
 
 - No future rows after the evaluation window are used.
-- Context rows before the window are not scored.
+- Context rows before the window are never scored.
 - Returns, trades, drawdown, exposure, and costs are counted only inside the actual
   train or test rows.
 - Each train/test window starts flat for accounting purposes.
@@ -108,11 +110,11 @@ The default preference is intraday and session-flat. The written hypothesis carr
 how many sessions a position may be held, how close to the close new entries are
 allowed, and what stricter evidence is required before swing ideas can be considered.
 
-Daily-bar templates remain useful research vehicles for market context and universe
-screening, but daily data does not prove a strategy can be traded flat by the close.
-Daily multi-bar holds are marked as swing exposure, not preferred intraday evidence.
-Intraday data can be checked for entries too close to the close, failure to flatten
-before the close, overnight holds, and weekend holds.
+Daily-bar templates remain useful swing research vehicles for market context and
+universe screening, but daily data does not prove a strategy can be traded flat by
+the close. Daily multi-bar holds are marked as swing exposure, not preferred
+intraday evidence. Intraday data can be checked for entries too close to the close,
+failure to flatten before the close, overnight holds, and weekend holds.
 
 Reports include:
 
@@ -122,10 +124,11 @@ Reports include:
 - Gap, overnight, weekend, and intraday return contribution where measurable.
 - Holding-policy violations and warning reasons.
 
-Weekend exposure is stricter than ordinary overnight exposure. Swing candidates must
-clear higher thresholds for benchmark excess, null excess, trade count, drawdown, gap
-dependence, and overnight/weekend exposure. A profitable result can still be rejected
-if most gains come from overnight or weekend gaps.
+Weekend exposure is stricter than ordinary overnight exposure. Conditional swing
+exposure requires exceptional evidence before it can become a candidate. Swing
+candidates must clear higher thresholds for benchmark excess, null excess, trade
+count, drawdown, gap dependence, and overnight/weekend exposure. A profitable result
+can still be rejected if most gains come from overnight or weekend gaps.
 
 ## Benchmarks And Null Timing
 

@@ -9,7 +9,7 @@ from stocker_research.experiments import _run_grid
 from stocker_research.hypothesis import Hypothesis
 from stocker_research.null_models import run_null_timing_test_for_splits
 from stocker_research.parameters import ParameterSet
-from stocker_research.templates import MovingAverageMomentumTemplate
+from stocker_research.templates import MovingAverageMomentumTemplate, PullbackInUptrendTemplate
 from stocker_research.templates.base import StrategyTemplate
 from stocker_research.walkforward import WalkForwardSplit
 from stocker_research.windows import (
@@ -161,6 +161,42 @@ def test_evaluation_window_uses_no_future_rows() -> None:
 
     assert original_window.eval_positions.equals(mutated_window.eval_positions)
     assert original_result.to_dict() == mutated_result.to_dict()
+
+
+def test_pullback_fixed_hold_carryover_uses_holding_period_context() -> None:
+    dates = pd.date_range("2024-01-02", periods=30, freq="B", tz="UTC")
+    close_values = [90.0 + index for index in range(30)]
+    close_values[8:13] = [100.0, 105.0, 110.0, 115.0, 110.0]
+    close_values[13:] = [111.0 + 0.5 * index for index in range(17)]
+    close = pd.Series(close_values)
+    frame = pd.DataFrame(
+        {
+            "timestamp": dates,
+            "open": close.shift(1).fillna(close.iloc[0]),
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": [1000] * len(close),
+        }
+    )
+    template = PullbackInUptrendTemplate()
+    params = {"trend_window": 5, "pullback_threshold": -0.03, "holding_period": 8}
+    eval_start = 20
+    eval_end = 24
+
+    full_positions = template.generate_positions(frame, params).iloc[eval_start:eval_end]
+    context_window = build_evaluation_window(
+        frame,
+        template,
+        params,
+        eval_start=eval_start,
+        eval_end=eval_end,
+    )
+
+    assert template.required_lookback_bars(params) == 12
+    assert float(full_positions.iloc[0]) == 1.0
+    assert float(context_window.eval_positions.iloc[0]) == 1.0
+    assert context_window.eval_positions.equals(full_positions.reset_index(drop=True))
 
 
 class FirstContextBarTemplate(StrategyTemplate):

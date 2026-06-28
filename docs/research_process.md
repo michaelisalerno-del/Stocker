@@ -68,13 +68,41 @@ updates `index.md` plus `index.json`.
 Classifications are intentionally conservative:
 
 - `rejected_data_issue`
+- `rejected_insufficient_data`
 - `rejected_no_edge`
 - `rejected_costs_kill_edge`
 - `rejected_unstable_parameters`
 - `rejected_walkforward_failure`
+- `rejected_too_few_trades`
 - `interesting_needs_more_tests`
 - `candidate_paper_test`
 
 Most ideas should be rejected. A paper-test candidate must survive costs, multiple
 walk-forward splits, nearby parameter settings, meaningful trade counts, tolerable
 drawdown, and more than one tiny favorable period.
+
+## Universe-Level Stage 3 Flow
+
+Research should usually run against a qualified universe, not one manually selected
+symbol:
+
+```bash
+uv run stocker universe qualify \
+  --universe universes/manual/us_test_5.yaml \
+  --timeframe 1d \
+  --source eodhd \
+  --min-history-days 10 \
+  --min-last-close 5 \
+  --min-median-dollar-volume-60d 1000000 \
+  --output data/universes/research_ready/us_test_5_1d.json
+
+uv run stocker research run-universe \
+  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
+  --qualified-universe data/universes/research_ready/us_test_5_1d.json \
+  --config configs/research.example.yaml \
+  --max-symbols 5
+```
+
+The universe report aggregates symbol classifications, candidates, rejection counts,
+median net return, median drawdown, trade counts, stability scores, and links to each
+symbol-level report.

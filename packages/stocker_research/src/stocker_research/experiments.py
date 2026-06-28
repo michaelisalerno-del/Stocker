@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,31 +15,33 @@ from stocker_backtest.costs import CostModel
 from stocker_backtest.vectorized import DirectionMode, VectorizedBacktestResult, evaluate_positions
 from stocker_data.audit import create_audit_report
 from stocker_data.storage import DatasetKey, dataset_metadata, load_dataset
+from stocker_data.universe import load_research_ready_universe
+from stocker_research.classification import ResearchClassification, classify_research_result
 from stocker_research.hypothesis import Hypothesis, load_hypothesis
-from stocker_research.parameters import ParameterSet, generate_parameter_grid
+from stocker_research.parameters import ParameterGrid, ParameterSet
 from stocker_research.regime import label_regimes, performance_by_regime
 from stocker_research.stability import StabilityReport, analyze_stability
-from stocker_research.templates import (
-    MeanReversionTemplate,
-    MovingAverageMomentumTemplate,
-    StrategyTemplate,
-    VolatilityBreakoutTemplate,
-)
+from stocker_research.templates import StrategyTemplate, get_template
 from stocker_research.walkforward import (
     WalkForwardConfig,
     WalkForwardSplit,
     generate_walk_forward_splits,
 )
 
-Classification = Literal[
-    "rejected_data_issue",
-    "rejected_no_edge",
-    "rejected_costs_kill_edge",
-    "rejected_unstable_parameters",
-    "rejected_walkforward_failure",
-    "interesting_needs_more_tests",
-    "candidate_paper_test",
-]
+Classification = (
+    ResearchClassification
+    | Literal[
+        "rejected_data_issue",
+        "rejected_insufficient_data",
+        "rejected_no_edge",
+        "rejected_costs_kill_edge",
+        "rejected_unstable_parameters",
+        "rejected_walkforward_failure",
+        "rejected_too_few_trades",
+        "interesting_needs_more_tests",
+        "candidate_paper_test",
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,17 @@ class ExperimentRunResult:
     classification: Classification
     markdown_path: Path
     json_path: Path
+
+
+@dataclass(frozen=True)
+class UniverseResearchRunResult:
+    """Paths and aggregate counts from a universe research run."""
+
+    run_id: str
+    markdown_path: Path
+    json_path: Path
+    classification_counts: dict[str, int]
+    failed_count: int
 
 
 def classify_experiment(
@@ -82,25 +96,19 @@ def classify_experiment(
 
 
 def _template_for(hypothesis: Hypothesis) -> StrategyTemplate:
-    if hypothesis.signal_family == "moving_average_momentum":
-        return MovingAverageMomentumTemplate()
-    if hypothesis.signal_family == "mean_reversion_after_large_down_day":
-        return MeanReversionTemplate()
-    if hypothesis.signal_family == "volatility_breakout":
-        return VolatilityBreakoutTemplate()
-    raise ValueError(f"Unsupported signal family: {hypothesis.signal_family}")
+    return get_template(hypothesis.template)
 
 
 def _cost_model(hypothesis: Hypothesis) -> CostModel:
     return CostModel(
-        spread_bps=hypothesis.cost_model.spread_bps,
-        commission_bps=hypothesis.cost_model.commission_bps,
-        slippage_bps=hypothesis.cost_model.slippage_bps,
+        spread_bps=hypothesis.costs.spread_bps,
+        commission_bps=hypothesis.costs.commission_bps,
+        slippage_bps=hypothesis.costs.slippage_bps,
     )
 
 
 def _walk_forward_config(hypothesis: Hypothesis) -> WalkForwardConfig:
-    method = hypothesis.validation_method
+    method = hypothesis.walkforward.to_validation_method()
     return WalkForwardConfig(
         mode=method.mode,
         train_size=method.train_size,
@@ -119,7 +127,9 @@ def _evaluate_slice(
     direction: DirectionMode,
 ) -> VectorizedBacktestResult:
     positions = template.generate_positions(frame.reset_index(drop=True), params)
-    direction_mode: DirectionMode = "long_only" if direction != "long_short" else "long_short"
+    direction_mode: DirectionMode = (
+        direction if direction in {"long_only", "short_only"} else "long_short"
+    )
     return evaluate_positions(
         frame.reset_index(drop=True),
         positions,
@@ -139,7 +149,9 @@ def _run_grid(
     rows: list[dict[str, Any]] = []
     for parameter_set in parameter_sets:
         train_returns: list[float] = []
+        train_gross_returns: list[float] = []
         test_returns: list[float] = []
+        test_gross_returns: list[float] = []
         test_trade_counts: list[int] = []
         test_drawdowns: list[float] = []
         for split in splits:
@@ -160,14 +172,18 @@ def _run_grid(
                 hypothesis.direction,
             )
             train_returns.append(train_result.net_return)
+            train_gross_returns.append(train_result.gross_return)
             test_returns.append(test_result.net_return)
+            test_gross_returns.append(test_result.gross_return)
             test_trade_counts.append(test_result.number_of_trades)
             test_drawdowns.append(test_result.max_drawdown)
         rows.append(
             {
                 "parameter_set_id": parameter_set.parameter_set_id,
                 "params": parameter_set.params,
+                "train_gross_return": float(sum(train_gross_returns) / len(train_gross_returns)),
                 "train_net_return": float(sum(train_returns) / len(train_returns)),
+                "test_gross_return": float(sum(test_gross_returns) / len(test_gross_returns)),
                 "test_net_return": float(sum(test_returns) / len(test_returns)),
                 "profitable_split_pct": float(
                     sum(value > 0 for value in test_returns) / len(test_returns)
@@ -186,16 +202,23 @@ def _experiment_id(hypothesis: Hypothesis, symbol: str, timeframe: str) -> str:
 
 def _markdown(payload: dict[str, Any]) -> str:
     warnings = "\n".join(f"- {warning}" for warning in payload["warnings"]) or "- None"
+    reasons = "\n".join(f"- {reason}" for reason in payload.get("classification_reasons", []))
+    if not reasons:
+        reasons = "- None"
     return f"""# Research Experiment: {payload["experiment_id"]}
 
 ## Classification
 
 `{payload["classification"]}`
 
+## Classification Reasons
+
+{reasons}
+
 ## Hypothesis
 
 - Name: {payload["hypothesis"]["name"]}
-- Signal family: `{payload["hypothesis"]["signal_family"]}`
+- Template: `{payload["hypothesis"]["template"]}`
 - Expected edge reason: {payload["hypothesis"]["expected_edge_reason"]}
 
 ## Data
@@ -229,15 +252,20 @@ def _markdown(payload: dict[str, Any]) -> str:
 """
 
 
-def _update_index(report_dir: Path, entry: dict[str, Any]) -> None:
+def _load_index_payload(report_dir: Path) -> dict[str, Any]:
     index_json = report_dir / "index.json"
     if index_json.exists():
         payload = json.loads(index_json.read_text(encoding="utf-8"))
-    else:
-        payload = {"experiments": []}
-    payload["experiments"].append(entry)
-    index_json.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        if isinstance(payload, dict):
+            payload.setdefault("experiments", [])
+            payload.setdefault("universe_runs", [])
+            return payload
+    return {"experiments": [], "universe_runs": []}
 
+
+def _write_index(report_dir: Path, payload: dict[str, Any]) -> None:
+    experiments = payload.get("experiments", [])
+    universe_runs = payload.get("universe_runs", [])
     lines = [
         "# Research Experiments",
         "",
@@ -245,14 +273,44 @@ def _update_index(report_dir: Path, entry: dict[str, Any]) -> None:
         "Net Return | Max DD | Trades | Stability |",
         "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
-    for item in payload["experiments"]:
+    for item in experiments:
         line_template = (
             "| {experiment_id} | {hypothesis_name} | {symbol} | {timeframe} | "
             "{classification} | {net_return:.6f} | {max_drawdown:.6f} | "
             "{trade_count} | {stability_score:.3f} |"
         )
         lines.append(line_template.format(**item))
+    if universe_runs:
+        lines.extend(
+            [
+                "",
+                "# Universe Research Runs",
+                "",
+                "| Run | Hypothesis | Universe | Symbols | Candidates | Rejected | Report |",
+                "| --- | --- | --- | ---: | ---: | ---: | --- |",
+            ]
+        )
+        for item in universe_runs:
+            lines.append(
+                "| {run_id} | {hypothesis_id} | {universe_id} | {symbol_count} | "
+                "{candidate_count} | {rejected_count} | {report_path} |".format(**item)
+            )
     (report_dir / "index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (report_dir / "index.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+
+def _update_index(report_dir: Path, entry: dict[str, Any]) -> None:
+    payload = _load_index_payload(report_dir)
+    payload["experiments"].append(entry)
+    _write_index(report_dir, payload)
+
+
+def _update_universe_index(report_dir: Path, entry: dict[str, Any]) -> None:
+    payload = _load_index_payload(report_dir)
+    payload["universe_runs"].append(entry)
+    _write_index(report_dir, payload)
 
 
 def run_research_experiment(
@@ -264,6 +322,7 @@ def run_research_experiment(
     source: str = "manual",
     instrument_type: str = "stock",
     max_parameter_sets: int = 100,
+    market_calendar: str | None = None,
 ) -> ExperimentRunResult:
     """Run one disciplined research experiment and save reports."""
 
@@ -279,14 +338,16 @@ def run_research_experiment(
         timeframe=timeframe,
         source=source,
         instrument_type=instrument_type,
+        market_calendar=market_calendar,
     )
     warnings = [f"data issue: {issue.code}" for issue in audit.issues if issue.severity == "error"]
     splits = generate_walk_forward_splits(frame, _walk_forward_config(hypothesis))
     if not splits:
-        warnings.append("data issue: no walk-forward splits generated")
-    parameter_sets = generate_parameter_grid(
-        hypothesis.parameter_space, max_size=max_parameter_sets
-    )
+        warnings.append("insufficient data: no walk-forward splits generated")
+    parameter_sets = ParameterGrid(
+        parameter_space=hypothesis.parameter_space,
+        maximum_parameter_sets=min(max_parameter_sets, hypothesis.maximum_parameter_sets),
+    ).expand()
     grid_results = _run_grid(frame, splits, parameter_sets, hypothesis) if splits else []
     if grid_results:
         best = max(grid_results, key=lambda row: float(row["test_net_return"]))
@@ -297,7 +358,7 @@ def run_research_experiment(
     else:
         best = {
             "parameter_set_id": "none",
-            "params": {},
+            "params": parameter_sets[0].params if parameter_sets else {},
             "train_net_return": 0.0,
             "test_net_return": 0.0,
             "profitable_split_pct": 0.0,
@@ -324,17 +385,31 @@ def run_research_experiment(
         pd.Series(full_result.net_returns),
         regimes["trend_regime"],
     )
-    non_unknown_regimes = [name for name in regime_performance if name != "unknown"]
-    classification = classify_experiment(
-        test_net_return=float(best["test_net_return"]),
-        train_net_return=float(best["train_net_return"]),
+    gross_test_return = (
+        float(best.get("test_gross_return", best["test_net_return"]))
+        if grid_results
+        else full_result.gross_return
+    )
+    classification_result = classify_research_result(
+        net_test_return=float(best["test_net_return"]),
+        gross_test_return=gross_test_return,
+        trade_count=int(best["trade_count"]),
         stability_score=stability.stability_score,
         profitable_split_pct=float(best["profitable_split_pct"]),
-        trade_count=int(best["trade_count"]),
         max_drawdown=float(best["max_drawdown"]),
-        regime_count=len(non_unknown_regimes),
-        warnings=warnings,
+        cost_drag=max(0.0, gross_test_return - float(best["test_net_return"])),
+        data_errors=sum(1 for warning in warnings if "data issue" in warning.lower()),
+        leakage_errors=sum(1 for warning in warnings if "leakage" in warning.lower()),
+        minimum_trades=hypothesis.minimum_evidence.min_trades,
+        minimum_profitable_split_pct=hypothesis.minimum_evidence.min_profitable_split_pct,
+        minimum_stability_score=hypothesis.minimum_evidence.min_stability_score,
+        max_allowed_drawdown=-abs(float(hypothesis.risk_model.max_drawdown)),
     )
+    classification: Classification = classification_result.classification
+    classification_reasons = list(classification_result.reasons)
+    if any("insufficient data" in warning.lower() for warning in warnings):
+        classification = "rejected_insufficient_data"
+        classification_reasons.insert(0, "insufficient_data")
 
     experiment_id = _experiment_id(hypothesis, symbol, timeframe)
     report_dir = Path(data_dir).expanduser() / "reports" / "research"
@@ -350,7 +425,7 @@ def run_research_experiment(
         "source": key.source,
         "instrument_type": key.instrument_type,
         "data": metadata.to_dict(),
-        "cost_assumptions": hypothesis.cost_model.model_dump(),
+        "cost_assumptions": hypothesis.costs.model_dump(),
         "splits": [split.model_dump() for split in splits],
         "grid_results": grid_results,
         "best_result": best,
@@ -360,6 +435,7 @@ def run_research_experiment(
         "stability": stability.to_dict(),
         "regime_performance": regime_performance,
         "warnings": warnings,
+        "classification_reasons": classification_reasons,
         "full_sample_result": full_result.to_dict(),
     }
     json_path.write_text(
@@ -371,6 +447,7 @@ def run_research_experiment(
         {
             "experiment_id": experiment_id,
             "hypothesis_name": hypothesis.name,
+            "hypothesis_id": hypothesis.id,
             "symbol": key.symbol,
             "timeframe": key.timeframe,
             "date_range": f"{metadata.min_timestamp} to {metadata.max_timestamp}",
@@ -387,4 +464,253 @@ def run_research_experiment(
         classification=classification,
         markdown_path=markdown_path,
         json_path=json_path,
+    )
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"JSON file must contain an object: {path}")
+    return payload
+
+
+def _universe_run_id(hypothesis: Hypothesis, universe_id: str, timeframe: str) -> str:
+    stamp = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
+    return f"{stamp}_{hypothesis.id}_{universe_id}_{timeframe}"
+
+
+def _median(values: list[float]) -> float:
+    clean = sorted(values)
+    if not clean:
+        return 0.0
+    midpoint = len(clean) // 2
+    if len(clean) % 2:
+        return clean[midpoint]
+    return (clean[midpoint - 1] + clean[midpoint]) / 2
+
+
+def _existing_experiment_entry(
+    *,
+    report_root: Path,
+    hypothesis_id: str,
+    symbol: str,
+    timeframe: str,
+) -> dict[str, Any] | None:
+    payload = _load_index_payload(report_root)
+    matches = [
+        item
+        for item in payload.get("experiments", [])
+        if item.get("hypothesis_id") == hypothesis_id
+        and item.get("symbol") == symbol
+        and item.get("timeframe") == timeframe
+    ]
+    return matches[-1] if matches else None
+
+
+def _universe_markdown(payload: dict[str, Any]) -> str:
+    rows = [
+        [
+            item["symbol"],
+            item["status"],
+            item.get("classification", ""),
+            item.get("net_return", ""),
+            item.get("trade_count", ""),
+            item.get("error_message", ""),
+        ]
+        for item in payload["symbol_results"]
+    ]
+    table = "\n".join(
+        [
+            "| Symbol | Status | Classification | Net Return | Trades | Message |",
+            "| --- | --- | --- | ---: | ---: | --- |",
+            *["| " + " | ".join(str(value) for value in row) + " |" for row in rows],
+        ]
+    )
+    return f"""# Universe Research Run: {payload["run_id"]}
+
+## Summary
+
+- Hypothesis: `{payload["hypothesis_id"]}`
+- Universe: `{payload["universe_id"]}`
+- Symbols tested: {payload["symbol_count"]}
+- Failed: {payload["failed_count"]}
+- Candidates: {payload["candidate_count"]}
+- Rejected: {payload["rejected_count"]}
+
+## Classification Counts
+
+```json
+{json.dumps(payload["classification_counts"], indent=2, sort_keys=True)}
+```
+
+## Symbols
+
+{table}
+"""
+
+
+def run_universe_research(
+    *,
+    hypothesis_path: Path,
+    qualified_universe_path: Path,
+    data_dir: str | Path = "data",
+    source: str | None = None,
+    timeframe: str | None = None,
+    instrument_type: str = "stock",
+    max_symbols: int | None = None,
+    fail_fast: bool = False,
+    resume: bool = False,
+    skip_existing: bool = False,
+    market_calendar: str | None = None,
+) -> UniverseResearchRunResult:
+    """Run one written hypothesis across a research-ready universe export."""
+
+    hypothesis = load_hypothesis(hypothesis_path)
+    universe_payload = _load_json(qualified_universe_path)
+    universe_id = str(universe_payload.get("universe_id", qualified_universe_path.stem))
+    resolved_source = source or str(universe_payload.get("source", hypothesis.data_source))
+    resolved_timeframe = timeframe or str(universe_payload.get("timeframe", hypothesis.timeframe))
+    symbols = load_research_ready_universe(qualified_universe_path)
+    if max_symbols is not None:
+        symbols = symbols[:max_symbols]
+
+    report_root = Path(data_dir).expanduser() / "reports" / "research"
+    report_dir = report_root / "universe"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    run_id = _universe_run_id(hypothesis, universe_id, resolved_timeframe)
+    json_path = report_dir / f"{run_id}.json"
+    markdown_path = report_dir / f"{run_id}.md"
+
+    symbol_results: list[dict[str, Any]] = []
+    for symbol in symbols:
+        existing = (
+            _existing_experiment_entry(
+                report_root=report_root,
+                hypothesis_id=hypothesis.id,
+                symbol=symbol,
+                timeframe=resolved_timeframe,
+            )
+            if resume or skip_existing
+            else None
+        )
+        if existing is not None:
+            symbol_results.append(
+                {
+                    "symbol": symbol,
+                    "status": "skipped",
+                    "skip_reason": "existing_index_entry",
+                    "classification": existing.get("classification", "rejected_data_issue"),
+                    "report_path": existing.get("report_path"),
+                    "net_return": float(existing.get("net_return", 0.0)),
+                    "max_drawdown": float(existing.get("max_drawdown", 0.0)),
+                    "trade_count": int(existing.get("trade_count", 0)),
+                    "stability_score": float(existing.get("stability_score", 0.0)),
+                }
+            )
+            continue
+        try:
+            result = run_research_experiment(
+                hypothesis_path=hypothesis_path,
+                data_dir=data_dir,
+                symbol=symbol,
+                timeframe=resolved_timeframe,
+                source=resolved_source,
+                instrument_type=instrument_type,
+                max_parameter_sets=hypothesis.maximum_parameter_sets,
+                market_calendar=market_calendar,
+            )
+            experiment_payload = _load_json(result.json_path)
+            best_result = experiment_payload.get("best_result", {})
+            stability = experiment_payload.get("stability", {})
+            symbol_results.append(
+                {
+                    "symbol": symbol,
+                    "status": "completed",
+                    "classification": result.classification,
+                    "experiment_id": result.experiment_id,
+                    "report_path": str(result.markdown_path),
+                    "json_path": str(result.json_path),
+                    "net_return": float(best_result.get("test_net_return", 0.0)),
+                    "max_drawdown": float(best_result.get("max_drawdown", 0.0)),
+                    "trade_count": int(best_result.get("trade_count", 0)),
+                    "stability_score": float(stability.get("stability_score", 0.0)),
+                }
+            )
+        except Exception as exc:
+            symbol_results.append(
+                {
+                    "symbol": symbol,
+                    "status": "failed",
+                    "classification": "rejected_data_issue",
+                    "error_message": str(exc),
+                    "net_return": 0.0,
+                    "max_drawdown": 0.0,
+                    "trade_count": 0,
+                    "stability_score": 0.0,
+                }
+            )
+            if fail_fast:
+                break
+
+    classifications = [
+        str(item["classification"])
+        for item in symbol_results
+        if item.get("status") in {"completed", "skipped"} and item.get("classification")
+    ]
+    classification_counts = dict(Counter(classifications))
+    failed_count = sum(1 for item in symbol_results if item["status"] == "failed")
+    candidate_count = classification_counts.get("candidate_paper_test", 0)
+    rejected_count = sum(
+        count
+        for classification_name, count in classification_counts.items()
+        if classification_name.startswith("rejected_")
+    )
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "hypothesis_id": hypothesis.id,
+        "hypothesis_name": hypothesis.name,
+        "universe_id": universe_id,
+        "qualified_universe_path": str(qualified_universe_path),
+        "timeframe": resolved_timeframe,
+        "source": resolved_source,
+        "symbol_count": len(symbols),
+        "failed_count": failed_count,
+        "candidate_count": candidate_count,
+        "rejected_count": rejected_count,
+        "classification_counts": classification_counts,
+        "median_net_return": _median([float(item["net_return"]) for item in symbol_results]),
+        "median_max_drawdown": _median([float(item["max_drawdown"]) for item in symbol_results]),
+        "median_trade_count": _median([float(item["trade_count"]) for item in symbol_results]),
+        "median_stability_score": _median(
+            [float(item["stability_score"]) for item in symbol_results]
+        ),
+        "top_candidates": [
+            item for item in symbol_results if item.get("classification") == "candidate_paper_test"
+        ][:10],
+        "top_rejection_reasons": dict(Counter(classifications).most_common(10)),
+        "symbol_results": symbol_results,
+        "created_at": datetime.now(tz=UTC).replace(microsecond=0).isoformat(),
+    }
+    json_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8"
+    )
+    markdown_path.write_text(_universe_markdown(payload), encoding="utf-8")
+    _update_universe_index(
+        report_root,
+        {
+            "run_id": run_id,
+            "hypothesis_id": hypothesis.id,
+            "universe_id": universe_id,
+            "symbol_count": len(symbols),
+            "candidate_count": candidate_count,
+            "rejected_count": rejected_count,
+            "report_path": str(markdown_path),
+        },
+    )
+    return UniverseResearchRunResult(
+        run_id=run_id,
+        markdown_path=markdown_path,
+        json_path=json_path,
+        classification_counts=classification_counts,
+        failed_count=failed_count,
     )

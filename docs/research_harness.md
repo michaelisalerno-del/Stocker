@@ -8,8 +8,8 @@ for clear reasons.
 
 Every experiment starts with a YAML hypothesis. The file describes the market
 universe, timeframe, signal family, entry and exit logic, holding period, direction,
-cost assumptions, parameter space, validation method, expected edge reason, and
-invalidation rules.
+cost assumptions, bounded parameter space, walk-forward method, expected edge reason,
+minimum evidence, and invalidation rules.
 
 Example hypotheses live in:
 
@@ -52,6 +52,7 @@ An isolated winner is treated as suspicious.
 The initial templates are deliberately simple:
 
 - Moving-average momentum.
+- Pullback in uptrend.
 - Mean reversion after a large move.
 - Volatility breakout.
 
@@ -91,10 +92,12 @@ trend regime so a result that depends on one tiny period is easier to spot.
 Research reports classify results as:
 
 - `rejected_data_issue`
+- `rejected_insufficient_data`
 - `rejected_no_edge`
 - `rejected_costs_kill_edge`
 - `rejected_unstable_parameters`
 - `rejected_walkforward_failure`
+- `rejected_too_few_trades`
 - `interesting_needs_more_tests`
 - `candidate_paper_test`
 
@@ -118,15 +121,28 @@ Run a hypothesis:
 ```bash
 uv run stocker research run \
   --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
-  --symbol AAPL \
-  --timeframe 1d
+  --symbol AAPL.US \
+  --timeframe 1d \
+  --source eodhd \
+  --config configs/research.example.yaml
+```
+
+Run the same written hypothesis across a qualified universe:
+
+```bash
+uv run stocker research run-universe \
+  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
+  --qualified-universe data/universes/research_ready/us_test_5_1d.json \
+  --config configs/research.example.yaml \
+  --max-symbols 5
 ```
 
 Reports are written to:
 
 ```text
 data/reports/research/
+data/reports/research/universe/
 ```
 
 The directory includes one Markdown report, one JSON report, and updated index files
-for comparing experiments.
+for comparing single-symbol experiments and universe-level runs.

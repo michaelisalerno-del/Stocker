@@ -162,7 +162,7 @@ uv run pytest
 
 CI does not require an EODHD token. Vendor tests use mocked HTTP only.
 
-## Before Stage 3
+## Stage 3 Research Readiness
 
 - `bash scripts/check.sh` passes locally.
 - GitHub Actions passes.
@@ -172,6 +172,7 @@ CI does not require an EODHD token. Vendor tests use mocked HTTP only.
 - Audit and EODHD QA reports are generated.
 - Baseline reports can consume the EODHD dataset.
 - Re-running the fetch with `--merge` does not duplicate rows.
+- A research-ready universe export exists for the symbols under test.
 
 ## Research Harness
 
@@ -181,17 +182,29 @@ splits, evaluates a small guarded parameter grid, applies explicit costs, checks
 parameter stability, summarizes performance by simple historical regimes, and writes
 Markdown/JSON reports under `data/reports/research/`.
 
-The initial templates are deliberately basic: moving-average momentum, mean reversion
-after a large down day, and volatility breakout. They are test vehicles for the
-harness, not claims of edge.
+The initial templates are deliberately basic: moving-average momentum, pullback in
+uptrend, mean reversion after a large down day, and volatility breakout. They are test
+vehicles for the harness, not claims of edge.
 
 Example:
 
 ```bash
 uv run stocker research run \
   --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
-  --symbol AAPL \
-  --timeframe 1d
+  --symbol AAPL.US \
+  --timeframe 1d \
+  --source eodhd \
+  --config configs/research.example.yaml
+```
+
+Universe example:
+
+```bash
+uv run stocker research run-universe \
+  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
+  --qualified-universe data/universes/research_ready/us_test_5_1d.json \
+  --config configs/research.example.yaml \
+  --max-symbols 5
 ```
 
 See [docs/research_harness.md](docs/research_harness.md) for the full workflow and
@@ -216,13 +229,15 @@ uv run stocker universe fetch \
 
 The intended flow is EODHD screener or manual YAML, batch EODHD fetch, audit/QA for
 each dataset, local liquidity and history qualification, then a research-ready JSON
-export for Stage 3. FMP and dashboard work are intentionally deferred.
+export consumed by `stocker research run-universe`. FMP and dashboard work are
+intentionally deferred.
 
 ## Next Development Stages
 
-1. Add stronger null models and benchmark comparisons.
-2. Expand event-driven accounting for candidates that survive the harness.
-3. Add paper trading with stale-data checks and broker-state reconciliation.
-4. Add tiny live tests only after paper results and operational safety are proven.
-5. Add production monitoring, deployment, and operational runbooks only after the
+1. Add stronger null models, benchmark comparisons, and candidate discovery guardrails.
+2. Add stock-suitability scoring across qualified universes.
+3. Expand event-driven accounting for candidates that survive the harness.
+4. Add paper trading with stale-data checks and broker-state reconciliation.
+5. Add tiny live tests only after paper results and operational safety are proven.
+6. Add production monitoring, deployment, and operational runbooks only after the
    execution boundary is proven in paper mode.

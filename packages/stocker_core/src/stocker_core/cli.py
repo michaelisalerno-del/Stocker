@@ -818,19 +818,26 @@ def research_run(
     timeframe: Annotated[str, typer.Option("--timeframe")],
     source: Annotated[str, typer.Option("--source")] = "manual",
     instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
-    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = None,
+    config: Annotated[
+        Path, typer.Option("--config", "-c", help="Research config to load.")
+    ] = DEFAULT_RESEARCH_CONFIG,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
 ) -> None:
     """Run a disciplined research experiment from a written hypothesis."""
 
     from stocker_research.experiments import run_research_experiment
 
+    loaded = _load_research_cli_config(config)
+    resolved_data_dir = _resolve_data_dir(loaded, data_dir)
     result = run_research_experiment(
         hypothesis_path=hypothesis,
-        data_dir=data_dir,
+        data_dir=resolved_data_dir,
         symbol=symbol,
         timeframe=timeframe,
         source=source,
         instrument_type=instrument_type,
+        market_calendar=market_calendar,
     )
     console.print(
         {
@@ -838,6 +845,59 @@ def research_run(
             "classification": result.classification,
             "report": str(result.markdown_path),
             "json": str(result.json_path),
+            "config_path": str(config),
+            "data_dir": str(resolved_data_dir),
+        }
+    )
+
+
+@research_app.command("run-universe")
+def research_run_universe(
+    hypothesis: Annotated[Path, typer.Option("--hypothesis", exists=True, file_okay=True)],
+    qualified_universe: Annotated[
+        Path, typer.Option("--qualified-universe", exists=True, file_okay=True)
+    ],
+    config: Annotated[
+        Path, typer.Option("--config", "-c", help="Research config to load.")
+    ] = DEFAULT_RESEARCH_CONFIG,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    source: Annotated[str | None, typer.Option("--source")] = None,
+    timeframe: Annotated[str | None, typer.Option("--timeframe")] = None,
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = None,
+    max_symbols: Annotated[int | None, typer.Option("--max-symbols")] = None,
+    fail_fast: Annotated[bool, typer.Option("--fail-fast")] = False,
+    resume: Annotated[bool, typer.Option("--resume")] = False,
+    skip_existing: Annotated[bool, typer.Option("--skip-existing")] = False,
+) -> None:
+    """Run a written hypothesis across a research-ready universe export."""
+
+    from stocker_research.experiments import run_universe_research
+
+    loaded = _load_research_cli_config(config)
+    resolved_data_dir = _resolve_data_dir(loaded, data_dir)
+    result = run_universe_research(
+        hypothesis_path=hypothesis,
+        qualified_universe_path=qualified_universe,
+        data_dir=resolved_data_dir,
+        source=source,
+        timeframe=timeframe,
+        instrument_type=instrument_type,
+        max_symbols=max_symbols,
+        fail_fast=fail_fast,
+        resume=resume,
+        skip_existing=skip_existing,
+        market_calendar=market_calendar,
+    )
+    console.print(
+        {
+            "run_id": result.run_id,
+            "classification_counts": result.classification_counts,
+            "failed_count": result.failed_count,
+            "report": str(result.markdown_path),
+            "json": str(result.json_path),
+            "config_path": str(config),
+            "data_dir": str(resolved_data_dir),
         }
     )
 

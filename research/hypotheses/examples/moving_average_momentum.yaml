@@ -1,36 +1,43 @@
-id: moving_average_momentum_example
-name: Moving Average Momentum Example
-description: Educational long-only momentum template using fast/slow moving averages.
-market_universe: Local CSV fixture data
+id: moving_average_momentum_v1
+name: Moving Average Momentum
+description: Simple trend-following test vehicle.
+hypothesis_version: 1
+market_universe: qualified_us_large_liquid
 instrument_type: stock
-symbol_filter: "*"
 timeframe: 1d
-signal_family: moving_average_momentum
-entry_logic: Long when fast moving average is above slow moving average.
-exit_logic: Flat when fast moving average is at or below slow moving average.
-holding_period: variable
+data_source: eodhd
+template: moving_average_momentum
 direction: long_only
-cost_model:
-  spread_bps: 1.0
-  commission_bps: 0.5
-  slippage_bps: 0.5
-risk_model:
-  max_drawdown: 0.25
-  min_trades: 3
-parameter_space:
-  fast_window: [2, 3]
-  slow_window: [5, 8]
-validation_method:
-  type: walk_forward
-  mode: rolling
-  train_size: 24
-  test_size: 12
-  step_size: 12
-  embargo_bars: 1
-  min_rows: 40
-expected_edge_reason: Momentum can persist when trend followers reinforce recent direction.
+entry_logic: Long when a fast historical moving average is above a slow historical moving average.
+exit_logic: Flat when the fast historical moving average is no longer above the slow average.
+holding_period: Parameterized by signal persistence.
+expected_edge_reason: >
+  Stocks with persistent positive trend may continue over intermediate horizons.
 invalidation_rules:
-  - Reject if after-cost test return is not positive.
-  - Reject if only one isolated parameter set works.
-  - Reject if walk-forward splits fail after costs.
+  - Rejected if net test return is not positive after costs.
+  - Rejected if performance only exists in one isolated parameter setting.
+  - Rejected if walk-forward degradation is excessive.
+  - Rejected if trade count is too low.
+minimum_evidence:
+  min_trades: 20
+  min_profitable_split_pct: 0.6
+  min_stability_score: 0.5
+parameter_space:
+  fast_window: [10, 20, 50]
+  slow_window: [100, 150, 200]
+  holding_period: [5, 10, 20]
+maximum_parameter_sets: 100
+costs:
+  spread_bps: 2
+  commission_bps: 0.5
+  slippage_bps: 1
+risk:
+  max_drawdown: 0.25
+walkforward:
+  mode: rolling
+  train_bars: 500
+  test_bars: 125
+  embargo_bars: 1
+  step_bars: 125
+  minimum_rows: 626
 created_at: "2026-06-28T00:00:00Z"

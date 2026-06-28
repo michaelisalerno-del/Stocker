@@ -11,8 +11,10 @@ from stocker_data.ingest import import_csv
 from stocker_research.experiments import classify_experiment, run_research_experiment
 from stocker_research.hypothesis import Hypothesis, load_hypothesis
 from stocker_research.leakage import (
+    check_embargo_violation,
     check_feature_target_overlap,
     check_same_bar_close_signal,
+    check_timestamp_integrity,
     check_train_test_overlap,
 )
 from stocker_research.parameters import generate_parameter_grid
@@ -52,8 +54,9 @@ def test_hypothesis_yaml_loading_and_invalid_rejection() -> None:
     hypothesis = load_hypothesis("research/hypotheses/examples/moving_average_momentum.yaml")
 
     assert isinstance(hypothesis, Hypothesis)
+    assert hypothesis.template == "moving_average_momentum"
     assert hypothesis.signal_family == "moving_average_momentum"
-    assert hypothesis.cost_model.round_trip_bps() == 4.0
+    assert hypothesis.cost_model.round_trip_bps() == 7.0
 
     invalid = hypothesis.model_dump()
     invalid["parameter_space"] = {}
@@ -206,6 +209,14 @@ def test_leakage_checks_fail_loudly_for_suspicious_inputs() -> None:
 
     bad_split = split.model_copy(update={"test_start": split.train_end - 1})
     assert check_train_test_overlap(bad_split)[0].code == "train_test_overlap"
+    assert check_embargo_violation(split, embargo_bars=2)[0].code == "embargo_violation"
+
+    duplicate_frame = _sample_ohlcv(5)
+    duplicate_frame.loc[1, "timestamp"] = duplicate_frame.loc[0, "timestamp"]
+    assert check_timestamp_integrity(duplicate_frame)[0].code == "duplicate_timestamps"
+
+    reversed_frame = _sample_ohlcv(5).iloc[::-1].reset_index(drop=True)
+    assert check_timestamp_integrity(reversed_frame)[0].code == "non_monotonic_timestamps"
 
 
 def test_regime_labels_and_performance_by_regime_use_historical_windows() -> None:
@@ -252,6 +263,7 @@ def test_experiment_runner_creates_reports_index_and_conservative_classification
     assert result.classification in {
         "rejected_no_edge",
         "rejected_costs_kill_edge",
+        "rejected_insufficient_data",
         "rejected_unstable_parameters",
         "rejected_walkforward_failure",
         "interesting_needs_more_tests",

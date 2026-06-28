@@ -1,30 +1,31 @@
-id: mean_reversion_after_large_down_day_v1
-name: Mean Reversion After Large Down Day
-description: Educational long-only mean-reversion test vehicle.
+id: pullback_in_uptrend_v1
+name: Pullback In Uptrend
+description: Educational long-only pullback test vehicle.
 hypothesis_version: 1
 market_universe: qualified_us_large_liquid
 instrument_type: stock
 timeframe: 1d
 data_source: eodhd
-template: mean_reversion_after_large_down_day
+template: pullback_in_uptrend
 direction: long_only
-entry_logic: Long after a prior-bar loss exceeds a configured threshold.
-exit_logic: Hold for a fixed number of bars, then return flat.
+entry_logic: Long after a short pullback while price remains above a historical trend average.
+exit_logic: Exit after a fixed holding period.
 holding_period: Parameterized fixed holding period.
 expected_edge_reason: >
-  Some liquid stocks may partially mean-revert after outsized short-term declines.
+  Stocks in established uptrends may mean-revert after short pullbacks.
 invalidation_rules:
   - Rejected if net test return is not positive after costs.
-  - Rejected if trades cluster in one tiny period.
-  - Rejected if nearby thresholds do not also work.
+  - Rejected if nearby parameter settings do not also work.
+  - Rejected if most walk-forward splits fail.
   - Rejected if trade count is too low.
 minimum_evidence:
   min_trades: 20
   min_profitable_split_pct: 0.6
   min_stability_score: 0.5
 parameter_space:
-  down_threshold: [-0.015, -0.02, -0.03]
-  hold_bars: [1, 2, 3]
+  trend_window: [50, 100, 150]
+  pullback_threshold: [-0.01, -0.02, -0.03]
+  holding_period: [3, 5, 10]
 maximum_parameter_sets: 100
 costs:
   spread_bps: 2

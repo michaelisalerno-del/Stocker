@@ -21,6 +21,7 @@ Desktop responsibilities:
 - Generate chronological walk-forward splits with embargo gaps.
 - Check parameter stability rather than selecting one lucky setting.
 - Label simple historical regimes and compare performance across them.
+- Run written hypotheses across qualified universe exports without selecting trades.
 - Generate features and labels from audited data.
 - Run vectorized and future event-driven backtests.
 - Produce reports that document why an idea failed or deserves more testing.
@@ -46,7 +47,7 @@ Server responsibilities:
   validation, audit reports, vendor adapters, vendor QA, and calendars.
 - `stocker_research`: written hypotheses, features, labels, baseline reports,
   walk-forward splits, parameter grids, stability checks, leakage checks, regime
-  labels, experiment runner, and research report indexes.
+  labels, single-symbol and universe experiment runners, and research report indexes.
 - `stocker_backtest`: cost models, transparent vectorized evaluation, and future
   event-driven interfaces.
 - `stocker_execution`: broker abstraction, orders, risk, state, and paper broker.

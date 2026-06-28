@@ -1,35 +1,42 @@
-id: volatility_breakout_example
-name: Volatility Breakout Example
-description: Educational breakout template using prior range expansion.
-market_universe: Local CSV fixture data
+id: volatility_breakout_v1
+name: Volatility Breakout
+description: Educational long-only breakout test vehicle.
+hypothesis_version: 1
+market_universe: qualified_us_large_liquid
 instrument_type: stock
-symbol_filter: "*"
 timeframe: 1d
-signal_family: volatility_breakout
-entry_logic: Long when close breaks above prior rolling high by a multiple of recent range.
-exit_logic: Flat when breakout condition no longer holds.
-holding_period: variable
+data_source: eodhd
+template: volatility_breakout
 direction: long_only
-cost_model:
-  spread_bps: 1.0
-  commission_bps: 0.5
-  slippage_bps: 0.5
-risk_model:
-  max_drawdown: 0.25
-  min_trades: 3
-parameter_space:
-  lookback: [5, 10]
-  range_multiplier: [0.25, 0.5]
-validation_method:
-  type: walk_forward
-  mode: rolling
-  train_size: 24
-  test_size: 12
-  step_size: 12
-  embargo_bars: 1
-  min_rows: 40
-expected_edge_reason: Breakouts can capture continuation after volatility expansion.
+entry_logic: Long when prior close breaks above a prior rolling high plus a range buffer.
+exit_logic: Flat when the breakout condition no longer holds.
+holding_period: Signal persistence.
+expected_edge_reason: >
+  Some stocks may continue after historical range expansion and upside breakouts.
 invalidation_rules:
-  - Reject if walk-forward test splits fail.
-  - Reject if nearby breakout settings do not work.
+  - Rejected if walk-forward test splits fail after costs.
+  - Rejected if only one isolated breakout setting works.
+  - Rejected if drawdown is unacceptable.
+  - Rejected if trade count is too low.
+minimum_evidence:
+  min_trades: 20
+  min_profitable_split_pct: 0.6
+  min_stability_score: 0.5
+parameter_space:
+  lookback: [20, 50, 100]
+  range_multiplier: [0.25, 0.5, 1.0]
+maximum_parameter_sets: 100
+costs:
+  spread_bps: 2
+  commission_bps: 0.5
+  slippage_bps: 1
+risk:
+  max_drawdown: 0.25
+walkforward:
+  mode: rolling
+  train_bars: 500
+  test_bars: 125
+  embargo_bars: 1
+  step_bars: 125
+  minimum_rows: 626
 created_at: "2026-06-28T00:00:00Z"

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import pandas as pd
+
 from stocker_research.walkforward import WalkForwardSplit
 
 
@@ -74,6 +76,98 @@ def check_train_test_overlap(split: WalkForwardSplit) -> list[LeakageIssue]:
         ]
     if split.train_end == split.test_start:
         return []
+    return []
+
+
+def check_embargo_violation(split: WalkForwardSplit, *, embargo_bars: int) -> list[LeakageIssue]:
+    """Detect a split that does not leave the required train/test embargo gap."""
+
+    actual_gap = split.test_start - split.train_end
+    if actual_gap < embargo_bars:
+        return [
+            LeakageIssue(
+                code="embargo_violation",
+                message=(f"{split.split_id} has embargo gap {actual_gap}, required {embargo_bars}"),
+            )
+        ]
+    return []
+
+
+def check_timestamp_integrity(
+    frame: pd.DataFrame, *, column: str = "timestamp"
+) -> list[LeakageIssue]:
+    """Detect duplicate or non-monotonic research timestamps."""
+
+    if column not in frame:
+        return [
+            LeakageIssue(
+                code="missing_timestamp",
+                message=f"Missing timestamp column: {column}",
+            )
+        ]
+    timestamps = pd.to_datetime(frame[column], errors="coerce")
+    issues: list[LeakageIssue] = []
+    if timestamps.duplicated().any():
+        issues.append(
+            LeakageIssue(
+                code="duplicate_timestamps",
+                message="Research data contains duplicate timestamps",
+            )
+        )
+    if not timestamps.is_monotonic_increasing:
+        issues.append(
+            LeakageIssue(
+                code="non_monotonic_timestamps",
+                message="Research timestamps are not monotonic increasing",
+            )
+        )
+    return issues
+
+
+def check_signal_quality(
+    signal: pd.Series, *, max_nan_fraction: float = 0.25
+) -> list[LeakageIssue]:
+    """Detect signal output that is too sparse or suspiciously NaN-heavy."""
+
+    if signal.empty:
+        return [LeakageIssue(code="empty_signal", message="Signal output is empty")]
+    nan_fraction = float(signal.isna().mean())
+    if nan_fraction > max_nan_fraction:
+        return [
+            LeakageIssue(
+                code="nan_heavy_signal",
+                message=f"Signal NaN fraction {nan_fraction:.3f} exceeds {max_nan_fraction:.3f}",
+            )
+        ]
+    return []
+
+
+def check_suspicious_perfect_prediction(
+    signal: pd.Series,
+    future_returns: pd.Series,
+    *,
+    threshold: float = 0.995,
+) -> list[LeakageIssue]:
+    """Flag extremely high signal/target correlation as suspicious."""
+
+    aligned = pd.concat(
+        [
+            pd.to_numeric(signal, errors="coerce").rename("signal"),
+            pd.to_numeric(future_returns, errors="coerce").rename("future_returns"),
+        ],
+        axis=1,
+    ).dropna()
+    if len(aligned) < 3:
+        return []
+    correlation = aligned["signal"].corr(aligned["future_returns"])
+    if correlation is not None and abs(float(correlation)) >= threshold:
+        return [
+            LeakageIssue(
+                code="suspicious_perfect_prediction",
+                message=f"Signal/target correlation {correlation:.4f} is suspiciously high",
+                severity="warning",
+            )
+        ]
     return []
 
 

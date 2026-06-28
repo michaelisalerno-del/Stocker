@@ -165,10 +165,15 @@ The JSON output is the Stage 3 handoff:
 
 ```bash
 uv run stocker research run-universe \
-  --qualified-universe data/universes/research_ready/us_large_liquid_1d.json
+  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
+  --qualified-universe data/universes/research_ready/us_large_liquid_1d.json \
+  --config configs/research.example.yaml \
+  --max-symbols 20
 ```
 
-`research run-universe` is intentionally future work.
+The research runner does not select trades or paper trade. It only applies a written
+hypothesis across qualified symbols, writes per-symbol reports, aggregates conservative
+classifications, and updates the research index.
 
 ## Health
 
@@ -199,4 +204,4 @@ universe to rescue a weak hypothesis.
 - No live trading.
 - No dashboard.
 - No strategy discovery or parameter optimization.
-- No Stage 3 `research run-universe` command yet.
+- No automatic universe strategy mining.

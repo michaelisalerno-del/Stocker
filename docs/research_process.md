@@ -16,7 +16,9 @@ The first research funnel is designed to reject bad ideas quickly.
 3. Simple statistical hypothesis.
    Write down the hypothesis before coding the strategy. Define the expected effect,
    instrument universe, timeframe, costs, parameter space, validation method, and
-   invalidation rules. Store examples under `research/hypotheses/examples/`.
+   holding policy. Intraday and session-flat is the default preference; swing ideas
+   are allowed only when the evidence is exceptional. Store examples under
+   `research/hypotheses/examples/`.
 
 4. Cost-adjusted vectorized backtest.
    Apply spread, commission, and slippage assumptions from the start. Ideas that only
@@ -43,27 +45,35 @@ The first research funnel is designed to reject bad ideas quickly.
    walk-forward test windows with the same indicator-context policy. A result that is
    positive but fails buy-and-hold or the null p75 is rejected.
 
-8. Leakage checks.
+8. Holding policy checks.
+   Separate preferred intraday/session-flat evidence from stricter swing evidence.
+   Daily-bar results are marked as swing research vehicles unless session-flat
+   intraday data exists. Overnight, weekend, and gap-driven returns are reported
+   separately where possible. Weekend exposure is stricter than ordinary overnight
+   exposure, and a profitable strategy can still be rejected if it violates the
+   preferred risk profile.
+
+9. Leakage checks.
    Check timestamp integrity, split overlap, embargo gaps, generated signal quality,
    and suspicious signal/next-return correlation. Leakage errors reject the result.
 
-9. Regime split.
+10. Regime split.
    Check whether results survive different volatility, trend, liquidity, and market
    session regimes. Regime labels must be based only on prior bars.
 
-10. Event-driven backtest.
+11. Event-driven backtest.
    Only candidates that survive earlier filters deserve slower accounting, order, and
    event simulation.
 
-11. Paper trading.
+12. Paper trading.
    Verify data freshness, state reconciliation, risk checks, and operational behavior
    without capital at risk.
 
-12. Tiny live test.
+13. Tiny live test.
    Only after paper evidence and operational safety exist, trade the smallest practical
    size.
 
-13. Scale only after evidence.
+14. Scale only after evidence.
    Increase size only when research, backtest, paper, and tiny-live evidence agree.
 
 ## Stage 3 Experiment Flow
@@ -92,14 +102,23 @@ Classifications are intentionally conservative:
 - `rejected_unstable_parameters`
 - `rejected_walkforward_failure`
 - `rejected_too_few_trades`
+- `rejected_overnight_risk`
+- `rejected_weekend_risk`
+- `rejected_holding_policy_violation`
 - `interesting_needs_more_tests`
+- `interesting_intraday_needs_more_tests`
+- `interesting_swing_needs_more_tests`
+- `candidate_intraday_test`
+- `candidate_swing_exceptional`
 - `candidate_paper_test`
 
-Most ideas should be rejected. A paper-test candidate must use a train-selected
+Most ideas should be rejected. An intraday candidate must use a train-selected
 parameter set, survive costs, beat buy-and-hold, pass the deterministic null timing
 gate, pass leakage checks, survive multiple walk-forward splits, show nearby
-parameter support, include meaningful trade counts, keep tolerable drawdown, and work
-across more than one tiny favorable period.
+parameter support, include meaningful trade counts, keep tolerable drawdown, work
+across more than one tiny favorable period, and remain session-flat. A swing
+candidate must pass those gates plus stricter benchmark, null, drawdown, gap, and
+overnight/weekend exposure thresholds.
 
 The walk-forward evaluator uses template-declared lookback rows to warm up rolling
 indicators before train/test windows. Context rows are not part of PnL, costs, trades,
@@ -131,8 +150,10 @@ uv run stocker research run-universe \
 
 The universe report aggregates symbol classifications, actual classification reasons,
 benchmark and null pass counts, median net return, median excess versus benchmark,
-median excess versus null, median drawdown, trade counts, stability scores, and links
-to each symbol-level report. Failed symbols are recorded without stopping the full
+median excess versus null, median drawdown, trade counts, stability scores, intraday
+candidate counts, swing exceptional counts, holding-policy rejection counts, median
+gap contribution, median overnight exposure, median weekend exposure, and links to
+each symbol-level report. Failed symbols are recorded without stopping the full
 universe run unless `--fail-fast` is set.
 
 ## Local Real-Data Smoke

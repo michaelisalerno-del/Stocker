@@ -7,9 +7,9 @@ for clear reasons.
 ## Written Hypotheses
 
 Every experiment starts with a YAML hypothesis. The file describes the market
-universe, timeframe, signal family, entry and exit logic, holding period, direction,
-cost assumptions, bounded parameter space, walk-forward method, expected edge reason,
-minimum evidence, and invalidation rules.
+universe, timeframe, signal family, entry and exit logic, holding period, holding
+policy, direction, cost assumptions, bounded parameter space, walk-forward method,
+expected edge reason, minimum evidence, and invalidation rules.
 
 Example hypotheses live in:
 
@@ -101,6 +101,32 @@ equity curve, drawdown curve, and simplified trades.
 
 Ideas that only work before costs should be rejected.
 
+## Holding Policy
+
+The default preference is intraday and session-flat. The written hypothesis carries a
+`holding_policy` block that states whether overnight and weekend exposure are allowed,
+how many sessions a position may be held, how close to the close new entries are
+allowed, and what stricter evidence is required before swing ideas can be considered.
+
+Daily-bar templates remain useful research vehicles for market context and universe
+screening, but daily data does not prove a strategy can be traded flat by the close.
+Daily multi-bar holds are marked as swing exposure, not preferred intraday evidence.
+Intraday data can be checked for entries too close to the close, failure to flatten
+before the close, overnight holds, and weekend holds.
+
+Reports include:
+
+- Session-flat compliance.
+- Maximum holding bars and estimated holding sessions.
+- Overnight and weekend exposure counts.
+- Gap, overnight, weekend, and intraday return contribution where measurable.
+- Holding-policy violations and warning reasons.
+
+Weekend exposure is stricter than ordinary overnight exposure. Swing candidates must
+clear higher thresholds for benchmark excess, null excess, trade count, drawdown, gap
+dependence, and overnight/weekend exposure. A profitable result can still be rejected
+if most gains come from overnight or weekend gaps.
+
 ## Benchmarks And Null Timing
 
 Single-symbol reports include a zero-position cash benchmark and a cost-aware
@@ -147,14 +173,23 @@ Research reports classify results as:
 - `rejected_unstable_parameters`
 - `rejected_walkforward_failure`
 - `rejected_too_few_trades`
+- `rejected_overnight_risk`
+- `rejected_weekend_risk`
+- `rejected_holding_policy_violation`
 - `interesting_needs_more_tests`
+- `interesting_intraday_needs_more_tests`
+- `interesting_swing_needs_more_tests`
+- `candidate_intraday_test`
+- `candidate_swing_exceptional`
 - `candidate_paper_test`
 
-`candidate_paper_test` is intentionally hard to reach. The test result must be
-positive after costs, come from train-selected parameters, beat buy-and-hold, pass the
-deterministic null timing gate, pass multiple walk-forward splits, show acceptable
-parameter stability, have nearby settings that also work, include enough trades to
-matter, avoid excessive drawdown, and not depend on one tiny regime.
+Candidate classifications are intentionally hard to reach. An intraday candidate must
+be positive after costs, come from train-selected parameters, beat buy-and-hold, pass
+the deterministic null timing gate, pass multiple walk-forward splits, show acceptable
+parameter stability, include enough trades to matter, avoid excessive drawdown, and
+remain session-flat. A swing candidate must pass all normal gates and the stricter
+exceptional swing thresholds; otherwise it remains interesting or rejected for holding
+risk.
 
 Most results should still be rejected. This harness is still research only. It does
 not paper trade, live trade, connect to brokers, run dashboards, train ML models, or

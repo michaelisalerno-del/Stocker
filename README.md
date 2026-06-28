@@ -194,9 +194,10 @@ splits, evaluates a small guarded parameter grid, warms rolling indicators with
 pre-window historical context while scoring only actual train/test rows, applies
 explicit costs, checks train-side parameter selection, keeps the best test-return row
 as diagnostic only, runs leakage checks, compares against cash and same-window long
-buy-and-hold, applies a same-window deterministic null timing test, summarizes
-performance by simple historical regimes, and writes Markdown/JSON reports under
-`data/reports/research/`.
+buy-and-hold, applies a same-window deterministic null timing test, separates
+preferred intraday/session-flat evidence from stricter swing evidence, reports
+overnight/weekend/gap contribution where measurable, summarizes performance by simple
+historical regimes, and writes Markdown/JSON reports under `data/reports/research/`.
 
 The initial templates are deliberately basic: moving-average momentum, pullback in
 uptrend, mean reversion after a large down day, and volatility breakout. They are test
@@ -204,6 +205,8 @@ vehicles for the harness, not claims of edge.
 
 Most research results should still be rejected. This stage is not paper trading, live
 trading, broker integration, dashboard work, ML, or automatic strategy mining.
+Daily-bar results are useful for context and universe research, but they do not prove
+session-flat tradability; swing candidates need exceptional evidence.
 
 Example:
 

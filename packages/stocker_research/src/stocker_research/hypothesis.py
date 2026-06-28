@@ -85,6 +85,27 @@ class MinimumEvidence(BaseModel):
     min_stability_score: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class HypothesisHoldingPolicy(BaseModel):
+    """Preferred holding style and stricter swing evidence gates."""
+
+    preferred_style: Literal["intraday", "swing"] = "intraday"
+    allow_intraday: bool = True
+    allow_overnight: Literal[False, "conditional", True] = "conditional"
+    allow_weekend: Literal[False, "exceptional_only", True] = "exceptional_only"
+    max_holding_sessions: int = Field(default=5, ge=1)
+    flatten_before_close_minutes: int = Field(default=10, ge=0)
+    entry_cutoff_before_close_minutes: int = Field(default=30, ge=0)
+    require_exceptional_evidence_for_swing: bool = True
+    require_gap_risk_report: bool = True
+    min_swing_excess_vs_benchmark: float = 0.05
+    min_swing_excess_vs_null: float = 0.03
+    min_swing_trade_count: int = Field(default=50, ge=0)
+    max_gap_return_contribution_pct: float = Field(default=0.25, ge=0.0)
+    max_weekend_exposure_count: int = Field(default=0, ge=0)
+    max_overnight_exposure_count: int = Field(default=0, ge=0)
+    max_swing_drawdown: float = Field(default=0.15, gt=0.0)
+
+
 class Hypothesis(BaseModel):
     """A reproducible written trading hypothesis."""
 
@@ -119,6 +140,7 @@ class Hypothesis(BaseModel):
     expected_edge_reason: str = Field(min_length=1)
     invalidation_rules: list[str] = Field(min_length=1)
     minimum_evidence: MinimumEvidence = Field(default_factory=MinimumEvidence)
+    holding_policy: HypothesisHoldingPolicy = Field(default_factory=HypothesisHoldingPolicy)
     created_at: datetime
 
     @model_validator(mode="before")

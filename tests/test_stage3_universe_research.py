@@ -48,6 +48,9 @@ def test_stage3_hypothesis_contract_and_examples() -> None:
     assert hypothesis.maximum_parameter_sets == 100
     assert hypothesis.costs.round_trip_bps() == 7.0
     assert hypothesis.walkforward.train_bars == 500
+    assert hypothesis.holding_policy.preferred_style == "intraday"
+    assert hypothesis.holding_policy.allow_overnight == "conditional"
+    assert hypothesis.holding_policy.allow_weekend == "exceptional_only"
 
     payload = hypothesis.model_dump(mode="json")
     payload["expected_edge_reason"] = ""
@@ -167,6 +170,21 @@ def test_classification_returns_reasons_and_is_conservative() -> None:
     )
     assert candidate.classification == "candidate_paper_test"
 
+    intraday_candidate = classify_research_result(
+        net_test_return=0.08,
+        gross_test_return=0.1,
+        trade_count=80,
+        stability_score=0.75,
+        profitable_split_pct=0.75,
+        max_drawdown=-0.1,
+        cost_drag=0.02,
+        data_errors=0,
+        leakage_errors=0,
+        holding_policy_classification="candidate_intraday_test",
+        holding_policy_reasons=["session_flat_compliant"],
+    )
+    assert intraday_candidate.classification == "candidate_intraday_test"
+
 
 def test_run_universe_research_writes_aggregate_report(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
@@ -208,6 +226,14 @@ def test_run_universe_research_writes_aggregate_report(tmp_path: Path) -> None:
     assert set(payload["classification_reason_counts"])
     assert payload["benchmark_pass_count"] <= 2
     assert payload["null_pass_count"] <= 2
+    assert "intraday_candidate_count" in payload
+    assert "swing_exceptional_candidate_count" in payload
+    assert "holding_policy_rejection_count" in payload
+    assert "overnight_violation_count" in payload
+    assert "weekend_violation_count" in payload
+    assert "median_gap_return_contribution_pct" in payload
+    assert "median_overnight_exposure_count" in payload
+    assert "median_weekend_exposure_count" in payload
     assert "median_excess_vs_benchmark" in payload
     assert "median_excess_vs_null" in payload
     assert len(payload["symbol_results"]) == 2
@@ -219,6 +245,9 @@ def test_run_universe_research_writes_aggregate_report(tmp_path: Path) -> None:
     assert "Failed:" in markdown
     assert "Rejected:" in markdown
     assert "Candidate paper test:" in markdown
+    assert "Holding Policy Summary" in markdown
+    assert "Intraday candidates:" in markdown
+    assert "Swing exceptional candidates:" in markdown
     assert (data_dir / "reports" / "research" / "index.json").exists()
 
 

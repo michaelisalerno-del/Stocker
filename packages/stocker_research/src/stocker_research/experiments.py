@@ -17,6 +17,10 @@ from stocker_data.storage import DatasetKey, dataset_metadata, load_dataset
 from stocker_data.universe import load_research_ready_universe
 from stocker_research.benchmarks import compare_with_benchmarks
 from stocker_research.classification import ResearchClassification, classify_research_result
+from stocker_research.holding_policy import (
+    analyze_holding_policy,
+    build_holding_policy_decision,
+)
 from stocker_research.hypothesis import Hypothesis, load_hypothesis
 from stocker_research.leakage import (
     LeakageIssue,
@@ -38,6 +42,7 @@ from stocker_research.windows import (
     EVALUATION_POLICY_WITH_INDICATOR_CONTEXT,
     GRID_CONTEXT_POLICY_WITH_INDICATOR_CONTEXT,
     INDICATOR_CONTEXT_POLICY,
+    build_evaluation_window,
     evaluate_window_with_context,
 )
 
@@ -51,7 +56,14 @@ Classification = (
         "rejected_unstable_parameters",
         "rejected_walkforward_failure",
         "rejected_too_few_trades",
+        "rejected_overnight_risk",
+        "rejected_weekend_risk",
+        "rejected_holding_policy_violation",
         "interesting_needs_more_tests",
+        "interesting_intraday_needs_more_tests",
+        "interesting_swing_needs_more_tests",
+        "candidate_intraday_test",
+        "candidate_swing_exceptional",
         "candidate_paper_test",
     ]
 )
@@ -270,6 +282,43 @@ def _run_grid(
     return rows
 
 
+def _selected_test_window_positions(
+    frame: pd.DataFrame,
+    splits: list[WalkForwardSplit],
+    template: StrategyTemplate,
+    params: dict[str, Any],
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    if not splits:
+        reset_frame = frame.reset_index(drop=True)
+        positions = template.generate_positions(reset_frame, params).reset_index(drop=True)
+        return reset_frame, positions, pd.Series(["full_sample"] * len(reset_frame))
+
+    frames: list[pd.DataFrame] = []
+    position_series: list[pd.Series] = []
+    window_ids: list[str] = []
+    for split in splits:
+        if split.test_end <= split.test_start:
+            continue
+        window = build_evaluation_window(
+            frame,
+            template,
+            params,
+            eval_start=split.test_start,
+            eval_end=split.test_end,
+        )
+        frames.append(window.eval_frame)
+        position_series.append(window.eval_positions)
+        window_ids.extend([split.split_id] * len(window.eval_frame))
+    if not frames:
+        empty = frame.iloc[0:0].reset_index(drop=True)
+        return empty, pd.Series(dtype=float), pd.Series(dtype=str)
+    return (
+        pd.concat(frames, ignore_index=True),
+        pd.concat(position_series, ignore_index=True),
+        pd.Series(window_ids),
+    )
+
+
 def _experiment_id(hypothesis: Hypothesis, symbol: str, timeframe: str) -> str:
     stamp = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
     return f"{stamp}_{hypothesis.id}_{symbol.upper()}_{timeframe}"
@@ -298,6 +347,11 @@ def _markdown(payload: dict[str, Any]) -> str:
         "benchmark_pass": payload.get("benchmark_pass", False),
         "benchmark_policy": payload.get("benchmark_policy", ""),
         "strategy_direction": payload.get("strategy_direction", ""),
+    }
+    holding_summary = {
+        "holding_policy": payload.get("holding_policy", {}),
+        "holding_policy_analysis": payload.get("holding_policy_analysis", {}),
+        "holding_policy_decision": payload.get("holding_policy_decision", {}),
     }
     return f"""# Research Experiment: {payload["experiment_id"]}
 
@@ -375,6 +429,17 @@ result. Buy-and-hold is a long market baseline for every hypothesis direction.
 
 ```json
 {json.dumps(benchmark_summary, indent=2)}
+```
+
+## Holding Policy
+
+The default preference is intraday and session-flat. Swing results are research
+vehicles unless they pass stricter evidence gates. Daily data cannot prove
+session-flat tradability; overnight, weekend, and gap contribution are reported
+separately where measurable.
+
+```json
+{json.dumps(holding_summary, indent=2)}
 ```
 
 ## Null Timing
@@ -621,6 +686,28 @@ def run_research_experiment(
         null_count=7,
         direction=hypothesis.direction,
     )
+    holding_frame, holding_positions, holding_window_ids = _selected_test_window_positions(
+        frame,
+        splits,
+        template,
+        selected_params,
+    )
+    holding_policy_analysis = analyze_holding_policy(
+        holding_frame,
+        holding_positions,
+        result=None,
+        timeframe=key.timeframe,
+        policy=hypothesis.holding_policy,
+        window_ids=holding_window_ids,
+    )
+    holding_policy_decision = build_holding_policy_decision(
+        holding_policy_analysis,
+        hypothesis.holding_policy,
+        selected_excess_vs_benchmark=float(benchmark_comparison["selected_excess_vs_buy_and_hold"]),
+        selected_excess_vs_null=float(null_model_results["selected_excess_vs_p75_null"]),
+        trade_count=_metric_int(selected_result, "test_trade_count", "trade_count"),
+        max_drawdown=_metric_float(selected_result, "test_max_drawdown", "max_drawdown"),
+    )
     gross_test_return = _metric_float(
         selected_result,
         "test_gross_return",
@@ -647,9 +734,14 @@ def run_research_experiment(
         benchmark_pass=bool(benchmark_comparison["benchmark_pass"]),
         null_pass=bool(null_model_results["null_pass"]),
         selection_rejected=selection.selection_method == "fallback_for_reporting_only",
+        holding_policy_classification=holding_policy_decision.classification,
+        holding_policy_reasons=holding_policy_decision.reasons,
     )
     classification: Classification = classification_result.classification
     classification_reasons = list(classification_result.reasons)
+    for reason in holding_policy_decision.reasons:
+        if reason not in classification_reasons:
+            classification_reasons.append(reason)
     if any(issue.severity == "error" for issue in leakage_issues) and (
         "leakage_errors" not in classification_reasons
     ):
@@ -739,6 +831,9 @@ def run_research_experiment(
         "benchmark_policy": benchmark_comparison["benchmark_policy"],
         "strategy_direction": benchmark_comparison["strategy_direction"],
         "null_model_results": null_model_results,
+        "holding_policy": hypothesis.holding_policy.model_dump(mode="json"),
+        "holding_policy_analysis": holding_policy_analysis.model_dump(mode="json"),
+        "holding_policy_decision": holding_policy_decision.model_dump(mode="json"),
         "warnings": warnings,
         "classification_reasons": classification_reasons,
         "full_sample_result": full_result.to_dict(),
@@ -764,6 +859,17 @@ def run_research_experiment(
             "stability_score": stability.stability_score,
             "benchmark_pass": benchmark_comparison["benchmark_pass"],
             "null_pass": null_model_results["null_pass"],
+            "holding_policy_evidence_tier": holding_policy_decision.evidence_tier,
+            "session_flat_compliant": holding_policy_analysis.session_flat_compliant,
+            "overnight_exposure_count": holding_policy_analysis.overnight_exposure_count,
+            "weekend_exposure_count": holding_policy_analysis.weekend_exposure_count,
+            "gap_return_contribution_pct": holding_policy_analysis.gap_return_contribution_pct,
+            "holding_policy_rejection": classification
+            in {
+                "rejected_overnight_risk",
+                "rejected_weekend_risk",
+                "rejected_holding_policy_violation",
+            },
             "selected_excess_vs_buy_and_hold": benchmark_comparison[
                 "selected_excess_vs_buy_and_hold"
             ],
@@ -829,6 +935,7 @@ def _universe_markdown(payload: dict[str, Any]) -> str:
             item.get("trade_count", ""),
             item.get("benchmark_pass", ""),
             item.get("null_pass", ""),
+            item.get("holding_policy_evidence_tier", ""),
             item.get("error_message", ""),
         ]
         for item in payload["symbol_results"]
@@ -836,8 +943,8 @@ def _universe_markdown(payload: dict[str, Any]) -> str:
     table = "\n".join(
         [
             "| Symbol | Status | Classification | Net Return | Trades | "
-            "Benchmark | Null | Message |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
+            "Benchmark | Null | Holding Tier | Message |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
             *["| " + " | ".join(str(value) for value in row) + " |" for row in rows],
         ]
     )
@@ -853,6 +960,8 @@ def _universe_markdown(payload: dict[str, Any]) -> str:
 - Failed: {payload["failed_count"]}
 - Rejected: {payload["rejected_count"]}
 - Candidate paper test: {payload["candidate_count"]}
+- Intraday candidates: {payload["intraday_candidate_count"]}
+- Swing exceptional candidates: {payload["swing_exceptional_candidate_count"]}
 
 Rejected results are expected. Failed symbols are data or harness failures; rejected
 symbols completed research and did not pass the conservative gates.
@@ -875,6 +984,15 @@ symbols completed research and did not pass the conservative gates.
 - Null pass count: {payload["null_pass_count"]}
 - Median excess vs benchmark: {payload["median_excess_vs_benchmark"]}
 - Median excess vs null: {payload["median_excess_vs_null"]}
+
+## Holding Policy Summary
+
+- Holding policy rejection count: {payload["holding_policy_rejection_count"]}
+- Overnight violation count: {payload["overnight_violation_count"]}
+- Weekend violation count: {payload["weekend_violation_count"]}
+- Median gap contribution pct: {payload["median_gap_return_contribution_pct"]}
+- Median overnight exposure count: {payload["median_overnight_exposure_count"]}
+- Median weekend exposure count: {payload["median_weekend_exposure_count"]}
 
 ## Symbols
 
@@ -941,6 +1059,18 @@ def run_universe_research(
                     "stability_score": float(existing.get("stability_score", 0.0)),
                     "benchmark_pass": bool(existing.get("benchmark_pass", False)),
                     "null_pass": bool(existing.get("null_pass", False)),
+                    "holding_policy_evidence_tier": str(
+                        existing.get("holding_policy_evidence_tier", "")
+                    ),
+                    "session_flat_compliant": bool(existing.get("session_flat_compliant", False)),
+                    "overnight_exposure_count": int(existing.get("overnight_exposure_count", 0)),
+                    "weekend_exposure_count": int(existing.get("weekend_exposure_count", 0)),
+                    "gap_return_contribution_pct": float(
+                        existing.get("gap_return_contribution_pct", 0.0)
+                    ),
+                    "holding_policy_rejection": bool(
+                        existing.get("holding_policy_rejection", False)
+                    ),
                     "selected_excess_vs_buy_and_hold": float(
                         existing.get("selected_excess_vs_buy_and_hold", 0.0)
                     ),
@@ -965,6 +1095,8 @@ def run_universe_research(
             selected_result = experiment_payload.get("selected_result", {})
             stability = experiment_payload.get("stability", {})
             null_model_results = experiment_payload.get("null_model_results", {})
+            holding_policy_analysis = experiment_payload.get("holding_policy_analysis", {})
+            holding_policy_decision = experiment_payload.get("holding_policy_decision", {})
             symbol_results.append(
                 {
                     "symbol": symbol,
@@ -990,6 +1122,29 @@ def run_universe_research(
                     "stability_score": float(stability.get("stability_score", 0.0)),
                     "benchmark_pass": bool(experiment_payload.get("benchmark_pass", False)),
                     "null_pass": bool(null_model_results.get("null_pass", False)),
+                    "holding_policy_evidence_tier": str(
+                        holding_policy_decision.get("evidence_tier", "")
+                    ),
+                    "session_flat_compliant": bool(
+                        holding_policy_analysis.get("session_flat_compliant", False)
+                    ),
+                    "overnight_exposure_count": int(
+                        holding_policy_analysis.get("overnight_exposure_count", 0)
+                    ),
+                    "weekend_exposure_count": int(
+                        holding_policy_analysis.get("weekend_exposure_count", 0)
+                    ),
+                    "gap_return_contribution_pct": float(
+                        holding_policy_analysis.get("gap_return_contribution_pct", 0.0)
+                    ),
+                    "holding_policy_rejection": bool(
+                        str(result.classification)
+                        in {
+                            "rejected_overnight_risk",
+                            "rejected_weekend_risk",
+                            "rejected_holding_policy_violation",
+                        }
+                    ),
                     "selected_excess_vs_buy_and_hold": float(
                         experiment_payload.get("selected_excess_vs_buy_and_hold", 0.0)
                     ),
@@ -1012,6 +1167,12 @@ def run_universe_research(
                     "classification_reasons": ["symbol_failed"],
                     "benchmark_pass": False,
                     "null_pass": False,
+                    "holding_policy_evidence_tier": "",
+                    "session_flat_compliant": False,
+                    "overnight_exposure_count": 0,
+                    "weekend_exposure_count": 0,
+                    "gap_return_contribution_pct": 0.0,
+                    "holding_policy_rejection": False,
                     "selected_excess_vs_buy_and_hold": 0.0,
                     "selected_excess_vs_p75_null": 0.0,
                 }
@@ -1035,11 +1196,35 @@ def run_universe_research(
     completed_count = sum(1 for item in symbol_results if item["status"] == "completed")
     skipped_count = sum(1 for item in symbol_results if item["status"] == "skipped")
     failed_count = sum(1 for item in symbol_results if item["status"] == "failed")
-    candidate_count = classification_counts.get("candidate_paper_test", 0)
+    intraday_candidate_count = classification_counts.get("candidate_intraday_test", 0)
+    swing_exceptional_candidate_count = classification_counts.get(
+        "candidate_swing_exceptional",
+        0,
+    )
+    candidate_count = (
+        classification_counts.get("candidate_paper_test", 0)
+        + intraday_candidate_count
+        + swing_exceptional_candidate_count
+    )
     rejected_count = sum(
         count
         for classification_name, count in classification_counts.items()
         if classification_name.startswith("rejected_")
+    )
+    holding_policy_rejection_count = sum(
+        1 for item in aggregate_items if item.get("holding_policy_rejection")
+    )
+    overnight_violation_count = sum(
+        1
+        for item in aggregate_items
+        if item.get("classification") == "rejected_overnight_risk"
+        or "overnight_risk_too_high" in item.get("classification_reasons", [])
+    )
+    weekend_violation_count = sum(
+        1
+        for item in aggregate_items
+        if item.get("classification") == "rejected_weekend_risk"
+        or "weekend_risk_too_high" in item.get("classification_reasons", [])
     )
     payload: dict[str, Any] = {
         "run_id": run_id,
@@ -1054,6 +1239,8 @@ def run_universe_research(
         "skipped_count": skipped_count,
         "failed_count": failed_count,
         "candidate_count": candidate_count,
+        "intraday_candidate_count": intraday_candidate_count,
+        "swing_exceptional_candidate_count": swing_exceptional_candidate_count,
         "rejected_count": rejected_count,
         "classification_counts": classification_counts,
         "classification_reason_counts": classification_reason_counts,
@@ -1066,13 +1253,32 @@ def run_universe_research(
         "median_excess_vs_null": _median(
             [float(item["selected_excess_vs_p75_null"]) for item in aggregate_items]
         ),
+        "holding_policy_rejection_count": holding_policy_rejection_count,
+        "overnight_violation_count": overnight_violation_count,
+        "weekend_violation_count": weekend_violation_count,
+        "median_gap_return_contribution_pct": _median(
+            [float(item["gap_return_contribution_pct"]) for item in aggregate_items]
+        ),
+        "median_overnight_exposure_count": _median(
+            [float(item["overnight_exposure_count"]) for item in aggregate_items]
+        ),
+        "median_weekend_exposure_count": _median(
+            [float(item["weekend_exposure_count"]) for item in aggregate_items]
+        ),
         "median_max_drawdown": _median([float(item["max_drawdown"]) for item in aggregate_items]),
         "median_trade_count": _median([float(item["trade_count"]) for item in aggregate_items]),
         "median_stability_score": _median(
             [float(item["stability_score"]) for item in aggregate_items]
         ),
         "top_candidates": [
-            item for item in symbol_results if item.get("classification") == "candidate_paper_test"
+            item
+            for item in symbol_results
+            if item.get("classification")
+            in {
+                "candidate_paper_test",
+                "candidate_intraday_test",
+                "candidate_swing_exceptional",
+            }
         ][:10],
         "top_rejection_reasons": dict(Counter(classification_reasons).most_common(10)),
         "symbol_results": symbol_results,

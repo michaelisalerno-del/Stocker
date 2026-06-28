@@ -14,7 +14,14 @@ ResearchClassification = Literal[
     "rejected_unstable_parameters",
     "rejected_walkforward_failure",
     "rejected_too_few_trades",
+    "rejected_overnight_risk",
+    "rejected_weekend_risk",
+    "rejected_holding_policy_violation",
     "interesting_needs_more_tests",
+    "interesting_intraday_needs_more_tests",
+    "interesting_swing_needs_more_tests",
+    "candidate_intraday_test",
+    "candidate_swing_exceptional",
     "candidate_paper_test",
 ]
 
@@ -44,6 +51,8 @@ def classify_research_result(
     benchmark_pass: bool = True,
     null_pass: bool = True,
     selection_rejected: bool = False,
+    holding_policy_classification: ResearchClassification | None = None,
+    holding_policy_reasons: list[str] | None = None,
 ) -> ClassificationResult:
     """Classify a research result with intentionally conservative gates."""
 
@@ -72,6 +81,15 @@ def classify_research_result(
     if not null_pass:
         reasons.append("failed_null_timing")
         return ClassificationResult(classification="rejected_no_edge", reasons=reasons)
+    holding_reasons = holding_policy_reasons or []
+    if holding_policy_classification is not None and holding_policy_classification.startswith(
+        "rejected_"
+    ):
+        reasons.extend(holding_reasons)
+        return ClassificationResult(
+            classification=holding_policy_classification,
+            reasons=reasons,
+        )
     if profitable_split_pct < minimum_profitable_split_pct:
         reasons.append("walkforward_failure")
         return ClassificationResult(
@@ -88,6 +106,17 @@ def classify_research_result(
         reasons.append("drawdown_too_large")
         return ClassificationResult(
             classification="interesting_needs_more_tests",
+            reasons=reasons,
+        )
+    if holding_policy_classification in {
+        "interesting_intraday_needs_more_tests",
+        "interesting_swing_needs_more_tests",
+        "candidate_intraday_test",
+        "candidate_swing_exceptional",
+    }:
+        reasons.extend(holding_reasons)
+        return ClassificationResult(
+            classification=holding_policy_classification,
             reasons=reasons,
         )
     reasons.append("all_candidate_gates_passed")

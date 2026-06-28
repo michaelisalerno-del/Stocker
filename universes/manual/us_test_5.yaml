@@ -1,0 +1,38 @@
+id: us_test_5
+name: US Test 5
+description: Small committed US stock universe for CLI smoke tests.
+source: manual
+created_at: "2026-06-28T00:00:00Z"
+filters:
+  exchange: US
+  min_price: 0
+  min_market_cap: 0
+  min_avgvol_200d: 0
+  sectors: []
+  industries: []
+symbols:
+  - symbol: AAPL.US
+    name: Apple Inc
+    exchange: US
+    currency: USD
+    instrument_type: stock
+  - symbol: MSFT.US
+    name: Microsoft Corp
+    exchange: US
+    currency: USD
+    instrument_type: stock
+  - symbol: NVDA.US
+    name: NVIDIA Corp
+    exchange: US
+    currency: USD
+    instrument_type: stock
+  - symbol: AMZN.US
+    name: Amazon.com Inc
+    exchange: US
+    currency: USD
+    instrument_type: stock
+  - symbol: META.US
+    name: Meta Platforms Inc
+    exchange: US
+    currency: USD
+    instrument_type: stock

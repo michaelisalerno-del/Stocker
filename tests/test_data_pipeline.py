@@ -41,7 +41,8 @@ def test_import_csv_auto_maps_columns_and_writes_partitioned_parquet(tmp_path: P
     assert result.path == expected_path
     assert result.rows == 5
     assert result.error_count == 0
-    assert result.warning_count == 1  # gap across the weekend is informational/warning-level.
+    assert result.warning_count == 0
+    assert any(issue.code == "calendar_gap_check_skipped" for issue in result.issues)
 
     frame = load_dataset(
         DatasetKey(source="manual", instrument_type="stock", symbol="AAPL", timeframe="1d"),
@@ -89,7 +90,11 @@ def test_validation_detects_duplicate_bad_ohlc_negative_volume_and_gaps() -> Non
 
     gap = pd.read_csv(FIXTURES / "missing_gap.csv")
     gap_issues = validate_ohlcv(
-        gap, timeframe="1d", timezone="America/New_York", require_timezone=True
+        gap,
+        timeframe="1d",
+        timezone="America/New_York",
+        require_timezone=True,
+        market_calendar="XNYS",
     )
     assert any(issue.code == "timestamp_gap" for issue in gap_issues)
 
@@ -159,7 +164,7 @@ def test_audit_report_creation(tmp_path: Path) -> None:
     payload = json.loads(report.json_path.read_text(encoding="utf-8"))
     assert payload["symbol"] == "AAPL"
     assert payload["row_count"] == 5
-    assert payload["passed"] is False  # sample has a daily calendar gap.
+    assert payload["passed"] is True
     assert "Return Distribution" in report.markdown_path.read_text(encoding="utf-8")
 
 

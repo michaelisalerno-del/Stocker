@@ -89,9 +89,26 @@ Checks include:
 - non-positive prices
 - negative volume
 - suspicious zero-volume runs
-- gaps based on timeframe cadence
+- calendar-aware gaps based on timeframe cadence
 - large close-to-close jumps
 - missing sessions when a market calendar is supplied
+
+For stock data, pass a market calendar such as `XNYS` when you want strict session
+gap checks:
+
+```bash
+uv run stocker data audit \
+  --symbol AAPL.US \
+  --timeframe 1d \
+  --source eodhd \
+  --market-calendar XNYS
+```
+
+Daily data with `XNYS` checks exchange sessions, so weekends and holidays are not
+flagged. Intraday data with `XNYS` checks expected bars only inside regular sessions,
+so overnight closures are not flagged. Without a market calendar, Stocker records an
+informational `calendar_gap_check_skipped` issue instead of creating noisy weekend or
+overnight false positives.
 
 ## Audit Reports
 
@@ -152,10 +169,32 @@ EODHD lives entirely inside `stocker_data.vendors.eodhd`. Strategy templates,
 backtests, research experiments, and execution code consume normalized Stocker
 datasets and do not call vendor APIs.
 
+Fetch commands load research config by default:
+
+```bash
+uv run stocker data fetch-eodhd-eod --config configs/research.example.yaml --help
+```
+
+The config supplies:
+
+- `data.data_dir`
+- `data.default_currency`
+- `data_vendors.eodhd.enabled`
+- `data_vendors.eodhd.base_url`
+- `data_vendors.eodhd.api_token_env`
+- `data_vendors.eodhd.request_timeout_seconds`
+- `data_vendors.eodhd.max_retries`
+- `data_vendors.eodhd.save_raw_by_default`
+
+Dry-runs do not require the token and may run while the vendor is disabled, but they
+print the disabled state. Live fetches require the vendor to be enabled unless
+`--enable-disabled-vendor` is passed deliberately.
+
 Dry-run a download without a token:
 
 ```bash
 uv run stocker data fetch-eodhd-eod \
+  --config configs/research.example.yaml \
   --symbol AAPL.US \
   --from 2024-01-01 \
   --to 2024-02-01 \
@@ -169,6 +208,7 @@ Run a real EOD fetch after setting the token:
 ```bash
 export EODHD_API_TOKEN="your_token_here"
 uv run stocker data fetch-eodhd-eod \
+  --config configs/research.example.yaml \
   --symbol AAPL.US \
   --from 2015-01-01 \
   --to 2026-06-28 \
@@ -183,6 +223,7 @@ Intraday ranges are chunked to stay inside EODHD-safe spans:
 
 ```bash
 uv run stocker data fetch-eodhd-intraday \
+  --config configs/research.example.yaml \
   --symbol AAPL.US \
   --interval 1m \
   --from 2024-01-01 \
@@ -197,10 +238,80 @@ After fetching:
 
 ```bash
 uv run stocker data catalog
-uv run stocker data audit --symbol AAPL.US --timeframe 1m --source eodhd
-uv run stocker data qa-eodhd --symbol AAPL.US --timeframe 1m --require-raw
+uv run stocker data audit \
+  --symbol AAPL.US \
+  --timeframe 1m \
+  --source eodhd \
+  --market-calendar XNYS
+uv run stocker data qa-eodhd \
+  --symbol AAPL.US \
+  --timeframe 1m \
+  --source eodhd \
+  --market-calendar XNYS \
+  --require-raw
 uv run stocker research baseline --symbol AAPL.US --timeframe 1m --source eodhd
 ```
 
 Vendor QA writes Markdown/JSON under `data/reports/vendor_qa/` and summarizes raw
 response coverage, adjusted-close policy, calendar validation, and refresh guidance.
+Raw coverage is dataset-specific: daily QA looks for `endpoint=eod/period=d`, while
+minute QA looks for `endpoint=intraday/interval=1m`. A daily raw file cannot satisfy
+intraday QA, and an intraday raw file cannot satisfy daily QA.
+
+## Local EODHD Smoke
+
+Run:
+
+```bash
+bash scripts/smoke_eodhd_local.sh
+```
+
+The script always runs EOD and intraday dry-runs. If `EODHD_API_TOKEN` is set, it
+fetches a tiny EOD sample into `data_smoke/`, then runs catalog, audit, EODHD QA, and
+baseline. If the token is missing, it prints that the live smoke was skipped and exits
+successfully.
+
+## CI Expectations
+
+GitHub Actions runs `uv sync --all-groups`, Ruff formatting, Ruff linting, mypy, and
+pytest on push and pull request. CI does not need `EODHD_API_TOKEN`; all vendor HTTP
+tests use mocks.
+
+Before starting Stage 3 research harness work, the local check script, CI, EODHD
+dry-runs, one tiny real EOD fetch, catalog, audit, vendor QA, baseline, and a merge
+re-run without duplicate rows should all pass.
+
+## Universe Data Manager
+
+Stage 2.7 adds a universe workflow on top of the single-symbol data pipeline:
+
+```text
+EODHD screener or manual universe file
+  -> universe YAML/JSON
+  -> batch EODHD fetch
+  -> audit every dataset
+  -> EODHD QA every dataset
+  -> local liquidity/history filters
+  -> research-ready universe export
+```
+
+Universe files live under `universes/manual/` or `universes/generated/`. Generated
+research-ready exports live under `data/universes/research_ready/`, and universe
+reports live under `data/reports/universes/`.
+
+Example dry-run fetch:
+
+```bash
+uv run stocker universe fetch \
+  --universe universes/manual/us_test_5.yaml \
+  --from 2024-01-01 \
+  --to 2024-02-01 \
+  --timeframe 1d \
+  --source eodhd \
+  --dry-run \
+  --max-symbols 2 \
+  --config configs/research.example.yaml
+```
+
+See [universes.md](universes.md) for the complete build, fetch, qualify, and health
+workflow.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -12,17 +13,19 @@ from typing import Any, cast
 
 import httpx
 import pandas as pd
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from stocker_core.config import EODHDConfig
 from stocker_data.audit import create_audit_report
 from stocker_data.catalog import write_catalog
 from stocker_data.schema import ALL_SCHEMA_COLUMNS
 from stocker_data.storage import DatasetKey, dataset_path, read_parquet, write_parquet
+from stocker_data.universe import UniverseSymbol
 from stocker_data.validate import ValidationIssue, validate_ohlcv
 
 EOD_PERIOD_TO_TIMEFRAME: dict[str, str] = {"d": "1d", "w": "1w", "m": "1mo"}
 INTRADAY_MAX_SPAN_DAYS: dict[str, int] = {"1m": 120, "5m": 600, "1h": 7200}
+SCREENER_MAX_LIMIT = 100
+SCREENER_MAX_OFFSET = 999
 
 
 class EODHDError(Exception):
@@ -35,6 +38,18 @@ class EODHDMissingTokenError(EODHDError):
 
 class EODHDHTTPError(EODHDError):
     """Raised when EODHD returns a non-success HTTP response."""
+
+
+class EODHDRateLimitError(EODHDHTTPError):
+    """Raised when EODHD rate limits a request after retries."""
+
+
+class EODHDTemporaryHTTPError(EODHDHTTPError):
+    """Raised when temporary EODHD failures are exhausted."""
+
+
+class EODHDPermanentHTTPError(EODHDHTTPError):
+    """Raised when EODHD returns a non-retryable HTTP response."""
 
 
 class EODHDEmptyResponseError(EODHDError):
@@ -51,6 +66,10 @@ class EODHDUnsupportedIntervalError(EODHDError):
 
 class EODHDInvalidDateRangeError(EODHDError):
     """Raised when a requested date range is invalid."""
+
+
+class EODHDUnsupportedScreenerError(EODHDError):
+    """Raised when a screener request would violate EODHD guardrails."""
 
 
 @dataclass(frozen=True)
@@ -147,8 +166,10 @@ class EODHDClient:
         *,
         config: EODHDConfig | None = None,
         transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
         self.config = config or EODHDConfig()
+        self._sleep = sleep or time.sleep
         self._client = httpx.Client(
             timeout=self.config.request_timeout_seconds,
             transport=transport,
@@ -212,6 +233,56 @@ class EODHDClient:
             },
         )
 
+    def build_screener_request(
+        self,
+        *,
+        filters: list[list[Any]],
+        signals: list[str],
+        sort: str,
+        limit: int,
+        offset: int,
+        api_token: str,
+    ) -> httpx.Request:
+        """Build an EODHD screener request without leaking the token to callers."""
+
+        _validate_screener_page(limit=limit, offset=offset)
+        params: dict[str, str] = {
+            "filters": json.dumps(filters, separators=(",", ":")),
+            "sort": sort,
+            "limit": str(limit),
+            "offset": str(offset),
+            "api_token": api_token,
+            "fmt": self.config.default_fmt,
+        }
+        if signals:
+            params["signals"] = json.dumps(signals, separators=(",", ":"))
+        return self._client.build_request(
+            "GET",
+            f"{self.config.base_url.rstrip('/')}/screener",
+            params=params,
+        )
+
+    def fetch_screener_page(
+        self,
+        *,
+        filters: list[list[Any]],
+        signals: list[str],
+        sort: str,
+        limit: int,
+        offset: int,
+    ) -> Any:
+        """Fetch one EODHD screener page."""
+
+        request = self.build_screener_request(
+            filters=filters,
+            signals=signals,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            api_token=self.require_token(),
+        )
+        return self._send_json(request)
+
     def fetch_eod(
         self,
         *,
@@ -273,21 +344,215 @@ class EODHDClient:
         return self._send_json(request)
 
     def _send_json(self, request: httpx.Request) -> Any:
-        retryer = Retrying(
-            stop=stop_after_attempt(self.config.max_retries),
-            wait=wait_exponential(multiplier=0.25, min=0.25, max=2.0),
-            retry=retry_if_exception_type(httpx.RequestError),
-            reraise=True,
-        )
-        for attempt in retryer:
-            with attempt:
+        max_attempts = max(1, self.config.max_retries)
+        for attempt in range(1, max_attempts + 1):
+            try:
                 response = self._client.send(request)
-                if response.status_code >= 400:
-                    raise EODHDHTTPError(
-                        f"EODHD HTTP {response.status_code}: {response.text[:300]}"
-                    )
+            except httpx.RequestError as exc:
+                if attempt >= max_attempts:
+                    raise EODHDTemporaryHTTPError(
+                        _request_error_message(
+                            request,
+                            error=exc,
+                            retries_exhausted=True,
+                        )
+                    ) from exc
+                self._sleep(_backoff_delay(attempt))
+                continue
+
+            if response.status_code < 400:
                 return response.json()
+
+            if _is_retryable_status(response.status_code):
+                if attempt >= max_attempts:
+                    error_type = (
+                        EODHDRateLimitError
+                        if response.status_code == 429
+                        else EODHDTemporaryHTTPError
+                    )
+                    raise error_type(
+                        _http_error_message(
+                            response,
+                            retries_exhausted=True,
+                        )
+                    )
+                self._sleep(_retry_delay(response, attempt))
+                continue
+
+            raise EODHDPermanentHTTPError(
+                _http_error_message(
+                    response,
+                    retries_exhausted=False,
+                )
+            )
+
         raise EODHDError("EODHD retry loop exhausted without a response")
+
+
+def _validate_screener_page(*, limit: int, offset: int) -> None:
+    if limit < 1 or limit > SCREENER_MAX_LIMIT:
+        raise EODHDUnsupportedScreenerError(
+            f"EODHD screener page limit must be between 1 and {SCREENER_MAX_LIMIT}"
+        )
+    if offset < 0 or offset > SCREENER_MAX_OFFSET:
+        raise EODHDUnsupportedScreenerError(
+            f"EODHD screener offset must be between 0 and {SCREENER_MAX_OFFSET}"
+        )
+
+
+def build_screener_filters(
+    *,
+    exchange: str | None = None,
+    min_price: float | None = None,
+    min_market_cap: float | None = None,
+    min_avgvol_200d: float | None = None,
+    sectors: list[str] | None = None,
+    industries: list[str] | None = None,
+) -> list[list[Any]]:
+    """Build first-pass EODHD screener filters from user-facing options."""
+
+    filters: list[list[Any]] = []
+    if exchange:
+        filters.append(["exchange", "=", exchange])
+    if min_price is not None:
+        filters.append(["adjusted_close", ">=", min_price])
+    if min_market_cap is not None:
+        filters.append(["market_capitalization", ">=", min_market_cap])
+    if min_avgvol_200d is not None:
+        filters.append(["avgvol_200d", ">=", min_avgvol_200d])
+    for sector in sectors or []:
+        filters.append(["sector", "=", sector])
+    for industry in industries or []:
+        filters.append(["industry", "=", industry])
+    return filters
+
+
+def normalize_screener_response(payload: Any) -> list[UniverseSymbol]:
+    """Normalize an EODHD screener payload to universe symbols."""
+
+    records = _records_from_response(payload)
+    symbols: list[UniverseSymbol] = []
+    for record in records:
+        code = record.get("code") or record.get("symbol")
+        if code is None or not str(code).strip():
+            raise EODHDSchemaError("EODHD screener response row is missing code/symbol")
+        symbols.append(
+            UniverseSymbol(
+                symbol=str(code),
+                name=_optional_str(record.get("name")),
+                exchange=_optional_str(record.get("exchange")),
+                currency=_optional_str(record.get("currency")),
+                instrument_type="stock",
+                sector=_optional_str(record.get("sector")),
+                industry=_optional_str(record.get("industry")),
+                market_capitalization=_optional_float(record.get("market_capitalization")),
+                adjusted_close=_optional_float(record.get("adjusted_close")),
+                avgvol_200d=_optional_float(record.get("avgvol_200d")),
+            )
+        )
+    return symbols
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    return str(value)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def fetch_screener_all(
+    *,
+    client: EODHDClient,
+    filters: list[list[Any]],
+    signals: list[str],
+    sort: str,
+    limit: int,
+    max_pages: int,
+) -> list[UniverseSymbol]:
+    """Fetch EODHD screener pages up to total limit and max page guardrails."""
+
+    if limit < 1:
+        raise EODHDUnsupportedScreenerError("EODHD screener limit must be positive")
+    if max_pages < 1:
+        raise EODHDUnsupportedScreenerError("EODHD screener max_pages must be positive")
+    rows: list[UniverseSymbol] = []
+    offset = 0
+    pages = 0
+    requested = 0
+    while requested < limit and pages < max_pages:
+        page_limit = min(SCREENER_MAX_LIMIT, limit - requested)
+        _validate_screener_page(limit=page_limit, offset=offset)
+        payload = client.fetch_screener_page(
+            filters=filters,
+            signals=signals,
+            sort=sort,
+            limit=page_limit,
+            offset=offset,
+        )
+        page_rows = normalize_screener_response(payload)
+        if not page_rows:
+            break
+        rows.extend(page_rows)
+        pages += 1
+        requested += page_limit
+        offset += page_limit
+        if offset > SCREENER_MAX_OFFSET and requested < limit and pages < max_pages:
+            raise EODHDUnsupportedScreenerError(
+                f"EODHD screener offset would exceed {SCREENER_MAX_OFFSET}"
+            )
+    return rows[:limit]
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in {429, 500, 502, 503, 504}
+
+
+def _backoff_delay(attempt: int) -> float:
+    delay = 0.25 * float(2 ** (attempt - 1))
+    return float(min(2.0, max(0.25, delay)))
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return max(0.0, float(str(retry_after)))
+        except ValueError:
+            pass
+    return _backoff_delay(attempt)
+
+
+def _safe_response_preview(response: httpx.Response, *, limit: int = 300) -> str:
+    preview = response.text[:limit]
+    token = response.request.url.params.get("api_token")
+    if token:
+        preview = preview.replace(token, "<redacted>")
+    return preview
+
+
+def _http_error_message(response: httpx.Response, *, retries_exhausted: bool) -> str:
+    path = response.request.url.path
+    preview = _safe_response_preview(response)
+    exhausted = "true" if retries_exhausted else "false"
+    return (
+        f"EODHD HTTP {response.status_code} for {path}; "
+        f"retries exhausted: {exhausted}; response preview: {preview}"
+    )
+
+
+def _request_error_message(
+    request: httpx.Request,
+    *,
+    error: httpx.RequestError,
+    retries_exhausted: bool,
+) -> str:
+    exhausted = "true" if retries_exhausted else "false"
+    return f"EODHD request failed for {request.url.path}; retries exhausted: {exhausted}; {error}"
 
 
 def timeframe_for_eod_period(period: str) -> str:
@@ -520,8 +785,19 @@ def _merge_or_replace(
     return _order_columns(_sorted_deduped(frame))
 
 
-def _validate_before_write(frame: pd.DataFrame, *, timeframe: str) -> list[ValidationIssue]:
-    issues = validate_ohlcv(frame, timeframe=timeframe, timezone="UTC", require_timezone=True)
+def _validate_before_write(
+    frame: pd.DataFrame,
+    *,
+    timeframe: str,
+    market_calendar: str | None,
+) -> list[ValidationIssue]:
+    issues = validate_ohlcv(
+        frame,
+        timeframe=timeframe,
+        timezone="UTC",
+        require_timezone=True,
+        market_calendar=market_calendar,
+    )
     errors = [issue for issue in issues if issue.severity == "error"]
     if errors:
         messages = "; ".join(f"{issue.code}: {issue.message}" for issue in errors)
@@ -555,6 +831,7 @@ def _fetch_to_storage_from_payload(
     overwrite: bool,
     merge: bool,
     audit: bool,
+    market_calendar: str | None = None,
     raw_selector_name: str = "timeframe",
     raw_selector_value: str | None = None,
 ) -> EODHDFetchResult:
@@ -587,7 +864,11 @@ def _fetch_to_storage_from_payload(
         overwrite=overwrite,
         merge=merge,
     )
-    issues = _validate_before_write(final_frame, timeframe=timeframe)
+    issues = _validate_before_write(
+        final_frame,
+        timeframe=timeframe,
+        market_calendar=market_calendar,
+    )
     output_path = dataset_path(key, data_dir=data_dir)
     write_parquet(final_frame, output_path)
     catalog_path = write_catalog(data_dir=data_dir)
@@ -600,6 +881,7 @@ def _fetch_to_storage_from_payload(
             timeframe=timeframe,
             source="eodhd",
             instrument_type=instrument_type,
+            market_calendar=market_calendar,
         )
         audit_markdown_path = audit_result.markdown_path
         audit_json_path = audit_result.json_path
@@ -632,6 +914,7 @@ def fetch_eod_to_storage(
     overwrite: bool = False,
     merge: bool = False,
     audit: bool = False,
+    market_calendar: str | None = None,
 ) -> EODHDFetchResult:
     """Fetch EODHD EOD data and store normalized Parquet."""
 
@@ -661,6 +944,7 @@ def fetch_eod_to_storage(
         overwrite=overwrite,
         merge=merge,
         audit=audit,
+        market_calendar=market_calendar,
         raw_selector_name="period",
         raw_selector_value=period,
     )
@@ -680,6 +964,7 @@ def fetch_intraday_to_storage(
     overwrite: bool = False,
     merge: bool = False,
     audit: bool = False,
+    market_calendar: str | None = None,
 ) -> EODHDFetchResult:
     """Fetch chunked EODHD intraday data and store normalized Parquet."""
 
@@ -733,6 +1018,7 @@ def fetch_intraday_to_storage(
         overwrite=overwrite,
         merge=merge,
         audit=audit,
+        market_calendar=market_calendar,
     )
     return EODHDFetchResult(
         output_path=result.output_path,

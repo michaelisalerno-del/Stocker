@@ -1,5 +1,7 @@
 # Stocker
 
+![CI](https://github.com/michaelisalerno-del/Stocker/actions/workflows/ci.yml/badge.svg)
+
 Stocker is a from-scratch trading research and execution foundation. The first goal is
 not to find an edge or place trades. The goal is to make bad ideas cheap to disprove on
 a Mac, while keeping any future server execution small, boring, and protected by hard
@@ -108,11 +110,19 @@ Parquet under
 `data/processed/source=.../instrument_type=.../symbol=.../timeframe=.../data.parquet`,
 update `data/catalog.json`, and can generate audit and baseline reports.
 
-EODHD credentials are read only from `EODHD_API_TOKEN`:
+EODHD fetch commands load `configs/research.example.yaml` by default. The config
+controls the data directory, default currency, vendor base URL, token environment
+variable, retry count, timeout, and default raw-response saving behavior. Dry-runs do
+not require a token. Live fetches require `data_vendors.eodhd.enabled: true` unless
+you explicitly pass `--enable-disabled-vendor`.
+
+EODHD credentials are read only from the configured environment variable, normally
+`EODHD_API_TOKEN`:
 
 ```bash
 export EODHD_API_TOKEN="your_token_here"
 uv run stocker data fetch-eodhd-eod \
+  --config configs/research.example.yaml \
   --symbol AAPL.US \
   --from 2015-01-01 \
   --to 2026-06-28 \
@@ -125,6 +135,43 @@ uv run stocker data fetch-eodhd-eod \
 
 See [docs/data_pipeline.md](docs/data_pipeline.md) before researching any edge.
 See [docs/vendors/eodhd.md](docs/vendors/eodhd.md) for EODHD-specific commands.
+See [docs/universes.md](docs/universes.md) for universe generation, batch fetch, and
+research-ready exports.
+
+Local EODHD smoke test:
+
+```bash
+bash scripts/smoke_eodhd_local.sh
+```
+
+Without `EODHD_API_TOKEN`, the script runs safe dry-runs and skips the live fetch.
+With a token, it fetches a tiny EOD sample into `data_smoke/`, then runs catalog,
+audit, vendor QA, and baseline checks.
+
+## Continuous Integration
+
+GitHub Actions runs on push and pull request with Python 3.12:
+
+```bash
+uv sync --all-groups
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy packages apps
+uv run pytest
+```
+
+CI does not require an EODHD token. Vendor tests use mocked HTTP only.
+
+## Before Stage 3
+
+- `bash scripts/check.sh` passes locally.
+- GitHub Actions passes.
+- EODHD dry-runs work without a token.
+- One small real EODHD EOD fetch works with `EODHD_API_TOKEN`.
+- `uv run stocker data catalog` sees the fetched dataset.
+- Audit and EODHD QA reports are generated.
+- Baseline reports can consume the EODHD dataset.
+- Re-running the fetch with `--merge` does not duplicate rows.
 
 ## Research Harness
 
@@ -149,6 +196,27 @@ uv run stocker research run \
 
 See [docs/research_harness.md](docs/research_harness.md) for the full workflow and
 classification rules.
+
+## Universe Workflow
+
+Stage 2.7 adds a stock-universe data manager so research starts from a reproducible
+symbol set instead of ad hoc tickers:
+
+```bash
+uv run stocker universe validate --universe universes/manual/us_test_5.yaml
+uv run stocker universe fetch \
+  --universe universes/manual/us_test_5.yaml \
+  --from 2024-01-01 \
+  --to 2024-02-01 \
+  --timeframe 1d \
+  --source eodhd \
+  --dry-run \
+  --max-symbols 2
+```
+
+The intended flow is EODHD screener or manual YAML, batch EODHD fetch, audit/QA for
+each dataset, local liquidity and history qualification, then a research-ready JSON
+export for Stage 3. FMP and dashboard work are intentionally deferred.
 
 ## Next Development Stages
 

@@ -50,6 +50,12 @@ def _parse_timestamps(frame: pd.DataFrame, timestamp_col: str) -> pd.Series:
     return pd.to_datetime(frame[timestamp_col], errors="coerce")
 
 
+def _parse_utc_timestamps(frame: pd.DataFrame, timestamp_col: str) -> pd.Series:
+    if timestamp_col not in frame:
+        return pd.Series(dtype="datetime64[ns, UTC]")
+    return pd.to_datetime(frame[timestamp_col], errors="coerce", utc=True)
+
+
 def _has_timezone(value: Any) -> bool:
     if value is None or pd.isna(value):
         return False
@@ -71,6 +77,19 @@ def _freq_for_timeframe(timeframe: str) -> str | None:
     if normalized.endswith("min") and normalized[:-3].isdigit():
         return normalized
     return None
+
+
+def _is_daily_timeframe(timeframe: str) -> bool:
+    return timeframe.strip().lower() in {"1d", "d", "day", "daily"}
+
+
+def _is_intraday_timeframe(timeframe: str) -> bool:
+    normalized = timeframe.strip().lower()
+    return (
+        (normalized.endswith("m") and normalized[:-1].isdigit())
+        or (normalized.endswith("h") and normalized[:-1].isdigit())
+        or (normalized.endswith("min") and normalized[:-3].isdigit())
+    )
 
 
 def _issue_for_timestamps(
@@ -291,8 +310,133 @@ def _validate_volume(data: pd.DataFrame, *, volume_col: str = "volume") -> list[
     return issues
 
 
+def _load_market_calendar(market_calendar: str) -> Any:
+    try:
+        import pandas_market_calendars as mcal
+    except ModuleNotFoundError:
+        return None
+    return mcal.get_calendar(market_calendar)
+
+
+def _calendar_gap_skipped_issue(timeframe: str) -> ValidationIssue:
+    return ValidationIssue(
+        severity="info",
+        code="calendar_gap_check_skipped",
+        message=(
+            "Calendar-aware gap checking was skipped because no market calendar was supplied "
+            f"for timeframe {timeframe}"
+        ),
+    )
+
+
+def _validate_daily_calendar_gaps(
+    data: pd.DataFrame, *, timestamp_col: str, timeframe: str, market_calendar: str
+) -> list[ValidationIssue]:
+    timestamps = _parse_utc_timestamps(data, timestamp_col).dropna().sort_values()
+    if timestamps.empty:
+        return []
+    calendar = _load_market_calendar(market_calendar)
+    if calendar is None:
+        return [
+            ValidationIssue(
+                severity="info",
+                code="calendar_unavailable",
+                message="pandas-market-calendars is not installed; calendar gap check skipped",
+            )
+        ]
+    schedule = calendar.schedule(
+        start_date=timestamps.min().date(),
+        end_date=timestamps.max().date(),
+    )
+    expected = pd.DatetimeIndex(pd.to_datetime(schedule.index.date))
+    actual = pd.DatetimeIndex(pd.to_datetime(timestamps.dt.date.unique()))
+    missing = expected.difference(actual)
+    if missing.empty:
+        return []
+    return [
+        ValidationIssue(
+            severity="warning",
+            code="timestamp_gap",
+            message=(
+                f"Detected {len(missing)} missing {market_calendar} sessions "
+                f"for expected {timeframe} cadence"
+            ),
+            count=int(len(missing)),
+            first_seen=str(missing[0].date()),
+            last_seen=str(missing[-1].date()),
+        )
+    ]
+
+
+def _validate_intraday_calendar_gaps(
+    data: pd.DataFrame,
+    *,
+    timestamp_col: str,
+    timeframe: str,
+    market_calendar: str,
+) -> list[ValidationIssue]:
+    freq = _freq_for_timeframe(timeframe)
+    if freq is None:
+        return []
+    timestamps = _parse_utc_timestamps(data, timestamp_col).dropna().sort_values()
+    if timestamps.empty:
+        return []
+    calendar = _load_market_calendar(market_calendar)
+    if calendar is None:
+        return [
+            ValidationIssue(
+                severity="info",
+                code="calendar_unavailable",
+                message="pandas-market-calendars is not installed; calendar gap check skipped",
+            )
+        ]
+    schedule = calendar.schedule(
+        start_date=timestamps.min().date(),
+        end_date=timestamps.max().date(),
+    )
+    expected_chunks: list[pd.DatetimeIndex] = []
+    for _, session in schedule.iterrows():
+        session_expected = pd.date_range(
+            session["market_open"],
+            session["market_close"],
+            freq=freq,
+            inclusive="left",
+        )
+        expected_chunks.append(session_expected)
+    if not expected_chunks:
+        return []
+    expected = expected_chunks[0]
+    for chunk in expected_chunks[1:]:
+        expected = pd.DatetimeIndex(expected.append(chunk))
+    expected = pd.DatetimeIndex(
+        expected[(expected >= timestamps.min()) & (expected <= timestamps.max())]
+    )
+    actual = pd.DatetimeIndex(timestamps.drop_duplicates())
+    missing = expected.difference(actual)
+    if missing.empty:
+        return []
+    return [
+        ValidationIssue(
+            severity="warning",
+            code="timestamp_gap",
+            message=(
+                f"Detected {len(missing)} missing in-session bars for expected "
+                f"{market_calendar} {timeframe} cadence"
+            ),
+            count=int(len(missing)),
+            first_seen=str(missing[0]),
+            last_seen=str(missing[-1]),
+        )
+    ]
+
+
 def _validate_gaps(
-    data: pd.DataFrame, *, timestamp_col: str, timeframe: str
+    data: pd.DataFrame,
+    *,
+    timestamp_col: str,
+    timeframe: str,
+    market_calendar: str | None,
+    strict_fixed_frequency_gaps: bool,
 ) -> list[ValidationIssue]:
     freq = _freq_for_timeframe(timeframe)
     if freq is None:
@@ -303,6 +447,25 @@ def _validate_gaps(
                 message=f"No fixed-frequency gap check for timeframe {timeframe}",
             )
         ]
+    if market_calendar is not None:
+        if _is_daily_timeframe(timeframe):
+            return _validate_daily_calendar_gaps(
+                data,
+                timestamp_col=timestamp_col,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
+            )
+        if _is_intraday_timeframe(timeframe):
+            return _validate_intraday_calendar_gaps(
+                data,
+                timestamp_col=timestamp_col,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
+            )
+
+    if not strict_fixed_frequency_gaps:
+        return [_calendar_gap_skipped_issue(timeframe)]
+
     missing = find_missing_timestamps(data, timestamp_col=timestamp_col, freq=freq)
     if not missing:
         return []
@@ -383,6 +546,7 @@ def validate_ohlcv(
     timestamp_col: str = "timestamp",
     require_timezone: bool = True,
     market_calendar: str | None = None,
+    strict_fixed_frequency_gaps: bool = False,
     large_jump_threshold: float = 0.2,
 ) -> list[ValidationIssue]:
     """Run structured validation checks over an OHLCV dataset."""
@@ -400,7 +564,15 @@ def validate_ohlcv(
     if timestamp_col in data:
         issues.extend(_validate_duplicates(data, timestamp_col))
         issues.extend(_validate_order(data, timestamp_col))
-        issues.extend(_validate_gaps(data, timestamp_col=timestamp_col, timeframe=timeframe))
+        issues.extend(
+            _validate_gaps(
+                data,
+                timestamp_col=timestamp_col,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
+                strict_fixed_frequency_gaps=strict_fixed_frequency_gaps,
+            )
+        )
         issues.extend(
             _validate_missing_sessions(
                 data,

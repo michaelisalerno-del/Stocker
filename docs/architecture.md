@@ -43,7 +43,7 @@ Server responsibilities:
 
 - `stocker_core`: shared config, logging, time, CLI, and type helpers.
 - `stocker_data`: CSV ingestion, schema, Parquet I/O, catalog, DuckDB queries,
-  validation, audit reports, vendor placeholders, and calendars.
+  validation, audit reports, vendor adapters, vendor QA, and calendars.
 - `stocker_research`: written hypotheses, features, labels, baseline reports,
   walk-forward splits, parameter grids, stability checks, leakage checks, regime
   labels, experiment runner, and research report indexes.
@@ -60,6 +60,12 @@ orders and current state, not research notebooks.
 Data trust is a separate boundary too. CSV ingestion, validation, audit reporting, and
 baseline reporting happen before edge discovery. A dataset that fails audit should not
 be used for backtests without a written reason.
+
+Vendor APIs are data-pipeline concerns only. EODHD lives under
+`stocker_data.vendors.eodhd`, normalizes responses to the Stocker OHLCV schema, writes
+Parquet, refreshes the catalog, and produces audit/QA reports. Strategy templates,
+backtests, research experiments, server runtime code, and future execution code should
+not call EODHD directly.
 
 Research discipline is another boundary. A strategy test should be attached to a
 written hypothesis, chronological walk-forward split, explicit cost model, and

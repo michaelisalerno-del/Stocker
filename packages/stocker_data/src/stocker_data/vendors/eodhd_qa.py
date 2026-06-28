@@ -44,19 +44,97 @@ class EODHDQAReportResult:
         }
 
 
+@dataclass(frozen=True)
+class RawFileCoverage:
+    """Dataset-specific raw response coverage details."""
+
+    endpoint: str
+    selector_name: str
+    selector_value: str
+    paths: list[Path]
+    first_date: str | None
+    last_date: str | None
+    covers_dataset_range: bool
+
+
 def _reports_dir(data_dir: str | Path) -> Path:
     return Path(data_dir).expanduser() / "reports" / "vendor_qa"
 
 
-def _raw_root(data_dir: str | Path, *, symbol: str) -> Path:
+def _raw_root(data_dir: str | Path) -> Path:
     return Path(data_dir).expanduser() / "raw" / "source=eodhd"
 
 
-def _raw_files(data_dir: str | Path, *, symbol: str) -> list[Path]:
-    root = _raw_root(data_dir, symbol=symbol)
+def _raw_selector_for_timeframe(timeframe: str) -> tuple[str, str, str]:
+    normalized = timeframe.strip().lower()
+    if normalized in {"1d", "d", "day", "daily"}:
+        return "eod", "period", "d"
+    if normalized in {"1w", "w", "week", "weekly"}:
+        return "eod", "period", "w"
+    if normalized in {"1mo", "m", "month", "monthly"}:
+        return "eod", "period", "m"
+    return "intraday", "interval", timeframe
+
+
+def _filename_date_range(path: Path) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    parts = path.stem.split("_")
+    if len(parts) < 2:
+        return None
+    try:
+        return pd.Timestamp(parts[0]), pd.Timestamp(parts[1])
+    except ValueError:
+        return None
+
+
+def _raw_file_coverage(
+    data_dir: str | Path,
+    *,
+    symbol: str,
+    timeframe: str,
+    min_timestamp: str | None,
+    max_timestamp: str | None,
+) -> RawFileCoverage:
+    endpoint, selector_name, selector_value = _raw_selector_for_timeframe(timeframe)
+    root = _raw_root(data_dir)
     if not root.exists():
-        return []
-    return sorted(root.glob(f"endpoint=*/symbol={symbol.upper()}/**/*.json"))
+        return RawFileCoverage(
+            endpoint=endpoint,
+            selector_name=selector_name,
+            selector_value=selector_value,
+            paths=[],
+            first_date=None,
+            last_date=None,
+            covers_dataset_range=False,
+        )
+    paths = sorted(
+        root.glob(
+            f"endpoint={endpoint}/symbol={symbol.upper()}/{selector_name}={selector_value}/*.json"
+        )
+    )
+    ranges = [date_range for path in paths if (date_range := _filename_date_range(path))]
+    first_date = min((date_range[0] for date_range in ranges), default=None)
+    last_date = max((date_range[1] for date_range in ranges), default=None)
+    dataset_start = None if min_timestamp is None else pd.Timestamp(min_timestamp)
+    dataset_end = None if max_timestamp is None else pd.Timestamp(max_timestamp)
+    covers_dataset_range = False
+    if (
+        first_date is not None
+        and last_date is not None
+        and dataset_start is not None
+        and dataset_end is not None
+    ):
+        covers_dataset_range = first_date.date() <= dataset_start.date() and (
+            last_date.date() >= dataset_end.date()
+        )
+    return RawFileCoverage(
+        endpoint=endpoint,
+        selector_name=selector_name,
+        selector_value=selector_value,
+        paths=paths,
+        first_date=None if first_date is None else first_date.date().isoformat(),
+        last_date=None if last_date is None else last_date.date().isoformat(),
+        covers_dataset_range=covers_dataset_range,
+    )
 
 
 def _validation_counts(issues: list[ValidationIssue]) -> dict[str, int]:
@@ -129,7 +207,7 @@ def _status_and_issue_codes(
     validation_counts: dict[str, int],
     adjusted_summary: dict[str, Any],
     policy: AdjustedPricePolicy,
-    raw_count: int,
+    raw_coverage: RawFileCoverage,
     require_raw: bool,
 ) -> tuple[QAStatus, list[str]]:
     issue_codes: list[str] = []
@@ -139,8 +217,10 @@ def _status_and_issue_codes(
         issue_codes.append("validation_warnings")
     if policy == AdjustedPricePolicy.REQUIRE_ADJUSTED_CLOSE and not adjusted_summary["present"]:
         issue_codes.append("missing_adjusted_close")
-    if require_raw and raw_count == 0:
+    if require_raw and len(raw_coverage.paths) == 0:
         issue_codes.append("missing_raw_responses")
+    if raw_coverage.paths and not raw_coverage.covers_dataset_range:
+        issue_codes.append("raw_date_range_incomplete")
     if adjusted_summary["different_from_close_count"]:
         issue_codes.append("adjusted_close_differs_from_close")
 
@@ -162,6 +242,7 @@ def _markdown(payload: dict[str, Any]) -> str:
 - Rows: {payload["row_count"]}
 - Date range: {payload["min_timestamp"]} to {payload["max_timestamp"]}
 - Raw files: {payload["raw_files"]["count"]}
+- Raw selector: `{payload["raw_files"]["endpoint"]}` `{payload["raw_files"]["selector"]}`
 
 ## Adjusted Close
 
@@ -222,17 +303,23 @@ def create_eodhd_qa_report(
     )
     validation_counts = _validation_counts(issues)
     adjusted_summary = _adjusted_close_summary(frame)
-    raw_files = _raw_files(data_dir, symbol=symbol)
     timestamps = (
         pd.to_datetime(frame["timestamp"], errors="coerce") if "timestamp" in frame else None
     )
     min_timestamp = None if timestamps is None or timestamps.empty else str(timestamps.min())
     max_timestamp = None if timestamps is None or timestamps.empty else str(timestamps.max())
+    raw_coverage = _raw_file_coverage(
+        data_dir,
+        symbol=symbol,
+        timeframe=timeframe,
+        min_timestamp=min_timestamp,
+        max_timestamp=max_timestamp,
+    )
     status, issue_codes = _status_and_issue_codes(
         validation_counts=validation_counts,
         adjusted_summary=adjusted_summary,
         policy=policy,
-        raw_count=len(raw_files),
+        raw_coverage=raw_coverage,
         require_raw=require_raw,
     )
     payload: dict[str, Any] = {
@@ -250,8 +337,17 @@ def create_eodhd_qa_report(
         "adjusted_close": adjusted_summary,
         "raw_files": {
             "required": require_raw,
-            "count": len(raw_files),
-            "paths": [str(path) for path in raw_files],
+            "endpoint": raw_coverage.endpoint,
+            "selector": {raw_coverage.selector_name: raw_coverage.selector_value},
+            "count": len(raw_coverage.paths),
+            "first_raw_file": str(raw_coverage.paths[0]) if raw_coverage.paths else None,
+            "last_raw_file": str(raw_coverage.paths[-1]) if raw_coverage.paths else None,
+            "paths": [str(path) for path in raw_coverage.paths],
+            "date_coverage": {
+                "first_raw_date": raw_coverage.first_date,
+                "last_raw_date": raw_coverage.last_date,
+                "covers_dataset_range": raw_coverage.covers_dataset_range,
+            },
         },
         "calendar": {
             "market_calendar": market_calendar,

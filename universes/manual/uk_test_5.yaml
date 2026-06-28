@@ -1,0 +1,38 @@
+id: uk_test_5
+name: UK Test 5
+description: Small committed UK stock universe for CLI smoke tests. Verify EODHD suffixes before live fetches.
+source: manual
+created_at: "2026-06-28T00:00:00Z"
+filters:
+  exchange: LSE
+  min_price: 0
+  min_market_cap: 0
+  min_avgvol_200d: 0
+  sectors: []
+  industries: []
+symbols:
+  - symbol: SHEL.LSE
+    name: Shell plc
+    exchange: LSE
+    currency: GBP
+    instrument_type: stock
+  - symbol: HSBA.LSE
+    name: HSBC Holdings plc
+    exchange: LSE
+    currency: GBP
+    instrument_type: stock
+  - symbol: AZN.LSE
+    name: AstraZeneca plc
+    exchange: LSE
+    currency: GBP
+    instrument_type: stock
+  - symbol: ULVR.LSE
+    name: Unilever plc
+    exchange: LSE
+    currency: GBP
+    instrument_type: stock
+  - symbol: BP.LSE
+    name: BP p.l.c.
+    exchange: LSE
+    currency: GBP
+    instrument_type: stock

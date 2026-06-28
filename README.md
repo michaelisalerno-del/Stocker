@@ -179,12 +179,17 @@ CI does not require an EODHD token. Vendor tests use mocked HTTP only.
 Stage 3 adds a hypothesis-first research harness. Each experiment starts from a YAML
 hypothesis, loads an audited local Parquet dataset, builds chronological walk-forward
 splits, evaluates a small guarded parameter grid, applies explicit costs, checks
-parameter stability, summarizes performance by simple historical regimes, and writes
-Markdown/JSON reports under `data/reports/research/`.
+train-side parameter selection, keeps the best test-return row as diagnostic only,
+runs leakage checks, compares against cash and same-window buy-and-hold, applies a
+small deterministic null timing test, summarizes performance by simple historical
+regimes, and writes Markdown/JSON reports under `data/reports/research/`.
 
 The initial templates are deliberately basic: moving-average momentum, pullback in
 uptrend, mean reversion after a large down day, and volatility breakout. They are test
 vehicles for the harness, not claims of edge.
+
+Most research results should still be rejected. This stage is not paper trading, live
+trading, broker integration, dashboard work, ML, or automatic strategy mining.
 
 Example:
 
@@ -234,10 +239,9 @@ intentionally deferred.
 
 ## Next Development Stages
 
-1. Add stronger null models, benchmark comparisons, and candidate discovery guardrails.
-2. Add stock-suitability scoring across qualified universes.
-3. Expand event-driven accounting for candidates that survive the harness.
-4. Add paper trading with stale-data checks and broker-state reconciliation.
-5. Add tiny live tests only after paper results and operational safety are proven.
-6. Add production monitoring, deployment, and operational runbooks only after the
+1. Add stock-suitability scoring across qualified universes.
+2. Expand event-driven accounting for candidates that survive the harness.
+3. Add paper trading with stale-data checks and broker-state reconciliation.
+4. Add tiny live tests only after paper results and operational safety are proven.
+5. Add production monitoring, deployment, and operational runbooks only after the
    execution boundary is proven in paper mode.

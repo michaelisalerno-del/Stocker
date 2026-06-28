@@ -159,6 +159,11 @@ def check_suspicious_perfect_prediction(
     ).dropna()
     if len(aligned) < 3:
         return []
+    if (
+        aligned["signal"].nunique(dropna=True) < 2
+        or aligned["future_returns"].nunique(dropna=True) < 2
+    ):
+        return []
     correlation = aligned["signal"].corr(aligned["future_returns"])
     if correlation is not None and abs(float(correlation)) >= threshold:
         return [
@@ -188,3 +193,56 @@ def check_future_timestamps(
                 )
             ]
     return []
+
+
+def _numeric_signal(signals: pd.DataFrame, column: str) -> pd.Series:
+    if column not in signals:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(signals[column], errors="coerce").reset_index(drop=True)
+
+
+def _deduplicate_issues(issues: list[LeakageIssue]) -> list[LeakageIssue]:
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[LeakageIssue] = []
+    for issue in issues:
+        key = (issue.code, issue.message, issue.severity)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(issue)
+    return deduped
+
+
+def collect_research_leakage_issues(
+    *,
+    frame: pd.DataFrame,
+    splits: list[WalkForwardSplit],
+    signals: pd.DataFrame,
+    embargo_bars: int,
+    timestamp_column: str = "timestamp",
+) -> list[LeakageIssue]:
+    """Collect basic leakage checks used by the research runner."""
+
+    issues: list[LeakageIssue] = []
+    issues.extend(check_timestamp_integrity(frame, column=timestamp_column))
+    for split in splits:
+        issues.extend(check_train_test_overlap(split))
+        issues.extend(check_embargo_violation(split, embargo_bars=embargo_bars))
+
+    signal = _numeric_signal(signals, "signal")
+    target_position = _numeric_signal(signals, "target_position")
+    issues.extend(check_signal_quality(signal))
+    if target_position.empty:
+        issues.append(
+            LeakageIssue(code="empty_target_position", message="Target position is empty")
+        )
+    else:
+        issues.extend(check_signal_quality(target_position))
+
+    if "close" in frame and not frame.empty:
+        close = pd.to_numeric(frame["close"], errors="coerce").reset_index(drop=True)
+        future_returns = close.pct_change().shift(-1)
+        issues.extend(check_suspicious_perfect_prediction(signal, future_returns))
+        issues.extend(check_suspicious_perfect_prediction(target_position, future_returns))
+
+    return _deduplicate_issues(issues)

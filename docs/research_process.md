@@ -29,23 +29,37 @@ The first research funnel is designed to reject bad ideas quickly.
    evidence. Do not use random train/test splits for trading data because future
    regimes would leak backward into model selection.
 
-6. Regime split.
+6. Train-side parameter selection.
+   Choose parameters from training-side evidence only. The best test-return row is
+   recorded as a diagnostic, not as the selected result. If no setting passes the
+   train gates, the experiment is rejected even if one test window looks lucky.
+
+7. Benchmark and null gates.
+   Compare the selected result with cash and same-window buy-and-hold after costs.
+   Then run a small deterministic circular-shift null timing set. A result that is
+   positive but fails buy-and-hold or the null p75 is rejected.
+
+8. Leakage checks.
+   Check timestamp integrity, split overlap, embargo gaps, generated signal quality,
+   and suspicious signal/next-return correlation. Leakage errors reject the result.
+
+9. Regime split.
    Check whether results survive different volatility, trend, liquidity, and market
    session regimes. Regime labels must be based only on prior bars.
 
-7. Event-driven backtest.
+10. Event-driven backtest.
    Only candidates that survive earlier filters deserve slower accounting, order, and
    event simulation.
 
-8. Paper trading.
+11. Paper trading.
    Verify data freshness, state reconciliation, risk checks, and operational behavior
    without capital at risk.
 
-9. Tiny live test.
+12. Tiny live test.
    Only after paper evidence and operational safety exist, trade the smallest practical
    size.
 
-10. Scale only after evidence.
+13. Scale only after evidence.
    Increase size only when research, backtest, paper, and tiny-live evidence agree.
 
 ## Stage 3 Experiment Flow
@@ -77,9 +91,11 @@ Classifications are intentionally conservative:
 - `interesting_needs_more_tests`
 - `candidate_paper_test`
 
-Most ideas should be rejected. A paper-test candidate must survive costs, multiple
-walk-forward splits, nearby parameter settings, meaningful trade counts, tolerable
-drawdown, and more than one tiny favorable period.
+Most ideas should be rejected. A paper-test candidate must use a train-selected
+parameter set, survive costs, beat buy-and-hold, pass the deterministic null timing
+gate, pass leakage checks, survive multiple walk-forward splits, show nearby
+parameter support, include meaningful trade counts, keep tolerable drawdown, and work
+across more than one tiny favorable period.
 
 ## Universe-Level Stage 3 Flow
 
@@ -103,6 +119,11 @@ uv run stocker research run-universe \
   --max-symbols 5
 ```
 
-The universe report aggregates symbol classifications, candidates, rejection counts,
-median net return, median drawdown, trade counts, stability scores, and links to each
-symbol-level report.
+The universe report aggregates symbol classifications, actual classification reasons,
+benchmark and null pass counts, median net return, median excess versus benchmark,
+median excess versus null, median drawdown, trade counts, stability scores, and links
+to each symbol-level report. Failed symbols are recorded without stopping the full
+universe run unless `--fail-fast` is set.
+
+This process is still not paper trading or live trading. The server-side execution
+boundary remains intentionally separate from Mac research.

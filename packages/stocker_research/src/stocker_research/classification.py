@@ -41,6 +41,9 @@ def classify_research_result(
     minimum_profitable_split_pct: float = 0.6,
     minimum_stability_score: float = 0.5,
     max_allowed_drawdown: float = -0.25,
+    benchmark_pass: bool = True,
+    null_pass: bool = True,
+    selection_rejected: bool = False,
 ) -> ClassificationResult:
     """Classify a research result with intentionally conservative gates."""
 
@@ -51,6 +54,9 @@ def classify_research_result(
     if leakage_errors:
         reasons.append("leakage_errors")
         return ClassificationResult(classification="rejected_data_issue", reasons=reasons)
+    if selection_rejected:
+        reasons.append("no_train_selected_parameter")
+        return ClassificationResult(classification="rejected_no_edge", reasons=reasons)
     if trade_count < minimum_trades:
         reasons.append("too_few_trades")
         return ClassificationResult(classification="rejected_too_few_trades", reasons=reasons)
@@ -59,6 +65,12 @@ def classify_research_result(
         return ClassificationResult(classification="rejected_costs_kill_edge", reasons=reasons)
     if net_test_return <= 0:
         reasons.append("no_positive_net_edge")
+        return ClassificationResult(classification="rejected_no_edge", reasons=reasons)
+    if not benchmark_pass:
+        reasons.append("failed_benchmark")
+        return ClassificationResult(classification="rejected_no_edge", reasons=reasons)
+    if not null_pass:
+        reasons.append("failed_null_timing")
         return ClassificationResult(classification="rejected_no_edge", reasons=reasons)
     if profitable_split_pct < minimum_profitable_split_pct:
         reasons.append("walkforward_failure")

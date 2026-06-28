@@ -47,6 +47,18 @@ Does this only work at one magic setting, or across a stable region?
 
 An isolated winner is treated as suspicious.
 
+## Honest Parameter Selection
+
+Parameter selection is based on training-side evidence only. The runner prefers
+settings with positive train net return, enough train-side trades, acceptable
+train-side drawdown, and non-isolated train behavior when nearby settings are
+available.
+
+The highest test-return setting is still reported as `best_test_diagnostic`, but it
+is diagnostic only. It does not drive classification. If no parameter set passes the
+train-side gates, the runner picks a deterministic fallback only so reports remain
+complete, and the experiment is rejected.
+
 ## Strategy Templates
 
 The initial templates are deliberately simple:
@@ -68,18 +80,30 @@ equity curve, drawdown curve, and simplified trades.
 
 Ideas that only work before costs should be rejected.
 
+## Benchmarks And Null Timing
+
+Single-symbol reports include a zero-position cash benchmark and a cost-aware
+buy-and-hold benchmark over the same test windows. A positive strategy that fails to
+beat buy-and-hold after costs is rejected with the `failed_benchmark` reason.
+
+The runner also evaluates a tiny deterministic null timing set by circularly shifting
+the selected target positions. This preserves broad exposure and trade structure but
+disrupts exact timing. The default null set is intentionally small and deterministic,
+not a brute-force random search. A selected result that fails to beat the null p75 is
+rejected with the `failed_null_timing` reason.
+
 ## Leakage Checks
 
-The harness includes helpers for suspicious research mistakes:
+The runner wires leakage checks into each experiment report. It checks:
 
-- Same-bar close signals without execution lag.
-- Target columns included in feature columns.
-- Feature names suggesting future data.
-- Train/test overlap.
-- Feature timestamps after prediction timestamps.
+- Duplicate, missing, or non-monotonic timestamps.
+- Train/test overlap and embargo violations.
+- Empty or NaN-heavy generated signals and target positions.
+- Suspiciously high correlation between generated signal or target position and
+  next-bar returns.
 
-These checks are intentionally conservative and should be expanded before adding more
-complex modelling.
+Leakage errors reject through the conservative classification path. Warnings remain
+visible in JSON and Markdown so they can be reviewed before promoting any result.
 
 ## Regime Analysis
 
@@ -102,9 +126,14 @@ Research reports classify results as:
 - `candidate_paper_test`
 
 `candidate_paper_test` is intentionally hard to reach. The test result must be
-positive after costs, pass multiple walk-forward splits, show acceptable parameter
-stability, have nearby settings that also work, include enough trades to matter, avoid
-excessive drawdown, and not depend on one tiny regime.
+positive after costs, come from train-selected parameters, beat buy-and-hold, pass the
+deterministic null timing gate, pass multiple walk-forward splits, show acceptable
+parameter stability, have nearby settings that also work, include enough trades to
+matter, avoid excessive drawdown, and not depend on one tiny regime.
+
+Most results should still be rejected. This harness is still research only. It does
+not paper trade, live trade, connect to brokers, run dashboards, train ML models, or
+mine strategies automatically.
 
 ## Commands
 

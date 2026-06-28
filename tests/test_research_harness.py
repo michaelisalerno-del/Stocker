@@ -1,4 +1,5 @@
 import json
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,7 @@ from stocker_research.leakage import (
     check_embargo_violation,
     check_feature_target_overlap,
     check_same_bar_close_signal,
+    check_suspicious_perfect_prediction,
     check_timestamp_integrity,
     check_train_test_overlap,
 )
@@ -217,6 +219,18 @@ def test_leakage_checks_fail_loudly_for_suspicious_inputs() -> None:
 
     reversed_frame = _sample_ohlcv(5).iloc[::-1].reset_index(drop=True)
     assert check_timestamp_integrity(reversed_frame)[0].code == "non_monotonic_timestamps"
+
+
+def test_suspicious_prediction_check_ignores_constant_inputs_without_warning() -> None:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        issues = check_suspicious_perfect_prediction(
+            pd.Series([0.0, 0.0, 0.0, 0.0]),
+            pd.Series([0.01, 0.02, 0.03, 0.04]),
+        )
+
+    assert issues == []
+    assert caught == []
 
 
 def test_regime_labels_and_performance_by_regime_use_historical_windows() -> None:

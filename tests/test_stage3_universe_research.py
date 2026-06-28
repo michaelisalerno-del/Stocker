@@ -203,8 +203,51 @@ def test_run_universe_research_writes_aggregate_report(tmp_path: Path) -> None:
     assert payload["symbol_count"] == 2
     assert payload["failed_count"] == 0
     assert set(payload["classification_counts"])
+    assert set(payload["classification_reason_counts"])
+    assert payload["benchmark_pass_count"] <= 2
+    assert payload["null_pass_count"] <= 2
+    assert "median_excess_vs_benchmark" in payload
+    assert "median_excess_vs_null" in payload
     assert len(payload["symbol_results"]) == 2
+    markdown = result.markdown_path.read_text(encoding="utf-8")
+    assert "Classification Counts" in markdown
+    assert "Classification Reason Counts" in markdown
     assert (data_dir / "reports" / "research" / "index.json").exists()
+
+
+def test_run_universe_research_keeps_going_after_symbol_failure(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    _write_dataset(data_dir, "AAPL.US")
+    ready = data_dir / "universes" / "research_ready" / "us_test_5_1d.json"
+    ready.parent.mkdir(parents=True)
+    ready.write_text(
+        json.dumps(
+            {
+                "universe_id": "us_test_5",
+                "timeframe": "1d",
+                "source": "eodhd",
+                "qualified_symbols": [{"symbol": "AAPL.US"}, {"symbol": "MISSING.US"}],
+                "rejected_symbols": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_universe_research(
+        hypothesis_path=Path("research/hypotheses/examples/moving_average_momentum.yaml"),
+        qualified_universe_path=ready,
+        data_dir=data_dir,
+        source="eodhd",
+        timeframe="1d",
+        instrument_type="stock",
+        max_symbols=2,
+        fail_fast=False,
+    )
+
+    payload = json.loads(result.json_path.read_text(encoding="utf-8"))
+
+    assert payload["failed_count"] == 1
+    assert [item["status"] for item in payload["symbol_results"]] == ["completed", "failed"]
 
 
 def test_run_universe_cli_smoke(tmp_path: Path) -> None:

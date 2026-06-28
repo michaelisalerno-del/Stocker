@@ -109,6 +109,28 @@ def test_duplicate_timestamp_leakage_issue_rejects_experiment(tmp_path: Path) ->
     assert "duplicate_timestamps" in markdown
 
 
+def test_non_monotonic_raw_timestamps_are_reported_before_sorting(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    frame = _sample_frame()
+    frame = frame.iloc[[0, 2, 1, *range(3, len(frame))]].reset_index(drop=True)
+    _write_dataset(data_dir, frame)
+
+    result = run_research_experiment(
+        hypothesis_path=_write_small_hypothesis(tmp_path),
+        data_dir=data_dir,
+        symbol="AAPL.US",
+        timeframe="1d",
+        source="manual",
+        instrument_type="stock",
+    )
+
+    payload = json.loads(result.json_path.read_text(encoding="utf-8"))
+
+    assert result.classification == "rejected_data_issue"
+    assert any(issue["code"] == "non_monotonic_timestamps" for issue in payload["leakage_issues"])
+    assert "leakage_errors" in payload["classification_reasons"]
+
+
 def test_clean_fixture_has_no_leakage_errors_and_serializes_checks(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     _write_dataset(data_dir, _sample_frame())

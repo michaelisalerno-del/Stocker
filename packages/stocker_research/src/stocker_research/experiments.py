@@ -24,7 +24,7 @@ from stocker_research.leakage import (
     check_timestamp_integrity,
     collect_research_leakage_issues,
 )
-from stocker_research.null_models import run_null_timing_test
+from stocker_research.null_models import run_null_timing_test_for_splits
 from stocker_research.parameters import ParameterGrid, ParameterSet
 from stocker_research.regime import label_regimes, performance_by_regime
 from stocker_research.selection import SelectionResult, select_parameter_set
@@ -281,12 +281,16 @@ def _markdown(payload: dict[str, Any]) -> str:
             "selected_excess_drawdown_vs_buy_and_hold", 0.0
         ),
         "benchmark_pass": payload.get("benchmark_pass", False),
+        "benchmark_policy": payload.get("benchmark_policy", ""),
+        "strategy_direction": payload.get("strategy_direction", ""),
     }
     return f"""# Research Experiment: {payload["experiment_id"]}
 
 ## Classification
 
 `{payload["classification"]}`
+
+Classification is conservative. Rejection is the common and expected research outcome.
 
 ## Classification Reasons
 
@@ -334,11 +338,17 @@ Selection uses train-side evidence only. Best-by-test is diagnostic only.
 
 ## Benchmarks
 
+Benchmarks are measured over the same walk-forward test windows as the selected
+result. Buy-and-hold is a long market baseline for every hypothesis direction.
+
 ```json
 {json.dumps(benchmark_summary, indent=2)}
 ```
 
 ## Null Timing
+
+Null timing checks use deterministic circular shifts over the same walk-forward test
+windows as the selected result.
 
 ```json
 {json.dumps(payload.get("null_model_results", {}), indent=2)}
@@ -524,7 +534,12 @@ def run_research_experiment(
     selected_params = dict(selected_result.get("params", {}))
     selected_params["parameter_set_id"] = str(selected_result["parameter_set_id"])
     full_positions = template.generate_positions(frame, selected_params)
-    full_result = evaluate_positions(frame, full_positions, cost_model=_cost_model(hypothesis))
+    full_result = evaluate_positions(
+        frame,
+        full_positions,
+        cost_model=_cost_model(hypothesis),
+        direction=hypothesis.direction,
+    )
     signals = template.generate_signals(frame, selected_params)
     leakage_issues = _deduplicate_leakage_issues(
         [
@@ -550,10 +565,13 @@ def run_research_experiment(
         splits=splits,
         selected_result=selected_result,
         cost_model=cost_model,
+        direction=hypothesis.direction,
     )
-    null_model_results = run_null_timing_test(
+    null_model_results = run_null_timing_test_for_splits(
         frame,
-        full_positions,
+        splits=splits,
+        template=template,
+        selected_params=selected_params,
         cost_model=cost_model,
         hypothesis_id=hypothesis.id,
         symbol=key.symbol,
@@ -633,6 +651,8 @@ def run_research_experiment(
             "selected_excess_drawdown_vs_buy_and_hold"
         ],
         "benchmark_pass": benchmark_comparison["benchmark_pass"],
+        "benchmark_policy": benchmark_comparison["benchmark_policy"],
+        "strategy_direction": benchmark_comparison["strategy_direction"],
         "null_model_results": null_model_results,
         "warnings": warnings,
         "classification_reasons": classification_reasons,
@@ -743,9 +763,14 @@ def _universe_markdown(payload: dict[str, Any]) -> str:
 - Hypothesis: `{payload["hypothesis_id"]}`
 - Universe: `{payload["universe_id"]}`
 - Symbols tested: {payload["symbol_count"]}
+- Completed: {payload["completed_count"]}
+- Skipped: {payload["skipped_count"]}
 - Failed: {payload["failed_count"]}
-- Candidates: {payload["candidate_count"]}
 - Rejected: {payload["rejected_count"]}
+- Candidate paper test: {payload["candidate_count"]}
+
+Rejected results are expected. Failed symbols are data or harness failures; rejected
+symbols completed research and did not pass the conservative gates.
 
 ## Classification Counts
 
@@ -922,6 +947,8 @@ def run_universe_research(
     ]
     classification_counts = dict(Counter(classifications))
     classification_reason_counts = dict(Counter(classification_reasons))
+    completed_count = sum(1 for item in symbol_results if item["status"] == "completed")
+    skipped_count = sum(1 for item in symbol_results if item["status"] == "skipped")
     failed_count = sum(1 for item in symbol_results if item["status"] == "failed")
     candidate_count = classification_counts.get("candidate_paper_test", 0)
     rejected_count = sum(
@@ -938,6 +965,8 @@ def run_universe_research(
         "timeframe": resolved_timeframe,
         "source": resolved_source,
         "symbol_count": len(symbols),
+        "completed_count": completed_count,
+        "skipped_count": skipped_count,
         "failed_count": failed_count,
         "candidate_count": candidate_count,
         "rejected_count": rejected_count,

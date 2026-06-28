@@ -83,13 +83,17 @@ Ideas that only work before costs should be rejected.
 ## Benchmarks And Null Timing
 
 Single-symbol reports include a zero-position cash benchmark and a cost-aware
-buy-and-hold benchmark over the same test windows. A positive strategy that fails to
-beat buy-and-hold after costs is rejected with the `failed_benchmark` reason.
+buy-and-hold benchmark over the same walk-forward test windows used for the selected
+result. Buy-and-hold is always a long market baseline, including for `short_only` and
+`long_short` hypotheses; the hypothesis direction still controls strategy and null
+position evaluation. A positive strategy that fails to beat buy-and-hold after costs
+is rejected with the `failed_benchmark` reason.
 
 The runner also evaluates a tiny deterministic null timing set by circularly shifting
-the selected target positions. This preserves broad exposure and trade structure but
-disrupts exact timing. The default null set is intentionally small and deterministic,
-not a brute-force random search. A selected result that fails to beat the null p75 is
+the selected target positions inside the same walk-forward test windows used by the
+grid result. This preserves broad exposure and trade structure but disrupts exact
+timing. The default null set is intentionally small and deterministic, not a
+brute-force random search. A selected result that fails to beat the null p75 is
 rejected with the `failed_null_timing` reason.
 
 ## Leakage Checks
@@ -165,6 +169,19 @@ uv run stocker research run-universe \
   --config configs/research.example.yaml \
   --max-symbols 5
 ```
+
+Run a bounded local real-data research smoke:
+
+```bash
+bash scripts/research_smoke_local.sh
+```
+
+Without `EODHD_API_TOKEN`, the script skips live fetch and explains whether existing
+local data under `data_smoke_research/` is available. With a token, it fetches the
+committed `universes/manual/us_test_5.yaml` sample, qualifies a tiny research-ready
+universe, runs `moving_average_momentum.yaml` across at most five symbols, and prints
+the qualified universe path plus the universe Markdown and JSON report paths.
+Rejected results are expected and do not mean the smoke failed.
 
 Reports are written to:
 

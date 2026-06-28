@@ -57,9 +57,9 @@ def compare_with_benchmarks(
     splits: list[WalkForwardSplit],
     selected_result: dict[str, Any],
     cost_model: CostModel,
-    direction: DirectionMode = "long_only",
+    direction: DirectionMode,
 ) -> dict[str, Any]:
-    """Compare a selected result with cash and same-window buy-and-hold."""
+    """Compare a selected result with cash and same-window long buy-and-hold."""
 
     cash_results: list[dict[str, float | int]] = []
     buy_hold_results: list[dict[str, float | int]] = []
@@ -76,7 +76,7 @@ def compare_with_benchmarks(
             window,
             pd.Series([1.0] * len(window)),
             cost_model=cost_model,
-            direction=direction,
+            direction="long_only",
         )
         cash_results.append(
             {
@@ -115,4 +115,6 @@ def compare_with_benchmarks(
         "selected_excess_vs_buy_and_hold": float(selected_excess),
         "selected_excess_drawdown_vs_buy_and_hold": float(selected_excess_drawdown),
         "benchmark_pass": bool(selected_net > buy_hold_net),
+        "strategy_direction": direction,
+        "benchmark_policy": "long_buy_and_hold_market_baseline",
     }

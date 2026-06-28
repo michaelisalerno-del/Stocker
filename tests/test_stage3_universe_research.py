@@ -202,6 +202,8 @@ def test_run_universe_research_writes_aggregate_report(tmp_path: Path) -> None:
     assert payload["universe_id"] == "us_test_5"
     assert payload["symbol_count"] == 2
     assert payload["failed_count"] == 0
+    assert payload["completed_count"] == 2
+    assert payload["skipped_count"] == 0
     assert set(payload["classification_counts"])
     assert set(payload["classification_reason_counts"])
     assert payload["benchmark_pass_count"] <= 2
@@ -212,6 +214,11 @@ def test_run_universe_research_writes_aggregate_report(tmp_path: Path) -> None:
     markdown = result.markdown_path.read_text(encoding="utf-8")
     assert "Classification Counts" in markdown
     assert "Classification Reason Counts" in markdown
+    assert "Completed:" in markdown
+    assert "Skipped:" in markdown
+    assert "Failed:" in markdown
+    assert "Rejected:" in markdown
+    assert "Candidate paper test:" in markdown
     assert (data_dir / "reports" / "research" / "index.json").exists()
 
 

@@ -23,3 +23,18 @@ def test_eodhd_local_smoke_script_is_safe_and_executable() -> None:
     assert "fetch-eodhd-intraday" in text
     assert "EODHD_API_TOKEN" in text
     assert "data_smoke" in text
+
+
+def test_research_smoke_script_is_safe_and_executable() -> None:
+    script = Path("scripts/research_smoke_local.sh")
+
+    assert script.exists()
+    assert os.access(script, os.X_OK)
+    text = script.read_text(encoding="utf-8")
+    assert "EODHD_API_TOKEN" in text
+    assert "universes/manual/us_test_5.yaml" in text
+    assert "moving_average_momentum.yaml" in text
+    assert "research run-universe" in text
+    assert "RESEARCH_SMOKE_MAX_SYMBOLS:-5" in text
+    assert '--max-symbols "$MAX_SYMBOLS"' in text
+    assert "classification_counts" in text

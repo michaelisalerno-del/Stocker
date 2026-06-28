@@ -35,9 +35,11 @@ The first research funnel is designed to reject bad ideas quickly.
    train gates, the experiment is rejected even if one test window looks lucky.
 
 7. Benchmark and null gates.
-   Compare the selected result with cash and same-window buy-and-hold after costs.
-   Then run a small deterministic circular-shift null timing set. A result that is
-   positive but fails buy-and-hold or the null p75 is rejected.
+   Compare the selected result with cash and same-window long buy-and-hold after
+   costs. Buy-and-hold remains a long market baseline for every hypothesis direction.
+   Then run a small deterministic circular-shift null timing set over those same
+   walk-forward test windows. A result that is positive but fails buy-and-hold or the
+   null p75 is rejected.
 
 8. Leakage checks.
    Check timestamp integrity, split overlap, embargo gaps, generated signal quality,
@@ -124,6 +126,26 @@ benchmark and null pass counts, median net return, median excess versus benchmar
 median excess versus null, median drawdown, trade counts, stability scores, and links
 to each symbol-level report. Failed symbols are recorded without stopping the full
 universe run unless `--fail-fast` is set.
+
+## Local Real-Data Smoke
+
+Use the bounded Stage 3 research smoke before larger research runs:
+
+```bash
+bash scripts/research_smoke_local.sh
+```
+
+The script uses `universes/manual/us_test_5.yaml`, `1d` data, and
+`research/hypotheses/examples/moving_average_momentum.yaml` with `--max-symbols 5`.
+Without `EODHD_API_TOKEN`, it skips live fetch and explains how to provide data. With
+a token, it fetches a tiny bounded EODHD sample, qualifies a research-ready universe,
+runs one universe research report, and prints:
+
+- `qualified_universe_path`
+- `universe_report_markdown_path`
+- `universe_report_json_path`
+
+No edge is expected. Rejected classifications are normal smoke outcomes.
 
 This process is still not paper trading or live trading. The server-side execution
 boundary remains intentionally separate from Mac research.

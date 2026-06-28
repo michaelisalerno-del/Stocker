@@ -148,6 +148,18 @@ Without `EODHD_API_TOKEN`, the script runs safe dry-runs and skips the live fetc
 With a token, it fetches a tiny EOD sample into `data_smoke/`, then runs catalog,
 audit, vendor QA, and baseline checks.
 
+Local Stage 3 research smoke:
+
+```bash
+bash scripts/research_smoke_local.sh
+```
+
+Without `EODHD_API_TOKEN`, the script skips live fetch and explains how to provide
+existing local data. With a token, it fetches a bounded `us_test_5` sample, qualifies
+a tiny research-ready universe, runs one moving-average momentum universe report, and
+prints the qualified universe path plus Markdown/JSON report paths. Rejections are
+expected and are not smoke failures.
+
 ## Continuous Integration
 
 GitHub Actions runs on push and pull request with Python 3.12:
@@ -180,9 +192,9 @@ Stage 3 adds a hypothesis-first research harness. Each experiment starts from a 
 hypothesis, loads an audited local Parquet dataset, builds chronological walk-forward
 splits, evaluates a small guarded parameter grid, applies explicit costs, checks
 train-side parameter selection, keeps the best test-return row as diagnostic only,
-runs leakage checks, compares against cash and same-window buy-and-hold, applies a
-small deterministic null timing test, summarizes performance by simple historical
-regimes, and writes Markdown/JSON reports under `data/reports/research/`.
+runs leakage checks, compares against cash and same-window long buy-and-hold, applies
+a same-window deterministic null timing test, summarizes performance by simple
+historical regimes, and writes Markdown/JSON reports under `data/reports/research/`.
 
 The initial templates are deliberately basic: moving-average momentum, pullback in
 uptrend, mean reversion after a large down day, and volatility breakout. They are test

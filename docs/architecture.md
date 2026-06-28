@@ -13,6 +13,9 @@ weak ideas before they get near execution.
 Desktop responsibilities:
 
 - Audit raw and processed data.
+- Import local CSV data into a canonical OHLCV schema.
+- Store audited datasets as partitioned Parquet.
+- Query local datasets through DuckDB.
 - Build baseline summaries and null comparisons.
 - Generate features and labels from audited data.
 - Run vectorized and future event-driven backtests.
@@ -35,8 +38,9 @@ Server responsibilities:
 ## Shared Packages
 
 - `stocker_core`: shared config, logging, time, CLI, and type helpers.
-- `stocker_data`: data paths, Parquet I/O, validation, and calendars.
-- `stocker_research`: features, labels, baselines, splits, and metrics.
+- `stocker_data`: CSV ingestion, schema, Parquet I/O, catalog, DuckDB queries,
+  validation, audit reports, vendor placeholders, and calendars.
+- `stocker_research`: features, labels, baseline reports, splits, and metrics.
 - `stocker_backtest`: cost models and backtest interfaces.
 - `stocker_execution`: broker abstraction, orders, risk, state, and paper broker.
 
@@ -45,6 +49,10 @@ Server responsibilities:
 Signal code should not place orders. Backtests should not know about live broker
 credentials. Risk checks should be pure and testable. Execution should consume approved
 orders and current state, not research notebooks.
+
+Data trust is a separate boundary too. CSV ingestion, validation, audit reporting, and
+baseline reporting happen before edge discovery. A dataset that fails audit should not
+be used for backtests without a written reason.
 
 This separation makes it easier to prove that a weak signal is weak, identify whether
 a result came from costs or market behavior, and keep future live execution from

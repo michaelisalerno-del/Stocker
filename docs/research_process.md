@@ -4,11 +4,14 @@ The first research funnel is designed to reject bad ideas quickly.
 
 1. Data audit.
    Confirm timestamps, duplicates, timezone handling, OHLC sanity, volume sanity,
-   corporate actions, missing sessions, and vendor-specific quirks.
+   corporate actions, missing sessions, gaps, large price jumps, and vendor-specific
+   quirks. Generate `data/reports/audits/<SYMBOL>_<TIMEFRAME>_audit.md` before using
+   the dataset for research.
 
 2. Baseline tests.
    Compare any idea against simple buy/hold, random, no-trade, and naive directional
-   baselines before adding complexity.
+   baselines before adding complexity. Stage 2 supports buy-and-hold, always-flat,
+   random entry/exit, simple SMA momentum, and simple mean-reversion reports.
 
 3. Simple statistical hypothesis.
    Write down the hypothesis before coding the strategy. Define the expected effect,

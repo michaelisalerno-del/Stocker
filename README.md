@@ -47,6 +47,16 @@ After bootstrap:
 
 ```bash
 uv run stocker check
+uv run stocker data import-csv \
+  --file tests/fixtures/market_data/clean_ohlcv.csv \
+  --symbol AAPL \
+  --source manual \
+  --timeframe 1d \
+  --instrument-type stock \
+  --timezone America/New_York \
+  --currency USD
+uv run stocker data audit --symbol AAPL --timeframe 1d
+uv run stocker research baseline --symbol AAPL --timeframe 1d
 uv run pytest
 uv run jupyter lab apps/desktop/notebooks
 ```
@@ -62,8 +72,8 @@ bash scripts/bootstrap_server.sh
 The server bootstrap installs only core and `server` dependency groups:
 
 ```bash
-uv sync --no-dev --group server
-uv run --no-dev --group server stocker server dry-run --config configs/server.example.yaml
+uv sync --no-default-groups --group server
+uv run --no-default-groups --group server stocker server dry-run --config configs/server.example.yaml
 ```
 
 ## Tests And Checks
@@ -80,16 +90,25 @@ bash scripts/check.sh
 - No broker integration.
 - No live trading.
 - No API keys or secrets.
-- No data vendor ingestion.
+- No data vendor ingestion beyond placeholders.
 - No strategy logic.
 - No Docker, systemd, or deployment automation.
 - No event-driven accounting engine beyond an explicit placeholder.
 
+## Data Pipeline
+
+Stage 2 adds a local CSV-to-Parquet research pipeline. CSV import maps common OHLCV
+column names, localizes timestamps, writes partitioned Parquet under
+`data/processed/source=.../instrument_type=.../symbol=.../timeframe=.../data.parquet`,
+updates `data/catalog.json`, and can generate audit and baseline reports.
+
+See [docs/data_pipeline.md](docs/data_pipeline.md) before researching any edge.
+
 ## Next Development Stages
 
 1. Add a reproducible market-data ingest path with raw-data immutability.
-2. Build strict data audit reports before researching signals.
-3. Add null models and baseline comparisons.
+2. Expand strict data audit reports before researching signals.
+3. Add stronger null models and baseline comparisons.
 4. Add cost-adjusted vectorized backtests only after a hypothesis is written down.
 5. Add walk-forward and regime evaluation.
 6. Add event-driven backtests for candidates that survive.

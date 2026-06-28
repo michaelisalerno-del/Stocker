@@ -20,6 +20,10 @@ trading-enabled state.
 No trading should occur if market data is stale, timestamps are ambiguous, or a data
 feed has gaps during an expected session. Stale data should fail closed.
 
+The server should only consume datasets or signals that have passed the research-side
+audit process. CSV import, DuckDB cataloging, audit reports, and baseline reports are
+desktop responsibilities, not live execution responsibilities.
+
 ## State Reconciliation
 
 The server must compare broker positions and cash with internal state. If they disagree

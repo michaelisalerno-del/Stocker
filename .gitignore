@@ -17,6 +17,7 @@ htmlcov/
 
 data/raw/*
 !data/raw/.gitkeep
+data/catalog.json
 data/processed/*
 !data/processed/.gitkeep
 data/features/*

@@ -111,4 +111,4 @@ packages = [
 ignore_missing_imports = true
 
 [tool.uv]
-default-groups = ["dev"]
+default-groups = ["dev", "research"]

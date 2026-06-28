@@ -8,6 +8,6 @@ This bootstrap does not include Docker, systemd, broker credentials, or live tra
 Run later on Linux:
 
 ```bash
-uv sync --no-dev --group server
-uv run --no-dev --group server python apps/server/scripts/run_executor.py --config configs/server.example.yaml
+uv sync --no-default-groups --group server
+uv run --no-default-groups --group server python apps/server/scripts/run_executor.py --config configs/server.example.yaml
 ```

@@ -17,10 +17,10 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 echo "Syncing core and server dependencies with uv..."
-uv sync --no-dev --group server
+uv sync --no-default-groups --group server
 
 echo
 echo "Bootstrap complete."
 echo "Next steps:"
-echo "  uv run --no-dev --group server stocker server dry-run --config configs/server.example.yaml"
-echo "  uv run --no-dev --group server python apps/server/scripts/run_executor.py --config configs/server.example.yaml"
+echo "  uv run --no-default-groups --group server stocker server dry-run --config configs/server.example.yaml"
+echo "  uv run --no-default-groups --group server python apps/server/scripts/run_executor.py --config configs/server.example.yaml"

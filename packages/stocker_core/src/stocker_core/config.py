@@ -16,6 +16,24 @@ class DataConfig(BaseModel):
     default_currency: str = "USD"
 
 
+class EODHDConfig(BaseModel):
+    """EODHD data-vendor settings without secrets."""
+
+    enabled: bool = False
+    base_url: str = "https://eodhd.com/api"
+    api_token_env: str = "EODHD_API_TOKEN"
+    default_fmt: Literal["json"] = "json"
+    request_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    max_retries: int = Field(default=3, ge=1)
+    save_raw_by_default: bool = True
+
+
+class DataVendorsConfig(BaseModel):
+    """Optional data-vendor configs used only by the data pipeline."""
+
+    eodhd: EODHDConfig = Field(default_factory=EODHDConfig)
+
+
 class CostsConfig(BaseModel):
     """Basic transaction-cost assumptions in basis points."""
 
@@ -76,6 +94,7 @@ class ResearchConfig(BaseSettings):
     )
 
     data: DataConfig = Field(default_factory=DataConfig)
+    data_vendors: DataVendorsConfig = Field(default_factory=DataVendorsConfig)
     costs: CostsConfig = Field(default_factory=CostsConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     research: ResearchSettings = Field(default_factory=ResearchSettings)
@@ -89,6 +108,7 @@ class ServerConfig(BaseSettings):
     )
 
     data: DataConfig = Field(default_factory=DataConfig)
+    data_vendors: DataVendorsConfig = Field(default_factory=DataVendorsConfig)
     costs: CostsConfig = Field(default_factory=CostsConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     server: ServerSettings = Field(default_factory=ServerSettings)

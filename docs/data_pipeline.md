@@ -1,7 +1,8 @@
 # Data Pipeline
 
-Stage 2 makes local market data trustworthy enough for basic research. It does not add
-vendor downloads, broker execution, live trading, or strategy optimization.
+The data pipeline makes local market data trustworthy enough for basic research. It
+supports local CSV import and EODHD vendor downloads. It does not add broker
+execution, live trading, or strategy optimization.
 
 ## Accepted CSV Input
 
@@ -59,6 +60,19 @@ data/processed/
 ```bash
 uv run stocker data catalog
 ```
+
+EODHD data uses the same processed layout with `source=eodhd`:
+
+```text
+data/processed/
+  source=eodhd/
+    instrument_type=stock/
+      symbol=AAPL.US/
+        timeframe=1m/
+          data.parquet
+```
+
+Raw EODHD JSON can optionally be saved under `data/raw/source=eodhd/...`.
 
 ## Validation Checks
 
@@ -131,3 +145,62 @@ estimated costs.
 Bad timestamps, duplicate bars, impossible OHLC values, negative volume, and unhandled
 gaps can create fake edges. Stocker’s research process starts by proving the data is
 usable before running baselines, hypotheses, or backtests.
+
+## EODHD Vendor Ingestion
+
+EODHD lives entirely inside `stocker_data.vendors.eodhd`. Strategy templates,
+backtests, research experiments, and execution code consume normalized Stocker
+datasets and do not call vendor APIs.
+
+Dry-run a download without a token:
+
+```bash
+uv run stocker data fetch-eodhd-eod \
+  --symbol AAPL.US \
+  --from 2024-01-01 \
+  --to 2024-02-01 \
+  --period d \
+  --instrument-type stock \
+  --dry-run
+```
+
+Run a real EOD fetch after setting the token:
+
+```bash
+export EODHD_API_TOKEN="your_token_here"
+uv run stocker data fetch-eodhd-eod \
+  --symbol AAPL.US \
+  --from 2015-01-01 \
+  --to 2026-06-28 \
+  --period d \
+  --instrument-type stock \
+  --merge \
+  --save-raw \
+  --audit
+```
+
+Intraday ranges are chunked to stay inside EODHD-safe spans:
+
+```bash
+uv run stocker data fetch-eodhd-intraday \
+  --symbol AAPL.US \
+  --interval 1m \
+  --from 2024-01-01 \
+  --to 2024-06-01 \
+  --instrument-type stock \
+  --merge \
+  --save-raw \
+  --audit
+```
+
+After fetching:
+
+```bash
+uv run stocker data catalog
+uv run stocker data audit --symbol AAPL.US --timeframe 1m --source eodhd
+uv run stocker data qa-eodhd --symbol AAPL.US --timeframe 1m --require-raw
+uv run stocker research baseline --symbol AAPL.US --timeframe 1m --source eodhd
+```
+
+Vendor QA writes Markdown/JSON under `data/reports/vendor_qa/` and summarizes raw
+response coverage, adjusted-close policy, calendar validation, and refresh guidance.

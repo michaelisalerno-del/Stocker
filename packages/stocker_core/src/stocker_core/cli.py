@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from stocker_core.config import load_server_config
+from stocker_core.config import EODHDConfig, load_server_config
 
 console = Console()
 app = typer.Typer(no_args_is_help=True, help="Stocker research and execution utilities.")
@@ -154,6 +154,197 @@ def data_audit(
             "passed": report.passed,
         }
     )
+
+
+def _check_storage_mode(overwrite: bool, merge: bool) -> None:
+    if overwrite and merge:
+        raise typer.BadParameter("Use either --overwrite or --merge, not both.")
+
+
+def _run_eodhd_qa(
+    *,
+    data_dir: Path,
+    symbol: str,
+    timeframe: str,
+    instrument_type: str,
+    market_calendar: str | None,
+    adjusted_price_policy: str,
+    require_raw: bool,
+) -> dict[str, object]:
+    from stocker_data.vendors.eodhd_qa import create_eodhd_qa_report
+
+    report = create_eodhd_qa_report(
+        data_dir=data_dir,
+        symbol=symbol,
+        timeframe=timeframe,
+        instrument_type=instrument_type,
+        market_calendar=market_calendar,
+        adjusted_price_policy=adjusted_price_policy,
+        require_raw=require_raw,
+    )
+    return report.to_dict()
+
+
+@data_app.command("qa-eodhd")
+def data_qa_eodhd(
+    symbol: Annotated[str, typer.Option("--symbol")],
+    timeframe: Annotated[str, typer.Option("--timeframe")],
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = None,
+    adjusted_price_policy: Annotated[
+        str, typer.Option("--adjusted-price-policy")
+    ] = "adjusted_available",
+    require_raw: Annotated[bool, typer.Option("--require-raw/--no-require-raw")] = False,
+) -> None:
+    """Create an EODHD-specific vendor QA report for a normalized dataset."""
+
+    console.print(
+        _run_eodhd_qa(
+            data_dir=data_dir,
+            symbol=symbol,
+            timeframe=timeframe,
+            instrument_type=instrument_type,
+            market_calendar=market_calendar,
+            adjusted_price_policy=adjusted_price_policy,
+            require_raw=require_raw,
+        )
+    )
+
+
+@data_app.command("fetch-eodhd-eod")
+def data_fetch_eodhd_eod(
+    symbol: Annotated[str, typer.Option("--symbol")],
+    from_date: Annotated[str, typer.Option("--from")],
+    to_date: Annotated[str, typer.Option("--to")],
+    period: Annotated[str, typer.Option("--period")] = "d",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    save_raw: Annotated[bool, typer.Option("--save-raw/--no-save-raw")] = True,
+    overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
+    merge: Annotated[bool, typer.Option("--merge")] = False,
+    audit: Annotated[bool, typer.Option("--audit")] = False,
+    qa: Annotated[bool, typer.Option("--qa")] = False,
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = None,
+    adjusted_price_policy: Annotated[
+        str, typer.Option("--adjusted-price-policy")
+    ] = "adjusted_available",
+) -> None:
+    """Fetch EODHD EOD data into normalized Stocker Parquet storage."""
+
+    from stocker_data.vendors import eodhd
+
+    _check_storage_mode(overwrite, merge)
+    if dry_run:
+        plan = eodhd.plan_eod_fetch(
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
+            period=period,
+            instrument_type=instrument_type,
+            data_dir=data_dir,
+            save_raw=save_raw,
+        )
+        console.print({"dry_run": True, **plan.to_dict()})
+        return
+
+    result = eodhd.fetch_eod_to_storage(
+        client=eodhd.EODHDClient(config=EODHDConfig()),
+        data_dir=data_dir,
+        symbol=symbol,
+        from_date=from_date,
+        to_date=to_date,
+        period=period,
+        instrument_type=instrument_type,
+        currency=currency,
+        save_raw=save_raw,
+        overwrite=overwrite,
+        merge=merge,
+        audit=audit,
+    )
+    timeframe = eodhd.timeframe_for_eod_period(period)
+    output: dict[str, object] = {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        **result.to_dict(),
+    }
+    if qa:
+        output["qa"] = _run_eodhd_qa(
+            data_dir=data_dir,
+            symbol=symbol,
+            timeframe=timeframe,
+            instrument_type=instrument_type,
+            market_calendar=market_calendar,
+            adjusted_price_policy=adjusted_price_policy,
+            require_raw=save_raw,
+        )
+    console.print(output)
+
+
+@data_app.command("fetch-eodhd-intraday")
+def data_fetch_eodhd_intraday(
+    symbol: Annotated[str, typer.Option("--symbol")],
+    interval: Annotated[str, typer.Option("--interval")],
+    from_date: Annotated[str, typer.Option("--from")],
+    to_date: Annotated[str, typer.Option("--to")],
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    save_raw: Annotated[bool, typer.Option("--save-raw/--no-save-raw")] = True,
+    overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
+    merge: Annotated[bool, typer.Option("--merge")] = False,
+    audit: Annotated[bool, typer.Option("--audit")] = False,
+    qa: Annotated[bool, typer.Option("--qa")] = False,
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = None,
+    adjusted_price_policy: Annotated[str, typer.Option("--adjusted-price-policy")] = "raw_close",
+) -> None:
+    """Fetch chunked EODHD intraday data into normalized Stocker Parquet storage."""
+
+    from stocker_data.vendors import eodhd
+
+    _check_storage_mode(overwrite, merge)
+    if dry_run:
+        plan = eodhd.plan_intraday_fetch(
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
+            interval=interval,
+            instrument_type=instrument_type,
+            data_dir=data_dir,
+            save_raw=save_raw,
+        )
+        console.print({"dry_run": True, **plan.to_dict()})
+        return
+
+    result = eodhd.fetch_intraday_to_storage(
+        client=eodhd.EODHDClient(config=EODHDConfig()),
+        data_dir=data_dir,
+        symbol=symbol,
+        from_date=from_date,
+        to_date=to_date,
+        interval=interval,
+        instrument_type=instrument_type,
+        currency=currency,
+        save_raw=save_raw,
+        overwrite=overwrite,
+        merge=merge,
+        audit=audit,
+    )
+    output = {"symbol": symbol.upper(), "timeframe": interval, **result.to_dict()}
+    if qa:
+        output["qa"] = _run_eodhd_qa(
+            data_dir=data_dir,
+            symbol=symbol,
+            timeframe=interval,
+            instrument_type=instrument_type,
+            market_calendar=market_calendar,
+            adjusted_price_policy=adjusted_price_policy,
+            require_raw=save_raw,
+        )
+    console.print(output)
 
 
 @research_app.command("baseline")

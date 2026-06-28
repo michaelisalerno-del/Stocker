@@ -3,6 +3,16 @@ data:
   timezone: UTC
   default_currency: GBP
 
+data_vendors:
+  eodhd:
+    enabled: false
+    base_url: "https://eodhd.com/api"
+    api_token_env: "EODHD_API_TOKEN"
+    default_fmt: "json"
+    request_timeout_seconds: 30
+    max_retries: 3
+    save_raw_by_default: false
+
 costs:
   spread_bps: 2.0
   commission_bps: 0.5

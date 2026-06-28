@@ -1,0 +1,22 @@
+[
+  {
+    "datetime": "2024-01-02 14:30:00",
+    "timestamp": 1704205800,
+    "gmtoffset": 0,
+    "open": 187.15,
+    "high": 187.2,
+    "low": 187.0,
+    "close": 187.05,
+    "volume": 1200
+  },
+  {
+    "datetime": "2024-01-02 14:31:00",
+    "timestamp": 1704205860,
+    "gmtoffset": 0,
+    "open": 187.05,
+    "high": 187.3,
+    "low": 187.01,
+    "close": 187.25,
+    "volume": 1550
+  }
+]

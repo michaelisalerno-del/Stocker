@@ -95,19 +95,36 @@ bash scripts/check.sh
 - No broker integration.
 - No live trading.
 - No API keys or secrets.
-- No data vendor ingestion beyond placeholders.
-- No strategy logic.
+- No vendor credentials in the repo.
+- No strategy optimization.
 - No Docker, systemd, or deployment automation.
 - No event-driven accounting engine beyond an explicit placeholder.
 
 ## Data Pipeline
 
-Stage 2 adds a local CSV-to-Parquet research pipeline. CSV import maps common OHLCV
-column names, localizes timestamps, writes partitioned Parquet under
+The data pipeline supports local CSV import and EODHD vendor ingestion. Both paths
+normalize to the same Stocker OHLCV schema, validate the result, write partitioned
+Parquet under
 `data/processed/source=.../instrument_type=.../symbol=.../timeframe=.../data.parquet`,
-updates `data/catalog.json`, and can generate audit and baseline reports.
+update `data/catalog.json`, and can generate audit and baseline reports.
+
+EODHD credentials are read only from `EODHD_API_TOKEN`:
+
+```bash
+export EODHD_API_TOKEN="your_token_here"
+uv run stocker data fetch-eodhd-eod \
+  --symbol AAPL.US \
+  --from 2015-01-01 \
+  --to 2026-06-28 \
+  --period d \
+  --instrument-type stock \
+  --merge \
+  --save-raw \
+  --audit
+```
 
 See [docs/data_pipeline.md](docs/data_pipeline.md) before researching any edge.
+See [docs/vendors/eodhd.md](docs/vendors/eodhd.md) for EODHD-specific commands.
 
 ## Research Harness
 

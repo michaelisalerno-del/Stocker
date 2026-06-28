@@ -2062,11 +2062,13 @@ name = "stocker"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "structlog" },
+    { name = "tenacity" },
     { name = "typer" },
 ]
 
@@ -2106,11 +2108,13 @@ server = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.7" },
     { name = "structlog", specifier = ">=24.1" },
+    { name = "tenacity", specifier = ">=8.4" },
     { name = "typer", specifier = ">=0.12" },
 ]
 

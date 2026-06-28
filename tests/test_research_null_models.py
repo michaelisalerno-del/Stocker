@@ -10,14 +10,11 @@ from stocker_research.templates.base import StrategyTemplate
 from stocker_research.walkforward import WalkForwardSplit
 
 
-class StaticPositionTemplate(StrategyTemplate):
-    name = "static_position"
-
-    def __init__(self, positions: list[float]) -> None:
-        self._positions = positions
+class FramePositionTemplate(StrategyTemplate):
+    name = "frame_position"
 
     def generate_positions(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
-        return pd.Series(self._positions[: len(frame)])
+        return pd.to_numeric(frame["position"], errors="coerce").fillna(0.0)
 
 
 def _shift(values: list[float], offset: int) -> list[float]:
@@ -106,6 +103,7 @@ def test_split_null_timing_uses_test_windows_not_full_sample() -> None:
         }
     )
     positions = pd.Series([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0])
+    frame["position"] = positions
     splits = [
         WalkForwardSplit(
             split_id="split_001",
@@ -122,7 +120,7 @@ def test_split_null_timing_uses_test_windows_not_full_sample() -> None:
             test_end=12,
         ),
     ]
-    template = StaticPositionTemplate([float(value) for value in positions])
+    template = FramePositionTemplate()
 
     split_aligned = run_null_timing_test_for_splits(
         frame,
@@ -156,6 +154,7 @@ def test_split_null_timing_uses_test_windows_not_full_sample() -> None:
     ]
 
     assert split_aligned["count"] == 3
+    assert split_aligned["window_policy"] == "walk_forward_test_windows_with_indicator_context"
     assert split_aligned["median_null_net_return"] == median(expected_null_returns)
     assert split_aligned["median_null_net_return"] != full_sample["median_null_net_return"]
     assert {

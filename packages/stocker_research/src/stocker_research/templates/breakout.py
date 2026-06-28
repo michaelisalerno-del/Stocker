@@ -14,6 +14,9 @@ class VolatilityBreakoutTemplate(StrategyTemplate):
 
     name = "volatility_breakout"
 
+    def required_lookback_bars(self, params: dict[str, Any]) -> int:
+        return int(params["lookback"]) + 1
+
     def generate_positions(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
         lookback = int(params["lookback"])
         multiplier = float(params["range_multiplier"])

@@ -27,7 +27,9 @@ The first research funnel is designed to reject bad ideas quickly.
 5. Walk-forward evaluation.
    Use chronological train/test splits. Do not tune on the whole history and call it
    evidence. Do not use random train/test splits for trading data because future
-   regimes would leak backward into model selection.
+   regimes would leak backward into model selection. Rolling indicators may use
+   historical rows before each train/test window for warmup, but scoring starts at the
+   window boundary and no future rows after the window are used.
 
 6. Train-side parameter selection.
    Choose parameters from training-side evidence only. The best test-return row is
@@ -38,8 +40,8 @@ The first research funnel is designed to reject bad ideas quickly.
    Compare the selected result with cash and same-window long buy-and-hold after
    costs. Buy-and-hold remains a long market baseline for every hypothesis direction.
    Then run a small deterministic circular-shift null timing set over those same
-   walk-forward test windows. A result that is positive but fails buy-and-hold or the
-   null p75 is rejected.
+   walk-forward test windows with the same indicator-context policy. A result that is
+   positive but fails buy-and-hold or the null p75 is rejected.
 
 8. Leakage checks.
    Check timestamp integrity, split overlap, embargo gaps, generated signal quality,
@@ -98,6 +100,12 @@ parameter set, survive costs, beat buy-and-hold, pass the deterministic null tim
 gate, pass leakage checks, survive multiple walk-forward splits, show nearby
 parameter support, include meaningful trade counts, keep tolerable drawdown, and work
 across more than one tiny favorable period.
+
+The walk-forward evaluator uses template-declared lookback rows to warm up rolling
+indicators before train/test windows. Context rows are not part of PnL, costs, trades,
+drawdown, or exposure, and every evaluated window starts flat. This keeps long
+lookback templates from being falsely flat in short test windows without allowing
+future data.
 
 ## Universe-Level Stage 3 Flow
 

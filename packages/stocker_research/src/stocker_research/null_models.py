@@ -13,6 +13,10 @@ from stocker_backtest.costs import CostModel
 from stocker_backtest.vectorized import DirectionMode, evaluate_positions
 from stocker_research.templates import StrategyTemplate
 from stocker_research.walkforward import WalkForwardSplit
+from stocker_research.windows import (
+    NULL_WINDOW_POLICY_WITH_INDICATOR_CONTEXT,
+    build_evaluation_window,
+)
 
 
 def _context_seed(
@@ -34,13 +38,13 @@ def _deterministic_offsets(length: int, count: int, seed: int) -> list[int]:
     offsets: list[int] = []
     step = seed % (length - 1) + 1
     candidate = seed % (length - 1) + 1
-    while len(offsets) < max_count:
+    attempts = 0
+    while len(offsets) < max_count and attempts < length - 1:
         offset = ((candidate - 1) % (length - 1)) + 1
         if offset not in offsets:
             offsets.append(offset)
         candidate += step
-        if len(offsets) < max_count and len(set(offsets)) == length - 1:
-            break
+        attempts += 1
     candidate = 1
     while len(offsets) < max_count:
         if candidate not in offsets:
@@ -183,13 +187,6 @@ def run_null_timing_test_for_splits(
             direction=direction,
         )
 
-    full_positions = (
-        template.generate_positions(frame.reset_index(drop=True), selected_params)
-        .reset_index(drop=True)
-        .astype(float)
-        .reindex(frame.index)
-        .fillna(0.0)
-    )
     test_length = sum(max(0, split.test_end - split.test_start) for split in splits)
     seed = _context_seed(
         hypothesis_id=hypothesis_id,
@@ -204,13 +201,18 @@ def run_null_timing_test_for_splits(
         for split in splits:
             if split.test_end <= split.test_start:
                 continue
-            test_frame = frame.iloc[split.test_start : split.test_end].reset_index(drop=True)
-            test_positions = full_positions.iloc[split.test_start : split.test_end].reset_index(
-                drop=True
+            window = build_evaluation_window(
+                frame,
+                template,
+                selected_params,
+                eval_start=split.test_start,
+                eval_end=split.test_end,
             )
-            shifted = pd.Series(_circular_shift([float(value) for value in test_positions], offset))
+            shifted = pd.Series(
+                _circular_shift([float(value) for value in window.eval_positions], offset)
+            )
             result = evaluate_positions(
-                test_frame,
+                window.eval_frame,
                 shifted,
                 cost_model=cost_model,
                 direction=direction,
@@ -224,5 +226,5 @@ def run_null_timing_test_for_splits(
         selected_net_return=selected_net_return,
         offsets=offsets,
         direction=direction,
-        window_policy="walk_forward_test_windows",
+        window_policy=NULL_WINDOW_POLICY_WITH_INDICATOR_CONTEXT,
     )

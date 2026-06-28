@@ -17,6 +17,11 @@ class StrategyTemplate(ABC):
     def generate_positions(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
         """Return deterministic target positions aligned to the input rows."""
 
+    def required_lookback_bars(self, params: dict[str, Any]) -> int:
+        """Return historical rows needed before the scoring window for indicators."""
+
+        return 0
+
     def generate_signals(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         """Return a standard signal DataFrame for reports and leakage checks."""
 

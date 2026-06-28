@@ -274,6 +274,19 @@ def test_experiment_runner_creates_reports_index_and_conservative_classification
 
     assert result.json_path.exists()
     assert result.markdown_path.exists()
+    payload = json.loads(result.json_path.read_text(encoding="utf-8"))
+    markdown = result.markdown_path.read_text(encoding="utf-8")
+    assert payload["evaluation_policy"] == "walk_forward_with_indicator_context"
+    assert (
+        payload["indicator_context_policy"]
+        == "historical_indicator_context_before_window_not_scored"
+    )
+    assert payload["context_rows_are_scored"] is False
+    assert "max_required_lookback_bars" in payload
+    assert "required_lookback_bars_by_parameter_set" in payload
+    assert "context_summary" in payload
+    assert "Historical rows before each train/test window" in markdown
+    assert "Future rows after the evaluation window are not used" in markdown
     assert result.classification in {
         "rejected_no_edge",
         "rejected_costs_kill_edge",

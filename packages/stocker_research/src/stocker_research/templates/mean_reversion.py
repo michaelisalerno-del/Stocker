@@ -14,6 +14,9 @@ class MeanReversionTemplate(StrategyTemplate):
 
     name = "mean_reversion_after_large_down_day"
 
+    def required_lookback_bars(self, params: dict[str, Any]) -> int:
+        return max(2, int(params["hold_bars"]) + 1)
+
     def generate_positions(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
         threshold = float(params["down_threshold"])
         hold_bars = int(params["hold_bars"])

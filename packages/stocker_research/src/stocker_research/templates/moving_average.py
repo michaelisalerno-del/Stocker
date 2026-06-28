@@ -14,6 +14,11 @@ class MovingAverageMomentumTemplate(StrategyTemplate):
 
     name = "moving_average_momentum"
 
+    def required_lookback_bars(self, params: dict[str, Any]) -> int:
+        fast = int(params["fast_window"])
+        slow = int(params["slow_window"])
+        return max(fast, slow) + 1
+
     def generate_positions(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
         fast = int(params["fast_window"])
         slow = int(params["slow_window"])

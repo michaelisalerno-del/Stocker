@@ -190,11 +190,13 @@ CI does not require an EODHD token. Vendor tests use mocked HTTP only.
 
 Stage 3 adds a hypothesis-first research harness. Each experiment starts from a YAML
 hypothesis, loads an audited local Parquet dataset, builds chronological walk-forward
-splits, evaluates a small guarded parameter grid, applies explicit costs, checks
-train-side parameter selection, keeps the best test-return row as diagnostic only,
-runs leakage checks, compares against cash and same-window long buy-and-hold, applies
-a same-window deterministic null timing test, summarizes performance by simple
-historical regimes, and writes Markdown/JSON reports under `data/reports/research/`.
+splits, evaluates a small guarded parameter grid, warms rolling indicators with
+pre-window historical context while scoring only actual train/test rows, applies
+explicit costs, checks train-side parameter selection, keeps the best test-return row
+as diagnostic only, runs leakage checks, compares against cash and same-window long
+buy-and-hold, applies a same-window deterministic null timing test, summarizes
+performance by simple historical regimes, and writes Markdown/JSON reports under
+`data/reports/research/`.
 
 The initial templates are deliberately basic: moving-average momentum, pullback in
 uptrend, mean reversion after a large down day, and volatility breakout. They are test

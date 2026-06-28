@@ -12,7 +12,6 @@ from typing import Any, Literal
 import pandas as pd
 
 from stocker_backtest.costs import CostModel
-from stocker_backtest.vectorized import DirectionMode, VectorizedBacktestResult, evaluate_positions
 from stocker_data.audit import create_audit_report
 from stocker_data.storage import DatasetKey, dataset_metadata, load_dataset
 from stocker_data.universe import load_research_ready_universe
@@ -34,6 +33,12 @@ from stocker_research.walkforward import (
     WalkForwardConfig,
     WalkForwardSplit,
     generate_walk_forward_splits,
+)
+from stocker_research.windows import (
+    EVALUATION_POLICY_WITH_INDICATOR_CONTEXT,
+    GRID_CONTEXT_POLICY_WITH_INDICATOR_CONTEXT,
+    INDICATOR_CONTEXT_POLICY,
+    evaluate_window_with_context,
 )
 
 Classification = (
@@ -127,25 +132,6 @@ def _walk_forward_config(hypothesis: Hypothesis) -> WalkForwardConfig:
     )
 
 
-def _evaluate_slice(
-    frame: pd.DataFrame,
-    template: StrategyTemplate,
-    params: dict[str, Any],
-    cost_model: CostModel,
-    direction: DirectionMode,
-) -> VectorizedBacktestResult:
-    positions = template.generate_positions(frame.reset_index(drop=True), params)
-    direction_mode: DirectionMode = (
-        direction if direction in {"long_only", "short_only"} else "long_short"
-    )
-    return evaluate_positions(
-        frame.reset_index(drop=True),
-        positions,
-        cost_model=cost_model,
-        direction=direction_mode,
-    )
-
-
 def _metric_float(row: dict[str, Any], key: str, fallback_key: str | None = None) -> float:
     value = row.get(key)
     if value is None and fallback_key is not None:
@@ -162,6 +148,19 @@ def _metric_int(row: dict[str, Any], key: str, fallback_key: str | None = None) 
     if value is None:
         return 0
     return int(value)
+
+
+def _safe_required_lookback(template: StrategyTemplate, row: dict[str, Any]) -> int:
+    value = row.get("required_lookback_bars")
+    if value is not None:
+        return max(0, int(value))
+    params = row.get("params", {})
+    if not isinstance(params, dict):
+        return 0
+    try:
+        return max(0, int(template.required_lookback_bars(params)))
+    except (KeyError, TypeError, ValueError):
+        return 0
 
 
 def _deduplicate_leakage_issues(issues: list[LeakageIssue]) -> list[LeakageIssue]:
@@ -186,39 +185,51 @@ def _run_grid(
     cost_model = _cost_model(hypothesis)
     rows: list[dict[str, Any]] = []
     for parameter_set in parameter_sets:
+        required_lookback_bars = max(
+            0,
+            int(template.required_lookback_bars(parameter_set.params)),
+        )
         train_returns: list[float] = []
         train_gross_returns: list[float] = []
         train_trade_counts: list[int] = []
         train_drawdowns: list[float] = []
+        train_context_rows: list[int] = []
         test_returns: list[float] = []
         test_gross_returns: list[float] = []
         test_trade_counts: list[int] = []
         test_drawdowns: list[float] = []
+        test_context_rows: list[int] = []
         for split in splits:
-            train = frame.iloc[split.train_start : split.train_end].copy()
-            test = frame.iloc[split.test_start : split.test_end].copy()
-            train_result = _evaluate_slice(
-                train,
+            train_evaluation = evaluate_window_with_context(
+                frame,
                 template,
                 parameter_set.params,
-                cost_model,
-                hypothesis.direction,
+                cost_model=cost_model,
+                direction=hypothesis.direction,
+                eval_start=split.train_start,
+                eval_end=split.train_end,
             )
-            test_result = _evaluate_slice(
-                test,
+            test_evaluation = evaluate_window_with_context(
+                frame,
                 template,
                 parameter_set.params,
-                cost_model,
-                hypothesis.direction,
+                cost_model=cost_model,
+                direction=hypothesis.direction,
+                eval_start=split.test_start,
+                eval_end=split.test_end,
             )
+            train_result = train_evaluation.result
+            test_result = test_evaluation.result
             train_returns.append(train_result.net_return)
             train_gross_returns.append(train_result.gross_return)
             train_trade_counts.append(train_result.number_of_trades)
             train_drawdowns.append(train_result.max_drawdown)
+            train_context_rows.append(train_evaluation.window.context_rows_used)
             test_returns.append(test_result.net_return)
             test_gross_returns.append(test_result.gross_return)
             test_trade_counts.append(test_result.number_of_trades)
             test_drawdowns.append(test_result.max_drawdown)
+            test_context_rows.append(test_evaluation.window.context_rows_used)
         train_net_return = float(sum(train_returns) / len(train_returns))
         train_gross_return = float(sum(train_gross_returns) / len(train_gross_returns))
         train_profitable_split_pct = float(
@@ -247,6 +258,10 @@ def _run_grid(
                 "test_profitable_split_pct": test_profitable_split_pct,
                 "test_trade_count": test_trade_count,
                 "test_max_drawdown": test_max_drawdown,
+                "required_lookback_bars": required_lookback_bars,
+                "train_context_rows_used": int(max(train_context_rows, default=0)),
+                "test_context_rows_used": int(max(test_context_rows, default=0)),
+                "context_policy": GRID_CONTEXT_POLICY_WITH_INDICATOR_CONTEXT,
                 "profitable_split_pct": test_profitable_split_pct,
                 "trade_count": test_trade_count,
                 "max_drawdown": test_max_drawdown,
@@ -309,6 +324,23 @@ Classification is conservative. Rejection is the common and expected research ou
 - Date range: {payload["data"]["min_timestamp"]} to {payload["data"]["max_timestamp"]}
 - Rows: {payload["data"]["row_count"]}
 
+## Evaluation Policy
+
+- Policy: `{payload.get("evaluation_policy", "")}`
+- Indicator context: `{payload.get("indicator_context_policy", "")}`
+- Context rows are scored: `{payload.get("context_rows_are_scored", False)}`
+- Max required lookback bars: {payload.get("max_required_lookback_bars", 0)}
+
+Historical rows before each train/test window may be used only to warm up indicators.
+Metrics, trades, drawdown, exposure, returns, and costs are scored only inside the
+actual train/test rows. Future rows after the evaluation window are not used. This
+avoids false rejection of rolling indicators while keeping rejection the expected
+research outcome.
+
+```json
+{json.dumps(payload.get("context_summary", {}), indent=2)}
+```
+
 ## Walk-Forward
 
 - Splits: {len(payload["splits"])}
@@ -348,7 +380,7 @@ result. Buy-and-hold is a long market baseline for every hypothesis direction.
 ## Null Timing
 
 Null timing checks use deterministic circular shifts over the same walk-forward test
-windows as the selected result.
+windows and indicator-context policy as the selected result.
 
 ```json
 {json.dumps(payload.get("null_model_results", {}), indent=2)}
@@ -533,13 +565,22 @@ def run_research_experiment(
     template = _template_for(hypothesis)
     selected_params = dict(selected_result.get("params", {}))
     selected_params["parameter_set_id"] = str(selected_result["parameter_set_id"])
-    full_positions = template.generate_positions(frame, selected_params)
-    full_result = evaluate_positions(
+    selected_required_lookback = _safe_required_lookback(template, selected_result)
+    selected_result.setdefault("required_lookback_bars", selected_required_lookback)
+    selected_result.setdefault("train_context_rows_used", 0)
+    selected_result.setdefault("test_context_rows_used", 0)
+    selected_result.setdefault("context_policy", GRID_CONTEXT_POLICY_WITH_INDICATOR_CONTEXT)
+    cost_model = _cost_model(hypothesis)
+    full_evaluation = evaluate_window_with_context(
         frame,
-        full_positions,
-        cost_model=_cost_model(hypothesis),
+        template,
+        selected_params,
+        cost_model=cost_model,
         direction=hypothesis.direction,
+        eval_start=0,
+        eval_end=len(frame),
     )
+    full_result = full_evaluation.result
     signals = template.generate_signals(frame, selected_params)
     leakage_issues = _deduplicate_leakage_issues(
         [
@@ -559,7 +600,6 @@ def run_research_experiment(
         pd.Series(full_result.net_returns),
         regimes["trend_regime"],
     )
-    cost_model = _cost_model(hypothesis)
     benchmark_comparison = compare_with_benchmarks(
         frame,
         splits=splits,
@@ -618,6 +658,45 @@ def run_research_experiment(
         classification = "rejected_insufficient_data"
         classification_reasons.insert(0, "insufficient_data")
 
+    required_lookback_bars_by_parameter_set = {
+        str(row.get("parameter_set_id", "unknown")): _safe_required_lookback(template, row)
+        for row in grid_results
+    }
+    selected_parameter_set_id = str(selected_result["parameter_set_id"])
+    required_lookback_bars_by_parameter_set.setdefault(
+        selected_parameter_set_id,
+        selected_required_lookback,
+    )
+    max_required_lookback_bars = max(
+        required_lookback_bars_by_parameter_set.values(),
+        default=selected_required_lookback,
+    )
+    context_summary = {
+        "context_policy": GRID_CONTEXT_POLICY_WITH_INDICATOR_CONTEXT,
+        "indicator_context_policy": INDICATOR_CONTEXT_POLICY,
+        "context_rows_are_scored": False,
+        "max_train_context_rows_used": int(
+            max(
+                (int(row.get("train_context_rows_used", 0) or 0) for row in grid_results),
+                default=0,
+            )
+        ),
+        "max_test_context_rows_used": int(
+            max(
+                (int(row.get("test_context_rows_used", 0) or 0) for row in grid_results),
+                default=0,
+            )
+        ),
+        "selected_parameter_set_id": selected_parameter_set_id,
+        "selected_required_lookback_bars": selected_required_lookback,
+        "selected_train_context_rows_used": int(
+            selected_result.get("train_context_rows_used", 0) or 0
+        ),
+        "selected_test_context_rows_used": int(
+            selected_result.get("test_context_rows_used", 0) or 0
+        ),
+    }
+
     experiment_id = _experiment_id(hypothesis, symbol, timeframe)
     report_dir = Path(data_dir).expanduser() / "reports" / "research"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -633,6 +712,12 @@ def run_research_experiment(
         "instrument_type": key.instrument_type,
         "data": metadata.to_dict(),
         "cost_assumptions": hypothesis.costs.model_dump(),
+        "evaluation_policy": EVALUATION_POLICY_WITH_INDICATOR_CONTEXT,
+        "indicator_context_policy": INDICATOR_CONTEXT_POLICY,
+        "context_rows_are_scored": False,
+        "max_required_lookback_bars": max_required_lookback_bars,
+        "required_lookback_bars_by_parameter_set": required_lookback_bars_by_parameter_set,
+        "context_summary": context_summary,
         "splits": [split.model_dump() for split in splits],
         "selection": selection.model_dump(mode="json"),
         "selected_result": selected_result,

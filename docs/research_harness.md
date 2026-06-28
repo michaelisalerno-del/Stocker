@@ -33,6 +33,27 @@ splits:
 The split engine records deterministic split IDs and boundaries, and tests enforce
 that train rows always come before test rows.
 
+## Indicator Context And Warmup
+
+Walk-forward train and test windows may use historical rows before the scoring
+window to warm up rolling indicators. The required lookback comes from the selected
+strategy template and parameter set. For example, a moving-average template with a
+200-bar slow window can use up to 201 prior rows before a 125-bar test window.
+
+The policy is strict:
+
+- No future rows after the evaluation window are used.
+- Context rows before the window are not scored.
+- Returns, trades, drawdown, exposure, and costs are counted only inside the actual
+  train or test rows.
+- Each train/test window starts flat for accounting purposes.
+- A first-bar target position created from historical context is allowed and pays
+  normal entry costs.
+
+This avoids falsely rejecting rolling-indicator hypotheses just because the isolated
+test slice is shorter than the indicator warmup period. It does not make rejection
+less common.
+
 ## Parameter Stability
 
 The harness generates small guarded parameter grids. A hard sweep limit prevents
@@ -90,11 +111,11 @@ position evaluation. A positive strategy that fails to beat buy-and-hold after c
 is rejected with the `failed_benchmark` reason.
 
 The runner also evaluates a tiny deterministic null timing set by circularly shifting
-the selected target positions inside the same walk-forward test windows used by the
-grid result. This preserves broad exposure and trade structure but disrupts exact
-timing. The default null set is intentionally small and deterministic, not a
-brute-force random search. A selected result that fails to beat the null p75 is
-rejected with the `failed_null_timing` reason.
+the selected target positions inside the same walk-forward test windows and indicator
+context policy used by the grid result. This preserves broad exposure and trade
+structure but disrupts exact timing. The default null set is intentionally small and
+deterministic, not a brute-force random search. A selected result that fails to beat
+the null p75 is rejected with the `failed_null_timing` reason.
 
 ## Leakage Checks
 

@@ -41,6 +41,13 @@ class VWAPReclaimRejectionParams:
     entry_cutoff_before_close_minutes: int
     flatten_before_close_minutes: int
     bars_per_session_context: int
+    min_opening_range_width_pct: float
+    require_above_opening_range_mid: bool
+    require_above_opening_range_high: bool
+    avoid_late_day: bool
+    late_day_start_minutes: int
+    confirmation_bars_above_vwap: int
+    confirmation_requires_low_above_vwap: bool
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,15 @@ class VWAPReclaimRejectionComputation:
     rejection_distance_ok: pd.Series
     relative_volume_ok: pd.Series
     distance_filter_ok: pd.Series
+    raw_reclaim: pd.Series
+    opening_range_width_pct: pd.Series
+    above_opening_range_mid: pd.Series
+    above_opening_range_high: pd.Series
+    late_day_blocked: pd.Series
+    confirmation_ready: pd.Series
+    opening_range_width_ok: pd.Series
+    opening_range_mid_ok: pd.Series
+    opening_range_high_ok: pd.Series
 
 
 def _optional_market_calendar(value: Any) -> str | None:
@@ -70,6 +86,16 @@ def _optional_market_calendar(value: Any) -> str | None:
     if not text or text.lower() in {"none", "null"}:
         return None
     return text
+
+
+def _bool_param(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
 
 
 def _validated_params(params: dict[str, Any]) -> VWAPReclaimRejectionParams:
@@ -92,6 +118,23 @@ def _validated_params(params: dict[str, Any]) -> VWAPReclaimRejectionParams:
     entry_cutoff = int(params.get("entry_cutoff_before_close_minutes", 30))
     flatten_before_close = int(params.get("flatten_before_close_minutes", 10))
     bars_per_session_context = int(params.get("bars_per_session_context", 80))
+    min_opening_range_width_pct = float(
+        params.get("min_opening_range_width_pct", 0.0)
+    )
+    require_above_opening_range_mid = _bool_param(
+        params.get("require_above_opening_range_mid", False)
+    )
+    require_above_opening_range_high = _bool_param(
+        params.get("require_above_opening_range_high", False)
+    )
+    avoid_late_day = _bool_param(params.get("avoid_late_day", False))
+    late_day_start_minutes = int(params.get("late_day_start_minutes", 300))
+    confirmation_bars_above_vwap = int(
+        params.get("confirmation_bars_above_vwap", 0)
+    )
+    confirmation_requires_low_above_vwap = _bool_param(
+        params.get("confirmation_requires_low_above_vwap", False)
+    )
 
     if entry_mode not in VALID_ENTRY_MODES:
         raise ValueError(f"entry_mode must be one of {sorted(VALID_ENTRY_MODES)}")
@@ -127,6 +170,12 @@ def _validated_params(params: dict[str, Any]) -> VWAPReclaimRejectionParams:
         raise ValueError("flatten_before_close_minutes must be non-negative")
     if bars_per_session_context <= 0:
         raise ValueError("bars_per_session_context must be positive")
+    if min_opening_range_width_pct < 0:
+        raise ValueError("min_opening_range_width_pct must be non-negative")
+    if late_day_start_minutes < 0:
+        raise ValueError("late_day_start_minutes must be non-negative")
+    if confirmation_bars_above_vwap < 0:
+        raise ValueError("confirmation_bars_above_vwap must be non-negative")
 
     return VWAPReclaimRejectionParams(
         entry_mode=entry_mode,
@@ -148,6 +197,13 @@ def _validated_params(params: dict[str, Any]) -> VWAPReclaimRejectionParams:
         entry_cutoff_before_close_minutes=entry_cutoff,
         flatten_before_close_minutes=flatten_before_close,
         bars_per_session_context=bars_per_session_context,
+        min_opening_range_width_pct=min_opening_range_width_pct,
+        require_above_opening_range_mid=require_above_opening_range_mid,
+        require_above_opening_range_high=require_above_opening_range_high,
+        avoid_late_day=avoid_late_day,
+        late_day_start_minutes=late_day_start_minutes,
+        confirmation_bars_above_vwap=confirmation_bars_above_vwap,
+        confirmation_requires_low_above_vwap=confirmation_requires_low_above_vwap,
     )
 
 
@@ -241,6 +297,52 @@ class VWAPReclaimRejectionTemplate(StrategyTemplate):
         previous_close = close.groupby(features["session_date"]).shift(1)
         previous_vwap = vwap.groupby(features["session_date"]).shift(1)
         previous_distance = distance.groupby(features["session_date"]).shift(1)
+        opening_range_mid = pd.to_numeric(
+            features.get("opening_range_mid", pd.Series(index=features.index)),
+            errors="coerce",
+        )
+        opening_range_high = pd.to_numeric(
+            features.get("opening_range_high", pd.Series(index=features.index)),
+            errors="coerce",
+        )
+        opening_range_width = pd.to_numeric(
+            features.get("opening_range_width", pd.Series(index=features.index)),
+            errors="coerce",
+        )
+        opening_range_width_pct = (opening_range_width / opening_range_mid).where(
+            opening_range_mid > 0.0
+        )
+        above_opening_range_mid = (close > opening_range_mid).fillna(False)
+        above_opening_range_high = (close > opening_range_high).fillna(False)
+        if cfg.min_opening_range_width_pct > 0:
+            opening_range_width_ok = opening_range_width_pct.ge(
+                cfg.min_opening_range_width_pct
+            ).fillna(False)
+        else:
+            opening_range_width_ok = pd.Series(True, index=features.index)
+        if cfg.require_above_opening_range_mid:
+            opening_range_mid_ok = above_opening_range_mid
+        else:
+            opening_range_mid_ok = pd.Series(True, index=features.index)
+        if cfg.require_above_opening_range_high:
+            opening_range_high_ok = above_opening_range_high
+        else:
+            opening_range_high_ok = pd.Series(True, index=features.index)
+        minutes_from_open = pd.to_numeric(
+            features.get("minutes_from_session_open", pd.Series(index=features.index)),
+            errors="coerce",
+        )
+        late_day_blocked = (
+            minutes_from_open.ge(cfg.late_day_start_minutes).fillna(False)
+            if cfg.avoid_late_day
+            else pd.Series(False, index=features.index)
+        )
+        v2_filter_ok = (
+            opening_range_width_ok
+            & opening_range_mid_ok
+            & opening_range_high_ok
+            & ~late_day_blocked
+        ).fillna(False)
 
         entry_threshold = vwap * (1.0 + cfg.entry_buffer_bps / 10_000.0)
         previous_entry_threshold = previous_vwap * (1.0 + cfg.entry_buffer_bps / 10_000.0)
@@ -271,6 +373,32 @@ class VWAPReclaimRejectionTemplate(StrategyTemplate):
             & reclaim_recent_below
             & reclaim_distance_ok
         ).fillna(False)
+        confirmation_ready = pd.Series(False, index=features.index)
+        confirmed_reclaim = pd.Series(False, index=features.index)
+        confirmation_bar_ok = (close > entry_threshold).fillna(False)
+        if cfg.confirmation_requires_low_above_vwap:
+            confirmation_bar_ok = (
+                confirmation_bar_ok & low.ge(vwap).fillna(False)
+            ).fillna(False)
+        if cfg.confirmation_bars_above_vwap == 0:
+            confirmation_ready = reclaim_cross.copy()
+            confirmed_reclaim = reclaim_cross.copy()
+        else:
+            for _, group_index in features.groupby("session_date", sort=False).groups.items():
+                pending_count: int | None = None
+                for index in [int(group_index_value) for group_index_value in group_index]:
+                    if pending_count is not None:
+                        if bool(confirmation_bar_ok.iloc[index]):
+                            pending_count += 1
+                            if pending_count >= cfg.confirmation_bars_above_vwap:
+                                confirmation_ready.iloc[index] = True
+                                confirmed_reclaim.iloc[index] = True
+                                pending_count = None
+                                continue
+                        else:
+                            pending_count = None
+                    if bool(reclaim_cross.iloc[index]):
+                        pending_count = 0
 
         previous_low = low.groupby(features["session_date"]).shift(1)
         previous_test_distance = (previous_low / previous_vwap - 1.0).abs()
@@ -320,7 +448,9 @@ class VWAPReclaimRejectionTemplate(StrategyTemplate):
 
         allow_reclaim = cfg.entry_mode in {"reclaim", "both"}
         allow_rejection = cfg.entry_mode in {"rejection", "both"}
-        raw_reclaim = reclaim_cross if allow_reclaim else pd.Series(False, index=features.index)
+        raw_reclaim = (
+            confirmed_reclaim if allow_reclaim else pd.Series(False, index=features.index)
+        )
         raw_rejection = (
             rejection_entry if allow_rejection else pd.Series(False, index=features.index)
         )
@@ -328,6 +458,7 @@ class VWAPReclaimRejectionTemplate(StrategyTemplate):
             features["can_open_new_position"].astype(bool)
             & features["can_enter_after_minimum_bars"].astype(bool)
             & relative_volume_ok
+            & v2_filter_ok
             & (raw_reclaim | raw_rejection)
         )
         distance_filter_ok = (
@@ -387,6 +518,15 @@ class VWAPReclaimRejectionTemplate(StrategyTemplate):
             rejection_distance_ok=rejection_distance_ok.reset_index(drop=True),
             relative_volume_ok=relative_volume_ok.reset_index(drop=True),
             distance_filter_ok=distance_filter_ok.reset_index(drop=True),
+            raw_reclaim=reclaim_cross.reset_index(drop=True),
+            opening_range_width_pct=opening_range_width_pct.reset_index(drop=True),
+            above_opening_range_mid=above_opening_range_mid.reset_index(drop=True),
+            above_opening_range_high=above_opening_range_high.reset_index(drop=True),
+            late_day_blocked=late_day_blocked.reset_index(drop=True),
+            confirmation_ready=confirmation_ready.reset_index(drop=True),
+            opening_range_width_ok=opening_range_width_ok.reset_index(drop=True),
+            opening_range_mid_ok=opening_range_mid_ok.reset_index(drop=True),
+            opening_range_high_ok=opening_range_high_ok.reset_index(drop=True),
         )
 
     def generate_positions(self, frame: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
@@ -408,6 +548,15 @@ class VWAPReclaimRejectionTemplate(StrategyTemplate):
                 "parameter_set_id": str(params.get("parameter_set_id", "unknown")),
                 "session_vwap": features["session_vwap"],
                 "distance_from_vwap": features["distance_from_vwap"],
+                "opening_range_mid": features["opening_range_mid"],
+                "opening_range_high": features["opening_range_high"],
+                "opening_range_width": features["opening_range_width"],
+                "opening_range_width_pct": computed.opening_range_width_pct,
+                "above_opening_range_mid": computed.above_opening_range_mid,
+                "above_opening_range_high": computed.above_opening_range_high,
+                "late_day_blocked": computed.late_day_blocked,
+                "confirmation_ready": computed.confirmation_ready,
+                "raw_reclaim": computed.raw_reclaim,
                 "entry_mode": computed.entry_modes,
                 "raw_entry": computed.raw_entries,
                 "time_stop_exit": computed.time_stop_exits,
@@ -420,5 +569,8 @@ class VWAPReclaimRejectionTemplate(StrategyTemplate):
                 "rejection_distance_ok": computed.rejection_distance_ok,
                 "relative_volume_ok": computed.relative_volume_ok,
                 "distance_filter_ok": computed.distance_filter_ok,
+                "opening_range_width_ok": computed.opening_range_width_ok,
+                "opening_range_mid_ok": computed.opening_range_mid_ok,
+                "opening_range_high_ok": computed.opening_range_high_ok,
             }
         )

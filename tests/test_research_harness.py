@@ -114,6 +114,14 @@ def test_parameter_grid_guardrail_ids_and_stability_scoring() -> None:
     grid = generate_parameter_grid({"fast": [2, 3], "slow": [5, 8]}, max_size=8)
 
     assert [item.parameter_set_id for item in grid] == ["ps_0001", "ps_0002", "ps_0003", "ps_0004"]
+    confirmation_grid = generate_parameter_grid(
+        {"confirmation_bars_above_vwap": [0, 1]},
+        max_size=2,
+    )
+    assert [item.params["confirmation_bars_above_vwap"] for item in confirmation_grid] == [
+        0,
+        1,
+    ]
 
     try:
         generate_parameter_grid({"x": list(range(20)), "y": list(range(20))}, max_size=100)
@@ -121,6 +129,13 @@ def test_parameter_grid_guardrail_ids_and_stability_scoring() -> None:
         assert "exceeds max_size" in str(exc)
     else:
         raise AssertionError("large grid should be rejected")
+
+    try:
+        generate_parameter_grid({"window": [0]}, max_size=1)
+    except ValueError as exc:
+        assert "invalid non-positive parameter value for window" in str(exc)
+    else:
+        raise AssertionError("zero window should be rejected")
 
     stability = analyze_stability(
         [

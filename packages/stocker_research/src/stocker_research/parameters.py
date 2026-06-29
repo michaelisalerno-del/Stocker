@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from itertools import product
 from typing import Any
 
+ZERO_ALLOWED_PARAMETER_KEYS = {
+    "confirmation_bars_above_vwap",
+    "min_bars_after_open",
+}
+
 
 @dataclass(frozen=True)
 class ParameterSet:
@@ -33,6 +38,8 @@ class ParameterGrid:
 
 def _validate_parameter_value(key: str, value: Any) -> None:
     if isinstance(value, bool | str):
+        return
+    if key in ZERO_ALLOWED_PARAMETER_KEYS and value == 0:
         return
     if (
         isinstance(value, int | float)

@@ -66,6 +66,32 @@ def _vwap_template():
     return get_template("vwap_reclaim_rejection")
 
 
+def _v2_reclaim_frame() -> pd.DataFrame:
+    return _intraday_frame(
+        bars_per_session=12,
+        overrides={
+            (0, 0): {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+            (0, 1): {"open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0},
+            (0, 2): {"open": 102.0, "high": 102.0, "low": 102.0, "close": 102.0},
+            (0, 3): {"open": 98.0, "high": 98.0, "low": 98.0, "close": 98.0},
+            (0, 4): {"open": 97.0, "high": 97.0, "low": 97.0, "close": 97.0},
+            (0, 5): {"open": 98.0, "high": 98.0, "low": 98.0, "close": 98.0},
+            (0, 6): {"open": 98.0, "high": 98.0, "low": 98.0, "close": 98.0},
+            (0, 7): {"open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0},
+            (0, 8): {"open": 101.2, "high": 101.2, "low": 101.2, "close": 101.2},
+            (0, 9): {"open": 101.4, "high": 101.4, "low": 101.4, "close": 101.4},
+        },
+    )
+
+
+def _late_day_reclaim_frame() -> pd.DataFrame:
+    frame = _intraday_frame(bars_per_session=70)
+    frame[["open", "high", "low", "close"]] = 100.0
+    frame.loc[60, ["open", "high", "low", "close"]] = 99.0
+    frame.loc[61, ["open", "high", "low", "close"]] = 101.0
+    return frame
+
+
 def test_no_entry_before_required_intraday_window() -> None:
     frame = _intraday_frame()
 
@@ -218,6 +244,175 @@ def test_no_entry_window_blocks_late_entries() -> None:
     assert positions.sum() == 0.0
 
 
+def test_opening_range_width_filter_blocks_narrow_range_sessions() -> None:
+    frame = _intraday_frame(
+        bars_per_session=12,
+        overrides={
+            (0, 0): {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+            (0, 1): {"open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0},
+            (0, 2): {"open": 100.5, "high": 100.5, "low": 100.5, "close": 100.5},
+            (0, 3): {"open": 99.8, "high": 99.8, "low": 99.8, "close": 99.8},
+            (0, 4): {"open": 99.7, "high": 99.7, "low": 99.7, "close": 99.7},
+            (0, 5): {"open": 99.8, "high": 99.8, "low": 99.8, "close": 99.8},
+            (0, 6): {"open": 99.5, "high": 99.5, "low": 99.5, "close": 99.5},
+            (0, 7): {"open": 101.5, "high": 101.5, "low": 101.5, "close": 101.5},
+        },
+    )
+    template = _vwap_template()
+
+    baseline = template.generate_positions(frame, _params())
+    filtered = template.generate_positions(
+        frame,
+        _params(min_opening_range_width_pct=0.03),
+    )
+
+    assert baseline.iloc[7] == 1.0
+    assert filtered.sum() == 0.0
+
+
+def test_require_above_opening_range_mid_blocks_entries_below_mid() -> None:
+    frame = _intraday_frame(
+        bars_per_session=12,
+        overrides={
+            (0, 0): {"open": 110.0, "high": 110.0, "low": 110.0, "close": 110.0},
+            (0, 1): {"open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+            (0, 2): {"open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+            (0, 3): {"open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+            (0, 4): {"open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+            (0, 5): {"open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+            (0, 6): {"open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+            (0, 7): {"open": 99.5, "high": 99.5, "low": 99.5, "close": 99.5},
+        },
+    )
+    template = _vwap_template()
+
+    baseline = template.generate_positions(frame, _params())
+    filtered = template.generate_positions(
+        frame,
+        _params(require_above_opening_range_mid=True),
+    )
+
+    assert baseline.iloc[7] == 1.0
+    assert filtered.sum() == 0.0
+
+
+def test_require_above_opening_range_high_blocks_entries_below_high() -> None:
+    frame = _v2_reclaim_frame()
+    template = _vwap_template()
+
+    baseline = template.generate_positions(
+        frame,
+        _params(require_above_opening_range_mid=True),
+    )
+    filtered = template.generate_positions(
+        frame,
+        _params(
+            require_above_opening_range_mid=True,
+            require_above_opening_range_high=True,
+        ),
+    )
+
+    assert baseline.iloc[7] == 1.0
+    assert filtered.sum() == 0.0
+
+
+def test_avoid_late_day_blocks_entries_in_late_day_window() -> None:
+    frame = _late_day_reclaim_frame()
+    template = _vwap_template()
+
+    baseline = template.generate_positions(frame, _params(max_hold_bars=3))
+    filtered = template.generate_positions(
+        frame,
+        _params(max_hold_bars=3, avoid_late_day=True, late_day_start_minutes=300),
+    )
+
+    assert baseline.iloc[61] == 1.0
+    assert filtered.sum() == 0.0
+
+
+def test_delayed_confirmation_waits_one_bar_after_reclaim() -> None:
+    frame = _v2_reclaim_frame()
+
+    positions = _vwap_template().generate_positions(
+        frame,
+        _params(confirmation_bars_above_vwap=1),
+    )
+    signals = _vwap_template().generate_signals(
+        frame,
+        _params(confirmation_bars_above_vwap=1),
+    )
+
+    assert bool(signals.loc[7, "raw_reclaim"]) is True
+    assert positions.iloc[7] == 0.0
+    assert positions.iloc[8] == 1.0
+    assert bool(signals.loc[8, "confirmation_ready"]) is True
+
+
+def test_delayed_confirmation_waits_two_bars_after_reclaim() -> None:
+    frame = _v2_reclaim_frame()
+
+    positions = _vwap_template().generate_positions(
+        frame,
+        _params(confirmation_bars_above_vwap=2),
+    )
+
+    assert positions.iloc[7] == 0.0
+    assert positions.iloc[8] == 0.0
+    assert positions.iloc[9] == 1.0
+
+
+def test_confirmation_can_require_low_above_vwap() -> None:
+    frame = _v2_reclaim_frame()
+    frame.loc[8, "low"] = 98.0
+    template = _vwap_template()
+
+    loose = template.generate_positions(
+        frame,
+        _params(confirmation_bars_above_vwap=1),
+    )
+    strict = template.generate_positions(
+        frame,
+        _params(
+            confirmation_bars_above_vwap=1,
+            confirmation_requires_low_above_vwap=True,
+        ),
+    )
+
+    assert loose.iloc[8] == 1.0
+    assert strict.sum() == 0.0
+
+
+def test_future_rows_do_not_change_prior_vwap_confirmation_decisions() -> None:
+    frame = _v2_reclaim_frame()
+    params = _params(confirmation_bars_above_vwap=1)
+
+    original = _vwap_template().generate_positions(frame, params).iloc[:9]
+    mutated = frame.copy()
+    mutated.loc[9:, ["high", "low", "close", "volume"]] = 10000.0
+    changed = _vwap_template().generate_positions(mutated, params).iloc[:9]
+
+    assert original.equals(changed)
+
+
+def test_v1_defaults_remain_backward_compatible_for_reclaim_entries() -> None:
+    frame = _v2_reclaim_frame()
+
+    baseline = _vwap_template().generate_positions(frame, _params())
+    with_defaults = _vwap_template().generate_positions(
+        frame,
+        _params(
+            min_opening_range_width_pct=0.0,
+            require_above_opening_range_mid=False,
+            require_above_opening_range_high=False,
+            avoid_late_day=False,
+            confirmation_bars_above_vwap=0,
+            confirmation_requires_low_above_vwap=False,
+        ),
+    )
+
+    assert with_defaults.equals(baseline)
+
+
 def test_positions_are_deterministic() -> None:
     frame = _intraday_frame()
     template = _vwap_template()
@@ -297,9 +492,18 @@ def test_generated_signals_include_vwap_diagnostic_columns() -> None:
         "reclaim_cross_above_vwap",
         "rejection_valid_test",
         "rejection_bounce",
-        "relative_volume_ok",
-        "distance_filter_ok",
-    }.issubset(signals.columns)
+            "relative_volume_ok",
+            "distance_filter_ok",
+            "opening_range_mid",
+            "opening_range_high",
+            "opening_range_width",
+            "opening_range_width_pct",
+            "above_opening_range_mid",
+            "above_opening_range_high",
+            "late_day_blocked",
+            "confirmation_ready",
+            "raw_reclaim",
+        }.issubset(signals.columns)
     assert len(signals) == len(frame)
 
 
@@ -369,6 +573,15 @@ def test_template_is_registered_and_hypothesis_validation_allows_it() -> None:
         ({"max_hold_bars": 0}, "max_hold_bars must be positive"),
         ({"min_relative_volume": -0.1}, "min_relative_volume must be non-negative"),
         ({"exit_mode": "trailing_stop"}, "exit_mode must be one of"),
+        (
+            {"min_opening_range_width_pct": -0.01},
+            "min_opening_range_width_pct must be non-negative",
+        ),
+        ({"late_day_start_minutes": -1}, "late_day_start_minutes must be non-negative"),
+        (
+            {"confirmation_bars_above_vwap": -1},
+            "confirmation_bars_above_vwap must be non-negative",
+        ),
     ],
 )
 def test_invalid_params_fail_clearly(override: dict[str, object], message: str) -> None:

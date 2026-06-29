@@ -1,0 +1,105 @@
+id: vwap_reclaim_v2_intraday_session_flat
+name: VWAP Reclaim V2 Intraday Session Flat
+description: >
+  Conservative session-flat VWAP reclaim refinement using opening-range
+  structure, late-day avoidance, and optional post-reclaim confirmation.
+hypothesis_version: 2
+market_universe: us_liquid_5m_intraday
+instrument_type: stock
+timeframe: 5m
+data_source: eodhd
+template: vwap_reclaim_rejection
+signal_family: vwap_reclaim_rejection
+direction: long_only
+preferred_style: intraday
+allow_intraday: true
+allow_overnight: false
+allow_weekend: false
+max_holding_sessions: 1
+flatten_before_close_minutes: 10
+entry_cutoff_before_close_minutes: 30
+entry_logic: >
+  Long-only after a completed bar reclaims session VWAP from below, with
+  entries constrained to wider opening-range sessions where price is above the
+  opening-range mid and before the late-day window. Optional confirmation waits
+  for one completed bar above VWAP after the reclaim.
+exit_logic: >
+  Exit by max-bars time stop only. Scored positions are forced session-flat by
+  the research holding policy before close.
+holding_period: >
+  Intraday only. New entries are blocked before the no-entry cutoff and scored
+  positions must be flat before the close; max_holding_sessions is 1.
+expected_edge_reason: >
+  VWAP v1 attribution suggested reclaim entries may be less bad when paired
+  with wider opening-range structure and late-day avoidance. This is a
+  diagnostic refinement hypothesis, not an edge claim.
+invalidation_rules:
+  - Rejected if walk-forward test splits fail after realistic intraday costs.
+  - Rejected if trade count is too low for the selected parameter set.
+  - Rejected if returns do not exceed same-window buy-and-hold and null timing checks.
+  - Rejected if scored positions are not session-flat compliant.
+  - Rejected if robustness gates fail cost stress, trade quality, or concentration checks.
+minimum_evidence:
+  min_trades: 20
+  min_profitable_split_pct: 0.6
+  min_stability_score: 0.5
+robustness_policy:
+  require_cost_stress_for_intraday_candidate: true
+  cost_stress_candidate_multiplier: 1.5
+  min_candidate_profit_factor: 1.10
+  require_positive_median_trade: true
+  max_top_positive_split_share: 0.50
+  max_top_5_winner_profit_share: 0.50
+holding_policy:
+  preferred_style: intraday
+  allow_intraday: true
+  allow_overnight: false
+  allow_weekend: false
+  max_holding_sessions: 1
+  flatten_before_close_minutes: 10
+  entry_cutoff_before_close_minutes: 30
+  require_exceptional_evidence_for_swing: true
+  require_gap_risk_report: true
+  min_swing_excess_vs_benchmark: 0.05
+  min_swing_excess_vs_null: 0.03
+  min_swing_trade_count: 50
+  max_gap_return_contribution_pct: 0.25
+  max_weekend_exposure_count: 0
+  max_overnight_exposure_count: 0
+  max_swing_drawdown: 0.15
+parameter_space:
+  entry_mode: [reclaim]
+  entry_buffer_bps: [5]
+  min_reclaim_distance_bps: [20, 30]
+  reclaim_lookback_bars: [3]
+  rejection_lookback_bars: [3]
+  max_reclaim_distance_from_vwap_pct: [0.05]
+  max_rejection_distance_from_vwap_pct: [0.01]
+  min_bounce_distance_bps: [5]
+  min_bars_after_open: [3]
+  max_hold_bars: [12]
+  min_relative_volume: [1.0, 1.5]
+  exit_mode: [time_stop]
+  min_opening_range_width_pct: [0.025, 0.03]
+  require_above_opening_range_mid: [true]
+  require_above_opening_range_high: [false]
+  avoid_late_day: [true]
+  late_day_start_minutes: [300]
+  confirmation_bars_above_vwap: [0, 1]
+  confirmation_requires_low_above_vwap: [false]
+maximum_parameter_sets: 16
+costs:
+  spread_bps: 3
+  commission_bps: 0.5
+  slippage_bps: 2
+risk:
+  max_drawdown: 0.20
+  min_trades: 20
+walkforward:
+  mode: rolling
+  train_bars: 7800
+  test_bars: 3900
+  embargo_bars: 1
+  step_bars: 3900
+  minimum_rows: 11701
+created_at: "2026-06-29T00:00:00Z"

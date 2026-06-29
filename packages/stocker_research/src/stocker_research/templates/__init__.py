@@ -4,6 +4,7 @@ from stocker_research.templates.base import StrategyTemplate
 from stocker_research.templates.breakout import VolatilityBreakoutTemplate
 from stocker_research.templates.mean_reversion import MeanReversionTemplate
 from stocker_research.templates.moving_average import MovingAverageMomentumTemplate
+from stocker_research.templates.opening_range import OpeningRangeBreakoutTemplate
 from stocker_research.templates.pullback import PullbackInUptrendTemplate
 
 TEMPLATE_REGISTRY: dict[str, type[StrategyTemplate]] = {
@@ -11,6 +12,7 @@ TEMPLATE_REGISTRY: dict[str, type[StrategyTemplate]] = {
     PullbackInUptrendTemplate.name: PullbackInUptrendTemplate,
     MeanReversionTemplate.name: MeanReversionTemplate,
     VolatilityBreakoutTemplate.name: VolatilityBreakoutTemplate,
+    OpeningRangeBreakoutTemplate.name: OpeningRangeBreakoutTemplate,
 }
 
 
@@ -26,6 +28,7 @@ def get_template(name: str) -> StrategyTemplate:
 __all__ = [
     "MeanReversionTemplate",
     "MovingAverageMomentumTemplate",
+    "OpeningRangeBreakoutTemplate",
     "PullbackInUptrendTemplate",
     "StrategyTemplate",
     "TEMPLATE_REGISTRY",

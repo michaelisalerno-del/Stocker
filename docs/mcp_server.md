@@ -5,6 +5,13 @@ Stocker code, StockerLocal research reports, and local Stocker database summarie
 It is infrastructure only. It does not place orders, connect to brokers, fetch vendor
 data, run research scans, or expose arbitrary filesystem access.
 
+The server supports:
+
+- Local stdio MCP for Codex and other local agents
+- Local authenticated Streamable HTTP MCP at `/mcp` for ChatGPT connector tunnels
+- ChatGPT-friendly `search` and `fetch` tools
+- Read-only tool annotations for every exposed tool
+
 ## Roots
 
 The server resolves two allowed roots:
@@ -13,7 +20,7 @@ The server resolves two allowed roots:
   `packages/`.
 - Stocker workspace: `STOCKER_HOME`, or `~/StockerLocal` when the variable is unset.
 
-Report tools search these roots, in order:
+Report tools search these roots:
 
 - `$STOCKER_HOME/data/reports/research`
 - `data/reports/research` inside the repo, when present
@@ -22,7 +29,13 @@ Database tools are scoped to:
 
 - `$STOCKER_HOME/db`
 
+Exports are written only under:
+
+- `$STOCKER_HOME/exports`
+
 ## Launch
+
+Stdio remains the default:
 
 ```bash
 export STOCKER_HOME="$HOME/StockerLocal"
@@ -31,8 +44,57 @@ uv run stocker-mcp doctor
 uv run stocker-mcp
 ```
 
-`uv run stocker-mcp` starts the MCP server over stdio. No public HTTP listener is
-enabled.
+Start local HTTP mode for a connector tunnel:
+
+```bash
+export STOCKER_HOME="$HOME/StockerLocal"
+export STOCKER_MCP_TOKEN="$(openssl rand -hex 32)"
+
+uv run stocker-mcp \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --auth-token-env STOCKER_MCP_TOKEN
+```
+
+HTTP mode binds to `127.0.0.1` by default and requires a bearer token from
+`STOCKER_MCP_TOKEN` by default. The MCP endpoint is:
+
+```text
+http://127.0.0.1:8765/mcp
+```
+
+Do not bind to `0.0.0.0` unless you have a protected private network reason.
+
+## Helper Commands
+
+```bash
+uv run stocker-mcp --help
+uv run stocker-mcp doctor
+uv run stocker-mcp connector-info
+uv run stocker-mcp tools
+```
+
+`connector-info` prints:
+
+- Local MCP URL
+- Expected HTTPS tunnel URL placeholder
+- Connector name and description
+- Bearer auth header format without the token value
+- Tool names
+- Security mode
+- Docs path
+
+`doctor` checks:
+
+- Repo root
+- `STOCKER_HOME`
+- Report, DB, and export roots
+- Auth env var presence without printing the value
+- HTTP dependency availability
+- Unsafe bind-address warning
+- Tool count
+- Stdio and HTTP initialization
 
 ## Codex Registration
 
@@ -59,7 +121,12 @@ Do not add API keys or broker settings to the MCP server environment.
 
 ## Tools
 
-Code and git tools:
+Discovery:
+
+- `search`
+- `fetch`
+
+Code and git:
 
 - `get_repo_info`
 - `git_status`
@@ -70,7 +137,7 @@ Code and git tools:
 - `read_code_file`
 - `git_diff`
 
-Workspace and report tools:
+Workspace and reports:
 
 - `workspace_doctor`
 - `list_recent_research_runs`
@@ -84,7 +151,20 @@ Workspace and report tools:
 - `find_interesting_symbols`
 - `filter_symbol_results`
 
-Database tools:
+Discovery workflow summaries:
+
+- `summarise_latest_research_state`
+- `find_positive_rejected_symbols`
+- `find_null_pass_benchmark_fail_symbols`
+- `find_benchmark_pass_rejected_symbols`
+- `find_common_rejection_reasons`
+- `get_symbol_bar_summary`
+- `get_symbol_recent_sessions`
+- `get_trade_feature_buckets`
+- `compare_template_runs`
+- `suggest_research_questions`
+
+Database:
 
 - `db_list_databases`
 - `db_list_tables`
@@ -111,10 +191,42 @@ Prompts:
 - `compare_two_stocker_universe_runs`
 - `investigate_symbol_gate_failure`
 
+## Search And Fetch
+
+`search` returns results shaped for ChatGPT:
+
+```json
+{
+  "results": [
+    {
+      "id": "stocker://reports/home/universe%2Frun.json",
+      "title": "run.json",
+      "url": ""
+    }
+  ]
+}
+```
+
+`fetch` accepts only validated `stocker://` IDs:
+
+- `stocker://reports/...`
+- `stocker://runs/...`
+- `stocker://symbols/...`
+- `stocker://code/...`
+- `stocker://hypotheses/...`
+- `stocker://db/...`
+- `stocker://workspace/...`
+
+It returns safe redacted text plus metadata. It does not accept raw filesystem paths,
+`file://` URLs, path traversal, `.env`, credential files, or arbitrary database files.
+
 ## Security
 
 The server is read-only except for a local redacted audit log and diagnostics zip
 exports under `$STOCKER_HOME/exports`.
+
+Every MCP tool is registered with `readOnlyHint: true`, `destructiveHint: false`, and
+`openWorldHint: false`.
 
 It blocks:
 
@@ -126,17 +238,21 @@ It blocks:
 - Arbitrary shell commands
 - File write, patch, delete, rename, and move operations
 - Broker, IBKR, order, live execution, paper execution, and vendor-fetch tools
+- Raw database file download
+- Raw vendor payload dumps
+- Huge parquet, zip, and database dumps
 
 Text output is bounded and redacted for secret-looking values such as API keys,
-tokens, bearer headers, passwords, and credential-like database columns.
+tokens, bearer headers, passwords, high-entropy strings, and credential-like database
+columns.
 
-`db_select` is optional and restricted:
+`db_select` is restricted:
 
 - SELECT only
 - No semicolons
 - No `ATTACH`, `DETACH`, `COPY`, `EXPORT`, `INSTALL`, `LOAD`, `PRAGMA`, `CREATE`,
   `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, or similar statements
-- No file-reading functions such as `read_csv` or `read_parquet`
+- No file-reading functions such as `read_csv`, `read_parquet`, or `parquet_scan`
 - Forced row limit
 - Read-only SQLite and DuckDB connections where supported
 
@@ -149,13 +265,6 @@ uv run stocker-mcp
 
 ## Diagnostics Export
 
-Create a redacted zip suitable for uploading to ChatGPT:
-
-```bash
-export STOCKER_HOME="$HOME/StockerLocal"
-uv run stocker-mcp doctor
-```
-
 From an MCP client, call:
 
 ```text
@@ -166,6 +275,26 @@ The zip includes workspace diagnostics, git status, recent git log, latest unive
 run summaries, selected report JSON/Markdown files, DB schema summaries, and safe
 config examples. It excludes `.env`, API keys, database files, parquet/raw vendor
 payloads, broker state, and huge data files.
+
+## MCP Inspector
+
+If the MCP Inspector is installed, use it against stdio:
+
+```bash
+npx @modelcontextprotocol/inspector uv run stocker-mcp
+```
+
+For HTTP mode, start the server first and point the inspector at:
+
+```text
+http://127.0.0.1:8765/mcp
+```
+
+Include:
+
+```text
+Authorization: Bearer $STOCKER_MCP_TOKEN
+```
 
 ## Future Tools
 

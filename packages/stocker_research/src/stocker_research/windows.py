@@ -9,6 +9,8 @@ import pandas as pd
 
 from stocker_backtest.costs import CostModel
 from stocker_backtest.vectorized import DirectionMode, VectorizedBacktestResult, evaluate_positions
+from stocker_research.hypothesis import HypothesisHoldingPolicy
+from stocker_research.position_policy import PositionPolicyResult, apply_holding_policy_to_positions
 from stocker_research.templates import StrategyTemplate
 
 EVALUATION_POLICY_WITH_INDICATOR_CONTEXT = "walk_forward_with_indicator_context"
@@ -23,6 +25,7 @@ class EvaluationWindow:
 
     eval_frame: pd.DataFrame
     eval_positions: pd.Series
+    raw_eval_positions: pd.Series
     context_start: int
     context_rows_used: int
     required_lookback_bars: int
@@ -34,6 +37,7 @@ class WindowEvaluationResult:
 
     result: VectorizedBacktestResult
     window: EvaluationWindow
+    position_policy: PositionPolicyResult | None = None
 
 
 def build_evaluation_window(
@@ -43,6 +47,9 @@ def build_evaluation_window(
     *,
     eval_start: int,
     eval_end: int,
+    holding_policy: HypothesisHoldingPolicy | None = None,
+    timeframe: str | None = None,
+    market_calendar: str | None = None,
 ) -> EvaluationWindow:
     """Build positions with historical context, then score only eval rows."""
 
@@ -63,8 +70,23 @@ def build_evaluation_window(
         .fillna(0.0)
         .reset_index(drop=True)
     )
+    if holding_policy is not None and timeframe is not None:
+        policy_result = apply_holding_policy_to_positions(
+            context_frame,
+            positions,
+            policy=holding_policy,
+            timeframe=timeframe,
+            market_calendar=market_calendar,
+        )
+        positions = policy_result.adjusted_positions.reset_index(drop=True)
     eval_frame = frame.iloc[eval_start:eval_end].reset_index(drop=True)
     eval_offset = eval_start - context_start
+    raw_eval_positions = (
+        raw_positions.iloc[eval_offset : eval_offset + len(eval_frame)]
+        .reset_index(drop=True)
+        .reindex(eval_frame.index)
+        .fillna(0.0)
+    )
     eval_positions = (
         positions.iloc[eval_offset : eval_offset + len(eval_frame)]
         .reset_index(drop=True)
@@ -74,6 +96,7 @@ def build_evaluation_window(
     return EvaluationWindow(
         eval_frame=eval_frame,
         eval_positions=eval_positions,
+        raw_eval_positions=raw_eval_positions,
         context_start=context_start,
         context_rows_used=eval_start - context_start,
         required_lookback_bars=required_lookback_bars,
@@ -89,6 +112,9 @@ def evaluate_window_with_context(
     direction: DirectionMode,
     eval_start: int,
     eval_end: int,
+    holding_policy: HypothesisHoldingPolicy | None = None,
+    timeframe: str | None = None,
+    market_calendar: str | None = None,
 ) -> WindowEvaluationResult:
     """Evaluate one scoring window with pre-window indicator context."""
 
@@ -98,11 +124,23 @@ def evaluate_window_with_context(
         params,
         eval_start=eval_start,
         eval_end=eval_end,
+        holding_policy=holding_policy,
+        timeframe=timeframe,
+        market_calendar=market_calendar,
     )
+    position_policy = None
+    if holding_policy is not None and timeframe is not None:
+        position_policy = apply_holding_policy_to_positions(
+            window.eval_frame,
+            window.raw_eval_positions,
+            policy=holding_policy,
+            timeframe=timeframe,
+            market_calendar=market_calendar,
+        )
     result = evaluate_positions(
         window.eval_frame,
         window.eval_positions,
         cost_model=cost_model,
         direction=direction,
     )
-    return WindowEvaluationResult(result=result, window=window)
+    return WindowEvaluationResult(result=result, window=window, position_policy=position_policy)

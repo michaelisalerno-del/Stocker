@@ -17,7 +17,7 @@ def label_regimes(frame: pd.DataFrame, *, window: int = 20) -> pd.DataFrame:
     high = pd.to_numeric(frame["high"], errors="coerce")
     low = pd.to_numeric(frame["low"], errors="coerce")
     prior_close = close.shift(1)
-    returns = prior_close.pct_change()
+    returns = prior_close.pct_change(fill_method=None)
 
     volatility = returns.rolling(window, min_periods=window).std()
     volatility_median = volatility.expanding(min_periods=window).median()

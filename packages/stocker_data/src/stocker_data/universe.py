@@ -138,6 +138,8 @@ class UniverseQualificationRules(BaseModel):
     """Local data rules for admitting symbols into research-ready universes."""
 
     min_history_days: int = Field(default=750, ge=0)
+    min_row_count: int = Field(default=0, ge=0)
+    min_sessions: int = Field(default=0, ge=0)
     min_last_close: float = Field(default=5.0, ge=0.0)
     min_median_dollar_volume_60d: float = Field(default=10_000_000.0, ge=0.0)
     max_validation_errors: int = Field(default=0, ge=0)
@@ -714,11 +716,15 @@ def _dataset_stats(frame: pd.DataFrame) -> dict[str, Any]:
     history_days = 0
     if min_timestamp is not None and max_timestamp is not None:
         history_days = int((max_timestamp - min_timestamp).days)
+    session_count = 0
+    if timestamps is not None and not timestamps.empty:
+        session_count = int(pd.Series(timestamps.dt.date.unique()).nunique())
     return {
         "row_count": int(len(frame)),
         "min_timestamp": None if min_timestamp is None else str(min_timestamp),
         "max_timestamp": None if max_timestamp is None else str(max_timestamp),
         "history_days": history_days,
+        "session_count": session_count,
         "last_close": float(close.iloc[-1]) if not close.empty else 0.0,
         "median_volume_60d": float(volume.tail(60).median()) if not volume.empty else 0.0,
         "median_dollar_volume_60d": float(dollar_volume.tail(60).median())
@@ -775,6 +781,10 @@ def qualify_universe(
         )
         if stats["history_days"] < rules.min_history_days:
             reasons.append("insufficient_history")
+        if stats["row_count"] < rules.min_row_count:
+            reasons.append("insufficient_rows")
+        if stats["session_count"] < rules.min_sessions:
+            reasons.append("insufficient_sessions")
         if stats["last_close"] < rules.min_last_close:
             reasons.append("low_last_close")
         if stats["median_dollar_volume_60d"] < rules.min_median_dollar_volume_60d:

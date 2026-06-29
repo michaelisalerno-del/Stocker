@@ -241,7 +241,7 @@ def collect_research_leakage_issues(
 
     if "close" in frame and not frame.empty:
         close = pd.to_numeric(frame["close"], errors="coerce").reset_index(drop=True)
-        future_returns = close.pct_change().shift(-1)
+        future_returns = close.pct_change(fill_method=None).shift(-1)
         issues.extend(check_suspicious_perfect_prediction(signal, future_returns))
         issues.extend(check_suspicious_perfect_prediction(target_position, future_returns))
 

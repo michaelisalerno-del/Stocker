@@ -29,6 +29,11 @@ from stocker_research.leakage import (
 )
 from stocker_research.null_models import run_null_timing_test_for_splits
 from stocker_research.parameters import ParameterGrid, ParameterSet
+from stocker_research.position_policy import (
+    PositionPolicyResult,
+    apply_holding_policy_to_positions,
+    summarize_position_policy_effect,
+)
 from stocker_research.regime import label_regimes, performance_by_regime
 from stocker_research.selection import SelectionResult, select_parameter_set
 from stocker_research.stability import StabilityReport, analyze_stability
@@ -192,6 +197,9 @@ def _run_grid(
     splits: list[WalkForwardSplit],
     parameter_sets: list[ParameterSet],
     hypothesis: Hypothesis,
+    *,
+    timeframe: str | None = None,
+    market_calendar: str | None = None,
 ) -> list[dict[str, Any]]:
     template = _template_for(hypothesis)
     cost_model = _cost_model(hypothesis)
@@ -211,6 +219,8 @@ def _run_grid(
         test_trade_counts: list[int] = []
         test_drawdowns: list[float] = []
         test_context_rows: list[int] = []
+        train_position_policy_results: list[PositionPolicyResult] = []
+        test_position_policy_results: list[PositionPolicyResult] = []
         for split in splits:
             train_evaluation = evaluate_window_with_context(
                 frame,
@@ -220,6 +230,9 @@ def _run_grid(
                 direction=hypothesis.direction,
                 eval_start=split.train_start,
                 eval_end=split.train_end,
+                holding_policy=hypothesis.holding_policy,
+                timeframe=timeframe or hypothesis.timeframe,
+                market_calendar=market_calendar,
             )
             test_evaluation = evaluate_window_with_context(
                 frame,
@@ -229,6 +242,9 @@ def _run_grid(
                 direction=hypothesis.direction,
                 eval_start=split.test_start,
                 eval_end=split.test_end,
+                holding_policy=hypothesis.holding_policy,
+                timeframe=timeframe or hypothesis.timeframe,
+                market_calendar=market_calendar,
             )
             train_result = train_evaluation.result
             test_result = test_evaluation.result
@@ -237,11 +253,15 @@ def _run_grid(
             train_trade_counts.append(train_result.number_of_trades)
             train_drawdowns.append(train_result.max_drawdown)
             train_context_rows.append(train_evaluation.window.context_rows_used)
+            if train_evaluation.position_policy is not None:
+                train_position_policy_results.append(train_evaluation.position_policy)
             test_returns.append(test_result.net_return)
             test_gross_returns.append(test_result.gross_return)
             test_trade_counts.append(test_result.number_of_trades)
             test_drawdowns.append(test_result.max_drawdown)
             test_context_rows.append(test_evaluation.window.context_rows_used)
+            if test_evaluation.position_policy is not None:
+                test_position_policy_results.append(test_evaluation.position_policy)
         train_net_return = float(sum(train_returns) / len(train_returns))
         train_gross_return = float(sum(train_gross_returns) / len(train_gross_returns))
         train_profitable_split_pct = float(
@@ -277,6 +297,12 @@ def _run_grid(
                 "profitable_split_pct": test_profitable_split_pct,
                 "trade_count": test_trade_count,
                 "max_drawdown": test_max_drawdown,
+                "train_position_policy": summarize_position_policy_effect(
+                    train_position_policy_results
+                ),
+                "position_policy": summarize_position_policy_effect(
+                    test_position_policy_results
+                ),
             }
         )
     return rows
@@ -287,14 +313,44 @@ def _selected_test_window_positions(
     splits: list[WalkForwardSplit],
     template: StrategyTemplate,
     params: dict[str, Any],
-) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    *,
+    holding_policy: Any | None = None,
+    timeframe: str | None = None,
+    market_calendar: str | None = None,
+) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, dict[str, Any]]:
+    position_policy_results: list[PositionPolicyResult] = []
     if not splits:
         reset_frame = frame.reset_index(drop=True)
-        positions = template.generate_positions(reset_frame, params).reset_index(drop=True)
-        return reset_frame, positions, pd.Series(["full_sample"] * len(reset_frame))
+        window = build_evaluation_window(
+            frame,
+            template,
+            params,
+            eval_start=0,
+            eval_end=len(frame),
+            holding_policy=holding_policy,
+            timeframe=timeframe,
+            market_calendar=market_calendar,
+        )
+        if holding_policy is not None and timeframe is not None:
+            policy_result = apply_holding_policy_to_positions(
+                window.eval_frame,
+                window.raw_eval_positions,
+                policy=holding_policy,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
+            )
+            position_policy_results.append(policy_result)
+        return (
+            reset_frame,
+            window.raw_eval_positions,
+            window.eval_positions,
+            pd.Series(["full_sample"] * len(reset_frame)),
+            summarize_position_policy_effect(position_policy_results),
+        )
 
     frames: list[pd.DataFrame] = []
-    position_series: list[pd.Series] = []
+    raw_position_series: list[pd.Series] = []
+    scored_position_series: list[pd.Series] = []
     window_ids: list[str] = []
     for split in splits:
         if split.test_end <= split.test_start:
@@ -305,17 +361,38 @@ def _selected_test_window_positions(
             params,
             eval_start=split.test_start,
             eval_end=split.test_end,
+            holding_policy=holding_policy,
+            timeframe=timeframe,
+            market_calendar=market_calendar,
         )
         frames.append(window.eval_frame)
-        position_series.append(window.eval_positions)
+        raw_position_series.append(window.raw_eval_positions)
+        scored_position_series.append(window.eval_positions)
         window_ids.extend([split.split_id] * len(window.eval_frame))
+        if holding_policy is not None and timeframe is not None:
+            policy_result = apply_holding_policy_to_positions(
+                window.eval_frame,
+                window.raw_eval_positions,
+                policy=holding_policy,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
+            )
+            position_policy_results.append(policy_result)
     if not frames:
         empty = frame.iloc[0:0].reset_index(drop=True)
-        return empty, pd.Series(dtype=float), pd.Series(dtype=str)
+        return (
+            empty,
+            pd.Series(dtype=float),
+            pd.Series(dtype=float),
+            pd.Series(dtype=str),
+            summarize_position_policy_effect([]),
+        )
     return (
         pd.concat(frames, ignore_index=True),
-        pd.concat(position_series, ignore_index=True),
+        pd.concat(raw_position_series, ignore_index=True),
+        pd.concat(scored_position_series, ignore_index=True),
         pd.Series(window_ids),
+        summarize_position_policy_effect(position_policy_results),
     )
 
 
@@ -350,6 +427,11 @@ def _markdown(payload: dict[str, Any]) -> str:
     }
     holding_summary = {
         "holding_policy": payload.get("holding_policy", {}),
+        "position_policy": payload.get("position_policy", {}),
+        "raw_template_holding_policy_analysis": payload.get(
+            "raw_template_holding_policy_analysis", {}
+        ),
+        "scored_holding_policy_analysis": payload.get("scored_holding_policy_analysis", {}),
         "holding_policy_analysis": payload.get("holding_policy_analysis", {}),
         "holding_policy_decision": payload.get("holding_policy_decision", {}),
     }
@@ -437,6 +519,10 @@ The default preference is intraday and session-flat. Swing results are research
 vehicles unless they pass stricter evidence gates. Daily data cannot prove
 session-flat tradability; overnight, weekend, and gap contribution are reported
 separately where measurable.
+
+For intraday/session-flat hypotheses, raw template target positions remain visible
+for diagnostics, but scored positions are adjusted by the research-side position
+policy before returns, costs, holding analysis, and classification are computed.
 
 ```json
 {json.dumps(holding_summary, indent=2)}
@@ -574,7 +660,18 @@ def run_research_experiment(
         parameter_space=hypothesis.parameter_space,
         maximum_parameter_sets=min(max_parameter_sets, hypothesis.maximum_parameter_sets),
     ).expand()
-    grid_results = _run_grid(frame, splits, parameter_sets, hypothesis) if splits else []
+    grid_results = (
+        _run_grid(
+            frame,
+            splits,
+            parameter_sets,
+            hypothesis,
+            timeframe=key.timeframe,
+            market_calendar=market_calendar,
+        )
+        if splits
+        else []
+    )
     if grid_results:
         selection = select_parameter_set(
             grid_results,
@@ -644,6 +741,9 @@ def run_research_experiment(
         direction=hypothesis.direction,
         eval_start=0,
         eval_end=len(frame),
+        holding_policy=hypothesis.holding_policy,
+        timeframe=key.timeframe,
+        market_calendar=market_calendar,
     )
     full_result = full_evaluation.result
     signals = template.generate_signals(frame, selected_params)
@@ -685,22 +785,45 @@ def run_research_experiment(
         selected_net_return=_metric_float(selected_result, "test_net_return"),
         null_count=7,
         direction=hypothesis.direction,
+        holding_policy=hypothesis.holding_policy,
+        market_calendar=market_calendar,
     )
-    holding_frame, holding_positions, holding_window_ids = _selected_test_window_positions(
+    (
+        holding_frame,
+        raw_holding_positions,
+        scored_holding_positions,
+        holding_window_ids,
+        selected_position_policy,
+    ) = _selected_test_window_positions(
         frame,
         splits,
         template,
         selected_params,
+        holding_policy=hypothesis.holding_policy,
+        timeframe=key.timeframe,
+        market_calendar=market_calendar,
     )
-    holding_policy_analysis = analyze_holding_policy(
+    raw_template_holding_policy_analysis = analyze_holding_policy(
         holding_frame,
-        holding_positions,
+        raw_holding_positions,
         result=None,
         selected_net_return=_metric_float(selected_result, "test_net_return"),
         timeframe=key.timeframe,
         policy=hypothesis.holding_policy,
         window_ids=holding_window_ids,
+        market_calendar=market_calendar,
     )
+    scored_holding_policy_analysis = analyze_holding_policy(
+        holding_frame,
+        scored_holding_positions,
+        result=None,
+        selected_net_return=_metric_float(selected_result, "test_net_return"),
+        timeframe=key.timeframe,
+        policy=hypothesis.holding_policy,
+        window_ids=holding_window_ids,
+        market_calendar=market_calendar,
+    )
+    holding_policy_analysis = scored_holding_policy_analysis
     holding_policy_decision = build_holding_policy_decision(
         holding_policy_analysis,
         hypothesis.holding_policy,
@@ -833,6 +956,11 @@ def run_research_experiment(
         "strategy_direction": benchmark_comparison["strategy_direction"],
         "null_model_results": null_model_results,
         "holding_policy": hypothesis.holding_policy.model_dump(mode="json"),
+        "position_policy": selected_position_policy,
+        "raw_template_holding_policy_analysis": raw_template_holding_policy_analysis.model_dump(
+            mode="json"
+        ),
+        "scored_holding_policy_analysis": scored_holding_policy_analysis.model_dump(mode="json"),
         "holding_policy_analysis": holding_policy_analysis.model_dump(mode="json"),
         "holding_policy_decision": holding_policy_decision.model_dump(mode="json"),
         "warnings": warnings,

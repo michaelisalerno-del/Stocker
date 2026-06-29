@@ -34,7 +34,7 @@ class PullbackInUptrendTemplate(StrategyTemplate):
             historical_close
             > historical_close.rolling(trend_window, min_periods=trend_window).mean()
         )
-        pullback = historical_close.pct_change() <= threshold
+        pullback = historical_close.pct_change(fill_method=None) <= threshold
         entries = (trend & pullback).fillna(False)
         positions = pd.Series(0.0, index=frame.index)
         for index, should_enter in enumerate(entries):

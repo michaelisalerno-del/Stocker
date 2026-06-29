@@ -121,7 +121,7 @@ def evaluate_positions(
     else:
         position = raw_position.clip(lower=-1.0, upper=1.0)
 
-    returns = close.pct_change().fillna(0.0)
+    returns = close.pct_change(fill_method=None).fillna(0.0)
     gross_returns = position.shift(1).fillna(0.0) * returns
     position_change = position.diff().abs().fillna(position.abs())
     cost_return = position_change * cost_model.one_way_bps() / 10_000

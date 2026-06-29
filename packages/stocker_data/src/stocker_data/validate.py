@@ -485,7 +485,7 @@ def _validate_large_jumps(data: pd.DataFrame, *, threshold: float = 0.2) -> list
     if "close" not in data:
         return []
     close = pd.to_numeric(data["close"], errors="coerce")
-    jumps = close.pct_change().abs() > threshold
+    jumps = close.pct_change(fill_method=None).abs() > threshold
     if not jumps.any():
         return []
     return [

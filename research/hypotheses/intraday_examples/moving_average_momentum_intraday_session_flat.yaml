@@ -1,0 +1,59 @@
+id: moving_average_momentum_intraday_session_flat_v1
+name: Moving Average Momentum Intraday Session Flat
+description: Intraday 5m session-flat scoring variant of the existing moving-average template.
+hypothesis_version: 1
+market_universe: us_test_5_intraday_smoke
+instrument_type: stock
+symbol_filter: "*"
+timeframe: 5m
+data_source: eodhd
+template: moving_average_momentum
+signal_family: moving_average_momentum
+direction: long_only
+entry_logic: Long when a fast historical 5m moving average is above a slow historical 5m moving average.
+exit_logic: Flat when the fast moving average is no longer above the slow average; session-flat overlay forces flat before close.
+holding_period: Intraday only; raw persistence is scored through the session-flat position policy.
+expected_edge_reason: >
+  A liquid-stock intraday trend signal may be worth rejecting or studying only after
+  it survives session-flat scoring and higher intraday costs.
+invalidation_rules:
+  - Rejected if net test return is not positive after intraday costs.
+  - Rejected if train-side selection fails.
+  - Rejected if the session-flat scored positions are not compliant.
+  - Rejected if trade count is too low.
+minimum_evidence:
+  min_trades: 20
+  min_profitable_split_pct: 0.6
+  min_stability_score: 0.5
+holding_policy:
+  preferred_style: intraday
+  allow_intraday: true
+  allow_overnight: false
+  allow_weekend: false
+  max_holding_sessions: 1
+  flatten_before_close_minutes: 10
+  entry_cutoff_before_close_minutes: 30
+  require_exceptional_evidence_for_swing: true
+  require_gap_risk_report: true
+  max_gap_return_contribution_pct: 0.0
+  max_weekend_exposure_count: 0
+  max_overnight_exposure_count: 0
+parameter_space:
+  fast_window: [6, 12]
+  slow_window: [36, 72]
+  holding_period: [6]
+maximum_parameter_sets: 4
+costs:
+  spread_bps: 3
+  commission_bps: 0.5
+  slippage_bps: 3
+risk:
+  max_drawdown: 0.25
+walkforward:
+  mode: rolling
+  train_bars: 3900
+  test_bars: 780
+  embargo_bars: 1
+  step_bars: 3900
+  minimum_rows: 4681
+created_at: "2026-06-28T00:00:00Z"

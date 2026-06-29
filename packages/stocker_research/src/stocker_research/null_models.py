@@ -11,6 +11,8 @@ import pandas as pd
 
 from stocker_backtest.costs import CostModel
 from stocker_backtest.vectorized import DirectionMode, evaluate_positions
+from stocker_research.hypothesis import HypothesisHoldingPolicy
+from stocker_research.position_policy import apply_holding_policy_to_positions
 from stocker_research.templates import StrategyTemplate
 from stocker_research.walkforward import WalkForwardSplit
 from stocker_research.windows import (
@@ -121,6 +123,8 @@ def run_null_timing_test(
     selected_net_return: float,
     null_count: int = 7,
     direction: DirectionMode = "long_only",
+    holding_policy: HypothesisHoldingPolicy | None = None,
+    market_calendar: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate deterministic circular timing shifts of the selected positions."""
 
@@ -137,6 +141,14 @@ def run_null_timing_test(
     null_returns: list[float] = []
     for offset in _deterministic_offsets(len(values), null_count, seed):
         shifted = pd.Series(_circular_shift(values, offset))
+        if holding_policy is not None:
+            shifted = apply_holding_policy_to_positions(
+                frame.reset_index(drop=True),
+                shifted,
+                policy=holding_policy,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
+            ).adjusted_positions
         result = evaluate_positions(
             frame.reset_index(drop=True),
             shifted,
@@ -169,6 +181,8 @@ def run_null_timing_test_for_splits(
     selected_net_return: float,
     direction: DirectionMode,
     null_count: int = 7,
+    holding_policy: HypothesisHoldingPolicy | None = None,
+    market_calendar: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate deterministic null timing over the same test windows as the grid."""
 
@@ -185,6 +199,8 @@ def run_null_timing_test_for_splits(
             selected_net_return=selected_net_return,
             null_count=null_count,
             direction=direction,
+            holding_policy=holding_policy,
+            market_calendar=market_calendar,
         )
 
     test_length = sum(max(0, split.test_end - split.test_start) for split in splits)
@@ -207,10 +223,21 @@ def run_null_timing_test_for_splits(
                 selected_params,
                 eval_start=split.test_start,
                 eval_end=split.test_end,
+                holding_policy=holding_policy,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
             )
             shifted = pd.Series(
                 _circular_shift([float(value) for value in window.eval_positions], offset)
             )
+            if holding_policy is not None:
+                shifted = apply_holding_policy_to_positions(
+                    window.eval_frame,
+                    shifted,
+                    policy=holding_policy,
+                    timeframe=timeframe,
+                    market_calendar=market_calendar,
+                ).adjusted_positions
             result = evaluate_positions(
                 window.eval_frame,
                 shifted,

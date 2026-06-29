@@ -697,6 +697,8 @@ def universe_qualify(
     source: Annotated[str, typer.Option("--source")] = "eodhd",
     data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
     min_history_days: Annotated[int, typer.Option("--min-history-days", min=0)] = 750,
+    min_row_count: Annotated[int, typer.Option("--min-row-count", min=0)] = 0,
+    min_sessions: Annotated[int, typer.Option("--min-sessions", min=0)] = 0,
     min_last_close: Annotated[float, typer.Option("--min-last-close", min=0.0)] = 5.0,
     min_median_dollar_volume_60d: Annotated[
         float, typer.Option("--min-median-dollar-volume-60d", min=0.0)
@@ -722,6 +724,8 @@ def universe_qualify(
         source=source,
         rules=UniverseQualificationRules(
             min_history_days=min_history_days,
+            min_row_count=min_row_count,
+            min_sessions=min_sessions,
             min_last_close=min_last_close,
             min_median_dollar_volume_60d=min_median_dollar_volume_60d,
             max_validation_errors=max_validation_errors,
@@ -898,6 +902,133 @@ def research_run_universe(
             "json": str(result.json_path),
             "config_path": str(config),
             "data_dir": str(resolved_data_dir),
+        }
+    )
+
+
+@research_app.command("failure-anatomy")
+def research_failure_anatomy(
+    reports_dir: Annotated[Path, typer.Option("--reports-dir")] = Path("data/reports/research"),
+    output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
+) -> None:
+    """Build Stage 3.6 diagnostics from existing research reports."""
+
+    from stocker_research.failure_anatomy import build_failure_anatomy_summary
+
+    result = build_failure_anatomy_summary(report_root=reports_dir, output_dir=output_dir)
+    files_created = [str(result.summary_json_path), str(result.summary_markdown_path)]
+    if result.selected_cases_csv_path is not None:
+        files_created.append(str(result.selected_cases_csv_path))
+    console.print(
+        {
+            "output_name": "stage3_6_failure_anatomy",
+            "files_created": files_created,
+            "report_count_analyzed": result.report_count_analyzed,
+            "malformed_report_count": result.malformed_report_count,
+            "classification_counts": result.classification_counts,
+            "top_diagnostic_findings": result.top_diagnostic_findings,
+            "recommended_next_step": result.recommended_next_step,
+        }
+    )
+
+
+@research_app.command("intraday-session-integrity")
+def research_intraday_session_integrity(
+    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+    output_dir: Annotated[
+        Path, typer.Option("--output-dir")
+    ] = Path("data/reports/research/stage3_8_intraday_session_integrity"),
+    stage3_7_summary: Annotated[
+        Path, typer.Option("--stage3-7-summary", exists=True, file_okay=True)
+    ] = Path("data/reports/research/stage3_7_intraday_5m_session_flat_smoke/summary.json"),
+    symbol: Annotated[list[str] | None, typer.Option("--symbol")] = None,
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
+    source: Annotated[str, typer.Option("--source")] = "eodhd",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    market_calendar: Annotated[str, typer.Option("--market-calendar")] = "XNYS",
+) -> None:
+    """Build Stage 3.8 intraday session-integrity diagnostics from local reports/data."""
+
+    from stocker_research.intraday_session_integrity import (
+        DEFAULT_SYMBOLS,
+        build_intraday_session_integrity_summary,
+    )
+
+    result = build_intraday_session_integrity_summary(
+        data_dir=data_dir,
+        output_dir=output_dir,
+        symbols=symbol or DEFAULT_SYMBOLS,
+        timeframe=timeframe,
+        source=source,
+        instrument_type=instrument_type,
+        market_calendar=market_calendar,
+        stage3_7_summary_path=stage3_7_summary,
+    )
+    console.print(
+        {
+            "output_name": "stage3_8_intraday_session_integrity",
+            "files_created": [
+                str(result.summary_json_path),
+                str(result.summary_markdown_path),
+                str(result.incomplete_sessions_csv_path),
+                str(result.session_bar_counts_csv_path),
+                str(result.position_policy_actions_csv_path),
+            ],
+            "report_count_analyzed": result.report_count_analyzed,
+            "incomplete_session_count_by_bucket": result.incomplete_session_count_by_bucket,
+            "symbols_with_most_incomplete_sessions": (
+                result.symbols_with_most_incomplete_sessions[:5]
+            ),
+            "position_policy_action_summary": result.position_policy_action_summary,
+            "intraday_classification_anatomy": result.intraday_classification_anatomy,
+            "stage_passed": result.stage_passed,
+            "recommended_next_step": result.recommended_next_step,
+        }
+    )
+
+
+@research_app.command("intraday-feature-audit")
+def research_intraday_feature_audit(
+    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+    universe: Annotated[
+        Path, typer.Option("--universe", exists=True, file_okay=True)
+    ] = Path("data/universes/research_ready/us_liquid_25_5m_intraday.json"),
+    output_dir: Annotated[
+        Path, typer.Option("--output-dir")
+    ] = Path("data/reports/research/stage4_1_intraday_feature_audit"),
+    source: Annotated[str, typer.Option("--source")] = "eodhd",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = "XNYS",
+) -> None:
+    """Build Stage 4.1 research-only intraday feature diagnostics from local data."""
+
+    from stocker_research.intraday_features import build_intraday_feature_audit
+
+    result = build_intraday_feature_audit(
+        data_dir=data_dir,
+        universe_path=universe,
+        output_dir=output_dir,
+        source=source,
+        instrument_type=instrument_type,
+        timeframe=timeframe,
+        market_calendar=market_calendar,
+    )
+    console.print(
+        {
+            "output_name": "stage4_1_intraday_feature_audit",
+            "files_created": [
+                str(result.summary_json_path),
+                str(result.summary_markdown_path),
+                str(result.feature_availability_csv_path),
+                str(result.session_feature_quality_csv_path),
+                str(result.feature_null_rates_csv_path),
+            ],
+            "symbol_count": result.symbol_count,
+            "feature_availability_summary": result.feature_availability_summary,
+            "null_rate_summary": result.null_rate_summary,
+            "session_warning_summary": result.session_warning_summary,
+            "stage_passed": result.stage_passed,
         }
     )
 

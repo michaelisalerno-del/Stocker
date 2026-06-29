@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from functools import lru_cache
 from typing import Any
 
 import pandas as pd
@@ -86,17 +87,67 @@ def _max_holding_stats(timestamps: pd.Series, held: pd.Series) -> tuple[int, int
     return max_bars, max_sessions
 
 
+@lru_cache(maxsize=128)
+def _cached_calendar_closes(
+    market_calendar: str,
+    start_date: date,
+    end_date: date,
+) -> tuple[tuple[str, str], ...]:
+    try:
+        import pandas_market_calendars as mcal
+    except ImportError:
+        return ()
+
+    calendar = mcal.get_calendar(market_calendar)
+    schedule = calendar.schedule(
+        start_date=start_date,
+        end_date=end_date,
+    )
+    rows: list[tuple[str, str]] = []
+    for session, row in schedule.iterrows():
+        close = pd.Timestamp(row["market_close"]).tz_convert("UTC")
+        rows.append((str(pd.Timestamp(session).date()), close.isoformat()))
+    return tuple(rows)
+
+
+def _calendar_close_by_date(
+    timestamps: pd.Series,
+    market_calendar: str | None,
+) -> dict[date, pd.Timestamp]:
+    if not market_calendar or timestamps.empty:
+        return {}
+    try:
+        rows = _cached_calendar_closes(
+            market_calendar,
+            timestamps.min().date(),
+            timestamps.max().date(),
+        )
+    except Exception:
+        return {}
+    return {pd.Timestamp(session).date(): pd.Timestamp(close) for session, close in rows}
+
+
 def _intraday_close_violations(
     timestamps: pd.Series,
     positions: pd.Series,
     *,
     policy: HypothesisHoldingPolicy,
+    market_calendar: str | None = None,
 ) -> tuple[list[str], bool]:
     violations: list[str] = []
     flat_by_close = True
     frame = pd.DataFrame({"timestamp": timestamps, "position": positions})
     frame["session_date"] = frame["timestamp"].dt.date
-    close_by_date = frame.groupby("session_date")["timestamp"].transform("max")
+    proxy_close_by_date = frame.groupby("session_date")["timestamp"].transform("max")
+    calendar_closes = _calendar_close_by_date(timestamps, market_calendar)
+    if calendar_closes:
+        calendar_close_by_date = pd.to_datetime(
+            frame["session_date"].map(calendar_closes),
+            utc=True,
+        )
+        close_by_date = calendar_close_by_date.fillna(proxy_close_by_date)
+    else:
+        close_by_date = proxy_close_by_date
     minutes_to_close = (close_by_date - frame["timestamp"]).dt.total_seconds() / 60
     held_near_close = (frame["position"].abs() > 0) & (
         minutes_to_close <= policy.flatten_before_close_minutes
@@ -123,6 +174,7 @@ def analyze_holding_policy(
     timeframe: str,
     policy: HypothesisHoldingPolicy,
     window_ids: pd.Series | None = None,
+    market_calendar: str | None = None,
 ) -> HoldingPolicyReport:
     """Analyze holding behavior and overnight/weekend return contribution."""
 
@@ -225,6 +277,7 @@ def analyze_holding_policy(
             timestamps,
             aligned_positions,
             policy=policy,
+            market_calendar=market_calendar,
         )
         violations.extend(close_violations)
         session_flat_compliant = flat_by_close and overnight_count == 0

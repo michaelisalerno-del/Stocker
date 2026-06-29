@@ -906,6 +906,54 @@ def research_run_universe(
     )
 
 
+@research_app.command("vwap-quality")
+def research_vwap_quality(
+    reports_dir: Annotated[Path, typer.Option("--reports-dir")] = Path(
+        "data/reports/research"
+    ),
+    output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
+    report_path: Annotated[list[Path] | None, typer.Option("--report-path")] = None,
+    universe: Annotated[Path | None, typer.Option("--universe")] = None,
+    symbol: Annotated[list[str] | None, typer.Option("--symbol")] = None,
+    data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
+    source: Annotated[str, typer.Option("--source")] = "eodhd",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = "XNYS",
+) -> None:
+    """Build research-only VWAP quality attribution diagnostics."""
+
+    from stocker_research.vwap_quality import build_vwap_quality_report
+
+    result = build_vwap_quality_report(
+        reports_dir=reports_dir,
+        output_dir=output_dir,
+        report_paths=report_path,
+        universe_path=universe,
+        symbols=symbol,
+        data_dir=data_dir,
+        timeframe=timeframe,
+        source=source,
+        instrument_type=instrument_type,
+        market_calendar=market_calendar,
+    )
+    console.print(
+        {
+            "output_name": "vwap_quality_attribution",
+            "files_created": [
+                str(result.summary_json_path),
+                str(result.summary_markdown_path),
+                str(result.trade_attribution_csv_path),
+                str(result.feature_bucket_summary_csv_path),
+                str(result.symbol_summary_csv_path),
+            ],
+            "report_count_analyzed": result.report_count_analyzed,
+            "trade_count": result.trade_count,
+            "parameter_set_count": result.parameter_set_count,
+        }
+    )
+
+
 @research_app.command("failure-anatomy")
 def research_failure_anatomy(
     reports_dir: Annotated[Path, typer.Option("--reports-dir")] = Path("data/reports/research"),

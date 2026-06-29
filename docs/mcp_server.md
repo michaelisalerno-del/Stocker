@@ -54,17 +54,30 @@ uv run stocker-mcp \
   --transport http \
   --host 127.0.0.1 \
   --port 8765 \
+  --auth-mode oauth \
   --auth-token-env STOCKER_MCP_TOKEN
 ```
 
-HTTP mode binds to `127.0.0.1` by default and requires a bearer token from
-`STOCKER_MCP_TOKEN` by default. The MCP endpoint is:
+HTTP mode binds to `127.0.0.1` by default. For ChatGPT connectors, use
+`--auth-mode oauth`. `STOCKER_MCP_TOKEN` acts as a local setup code on the OAuth
+approval page. The MCP endpoint is:
 
 ```text
 http://127.0.0.1:8765/mcp
 ```
 
 Do not bind to `0.0.0.0` unless you have a protected private network reason.
+
+Bearer-token mode remains available for local clients:
+
+```bash
+uv run stocker-mcp \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --auth-mode bearer \
+  --auth-token-env STOCKER_MCP_TOKEN
+```
 
 ## Helper Commands
 
@@ -80,7 +93,7 @@ uv run stocker-mcp tools
 - Local MCP URL
 - Expected HTTPS tunnel URL placeholder
 - Connector name and description
-- Bearer auth header format without the token value
+- OAuth metadata locations or bearer auth header format without secret values
 - Tool names
 - Security mode
 - Docs path
@@ -95,6 +108,26 @@ uv run stocker-mcp tools
 - Unsafe bind-address warning
 - Tool count
 - Stdio and HTTP initialization
+
+## OAuth Endpoints
+
+OAuth mode exposes local metadata and auth endpoints for ChatGPT:
+
+- `/.well-known/oauth-protected-resource`
+- `/.well-known/oauth-authorization-server`
+- `/oauth/register`
+- `/oauth/authorize`
+- `/oauth/token`
+- `/oauth/revoke`
+
+The OAuth implementation is local and in-memory:
+
+- Dynamic client registration is supported.
+- Authorization code with PKCE `S256` is supported.
+- Refresh tokens are supported for the current server process.
+- Access and refresh tokens are not written to disk.
+- The setup code is read from an environment variable and is never printed by helper
+  commands.
 
 ## Codex Registration
 

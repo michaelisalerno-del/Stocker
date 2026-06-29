@@ -10,6 +10,7 @@ from hmac import compare_digest
 from typing import Any
 
 from stocker_mcp import __version__
+from stocker_mcp.oauth import OAuthMiddleware, OAuthState
 from stocker_mcp.schemas import (
     READ_ONLY_ANNOTATIONS,
     TOOL_NAMES,
@@ -25,6 +26,8 @@ from stocker_mcp.tools import database as database_tools
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_AUTH_TOKEN_ENV = "STOCKER_MCP_TOKEN"
+DEFAULT_OAUTH_SETUP_CODE_ENV = "STOCKER_MCP_TOKEN"
+AUTH_MODES = ("oauth", "bearer")
 MCP_PATH = "/mcp"
 CONNECTOR_NAME = "Stocker Research"
 CONNECTOR_DESCRIPTION = (
@@ -61,6 +64,7 @@ def _tool_kwargs(name: str) -> dict[str, Any]:
         "title": spec.title,
         "description": spec.description,
         "annotations": ToolAnnotations(**READ_ONLY_ANNOTATIONS),
+        "meta": {"securitySchemes": [{"type": "oauth2", "scopes": ["stocker.read"]}]},
         "structured_output": True,
     }
 
@@ -459,18 +463,31 @@ def build_http_app(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     auth_token_env: str = DEFAULT_AUTH_TOKEN_ENV,
+    auth_mode: str = "bearer",
+    oauth_setup_code_env: str = DEFAULT_OAUTH_SETUP_CODE_ENV,
     require_auth: bool = True,
 ) -> Any:
     """Build the authenticated Streamable HTTP MCP app."""
 
-    token = os.environ.get(auth_token_env)
-    if require_auth and not token:
-        raise SecurityError(f"HTTP mode requires auth token env var {auth_token_env} to be set")
+    if auth_mode not in AUTH_MODES:
+        raise SecurityError(f"unsupported HTTP auth mode: {auth_mode}")
     mcp = build_server(host=host, port=port)
     app = mcp.streamable_http_app()
-    if require_auth and token:
-        context = default_context()
+    if not require_auth:
+        return app
+    context = default_context()
+    if auth_mode == "bearer":
+        token = os.environ.get(auth_token_env)
+        if not token:
+            raise SecurityError(f"HTTP mode requires auth token env var {auth_token_env} to be set")
         app = _BearerAuthMiddleware(app, token=token, context=context)
+    else:
+        setup_code = os.environ.get(oauth_setup_code_env)
+        if not setup_code:
+            raise SecurityError(
+                f"OAuth mode requires setup code env var {oauth_setup_code_env} to be set"
+            )
+        app = OAuthMiddleware(app, state=OAuthState(setup_code=setup_code), context=context)
     return app
 
 
@@ -478,22 +495,39 @@ def connector_info(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     auth_token_env: str = DEFAULT_AUTH_TOKEN_ENV,
+    auth_mode: str = "bearer",
+    oauth_setup_code_env: str = DEFAULT_OAUTH_SETUP_CODE_ENV,
 ) -> dict[str, Any]:
     """Return local ChatGPT connector setup info without exposing secrets."""
 
     context = default_context()
     auth_set = bool(os.environ.get(auth_token_env))
+    oauth_setup_code_set = bool(os.environ.get(oauth_setup_code_env))
+    if auth_mode == "oauth":
+        auth = {
+            "enabled": True,
+            "type": "oauth",
+            "setup_code_env_var": oauth_setup_code_env,
+            "setup_code_env_var_set": oauth_setup_code_set,
+            "authorization_metadata": "https://YOUR-TUNNEL-URL/.well-known/oauth-authorization-server",
+            "protected_resource_metadata": (
+                "https://YOUR-TUNNEL-URL/.well-known/oauth-protected-resource"
+            ),
+        }
+    else:
+        auth = {
+            "enabled": True,
+            "type": "bearer",
+            "env_var": auth_token_env,
+            "env_var_set": auth_set,
+            "header": f"Authorization: Bearer <{auth_token_env}>",
+        }
     return {
         "local_url": f"http://{host}:{port}{MCP_PATH}",
         "expected_https_tunnel_url": "https://YOUR-TUNNEL-URL/mcp",
         "connector_name": CONNECTOR_NAME,
         "connector_description": CONNECTOR_DESCRIPTION,
-        "auth": {
-            "enabled": True,
-            "env_var": auth_token_env,
-            "env_var_set": auth_set,
-            "header": f"Authorization: Bearer <{auth_token_env}>",
-        },
+        "auth": auth,
         "tools": list(tool_names()),
         "tool_count": len(tool_names()),
         "security_mode": "read-only",
@@ -508,6 +542,8 @@ def doctor(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     auth_token_env: str = DEFAULT_AUTH_TOKEN_ENV,
+    auth_mode: str = "bearer",
+    oauth_setup_code_env: str = DEFAULT_OAUTH_SETUP_CODE_ENV,
 ) -> dict[str, Any]:
     """Return safe MCP server diagnostics."""
 
@@ -527,9 +563,20 @@ def doctor(
     except Exception:
         stdio_can_initialise = False
         http_can_initialise = False
-    if transport == "http" and os.environ.get(auth_token_env):
+    auth_env_ready = bool(os.environ.get(auth_token_env))
+    oauth_setup_ready = bool(os.environ.get(oauth_setup_code_env))
+    if transport == "http" and (
+        (auth_mode == "bearer" and auth_env_ready)
+        or (auth_mode == "oauth" and oauth_setup_ready)
+    ):
         try:
-            build_http_app(host=host, port=port, auth_token_env=auth_token_env)
+            build_http_app(
+                host=host,
+                port=port,
+                auth_token_env=auth_token_env,
+                auth_mode=auth_mode,
+                oauth_setup_code_env=oauth_setup_code_env,
+            )
         except Exception:
             http_can_initialise = False
     return {
@@ -545,8 +592,11 @@ def doctor(
             "port": port,
             "path": MCP_PATH,
             "auth_enabled": True,
+            "auth_mode": auth_mode,
             "auth_env_var": auth_token_env,
-            "auth_env_var_set": bool(os.environ.get(auth_token_env)),
+            "auth_env_var_set": auth_env_ready,
+            "oauth_setup_code_env_var": oauth_setup_code_env,
+            "oauth_setup_code_env_var_set": oauth_setup_ready,
             "dependencies": http_deps,
             "unsafe_bind_warning": _unsafe_bind_warning(host),
         },
@@ -554,7 +604,13 @@ def doctor(
     }
 
 
-def _startup_payload(host: str, port: int, auth_token_env: str) -> dict[str, Any]:
+def _startup_payload(
+    host: str,
+    port: int,
+    auth_token_env: str,
+    auth_mode: str,
+    oauth_setup_code_env: str,
+) -> dict[str, Any]:
     context = default_context()
     return {
         "local_mcp_url": f"http://{host}:{port}{MCP_PATH}",
@@ -562,17 +618,38 @@ def _startup_payload(host: str, port: int, auth_token_env: str) -> dict[str, Any
         "repo_root": str(context.repo_root),
         "stocker_home": str(context.stocker_home),
         "tool_count": len(tool_names()),
-        "auth_enabled": bool(os.environ.get(auth_token_env)),
+        "auth_enabled": True,
+        "auth_mode": auth_mode,
         "auth_token_env": auth_token_env,
+        "auth_token_env_set": bool(os.environ.get(auth_token_env)),
+        "oauth_setup_code_env": oauth_setup_code_env,
+        "oauth_setup_code_env_set": bool(os.environ.get(oauth_setup_code_env)),
         "unsafe_bind_warning": _unsafe_bind_warning(host),
     }
 
 
-def _run_http(host: str, port: int, auth_token_env: str) -> None:
-    if not os.environ.get(auth_token_env):
-        raise SecurityError(f"set {auth_token_env} before starting HTTP mode")
-    print(_json(_startup_payload(host, port, auth_token_env)), file=sys.stderr)
-    app = build_http_app(host=host, port=port, auth_token_env=auth_token_env)
+def _run_http(
+    host: str,
+    port: int,
+    auth_token_env: str,
+    auth_mode: str,
+    oauth_setup_code_env: str,
+) -> None:
+    if auth_mode == "bearer" and not os.environ.get(auth_token_env):
+        raise SecurityError(f"set {auth_token_env} before starting HTTP bearer mode")
+    if auth_mode == "oauth" and not os.environ.get(oauth_setup_code_env):
+        raise SecurityError(f"set {oauth_setup_code_env} before starting HTTP OAuth mode")
+    print(
+        _json(_startup_payload(host, port, auth_token_env, auth_mode, oauth_setup_code_env)),
+        file=sys.stderr,
+    )
+    app = build_http_app(
+        host=host,
+        port=port,
+        auth_token_env=auth_token_env,
+        auth_mode=auth_mode,
+        oauth_setup_code_env=oauth_setup_code_env,
+    )
     import uvicorn
 
     uvicorn.run(app, host=host, port=port, log_level="info")
@@ -605,6 +682,17 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_AUTH_TOKEN_ENV,
         help="Environment variable containing the HTTP bearer token.",
     )
+    parser.add_argument(
+        "--auth-mode",
+        choices=AUTH_MODES,
+        default="bearer",
+        help="HTTP auth mode. Use oauth for ChatGPT custom connectors.",
+    )
+    parser.add_argument(
+        "--oauth-setup-code-env",
+        default=DEFAULT_OAUTH_SETUP_CODE_ENV,
+        help="Environment variable containing the local OAuth setup code.",
+    )
     parser.add_argument("--version", action="version", version=f"stocker-mcp {__version__}")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("doctor", help="Print safe workspace and connector diagnostics and exit.")
@@ -625,6 +713,8 @@ def main(argv: list[str] | None = None) -> None:
                     host=args.host,
                     port=args.port,
                     auth_token_env=args.auth_token_env,
+                    auth_mode=args.auth_mode,
+                    oauth_setup_code_env=args.oauth_setup_code_env,
                 )
             )
         )
@@ -635,12 +725,24 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "connector-info":
         print(
             _plain_json(
-                connector_info(host=args.host, port=args.port, auth_token_env=args.auth_token_env)
+                connector_info(
+                    host=args.host,
+                    port=args.port,
+                    auth_token_env=args.auth_token_env,
+                    auth_mode=args.auth_mode,
+                    oauth_setup_code_env=args.oauth_setup_code_env,
+                )
             )
         )
         return
     if args.transport == "http":
-        _run_http(host=args.host, port=args.port, auth_token_env=args.auth_token_env)
+        _run_http(
+            host=args.host,
+            port=args.port,
+            auth_token_env=args.auth_token_env,
+            auth_mode=args.auth_mode,
+            oauth_setup_code_env=args.oauth_setup_code_env,
+        )
         return
     build_server(host=args.host, port=args.port).run(transport="stdio")
 

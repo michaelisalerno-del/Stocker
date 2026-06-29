@@ -40,6 +40,7 @@ uv run stocker-mcp \
   --transport http \
   --host 127.0.0.1 \
   --port 8765 \
+  --auth-mode oauth \
   --auth-token-env STOCKER_MCP_TOKEN
 ```
 
@@ -49,13 +50,12 @@ The local MCP endpoint is:
 http://127.0.0.1:8765/mcp
 ```
 
-HTTP mode requires:
+For ChatGPT, HTTP mode uses OAuth. `STOCKER_MCP_TOKEN` is used as the local setup
+code on the OAuth approval page. It is not printed by the server and should not be
+committed or pasted into docs.
 
-```text
-Authorization: Bearer <your STOCKER_MCP_TOKEN value>
-```
-
-Do not paste the token into logs, docs, commits, or screenshots.
+Bearer-token mode remains available for local clients with `--auth-mode bearer`, but
+ChatGPT custom connectors should use OAuth.
 
 ## Connector Info
 
@@ -71,7 +71,7 @@ This prints:
 - Tunnel URL placeholder: `https://YOUR-TUNNEL-URL/mcp`
 - Connector name: `Stocker Research`
 - Connector description
-- Auth header format without the token value
+- OAuth metadata locations without setup-code values
 - Exposed tool names
 - Security mode
 - Docs path
@@ -151,17 +151,48 @@ In ChatGPT web:
 Connector name: Stocker Research
 Description: Read-only connector for Stocker historical research, code, reports, bars, database summaries, and hypothesis analysis. No trading or execution.
 Connector URL: https://YOUR-TUNNEL-URL/mcp
-Authentication: Bearer token / Authorization header
-Header: Authorization: Bearer <your STOCKER_MCP_TOKEN value>
+Authentication: OAuth
 ```
 
-If the UI asks for custom headers, use:
+If ChatGPT shows your callback URL, it can be registered dynamically by Stocker MCP.
+For example:
 
 ```text
-Authorization: Bearer <your STOCKER_MCP_TOKEN value>
+Callback URL:
+https://chatgpt.com/connector/oauth/LcDotGjs8ocx
 ```
 
-If the UI has a dedicated bearer-token field, paste only the token value.
+If the UI asks you to enter OAuth settings manually, use:
+
+```text
+Authorization URL:
+https://YOUR-TUNNEL-URL/oauth/authorize
+
+Token URL:
+https://YOUR-TUNNEL-URL/oauth/token
+
+Registration URL:
+https://YOUR-TUNNEL-URL/oauth/register
+
+Client setup:
+Dynamic Client Registration, if available
+
+Scopes:
+stocker.read
+
+Token endpoint authentication:
+None / public client
+
+PKCE:
+S256
+```
+
+When ChatGPT starts the OAuth flow, the Stocker approval page asks for a setup code.
+Paste the value of `STOCKER_MCP_TOKEN` there. Do not paste it into the connector
+description, docs, screenshots, or chat messages.
+
+If ChatGPT offers a client setup method, use Dynamic Client Registration or discovered
+OAuth settings from the server metadata.
 
 ## First Prompts
 
@@ -244,9 +275,10 @@ Tunnel URL wrong:
 Auth failure:
 
 - Confirm `STOCKER_MCP_TOKEN` was set before starting the server.
-- Confirm the ChatGPT connector sends `Authorization: Bearer <token>`.
-- If the UI has a bearer-token field, paste only the token value, not the whole header.
-- Restart the server after changing the token.
+- Confirm the server was started with `--auth-mode oauth`.
+- Confirm ChatGPT discovered the OAuth metadata.
+- Paste `STOCKER_MCP_TOKEN` only into the Stocker OAuth approval page.
+- Restart the server after changing the setup code.
 
 Server bound only to localhost:
 

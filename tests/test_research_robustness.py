@@ -106,7 +106,7 @@ def test_partial_pass_row_and_flags_capture_fragility() -> None:
 
     flags = build_robustness_flags(row, trade_count=68)
 
-    assert "fragile_costs" in flags
+    assert "failed_cost_stress" in flags
     assert "split_concentrated" in flags
     assert "trade_concentrated" in flags
     assert "negative_median_trade" in flags
@@ -150,7 +150,7 @@ def _passing_split_rows() -> list[dict[str, float | str]]:
 
 
 def _passing_trade_returns() -> list[float]:
-    return [0.010] * 10 + [-0.004, -0.004]
+    return [0.010] * 20 + [-0.004, -0.004]
 
 
 def _robust_candidate_result(
@@ -201,6 +201,10 @@ def test_intraday_robustness_diagnostics_use_required_report_shape() -> None:
     assert diagnostics["trade_concentration"]["top_5_winners_profit_share"] <= 0.50
     assert diagnostics["split_concentration"]["top_positive_split_share"] <= 0.50
     assert diagnostics["robustness_flags"] == []
+    assert "trade_return_summary" in diagnostics
+    assert "split_return_summary" in diagnostics
+    assert "cost_stress_summary" in diagnostics
+    assert "partial_pass_row" in diagnostics
 
 
 def test_clean_intraday_candidate_that_passes_robustness_remains_candidate() -> None:
@@ -426,3 +430,48 @@ def test_missing_trade_reconstruction_data_prevents_intraday_candidate() -> None
 
     assert result.classification == "interesting_intraday_needs_more_tests"
     assert "missing_trade_reconstruction" in result.reasons
+
+
+@pytest.mark.parametrize(
+    "blocking_flag",
+    [
+        "failed_cost_stress",
+        "negative_median_trade",
+        "split_concentrated",
+        "trade_concentrated",
+        "too_few_trades",
+        "benchmark_failed",
+        "null_failed",
+        "train_selection_failed",
+        "session_quality_warning",
+    ],
+)
+def test_intraday_candidate_is_downgraded_for_blocking_robustness_flags(
+    blocking_flag: str,
+) -> None:
+    diagnostics = build_intraday_robustness_diagnostics(
+        cost_stress_rows=_passing_cost_stress_rows(),
+        trade_returns=_passing_trade_returns(),
+        split_rows=_passing_split_rows(),
+        policy=RobustnessGatePolicy(),
+    )
+    diagnostics["robustness_flags"] = [blocking_flag]
+
+    result = classify_research_result(
+        net_test_return=0.08,
+        gross_test_return=0.10,
+        trade_count=80,
+        stability_score=0.75,
+        profitable_split_pct=0.75,
+        max_drawdown=-0.10,
+        cost_drag=0.02,
+        data_errors=0,
+        leakage_errors=0,
+        benchmark_pass=True,
+        null_pass=True,
+        holding_policy_classification="candidate_intraday_test",
+        holding_policy_reasons=["session_flat_compliant"],
+        intraday_robustness_diagnostics=diagnostics,
+    )
+
+    assert result.classification == "interesting_intraday_needs_more_tests"

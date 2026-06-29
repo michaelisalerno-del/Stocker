@@ -15,6 +15,7 @@ REGISTERED_TEMPLATES = {
     "mean_reversion_after_large_down_day",
     "volatility_breakout",
     "opening_range_breakout",
+    "vwap_reclaim_rejection",
 }
 
 
@@ -137,6 +138,7 @@ class Hypothesis(BaseModel):
         "mean_reversion_after_large_down_day",
         "volatility_breakout",
         "opening_range_breakout",
+        "vwap_reclaim_rejection",
     ] = "moving_average_momentum"
     entry_logic: str = Field(min_length=1)
     exit_logic: str = Field(min_length=1)

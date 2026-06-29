@@ -26,6 +26,19 @@ class RobustnessGatePolicy:
     max_top_5_winner_profit_share: float = 0.50
 
 
+INTRADAY_CANDIDATE_BLOCKING_FLAGS = {
+    "failed_cost_stress",
+    "negative_median_trade",
+    "split_concentrated",
+    "trade_concentrated",
+    "too_few_trades",
+    "benchmark_failed",
+    "null_failed",
+    "train_selection_failed",
+    "session_quality_warning",
+}
+
+
 def _finite_float(value: Any, default: float = 0.0) -> float:
     try:
         result = float(value)
@@ -248,6 +261,16 @@ def build_intraday_robustness_diagnostics(
     trade_returns: Iterable[Any] | None,
     split_rows: Iterable[Mapping[str, Any]] | None,
     policy: RobustnessGatePolicy | None = None,
+    symbol: str = "",
+    benchmark_pass: bool = True,
+    null_pass: bool = True,
+    net_return: float | None = None,
+    stability_score: float = 0.0,
+    train_selection_succeeded: bool = True,
+    session_flat_compliant: bool = True,
+    trade_count: int | None = None,
+    min_trades: int = 20,
+    session_quality_warning: bool = False,
 ) -> dict[str, Any]:
     """Build official intraday robustness diagnostics for candidate gates."""
 
@@ -282,21 +305,38 @@ def build_intraday_robustness_diagnostics(
         or top_positive_split_share > active_policy.max_top_positive_split_share
     )
 
-    flags: list[str] = []
+    partial_pass_row = build_partial_pass_row(
+        symbol=symbol,
+        benchmark_pass=benchmark_pass,
+        null_pass=null_pass,
+        net_return=base_net_return if net_return is None else net_return,
+        cost_stress_survives_1_5x=survives_1_5x,
+        median_trade=median_trade,
+        top_positive_split_share=top_positive_split_share,
+        top_winner_share=top5_winner_share,
+        stability_score=stability_score,
+        train_selection_succeeded=train_selection_succeeded,
+        session_flat_compliant=session_flat_compliant,
+        concentration_threshold=active_policy.max_top_positive_split_share,
+    )
+    flags = [
+        flag
+        for flag in build_robustness_flags(
+            partial_pass_row,
+            trade_count=int(trade_summary["number_of_trades"])
+            if trade_count is None
+            else trade_count,
+            min_trades=min_trades,
+            session_quality_warning=session_quality_warning,
+        )
+        if flag != "robust_partial_pass"
+    ]
     if missing_cost_stress:
         flags.append("missing_cost_stress")
-    if active_policy.require_cost_stress_for_intraday_candidate and not survives_1_5x:
-        flags.append("fragile_costs")
     if missing_trade_reconstruction:
         flags.append("missing_trade_reconstruction")
-    if negative_median_trade:
-        flags.append("negative_median_trade")
-    if split_concentrated:
-        flags.append("split_concentrated")
-    if top_winner_concentrated:
-        flags.append("trade_concentrated")
     if profit_factor < active_policy.min_candidate_profit_factor:
-        flags.append("weak_profit_factor")
+        _append_once(flags, "weak_profit_factor")
     if missing_split_concentration:
         flags.append("missing_split_concentration")
 
@@ -336,6 +376,10 @@ def build_intraday_robustness_diagnostics(
                 "net_return": split_summary["worst_split_return"],
             },
         },
+        "trade_return_summary": trade_summary,
+        "split_return_summary": split_summary,
+        "cost_stress_summary": cost_summary,
+        "partial_pass_row": partial_pass_row,
         "robustness_flags": flags,
     }
 
@@ -368,6 +412,9 @@ def intraday_robustness_gate_failure_reasons(
         flags = set()
     reasons: list[str] = []
 
+    for flag in sorted(INTRADAY_CANDIDATE_BLOCKING_FLAGS & flags):
+        _append_once(reasons, flag)
+
     multiplier = active_policy.cost_stress_candidate_multiplier
     if active_policy.require_cost_stress_for_intraday_candidate:
         if math.isclose(multiplier, 1.5):
@@ -378,7 +425,7 @@ def intraday_robustness_gate_failure_reasons(
             survives_cost_stress = stressed_return is not None and stressed_return > 0
         if (
             not survives_cost_stress
-            or "fragile_costs" in flags
+            or "failed_cost_stress" in flags
             or "missing_cost_stress" in flags
         ):
             _append_once(reasons, "failed_cost_stress")
@@ -467,7 +514,7 @@ def build_robustness_flags(
 
     flags: list[str] = []
     if not bool(partial_pass_row.get("cost_stress_survives_1_5x", False)):
-        flags.append("fragile_costs")
+        flags.append("failed_cost_stress")
     if not bool(partial_pass_row.get("top_split_concentration_ok", False)):
         flags.append("split_concentrated")
     if not bool(partial_pass_row.get("top_trade_concentration_ok", False)):

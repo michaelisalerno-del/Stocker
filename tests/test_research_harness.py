@@ -290,6 +290,10 @@ def test_experiment_runner_creates_reports_index_and_conservative_classification
         "cost_stress",
         "trade_concentration",
         "split_concentration",
+        "trade_return_summary",
+        "split_return_summary",
+        "cost_stress_summary",
+        "partial_pass_row",
         "robustness_flags",
     }.issubset(payload["robustness_diagnostics"])
     assert "Historical rows before each train/test window" in markdown

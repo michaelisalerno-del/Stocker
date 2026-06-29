@@ -463,6 +463,15 @@ def _selected_intraday_robustness_diagnostics(
     *,
     timeframe: str,
     market_calendar: str | None,
+    symbol: str,
+    benchmark_pass: bool,
+    null_pass: bool,
+    selected_net_return: float,
+    stability_score: float,
+    train_selection_succeeded: bool,
+    session_flat_compliant: bool,
+    minimum_trades: int,
+    session_quality_warning: bool,
 ) -> dict[str, Any]:
     policy = _robustness_gate_policy(hypothesis)
     if not splits:
@@ -471,6 +480,16 @@ def _selected_intraday_robustness_diagnostics(
             trade_returns=None,
             split_rows=None,
             policy=policy,
+            symbol=symbol,
+            benchmark_pass=benchmark_pass,
+            null_pass=null_pass,
+            net_return=selected_net_return,
+            stability_score=stability_score,
+            train_selection_succeeded=train_selection_succeeded,
+            session_flat_compliant=session_flat_compliant,
+            trade_count=0,
+            min_trades=minimum_trades,
+            session_quality_warning=session_quality_warning,
         )
 
     cost_stress_rows: list[dict[str, float]] = []
@@ -520,6 +539,16 @@ def _selected_intraday_robustness_diagnostics(
         trade_returns=trade_returns,
         split_rows=split_rows,
         policy=policy,
+        symbol=symbol,
+        benchmark_pass=benchmark_pass,
+        null_pass=null_pass,
+        net_return=selected_net_return,
+        stability_score=stability_score,
+        train_selection_succeeded=train_selection_succeeded,
+        session_flat_compliant=session_flat_compliant,
+        trade_count=len(trade_returns),
+        min_trades=minimum_trades,
+        session_quality_warning=session_quality_warning,
     )
 
 
@@ -980,6 +1009,15 @@ def run_research_experiment(
         cost_model,
         timeframe=key.timeframe,
         market_calendar=market_calendar,
+        symbol=key.symbol,
+        benchmark_pass=bool(benchmark_comparison["benchmark_pass"]),
+        null_pass=bool(null_model_results["null_pass"]),
+        selected_net_return=_metric_float(selected_result, "test_net_return"),
+        stability_score=stability.stability_score,
+        train_selection_succeeded=selection.selection_method != "fallback_for_reporting_only",
+        session_flat_compliant=holding_policy_analysis.session_flat_compliant,
+        minimum_trades=hypothesis.minimum_evidence.min_trades,
+        session_quality_warning=bool(holding_policy_analysis.holding_policy_warning_reasons),
     )
     gross_test_return = _metric_float(
         selected_result,

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from pydantic import BaseModel
+
+from stocker_research.robustness import (
+    RobustnessGatePolicy,
+    intraday_robustness_gate_failure_reasons,
+)
 
 ResearchClassification = Literal[
     "rejected_data_issue",
@@ -53,6 +59,8 @@ def classify_research_result(
     selection_rejected: bool = False,
     holding_policy_classification: ResearchClassification | None = None,
     holding_policy_reasons: list[str] | None = None,
+    intraday_robustness_diagnostics: Mapping[str, Any] | None = None,
+    intraday_robustness_policy: RobustnessGatePolicy | None = None,
 ) -> ClassificationResult:
     """Classify a research result with intentionally conservative gates."""
 
@@ -115,6 +123,19 @@ def classify_research_result(
         "candidate_swing_exceptional",
     }:
         reasons.extend(holding_reasons)
+        if holding_policy_classification == "candidate_intraday_test":
+            robustness_reasons = intraday_robustness_gate_failure_reasons(
+                intraday_robustness_diagnostics,
+                policy=intraday_robustness_policy,
+            )
+            if robustness_reasons:
+                reasons.extend(
+                    reason for reason in robustness_reasons if reason not in reasons
+                )
+                return ClassificationResult(
+                    classification="interesting_intraday_needs_more_tests",
+                    reasons=reasons,
+                )
         return ClassificationResult(
             classification=holding_policy_classification,
             reasons=reasons,

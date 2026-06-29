@@ -1,0 +1,198 @@
+{
+  "candidate_remains": false,
+  "concentration_summary": {
+    "median_profit_factor": 0.7216018599313033,
+    "median_round_trip_trade_count": 91.0,
+    "negative_median_trade_count": 22,
+    "split_concentrated_count": 21,
+    "top5_winner_concentrated_count": 5
+  },
+  "cost_stress_summary": {
+    "first_nonpositive_multiplier_counts": {
+      "1.0": 20,
+      "1.5": 4,
+      "3.0": 1
+    },
+    "symbols_nonpositive_at_base_costs": 20,
+    "symbols_nonpositive_by_1_5x_costs": 24,
+    "symbols_surviving_1_5x_costs": 1
+  },
+  "created_at": "2026-06-29T11:59:53+00:00",
+  "crm_new_classification": "interesting_intraday_needs_more_tests",
+  "crm_old_classification": "candidate_intraday_test",
+  "new_candidate_count": 0,
+  "new_classification_counts": {
+    "interesting_intraday_needs_more_tests": 1,
+    "rejected_costs_kill_edge": 6,
+    "rejected_no_edge": 18
+  },
+  "no_gates_weakened": true,
+  "no_new_data_fetched": true,
+  "no_strategy_templates_added": true,
+  "old_candidate_count": 1,
+  "old_classification_counts": {
+    "candidate_intraday_test": 1,
+    "rejected_costs_kill_edge": 6,
+    "rejected_no_edge": 18
+  },
+  "output_dir": "data/reports/research/stage4_5_intraday_robustness_gates",
+  "recommendation_for_next_strategy_family": "No robust opening-range candidate remains. Move to VWAP reclaim/rejection as the next hypothesis family, using the new robustness gates from the start.",
+  "robustness_failure_reasons_by_symbol": {
+    "AAPL": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "trade_concentrated",
+      "weak_profit_factor"
+    ],
+    "AMD": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "AMZN": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "weak_profit_factor"
+    ],
+    "AVGO": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "BABA": [
+      "failed_cost_stress",
+      "negative_median_trade"
+    ],
+    "BAC": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "BMY": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "C": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "CRM": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "trade_concentrated"
+    ],
+    "CSCO": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "CSX": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "CVX": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "DIS": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "FCX": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "GLW": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "weak_profit_factor"
+    ],
+    "GOOG": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "GOOGL": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "HOOD": [
+      "failed_cost_stress",
+      "split_concentrated",
+      "trade_concentrated"
+    ],
+    "INTC": [
+      "split_concentrated",
+      "trade_concentrated"
+    ],
+    "ITUB": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "KLAC": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "KO": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "LRCX": [
+      "failed_cost_stress",
+      "split_concentrated",
+      "weak_profit_factor"
+    ],
+    "LYG": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "trade_concentrated",
+      "weak_profit_factor"
+    ],
+    "META": [
+      "failed_cost_stress",
+      "negative_median_trade",
+      "split_concentrated",
+      "weak_profit_factor"
+    ]
+  },
+  "source_report_root": "/Users/michaelsalerno/Documents/Codex/2026-06-29-branch-codex-stage4-intraday-feature-layer/data/reports/research",
+  "source_universe_report": "/Users/michaelsalerno/Documents/Codex/2026-06-29-branch-codex-stage4-intraday-feature-layer/data/reports/research/universe/20260629073032_opening_range_breakout_intraday_session_flat_v1_us_liquid_25_intraday_5m.json",
+  "stage": "4.5_intraday_robustness_gates",
+  "symbols_downgraded_by_robustness_gates": [
+    "CRM"
+  ],
+  "test_status": "passed",
+  "tests_run": [
+    "focused robustness/classification/report tests: 19 passed",
+    "full pytest suite: 174 passed",
+    "ruff check .: passed",
+    "git diff --check: passed before final summary generation"
+  ]
+}

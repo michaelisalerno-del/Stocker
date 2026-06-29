@@ -1,15 +1,29 @@
-"""Diagnostic-only robustness helpers for research results.
+"""Robustness helpers for research results.
 
-These helpers summarize already-scored research outputs. They do not select
-parameters, fetch data, or change official classification gates.
+These helpers summarize already-scored research outputs and define the
+conservative intraday candidate robustness gate policy. They do not select
+parameters or fetch data.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from statistics import median
 from typing import Any
+
+
+@dataclass(frozen=True)
+class RobustnessGatePolicy:
+    """Conservative official candidate robustness gates for intraday research."""
+
+    require_cost_stress_for_intraday_candidate: bool = True
+    cost_stress_candidate_multiplier: float = 1.5
+    min_candidate_profit_factor: float = 1.10
+    require_positive_median_trade: bool = True
+    max_top_positive_split_share: float = 0.50
+    max_top_5_winner_profit_share: float = 0.50
 
 
 def _finite_float(value: Any, default: float = 0.0) -> float:
@@ -36,6 +50,30 @@ def _safe_share(numerator: float, denominator: float) -> float:
     if denominator == 0:
         return 0.0
     return float(numerator / denominator)
+
+
+def _maybe_float(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _net_return_at_multiplier(
+    rows: Sequence[Mapping[str, Any]],
+    multiplier: float,
+) -> float | None:
+    for row in rows:
+        row_multiplier = _maybe_float(row.get("cost_multiplier"))
+        if row_multiplier is not None and math.isclose(row_multiplier, multiplier):
+            return _maybe_float(row.get("net_return"))
+    return None
+
+
+def _append_once(values: list[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
 
 
 def _profit_factor(returns: Sequence[float]) -> float:
@@ -202,6 +240,180 @@ def summarize_cost_stress(rows: Iterable[Mapping[str, Any]]) -> dict[str, float 
         "first_costs_kill_multiplier": first_costs_kill,
         "survives_1_5x_costs": survives_1_5x,
     }
+
+
+def build_intraday_robustness_diagnostics(
+    *,
+    cost_stress_rows: Iterable[Mapping[str, Any]] | None,
+    trade_returns: Iterable[Any] | None,
+    split_rows: Iterable[Mapping[str, Any]] | None,
+    policy: RobustnessGatePolicy | None = None,
+) -> dict[str, Any]:
+    """Build official intraday robustness diagnostics for candidate gates."""
+
+    active_policy = policy or RobustnessGatePolicy()
+    cost_rows = list(cost_stress_rows or [])
+    cost_summary = summarize_cost_stress(cost_rows)
+    base_net_return = _net_return_at_multiplier(cost_rows, 1.0)
+    net_return_1_5x = _net_return_at_multiplier(cost_rows, 1.5)
+    net_return_2x = _net_return_at_multiplier(cost_rows, 2.0)
+    net_return_3x = _net_return_at_multiplier(cost_rows, 3.0)
+    missing_cost_stress = not cost_rows or net_return_1_5x is None
+    survives_1_5x = bool(cost_summary["survives_1_5x_costs"]) and not missing_cost_stress
+
+    missing_trade_reconstruction = trade_returns is None
+    trade_values = [] if trade_returns is None else _clean_floats(trade_returns)
+    trade_summary = summarize_trade_returns(trade_values)
+    median_trade = float(trade_summary["median_trade"])
+    profit_factor = float(trade_summary["profit_factor"])
+    top5_winner_share = float(trade_summary["top5_winners_share_of_positive_profit"])
+    negative_median_trade = missing_trade_reconstruction or median_trade <= 0.0
+    top_winner_concentrated = (
+        not missing_trade_reconstruction
+        and top5_winner_share > active_policy.max_top_5_winner_profit_share
+    )
+
+    split_values = list(split_rows or [])
+    split_summary = summarize_split_returns(split_values)
+    missing_split_concentration = not split_values
+    top_positive_split_share = float(split_summary["top_positive_split_share"])
+    split_concentrated = (
+        missing_split_concentration
+        or top_positive_split_share > active_policy.max_top_positive_split_share
+    )
+
+    flags: list[str] = []
+    if missing_cost_stress:
+        flags.append("missing_cost_stress")
+    if active_policy.require_cost_stress_for_intraday_candidate and not survives_1_5x:
+        flags.append("fragile_costs")
+    if missing_trade_reconstruction:
+        flags.append("missing_trade_reconstruction")
+    if negative_median_trade:
+        flags.append("negative_median_trade")
+    if split_concentrated:
+        flags.append("split_concentrated")
+    if top_winner_concentrated:
+        flags.append("trade_concentrated")
+    if profit_factor < active_policy.min_candidate_profit_factor:
+        flags.append("weak_profit_factor")
+    if missing_split_concentration:
+        flags.append("missing_split_concentration")
+
+    return {
+        "cost_stress": {
+            "base_net_return": base_net_return,
+            "net_return_1_5x_costs": net_return_1_5x,
+            "net_return_2x_costs": net_return_2x,
+            "net_return_3x_costs": net_return_3x,
+            "survives_1_5x_costs": survives_1_5x,
+            "first_non_positive_cost_multiplier": cost_summary[
+                "first_nonpositive_net_multiplier"
+            ],
+        },
+        "trade_concentration": {
+            "reconstructed_round_trips": int(trade_summary["number_of_trades"]),
+            "median_trade_return": median_trade,
+            "average_trade_return": float(trade_summary["average_trade"]),
+            "win_rate": float(trade_summary["win_rate"]),
+            "profit_factor": profit_factor,
+            "top_5_winners_profit_share": top5_winner_share,
+            "top_10_winners_profit_share": float(
+                trade_summary["top10_winners_share_of_positive_profit"]
+            ),
+            "negative_median_trade": negative_median_trade,
+            "top_winner_concentrated": top_winner_concentrated,
+        },
+        "split_concentration": {
+            "top_positive_split_share": top_positive_split_share,
+            "split_concentrated": split_concentrated,
+            "best_split": {
+                "split_id": split_summary["best_split_id"],
+                "net_return": split_summary["best_split_return"],
+            },
+            "worst_split": {
+                "split_id": split_summary["worst_split_id"],
+                "net_return": split_summary["worst_split_return"],
+            },
+        },
+        "robustness_flags": flags,
+    }
+
+
+def intraday_robustness_gate_failure_reasons(
+    diagnostics: Mapping[str, Any] | None,
+    *,
+    policy: RobustnessGatePolicy | None = None,
+) -> list[str]:
+    """Return official intraday candidate gate failure reasons."""
+
+    active_policy = policy or RobustnessGatePolicy()
+    if diagnostics is None:
+        return [
+            "failed_cost_stress",
+            "missing_trade_reconstruction",
+            "negative_median_trade",
+            "weak_profit_factor",
+        ]
+
+    cost_stress = diagnostics.get("cost_stress", {})
+    trade_concentration = diagnostics.get("trade_concentration", {})
+    split_concentration = diagnostics.get("split_concentration", {})
+    raw_flags = diagnostics.get("robustness_flags", [])
+    if isinstance(raw_flags, str):
+        flags = {raw_flags}
+    elif isinstance(raw_flags, Iterable):
+        flags = {str(flag) for flag in raw_flags}
+    else:
+        flags = set()
+    reasons: list[str] = []
+
+    multiplier = active_policy.cost_stress_candidate_multiplier
+    if active_policy.require_cost_stress_for_intraday_candidate:
+        if math.isclose(multiplier, 1.5):
+            survives_cost_stress = bool(cost_stress.get("survives_1_5x_costs", False))
+        else:
+            multiplier_key = str(multiplier).replace(".", "_")
+            stressed_return = _maybe_float(cost_stress.get(f"net_return_{multiplier_key}x_costs"))
+            survives_cost_stress = stressed_return is not None and stressed_return > 0
+        if (
+            not survives_cost_stress
+            or "fragile_costs" in flags
+            or "missing_cost_stress" in flags
+        ):
+            _append_once(reasons, "failed_cost_stress")
+
+    median_trade = _maybe_float(trade_concentration.get("median_trade_return"))
+    if "missing_trade_reconstruction" in flags:
+        _append_once(reasons, "missing_trade_reconstruction")
+    if active_policy.require_positive_median_trade and (
+        median_trade is None
+        or median_trade <= 0
+        or bool(trade_concentration.get("negative_median_trade", False))
+    ):
+        _append_once(reasons, "negative_median_trade")
+
+    top_split_share = _maybe_float(split_concentration.get("top_positive_split_share"))
+    if (
+        top_split_share is None
+        or top_split_share > active_policy.max_top_positive_split_share
+        or bool(split_concentration.get("split_concentrated", False))
+    ):
+        _append_once(reasons, "split_concentrated")
+
+    top5_share = _maybe_float(trade_concentration.get("top_5_winners_profit_share"))
+    if (
+        top5_share is None
+        or top5_share > active_policy.max_top_5_winner_profit_share
+        or bool(trade_concentration.get("top_winner_concentrated", False))
+    ):
+        _append_once(reasons, "trade_concentrated")
+
+    profit_factor = _maybe_float(trade_concentration.get("profit_factor"))
+    if profit_factor is None or profit_factor < active_policy.min_candidate_profit_factor:
+        _append_once(reasons, "weak_profit_factor")
+
+    return reasons
 
 
 def build_partial_pass_row(

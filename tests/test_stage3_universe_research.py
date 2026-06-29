@@ -51,6 +51,9 @@ def test_stage3_hypothesis_contract_and_examples() -> None:
     assert hypothesis.holding_policy.preferred_style == "intraday"
     assert hypothesis.holding_policy.allow_overnight == "conditional"
     assert hypothesis.holding_policy.allow_weekend == "exceptional_only"
+    assert hypothesis.robustness_policy.require_cost_stress_for_intraday_candidate is True
+    assert hypothesis.robustness_policy.cost_stress_candidate_multiplier == pytest.approx(1.5)
+    assert hypothesis.robustness_policy.min_candidate_profit_factor == pytest.approx(1.10)
 
     payload = hypothesis.model_dump(mode="json")
     payload["expected_edge_reason"] = ""
@@ -183,7 +186,8 @@ def test_classification_returns_reasons_and_is_conservative() -> None:
         holding_policy_classification="candidate_intraday_test",
         holding_policy_reasons=["session_flat_compliant"],
     )
-    assert intraday_candidate.classification == "candidate_intraday_test"
+    assert intraday_candidate.classification == "interesting_intraday_needs_more_tests"
+    assert "missing_trade_reconstruction" in intraday_candidate.reasons
 
 
 def test_run_universe_research_writes_aggregate_report(tmp_path: Path) -> None:

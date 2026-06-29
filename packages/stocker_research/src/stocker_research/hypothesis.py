@@ -86,6 +86,17 @@ class MinimumEvidence(BaseModel):
     min_stability_score: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class HypothesisRobustnessPolicy(BaseModel):
+    """Conservative robustness gates before intraday candidate promotion."""
+
+    require_cost_stress_for_intraday_candidate: bool = True
+    cost_stress_candidate_multiplier: float = Field(default=1.5, gt=0.0)
+    min_candidate_profit_factor: float = Field(default=1.10, ge=0.0)
+    require_positive_median_trade: bool = True
+    max_top_positive_split_share: float = Field(default=0.50, ge=0.0, le=1.0)
+    max_top_5_winner_profit_share: float = Field(default=0.50, ge=0.0, le=1.0)
+
+
 class HypothesisHoldingPolicy(BaseModel):
     """Preferred holding style and stricter swing evidence gates."""
 
@@ -142,6 +153,9 @@ class Hypothesis(BaseModel):
     expected_edge_reason: str = Field(min_length=1)
     invalidation_rules: list[str] = Field(min_length=1)
     minimum_evidence: MinimumEvidence = Field(default_factory=MinimumEvidence)
+    robustness_policy: HypothesisRobustnessPolicy = Field(
+        default_factory=HypothesisRobustnessPolicy
+    )
     holding_policy: HypothesisHoldingPolicy = Field(default_factory=HypothesisHoldingPolicy)
     created_at: datetime
 

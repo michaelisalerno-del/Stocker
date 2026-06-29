@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +37,10 @@ from stocker_research.position_policy import (
     summarize_position_policy_effect,
 )
 from stocker_research.regime import label_regimes, performance_by_regime
+from stocker_research.robustness import (
+    RobustnessGatePolicy,
+    build_intraday_robustness_diagnostics,
+)
 from stocker_research.selection import SelectionResult, select_parameter_set
 from stocker_research.stability import StabilityReport, analyze_stability
 from stocker_research.templates import StrategyTemplate, get_template
@@ -396,6 +402,127 @@ def _selected_test_window_positions(
     )
 
 
+def _robustness_gate_policy(hypothesis: Hypothesis) -> RobustnessGatePolicy:
+    return RobustnessGatePolicy(**hypothesis.robustness_policy.model_dump())
+
+
+def _multiply_cost_model(cost_model: CostModel, multiplier: float) -> CostModel:
+    return CostModel(
+        spread_bps=cost_model.spread_bps * multiplier,
+        commission_bps=cost_model.commission_bps * multiplier,
+        slippage_bps=cost_model.slippage_bps * multiplier,
+    )
+
+
+def _reconstruct_round_trip_returns(
+    positions: pd.Series,
+    net_returns: Sequence[float],
+) -> list[float]:
+    position_values = positions.reset_index(drop=True).astype(float).tolist()
+    returns = [float(value) for value in net_returns]
+    trade_returns: list[float] = []
+    active = False
+    running_return = 0.0
+    previous_position = 0.0
+
+    for index, current_position in enumerate(position_values):
+        bar_return = returns[index] if index < len(returns) else 0.0
+        opens_trade = not active and abs(previous_position) == 0.0 and abs(current_position) > 0.0
+        flips_trade = active and previous_position * current_position < 0.0
+        closes_trade = active and abs(previous_position) > 0.0 and abs(current_position) == 0.0
+
+        if opens_trade:
+            active = True
+            running_return = bar_return
+        elif active:
+            running_return += bar_return
+
+        if flips_trade:
+            trade_returns.append(running_return)
+            running_return = bar_return
+            active = abs(current_position) > 0.0
+        elif closes_trade:
+            trade_returns.append(running_return)
+            running_return = 0.0
+            active = False
+
+        previous_position = current_position
+
+    if active:
+        trade_returns.append(running_return)
+    return trade_returns
+
+
+def _selected_intraday_robustness_diagnostics(
+    frame: pd.DataFrame,
+    splits: list[WalkForwardSplit],
+    template: StrategyTemplate,
+    selected_params: dict[str, Any],
+    hypothesis: Hypothesis,
+    cost_model: CostModel,
+    *,
+    timeframe: str,
+    market_calendar: str | None,
+) -> dict[str, Any]:
+    policy = _robustness_gate_policy(hypothesis)
+    if not splits:
+        return build_intraday_robustness_diagnostics(
+            cost_stress_rows=None,
+            trade_returns=None,
+            split_rows=None,
+            policy=policy,
+        )
+
+    cost_stress_rows: list[dict[str, float]] = []
+    split_rows: list[dict[str, float | str]] = []
+    trade_returns: list[float] = []
+    for multiplier in (1.0, 1.5, 2.0, 3.0):
+        split_net_returns: list[float] = []
+        stressed_cost_model = _multiply_cost_model(cost_model, multiplier)
+        for split in splits:
+            evaluation = evaluate_window_with_context(
+                frame,
+                template,
+                selected_params,
+                cost_model=stressed_cost_model,
+                direction=hypothesis.direction,
+                eval_start=split.test_start,
+                eval_end=split.test_end,
+                holding_policy=hypothesis.holding_policy,
+                timeframe=timeframe,
+                market_calendar=market_calendar,
+            )
+            split_net_returns.append(float(evaluation.result.net_return))
+            if math.isclose(multiplier, 1.0):
+                split_rows.append(
+                    {
+                        "split_id": split.split_id,
+                        "test_net_return": float(evaluation.result.net_return),
+                    }
+                )
+                trade_returns.extend(
+                    _reconstruct_round_trip_returns(
+                        evaluation.window.eval_positions,
+                        evaluation.result.net_returns,
+                    )
+                )
+        cost_stress_rows.append(
+            {
+                "cost_multiplier": multiplier,
+                "net_return": float(sum(split_net_returns) / len(split_net_returns))
+                if split_net_returns
+                else 0.0,
+            }
+        )
+
+    return build_intraday_robustness_diagnostics(
+        cost_stress_rows=cost_stress_rows,
+        trade_returns=trade_returns,
+        split_rows=split_rows,
+        policy=policy,
+    )
+
+
 def _experiment_id(hypothesis: Hypothesis, symbol: str, timeframe: str) -> str:
     stamp = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
     return f"{stamp}_{hypothesis.id}_{symbol.upper()}_{timeframe}"
@@ -526,6 +653,17 @@ policy before returns, costs, holding analysis, and classification are computed.
 
 ```json
 {json.dumps(holding_summary, indent=2)}
+```
+
+## Robustness Diagnostics
+
+Intraday candidate promotion requires modest cost-stress survival, positive
+median reconstructed trade return, acceptable split and winner concentration,
+and minimum profit factor. These diagnostics harden classification only; they do
+not add strategy templates or fetch data.
+
+```json
+{json.dumps(payload.get("robustness_diagnostics", {}), indent=2)}
 ```
 
 ## Null Timing
@@ -832,6 +970,17 @@ def run_research_experiment(
         trade_count=_metric_int(selected_result, "test_trade_count", "trade_count"),
         max_drawdown=_metric_float(selected_result, "test_max_drawdown", "max_drawdown"),
     )
+    robustness_policy = _robustness_gate_policy(hypothesis)
+    robustness_diagnostics = _selected_intraday_robustness_diagnostics(
+        frame,
+        splits,
+        template,
+        selected_params,
+        hypothesis,
+        cost_model,
+        timeframe=key.timeframe,
+        market_calendar=market_calendar,
+    )
     gross_test_return = _metric_float(
         selected_result,
         "test_gross_return",
@@ -860,6 +1009,8 @@ def run_research_experiment(
         selection_rejected=selection.selection_method == "fallback_for_reporting_only",
         holding_policy_classification=holding_policy_decision.classification,
         holding_policy_reasons=holding_policy_decision.reasons,
+        intraday_robustness_diagnostics=robustness_diagnostics,
+        intraday_robustness_policy=robustness_policy,
     )
     classification: Classification = classification_result.classification
     classification_reasons = list(classification_result.reasons)
@@ -963,6 +1114,8 @@ def run_research_experiment(
         "scored_holding_policy_analysis": scored_holding_policy_analysis.model_dump(mode="json"),
         "holding_policy_analysis": holding_policy_analysis.model_dump(mode="json"),
         "holding_policy_decision": holding_policy_decision.model_dump(mode="json"),
+        "robustness_policy": hypothesis.robustness_policy.model_dump(mode="json"),
+        "robustness_diagnostics": robustness_diagnostics,
         "warnings": warnings,
         "classification_reasons": classification_reasons,
         "full_sample_result": full_result.to_dict(),

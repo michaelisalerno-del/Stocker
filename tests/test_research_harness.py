@@ -285,6 +285,13 @@ def test_experiment_runner_creates_reports_index_and_conservative_classification
     assert "max_required_lookback_bars" in payload
     assert "required_lookback_bars_by_parameter_set" in payload
     assert "context_summary" in payload
+    assert "robustness_diagnostics" in payload
+    assert {
+        "cost_stress",
+        "trade_concentration",
+        "split_concentration",
+        "robustness_flags",
+    }.issubset(payload["robustness_diagnostics"])
     assert "Historical rows before each train/test window" in markdown
     assert "Future rows after the evaluation window are not used" in markdown
     assert result.classification in {

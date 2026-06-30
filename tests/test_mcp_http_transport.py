@@ -49,3 +49,38 @@ def test_http_public_bind_reports_warning(monkeypatch) -> None:
     )
 
     assert "public interface" in result["http"]["unsafe_bind_warning"]
+
+
+def test_http_tunnel_host_can_be_allowlisted(monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("STOCKER_MCP_TOKEN", "expected-token")
+        app = build_http_app(
+            host="127.0.0.1",
+            port=8765,
+            auth_token_env="STOCKER_MCP_TOKEN",
+            allowed_hosts=["formula-tall-treasurer-gods.trycloudflare.com"],
+        )
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.post(
+                "/mcp",
+                headers={
+                    "Authorization": "Bearer expected-token",
+                    "Host": "formula-tall-treasurer-gods.trycloudflare.com",
+                    "Accept": "application/json, text/event-stream",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1.0"},
+                    },
+                },
+            )
+
+        assert response.status_code != 421
+
+    asyncio.run(run())

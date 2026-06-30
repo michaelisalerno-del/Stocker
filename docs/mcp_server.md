@@ -68,6 +68,22 @@ http://127.0.0.1:8765/mcp
 
 Do not bind to `0.0.0.0` unless you have a protected private network reason.
 
+If ChatGPT reaches the server through an HTTPS tunnel, allowlist the exact tunnel
+host while keeping the bind address on loopback:
+
+```bash
+uv run stocker-mcp \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --auth-mode oauth \
+  --auth-token-env STOCKER_MCP_TOKEN \
+  --allowed-host YOUR-TUNNEL-HOST
+```
+
+You can also set `STOCKER_MCP_ALLOWED_HOSTS="YOUR-TUNNEL-HOST"`. Do not use
+wildcards.
+
 Bearer-token mode remains available for local clients:
 
 ```bash

@@ -8,6 +8,7 @@ import os
 import sys
 from hmac import compare_digest
 from typing import Any
+from urllib.parse import urlparse
 
 from stocker_mcp import __version__
 from stocker_mcp.oauth import OAuthMiddleware, OAuthState
@@ -27,6 +28,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_AUTH_TOKEN_ENV = "STOCKER_MCP_TOKEN"
 DEFAULT_OAUTH_SETUP_CODE_ENV = "STOCKER_MCP_TOKEN"
+DEFAULT_ALLOWED_HOSTS_ENV = "STOCKER_MCP_ALLOWED_HOSTS"
 AUTH_MODES = ("oauth", "bearer")
 MCP_PATH = "/mcp"
 CONNECTOR_NAME = "Stocker Research"
@@ -69,12 +71,82 @@ def _tool_kwargs(name: str) -> dict[str, Any]:
     }
 
 
-def build_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Any:
+def _normalise_allowed_host(value: str) -> str:
+    candidate = value.strip()
+    if not candidate:
+        return ""
+    if "://" in candidate:
+        candidate = urlparse(candidate).netloc
+    candidate = candidate.split("/", 1)[0].strip()
+    return candidate.rstrip("/")
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _allowed_hosts_from_env(env_var: str = DEFAULT_ALLOWED_HOSTS_ENV) -> tuple[str, ...]:
+    raw = os.environ.get(env_var, "")
+    values = raw.replace(",", " ").split()
+    return tuple(host for host in (_normalise_allowed_host(value) for value in values) if host)
+
+
+def _transport_security(
+    *,
+    host: str,
+    allowed_hosts: list[str] | tuple[str, ...],
+) -> Any:
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    loopback = host in {"127.0.0.1", "localhost", "::1"}
+    normalised = [
+        host
+        for host in (_normalise_allowed_host(value) for value in allowed_hosts)
+        if host
+    ]
+    if not loopback and not normalised:
+        return None
+
+    hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"] if loopback else []
+    origins = (
+        ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"] if loopback else []
+    )
+    for allowed in normalised:
+        hosts.append(allowed)
+        if ":" not in allowed:
+            hosts.append(f"{allowed}:*")
+        origins.extend([f"https://{allowed}", f"http://{allowed}"])
+        if ":" not in allowed:
+            origins.extend([f"https://{allowed}:*", f"http://{allowed}:*"])
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_dedupe(hosts),
+        allowed_origins=_dedupe(origins),
+    )
+
+
+def build_server(
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    allowed_hosts: list[str] | tuple[str, ...] = (),
+) -> Any:
     """Build a FastMCP server with only read-only Stocker tools."""
 
     from mcp.server.fastmcp import FastMCP
 
-    mcp = FastMCP("Stocker", host=host, port=port, streamable_http_path=MCP_PATH)
+    mcp = FastMCP(
+        "Stocker",
+        host=host,
+        port=port,
+        streamable_http_path=MCP_PATH,
+        transport_security=_transport_security(host=host, allowed_hosts=allowed_hosts),
+    )
 
     @mcp.tool(**_tool_kwargs("search"))
     def search(query: str, limit: int = 20) -> dict[str, Any]:
@@ -465,13 +537,14 @@ def build_http_app(
     auth_token_env: str = DEFAULT_AUTH_TOKEN_ENV,
     auth_mode: str = "bearer",
     oauth_setup_code_env: str = DEFAULT_OAUTH_SETUP_CODE_ENV,
+    allowed_hosts: list[str] | tuple[str, ...] = (),
     require_auth: bool = True,
 ) -> Any:
     """Build the authenticated Streamable HTTP MCP app."""
 
     if auth_mode not in AUTH_MODES:
         raise SecurityError(f"unsupported HTTP auth mode: {auth_mode}")
-    mcp = build_server(host=host, port=port)
+    mcp = build_server(host=host, port=port, allowed_hosts=allowed_hosts)
     app = mcp.streamable_http_app()
     if not require_auth:
         return app
@@ -497,6 +570,7 @@ def connector_info(
     auth_token_env: str = DEFAULT_AUTH_TOKEN_ENV,
     auth_mode: str = "bearer",
     oauth_setup_code_env: str = DEFAULT_OAUTH_SETUP_CODE_ENV,
+    allowed_hosts: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Return local ChatGPT connector setup info without exposing secrets."""
 
@@ -533,6 +607,7 @@ def connector_info(
         "security_mode": "read-only",
         "repo_root": str(context.repo_root),
         "stocker_home": str(context.stocker_home),
+        "allowed_hosts": list(allowed_hosts),
         "docs_path": "docs/chatgpt_connector.md",
     }
 
@@ -544,6 +619,7 @@ def doctor(
     auth_token_env: str = DEFAULT_AUTH_TOKEN_ENV,
     auth_mode: str = "bearer",
     oauth_setup_code_env: str = DEFAULT_OAUTH_SETUP_CODE_ENV,
+    allowed_hosts: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Return safe MCP server diagnostics."""
 
@@ -559,7 +635,7 @@ def doctor(
     stdio_can_initialise = True
     http_can_initialise = all(http_deps.values())
     try:
-        build_server(host=host, port=port)
+        build_server(host=host, port=port, allowed_hosts=allowed_hosts)
     except Exception:
         stdio_can_initialise = False
         http_can_initialise = False
@@ -576,6 +652,7 @@ def doctor(
                 auth_token_env=auth_token_env,
                 auth_mode=auth_mode,
                 oauth_setup_code_env=oauth_setup_code_env,
+                allowed_hosts=allowed_hosts,
             )
         except Exception:
             http_can_initialise = False
@@ -597,6 +674,7 @@ def doctor(
             "auth_env_var_set": auth_env_ready,
             "oauth_setup_code_env_var": oauth_setup_code_env,
             "oauth_setup_code_env_var_set": oauth_setup_ready,
+            "allowed_hosts": list(allowed_hosts),
             "dependencies": http_deps,
             "unsafe_bind_warning": _unsafe_bind_warning(host),
         },
@@ -610,6 +688,7 @@ def _startup_payload(
     auth_token_env: str,
     auth_mode: str,
     oauth_setup_code_env: str,
+    allowed_hosts: list[str] | tuple[str, ...],
 ) -> dict[str, Any]:
     context = default_context()
     return {
@@ -624,6 +703,7 @@ def _startup_payload(
         "auth_token_env_set": bool(os.environ.get(auth_token_env)),
         "oauth_setup_code_env": oauth_setup_code_env,
         "oauth_setup_code_env_set": bool(os.environ.get(oauth_setup_code_env)),
+        "allowed_hosts": list(allowed_hosts),
         "unsafe_bind_warning": _unsafe_bind_warning(host),
     }
 
@@ -634,13 +714,23 @@ def _run_http(
     auth_token_env: str,
     auth_mode: str,
     oauth_setup_code_env: str,
+    allowed_hosts: list[str] | tuple[str, ...],
 ) -> None:
     if auth_mode == "bearer" and not os.environ.get(auth_token_env):
         raise SecurityError(f"set {auth_token_env} before starting HTTP bearer mode")
     if auth_mode == "oauth" and not os.environ.get(oauth_setup_code_env):
         raise SecurityError(f"set {oauth_setup_code_env} before starting HTTP OAuth mode")
     print(
-        _json(_startup_payload(host, port, auth_token_env, auth_mode, oauth_setup_code_env)),
+        _json(
+            _startup_payload(
+                host,
+                port,
+                auth_token_env,
+                auth_mode,
+                oauth_setup_code_env,
+                allowed_hosts,
+            )
+        ),
         file=sys.stderr,
     )
     app = build_http_app(
@@ -649,6 +739,7 @@ def _run_http(
         auth_token_env=auth_token_env,
         auth_mode=auth_mode,
         oauth_setup_code_env=oauth_setup_code_env,
+        allowed_hosts=allowed_hosts,
     )
     import uvicorn
 
@@ -693,6 +784,20 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_OAUTH_SETUP_CODE_ENV,
         help="Environment variable containing the local OAuth setup code.",
     )
+    parser.add_argument(
+        "--allowed-host",
+        action="append",
+        default=[],
+        help=(
+            "Additional exact Host header allowed by MCP transport security. "
+            "Use the HTTPS tunnel hostname only, not 0.0.0.0."
+        ),
+    )
+    parser.add_argument(
+        "--allowed-hosts-env",
+        default=DEFAULT_ALLOWED_HOSTS_ENV,
+        help="Optional comma/space-separated env var of additional allowed Host headers.",
+    )
     parser.add_argument("--version", action="version", version=f"stocker-mcp {__version__}")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("doctor", help="Print safe workspace and connector diagnostics and exit.")
@@ -705,6 +810,7 @@ def main(argv: list[str] | None = None) -> None:
     """Console script entry point."""
 
     args = _parser().parse_args(argv)
+    allowed_hosts = tuple(args.allowed_host) + _allowed_hosts_from_env(args.allowed_hosts_env)
     if args.command == "doctor":
         print(
             _json(
@@ -715,6 +821,7 @@ def main(argv: list[str] | None = None) -> None:
                     auth_token_env=args.auth_token_env,
                     auth_mode=args.auth_mode,
                     oauth_setup_code_env=args.oauth_setup_code_env,
+                    allowed_hosts=allowed_hosts,
                 )
             )
         )
@@ -731,6 +838,7 @@ def main(argv: list[str] | None = None) -> None:
                     auth_token_env=args.auth_token_env,
                     auth_mode=args.auth_mode,
                     oauth_setup_code_env=args.oauth_setup_code_env,
+                    allowed_hosts=allowed_hosts,
                 )
             )
         )
@@ -742,9 +850,10 @@ def main(argv: list[str] | None = None) -> None:
             auth_token_env=args.auth_token_env,
             auth_mode=args.auth_mode,
             oauth_setup_code_env=args.oauth_setup_code_env,
+            allowed_hosts=allowed_hosts,
         )
         return
-    build_server(host=args.host, port=args.port).run(transport="stdio")
+    build_server(host=args.host, port=args.port, allowed_hosts=allowed_hosts).run(transport="stdio")
 
 
 if __name__ == "__main__":

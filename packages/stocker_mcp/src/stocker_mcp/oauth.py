@@ -51,6 +51,7 @@ class OAuthCode:
     redirect_uri: str
     code_challenge: str
     scope: str
+    resource: str | None
     expires_at: float
     used: bool = False
 
@@ -62,6 +63,7 @@ class OAuthToken:
     token: str
     client_id: str
     scope: str
+    resource: str | None
     expires_at: float
 
 
@@ -100,6 +102,7 @@ class OAuthState:
         redirect_uri: str,
         code_challenge: str,
         scope: str,
+        resource: str | None = None,
     ) -> str:
         code = secrets.token_urlsafe(32)
         self.codes[code] = OAuthCode(
@@ -108,6 +111,7 @@ class OAuthState:
             redirect_uri=redirect_uri,
             code_challenge=code_challenge,
             scope=scope,
+            resource=resource,
             expires_at=time.time() + AUTH_CODE_TTL_SECONDS,
         )
         return code
@@ -119,24 +123,49 @@ class OAuthState:
         client_id: str,
         redirect_uri: str,
         code_verifier: str,
+        resource: str | None = None,
     ) -> dict[str, Any]:
         stored = self.codes.get(code)
         if stored is None or stored.used or stored.expires_at < time.time():
             raise OAuthError("invalid_grant", "authorization code is invalid", 400)
         if stored.client_id != client_id or stored.redirect_uri != redirect_uri:
             raise OAuthError("invalid_grant", "authorization code context does not match", 400)
+        if stored.resource and resource and stored.resource != resource:
+            raise OAuthError("invalid_grant", "authorization code resource does not match", 400)
         if not compare_digest(stored.code_challenge, _pkce_challenge(code_verifier)):
             raise OAuthError("invalid_grant", "PKCE verification failed", 400)
         stored.used = True
-        return self.issue_tokens(client_id=client_id, scope=stored.scope)
+        return self.issue_tokens(
+            client_id=client_id,
+            scope=stored.scope,
+            resource=stored.resource or resource,
+        )
 
-    def refresh(self, *, client_id: str, refresh_token: str) -> dict[str, Any]:
+    def refresh(
+        self,
+        *,
+        client_id: str,
+        refresh_token: str,
+        resource: str | None = None,
+    ) -> dict[str, Any]:
         stored = self.refresh_tokens.get(refresh_token)
         if stored is None or stored.client_id != client_id:
             raise OAuthError("invalid_grant", "refresh token is invalid", 400)
-        return self.issue_tokens(client_id=client_id, scope=stored.scope)
+        if stored.resource and resource and stored.resource != resource:
+            raise OAuthError("invalid_grant", "refresh token resource does not match", 400)
+        return self.issue_tokens(
+            client_id=client_id,
+            scope=stored.scope,
+            resource=stored.resource or resource,
+        )
 
-    def issue_tokens(self, *, client_id: str, scope: str) -> dict[str, Any]:
+    def issue_tokens(
+        self,
+        *,
+        client_id: str,
+        scope: str,
+        resource: str | None = None,
+    ) -> dict[str, Any]:
         access_token = secrets.token_urlsafe(40)
         refresh_token = secrets.token_urlsafe(40)
         expires_at = time.time() + ACCESS_TOKEN_TTL_SECONDS
@@ -144,23 +173,28 @@ class OAuthState:
             token=access_token,
             client_id=client_id,
             scope=scope,
+            resource=resource,
             expires_at=expires_at,
         )
         refresh = OAuthToken(
             token=refresh_token,
             client_id=client_id,
             scope=scope,
+            resource=resource,
             expires_at=expires_at,
         )
         self.access_tokens[access_token] = access
         self.refresh_tokens[refresh_token] = refresh
-        return {
+        payload = {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "Bearer",
             "expires_in": ACCESS_TOKEN_TTL_SECONDS,
             "scope": scope,
         }
+        if resource:
+            payload["resource"] = resource
+        return payload
 
     def access_token_valid(self, token: str) -> bool:
         stored = self.access_tokens.get(token)
@@ -195,10 +229,10 @@ class OAuthMiddleware:
             if method == "OPTIONS":
                 await self._empty(send, 204)
                 return
-            if path in PROTECTED_RESOURCE_METADATA_PATHS:
+            if _is_protected_resource_metadata_path(path):
                 await self._json(send, self._resource_metadata(scope))
                 return
-            if path in AUTHORIZATION_SERVER_METADATA_PATHS:
+            if _is_authorization_server_metadata_path(path):
                 await self._json(send, self._authorization_server_metadata(scope))
                 return
             if path == "/oauth/register" and method == "POST":
@@ -289,6 +323,13 @@ class OAuthMiddleware:
         params = _query_params(scope)
         if str(scope.get("method")) == "POST":
             params.update(_form_params(await _body(receive)))
+        if not _has_authorization_request_params(params):
+            self.context.log_tool_call(
+                "oauth_authorize_probe",
+                {"method": str(scope.get("method"))},
+            )
+            await self._html(send, _authorize_probe_page())
+            return
         request = _AuthorizationRequest(params=params, oauth_state=self.state)
         if str(scope.get("method")) == "GET":
             await self._html(send, _approval_page(request))
@@ -303,6 +344,7 @@ class OAuthMiddleware:
             redirect_uri=request.redirect_uri,
             code_challenge=request.code_challenge,
             scope=request.scope,
+            resource=request.resource,
         )
         self.context.log_tool_call("oauth_authorize", {"approved": True})
         query = {"code": code}
@@ -323,11 +365,13 @@ class OAuthMiddleware:
                 client_id=client_id,
                 redirect_uri=params.get("redirect_uri", ""),
                 code_verifier=params.get("code_verifier", ""),
+                resource=params.get("resource") or None,
             )
         elif grant_type == "refresh_token":
             payload = self.state.refresh(
                 client_id=client_id,
                 refresh_token=params.get("refresh_token", ""),
+                resource=params.get("resource") or None,
             )
         else:
             raise OAuthError("unsupported_grant_type", "grant_type is unsupported", 400)
@@ -467,6 +511,10 @@ class _AuthorizationRequest:
     def request_state(self) -> str:
         return self.params.get("state", "")
 
+    @property
+    def resource(self) -> str | None:
+        return self.params.get("resource") or None
+
 
 def _approval_page(request: _AuthorizationRequest) -> str:
     hidden = "\n".join(
@@ -490,6 +538,17 @@ def _approval_page(request: _AuthorizationRequest) -> str:
 </html>"""
 
 
+def _authorize_probe_page() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Stocker OAuth</title></head>
+<body>
+<h1>Stocker OAuth</h1>
+<p>Start from ChatGPT connector setup to approve read-only Stocker Research access.</p>
+</body>
+</html>"""
+
+
 def _can_adopt_cached_chatgpt_client(client_id: str, redirect_uri: str) -> bool:
     if not client_id.startswith("stocker-client-"):
         return False
@@ -498,6 +557,32 @@ def _can_adopt_cached_chatgpt_client(client_id: str, redirect_uri: str) -> bool:
         parsed.scheme == "https"
         and parsed.netloc == "chatgpt.com"
         and parsed.path.startswith("/connector/oauth/")
+    )
+
+
+def _is_protected_resource_metadata_path(path: str) -> bool:
+    return path in PROTECTED_RESOURCE_METADATA_PATHS or (
+        "/.well-known/oauth-protected-resource" in path
+    )
+
+
+def _is_authorization_server_metadata_path(path: str) -> bool:
+    return path in AUTHORIZATION_SERVER_METADATA_PATHS or (
+        "/.well-known/oauth-authorization-server" in path
+        or "/.well-known/openid-configuration" in path
+    )
+
+
+def _has_authorization_request_params(params: dict[str, str]) -> bool:
+    return any(
+        params.get(key)
+        for key in (
+            "response_type",
+            "client_id",
+            "redirect_uri",
+            "code_challenge",
+            "code_challenge_method",
+        )
     )
 
 

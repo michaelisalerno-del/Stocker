@@ -8,6 +8,7 @@ import httpx
 from stocker_mcp.server import build_http_app, connector_info, doctor
 
 CHATGPT_CALLBACK = "https://chatgpt.com/connector/oauth/LcDotGjs8ocx"
+RESOURCE = "https://stocker.test/mcp"
 
 
 def _challenge(verifier: str) -> str:
@@ -69,6 +70,65 @@ def test_oauth_metadata_and_registration(monkeypatch) -> None:
     asyncio.run(run())
 
 
+def test_oauth_accepts_chatgpt_metadata_probe_paths(monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("STOCKER_OAUTH_SETUP_CODE", "setup-code")
+        app = build_http_app(
+            host="127.0.0.1",
+            port=8765,
+            auth_mode="oauth",
+            oauth_setup_code_env="STOCKER_OAUTH_SETUP_CODE",
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://stocker.test",
+        ) as client:
+            responses = [
+                await client.get("/.well-known/oauth-protected-resource/oauth/authorize"),
+                await client.get("/oauth/authorize/.well-known/oauth-protected-resource"),
+                await client.get("/.well-known/oauth-authorization-server/oauth/authorize"),
+                await client.get("/oauth/authorize/.well-known/oauth-authorization-server"),
+                await client.get("/.well-known/openid-configuration/oauth/authorize"),
+                await client.get("/oauth/authorize/.well-known/openid-configuration"),
+            ]
+
+        assert [response.status_code for response in responses] == [200] * len(responses)
+        assert responses[0].json()["resource"] == RESOURCE
+        assert responses[1].json()["authorization_servers"] == ["https://stocker.test"]
+        assert responses[2].json()["authorization_endpoint"] == (
+            "https://stocker.test/oauth/authorize"
+        )
+        assert responses[-1].json()["token_endpoint"] == "https://stocker.test/oauth/token"
+
+    asyncio.run(run())
+
+
+def test_oauth_bare_authorize_probe_is_nonfatal(monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("STOCKER_OAUTH_SETUP_CODE", "setup-code")
+        app = build_http_app(
+            host="127.0.0.1",
+            port=8765,
+            auth_mode="oauth",
+            oauth_setup_code_env="STOCKER_OAUTH_SETUP_CODE",
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://stocker.test",
+        ) as client:
+            get_probe = await client.get("/oauth/authorize")
+            post_probe = await client.post("/oauth/authorize")
+
+        assert get_probe.status_code == 200
+        assert post_probe.status_code == 200
+        assert "Start from ChatGPT" in get_probe.text
+        assert "Start from ChatGPT" in post_probe.text
+
+    asyncio.run(run())
+
+
 def test_oauth_authorization_code_flow_allows_mcp(monkeypatch) -> None:
     async def run() -> None:
         monkeypatch.setenv("STOCKER_OAUTH_SETUP_CODE", "setup-code")
@@ -93,6 +153,7 @@ def test_oauth_authorization_code_flow_allows_mcp(monkeypatch) -> None:
                 "response_type": "code",
                 "client_id": client_id,
                 "redirect_uri": CHATGPT_CALLBACK,
+                "resource": RESOURCE,
                 "state": "abc",
                 "scope": "stocker.read",
                 "code_challenge": _challenge(verifier),
@@ -119,6 +180,7 @@ def test_oauth_authorization_code_flow_allows_mcp(monkeypatch) -> None:
                     "grant_type": "authorization_code",
                     "client_id": client_id,
                     "redirect_uri": CHATGPT_CALLBACK,
+                    "resource": RESOURCE,
                     "code": query["code"][0],
                     "code_verifier": verifier,
                 },
@@ -139,6 +201,7 @@ def test_oauth_authorization_code_flow_allows_mcp(monkeypatch) -> None:
         assert query["state"] == ["abc"]
         assert token.status_code == 200
         assert payload["token_type"] == "Bearer"
+        assert payload["resource"] == RESOURCE
         assert payload["access_token"]
         assert payload["refresh_token"]
         assert missing.status_code == 401

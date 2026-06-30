@@ -57,6 +57,28 @@ committed or pasted into docs.
 Bearer-token mode remains available for local clients with `--auth-mode bearer`, but
 ChatGPT custom connectors should use OAuth.
 
+When using a public HTTPS tunnel, MCP transport security must allow the exact tunnel
+host. After the tunnel gives you `https://YOUR-TUNNEL-HOST`, restart the server with
+one of these safe options:
+
+```bash
+uv run stocker-mcp \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --auth-mode oauth \
+  --auth-token-env STOCKER_MCP_TOKEN \
+  --allowed-host YOUR-TUNNEL-HOST
+```
+
+Or set:
+
+```bash
+export STOCKER_MCP_ALLOWED_HOSTS="YOUR-TUNNEL-HOST"
+```
+
+Do not use wildcards or bind the server to `0.0.0.0`.
+
 ## Connector Info
 
 Print setup metadata without exposing secrets:
@@ -132,6 +154,18 @@ Use the HTTPS forwarding URL and append `/mcp`:
 
 ```text
 https://YOUR-CLOUDFLARE-URL/mcp
+```
+
+Also allowlist only the hostname portion when starting `stocker-mcp`:
+
+```bash
+uv run stocker-mcp \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --auth-mode oauth \
+  --auth-token-env STOCKER_MCP_TOKEN \
+  --allowed-host YOUR-CLOUDFLARE-HOST
 ```
 
 Do not commit tunnel URLs or auth tokens. Stop temporary tunnels when finished.

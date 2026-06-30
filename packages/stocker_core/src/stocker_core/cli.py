@@ -1033,6 +1033,82 @@ def research_intraday_feature_audit(
     )
 
 
+@research_app.command("behavioral-state-similarity")
+def research_behavioral_state_similarity(
+    qualified_universe: Annotated[
+        Path | None,
+        typer.Option("--qualified-universe", exists=True, file_okay=True, dir_okay=False),
+    ] = None,
+    symbol: Annotated[list[str] | None, typer.Option("--symbol")] = None,
+    max_symbols: Annotated[int | None, typer.Option("--max-symbols", min=1)] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    source: Annotated[str, typer.Option("--source")] = "eodhd",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = "XNYS",
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/behavioral_state_similarity"),
+    config: Annotated[
+        Path, typer.Option("--config", "-c", help="Research config to load.")
+    ] = DEFAULT_RESEARCH_CONFIG,
+) -> None:
+    """Run the research-only behavioral state/personality similarity lab."""
+
+    from stocker_research.behavioral_state_similarity import (
+        BehavioralStateConfig,
+        _load_qualified_symbols,
+        run_behavioral_state_similarity_lab,
+    )
+
+    loaded = _load_research_cli_config(config)
+    resolved_data_dir = _resolve_data_dir(loaded, data_dir)
+    requested_symbols = [item.upper() for item in symbol or []]
+    if qualified_universe is not None:
+        requested_symbols.extend(_load_qualified_symbols(qualified_universe))
+    if not requested_symbols:
+        raise typer.BadParameter("Supply --qualified-universe or one or more --symbol values.")
+
+    deduped_symbols: list[str] = []
+    seen_symbols: set[str] = set()
+    for requested_symbol in requested_symbols:
+        if requested_symbol in seen_symbols:
+            continue
+        seen_symbols.add(requested_symbol)
+        deduped_symbols.append(requested_symbol)
+    if max_symbols is not None:
+        deduped_symbols = deduped_symbols[:max_symbols]
+
+    result = run_behavioral_state_similarity_lab(
+        data_dir=resolved_data_dir,
+        symbols=deduped_symbols,
+        source=source,
+        instrument_type=instrument_type,
+        timeframe=timeframe,
+        market_calendar=market_calendar,
+        output_dir=output_dir,
+        config=BehavioralStateConfig(timeframe=timeframe, market_calendar=market_calendar),
+    )
+    console.print(
+        {
+            "output_name": "behavioral_state_similarity",
+            "run_id": result.run_id,
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "event_csv_path": str(result.event_csv_path),
+            "state_summary_csv_path": str(result.state_summary_csv_path),
+            "match_summary_csv_path": str(result.match_summary_csv_path),
+            "symbols_requested": result.symbols_requested,
+            "symbols_completed": result.symbols_completed,
+            "symbols_failed": result.symbols_failed,
+            "state_counts": result.state_counts,
+            "stage_passed": result.stage_passed,
+            "research_passed": result.research_passed,
+        }
+    )
+
+
 @server_app.command("dry-run")
 def server_dry_run(
     config: Annotated[Path, typer.Option("--config", "-c")] = Path("configs/server.example.yaml"),

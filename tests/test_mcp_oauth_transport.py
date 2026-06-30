@@ -148,6 +148,57 @@ def test_oauth_authorization_code_flow_allows_mcp(monkeypatch) -> None:
     asyncio.run(run())
 
 
+def test_oauth_adopts_cached_chatgpt_client_id_after_restart(monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("STOCKER_OAUTH_SETUP_CODE", "setup-code")
+        app = build_http_app(
+            host="127.0.0.1",
+            port=8765,
+            auth_mode="oauth",
+            oauth_setup_code_env="STOCKER_OAUTH_SETUP_CODE",
+        )
+        transport = httpx.ASGITransport(app=app)
+        verifier = "cached-client-verifier-for-stocker-oauth"
+        client_id = "stocker-client-FzVIzLIb69CVU9kMj-cE1rRf-2Ojz8wx"
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": CHATGPT_CALLBACK,
+            "scope": "stocker.read",
+            "code_challenge": _challenge(verifier),
+            "code_challenge_method": "S256",
+            "state": "cached-client",
+        }
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://stocker.test",
+        ) as client:
+            approval = await client.get("/oauth/authorize", params=params)
+            approved = await client.post(
+                "/oauth/authorize",
+                data={**params, "setup_code": "setup-code"},
+                follow_redirects=False,
+            )
+            code = parse_qs(urlparse(approved.headers["location"]).query)["code"][0]
+            token = await client.post(
+                "/oauth/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": client_id,
+                    "redirect_uri": CHATGPT_CALLBACK,
+                    "code": code,
+                    "code_verifier": verifier,
+                },
+            )
+
+        assert approval.status_code == 200
+        assert approved.status_code == 302
+        assert token.status_code == 200
+        assert token.json()["access_token"]
+
+    asyncio.run(run())
+
+
 def test_oauth_refresh_token_flow(monkeypatch) -> None:
     async def run() -> None:
         monkeypatch.setenv("STOCKER_OAUTH_SETUP_CODE", "setup-code")

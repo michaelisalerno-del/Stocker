@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from hmac import compare_digest
 from typing import Any
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from stocker_mcp.security import StockerMCPContext
 
@@ -435,7 +435,11 @@ class _AuthorizationRequest:
         client_id = self.client_id
         client = self.oauth_state.clients.get(client_id)
         if client is None:
-            raise OAuthError("invalid_client", "client_id is invalid", 400)
+            if _can_adopt_cached_chatgpt_client(client_id, self.redirect_uri):
+                client = OAuthClient(client_id=client_id, redirect_uris=[self.redirect_uri])
+                self.oauth_state.clients[client_id] = client
+            else:
+                raise OAuthError("invalid_client", "client_id is invalid", 400)
         if self.redirect_uri not in client.redirect_uris:
             raise OAuthError("invalid_request", "redirect_uri is not registered", 400)
         if not self.code_challenge:
@@ -484,6 +488,17 @@ def _approval_page(request: _AuthorizationRequest) -> str:
 </form>
 </body>
 </html>"""
+
+
+def _can_adopt_cached_chatgpt_client(client_id: str, redirect_uri: str) -> bool:
+    if not client_id.startswith("stocker-client-"):
+        return False
+    parsed = urlparse(redirect_uri)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc == "chatgpt.com"
+        and parsed.path.startswith("/connector/oauth/")
+    )
 
 
 def _pkce_challenge(verifier: str) -> str:

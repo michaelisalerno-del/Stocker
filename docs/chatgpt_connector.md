@@ -25,9 +25,11 @@ The server blocks:
 - Raw vendor payload dumps
 - Huge parquet, zip, and database dumps
 - SQL writes and unsafe SQL features
+- Arbitrary Parquet reads outside the canonical `db_get_symbol_bars` bar path
 
 Responses are bounded and secret-redacted. Tool calls are logged locally without token
-values.
+values. Historical bars can be read from Stocker's canonical partitioned Parquet
+layout through `db_get_symbol_bars`; raw Parquet browsing remains blocked.
 
 ## Start Local HTTP MCP
 

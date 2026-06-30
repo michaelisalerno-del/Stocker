@@ -1,6 +1,7 @@
 import sqlite3
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from stocker_mcp.security import SecurityError, StockerMCPContext
@@ -45,6 +46,50 @@ def _context_with_duckdb(tmp_path: Path) -> StockerMCPContext:
     return StockerMCPContext(repo_root=repo, stocker_home=home)
 
 
+def _context_with_partitioned_parquet(tmp_path: Path) -> StockerMCPContext:
+    repo = tmp_path / "repo"
+    home = tmp_path / "StockerLocal"
+    parquet_path = (
+        home
+        / "data"
+        / "processed"
+        / "source=eodhd"
+        / "instrument_type=stock"
+        / "symbol=NVDA.US"
+        / "timeframe=5m"
+        / "data.parquet"
+    )
+    repo.mkdir()
+    parquet_path.parent.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "timestamp": "2026-01-01T14:30:00Z",
+                "symbol": "NVDA.US",
+                "timeframe": "5m",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.5,
+                "volume": 1000,
+                "api_key": "secret",
+            },
+            {
+                "timestamp": "2026-01-01T14:35:00Z",
+                "symbol": "NVDA.US",
+                "timeframe": "5m",
+                "open": 101.0,
+                "high": 103.0,
+                "low": 100.0,
+                "close": 102.5,
+                "volume": 2000,
+                "api_key": "secret",
+            },
+        ]
+    ).to_parquet(parquet_path, index=False)
+    return StockerMCPContext(repo_root=repo, stocker_home=home)
+
+
 def test_database_table_listing_and_preview_are_read_only(tmp_path: Path) -> None:
     context = _context_with_sqlite(tmp_path)
 
@@ -63,6 +108,31 @@ def test_named_symbol_bars_query_forces_limit(tmp_path: Path) -> None:
 
     assert result["row_count"] == 1
     assert result["rows"][0]["close"] == 101.5
+
+
+def test_symbol_bars_falls_back_to_partitioned_parquet(tmp_path: Path) -> None:
+    context = _context_with_partitioned_parquet(tmp_path)
+
+    result = database.db_get_symbol_bars(
+        "NVDA",
+        "5m",
+        start="2026-01-01T14:35:00Z",
+        limit=5,
+        context=context,
+    )
+
+    assert result["database_type"] == "parquet"
+    assert result["row_count"] == 1
+    assert result["rows"][0]["timestamp"] == "2026-01-01T14:35:00Z"
+    assert result["rows"][0]["close"] == 102.5
+    assert result["rows"][0]["api_key"] == "[REDACTED]"
+
+
+def test_symbol_bars_rejects_unsafe_partition_values(tmp_path: Path) -> None:
+    context = _context_with_partitioned_parquet(tmp_path)
+
+    with pytest.raises(SecurityError):
+        database.db_get_symbol_bars("../NVDA", "5m", context=context)
 
 
 def test_arbitrary_sql_rejects_write_statements(tmp_path: Path) -> None:

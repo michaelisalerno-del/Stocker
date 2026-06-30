@@ -100,7 +100,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec("db_list_tables", "List Tables", "List tables in a Stocker database."),
     ToolSpec("db_describe_table", "Describe Table", "Describe columns for a Stocker table."),
     ToolSpec("db_preview_table", "Preview Table", "Preview bounded rows from a Stocker table."),
-    ToolSpec("db_get_symbol_bars", "Get Symbol Bars", "Read bounded historical bar rows."),
+    ToolSpec(
+        "db_get_symbol_bars",
+        "Get Symbol Bars",
+        "Read bounded historical bar rows from DB tables or canonical Parquet partitions.",
+    ),
     ToolSpec(
         "db_get_latest_catalysts",
         "Get Latest Catalysts",

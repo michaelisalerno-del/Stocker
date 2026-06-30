@@ -29,6 +29,12 @@ Database tools are scoped to:
 
 - `$STOCKER_HOME/db`
 
+`db_get_symbol_bars` can also read bounded rows from Stocker's canonical bar
+partitions under
+`$STOCKER_HOME/data/processed/source=*/instrument_type=*/symbol=*/timeframe=*/data.parquet`.
+This is limited to the requested symbol and timeframe; arbitrary Parquet file
+reads remain blocked.
+
 Exports are written only under:
 
 - `$STOCKER_HOME/exports`
@@ -290,6 +296,7 @@ It blocks:
 - Raw database file download
 - Raw vendor payload dumps
 - Huge parquet, zip, and database dumps
+- Arbitrary Parquet reads outside the `db_get_symbol_bars` canonical bar path
 
 Text output is bounded and redacted for secret-looking values such as API keys,
 tokens, bearer headers, passwords, high-entropy strings, and credential-like database

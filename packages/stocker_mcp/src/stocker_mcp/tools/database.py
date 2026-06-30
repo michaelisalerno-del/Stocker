@@ -1,4 +1,4 @@
-"""Read-only database tools scoped to STOCKER_HOME/db."""
+"""Read-only database and canonical bar Parquet tools scoped to STOCKER_HOME."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from stocker_mcp.security import (
 SQLITE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 DUCKDB_SUFFIXES = {".duckdb", ".ddb"}
 TABLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+PARTITION_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 BANNED_SQL_PATTERN = re.compile(
     r"\b(attach|detach|copy|export|install|load|pragma|create|insert|update|delete|drop|alter|"
     r"truncate|replace|vacuum|analyze)\b",
@@ -126,6 +127,167 @@ def _execute(path: Path, sql: str, params: tuple[Any, ...] = (), *, limit: int) 
         "database_type": db_type,
         "columns": columns,
         "rows": _redact_rows(columns, rows),
+        "row_count": len(rows),
+        "limit": limit,
+    }
+
+
+def _validate_partition_value(name: str, value: str) -> str:
+    if not isinstance(value, str):
+        raise SecurityError(f"unsafe {name}: {value}")
+    safe = value.strip()
+    if not safe or not PARTITION_VALUE_PATTERN.fullmatch(safe):
+        raise SecurityError(f"unsafe {name}: {value}")
+    return safe
+
+
+def _symbol_partition_candidates(symbol: str) -> tuple[str, ...]:
+    safe_symbol = _validate_partition_value("symbol", symbol).upper()
+    candidates = [safe_symbol]
+    if "." not in safe_symbol:
+        candidates.append(f"{safe_symbol}.US")
+    return tuple(dict.fromkeys(candidates))
+
+
+def _timeframe_partition_candidates(timeframe: str) -> tuple[str, ...]:
+    safe_timeframe = _validate_partition_value("timeframe", timeframe)
+    candidates = [safe_timeframe]
+    lowered = safe_timeframe.lower()
+    if lowered != safe_timeframe:
+        candidates.append(lowered)
+    return tuple(dict.fromkeys(candidates))
+
+
+def _partitioned_bar_files(
+    symbol: str,
+    timeframe: str,
+    context: StockerMCPContext,
+) -> list[Path]:
+    root = context.stocker_home / "data" / "processed"
+    if not root.exists():
+        return []
+    matches: list[Path] = []
+    for symbol_candidate in _symbol_partition_candidates(symbol):
+        for timeframe_candidate in _timeframe_partition_candidates(timeframe):
+            pattern = (
+                f"source=*/instrument_type=*/symbol={symbol_candidate}/"
+                f"timeframe={timeframe_candidate}/data.parquet"
+            )
+            for path in root.glob(pattern):
+                if not path.is_file():
+                    continue
+                resolved = context.resolve_under_root(root, path)
+                if not is_blocked_path(resolved):
+                    matches.append(resolved)
+    return sorted(dict.fromkeys(matches), key=lambda path: path.as_posix())
+
+
+def _partition_values_from_path(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for part in path.parts:
+        if "=" not in part:
+            continue
+        name, value = part.split("=", 1)
+        if name in {"source", "instrument_type", "symbol", "timeframe"} and value:
+            values[name] = value
+    return values
+
+
+def _json_safe_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    try:
+        import pandas as pd
+    except ImportError:
+        pd = None
+    if pd is not None:
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except (TypeError, ValueError):
+            pass
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (TypeError, ValueError):
+            pass
+    return value
+
+
+def _parse_optional_timestamp(pd: Any, name: str, value: str | None) -> Any:
+    if value is None:
+        return None
+    parsed = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(parsed):
+        raise SecurityError(f"invalid {name} timestamp: {value}")
+    return parsed
+
+
+def _partitioned_symbol_bars(
+    symbol: str,
+    timeframe: str,
+    start: str | None,
+    end: str | None,
+    limit: int,
+    context: StockerMCPContext,
+) -> dict[str, Any] | None:
+    files = _partitioned_bar_files(symbol, timeframe, context)
+    if not files:
+        return None
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise SecurityError("pandas/pyarrow is required to read partitioned bar Parquet") from exc
+
+    frames = []
+    for path in files:
+        try:
+            frame = pd.read_parquet(path)
+        except Exception as exc:
+            raise SecurityError(f"unable to read partitioned bar Parquet: {path.name}") from exc
+        for name, value in _partition_values_from_path(path).items():
+            if name not in frame.columns:
+                frame[name] = value
+        frames.append(frame)
+
+    combined = pd.concat(frames, ignore_index=True, sort=False) if len(frames) > 1 else frames[0]
+    if "timestamp" in combined.columns:
+        timestamps = pd.to_datetime(combined["timestamp"], utc=True, errors="coerce")
+        mask = pd.Series(True, index=combined.index)
+        start_timestamp = _parse_optional_timestamp(pd, "start", start)
+        end_timestamp = _parse_optional_timestamp(pd, "end", end)
+        if start_timestamp is not None:
+            mask &= timestamps >= start_timestamp
+        if end_timestamp is not None:
+            mask &= timestamps <= end_timestamp
+        combined = combined.loc[mask].copy()
+        combined["_stocker_mcp_sort_timestamp"] = timestamps.loc[mask]
+        combined = combined.sort_values("_stocker_mcp_sort_timestamp").drop(
+            columns=["_stocker_mcp_sort_timestamp"]
+        )
+    elif start is not None or end is not None:
+        raise SecurityError("partitioned bar Parquet has no timestamp column")
+
+    limited = combined.head(limit)
+    columns = [str(column) for column in limited.columns]
+    rows = [
+        {
+            str(column): redact_value(str(column), _json_safe_scalar(value))
+            for column, value in record.items()
+        }
+        for record in limited.to_dict(orient="records")
+    ]
+    return {
+        "database": str(files[0]),
+        "database_type": "parquet",
+        "parquet_files": [str(path) for path in files],
+        "columns": columns,
+        "rows": rows,
         "row_count": len(rows),
         "limit": limit,
     }
@@ -270,14 +432,55 @@ def db_get_symbol_bars(
     database: str | None = None,
     context: StockerMCPContext | None = None,
 ) -> dict[str, Any]:
-    """Return recent bars from a conventional bars table."""
+    """Return recent bars from a bars table or Stocker partitioned Parquet."""
 
     resolved = _context(context)
     safe_limit = clamp_limit(limit, default=500, maximum=MAX_DB_ROWS)
-    path = _resolve_database(database, resolved)
+    try:
+        path = _resolve_database(database, resolved)
+    except SecurityError:
+        if database is not None or not resolved.db_enabled:
+            raise
+        parquet_result = _partitioned_symbol_bars(
+            symbol, timeframe, start, end, safe_limit, resolved
+        )
+        if parquet_result is not None:
+            resolved.log_tool_call(
+                "db_get_symbol_bars",
+                {
+                    "source": "parquet",
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "limit": safe_limit,
+                },
+            )
+            return parquet_result
+        raise
+
     table = _first_existing_table(path, ("bars", "ohlcv", "prices", "market_bars"))
     if table is None:
-        return {"database": str(path), "rows": [], "row_count": 0, "message": "no bars table found"}
+        if database is None:
+            parquet_result = _partitioned_symbol_bars(
+                symbol, timeframe, start, end, safe_limit, resolved
+            )
+            if parquet_result is not None:
+                resolved.log_tool_call(
+                    "db_get_symbol_bars",
+                    {
+                        "source": "parquet",
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "limit": safe_limit,
+                    },
+                )
+                return parquet_result
+        return {
+            "database": str(path),
+            "database_type": _db_type(path),
+            "rows": [],
+            "row_count": 0,
+            "message": "no bars table found and no partitioned Parquet bars found",
+        }
     filters = ["symbol = ?", "timeframe = ?"]
     params: list[Any] = [symbol.upper(), timeframe]
     if start is not None:

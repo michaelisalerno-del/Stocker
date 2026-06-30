@@ -1049,7 +1049,16 @@ def research_behavioral_state_similarity(
     output_dir: Annotated[
         Path,
         typer.Option("--output-dir"),
-    ] = Path("data/reports/research/behavioral_state_similarity"),
+    ] = Path("data/reports/research/behavioral_state_similarity_v2"),
+    event_mode: Annotated[str, typer.Option("--event-mode")] = "state_entry_non_overlapping",
+    permutation_count: Annotated[int, typer.Option("--permutation-count", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_independent_events: Annotated[int, typer.Option("--min-independent-events", min=1)] = 30,
+    run_template_overlay: Annotated[
+        bool,
+        typer.Option("--run-template-overlay/--no-run-template-overlay"),
+    ] = False,
+    template: Annotated[str, typer.Option("--template")] = "opening_range_breakout",
     config: Annotated[
         Path, typer.Option("--config", "-c", help="Research config to load.")
     ] = DEFAULT_RESEARCH_CONFIG,
@@ -1088,7 +1097,16 @@ def research_behavioral_state_similarity(
         timeframe=timeframe,
         market_calendar=market_calendar,
         output_dir=output_dir,
-        config=BehavioralStateConfig(timeframe=timeframe, market_calendar=market_calendar),
+        config=BehavioralStateConfig(
+            timeframe=timeframe,
+            market_calendar=market_calendar,
+            event_mode=event_mode,
+            permutation_count=permutation_count,
+            random_seed=random_seed,
+            min_independent_events_per_state_horizon=min_independent_events,
+            run_template_overlay=run_template_overlay,
+            template=template,
+        ),
     )
     console.print(
         {
@@ -1103,8 +1121,14 @@ def research_behavioral_state_similarity(
             "symbols_completed": result.symbols_completed,
             "symbols_failed": result.symbols_failed,
             "state_counts": result.state_counts,
-            "stage_passed": result.stage_passed,
-            "research_passed": result.research_passed,
+            "pipeline_passed": result.pipeline_passed,
+            "label_similarity_supported": result.label_similarity_supported,
+            "fingerprint_similarity_supported": result.fingerprint_similarity_supported,
+            "state_similarity_supported": result.state_similarity_supported,
+            "oos_similarity_supported": result.oos_similarity_supported,
+            "template_overlay_supported": result.template_overlay_supported,
+            "decision": result.decision,
+            "decision_reasons": result.decision_reasons,
         }
     )
 

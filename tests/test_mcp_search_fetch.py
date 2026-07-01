@@ -61,6 +61,26 @@ def test_search_returns_chatgpt_result_shape(tmp_path: Path) -> None:
     assert any(item["id"].startswith("stocker://reports/") for item in result["results"])
 
 
+def test_search_prioritizes_matching_nested_report_files(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    report_dir = (
+        context.stocker_home
+        / "data"
+        / "reports"
+        / "research"
+        / "role_aware_event_cutter_v0"
+        / "role_aware_event_cutter_v0_20260630T225926Z"
+    )
+    report_dir.mkdir(parents=True)
+    (report_dir / "summary.md").write_text("role-aware summary", encoding="utf-8")
+
+    result = discovery.search("role_aware_event_cutter_v0", limit=1, context=context)
+
+    assert result["results"][0]["id"].startswith(
+        "stocker://reports/home/role_aware_event_cutter_v0"
+    )
+
+
 def test_fetch_returns_safe_text_and_metadata(tmp_path: Path) -> None:
     context = _context(tmp_path)
     search_result = discovery.search("VWAP", context=context)

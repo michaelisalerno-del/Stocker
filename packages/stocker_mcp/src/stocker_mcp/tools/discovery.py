@@ -113,7 +113,8 @@ def _search_reports(
     for run in recent.get("runs", []):
         haystack = _safe_json_text(run).lower()
         run_id = str(run.get("run_id", ""))
-        if lowered in haystack or lowered in run_id.lower():
+        run_matches = lowered in haystack or lowered in run_id.lower()
+        if run_matches:
             _add_result(
                 results,
                 seen,
@@ -127,6 +128,8 @@ def _search_reports(
             if not raw_path:
                 continue
             path = Path(str(raw_path))
+            if not run_matches and lowered not in f"{path.name} {path}".lower():
+                continue
             try:
                 root_key, root = _report_root_key(path, context)
                 rel = path.resolve().relative_to(root).as_posix()
@@ -157,7 +160,8 @@ def _search_reports(
                 )
             except (OSError, SecurityError, UnicodeError):
                 continue
-            if lowered not in path.name.lower() and lowered not in content.lower():
+            match_text = f"{rel} {path.name} {content}".lower()
+            if lowered not in match_text:
                 continue
             root_key, _ = _report_root_key(path, context)
             _add_result(

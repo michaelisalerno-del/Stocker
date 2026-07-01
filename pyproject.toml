@@ -24,7 +24,7 @@ dependencies = [
 
 [project.scripts]
 stocker = "stocker_launcher:main"
-stocker-mcp = "stocker_mcp.server:main"
+stocker-mcp = "stocker_launcher:mcp_main"
 
 [dependency-groups]
 research = [

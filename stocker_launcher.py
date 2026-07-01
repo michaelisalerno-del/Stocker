@@ -14,6 +14,7 @@ PACKAGE_SRC_DIRS: tuple[str, ...] = (
     "packages/stocker_research/src",
     "packages/stocker_backtest/src",
     "packages/stocker_execution/src",
+    "packages/stocker_mcp/src",
 )
 
 
@@ -50,3 +51,14 @@ def main() -> object:
         _ensure_monorepo_src_paths()
         from stocker_core.cli import app
     return app()
+
+
+def mcp_main() -> object:
+    """Run the Stocker MCP server from editable or installed environments."""
+
+    try:
+        from stocker_mcp.server import main as server_main
+    except ModuleNotFoundError:
+        _ensure_monorepo_src_paths()
+        from stocker_mcp.server import main as server_main
+    return server_main()

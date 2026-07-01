@@ -191,6 +191,27 @@ def _resolve_save_raw(eodhd_config: EODHDConfig, save_raw: bool | None) -> bool:
     return save_raw if save_raw is not None else eodhd_config.save_raw_by_default
 
 
+def _parse_symbol_inputs(
+    *,
+    symbol: list[str] | None = None,
+    symbols: str | None = None,
+) -> list[str]:
+    requested: list[str] = []
+    for item in symbol or []:
+        requested.extend(part.strip() for part in item.split(",") if part.strip())
+    if symbols:
+        requested.extend(part.strip() for part in symbols.split(",") if part.strip())
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for requested_symbol in requested:
+        normalized = requested_symbol.upper()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
 def _require_eodhd_enabled(
     eodhd_config: EODHDConfig,
     *,
@@ -1040,6 +1061,7 @@ def research_behavioral_state_similarity(
         typer.Option("--qualified-universe", exists=True, file_okay=True, dir_okay=False),
     ] = None,
     symbol: Annotated[list[str] | None, typer.Option("--symbol")] = None,
+    symbols: Annotated[str | None, typer.Option("--symbols")] = None,
     max_symbols: Annotated[int | None, typer.Option("--max-symbols", min=1)] = None,
     data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
     source: Annotated[str, typer.Option("--source")] = "eodhd",
@@ -1073,7 +1095,7 @@ def research_behavioral_state_similarity(
 
     loaded = _load_research_cli_config(config)
     resolved_data_dir = _resolve_data_dir(loaded, data_dir)
-    requested_symbols = [item.upper() for item in symbol or []]
+    requested_symbols = _parse_symbol_inputs(symbol=symbol, symbols=symbols)
     if qualified_universe is not None:
         requested_symbols.extend(_load_qualified_symbols(qualified_universe))
     if not requested_symbols:
@@ -1129,6 +1151,285 @@ def research_behavioral_state_similarity(
             "template_overlay_supported": result.template_overlay_supported,
             "decision": result.decision,
             "decision_reasons": result.decision_reasons,
+        }
+    )
+
+
+@research_app.command("state-event-detector")
+def research_state_event_detector(
+    symbol: Annotated[list[str] | None, typer.Option("--symbol")] = None,
+    symbols: Annotated[str | None, typer.Option("--symbols")] = None,
+    max_symbols: Annotated[int | None, typer.Option("--max-symbols", min=1)] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    source: Annotated[str, typer.Option("--source")] = "eodhd",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = "XNYS",
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/state_event_detector_v0"),
+    event_mode: Annotated[str, typer.Option("--event-mode")] = "state_entry_non_overlapping",
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_events_for_similarity: Annotated[
+        int,
+        typer.Option("--min-events-for-similarity", min=1),
+    ] = 30,
+    config: Annotated[
+        Path, typer.Option("--config", "-c", help="Research config to load.")
+    ] = DEFAULT_RESEARCH_CONFIG,
+) -> None:
+    """Run the focused research-only state event detector v0."""
+
+    from stocker_research.state_event_detector_v0 import (
+        StateEventDetectorConfig,
+        run_state_event_detector_lab,
+    )
+
+    loaded = _load_research_cli_config(config)
+    resolved_data_dir = _resolve_data_dir(loaded, data_dir)
+    requested_symbols = _parse_symbol_inputs(symbol=symbol, symbols=symbols)
+    if not requested_symbols:
+        raise typer.BadParameter("Supply one or more symbols with --symbols or --symbol.")
+    if max_symbols is not None:
+        requested_symbols = requested_symbols[:max_symbols]
+
+    result = run_state_event_detector_lab(
+        data_dir=resolved_data_dir,
+        symbols=requested_symbols,
+        source=source,
+        instrument_type=instrument_type,
+        timeframe=timeframe,
+        market_calendar=market_calendar,
+        output_dir=output_dir,
+        config=StateEventDetectorConfig(
+            timeframe=timeframe,
+            market_calendar=market_calendar,
+            event_mode=event_mode,
+            random_seed=random_seed,
+            min_events_for_similarity=min_events_for_similarity,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "state_event_detector_v0",
+            "run_id": result.run_id,
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "event_rows_csv_path": str(result.event_rows_csv_path),
+            "manual_state_audit_csv_path": str(result.manual_state_audit_csv_path),
+            "event_state_summary_csv_path": str(result.event_state_summary_csv_path),
+            "same_event_cross_symbol_similarity_csv_path": str(
+                result.same_event_cross_symbol_similarity_csv_path
+            ),
+            "random_baseline_csv_path": str(result.random_baseline_csv_path),
+            "oos_event_response_csv_path": str(result.oos_event_response_csv_path),
+            "concentration_warnings_csv_path": str(result.concentration_warnings_csv_path),
+            "decision_json_path": str(result.decision_json_path),
+            "symbols_requested": result.symbols_requested,
+            "symbols_completed": result.symbols_completed,
+            "symbols_failed": result.symbols_failed,
+            "total_event_rows": result.total_event_rows,
+            "manual_audit_status": "manual_reproduced"
+            if result.manual_audit_passed
+            else "manual_reproduction_failed",
+            "decision": result.decision,
+        }
+    )
+
+
+@research_app.command("event-failure-cutter")
+def research_event_failure_cutter(
+    input_dir: Annotated[Path | None, typer.Option("--input-dir")] = None,
+    input_base_dir: Annotated[
+        Path,
+        typer.Option("--input-base-dir"),
+    ] = Path("data/reports/research/state_event_detector_v0"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/event_failure_cutter_v0"),
+    horizons: Annotated[str, typer.Option("--horizons")] = "6,9,12,24",
+    min_train_events: Annotated[int, typer.Option("--min-train-events", min=1)] = 30,
+    min_test_events: Annotated[int, typer.Option("--min-test-events", min=1)] = 20,
+    min_retained_events: Annotated[int, typer.Option("--min-retained-events", min=1)] = 10,
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 50,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    max_candidates_per_state_horizon: Annotated[
+        int,
+        typer.Option("--max-candidates-per-state-horizon", min=1),
+    ] = 24,
+    top_single_filters_for_pairs: Annotated[
+        int,
+        typer.Option("--top-single-filters-for-pairs", min=1),
+    ] = 5,
+) -> None:
+    """Run the research-only event failure cutter v0."""
+
+    from stocker_research.event_failure_cutter_v0 import (
+        EventFailureCutterConfig,
+        run_event_failure_cutter_lab,
+    )
+
+    parsed_horizons = tuple(
+        int(part.strip()) for part in horizons.split(",") if part.strip()
+    )
+    if not parsed_horizons:
+        raise typer.BadParameter("Supply at least one horizon with --horizons.")
+    result = run_event_failure_cutter_lab(
+        input_dir=input_dir,
+        input_base_dir=input_base_dir,
+        output_dir=output_dir,
+        config=EventFailureCutterConfig(
+            horizons=parsed_horizons,
+            min_train_events=min_train_events,
+            min_test_events=min_test_events,
+            min_retained_events=min_retained_events,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            max_candidates_per_state_horizon=max_candidates_per_state_horizon,
+            top_single_filters_for_pairs=top_single_filters_for_pairs,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "event_failure_cutter_v0",
+            "run_id": result.run_id,
+            "input_dir": str(result.input_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "filter_oos_results_csv_path": str(result.filter_oos_results_csv_path),
+            "random_filter_baseline_csv_path": str(result.random_filter_baseline_csv_path),
+            "blocker_quality_summary_csv_path": str(
+                result.blocker_quality_summary_csv_path
+            ),
+            "decision": result.decision,
+            "best_filter_count": result.best_filter_count,
+        }
+    )
+
+
+@research_app.command("state-event-directional-interpretation")
+def research_state_event_directional_interpretation(
+    input_dir: Annotated[Path | None, typer.Option("--input-dir")] = None,
+    input_base_dir: Annotated[
+        Path,
+        typer.Option("--input-base-dir"),
+    ] = Path("data/reports/research/state_event_detector_v0"),
+    horizons: Annotated[str, typer.Option("--horizons")] = "6,9,12,24",
+    min_events: Annotated[int, typer.Option("--min-events", min=1)] = 30,
+    min_symbols: Annotated[int, typer.Option("--min-symbols", min=1)] = 3,
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Update a state-event-detector report with role-aware directional scoring."""
+
+    from stocker_research.state_directional_interpretation_v0 import (
+        DirectionalInterpretationConfig,
+        run_state_directional_interpretation_report,
+    )
+
+    parsed_horizons = tuple(
+        int(part.strip()) for part in horizons.split(",") if part.strip()
+    )
+    if not parsed_horizons:
+        raise typer.BadParameter("Supply at least one horizon with --horizons.")
+    result = run_state_directional_interpretation_report(
+        input_dir=input_dir,
+        input_base_dir=input_base_dir,
+        config=DirectionalInterpretationConfig(
+            horizons=parsed_horizons,
+            min_events=min_events,
+            min_symbols=min_symbols,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "state_directional_interpretation_v0",
+            "input_dir": str(result.input_dir),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "directional_state_summary_csv_path": str(
+                result.directional_state_summary_csv_path
+            ),
+            "blocker_quality_summary_csv_path": str(result.blocker_quality_summary_csv_path),
+            "short_candidate_summary_csv_path": str(result.short_candidate_summary_csv_path),
+            "no_trade_quality_summary_csv_path": str(result.no_trade_quality_summary_csv_path),
+            "oos_directional_state_response_csv_path": str(
+                result.oos_directional_state_response_csv_path
+            ),
+            "decision": result.decision,
+            "state_decision_count": result.state_decision_count,
+        }
+    )
+
+
+@research_app.command("role-aware-event-cutter")
+def research_role_aware_event_cutter(
+    input_dir: Annotated[Path | None, typer.Option("--input-dir")] = None,
+    input_base_dir: Annotated[
+        Path,
+        typer.Option("--input-base-dir"),
+    ] = Path("data/reports/research/state_event_detector_v0"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/role_aware_event_cutter_v0"),
+    horizons: Annotated[str, typer.Option("--horizons")] = "6,9,12,24",
+    min_train_events: Annotated[int, typer.Option("--min-train-events", min=1)] = 30,
+    min_test_events: Annotated[int, typer.Option("--min-test-events", min=1)] = 20,
+    min_retained_events: Annotated[int, typer.Option("--min-retained-events", min=1)] = 10,
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 50,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    max_candidates_per_state_horizon: Annotated[
+        int,
+        typer.Option("--max-candidates-per-state-horizon", min=1),
+    ] = 24,
+) -> None:
+    """Run the research-only role-aware event cutter v0."""
+
+    from stocker_research.role_aware_event_cutter_v0 import (
+        RoleAwareEventCutterConfig,
+        run_role_aware_event_cutter_lab,
+    )
+
+    parsed_horizons = tuple(
+        int(part.strip()) for part in horizons.split(",") if part.strip()
+    )
+    if not parsed_horizons:
+        raise typer.BadParameter("Supply at least one horizon with --horizons.")
+    result = run_role_aware_event_cutter_lab(
+        input_dir=input_dir,
+        input_base_dir=input_base_dir,
+        output_dir=output_dir,
+        config=RoleAwareEventCutterConfig(
+            horizons=parsed_horizons,
+            min_train_events=min_train_events,
+            min_test_events=min_test_events,
+            min_retained_events=min_retained_events,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            max_candidates_per_state_horizon=max_candidates_per_state_horizon,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "role_aware_event_cutter_v0",
+            "run_id": result.run_id,
+            "input_dir": str(result.input_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "filter_oos_results_csv_path": str(result.filter_oos_results_csv_path),
+            "random_role_baselines_csv_path": str(result.random_role_baselines_csv_path),
+            "selected_filters_csv_path": str(result.selected_filters_csv_path),
+            "rejected_filters_csv_path": str(result.rejected_filters_csv_path),
+            "decision": result.decision,
+            "selected_filter_count": result.selected_filter_count,
         }
     )
 

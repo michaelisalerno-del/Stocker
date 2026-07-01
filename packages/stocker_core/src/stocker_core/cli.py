@@ -1820,6 +1820,77 @@ def research_personality_stop_validation(
     )
 
 
+@research_app.command("personality-live-replay")
+def research_personality_live_replay(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    candidate_book: Annotated[
+        Path,
+        typer.Option("--candidate-book"),
+    ],
+    template_path: Annotated[
+        Path,
+        typer.Option("--template-path"),
+    ] = Path("configs/research/personality_template_v0/templates.yaml"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_live_replay_v0"),
+    replay_start: Annotated[
+        str,
+        typer.Option("--replay-start"),
+    ] = "2026-06-01",
+    replay_end: Annotated[
+        str,
+        typer.Option("--replay-end"),
+    ] = "2026-06-30",
+    cost_bps: Annotated[
+        float,
+        typer.Option("--cost-bps"),
+    ] = 10.0,
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Replay frozen personality candidates over a historical live-style window."""
+
+    from stocker_research.personality_live_replay_v0 import (
+        LiveReplayConfig,
+        run_personality_live_replay_lab,
+    )
+
+    result = run_personality_live_replay_lab(
+        input_event_dir=input_event_dir,
+        candidate_book_path=candidate_book,
+        template_path=template_path,
+        output_dir=output_dir,
+        replay_start=replay_start,
+        replay_end=replay_end,
+        config=LiveReplayConfig(
+            cost_bps=cost_bps,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_live_replay_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "candidate_book_path": str(result.candidate_book_path),
+            "template_path": str(result.template_path),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "trades_csv_path": str(result.trades_csv_path),
+            "decision": result.decision,
+            "trade_count": result.trade_count,
+        }
+    )
+
+
 @server_app.command("dry-run")
 def server_dry_run(
     config: Annotated[Path, typer.Option("--config", "-c")] = Path("configs/server.example.yaml"),

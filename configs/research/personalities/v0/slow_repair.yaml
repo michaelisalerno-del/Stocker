@@ -1,0 +1,36 @@
+personality: slow_repair
+version: v0
+role: long_reversal
+default_expected_direction: 1
+base_event_states:
+  - slow_snapback_after_dip
+preferred_horizons: [12, 24]
+regime_families:
+  - vwap_side
+  - opening_mid_side
+  - range
+  - compression_x_efficiency
+  - efficiency
+  - time_of_day
+filter_families:
+  - efficiency
+  - prior_return
+  - recent_structure
+  - range_volatility
+  - vwap_distance
+  - opening_range
+  - volume
+caveat_families:
+  - auction_location
+  - event_quality
+  - time_of_day
+  - cross_stock_alignment
+  - freshness
+minimums:
+  train_count: 24
+  test_count: 10
+  retained_count: 8
+  symbol_count: 3
+max_single_symbol_share: 0.50
+max_single_session_share: 0.20
+max_single_month_share: 0.50

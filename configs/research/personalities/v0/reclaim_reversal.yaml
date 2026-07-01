@@ -1,0 +1,36 @@
+personality: reclaim_reversal
+version: v0
+role: long_reversal
+default_expected_direction: 1
+base_event_states:
+  - liquidation_failed_low_reclaim
+preferred_horizons: [6, 9, 12, 24]
+regime_families:
+  - vwap_side
+  - opening_mid_side
+  - session_open_side
+  - compression_x_efficiency
+  - range
+  - time_of_day
+filter_families:
+  - recent_structure
+  - session_location
+  - wick_quality
+  - prior_return
+  - efficiency
+  - range_volatility
+  - volume
+caveat_families:
+  - auction_location
+  - event_quality
+  - time_of_day
+  - cross_stock_alignment
+  - freshness
+minimums:
+  train_count: 30
+  test_count: 12
+  retained_count: 8
+  symbol_count: 3
+max_single_symbol_share: 0.50
+max_single_session_share: 0.20
+max_single_month_share: 0.50

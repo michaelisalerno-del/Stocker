@@ -1,0 +1,30 @@
+version: midcap_personality_scope_v0_20260701
+research_only: true
+market_cap_source: /Users/michaelsalerno/StockerLocal/data/universes/generated/us_liquid_smid_momentum_25.yaml
+market_cap_snapshot_created_at: "2026-06-30T11:07:52Z"
+definition:
+  min_market_capitalization: 2000000000
+  max_market_capitalization: 10000000000
+  timeframe: 5m
+  local_data_dir: /Users/michaelsalerno/StockerLocal/data
+symbols:
+  - symbol: AXTI
+    market_capitalization: 4652242432
+  - symbol: BMNR
+    market_capitalization: 7723462144
+  - symbol: CIFR
+    market_capitalization: 9623209984
+  - symbol: HIMS
+    market_capitalization: 7855673856
+  - symbol: MARA
+    market_capitalization: 5543672832
+  - symbol: MP
+    market_capitalization: 9595396096
+  - symbol: NVTS
+    market_capitalization: 4130694656
+  - symbol: OKLO
+    market_capitalization: 8699549696
+  - symbol: QBTS
+    market_capitalization: 8827708416
+  - symbol: RGTI
+    market_capitalization: 6328873984

@@ -1,0 +1,430 @@
+version: personality_template_v0_seed_20260701
+research_only: true
+notes:
+  - Candidate templates only; no edge is claimed.
+  - Detection and caveat features are event-row features available at or before the event bar.
+  - Forward returns and MFE/MAE remain target columns only.
+templates:
+  - template_id: failed_open_bear_trap_absorption
+    personality: failed_open_bear_trap_absorption
+    parent_event_state: failed_open_down_continuation
+    role: long_reversal_candidate
+    expected_direction: 1
+    horizon: 12
+    base_conditions:
+      - feature: close_location_value
+        operator: between
+        lower: 0.45
+        upper: 0.75
+      - feature: lower_wick_pct_of_range
+        operator: "<="
+        threshold: 0.20
+    regime_fields:
+      - range_regime
+      - open_mid_loc
+      - opening_mid_side_regime
+      - session_open_side_regime
+      - time_regime
+      - compression_regime
+      - prior12_regime
+    filter_features:
+      - prior_6_bar_return
+      - directional_efficiency_6
+      - directional_efficiency_12
+      - body_pct_of_range
+      - range_zscore
+      - rolling_intraday_range_pct
+      - distance_from_session_low_pct
+      - distance_from_session_high_pct
+      - distance_from_session_open_pct
+      - distance_from_opening_range_mid_pct
+      - distance_from_opening_range_low_pct
+    minimums:
+      base_events: 20
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Failed open-down continuation that refuses lower prices."
+
+  - template_id: reclaim_above_open_mid_low_eff
+    personality: reclaim_above_open_mid_low_eff
+    parent_event_state: liquidation_failed_low_reclaim
+    role: long_reversal_candidate
+    expected_direction: 1
+    horizon: 12
+    base_conditions:
+      - feature: distance_from_opening_range_mid_pct
+        operator: ">="
+        threshold: 0.001
+      - feature: directional_efficiency_12
+        operator: "<="
+        threshold: 0.25
+    regime_fields:
+      - range_regime
+      - compression_regime
+      - session_open_side_regime
+      - opening_mid_side_regime
+      - prior12_regime
+      - time_regime
+    filter_features:
+      - prior_3_bar_return
+      - prior_6_bar_return
+      - prior_12_bar_return
+      - distance_from_vwap_pct
+      - distance_from_opening_range_low_pct
+      - distance_from_opening_range_mid_pct
+      - distance_from_opening_range_high_pct
+      - rolling_intraday_range_pct
+      - compression_zscore
+      - upper_wick_pct_of_range
+      - close_location_value
+    minimums:
+      base_events: 30
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Reclaim back above opening midpoint while still controlled/low efficiency."
+
+  - template_id: morning_vwap_reclaim_repair
+    personality: morning_vwap_reclaim_repair
+    parent_event_state: liquidation_failed_low_reclaim
+    role: long_reversal_candidate
+    expected_direction: 1
+    horizon: 12
+    base_conditions:
+      - feature: bar_index_bucket
+        operator: "=="
+        threshold: morning
+      - feature: distance_from_vwap_pct
+        operator: ">="
+        threshold: 0.001
+    regime_fields:
+      - compression_regime
+      - range_regime
+      - session_open_side_regime
+      - opening_mid_side_regime
+      - prior12_regime
+      - time_regime
+    filter_features:
+      - directional_efficiency_6
+      - directional_efficiency_12
+      - prior_3_bar_return
+      - prior_6_bar_return
+      - distance_from_vwap_pct
+      - compression_zscore
+      - rolling_intraday_range_pct
+      - close_location_value
+    minimums:
+      base_events: 20
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Morning liquidation reclaim that repairs back above VWAP."
+
+  - template_id: pullback_near_vwap_structure_hold
+    personality: pullback_near_vwap_structure_hold
+    parent_event_state: controlled_pullback_after_bullish_impulse
+    role: long_continuation_candidate
+    expected_direction: 1
+    horizon: 24
+    base_conditions:
+      - feature: distance_from_vwap_pct
+        operator: between
+        lower: -0.002
+        upper: 0.006
+      - feature: distance_from_recent_high_pct
+        operator: "<="
+        threshold: -0.003
+      - feature: close_location_value
+        operator: ">="
+        threshold: 0.45
+    regime_fields:
+      - session_open_side_regime
+      - opening_mid_side_regime
+      - range_regime
+      - compression_regime
+      - time_regime
+      - prior12_regime
+    filter_features:
+      - distance_from_opening_range_low_pct
+      - distance_from_opening_range_mid_pct
+      - distance_from_vwap_pct
+      - distance_from_session_open_pct
+      - lower_wick_pct_of_range
+      - directional_efficiency_6
+      - range_cross_count_12
+      - rolling_intraday_range_pct
+    minimums:
+      base_events: 30
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Pullback near VWAP that still holds structure."
+
+  - template_id: low_range_pullback_continuation
+    personality: low_range_pullback_continuation
+    parent_event_state: controlled_pullback_after_bullish_impulse
+    role: long_continuation_candidate
+    expected_direction: 1
+    horizon: 12
+    base_conditions:
+      - feature: rolling_intraday_range_pct
+        operator: "<="
+        threshold: 0.01079666
+      - feature: distance_from_opening_range_mid_pct
+        operator: ">="
+        threshold: -0.004
+    regime_fields:
+      - vwap_side_regime
+      - range_regime
+      - compression_regime
+      - time_regime
+      - bar_index_bucket
+    filter_features:
+      - distance_from_opening_range_mid_pct
+      - distance_from_opening_range_low_pct
+      - distance_from_session_low_pct
+      - distance_from_vwap_pct
+      - distance_from_recent_high_pct
+      - prior_3_bar_return
+      - compression_zscore
+      - rolling_intraday_range_pct
+    minimums:
+      base_events: 30
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Low-range pullback continuation; raw version was weak without caveats."
+
+  - template_id: failed_open_weak_close_continuation
+    personality: failed_open_weak_close_continuation
+    parent_event_state: failed_open_down_continuation
+    role: short_or_long_blocker
+    expected_direction: -1
+    horizon: 12
+    base_conditions:
+      - feature: distance_from_vwap_pct
+        operator: "<="
+        threshold: -0.001
+      - feature: distance_from_opening_range_mid_pct
+        operator: "<="
+        threshold: -0.001
+      - feature: close_location_value
+        operator: "<="
+        threshold: 0.35
+    regime_fields:
+      - time_regime
+      - bar_index_bucket
+      - prior12_regime
+      - compression_regime
+      - range_regime
+      - vwap_side_regime
+    filter_features:
+      - close_location_value
+      - lower_wick_pct_of_range
+      - distance_from_session_open_pct
+      - distance_from_session_high_pct
+      - distance_from_opening_range_high_pct
+      - compression_zscore
+      - vwap_cross_count_12
+    minimums:
+      base_events: 30
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Open-down continuation only when close is extremely weak."
+
+  - template_id: high_range_bounce_failure
+    personality: high_range_bounce_failure
+    parent_event_state: failed_bounce_active_liquidation
+    role: short_or_long_blocker
+    expected_direction: -1
+    horizon: 12
+    base_conditions:
+      - feature: rolling_intraday_range_pct
+        operator: ">="
+        threshold: 0.01711841
+      - feature: distance_from_recent_low_pct
+        operator: ">="
+        threshold: 0.006
+      - feature: close_location_value
+        operator: "<="
+        threshold: 0.45
+    regime_fields:
+      - time_regime
+      - bar_index_bucket
+      - vwap_cross_regime
+      - compression_regime
+      - range_regime
+    filter_features:
+      - distance_from_session_high_pct
+      - distance_from_opening_range_high_pct
+      - rolling_intraday_range_pct
+      - distance_from_recent_high_pct
+      - vwap_cross_count_12
+      - compression_zscore
+      - close_location_value
+    minimums:
+      base_events: 30
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "High-range bounce failure as blocker/short-bias caveat."
+
+  - template_id: near_vwap_impulse_recoil_under_mid
+    personality: near_vwap_impulse_recoil_under_mid
+    parent_event_state: failed_bullish_impulse_recoil
+    role: short_or_long_blocker
+    expected_direction: -1
+    horizon: 24
+    base_conditions:
+      - feature: distance_from_vwap_pct
+        operator: between
+        lower: -0.002
+        upper: 0.002
+      - feature: distance_from_opening_range_mid_pct
+        operator: "<="
+        threshold: -0.004
+      - feature: close_location_value
+        operator: "<="
+        threshold: 0.45
+    regime_fields:
+      - range_regime
+      - compression_regime
+      - prior12_regime
+      - efficiency_regime
+      - vwap_side_regime
+    filter_features:
+      - upper_wick_pct_of_range
+      - distance_from_opening_range_high_pct
+      - distance_from_session_high_pct
+      - distance_from_recent_low_pct
+      - rolling_intraday_range_pct
+      - compression_zscore
+      - close_location_value
+    minimums:
+      base_events: 20
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Near-VWAP impulse recoil under opening midpoint."
+
+  - template_id: compressed_impulse_recoil_fade
+    personality: compressed_impulse_recoil_fade
+    parent_event_state: failed_bullish_impulse_recoil
+    role: short_or_long_blocker
+    expected_direction: -1
+    horizon: 24
+    base_conditions:
+      - feature: upper_wick_pct_of_range
+        operator: ">="
+        threshold: 0.35
+      - feature: close_location_value
+        operator: "<="
+        threshold: 0.45
+      - feature: distance_from_recent_high_pct
+        operator: ">="
+        threshold: -0.012
+      - feature: compression_zscore
+        operator: "<="
+        threshold: -0.75
+      - feature: prior_6_bar_return
+        operator: ">="
+        threshold: 0.0115972
+    regime_fields:
+      - time_regime
+      - bar_index_bucket
+      - vwap_side_regime
+      - efficiency_regime
+      - compression_regime
+      - prior12_regime
+    filter_features:
+      - lower_wick_pct_of_range
+      - body_pct_of_range
+      - directional_efficiency_12
+      - distance_from_session_low_pct
+      - distance_from_opening_range_low_pct
+      - distance_from_session_high_pct
+      - distance_from_vwap_pct
+      - prior_6_bar_return
+    minimums:
+      base_events: 20
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Compressed bullish impulse rejection that fades."
+
+  - template_id: near_vwap_dead_chop_low_range
+    personality: near_vwap_dead_chop_low_range
+    parent_event_state: dead_chop_blocker
+    role: no_trade_filter
+    expected_direction: 0
+    horizon: 12
+    base_conditions:
+      - feature: distance_from_vwap_pct
+        operator: between
+        lower: -0.002
+        upper: 0.002
+      - feature: rolling_intraday_range_pct
+        operator: "<="
+        threshold: 0.01079666
+      - feature: vwap_cross_count_12
+        operator: ">="
+        threshold: 1
+    regime_fields:
+      - range_regime
+      - compression_regime
+      - time_regime
+      - bar_index_bucket
+      - vwap_side_regime
+    filter_features:
+      - prior_6_bar_return
+      - distance_from_recent_low_pct
+      - lower_wick_pct_of_range
+      - upper_wick_pct_of_range
+      - body_pct_of_range
+      - close_location_value
+      - distance_from_session_high_pct
+      - rolling_intraday_range_pct
+    minimums:
+      base_events: 30
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Near-VWAP low-range dead chop as no-trade filter."
+
+  - template_id: opening_mid_dead_chop_low_eff
+    personality: opening_mid_dead_chop_low_eff
+    parent_event_state: dead_chop_blocker
+    role: no_trade_filter
+    expected_direction: 0
+    horizon: 24
+    base_conditions:
+      - feature: distance_from_opening_range_mid_pct
+        operator: between
+        lower: -0.004
+        upper: 0.004
+      - feature: directional_efficiency_12
+        operator: "<="
+        threshold: 0.25
+    regime_fields:
+      - session_open_side_regime
+      - time_regime
+      - bar_index_bucket
+      - vwap_side_regime
+      - range_regime
+      - opening_mid_side_regime
+    filter_features:
+      - distance_from_recent_high_pct
+      - distance_from_session_high_pct
+      - distance_from_session_low_pct
+      - distance_from_opening_range_low_pct
+      - upper_wick_pct_of_range
+      - rolling_intraday_range_pct
+      - close_location_value
+    minimums:
+      base_events: 30
+      retained_events: 8
+      symbols: 3
+      months: 3
+    source_note: "Opening-mid dead chop with low efficiency as no-trade filter."

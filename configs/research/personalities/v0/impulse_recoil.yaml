@@ -1,0 +1,37 @@
+personality: impulse_recoil
+version: v0
+role: short_or_long_blocker
+default_expected_direction: -1
+base_event_states:
+  - failed_bullish_impulse_recoil
+preferred_horizons: [6, 9, 12, 24]
+regime_families:
+  - vwap_side
+  - session_open_side
+  - range
+  - vwap_x_range
+  - vwap_x_efficiency
+  - relative_volume
+  - time_of_day
+filter_families:
+  - wick_quality
+  - prior_return
+  - recent_structure
+  - vwap_distance
+  - session_location
+  - range_volatility
+  - cross_counts
+caveat_families:
+  - auction_location
+  - event_quality
+  - time_of_day
+  - cross_stock_alignment
+  - freshness
+minimums:
+  train_count: 30
+  test_count: 12
+  retained_count: 8
+  symbol_count: 3
+max_single_symbol_share: 0.50
+max_single_session_share: 0.20
+max_single_month_share: 0.50

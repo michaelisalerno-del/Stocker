@@ -1434,6 +1434,303 @@ def research_role_aware_event_cutter(
     )
 
 
+@research_app.command("personality-discovery")
+def research_personality_discovery(
+    input_dir: Annotated[Path | None, typer.Option("--input-dir")] = None,
+    input_base_dir: Annotated[
+        Path,
+        typer.Option("--input-base-dir"),
+    ] = Path("data/reports/research/state_event_detector_v0"),
+    spec_dir: Annotated[
+        Path,
+        typer.Option("--spec-dir"),
+    ] = Path("configs/research/personalities/v0"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_discovery_v0"),
+    horizons: Annotated[str, typer.Option("--horizons")] = "6,9,12,24",
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    max_filters_per_personality_horizon: Annotated[
+        int,
+        typer.Option("--max-filters-per-personality-horizon", min=1),
+    ] = 80,
+    max_pair_seed_filters: Annotated[
+        int,
+        typer.Option("--max-pair-seed-filters", min=1),
+    ] = 12,
+    default_min_train_events: Annotated[
+        int,
+        typer.Option("--default-min-train-events", min=1),
+    ] = 30,
+    default_min_test_events: Annotated[
+        int,
+        typer.Option("--default-min-test-events", min=1),
+    ] = 12,
+    default_min_retained_events: Annotated[
+        int,
+        typer.Option("--default-min-retained-events", min=1),
+    ] = 8,
+    default_min_symbols: Annotated[
+        int,
+        typer.Option("--default-min-symbols", min=1),
+    ] = 3,
+) -> None:
+    """Run YAML-driven research-only personality discovery over event rows."""
+
+    from stocker_research.personality_discovery_v0 import (
+        PersonalityDiscoveryConfig,
+        run_personality_discovery_lab,
+    )
+
+    parsed_horizons = tuple(
+        int(part.strip()) for part in horizons.split(",") if part.strip()
+    )
+    if not parsed_horizons:
+        raise typer.BadParameter("Supply at least one horizon with --horizons.")
+    result = run_personality_discovery_lab(
+        input_dir=input_dir,
+        input_base_dir=input_base_dir,
+        spec_dir=spec_dir,
+        output_dir=output_dir,
+        config=PersonalityDiscoveryConfig(
+            horizons=parsed_horizons,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            max_filters_per_personality_horizon=max_filters_per_personality_horizon,
+            max_pair_seed_filters=max_pair_seed_filters,
+            default_min_train_events=default_min_train_events,
+            default_min_test_events=default_min_test_events,
+            default_min_retained_events=default_min_retained_events,
+            default_min_symbols=default_min_symbols,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_discovery_v0",
+            "run_id": result.run_id,
+            "input_dir": str(result.input_dir),
+            "spec_dir": str(result.spec_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "candidate_rules_csv_path": str(result.candidate_rules_csv_path),
+            "selected_rules_csv_path": str(result.selected_rules_csv_path),
+            "passed_rules_csv_path": str(result.passed_rules_csv_path),
+            "random_baseline_csv_path": str(result.random_baseline_csv_path),
+            "decision": result.decision,
+            "passed_rule_count": result.passed_rule_count,
+        }
+    )
+
+
+@research_app.command("personality-rulebook-validation")
+def research_personality_rulebook_validation(
+    source_personality_dir: Annotated[
+        Path,
+        typer.Option("--source-personality-dir"),
+    ],
+    validation_event_dir: Annotated[
+        Path,
+        typer.Option("--validation-event-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_rulebook_validation_v0"),
+    top_per_personality: Annotated[
+        int,
+        typer.Option("--top-per-personality", min=1),
+    ] = 8,
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_validation_events: Annotated[
+        int,
+        typer.Option("--min-validation-events", min=1),
+    ] = 12,
+    min_validation_symbols: Annotated[
+        int,
+        typer.Option("--min-validation-symbols", min=1),
+    ] = 5,
+    min_validation_months: Annotated[
+        int,
+        typer.Option("--min-validation-months", min=1),
+    ] = 3,
+) -> None:
+    """Validate a compact personality rulebook on holdout event symbols."""
+
+    from stocker_research.personality_rulebook_validation_v0 import (
+        RulebookValidationConfig,
+        run_personality_rulebook_validation,
+    )
+
+    result = run_personality_rulebook_validation(
+        source_personality_dir=source_personality_dir,
+        validation_event_dir=validation_event_dir,
+        output_dir=output_dir,
+        config=RulebookValidationConfig(
+            top_per_personality=top_per_personality,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            min_validation_events=min_validation_events,
+            min_validation_symbols=min_validation_symbols,
+            min_validation_months=min_validation_months,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_rulebook_validation_v0",
+            "run_id": result.run_id,
+            "source_personality_dir": str(result.source_personality_dir),
+            "validation_event_dir": str(result.validation_event_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "collapsed_rulebook_csv_path": str(result.collapsed_rulebook_csv_path),
+            "validation_results_csv_path": str(result.validation_results_csv_path),
+            "passed_rules_csv_path": str(result.passed_rules_csv_path),
+            "decision": result.decision,
+            "passed_rule_count": result.passed_rule_count,
+        }
+    )
+
+
+@research_app.command("personality-rulebook")
+def research_personality_rulebook(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    rulebook_path: Annotated[
+        Path,
+        typer.Option("--rulebook-path"),
+    ] = Path("configs/research/personality_rulebook_v0/rules.yaml"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_rulebook_v0"),
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_events: Annotated[int, typer.Option("--min-events", min=1)] = 12,
+    min_symbols: Annotated[int, typer.Option("--min-symbols", min=1)] = 5,
+    min_months: Annotated[int, typer.Option("--min-months", min=1)] = 3,
+) -> None:
+    """Apply the fixed research-only personality rulebook to event rows."""
+
+    from stocker_research.personality_rulebook_v0 import (
+        PersonalityRulebookConfig,
+        run_personality_rulebook_lab,
+    )
+
+    result = run_personality_rulebook_lab(
+        input_event_dir=input_event_dir,
+        rulebook_path=rulebook_path,
+        output_dir=output_dir,
+        config=PersonalityRulebookConfig(
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            min_events=min_events,
+            min_symbols=min_symbols,
+            min_months=min_months,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_rulebook_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "rulebook_path": str(result.rulebook_path),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "rule_summary_csv_path": str(result.rule_summary_csv_path),
+            "personality_summary_csv_path": str(result.personality_summary_csv_path),
+            "decision": result.decision,
+            "passed_rule_count": result.passed_rule_count,
+        }
+    )
+
+
+@research_app.command("personality-template")
+def research_personality_template(
+    input_event_dir: Annotated[
+        Path | None,
+        typer.Option("--input-event-dir"),
+    ] = None,
+    input_base_dir: Annotated[
+        Path,
+        typer.Option("--input-base-dir"),
+    ] = Path("data/reports/research/state_event_detector_v0"),
+    template_path: Annotated[
+        Path,
+        typer.Option("--template-path"),
+    ] = Path("configs/research/personality_template_v0/templates.yaml"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_template_v0"),
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    max_candidates_per_template: Annotated[
+        int,
+        typer.Option("--max-candidates-per-template", min=1),
+    ] = 96,
+    max_selected_per_template: Annotated[
+        int,
+        typer.Option("--max-selected-per-template", min=1),
+    ] = 12,
+    stop_loss_bps: Annotated[
+        str,
+        typer.Option("--stop-loss-bps"),
+    ] = "25,50,100",
+) -> None:
+    """Discover caveats for fixed research-only personality templates."""
+
+    from stocker_research.personality_template_v0 import (
+        PersonalityTemplateConfig,
+        run_personality_template_lab,
+    )
+
+    parsed_stop_loss_bps = tuple(
+        float(part.strip()) for part in stop_loss_bps.split(",") if part.strip()
+    )
+    if not parsed_stop_loss_bps:
+        raise typer.BadParameter("Supply at least one stop distance with --stop-loss-bps.")
+    result = run_personality_template_lab(
+        input_event_dir=input_event_dir,
+        input_base_dir=input_base_dir,
+        template_path=template_path,
+        output_dir=output_dir,
+        config=PersonalityTemplateConfig(
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            max_candidates_per_template=max_candidates_per_template,
+            max_selected_per_template=max_selected_per_template,
+            stop_loss_bps=parsed_stop_loss_bps,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_template_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "template_path": str(result.template_path),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "selected_rules_csv_path": str(result.selected_rules_csv_path),
+            "candidate_rules_csv_path": str(result.candidate_rules_csv_path),
+            "decision": result.decision,
+            "selected_rule_count": result.selected_rule_count,
+        }
+    )
+
+
 @server_app.command("dry-run")
 def server_dry_run(
     config: Annotated[Path, typer.Option("--config", "-c")] = Path("configs/server.example.yaml"),

@@ -1891,6 +1891,569 @@ def research_personality_live_replay(
     )
 
 
+@research_app.command("walk-forward-personality-filter-exit")
+def research_walk_forward_personality_filter_exit(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    input_combined_regime_dir: Annotated[
+        Path,
+        typer.Option("--input-combined-regime-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/walk_forward_personality_filter_exit_v0"),
+    replay_months: Annotated[
+        str,
+        typer.Option("--replay-months"),
+    ] = "2026-01,2026-02,2026-03,2026-04,2026-05,2026-06",
+    filter_features: Annotated[
+        str,
+        typer.Option("--filter-features"),
+    ] = "",
+    stop_models: Annotated[
+        str,
+        typer.Option("--stop-models"),
+    ] = (
+        "fixed_50bps,fixed_75bps,fixed_100bps,"
+        "structure_session_extreme_10bps,structure_recent_extreme_10bps,"
+        "structure_opening_range_extreme_10bps"
+    ),
+    target_r_multiples: Annotated[
+        str,
+        typer.Option("--target-r-multiples"),
+    ] = "1,1.5,2",
+    quantiles: Annotated[
+        str,
+        typer.Option("--quantiles"),
+    ] = "0.20,0.35,0.50,0.65,0.80",
+    cost_bps: Annotated[
+        float,
+        typer.Option("--cost-bps"),
+    ] = 10.0,
+    top_combos_per_personality: Annotated[
+        int,
+        typer.Option("--top-combos-per-personality", min=1),
+    ] = 5,
+    max_filter_candidates_per_combo: Annotated[
+        int,
+        typer.Option("--max-filter-candidates-per-combo", min=1),
+    ] = 4,
+    max_exit_candidates_per_month: Annotated[
+        int,
+        typer.Option("--max-exit-candidates-per-month", min=1),
+    ] = 48,
+    max_selected_per_month: Annotated[
+        int,
+        typer.Option("--max-selected-per-month", min=1),
+    ] = 12,
+    min_train_events: Annotated[
+        int,
+        typer.Option("--min-train-events", min=1),
+    ] = 35,
+    min_train_symbols: Annotated[
+        int,
+        typer.Option("--min-train-symbols", min=1),
+    ] = 4,
+    min_train_months: Annotated[
+        int,
+        typer.Option("--min-train-months", min=1),
+    ] = 4,
+    min_total_trades: Annotated[
+        int,
+        typer.Option("--min-total-trades", min=1),
+    ] = 30,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Run prior-only monthly filter rediscovery with conservative exit replay."""
+
+    from stocker_research.walk_forward_personality_filter_exit_v0 import (
+        DEFAULT_FILTER_FEATURES,
+        WalkForwardPersonalityFilterExitConfig,
+        run_walk_forward_personality_filter_exit_lab,
+    )
+
+    parsed_months = tuple(part.strip() for part in replay_months.split(",") if part.strip())
+    parsed_features = (
+        tuple(part.strip() for part in filter_features.split(",") if part.strip())
+        if filter_features.strip()
+        else DEFAULT_FILTER_FEATURES
+    )
+    parsed_stop_models = tuple(part.strip() for part in stop_models.split(",") if part.strip())
+    parsed_target_r = tuple(
+        float(part.strip()) for part in target_r_multiples.split(",") if part.strip()
+    )
+    parsed_quantiles = tuple(float(part.strip()) for part in quantiles.split(",") if part.strip())
+    if not parsed_months:
+        raise typer.BadParameter("Supply at least one replay month with --replay-months.")
+    if not parsed_features:
+        raise typer.BadParameter("Supply at least one feature with --filter-features.")
+    if not parsed_stop_models:
+        raise typer.BadParameter("Supply at least one stop model with --stop-models.")
+    if not parsed_target_r:
+        raise typer.BadParameter("Supply at least one target multiple.")
+    if not parsed_quantiles:
+        raise typer.BadParameter("Supply at least one quantile.")
+
+    result = run_walk_forward_personality_filter_exit_lab(
+        input_event_dir=input_event_dir,
+        input_combined_regime_dir=input_combined_regime_dir,
+        output_dir=output_dir,
+        config=WalkForwardPersonalityFilterExitConfig(
+            replay_months=parsed_months,
+            filter_features=parsed_features,
+            stop_models=parsed_stop_models,
+            target_r_multiples=parsed_target_r,
+            quantiles=parsed_quantiles,
+            cost_bps=cost_bps,
+            top_combos_per_personality=top_combos_per_personality,
+            max_filter_candidates_per_combo=max_filter_candidates_per_combo,
+            max_exit_candidates_per_month=max_exit_candidates_per_month,
+            max_selected_per_month=max_selected_per_month,
+            min_train_events=min_train_events,
+            min_train_symbols=min_train_symbols,
+            min_train_months=min_train_months,
+            min_total_trades=min_total_trades,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "walk_forward_personality_filter_exit_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "input_combined_regime_dir": str(result.input_combined_regime_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "selected_monthly_candidates_csv_path": str(
+                result.selected_monthly_candidates_csv_path
+            ),
+            "trades_csv_path": str(result.trades_csv_path),
+            "decision": result.decision,
+            "trade_count": result.trade_count,
+        }
+    )
+
+
+@research_app.command("walk-forward-selected-filter-exit")
+def research_walk_forward_selected_filter_exit(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    input_filter_report_dir: Annotated[
+        Path,
+        typer.Option("--input-filter-report-dir"),
+    ],
+    input_blocker_report_dir: Annotated[
+        Path | None,
+        typer.Option("--input-blocker-report-dir"),
+    ] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/walk_forward_selected_filter_exit_v0"),
+    replay_months: Annotated[
+        str,
+        typer.Option("--replay-months"),
+    ] = "2026-01,2026-02,2026-03,2026-04,2026-05,2026-06",
+    stop_models: Annotated[
+        str,
+        typer.Option("--stop-models"),
+    ] = (
+        "fixed_50bps,fixed_75bps,fixed_100bps,"
+        "structure_session_extreme_10bps,structure_recent_extreme_10bps,"
+        "structure_opening_range_extreme_10bps"
+    ),
+    target_r_multiples: Annotated[
+        str,
+        typer.Option("--target-r-multiples"),
+    ] = "1,1.5,2",
+    cost_bps: Annotated[
+        float,
+        typer.Option("--cost-bps"),
+    ] = 10.0,
+    max_exit_candidates_per_month: Annotated[
+        int,
+        typer.Option("--max-exit-candidates-per-month", min=1),
+    ] = 48,
+    max_selected_per_month: Annotated[
+        int,
+        typer.Option("--max-selected-per-month", min=1),
+    ] = 18,
+    max_blocker_rules: Annotated[
+        int,
+        typer.Option("--max-blocker-rules", min=0),
+    ] = 12,
+    min_train_events: Annotated[
+        int,
+        typer.Option("--min-train-events", min=1),
+    ] = 35,
+    min_train_symbols: Annotated[
+        int,
+        typer.Option("--min-train-symbols", min=1),
+    ] = 4,
+    min_train_months: Annotated[
+        int,
+        typer.Option("--min-train-months", min=1),
+    ] = 4,
+    min_total_trades: Annotated[
+        int,
+        typer.Option("--min-total-trades", min=1),
+    ] = 30,
+    max_single_month_share: Annotated[
+        float,
+        typer.Option("--max-single-month-share", min=0.0, max=1.0),
+    ] = 0.50,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Replay frozen selected filters with prior-only monthly exit selection."""
+
+    from stocker_research.walk_forward_personality_filter_exit_v0 import (
+        WalkForwardSelectedFilterExitConfig,
+        run_walk_forward_selected_filter_exit_lab,
+    )
+
+    parsed_months = tuple(part.strip() for part in replay_months.split(",") if part.strip())
+    parsed_stop_models = tuple(part.strip() for part in stop_models.split(",") if part.strip())
+    parsed_target_r = tuple(
+        float(part.strip()) for part in target_r_multiples.split(",") if part.strip()
+    )
+    if not parsed_months:
+        raise typer.BadParameter("Supply at least one replay month with --replay-months.")
+    if not parsed_stop_models:
+        raise typer.BadParameter("Supply at least one stop model with --stop-models.")
+    if not parsed_target_r:
+        raise typer.BadParameter("Supply at least one target multiple.")
+
+    result = run_walk_forward_selected_filter_exit_lab(
+        input_event_dir=input_event_dir,
+        input_filter_report_dir=input_filter_report_dir,
+        input_blocker_report_dir=input_blocker_report_dir,
+        output_dir=output_dir,
+        config=WalkForwardSelectedFilterExitConfig(
+            replay_months=parsed_months,
+            stop_models=parsed_stop_models,
+            target_r_multiples=parsed_target_r,
+            cost_bps=cost_bps,
+            max_exit_candidates_per_month=max_exit_candidates_per_month,
+            max_selected_per_month=max_selected_per_month,
+            max_blocker_rules=max_blocker_rules,
+            min_train_events=min_train_events,
+            min_train_symbols=min_train_symbols,
+            min_train_months=min_train_months,
+            min_total_trades=min_total_trades,
+            max_single_month_share=max_single_month_share,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "walk_forward_selected_filter_exit_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "input_filter_report_dir": str(result.input_filter_report_dir),
+            "input_blocker_report_dir": str(result.input_blocker_report_dir)
+            if result.input_blocker_report_dir is not None
+            else None,
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "selected_monthly_candidates_csv_path": str(
+                result.selected_monthly_candidates_csv_path
+            ),
+            "trades_csv_path": str(result.trades_csv_path),
+            "blocked_signals_csv_path": str(result.blocked_signals_csv_path),
+            "decision": result.decision,
+            "trade_count": result.trade_count,
+        }
+    )
+
+
+@research_app.command("sidelined-personality-cross-regime")
+def research_sidelined_personality_cross_regime(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    input_selected_filter_dir: Annotated[
+        Path,
+        typer.Option("--input-selected-filter-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/sidelined_personality_cross_regime_v0"),
+    external_report_dir: Annotated[
+        list[Path] | None,
+        typer.Option("--external-report-dir"),
+    ] = None,
+    horizons: Annotated[
+        str,
+        typer.Option("--horizons"),
+    ] = "6,9,12,24",
+    regime_fields: Annotated[
+        str,
+        typer.Option("--regime-fields"),
+    ] = "",
+    filter_features: Annotated[
+        str,
+        typer.Option("--filter-features"),
+    ] = "",
+    quantiles: Annotated[
+        str,
+        typer.Option("--quantiles"),
+    ] = "0.20,0.35,0.50,0.65,0.80",
+    min_train_events: Annotated[
+        int,
+        typer.Option("--min-train-events", min=1),
+    ] = 30,
+    min_test_events: Annotated[
+        int,
+        typer.Option("--min-test-events", min=1),
+    ] = 12,
+    min_retained_events: Annotated[
+        int,
+        typer.Option("--min-retained-events", min=1),
+    ] = 8,
+    min_symbols: Annotated[
+        int,
+        typer.Option("--min-symbols", min=1),
+    ] = 3,
+    low_movement_threshold: Annotated[
+        float,
+        typer.Option("--low-movement-threshold", min=0.0),
+    ] = 0.0015,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 50,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Screen sidelined personalities across regimes without touching execution."""
+
+    from stocker_research.sidelined_personality_cross_regime_v0 import (
+        DEFAULT_FILTER_FEATURES,
+        DEFAULT_REGIME_FIELDS,
+        SidelinedPersonalityCrossRegimeConfig,
+        run_sidelined_personality_cross_regime_lab,
+    )
+
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
+    parsed_regimes = (
+        tuple(part.strip() for part in regime_fields.split(",") if part.strip())
+        if regime_fields.strip()
+        else DEFAULT_REGIME_FIELDS
+    )
+    parsed_features = (
+        tuple(part.strip() for part in filter_features.split(",") if part.strip())
+        if filter_features.strip()
+        else DEFAULT_FILTER_FEATURES
+    )
+    parsed_quantiles = tuple(float(part.strip()) for part in quantiles.split(",") if part.strip())
+    if not parsed_horizons:
+        raise typer.BadParameter("Supply at least one horizon with --horizons.")
+    if not parsed_regimes:
+        raise typer.BadParameter("Supply at least one regime field.")
+    if not parsed_features:
+        raise typer.BadParameter("Supply at least one filter feature.")
+    if not parsed_quantiles:
+        raise typer.BadParameter("Supply at least one quantile.")
+
+    result = run_sidelined_personality_cross_regime_lab(
+        input_event_dir=input_event_dir,
+        input_selected_filter_dir=input_selected_filter_dir,
+        output_dir=output_dir,
+        external_report_dirs=tuple(external_report_dir or ()),
+        config=SidelinedPersonalityCrossRegimeConfig(
+            horizons=parsed_horizons,
+            regime_fields=parsed_regimes,
+            filter_features=parsed_features,
+            quantiles=parsed_quantiles,
+            min_train_events=min_train_events,
+            min_test_events=min_test_events,
+            min_retained_events=min_retained_events,
+            min_symbols=min_symbols,
+            low_movement_threshold=low_movement_threshold,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "sidelined_personality_cross_regime_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "input_selected_filter_dir": str(result.input_selected_filter_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "selected_sidelined_candidates_csv_path": str(
+                result.selected_sidelined_candidates_csv_path
+            ),
+            "decision": result.decision,
+            "selected_candidate_count": result.selected_candidate_count,
+        }
+    )
+
+
+@research_app.command("sparse-exhaustion-extension")
+def research_sparse_exhaustion_extension(
+    input_candidate_report_dir: Annotated[
+        Path,
+        typer.Option("--input-candidate-report-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/sparse_exhaustion_extension_v0"),
+) -> None:
+    """Formalize existing sparse exhaustion-extension candidate rows."""
+
+    from stocker_research.sparse_exhaustion_extension_v0 import (
+        run_sparse_exhaustion_extension_lab,
+    )
+
+    result = run_sparse_exhaustion_extension_lab(
+        input_candidate_report_dir=input_candidate_report_dir,
+        output_dir=output_dir,
+    )
+    console.print(
+        {
+            "output_name": "sparse_exhaustion_extension_v0",
+            "run_id": result.run_id,
+            "input_candidate_report_dir": str(result.input_candidate_report_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "exhaustion_event_rows_csv_path": str(result.exhaustion_event_rows_csv_path),
+            "decision": result.decision,
+            "event_count": result.event_count,
+        }
+    )
+
+
+@research_app.command("exhaustion-extension-exit-replay")
+def research_exhaustion_extension_exit_replay(
+    input_exhaustion_event_dir: Annotated[
+        Path,
+        typer.Option("--input-exhaustion-event-dir"),
+    ],
+    input_filter_report_dir: Annotated[
+        Path,
+        typer.Option("--input-filter-report-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/exhaustion_extension_exit_replay_v0"),
+    replay_months: Annotated[
+        str,
+        typer.Option("--replay-months", help="Comma-separated YYYY-MM replay months."),
+    ] = "2026-01,2026-02,2026-03,2026-04,2026-05,2026-06",
+    stop_models: Annotated[
+        str,
+        typer.Option("--stop-models", help="Comma-separated stop model names."),
+    ] = (
+        "fixed_50bps,fixed_75bps,fixed_100bps,"
+        "structure_session_extreme_10bps,structure_recent_extreme_10bps,"
+        "structure_opening_range_extreme_10bps"
+    ),
+    target_r_multiples: Annotated[
+        str,
+        typer.Option("--target-r-multiples", help="Comma-separated target R multiples."),
+    ] = "1.0,1.5,2.0",
+    cost_bps: Annotated[float, typer.Option("--cost-bps", min=0.0)] = 10.0,
+    min_train_events: Annotated[int, typer.Option("--min-train-events", min=1)] = 35,
+    min_train_symbols: Annotated[int, typer.Option("--min-train-symbols", min=1)] = 4,
+    min_train_months: Annotated[int, typer.Option("--min-train-months", min=1)] = 4,
+    min_total_trades: Annotated[int, typer.Option("--min-total-trades", min=1)] = 30,
+    max_single_symbol_share: Annotated[
+        float,
+        typer.Option("--max-single-symbol-share", min=0.0, max=1.0),
+    ] = 0.50,
+    max_single_session_share: Annotated[
+        float,
+        typer.Option("--max-single-session-share", min=0.0, max=1.0),
+    ] = 0.20,
+    max_single_month_share: Annotated[
+        float,
+        typer.Option("--max-single-month-share", min=0.0, max=1.0),
+    ] = 0.50,
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 2701,
+) -> None:
+    """Replay selected exhaustion-extension filters with prior-only exit selection."""
+
+    from stocker_research.exhaustion_extension_exit_replay_v0 import (
+        ExhaustionExtensionExitReplayConfig,
+        run_exhaustion_extension_exit_replay_lab,
+    )
+
+    parsed_months = tuple(part.strip() for part in replay_months.split(",") if part.strip())
+    parsed_stop_models = tuple(part.strip() for part in stop_models.split(",") if part.strip())
+    parsed_targets = tuple(float(part.strip()) for part in target_r_multiples.split(",") if part)
+    if not parsed_months:
+        raise typer.BadParameter("Supply at least one replay month.")
+    if not parsed_stop_models:
+        raise typer.BadParameter("Supply at least one stop model.")
+    if not parsed_targets:
+        raise typer.BadParameter("Supply at least one target R multiple.")
+
+    result = run_exhaustion_extension_exit_replay_lab(
+        input_exhaustion_event_dir=input_exhaustion_event_dir,
+        input_filter_report_dir=input_filter_report_dir,
+        output_dir=output_dir,
+        config=ExhaustionExtensionExitReplayConfig(
+            replay_months=parsed_months,
+            stop_models=parsed_stop_models,
+            target_r_multiples=parsed_targets,
+            cost_bps=cost_bps,
+            min_train_events=min_train_events,
+            min_train_symbols=min_train_symbols,
+            min_train_months=min_train_months,
+            min_total_trades=min_total_trades,
+            max_single_symbol_share=max_single_symbol_share,
+            max_single_session_share=max_single_session_share,
+            max_single_month_share=max_single_month_share,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "exhaustion_extension_exit_replay_v0",
+            "run_id": result.run_id,
+            "input_exhaustion_event_dir": str(result.input_exhaustion_event_dir),
+            "input_filter_report_dir": str(result.input_filter_report_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "trades_csv_path": str(result.trades_csv_path),
+            "decision": result.decision,
+            "trade_count": result.trade_count,
+        }
+    )
+
+
 @server_app.command("dry-run")
 def server_dry_run(
     config: Annotated[Path, typer.Option("--config", "-c")] = Path("configs/server.example.yaml"),

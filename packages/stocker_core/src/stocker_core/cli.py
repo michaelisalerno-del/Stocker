@@ -1731,6 +1731,95 @@ def research_personality_template(
     )
 
 
+@research_app.command("personality-stop-validation")
+def research_personality_stop_validation(
+    input_template_dir: Annotated[
+        Path | None,
+        typer.Option("--input-template-dir"),
+    ] = None,
+    input_base_dir: Annotated[
+        Path,
+        typer.Option("--input-base-dir"),
+    ] = Path("data/reports/research/personality_template_v0"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_stop_validation_v0"),
+    stop_loss_bps: Annotated[
+        str,
+        typer.Option("--stop-loss-bps"),
+    ] = "25,50,75,100",
+    target_r_multiples: Annotated[
+        str,
+        typer.Option("--target-r-multiples"),
+    ] = "1,1.5,2",
+    cost_bps: Annotated[
+        str,
+        typer.Option("--cost-bps"),
+    ] = "0,5,10",
+    train_fraction: Annotated[
+        float,
+        typer.Option("--train-fraction", min=0.1, max=0.9),
+    ] = 0.60,
+    max_candidate_book_rows: Annotated[
+        int,
+        typer.Option("--max-candidate-book-rows", min=1),
+    ] = 12,
+    random_iterations: Annotated[int, typer.Option("--random-iterations", min=1)] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Validate stop distances and R multiples for selected personality templates."""
+
+    from stocker_research.personality_stop_validation_v0 import (
+        PersonalityStopValidationConfig,
+        run_personality_stop_validation_lab,
+    )
+
+    parsed_stop_loss_bps = tuple(
+        float(part.strip()) for part in stop_loss_bps.split(",") if part.strip()
+    )
+    parsed_target_r = tuple(
+        float(part.strip()) for part in target_r_multiples.split(",") if part.strip()
+    )
+    parsed_cost_bps = tuple(float(part.strip()) for part in cost_bps.split(",") if part.strip())
+    if not parsed_stop_loss_bps:
+        raise typer.BadParameter("Supply at least one stop distance with --stop-loss-bps.")
+    if not parsed_target_r:
+        raise typer.BadParameter("Supply at least one target multiple with --target-r-multiples.")
+    if not parsed_cost_bps:
+        raise typer.BadParameter("Supply at least one cost value with --cost-bps.")
+    result = run_personality_stop_validation_lab(
+        input_template_dir=input_template_dir,
+        input_base_dir=input_base_dir,
+        output_dir=output_dir,
+        config=PersonalityStopValidationConfig(
+            stop_loss_bps=parsed_stop_loss_bps,
+            target_r_multiples=parsed_target_r,
+            cost_bps=parsed_cost_bps,
+            train_fraction=train_fraction,
+            max_candidate_book_rows=max_candidate_book_rows,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_stop_validation_v0",
+            "run_id": result.run_id,
+            "input_template_dir": str(result.input_template_dir),
+            "input_event_dir": str(result.input_event_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "stop_model_results_csv_path": str(result.stop_model_results_csv_path),
+            "selected_stop_models_csv_path": str(result.selected_stop_models_csv_path),
+            "decision": result.decision,
+            "selected_stop_model_count": result.selected_stop_model_count,
+        }
+    )
+
+
 @server_app.command("dry-run")
 def server_dry_run(
     config: Annotated[Path, typer.Option("--config", "-c")] = Path("configs/server.example.yaml"),

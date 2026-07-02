@@ -2692,6 +2692,305 @@ def research_conditional_context_caveat(
     )
 
 
+@research_app.command("personality-context-admission")
+def research_personality_context_admission(
+    input_baseline_report_dir: Annotated[
+        Path,
+        typer.Option("--input-baseline-report-dir"),
+    ],
+    input_candidate_report_dir: Annotated[
+        Path,
+        typer.Option("--input-candidate-report-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_context_admission_v0"),
+    train_months: Annotated[
+        str,
+        typer.Option("--train-months"),
+    ] = "2026-01,2026-02,2026-03,2026-04",
+    test_months: Annotated[
+        str,
+        typer.Option("--test-months"),
+    ] = "2026-05,2026-06",
+    target_personalities: Annotated[
+        str,
+        typer.Option("--target-personalities"),
+    ] = "",
+    context_features: Annotated[
+        str,
+        typer.Option("--context-features"),
+    ] = "",
+    trade_key_columns: Annotated[
+        str,
+        typer.Option("--trade-key-columns"),
+    ] = (
+        "symbol,timestamp,personality,stop_model,target_r,"
+        "monthly_candidate_rank,selected_filter_rank"
+    ),
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 3000,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_train_admitted_count: Annotated[
+        int,
+        typer.Option("--min-train-admitted-count", min=1),
+    ] = 3,
+    min_oos_admitted_count: Annotated[
+        int,
+        typer.Option("--min-oos-admitted-count", min=1),
+    ] = 1,
+    max_context_values: Annotated[
+        int,
+        typer.Option("--max-context-values", min=1),
+    ] = 40,
+    max_selected_rules_per_personality: Annotated[
+        int,
+        typer.Option("--max-selected-rules-per-personality", min=1),
+    ] = 3,
+    max_flag_rules: Annotated[
+        int,
+        typer.Option("--max-flag-rules", min=1),
+    ] = 40,
+    max_single_symbol_share: Annotated[
+        float,
+        typer.Option("--max-single-symbol-share", min=0.0, max=1.0),
+    ] = 0.50,
+    max_single_session_share: Annotated[
+        float,
+        typer.Option("--max-single-session-share", min=0.0, max=1.0),
+    ] = 0.20,
+) -> None:
+    """Validate personality-specific context admissions over staged report diffs."""
+
+    from stocker_research.personality_context_admission_v0 import (
+        PersonalityContextAdmissionConfig,
+        run_personality_context_admission_lab,
+    )
+
+    parsed_train_months = tuple(part.strip() for part in train_months.split(",") if part.strip())
+    parsed_test_months = tuple(part.strip() for part in test_months.split(",") if part.strip())
+    parsed_personalities = tuple(
+        part.strip() for part in target_personalities.split(",") if part.strip()
+    )
+    parsed_context_features = tuple(
+        part.strip() for part in context_features.split(",") if part.strip()
+    )
+    parsed_key_columns = tuple(
+        part.strip() for part in trade_key_columns.split(",") if part.strip()
+    )
+    if not parsed_train_months:
+        raise typer.BadParameter("Supply at least one train month with --train-months.")
+    if not parsed_test_months:
+        raise typer.BadParameter("Supply at least one test month with --test-months.")
+    if not parsed_key_columns:
+        raise typer.BadParameter("Supply at least one trade key column.")
+
+    result = run_personality_context_admission_lab(
+        input_baseline_report_dir=input_baseline_report_dir,
+        input_candidate_report_dir=input_candidate_report_dir,
+        output_dir=output_dir,
+        config=PersonalityContextAdmissionConfig(
+            train_months=parsed_train_months,
+            test_months=parsed_test_months,
+            target_personalities=parsed_personalities,
+            context_features=parsed_context_features,
+            trade_key_columns=parsed_key_columns,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            min_train_admitted_count=min_train_admitted_count,
+            min_oos_admitted_count=min_oos_admitted_count,
+            max_context_values=max_context_values,
+            max_selected_rules_per_personality=max_selected_rules_per_personality,
+            max_flag_rules=max_flag_rules,
+            max_single_symbol_share=max_single_symbol_share,
+            max_single_session_share=max_single_session_share,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_context_admission_v0",
+            "run_id": result.run_id,
+            "input_baseline_report_dir": str(result.input_baseline_report_dir),
+            "input_candidate_report_dir": str(result.input_candidate_report_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "admission_rule_results_csv_path": str(
+                result.admission_rule_results_csv_path
+            ),
+            "selected_admissions_csv_path": str(result.selected_admissions_csv_path),
+            "blocked_candidate_trades_csv_path": str(
+                result.blocked_candidate_trades_csv_path
+            ),
+            "trade_admission_flags_csv_path": str(result.trade_admission_flags_csv_path),
+            "decision": result.decision,
+            "selected_admission_count": result.selected_admission_count,
+        }
+    )
+
+
+def _parse_report_pair_specs(report_pair: list[str]) -> tuple[tuple[str, Path, Path], ...]:
+    parsed: list[tuple[str, Path, Path]] = []
+    for index, spec in enumerate(report_pair, start=1):
+        label = f"pair_{index}"
+        paths_part = spec
+        if "=" in spec:
+            label, paths_part = spec.split("=", 1)
+            label = label.strip() or f"pair_{index}"
+        parts = [part.strip() for part in paths_part.split(",", 1)]
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise typer.BadParameter(
+                "Report pairs must be `label=baseline_report_dir,candidate_report_dir`."
+            )
+        parsed.append((label, Path(parts[0]), Path(parts[1])))
+    return tuple(parsed)
+
+
+@research_app.command("personality-context-rule-discovery")
+def research_personality_context_rule_discovery(
+    report_pair: Annotated[
+        list[str] | None,
+        typer.Option("--report-pair"),
+    ] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_context_rule_discovery_v0"),
+    target_personalities: Annotated[
+        str,
+        typer.Option("--target-personalities"),
+    ] = "",
+    categorical_features: Annotated[
+        str,
+        typer.Option("--categorical-features"),
+    ] = "",
+    numeric_features: Annotated[
+        str,
+        typer.Option("--numeric-features"),
+    ] = "",
+    quantiles: Annotated[
+        str,
+        typer.Option("--quantiles"),
+    ] = "0.20,0.33,0.50,0.67,0.80",
+    min_rule_trades: Annotated[
+        int,
+        typer.Option("--min-rule-trades", min=1),
+    ] = 3,
+    min_rule_windows: Annotated[
+        int,
+        typer.Option("--min-rule-windows", min=1),
+    ] = 2,
+    min_positive_windows: Annotated[
+        int,
+        typer.Option("--min-positive-windows", min=1),
+    ] = 2,
+    max_negative_windows: Annotated[
+        int,
+        typer.Option("--max-negative-windows", min=0),
+    ] = 0,
+    max_single_window_share: Annotated[
+        float,
+        typer.Option("--max-single-window-share", min=0.0, max=1.0),
+    ] = 0.65,
+    max_atomic_rules_per_personality: Annotated[
+        int,
+        typer.Option("--max-atomic-rules-per-personality", min=1),
+    ] = 800,
+    max_union_base_rules_per_personality: Annotated[
+        int,
+        typer.Option("--max-union-base-rules-per-personality", min=1),
+    ] = 24,
+    max_union_rules_per_personality: Annotated[
+        int,
+        typer.Option("--max-union-rules-per-personality", min=1),
+    ] = 250,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 3000,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Discover personality-specific context admission rules from report pairs."""
+
+    from stocker_research.personality_context_rule_discovery_v0 import (
+        DEFAULT_CATEGORICAL_FEATURES,
+        DEFAULT_NUMERIC_FEATURES,
+        PersonalityContextRuleDiscoveryConfig,
+        ReportPair,
+        run_personality_context_rule_discovery_lab,
+    )
+
+    parsed_pairs = _parse_report_pair_specs(report_pair or [])
+    if not parsed_pairs:
+        raise typer.BadParameter("Supply at least one --report-pair.")
+    parsed_personalities = tuple(
+        part.strip() for part in target_personalities.split(",") if part.strip()
+    )
+    parsed_categorical_features = (
+        tuple(part.strip() for part in categorical_features.split(",") if part.strip())
+        if categorical_features.strip()
+        else DEFAULT_CATEGORICAL_FEATURES
+    )
+    parsed_numeric_features = (
+        tuple(part.strip() for part in numeric_features.split(",") if part.strip())
+        if numeric_features.strip()
+        else DEFAULT_NUMERIC_FEATURES
+    )
+    parsed_quantiles = tuple(float(part.strip()) for part in quantiles.split(",") if part.strip())
+    if not parsed_quantiles:
+        raise typer.BadParameter("Supply at least one quantile.")
+
+    result = run_personality_context_rule_discovery_lab(
+        report_pairs=tuple(
+            ReportPair(
+                label=label,
+                baseline_report_dir=baseline,
+                candidate_report_dir=candidate,
+            )
+            for label, baseline, candidate in parsed_pairs
+        ),
+        output_dir=output_dir,
+        config=PersonalityContextRuleDiscoveryConfig(
+            target_personalities=parsed_personalities,
+            categorical_features=parsed_categorical_features,
+            numeric_features=parsed_numeric_features,
+            quantiles=parsed_quantiles,
+            min_rule_trades=min_rule_trades,
+            min_rule_windows=min_rule_windows,
+            min_positive_windows=min_positive_windows,
+            max_negative_windows=max_negative_windows,
+            max_single_window_share=max_single_window_share,
+            max_atomic_rules_per_personality=max_atomic_rules_per_personality,
+            max_union_base_rules_per_personality=(
+                max_union_base_rules_per_personality
+            ),
+            max_union_rules_per_personality=max_union_rules_per_personality,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_context_rule_discovery_v0",
+            "run_id": result.run_id,
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "rule_results_csv_path": str(result.rule_results_csv_path),
+            "rule_window_results_csv_path": str(result.rule_window_results_csv_path),
+            "selected_rules_csv_path": str(result.selected_rules_csv_path),
+            "candidate_only_trades_csv_path": str(result.candidate_only_trades_csv_path),
+            "decision": result.decision,
+            "selected_rule_count": result.selected_rule_count,
+        }
+    )
+
+
 @research_app.command("shadow-candidate-trigger-audit")
 def research_shadow_candidate_trigger_audit(
     input_context_report_dir: Annotated[

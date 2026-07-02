@@ -2185,6 +2185,1038 @@ def research_walk_forward_selected_filter_exit(
     )
 
 
+@research_app.command("bad-trade-sequence-caveat")
+def research_bad_trade_sequence_caveat(
+    input_selected_report_dir: Annotated[
+        Path,
+        typer.Option("--input-selected-report-dir"),
+    ],
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/bad_trade_sequence_caveat_v0"),
+    train_months: Annotated[
+        str,
+        typer.Option("--train-months"),
+    ] = "2026-01,2026-02,2026-03,2026-04",
+    test_months: Annotated[
+        str,
+        typer.Option("--test-months"),
+    ] = "2026-05,2026-06",
+    numeric_quantiles: Annotated[
+        str,
+        typer.Option("--numeric-quantiles"),
+    ] = "0.20,0.25,0.33,0.50,0.67,0.75,0.80",
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 3000,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_candidate_count: Annotated[
+        int,
+        typer.Option("--min-candidate-count", min=1),
+    ] = 1,
+    max_single_symbol_share: Annotated[
+        float,
+        typer.Option("--max-single-symbol-share", min=0.0, max=1.0),
+    ] = 0.50,
+    max_single_session_share: Annotated[
+        float,
+        typer.Option("--max-single-session-share", min=0.0, max=1.0),
+    ] = 0.20,
+) -> None:
+    """Run reusable research-only bad-trade sequence caveat diagnostics."""
+
+    from stocker_research.bad_trade_sequence_caveat_v0 import (
+        BadTradeSequenceCaveatConfig,
+        run_bad_trade_sequence_caveat_lab,
+    )
+
+    parsed_train_months = tuple(part.strip() for part in train_months.split(",") if part.strip())
+    parsed_test_months = tuple(part.strip() for part in test_months.split(",") if part.strip())
+    parsed_quantiles = tuple(
+        float(part.strip()) for part in numeric_quantiles.split(",") if part.strip()
+    )
+    if not parsed_train_months:
+        raise typer.BadParameter("Supply at least one train month with --train-months.")
+    if not parsed_test_months:
+        raise typer.BadParameter("Supply at least one test month with --test-months.")
+    if not parsed_quantiles:
+        raise typer.BadParameter("Supply at least one numeric quantile.")
+
+    result = run_bad_trade_sequence_caveat_lab(
+        input_selected_report_dir=input_selected_report_dir,
+        input_event_dir=input_event_dir,
+        output_dir=output_dir,
+        config=BadTradeSequenceCaveatConfig(
+            train_months=parsed_train_months,
+            test_months=parsed_test_months,
+            numeric_quantiles=parsed_quantiles,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            min_candidate_count=min_candidate_count,
+            max_single_symbol_share=max_single_symbol_share,
+            max_single_session_share=max_single_session_share,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "bad_trade_sequence_caveat_v0",
+            "run_id": result.run_id,
+            "input_selected_report_dir": str(result.input_selected_report_dir),
+            "input_event_dir": str(result.input_event_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "sequence_caveat_results_csv_path": str(result.sequence_caveat_results_csv_path),
+            "current_personality_caveats_csv_path": str(
+                result.current_personality_caveats_csv_path
+            ),
+            "prior_sequence_caveats_csv_path": str(result.prior_sequence_caveats_csv_path),
+            "numeric_threshold_caveats_csv_path": str(result.numeric_threshold_caveats_csv_path),
+            "strict_validation_results_csv_path": str(result.strict_validation_results_csv_path),
+            "trade_caveat_flags_csv_path": str(result.trade_caveat_flags_csv_path),
+            "decision": result.decision,
+            "caveat_count": result.caveat_count,
+        }
+    )
+
+
+@research_app.command("personality-expression-lab")
+def research_personality_expression_lab(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    input_personality_discovery_dir: Annotated[
+        Path,
+        typer.Option("--input-personality-discovery-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_expression_lab_v0"),
+    train_months: Annotated[
+        str,
+        typer.Option("--train-months"),
+    ] = "2026-01,2026-02,2026-03,2026-04",
+    test_months: Annotated[
+        str,
+        typer.Option("--test-months"),
+    ] = "2026-05,2026-06",
+    allowed_personalities: Annotated[
+        str,
+        typer.Option("--allowed-personalities"),
+    ] = "active_liquidation,impulse_recoil,slow_repair",
+    stop_models: Annotated[
+        str,
+        typer.Option("--stop-models"),
+    ] = (
+        "fixed_50bps,fixed_75bps,fixed_100bps,"
+        "structure_session_extreme_10bps,structure_recent_extreme_10bps,"
+        "structure_opening_range_extreme_10bps"
+    ),
+    target_r_multiples: Annotated[
+        str,
+        typer.Option("--target-r-multiples"),
+    ] = "1,1.5,2",
+    cost_bps: Annotated[
+        float,
+        typer.Option("--cost-bps"),
+    ] = 10.0,
+    max_rule_candidates_per_personality: Annotated[
+        int,
+        typer.Option("--max-rule-candidates-per-personality", min=1),
+    ] = 80,
+    max_expressions_per_personality: Annotated[
+        int,
+        typer.Option("--max-expressions-per-personality", min=1),
+    ] = 1,
+    min_train_trades: Annotated[
+        int,
+        typer.Option("--min-train-trades", min=1),
+    ] = 20,
+    min_train_months: Annotated[
+        int,
+        typer.Option("--min-train-months", min=1),
+    ] = 3,
+    min_train_total_net_r: Annotated[
+        float,
+        typer.Option("--min-train-total-net-r"),
+    ] = 0.0,
+    min_train_win_rate: Annotated[
+        float,
+        typer.Option("--min-train-win-rate", min=0.0, max=1.0),
+    ] = 0.55,
+    min_oos_trades: Annotated[
+        int,
+        typer.Option("--min-oos-trades", min=1),
+    ] = 1,
+) -> None:
+    """Replay strict personality expressions selected on train months."""
+
+    from stocker_research.personality_expression_lab_v0 import (
+        PersonalityExpressionLabConfig,
+        run_personality_expression_lab,
+    )
+
+    parsed_train_months = tuple(part.strip() for part in train_months.split(",") if part.strip())
+    parsed_test_months = tuple(part.strip() for part in test_months.split(",") if part.strip())
+    parsed_personalities = tuple(
+        part.strip() for part in allowed_personalities.split(",") if part.strip()
+    )
+    parsed_stop_models = tuple(part.strip() for part in stop_models.split(",") if part.strip())
+    parsed_target_r = tuple(
+        float(part.strip()) for part in target_r_multiples.split(",") if part.strip()
+    )
+    if not parsed_train_months:
+        raise typer.BadParameter("Supply at least one train month with --train-months.")
+    if not parsed_test_months:
+        raise typer.BadParameter("Supply at least one test month with --test-months.")
+    if not parsed_personalities:
+        raise typer.BadParameter("Supply at least one personality with --allowed-personalities.")
+    if not parsed_stop_models:
+        raise typer.BadParameter("Supply at least one stop model with --stop-models.")
+    if not parsed_target_r:
+        raise typer.BadParameter("Supply at least one target multiple.")
+
+    result = run_personality_expression_lab(
+        input_event_dir=input_event_dir,
+        input_personality_discovery_dir=input_personality_discovery_dir,
+        output_dir=output_dir,
+        config=PersonalityExpressionLabConfig(
+            train_months=parsed_train_months,
+            test_months=parsed_test_months,
+            allowed_personalities=parsed_personalities,
+            stop_models=parsed_stop_models,
+            target_r_multiples=parsed_target_r,
+            cost_bps=cost_bps,
+            max_rule_candidates_per_personality=max_rule_candidates_per_personality,
+            max_expressions_per_personality=max_expressions_per_personality,
+            min_train_trades=min_train_trades,
+            min_train_months=min_train_months,
+            min_train_total_net_r=min_train_total_net_r,
+            min_train_win_rate=min_train_win_rate,
+            min_oos_trades=min_oos_trades,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_expression_lab_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "input_personality_discovery_dir": str(result.input_personality_discovery_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "expression_candidate_sweep_csv_path": str(
+                result.expression_candidate_sweep_csv_path
+            ),
+            "selected_expressions_csv_path": str(result.selected_expressions_csv_path),
+            "test_trades_csv_path": str(result.test_trades_csv_path),
+            "decision": result.decision,
+            "test_trade_count": result.test_trade_count,
+        }
+    )
+
+
+@research_app.command("state-lifecycle-context")
+def research_state_lifecycle_context(
+    input_expression_report_dir: Annotated[
+        Path,
+        typer.Option("--input-expression-report-dir"),
+    ],
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    data_dir: Annotated[
+        Path,
+        typer.Option("--data-dir"),
+    ] = Path("data"),
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/state_lifecycle_context_lab_v0"),
+    lookback_bars: Annotated[
+        str,
+        typer.Option("--lookback-bars"),
+    ] = "6,12,24,36",
+    source: Annotated[str, typer.Option("--source")] = "eodhd",
+    instrument_type: Annotated[
+        str,
+        typer.Option("--instrument-type"),
+    ] = "stock",
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
+    market_calendar: Annotated[
+        str,
+        typer.Option("--market-calendar"),
+    ] = "XNYS",
+    min_train_count: Annotated[
+        int,
+        typer.Option("--min-train-count", min=1),
+    ] = 8,
+    min_oos_count: Annotated[
+        int,
+        typer.Option("--min-oos-count", min=1),
+    ] = 5,
+    min_train_mean_lift_r: Annotated[
+        float,
+        typer.Option("--min-train-mean-lift-r"),
+    ] = 0.0,
+    min_oos_mean_lift_r: Annotated[
+        float,
+        typer.Option("--min-oos-mean-lift-r"),
+    ] = 0.0,
+    max_selected_per_family: Annotated[
+        int,
+        typer.Option("--max-selected-per-family", min=1),
+    ] = 40,
+) -> None:
+    """Test prior regime mix and sparse event clusters for personality trades."""
+
+    from stocker_research.state_lifecycle_context_lab_v0 import (
+        StateLifecycleContextConfig,
+        run_state_lifecycle_context_lab,
+    )
+
+    parsed_lookbacks = tuple(
+        int(part.strip()) for part in lookback_bars.split(",") if part.strip()
+    )
+    if not parsed_lookbacks:
+        raise typer.BadParameter("Supply at least one lookback with --lookback-bars.")
+    parsed_calendar = market_calendar.strip()
+
+    result = run_state_lifecycle_context_lab(
+        input_expression_report_dir=input_expression_report_dir,
+        input_event_dir=input_event_dir,
+        data_dir=data_dir,
+        output_dir=output_dir,
+        config=StateLifecycleContextConfig(
+            lookback_bars=parsed_lookbacks,
+            source=source,
+            instrument_type=instrument_type,
+            timeframe=timeframe,
+            market_calendar=parsed_calendar if parsed_calendar.lower() != "none" else None,
+            min_train_count=min_train_count,
+            min_oos_count=min_oos_count,
+            min_train_mean_lift_r=min_train_mean_lift_r,
+            min_oos_mean_lift_r=min_oos_mean_lift_r,
+            max_selected_per_family=max_selected_per_family,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "state_lifecycle_context_lab_v0",
+            "run_id": result.run_id,
+            "input_expression_report_dir": str(result.input_expression_report_dir),
+            "input_event_dir": str(result.input_event_dir),
+            "data_dir": str(result.data_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "trade_context_features_csv_path": str(result.trade_context_features_csv_path),
+            "base_summary_csv_path": str(result.base_summary_csv_path),
+            "prior_regime_numeric_scan_csv_path": str(
+                result.prior_regime_numeric_scan_csv_path
+            ),
+            "prior_regime_categorical_scan_csv_path": str(
+                result.prior_regime_categorical_scan_csv_path
+            ),
+            "prior_event_cluster_scan_csv_path": str(result.prior_event_cluster_scan_csv_path),
+            "selected_context_candidates_csv_path": str(
+                result.selected_context_candidates_csv_path
+            ),
+            "decision": result.decision,
+            "selected_candidate_count": result.selected_candidate_count,
+        }
+    )
+
+
+@research_app.command("conditional-context-caveat")
+def research_conditional_context_caveat(
+    input_context_report_dir: Annotated[
+        Path,
+        typer.Option("--input-context-report-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/conditional_context_caveat_v0"),
+    train_months: Annotated[
+        str,
+        typer.Option("--train-months"),
+    ] = "2026-01,2026-02,2026-03,2026-04",
+    test_months: Annotated[
+        str,
+        typer.Option("--test-months"),
+    ] = "2026-05,2026-06",
+    condition_features: Annotated[
+        str,
+        typer.Option("--condition-features"),
+    ] = "",
+    numeric_features: Annotated[
+        str,
+        typer.Option("--numeric-features"),
+    ] = "",
+    numeric_operators: Annotated[
+        str,
+        typer.Option("--numeric-operators"),
+    ] = "<=,>=",
+    numeric_quantiles: Annotated[
+        str,
+        typer.Option("--numeric-quantiles"),
+    ] = "0.20,0.33,0.50,0.67,0.80",
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 3000,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_train_condition_count: Annotated[
+        int,
+        typer.Option("--min-train-condition-count", min=1),
+    ] = 8,
+    min_train_flagged_count: Annotated[
+        int,
+        typer.Option("--min-train-flagged-count", min=1),
+    ] = 3,
+    min_oos_flagged_count: Annotated[
+        int,
+        typer.Option("--min-oos-flagged-count", min=1),
+    ] = 1,
+    max_condition_values: Annotated[
+        int,
+        typer.Option("--max-condition-values", min=1),
+    ] = 30,
+    max_selected_rules: Annotated[
+        int,
+        typer.Option("--max-selected-rules", min=1),
+    ] = 40,
+    max_flag_rules: Annotated[
+        int,
+        typer.Option("--max-flag-rules", min=1),
+    ] = 40,
+    max_single_symbol_share: Annotated[
+        float,
+        typer.Option("--max-single-symbol-share", min=0.0, max=1.0),
+    ] = 0.50,
+    max_single_session_share: Annotated[
+        float,
+        typer.Option("--max-single-session-share", min=0.0, max=1.0),
+    ] = 0.20,
+) -> None:
+    """Scan IF context == value THEN numeric veto caveats."""
+
+    from stocker_research.conditional_context_caveat_v0 import (
+        ConditionalContextCaveatConfig,
+        run_conditional_context_caveat_lab,
+    )
+
+    parsed_train_months = tuple(part.strip() for part in train_months.split(",") if part.strip())
+    parsed_test_months = tuple(part.strip() for part in test_months.split(",") if part.strip())
+    parsed_conditions = tuple(
+        part.strip() for part in condition_features.split(",") if part.strip()
+    )
+    parsed_numeric_features = tuple(
+        part.strip() for part in numeric_features.split(",") if part.strip()
+    )
+    parsed_numeric_operators = tuple(
+        part.strip() for part in numeric_operators.split(",") if part.strip()
+    )
+    parsed_quantiles = tuple(
+        float(part.strip()) for part in numeric_quantiles.split(",") if part.strip()
+    )
+    if not parsed_train_months:
+        raise typer.BadParameter("Supply at least one train month with --train-months.")
+    if not parsed_test_months:
+        raise typer.BadParameter("Supply at least one test month with --test-months.")
+    if not parsed_numeric_operators:
+        raise typer.BadParameter("Supply at least one numeric operator.")
+    invalid_operators = sorted(set(parsed_numeric_operators) - {"<=", ">="})
+    if invalid_operators:
+        raise typer.BadParameter(f"Unsupported numeric operators: {invalid_operators}")
+    if not parsed_quantiles:
+        raise typer.BadParameter("Supply at least one numeric quantile.")
+
+    result = run_conditional_context_caveat_lab(
+        input_context_report_dir=input_context_report_dir,
+        output_dir=output_dir,
+        config=ConditionalContextCaveatConfig(
+            train_months=parsed_train_months,
+            test_months=parsed_test_months,
+            condition_features=parsed_conditions,
+            numeric_features=parsed_numeric_features,
+            numeric_operators=parsed_numeric_operators,
+            numeric_quantiles=parsed_quantiles,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            min_train_condition_count=min_train_condition_count,
+            min_train_flagged_count=min_train_flagged_count,
+            min_oos_flagged_count=min_oos_flagged_count,
+            max_condition_values=max_condition_values,
+            max_selected_rules=max_selected_rules,
+            max_flag_rules=max_flag_rules,
+            max_single_symbol_share=max_single_symbol_share,
+            max_single_session_share=max_single_session_share,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "conditional_context_caveat_v0",
+            "run_id": result.run_id,
+            "input_context_report_dir": str(result.input_context_report_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "conditional_caveat_results_csv_path": str(
+                result.conditional_caveat_results_csv_path
+            ),
+            "selected_conditional_caveats_csv_path": str(
+                result.selected_conditional_caveats_csv_path
+            ),
+            "strict_validation_results_csv_path": str(result.strict_validation_results_csv_path),
+            "trade_conditional_caveat_flags_csv_path": str(
+                result.trade_conditional_caveat_flags_csv_path
+            ),
+            "decision": result.decision,
+            "selected_caveat_count": result.selected_caveat_count,
+        }
+    )
+
+
+@research_app.command("shadow-candidate-trigger-audit")
+def research_shadow_candidate_trigger_audit(
+    input_context_report_dir: Annotated[
+        Path,
+        typer.Option("--input-context-report-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/shadow_candidate_trigger_audit_v0"),
+    shadow_window: Annotated[
+        int,
+        typer.Option("--shadow-window", min=1),
+    ] = 20,
+    min_prior_candidates: Annotated[
+        int,
+        typer.Option("--min-prior-candidates", min=0),
+    ] = 8,
+    weak_context_max_score: Annotated[
+        int,
+        typer.Option("--weak-context-max-score", min=0),
+    ] = 3,
+    weak_context_share_threshold: Annotated[
+        float,
+        typer.Option("--weak-context-share-threshold", min=0.0, max=1.0),
+    ] = 0.75,
+    shadow_net_r_threshold: Annotated[
+        float,
+        typer.Option("--shadow-net-r-threshold"),
+    ] = -1.0,
+    anti_stale_windows: Annotated[
+        str,
+        typer.Option("--anti-stale-windows"),
+    ] = "6,12,24,36",
+    anti_stale_feature_bases: Annotated[
+        str,
+        typer.Option("--anti-stale-feature-bases"),
+    ] = "time_regime,time_x_vwap_regime",
+    anti_stale_quantiles: Annotated[
+        str,
+        typer.Option("--anti-stale-quantiles"),
+    ] = "0.10,0.20,0.33,0.50,0.67",
+    min_train_count: Annotated[
+        int,
+        typer.Option("--min-train-count", min=1),
+    ] = 30,
+    min_rule_keep_count: Annotated[
+        int,
+        typer.Option("--min-rule-keep-count", min=1),
+    ] = 8,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 1000,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Audit shadow-candidate weak-cluster deterioration triggers."""
+
+    from stocker_research.shadow_candidate_trigger_audit_v0 import (
+        ShadowCandidateTriggerConfig,
+        run_shadow_candidate_trigger_audit,
+    )
+
+    parsed_windows = tuple(
+        int(part.strip()) for part in anti_stale_windows.split(",") if part.strip()
+    )
+    parsed_feature_bases = tuple(
+        part.strip() for part in anti_stale_feature_bases.split(",") if part.strip()
+    )
+    parsed_quantiles = tuple(
+        float(part.strip()) for part in anti_stale_quantiles.split(",") if part.strip()
+    )
+    if not parsed_windows:
+        raise typer.BadParameter("Supply at least one anti-stale window.")
+    if not parsed_feature_bases:
+        raise typer.BadParameter("Supply at least one anti-stale feature base.")
+    if not parsed_quantiles:
+        raise typer.BadParameter("Supply at least one anti-stale quantile.")
+
+    result = run_shadow_candidate_trigger_audit(
+        input_context_report_dir=input_context_report_dir,
+        output_dir=output_dir,
+        config=ShadowCandidateTriggerConfig(
+            shadow_window=shadow_window,
+            min_prior_candidates=min_prior_candidates,
+            weak_context_max_score=weak_context_max_score,
+            weak_context_share_threshold=weak_context_share_threshold,
+            shadow_net_r_threshold=shadow_net_r_threshold,
+            anti_stale_windows=parsed_windows,
+            anti_stale_feature_bases=parsed_feature_bases,
+            anti_stale_quantiles=parsed_quantiles,
+            min_train_count=min_train_count,
+            min_rule_keep_count=min_rule_keep_count,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "shadow_candidate_trigger_audit_v0",
+            "run_id": result.run_id,
+            "input_context_report_dir": str(result.input_context_report_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "shadow_candidate_features_csv_path": str(
+                result.shadow_candidate_features_csv_path
+            ),
+            "monthly_policy_results_csv_path": str(result.monthly_policy_results_csv_path),
+            "policy_summary_csv_path": str(result.policy_summary_csv_path),
+            "trade_shadow_trigger_flags_csv_path": str(
+                result.trade_shadow_trigger_flags_csv_path
+            ),
+            "decision": result.decision,
+        }
+    )
+
+
+@research_app.command("pre-registered-edge-proof")
+def research_pre_registered_edge_proof(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    input_staged_report_dir: Annotated[
+        Path,
+        typer.Option("--input-staged-report-dir"),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/pre_registered_edge_proof_v0"),
+    registration_cutoff_month: Annotated[
+        str,
+        typer.Option("--registration-cutoff-month"),
+    ] = "2026-06",
+    evaluation_months: Annotated[
+        str,
+        typer.Option("--evaluation-months"),
+    ] = "2026-07",
+    source_month: Annotated[
+        str,
+        typer.Option("--source-month"),
+    ] = "",
+    personality: Annotated[
+        str,
+        typer.Option("--personality"),
+    ] = "active_liquidation",
+    max_candidates: Annotated[
+        int,
+        typer.Option("--max-candidates", min=1),
+    ] = 1,
+    cost_bps: Annotated[
+        float,
+        typer.Option("--cost-bps"),
+    ] = 10.0,
+    min_replay_signals: Annotated[
+        int,
+        typer.Option("--min-replay-signals", min=1),
+    ] = 1,
+    min_forward_trades: Annotated[
+        int,
+        typer.Option("--min-forward-trades", min=1),
+    ] = 15,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 1000,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+) -> None:
+    """Register and evaluate a frozen research tuple on future months."""
+
+    from stocker_research.pre_registered_edge_proof_v0 import (
+        PreRegisteredEdgeProofConfig,
+        run_pre_registered_edge_proof,
+    )
+
+    parsed_months = tuple(part.strip() for part in evaluation_months.split(",") if part.strip())
+    if not parsed_months:
+        raise typer.BadParameter("Supply at least one month with --evaluation-months.")
+    parsed_source_month = source_month.strip() or None
+
+    result = run_pre_registered_edge_proof(
+        input_event_dir=input_event_dir,
+        input_staged_report_dir=input_staged_report_dir,
+        output_dir=output_dir,
+        config=PreRegisteredEdgeProofConfig(
+            registration_cutoff_month=registration_cutoff_month,
+            evaluation_months=parsed_months,
+            source_month=parsed_source_month,
+            personality=personality,
+            max_candidates=max_candidates,
+            cost_bps=cost_bps,
+            min_replay_signals=min_replay_signals,
+            min_forward_trades=min_forward_trades,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "pre_registered_edge_proof_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "input_staged_report_dir": str(result.input_staged_report_dir),
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "registration_json_path": str(result.registration_json_path),
+            "frozen_candidates_csv_path": str(result.frozen_candidates_csv_path),
+            "frozen_caveats_csv_path": str(result.frozen_caveats_csv_path),
+            "evaluation_monthly_summary_csv_path": str(
+                result.evaluation_monthly_summary_csv_path
+            ),
+            "evaluation_trades_csv_path": str(result.evaluation_trades_csv_path),
+            "decision": result.decision,
+            "trade_count": result.trade_count,
+        }
+    )
+
+
+@research_app.command("walk-forward-staged-mixed-regime-caveat-exit")
+def research_walk_forward_staged_mixed_regime_caveat_exit(
+    input_event_dir: Annotated[
+        Path,
+        typer.Option("--input-event-dir"),
+    ],
+    input_personality_discovery_dir: Annotated[
+        Path,
+        typer.Option("--input-personality-discovery-dir"),
+    ],
+    input_caveat_report_dir: Annotated[
+        Path | None,
+        typer.Option("--input-caveat-report-dir"),
+    ] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/walk_forward_staged_mixed_regime_caveat_exit_v0"),
+    warmup_months: Annotated[
+        str,
+        typer.Option("--warmup-months"),
+    ] = "",
+    replay_months: Annotated[
+        str,
+        typer.Option("--replay-months"),
+    ] = "2026-01,2026-02,2026-03,2026-04,2026-05,2026-06",
+    combined_regime_fields: Annotated[
+        str,
+        typer.Option("--combined-regime-fields"),
+    ] = (
+        "vwap_x_efficiency_regime,vwap_x_range_regime,"
+        "compression_x_efficiency_regime,opening_mid_x_range_regime,"
+        "time_x_vwap_regime,volume_x_vwap_regime"
+    ),
+    mixed_regime_value_contains: Annotated[
+        str,
+        typer.Option("--mixed-regime-value-contains"),
+    ] = "",
+    allowed_caveat_statuses: Annotated[
+        str,
+        typer.Option("--allowed-caveat-statuses"),
+    ] = "strict_train_and_oos_supported",
+    stop_models: Annotated[
+        str,
+        typer.Option("--stop-models"),
+    ] = (
+        "fixed_50bps,fixed_75bps,fixed_100bps,"
+        "structure_session_extreme_10bps,structure_recent_extreme_10bps,"
+        "structure_opening_range_extreme_10bps"
+    ),
+    target_r_multiples: Annotated[
+        str,
+        typer.Option("--target-r-multiples"),
+    ] = "1,1.5,2",
+    cost_bps: Annotated[
+        float,
+        typer.Option("--cost-bps"),
+    ] = 10.0,
+    max_filters_per_personality: Annotated[
+        int,
+        typer.Option("--max-filters-per-personality", min=1),
+    ] = 4,
+    max_exit_candidates_per_month: Annotated[
+        int,
+        typer.Option("--max-exit-candidates-per-month", min=1),
+    ] = 48,
+    max_selected_per_month: Annotated[
+        int,
+        typer.Option("--max-selected-per-month", min=1),
+    ] = 18,
+    max_caveat_rules: Annotated[
+        int,
+        typer.Option("--max-caveat-rules", min=0),
+    ] = 12,
+    max_staged_caveat_rules_per_month: Annotated[
+        int,
+        typer.Option("--max-staged-caveat-rules-per-month", min=0),
+    ] = 2,
+    min_train_events: Annotated[
+        int,
+        typer.Option("--min-train-events", min=1),
+    ] = 35,
+    min_train_symbols: Annotated[
+        int,
+        typer.Option("--min-train-symbols", min=1),
+    ] = 4,
+    min_train_months: Annotated[
+        int,
+        typer.Option("--min-train-months", min=1),
+    ] = 4,
+    min_symbol_train_events: Annotated[
+        int,
+        typer.Option("--min-symbol-train-events", min=1),
+    ] = 3,
+    min_symbol_train_total_net_r: Annotated[
+        float,
+        typer.Option("--min-symbol-train-total-net-r"),
+    ] = 0.0,
+    min_symbol_train_win_rate: Annotated[
+        float,
+        typer.Option("--min-symbol-train-win-rate", min=0.0, max=1.0),
+    ] = 0.0,
+    enable_personality_acceptance: Annotated[
+        bool,
+        typer.Option("--enable-personality-acceptance/--disable-personality-acceptance"),
+    ] = True,
+    min_personality_train_trades: Annotated[
+        int,
+        typer.Option("--min-personality-train-trades", min=1),
+    ] = 3,
+    min_personality_train_total_net_r: Annotated[
+        float,
+        typer.Option("--min-personality-train-total-net-r"),
+    ] = 0.0,
+    min_personality_train_win_rate: Annotated[
+        float,
+        typer.Option("--min-personality-train-win-rate", min=0.0, max=1.0),
+    ] = 0.0,
+    enable_prior_replay_personality_acceptance: Annotated[
+        bool,
+        typer.Option(
+            "--enable-prior-replay-personality-acceptance/"
+            "--disable-prior-replay-personality-acceptance"
+        ),
+    ] = False,
+    min_prior_replay_personality_trades: Annotated[
+        int,
+        typer.Option("--min-prior-replay-personality-trades", min=1),
+    ] = 15,
+    min_prior_replay_personality_total_net_r: Annotated[
+        float,
+        typer.Option("--min-prior-replay-personality-total-net-r"),
+    ] = -1.0,
+    min_prior_replay_personality_win_rate: Annotated[
+        float,
+        typer.Option("--min-prior-replay-personality-win-rate", min=0.0, max=1.0),
+    ] = 0.0,
+    min_staged_caveat_train_trades: Annotated[
+        int,
+        typer.Option("--min-staged-caveat-train-trades", min=1),
+    ] = 35,
+    min_staged_caveat_flagged_trades: Annotated[
+        int,
+        typer.Option("--min-staged-caveat-flagged-trades", min=1),
+    ] = 5,
+    min_total_trades: Annotated[
+        int,
+        typer.Option("--min-total-trades", min=1),
+    ] = 30,
+    allow_sparse_quality_decision: Annotated[
+        bool,
+        typer.Option("--allow-sparse-quality-decision/--disallow-sparse-quality-decision"),
+    ] = False,
+    min_sparse_total_trades: Annotated[
+        int,
+        typer.Option("--min-sparse-total-trades", min=1),
+    ] = 15,
+    min_sparse_positive_months: Annotated[
+        int,
+        typer.Option("--min-sparse-positive-months", min=1),
+    ] = 4,
+    min_sparse_win_rate: Annotated[
+        float,
+        typer.Option("--min-sparse-win-rate", min=0.0, max=1.0),
+    ] = 0.65,
+    min_sparse_mean_net_r: Annotated[
+        float,
+        typer.Option("--min-sparse-mean-net-r"),
+    ] = 0.20,
+    max_sparse_single_month_share: Annotated[
+        float,
+        typer.Option("--max-sparse-single-month-share", min=0.0, max=1.0),
+    ] = 0.75,
+    max_single_month_share: Annotated[
+        float,
+        typer.Option("--max-single-month-share", min=0.0, max=1.0),
+    ] = 0.50,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 100,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    enable_staged_train_caveats: Annotated[
+        bool,
+        typer.Option("--enable-staged-train-caveats/--disable-staged-train-caveats"),
+    ] = True,
+) -> None:
+    """Replay personality -> mixed regime -> filter -> caveat -> exit."""
+
+    from stocker_research.walk_forward_staged_mixed_regime_caveat_exit_v0 import (
+        StagedMixedRegimeCaveatExitConfig,
+        run_staged_mixed_regime_caveat_exit_lab,
+    )
+
+    parsed_warmup_months = tuple(
+        part.strip() for part in warmup_months.split(",") if part.strip()
+    )
+    parsed_months = tuple(part.strip() for part in replay_months.split(",") if part.strip())
+    parsed_combined_fields = tuple(
+        part.strip() for part in combined_regime_fields.split(",") if part.strip()
+    )
+    parsed_mixed_terms = tuple(
+        part.strip() for part in mixed_regime_value_contains.split(",") if part.strip()
+    )
+    parsed_statuses = tuple(
+        part.strip() for part in allowed_caveat_statuses.split(",") if part.strip()
+    )
+    parsed_stop_models = tuple(part.strip() for part in stop_models.split(",") if part.strip())
+    parsed_target_r = tuple(
+        float(part.strip()) for part in target_r_multiples.split(",") if part.strip()
+    )
+    if not parsed_months:
+        raise typer.BadParameter("Supply at least one replay month with --replay-months.")
+    if not parsed_combined_fields:
+        raise typer.BadParameter("Supply at least one combined regime field.")
+    if not parsed_statuses:
+        raise typer.BadParameter("Supply at least one caveat status.")
+    if not parsed_stop_models:
+        raise typer.BadParameter("Supply at least one stop model with --stop-models.")
+    if not parsed_target_r:
+        raise typer.BadParameter("Supply at least one target multiple.")
+
+    result = run_staged_mixed_regime_caveat_exit_lab(
+        input_event_dir=input_event_dir,
+        input_personality_discovery_dir=input_personality_discovery_dir,
+        input_caveat_report_dir=input_caveat_report_dir,
+        output_dir=output_dir,
+        config=StagedMixedRegimeCaveatExitConfig(
+            warmup_months=parsed_warmup_months,
+            replay_months=parsed_months,
+            combined_regime_fields=parsed_combined_fields,
+            mixed_regime_value_contains=parsed_mixed_terms,
+            allowed_caveat_statuses=parsed_statuses,
+            stop_models=parsed_stop_models,
+            target_r_multiples=parsed_target_r,
+            cost_bps=cost_bps,
+            max_filters_per_personality=max_filters_per_personality,
+            max_exit_candidates_per_month=max_exit_candidates_per_month,
+            max_selected_per_month=max_selected_per_month,
+            max_caveat_rules=max_caveat_rules,
+            max_staged_caveat_rules_per_month=max_staged_caveat_rules_per_month,
+            min_train_events=min_train_events,
+            min_train_symbols=min_train_symbols,
+            min_train_months=min_train_months,
+            min_symbol_train_events=min_symbol_train_events,
+            min_symbol_train_total_net_r=min_symbol_train_total_net_r,
+            min_symbol_train_win_rate=min_symbol_train_win_rate,
+            enable_personality_acceptance=enable_personality_acceptance,
+            min_personality_train_trades=min_personality_train_trades,
+            min_personality_train_total_net_r=min_personality_train_total_net_r,
+            min_personality_train_win_rate=min_personality_train_win_rate,
+            enable_prior_replay_personality_acceptance=(
+                enable_prior_replay_personality_acceptance
+            ),
+            min_prior_replay_personality_trades=min_prior_replay_personality_trades,
+            min_prior_replay_personality_total_net_r=(
+                min_prior_replay_personality_total_net_r
+            ),
+            min_prior_replay_personality_win_rate=min_prior_replay_personality_win_rate,
+            min_staged_caveat_train_trades=min_staged_caveat_train_trades,
+            min_staged_caveat_flagged_trades=min_staged_caveat_flagged_trades,
+            min_total_trades=min_total_trades,
+            allow_sparse_quality_decision=allow_sparse_quality_decision,
+            min_sparse_total_trades=min_sparse_total_trades,
+            min_sparse_positive_months=min_sparse_positive_months,
+            min_sparse_win_rate=min_sparse_win_rate,
+            min_sparse_mean_net_r=min_sparse_mean_net_r,
+            max_sparse_single_month_share=max_sparse_single_month_share,
+            max_single_month_share=max_single_month_share,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            enable_staged_train_caveats=enable_staged_train_caveats,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "walk_forward_staged_mixed_regime_caveat_exit_v0",
+            "run_id": result.run_id,
+            "input_event_dir": str(result.input_event_dir),
+            "input_personality_discovery_dir": str(result.input_personality_discovery_dir),
+            "input_caveat_report_dir": str(result.input_caveat_report_dir)
+            if result.input_caveat_report_dir is not None
+            else None,
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "mixed_regime_filter_book_csv_path": str(result.mixed_regime_filter_book_csv_path),
+            "caveat_rule_book_csv_path": str(result.caveat_rule_book_csv_path),
+            "personality_acceptance_csv_path": str(result.personality_acceptance_csv_path),
+            "selected_monthly_candidates_csv_path": str(
+                result.selected_monthly_candidates_csv_path
+            ),
+            "signals_csv_path": str(result.signals_csv_path),
+            "caveated_signals_csv_path": str(result.caveated_signals_csv_path),
+            "trades_csv_path": str(result.trades_csv_path),
+            "decision": result.decision,
+            "trade_count": result.trade_count,
+        }
+    )
+
+
 @research_app.command("sidelined-personality-cross-regime")
 def research_sidelined_personality_cross_regime(
     input_event_dir: Annotated[

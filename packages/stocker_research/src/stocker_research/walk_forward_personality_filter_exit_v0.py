@@ -482,17 +482,36 @@ def _select_filter_candidates_for_combo(
     ).head(config.max_filter_candidates_per_combo)
 
 
+def _candidate_filter_mask(rows: pd.DataFrame, candidate: pd.Series) -> pd.Series:
+    primary = _filter_mask(
+        rows,
+        feature=str(candidate["filter_feature"]),
+        operator=str(candidate["filter_operator"]),
+        threshold=float(candidate["filter_threshold"]),
+    )
+    rule_kind = str(candidate.get("rule_kind", "single"))
+    feature_b = str(candidate.get("feature_b", "") or "")
+    operator_b = str(candidate.get("operator_b", "") or "")
+    threshold_b = candidate.get("threshold_b", math.nan)
+    if rule_kind not in {"and", "or"} or not feature_b or not operator_b:
+        return primary
+    if feature_b not in rows or pd.isna(threshold_b):
+        return primary
+    secondary = _filter_mask(
+        rows,
+        feature=feature_b,
+        operator=operator_b,
+        threshold=float(threshold_b),
+    )
+    if rule_kind == "and":
+        return primary & secondary
+    return primary | secondary
+
+
 def _apply_filter_candidate(rows: pd.DataFrame, candidate: pd.Series) -> pd.DataFrame:
     if rows.empty:
         return rows.copy()
-    return rows[
-        _filter_mask(
-            rows,
-            feature=str(candidate["filter_feature"]),
-            operator=str(candidate["filter_operator"]),
-            threshold=float(candidate["filter_threshold"]),
-        )
-    ].copy()
+    return rows[_candidate_filter_mask(rows, candidate)].copy()
 
 
 def _score_exit_model(
@@ -1726,7 +1745,9 @@ def run_walk_forward_selected_filter_exit_lab(
     total_net_r = float(trade_frame["net_r"].sum()) if not trade_frame.empty else 0.0
     win_rate = float((trade_frame["net_r"] > 0.0).mean()) if not trade_frame.empty else math.nan
     positive_month_count = (
-        int((monthly_summary["total_net_r"] > 0.0).sum()) if not monthly_summary.empty else 0
+        int((monthly_summary["total_net_r"] > 0.0).sum())
+        if not monthly_summary.empty
+        else 0
     )
     max_drawdown = float(daily["drawdown_r"].min()) if not daily.empty else math.nan
     conc = _concentration(trade_frame)
@@ -1995,7 +2016,9 @@ def run_walk_forward_personality_filter_exit_lab(
     total_net_r = float(trade_frame["net_r"].sum()) if not trade_frame.empty else 0.0
     win_rate = float((trade_frame["net_r"] > 0.0).mean()) if not trade_frame.empty else math.nan
     positive_month_count = (
-        int((monthly_summary["total_net_r"] > 0.0).sum()) if not monthly_summary.empty else 0
+        int((monthly_summary["total_net_r"] > 0.0).sum())
+        if not monthly_summary.empty
+        else 0
     )
     max_drawdown = float(daily["drawdown_r"].min()) if not daily.empty else math.nan
     conc = _concentration(trade_frame)

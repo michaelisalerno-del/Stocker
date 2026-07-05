@@ -1238,6 +1238,122 @@ def research_state_event_detector(
     )
 
 
+@research_app.command("frozen-template-technique")
+def research_frozen_template_technique(
+    symbol: Annotated[list[str] | None, typer.Option("--symbol")] = None,
+    symbols: Annotated[str | None, typer.Option("--symbols")] = None,
+    from_date: Annotated[str, typer.Option("--from")] = "",
+    to_date: Annotated[str, typer.Option("--to")] = "",
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/frozen_template_technique_v0"),
+    config: Annotated[
+        Path, typer.Option("--config", "-c", help="Research config to load.")
+    ] = DEFAULT_RESEARCH_CONFIG,
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
+    source: Annotated[str, typer.Option("--source")] = "eodhd",
+    instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
+    currency: Annotated[str | None, typer.Option("--currency")] = None,
+    market_calendar: Annotated[str | None, typer.Option("--market-calendar")] = "XNYS",
+    download_eodhd: Annotated[
+        bool,
+        typer.Option("--download-eodhd/--no-download-eodhd"),
+    ] = False,
+    merge: Annotated[bool, typer.Option("--merge/--no-merge")] = True,
+    overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
+    audit: Annotated[bool, typer.Option("--audit/--no-audit")] = True,
+    qa: Annotated[bool, typer.Option("--qa/--no-qa")] = True,
+    enable_disabled_vendor: Annotated[
+        bool,
+        typer.Option(
+            "--enable-disabled-vendor",
+            help="Allow EODHD download even when data_vendors.eodhd.enabled is false.",
+        ),
+    ] = False,
+    event_mode: Annotated[str, typer.Option("--event-mode")] = "state_entry_non_overlapping",
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    min_events_for_similarity: Annotated[
+        int,
+        typer.Option("--min-events-for-similarity", min=1),
+    ] = 1,
+    template_universe_profile: Annotated[
+        str,
+        typer.Option("--template-universe-profile"),
+    ] = "liquid_midcap",
+) -> None:
+    """Run the local packaged frozen-template research technique."""
+
+    from stocker_research.frozen_template_technique_v0 import (
+        FrozenTemplateTechniqueConfig,
+        run_frozen_template_technique_v0,
+    )
+
+    requested_symbols = _parse_symbol_inputs(symbol=symbol, symbols=symbols)
+    if not requested_symbols:
+        raise typer.BadParameter("Supply one or more symbols with --symbols or --symbol.")
+    if not from_date or not to_date:
+        raise typer.BadParameter("Supply --from and --to dates for the technique run.")
+    _check_storage_mode(overwrite, merge)
+
+    loaded = _load_research_cli_config(config)
+    eodhd_config = loaded.data_vendors.eodhd
+    resolved_data_dir = _resolve_data_dir(loaded, data_dir)
+    resolved_currency = _resolve_currency(loaded, currency)
+    if download_eodhd:
+        _require_eodhd_enabled(
+            eodhd_config,
+            dry_run=False,
+            enable_disabled_vendor=enable_disabled_vendor,
+            config_path=config,
+        )
+
+    result = run_frozen_template_technique_v0(
+        data_dir=resolved_data_dir,
+        symbols=requested_symbols,
+        output_dir=output_dir,
+        eodhd_config=eodhd_config,
+        config=FrozenTemplateTechniqueConfig(
+            from_date=from_date,
+            to_date=to_date,
+            timeframe=timeframe,
+            source=source,
+            instrument_type=instrument_type,
+            currency=resolved_currency,
+            market_calendar=market_calendar,
+            download_eodhd=download_eodhd,
+            merge=merge,
+            overwrite=overwrite,
+            audit=audit,
+            qa=qa,
+            event_mode=event_mode,
+            random_seed=random_seed,
+            min_events_for_similarity=min_events_for_similarity,
+            template_universe_profile=template_universe_profile,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "frozen_template_technique_v0",
+            "run_id": result.run_id,
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "fetch_report_csv_path": str(result.fetch_report_csv_path),
+            "bar_cleaner_report_csv_path": str(result.bar_cleaner_report_csv_path),
+            "state_event_report_dir": str(result.state_event_report_dir),
+            "event_rows_csv_path": str(result.event_rows_csv_path),
+            "template_transfer_report_dir": str(result.template_transfer_report_dir),
+            "template_transfer_summary_json_path": str(
+                result.template_transfer_summary_json_path
+            ),
+            "decision_json_path": str(result.decision_json_path),
+            "decision": result.decision,
+        }
+    )
+
+
 @research_app.command("event-failure-cutter")
 def research_event_failure_cutter(
     input_dir: Annotated[Path | None, typer.Option("--input-dir")] = None,
@@ -2848,6 +2964,443 @@ def _parse_report_pair_specs(report_pair: list[str]) -> tuple[tuple[str, Path, P
             )
         parsed.append((label, Path(parts[0]), Path(parts[1])))
     return tuple(parsed)
+
+
+def _parse_event_rows_specs(event_rows: list[str]) -> tuple[tuple[str, Path], ...]:
+    parsed: list[tuple[str, Path]] = []
+    for index, spec in enumerate(event_rows, start=1):
+        label = f"surface_{index}"
+        path_part = spec
+        if "=" in spec:
+            label, path_part = spec.split("=", 1)
+            label = label.strip() or f"surface_{index}"
+        path_part = path_part.strip()
+        if not path_part:
+            raise typer.BadParameter(
+                "Event-row inputs must be `label=event_rows.csv` or `event_rows.csv`."
+            )
+        parsed.append((label, Path(path_part)))
+    return tuple(parsed)
+
+
+@research_app.command("template-discovery-system")
+def research_template_discovery_system(
+    input_event_rows: Annotated[
+        list[str] | None,
+        typer.Option("--input-event-rows"),
+    ] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/template_discovery_system_v0"),
+    mode: Annotated[str, typer.Option("--mode")] = "container-routing",
+    universe_profile: Annotated[
+        str,
+        typer.Option("--universe-profile"),
+    ] = "liquid_midcap",
+    horizons: Annotated[str, typer.Option("--horizons")] = "6,9,12,24",
+    behavior_loop_discovery_period: Annotated[
+        str,
+        typer.Option("--behavior-loop-discovery-period"),
+    ] = "saved_year",
+    min_behavior_loop_rows: Annotated[
+        int,
+        typer.Option("--min-behavior-loop-rows", min=1),
+    ] = 500,
+    min_behavior_loop_transition_rate: Annotated[
+        float,
+        typer.Option("--min-behavior-loop-transition-rate", min=0.0),
+    ] = 0.20,
+    min_behavior_loop_symbols: Annotated[
+        int,
+        typer.Option("--min-behavior-loop-symbols", min=1),
+    ] = 20,
+    min_behavior_loop_months: Annotated[
+        int,
+        typer.Option("--min-behavior-loop-months", min=1),
+    ] = 10,
+    min_behavior_loop_split_rows: Annotated[
+        int,
+        typer.Option("--min-behavior-loop-split-rows", min=1),
+    ] = 100,
+    min_loop_regime_rows: Annotated[
+        int,
+        typer.Option("--min-loop-regime-rows", min=1),
+    ] = 30,
+    min_loop_refinement_rows: Annotated[
+        int,
+        typer.Option("--min-loop-refinement-rows", min=1),
+    ] = 80,
+    max_loop_refinement_terms_per_loop: Annotated[
+        int,
+        typer.Option("--max-loop-refinement-terms-per-loop", min=1),
+    ] = 3,
+    min_atom_rows: Annotated[int, typer.Option("--min-atom-rows", min=1)] = 100,
+    min_container_rows: Annotated[
+        int,
+        typer.Option("--min-container-rows", min=1),
+    ] = 120,
+    min_loop_inside_rows: Annotated[
+        int,
+        typer.Option("--min-loop-inside-rows", min=1),
+    ] = 8,
+    min_loop_outside_rows: Annotated[
+        int,
+        typer.Option("--min-loop-outside-rows", min=1),
+    ] = 8,
+    route_lift_bar: Annotated[
+        float,
+        typer.Option("--route-lift-bar", min=0.0),
+    ] = 0.05,
+    max_containers_to_route: Annotated[
+        int,
+        typer.Option("--max-containers-to-route", min=1),
+    ] = 5,
+    stop_models: Annotated[str, typer.Option("--stop-models")] = "fixed_50bps",
+    target_r_multiples: Annotated[
+        str,
+        typer.Option("--target-r-multiples"),
+    ] = "1.0",
+    cost_bps_values: Annotated[
+        str,
+        typer.Option("--cost-bps-values"),
+    ] = "0,5,10",
+    frozen_combo_dir: Annotated[
+        Path | None,
+        typer.Option("--frozen-combo-dir"),
+    ] = None,
+    frozen_component_rows: Annotated[
+        list[Path] | None,
+        typer.Option("--frozen-component-rows"),
+    ] = None,
+    frozen_candidate_book: Annotated[
+        Path | None,
+        typer.Option("--frozen-candidate-book"),
+    ] = None,
+    component_candidate_dir: Annotated[
+        Path | None,
+        typer.Option("--component-candidate-dir"),
+    ] = None,
+    component_candidate_rows: Annotated[
+        list[Path] | None,
+        typer.Option("--component-candidate-rows"),
+    ] = None,
+    min_component_candidate_rows: Annotated[
+        int,
+        typer.Option("--min-component-candidate-rows", min=1),
+    ] = 10,
+    min_component_total_r: Annotated[
+        float,
+        typer.Option("--min-component-total-r"),
+    ] = 0.0,
+    max_component_negative_months: Annotated[
+        int,
+        typer.Option("--max-component-negative-months", min=0),
+    ] = 8,
+    max_component_single_symbol_share: Annotated[
+        float,
+        typer.Option("--max-component-single-symbol-share", min=0.0),
+    ] = 0.35,
+    max_component_candidates_per_family: Annotated[
+        int,
+        typer.Option("--max-component-candidates-per-family", min=1),
+    ] = 20,
+) -> None:
+    """Run clean-slate research-only template discovery from event rows."""
+
+    from stocker_research.template_discovery_system_v0 import (
+        SUPPORTED_MODES,
+        TemplateDiscoveryEventInput,
+        TemplateDiscoverySystemConfig,
+        run_template_discovery_system_lab,
+    )
+
+    parsed_inputs = _parse_event_rows_specs(input_event_rows or [])
+    no_event_row_modes = {"frozen-combo-replay", "template-component-selection"}
+    if not parsed_inputs and mode not in no_event_row_modes:
+        raise typer.BadParameter("Supply at least one --input-event-rows.")
+    if mode not in SUPPORTED_MODES:
+        raise typer.BadParameter(
+            f"Unsupported mode {mode!r}. Supported modes: {', '.join(sorted(SUPPORTED_MODES))}."
+        )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
+    if not parsed_horizons:
+        raise typer.BadParameter("Supply at least one horizon.")
+    parsed_stop_models = tuple(part.strip() for part in stop_models.split(",") if part.strip())
+    parsed_target_r = tuple(
+        float(part.strip()) for part in target_r_multiples.split(",") if part.strip()
+    )
+    parsed_cost_bps = tuple(
+        float(part.strip()) for part in cost_bps_values.split(",") if part.strip()
+    )
+
+    result = run_template_discovery_system_lab(
+        input_event_rows=tuple(
+            TemplateDiscoveryEventInput(label, event_rows_path)
+            for label, event_rows_path in parsed_inputs
+        ),
+        output_dir=output_dir,
+        config=TemplateDiscoverySystemConfig(
+            mode=mode,
+            universe_profile=universe_profile,
+            horizons=parsed_horizons,
+            behavior_loop_discovery_period=behavior_loop_discovery_period,
+            min_behavior_loop_rows=min_behavior_loop_rows,
+            min_behavior_loop_transition_rate=min_behavior_loop_transition_rate,
+            min_behavior_loop_symbols=min_behavior_loop_symbols,
+            min_behavior_loop_months=min_behavior_loop_months,
+            min_behavior_loop_split_rows=min_behavior_loop_split_rows,
+            min_loop_regime_rows=min_loop_regime_rows,
+            min_loop_refinement_rows=min_loop_refinement_rows,
+            max_loop_refinement_terms_per_loop=max_loop_refinement_terms_per_loop,
+            min_atom_rows=min_atom_rows,
+            min_container_rows=min_container_rows,
+            min_loop_inside_rows=min_loop_inside_rows,
+            min_loop_outside_rows=min_loop_outside_rows,
+            route_lift_bar=route_lift_bar,
+            max_containers_to_route=max_containers_to_route,
+            stop_models=parsed_stop_models,
+            target_r_multiples=parsed_target_r,
+            cost_bps_values=parsed_cost_bps,
+            frozen_combo_dir=frozen_combo_dir,
+            frozen_component_paths=tuple(frozen_component_rows or ()),
+            frozen_candidate_book_path=frozen_candidate_book,
+            component_candidate_dir=component_candidate_dir,
+            component_candidate_paths=tuple(component_candidate_rows or ()),
+            min_component_candidate_rows=min_component_candidate_rows,
+            min_component_total_r=min_component_total_r,
+            max_component_negative_months=max_component_negative_months,
+            max_component_single_symbol_share=max_component_single_symbol_share,
+            max_component_candidates_per_family=max_component_candidates_per_family,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "template_discovery_system_v0",
+            "run_id": result.run_id,
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "behavior_loop_scorecard_csv_path": str(
+                result.behavior_loop_scorecard_csv_path
+            ),
+            "loop_regime_occupancy_csv_path": str(
+                result.loop_regime_occupancy_csv_path
+            ),
+            "loop_mixed_regime_occupancy_csv_path": str(
+                result.loop_mixed_regime_occupancy_csv_path
+            ),
+            "loop_transition_regime_occupancy_csv_path": str(
+                result.loop_transition_regime_occupancy_csv_path
+            ),
+            "c0_parent_readout_csv_path": str(result.c0_parent_readout_csv_path),
+            "b0_state_summary_csv_path": str(result.b0_state_summary_csv_path),
+            "b0_route_detail_csv_path": str(result.b0_route_detail_csv_path),
+            "loop_context_refinement_csv_path": str(
+                result.loop_context_refinement_csv_path
+            ),
+            "loop_context_admissions_csv_path": str(
+                result.loop_context_admissions_csv_path
+            ),
+            "loop_context_blockers_csv_path": str(
+                result.loop_context_blockers_csv_path
+            ),
+            "atom_scorecard_csv_path": str(result.atom_scorecard_csv_path),
+            "container_scorecard_csv_path": str(result.container_scorecard_csv_path),
+            "loop_routing_detail_csv_path": str(result.loop_routing_detail_csv_path),
+            "family_test_detail_csv_path": str(result.family_test_detail_csv_path),
+            "concentration_warnings_csv_path": str(result.concentration_warnings_csv_path),
+            "admission_candidates_csv_path": str(result.admission_candidates_csv_path),
+            "blocker_candidates_csv_path": str(result.blocker_candidates_csv_path),
+            "replay_results_csv_path": str(result.replay_results_csv_path),
+            "family_r_replay_summary_csv_path": str(
+                result.output_dir / "family_r_replay_summary.csv"
+            ),
+            "family_r_replay_scorecard_csv_path": str(
+                result.output_dir / "family_r_replay_scorecard.csv"
+            ),
+            "family_r_replay_cost_sensitivity_csv_path": str(
+                result.output_dir / "family_r_replay_cost_sensitivity.csv"
+            ),
+            "family_r_replay_selected_events_csv_path": str(
+                result.output_dir / "family_r_replay_selected_events.csv"
+            ),
+            "component_candidate_scorecard_csv_path": str(
+                result.output_dir / "component_candidate_scorecard.csv"
+            ),
+            "selected_candidate_book_csv_path": str(
+                result.output_dir / "selected_candidate_book.csv"
+            ),
+            "selected_combo_exact_dedupe_trades_csv_path": str(
+                result.output_dir / "selected_combo_exact_dedupe_trades.csv"
+            ),
+            "frozen_template_transfer_all_rows_csv_path": str(
+                result.output_dir / "frozen_template_transfer_all_rows.csv"
+            ),
+            "frozen_template_transfer_exact_dedupe_trades_csv_path": str(
+                result.output_dir
+                / "frozen_template_transfer_exact_dedupe_trades.csv"
+            ),
+            "frozen_template_transfer_template_audit_csv_path": str(
+                result.output_dir / "frozen_template_transfer_template_audit.csv"
+            ),
+            "frozen_template_transfer_summary_csv_path": str(
+                result.output_dir / "frozen_template_transfer_summary.csv"
+            ),
+            "decision": result.decision,
+        }
+    )
+
+
+@research_app.command("personality-context-workflow")
+def research_personality_context_workflow(
+    report_pair: Annotated[
+        list[str] | None,
+        typer.Option("--report-pair"),
+    ] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir"),
+    ] = Path("data/reports/research/personality_context_workflow_v0"),
+    target_personality: Annotated[
+        str,
+        typer.Option("--target-personality"),
+    ] = "",
+    saved_rules_path: Annotated[
+        Path,
+        typer.Option("--saved-rules-path"),
+    ] = Path("configs/research/personality_context_admission_v0/candidate_rules.yaml"),
+    categorical_features: Annotated[
+        str,
+        typer.Option("--categorical-features"),
+    ] = "",
+    numeric_features: Annotated[
+        str,
+        typer.Option("--numeric-features"),
+    ] = "",
+    quantiles: Annotated[
+        str,
+        typer.Option("--quantiles"),
+    ] = "0.20,0.33,0.50,0.67,0.80",
+    min_rule_trades: Annotated[
+        int,
+        typer.Option("--min-rule-trades", min=1),
+    ] = 3,
+    min_rule_windows: Annotated[
+        int,
+        typer.Option("--min-rule-windows", min=1),
+    ] = 2,
+    min_positive_windows: Annotated[
+        int,
+        typer.Option("--min-positive-windows", min=1),
+    ] = 2,
+    max_negative_windows: Annotated[
+        int,
+        typer.Option("--max-negative-windows", min=0),
+    ] = 0,
+    max_single_window_share: Annotated[
+        float,
+        typer.Option("--max-single-window-share", min=0.0, max=1.0),
+    ] = 0.65,
+    min_blocked_count: Annotated[
+        int,
+        typer.Option("--min-blocked-count", min=1),
+    ] = 3,
+    max_blocker_screens: Annotated[
+        int,
+        typer.Option("--max-blocker-screens", min=1),
+    ] = 250,
+    random_iterations: Annotated[
+        int,
+        typer.Option("--random-iterations", min=1),
+    ] = 1000,
+    random_seed: Annotated[int, typer.Option("--random-seed")] = 1337,
+    save_yaml: Annotated[
+        bool,
+        typer.Option("--save-yaml/--no-save-yaml"),
+    ] = False,
+) -> None:
+    """Run the research-only single-personality context workflow over report pairs."""
+
+    from stocker_research.personality_context_rule_discovery_v0 import ReportPair
+    from stocker_research.personality_context_workflow_v0 import (
+        DEFAULT_WORKFLOW_CATEGORICAL_FEATURES,
+        DEFAULT_WORKFLOW_NUMERIC_FEATURES,
+        PersonalityContextWorkflowConfig,
+        run_personality_context_workflow_lab,
+    )
+
+    parsed_pairs = _parse_report_pair_specs(report_pair or [])
+    if not parsed_pairs:
+        raise typer.BadParameter("Supply at least one --report-pair.")
+    parsed_categorical_features = (
+        tuple(part.strip() for part in categorical_features.split(",") if part.strip())
+        if categorical_features.strip()
+        else DEFAULT_WORKFLOW_CATEGORICAL_FEATURES
+    )
+    parsed_numeric_features = (
+        tuple(part.strip() for part in numeric_features.split(",") if part.strip())
+        if numeric_features.strip()
+        else DEFAULT_WORKFLOW_NUMERIC_FEATURES
+    )
+    parsed_quantiles = tuple(float(part.strip()) for part in quantiles.split(",") if part.strip())
+    if not parsed_categorical_features:
+        raise typer.BadParameter("Supply at least one categorical feature.")
+    if not parsed_numeric_features:
+        raise typer.BadParameter("Supply at least one numeric feature.")
+    if not parsed_quantiles:
+        raise typer.BadParameter("Supply at least one quantile.")
+
+    result = run_personality_context_workflow_lab(
+        report_pairs=tuple(
+            ReportPair(label, baseline, candidate)
+            for label, baseline, candidate in parsed_pairs
+        ),
+        output_dir=output_dir,
+        config=PersonalityContextWorkflowConfig(
+            target_personality=target_personality.strip() or None,
+            saved_rules_path=saved_rules_path,
+            categorical_features=parsed_categorical_features,
+            numeric_features=parsed_numeric_features,
+            quantiles=parsed_quantiles,
+            min_rule_trades=min_rule_trades,
+            min_rule_windows=min_rule_windows,
+            min_positive_windows=min_positive_windows,
+            max_negative_windows=max_negative_windows,
+            max_single_window_share=max_single_window_share,
+            min_blocked_count=min_blocked_count,
+            max_blocker_screens=max_blocker_screens,
+            random_iterations=random_iterations,
+            random_seed=random_seed,
+            save_yaml_to_registry=save_yaml,
+        ),
+    )
+    console.print(
+        {
+            "output_name": "personality_context_workflow_v0",
+            "run_id": result.run_id,
+            "output_dir": str(result.output_dir),
+            "summary_json_path": str(result.summary_json_path),
+            "summary_markdown_path": str(result.summary_markdown_path),
+            "decision_json_path": str(result.decision_json_path),
+            "personality_ranking_csv_path": str(result.personality_ranking_csv_path),
+            "selected_no_prior_trades_csv_path": str(
+                result.selected_no_prior_trades_csv_path
+            ),
+            "selected_candidate_only_trades_csv_path": str(
+                result.selected_candidate_only_trades_csv_path
+            ),
+            "categorical_commonality_csv_path": str(result.categorical_commonality_csv_path),
+            "numeric_commonality_csv_path": str(result.numeric_commonality_csv_path),
+            "no_prior_defensive_screens_csv_path": str(
+                result.no_prior_defensive_screens_csv_path
+            ),
+            "yaml_draft_path": str(result.yaml_draft_path),
+            "selected_personality": result.selected_personality,
+            "decision": result.decision,
+        }
+    )
 
 
 @research_app.command("personality-context-rule-discovery")

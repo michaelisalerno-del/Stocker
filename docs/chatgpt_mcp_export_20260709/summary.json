@@ -1,0 +1,128 @@
+{
+  "active_repo": "/Users/michaelsalerno/Documents/Codex/2026-06-30-we-are-working-in-my-stocker-2",
+  "created_at": "2026-07-09T12:24:06+00:00",
+  "edge_claimed": false,
+  "files": [
+    {
+      "bytes": 14070,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/child_morph_template_discovery_handover_20260708.md",
+      "name": "child_morph_template_discovery_handover_20260708.md",
+      "source_path": "/Users/michaelsalerno/Documents/Codex/2026-06-30-we-are-working-in-my-stocker-2/docs/child_morph_template_discovery_handover_20260708.md"
+    },
+    {
+      "bytes": 4848,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/one_win_warm_state_idea_sweep_summary.md",
+      "name": "one_win_warm_state_idea_sweep_summary.md",
+      "source_path": "/private/tmp/stocker_one_win_warm_state_idea_sweep_20260709/summary.md"
+    },
+    {
+      "bytes": 465,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/one_win_warm_state_idea_sweep_summary.json",
+      "name": "one_win_warm_state_idea_sweep_summary.json",
+      "source_path": "/private/tmp/stocker_one_win_warm_state_idea_sweep_20260709/summary.json"
+    },
+    {
+      "bytes": 2398,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/one_win_tier2_union_summary.md",
+      "name": "one_win_tier2_union_summary.md",
+      "source_path": "/private/tmp/stocker_one_win_warm_state_idea_sweep_20260709/tier2_union_summary.md"
+    },
+    {
+      "bytes": 11908,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/or_stack_robustness_candidate_summary.md",
+      "name": "or_stack_robustness_candidate_summary.md",
+      "source_path": "/private/tmp/stocker_or_stack_robustness_candidate_test_20260709/summary.md"
+    },
+    {
+      "bytes": 4147,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/or_stack_one_win_priority_tier_summary.md",
+      "name": "or_stack_one_win_priority_tier_summary.md",
+      "source_path": "/private/tmp/stocker_or_stack_one_win_priority_tier_test_20260709/summary.md"
+    },
+    {
+      "bytes": 6133,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/or_stack_one_win_priority_tier_summary.json",
+      "name": "or_stack_one_win_priority_tier_summary.json",
+      "source_path": "/private/tmp/stocker_or_stack_one_win_priority_tier_test_20260709/summary.json"
+    },
+    {
+      "bytes": 2307,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/or_stack_one_win_tier_summary_all_splits.csv",
+      "name": "or_stack_one_win_tier_summary_all_splits.csv",
+      "source_path": "/private/tmp/stocker_or_stack_one_win_priority_tier_test_20260709/tier_summary_all_splits.csv"
+    },
+    {
+      "bytes": 1588,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/or_stack_plus_source_visible_harvest_summary.csv",
+      "name": "or_stack_plus_source_visible_harvest_summary.csv",
+      "source_path": "/private/tmp/stocker_or_stack_one_win_priority_tier_test_20260709/or_stack_plus_source_visible_harvest_summary.csv"
+    },
+    {
+      "bytes": 4295,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/source_visible_fast_trigger_bridge_summary.md",
+      "name": "source_visible_fast_trigger_bridge_summary.md",
+      "source_path": "/private/tmp/stocker_source_visible_fast_trigger_bridge_test_20260709/summary.md"
+    },
+    {
+      "bytes": 27835,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/source_visible_fast_trigger_bridge_summary.json",
+      "name": "source_visible_fast_trigger_bridge_summary.json",
+      "source_path": "/private/tmp/stocker_source_visible_fast_trigger_bridge_test_20260709/summary.json"
+    },
+    {
+      "bytes": 5084,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/source_to_or_stack_loose_bridge_summary.csv",
+      "name": "source_to_or_stack_loose_bridge_summary.csv",
+      "source_path": "/private/tmp/stocker_source_visible_fast_trigger_bridge_test_20260709/source_to_or_stack_loose_bridge_summary.csv"
+    },
+    {
+      "bytes": 5321,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/source_scored_selected_by_split_horizon.csv",
+      "name": "source_scored_selected_by_split_horizon.csv",
+      "source_path": "/private/tmp/stocker_source_visible_fast_trigger_bridge_test_20260709/source_scored_selected_by_split_horizon.csv"
+    },
+    {
+      "bytes": 2287,
+      "exists": true,
+      "export_path": "/private/tmp/stocker_chatgpt_mcp_export_20260709/confirmation_scored_forward_source_contrast.csv",
+      "name": "confirmation_scored_forward_source_contrast.csv",
+      "source_path": "/private/tmp/stocker_source_visible_fast_trigger_bridge_test_20260709/confirmation_scored_forward_source_contrast.csv"
+    }
+  ],
+  "headline": {
+    "next_path": "parent-loop OR-stack admission and staged child/morph matrix",
+    "one_win_warm_inside_or_stack": "priority label only, not expansion rule",
+    "or_stack_forward_2026_events": 29,
+    "or_stack_forward_2026_mean_r": 0.7508534899209081,
+    "or_stack_forward_2026_total_r": 21.774751207706334,
+    "or_stack_forward_2026_win_rate": 0.9310344827586207,
+    "source_scored_fast_trigger": "failed: selected 0 forward events",
+    "source_visible_bridge": "failed: 0/29 exact or same-future-loop forward OR-stack matches"
+  },
+  "live_ordering_enabled": false,
+  "mcp_current_repo_observed": "/Users/michaelsalerno/Documents/Codex/2026-06-29-we-are-working-in-my-stocker",
+  "mcp_visible_target_root": "~/StockerLocal/data/reports/research",
+  "order_placement": "disabled",
+  "research_only": true,
+  "run_id": "stocker_latest_loop_regime_research_20260709",
+  "search_terms": [
+    "stocker_latest_loop_regime_research_20260709",
+    "OR-stack one-win priority tier",
+    "source-visible fast-trigger bridge",
+    "one-win warm-state idea sweep",
+    "child morph template discovery handover"
+  ]
+}

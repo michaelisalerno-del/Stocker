@@ -1,0 +1,264 @@
+{
+  "contract_id": "loop_burst_mechanism_v1",
+  "contract_frozen_at_utc": "2026-07-11T23:59:00Z",
+  "scientific_status": "post_inspection_2024_causal_oof_loop_burst_mechanism_development_test",
+  "prospective_validation_claim_permitted": false,
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_claim": false,
+  "objective": "Test whether two-state loops are temporary recurrent bursts whose continuation and termination depend on completed-loop phase, completed dwell times, scheduled session time remaining, and causal entry context rather than on the current regime label alone.",
+  "known_before_freeze": {
+    "all_source_outcomes_are_opened_2024_development_evidence": true,
+    "cycle_13_state_5_exact_prior_loop_recurrence_rate": 0.462282,
+    "cycle_13_state_5_other_history_rate": 0.07054,
+    "cycle_13_state_5_exact_recurrence_rate_ratio": 6.553435,
+    "all_26_two_state_orientations_had_descriptive_recurrence_rate_ratio_above_one": true,
+    "median_two_state_orientation_recurrence_rate_ratio": 2.264956,
+    "cycle_13_state_5_occurrences_in_multi_loop_bursts_fraction": 0.705996,
+    "cycle_13_state_5_clock_1_rate": 0.174147,
+    "cycle_13_state_5_clock_3_rate": 0.040884,
+    "cycle_13_state_5_clock_3_session_boundary_fraction": 0.4221,
+    "cycle_13_state_5_clock_3_rate_after_removing_first_two_destination_session_ends": 0.0707,
+    "cycle_13_state_5_full9_log_loss_improvement_vs_limited4": 0.030012,
+    "cycle_13_realized_loops_all_three_legs_at_least_two_bars_fraction": 0.45648,
+    "cycle_13_realized_loop_total_duration_median_bars": 22.0,
+    "implication": "The descriptive burst mechanism is already known and cannot be presented as newly validated. The new question is whether exact causal burst-phase features improve future continuation probabilities under a frozen expanding-month test."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_recurrent_burst",
+      "question": "Does a just-completed same-orientation loop raise the probability of another completion across the two-state dictionary?",
+      "primary_checks": [
+        "pooled_recurrence_rate_ratio_at_least_1.5",
+        "at_least_24_of_26_supported_orientations_rate_ratio_above_1",
+        "five_session_block_bootstrap_recurrence_risk_difference_lower_above_0"
+      ]
+    },
+    {
+      "id": "H2_session_boundary_and_phase",
+      "question": "Does scheduled session time explain part but not all of late loop decay?",
+      "primary_checks": [
+        "cycle_13_late_boundary_fraction_at_least_0.25",
+        "cycle_13_mid_minus_late_rate_among_two_destination_eligible_rows_at_least_0.03"
+      ]
+    },
+    {
+      "id": "H3_causal_burst_continuation_model",
+      "question": "Do repeat count, completed dwell times, and scheduled bars remaining improve continuation probability beyond causal qfull9 and its fold-local intercept calibration?",
+      "primary_model": "qburst_orientation",
+      "primary_baseline": "qoffset_calibration"
+    },
+    {
+      "id": "H4_durable_prior_loop",
+      "question": "Does continuation information persist when both completed legs of the prior loop lasted at least two bars?",
+      "primary_checks": [
+        "durable_prior_support",
+        "qburst_orientation_log_loss_and_brier_no_worse_than_qoffset_calibration"
+      ]
+    },
+    {
+      "id": "H5_detector_chatter_falsification",
+      "question": "Are realized cycle-13 loops more than one-bar detector chatter?",
+      "primary_checks": [
+        "all_three_legs_at_least_two_bars_fraction_at_least_0.35",
+        "median_total_duration_at_least_10_bars"
+      ]
+    }
+  ],
+  "frozen_sources": {
+    "factor_oof_predictions": {
+      "path": "/private/tmp/stocker_factor_conditioned_loop_occurrence_v1_20260711/oof_predictions_2024.parquet",
+      "sha256": "422a7cd24f7e797daef6e5a81756460308bb50a6bf9e2d179dd64abe0b07c6bc",
+      "rows": 361220,
+      "months": ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"]
+    },
+    "factor_oof_independent_audit": {
+      "path": "/private/tmp/stocker_factor_conditioned_loop_occurrence_v1_20260711/pre_score_audit.json",
+      "sha256": "18d4290c50f749ce6ec5434324afa82cd7bebafcd8be198ed8b1c6c7361eedb1",
+      "required": {"all_passed": true, "check_count": 47}
+    },
+    "filtered_runs_2024": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/train_2024_filtered_runs.csv",
+      "sha256": "9557298a1a1bc32d47e15a3be31c453f81e019c5a9b1cf76401e4ad4613614d0",
+      "rows": 110949
+    },
+    "cycle_dictionary": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/fixed_cycle_shuffled_nulls.csv",
+      "sha256": "5695f09a7573a110034d251b5abdc40c2f37a11cc7198b196636a624c7d1ad22",
+      "two_transition_cycles": 13,
+      "two_transition_orientations": 26
+    },
+    "factor_contract": {
+      "path": "work/contracts/20260711-factor-conditioned-loop-occurrence-v1.json",
+      "sha256": "ef8b61bdd4f6671fa64713551a9991f6e4591c3c96bc1ccc324c81b7195bfe7d"
+    },
+    "factor_runner": {
+      "path": "work/run_factor_conditioned_loop_occurrence_v1.py",
+      "sha256": "aafb89c6046b752335c7da664c0e8f35062eb66014b86148931fbc92180fa9ff"
+    },
+    "source_prediction_or_detector_refit_permitted": false
+  },
+  "population_and_target": {
+    "cycle_scope": "all_13_fixed_two_transition_cycles_and_both_current_state_orientations",
+    "compatible_rows": "factor_oof_rows_with_transition_length_equal_2",
+    "continuation_cohort": "prior_same_orientation_repeat_count_at_least_1_at_current_run_entry",
+    "initiation_cohort": "prior_same_orientation_repeat_count_equal_0",
+    "target": "existing_same_cycle_next_two_filtered_destinations_complete_the_compatible_two_state_rotation_before_session_end",
+    "overlapping_labels_remain_overlapping": true,
+    "session_end_destination": 8,
+    "primary_validation_months": ["2024-10", "2024-11", "2024-12"],
+    "training_months_by_validation_month": {
+      "2024-10": ["2024-07", "2024-08", "2024-09"],
+      "2024-11": ["2024-07", "2024-08", "2024-09", "2024-10"],
+      "2024-12": ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11"]
+    },
+    "strictly_earlier_month_training": true,
+    "later_period_paths_permitted": false,
+    "partial_2026_permitted": false,
+    "prospective_shadow_read_or_write_permitted": false
+  },
+  "causal_phase_features": {
+    "prior_same_orientation_repeat_count": "At current run index i, count consecutive prior pairs (current_state, other_state, current_state) ending at i by stepping backward two runs; use log1p of the uncapped count.",
+    "prior_current_duration": "Completed duration of run i-2 when repeat_count is positive; zero otherwise; use log1p.",
+    "prior_other_duration": "Completed duration of run i-1 when repeat_count is positive; zero otherwise; use log1p.",
+    "prior_pair_duration": "Sum of prior_current_duration and prior_other_duration; use log1p.",
+    "scheduled_bars_remaining": "Maximum of one and 78 minus the zero-based current run-entry bar ordinal; known from the fixed regular session schedule.",
+    "prior_durable": "Both completed prior-loop run durations are at least two bars.",
+    "standardization": "Training-fold inverse-compatible-weighted mean and population standard deviation, reused unchanged on validation.",
+    "forbidden_predictors": [
+      "current_run_final_duration",
+      "next_run_duration",
+      "return_run_duration",
+      "future_state_1",
+      "future_state_2",
+      "future_state_3",
+      "future_state_4",
+      "session_end_realization",
+      "validation_month_outcomes"
+    ]
+  },
+  "models": {
+    "qhistory": "Frozen causal OOF last-three-state loop probability.",
+    "qfull9": "Frozen causal OOF factor-conditioned loop probability; reference only because its parent global gate failed.",
+    "qoffset_calibration": {
+      "formula": "sigmoid(logit(qfull9) plus a training-fold continuation-cohort intercept)",
+      "penalty": 0.0
+    },
+    "qburst_global": {
+      "offset": "logit(qfull9)",
+      "features": [
+        "global_intercept",
+        "log1p_repeat_count",
+        "log1p_prior_current_duration",
+        "log1p_prior_other_duration",
+        "log1p_prior_pair_duration",
+        "scheduled_bars_remaining"
+      ],
+      "ridge_lambda": 0.01,
+      "global_intercept_penalty_multiplier": 0.0,
+      "phase_penalty_multiplier": 1.0
+    },
+    "qburst_orientation": {
+      "inherit_qburst_global": true,
+      "orientation": "cycle_id_by_current_state_sorted_across_the_frozen_two_state_population",
+      "orientation_count": 26,
+      "additional_blocks": [
+        "25_reference_dropped_orientation_intercepts",
+        "25_by_5_orientation_phase_interactions_phase_major"
+      ],
+      "ridge_lambda": 0.01,
+      "orientation_intercept_penalty_multiplier": 4.0,
+      "orientation_phase_penalty_multiplier": 8.0,
+      "stock_identity": false
+    },
+    "optimizer": {
+      "library": "scipy.optimize.minimize",
+      "method": "L-BFGS-B",
+      "max_iter": 1000,
+      "ftol": 1e-12,
+      "gtol": 1e-8,
+      "initial_coefficients": 0.0,
+      "objective": "inverse-compatible-weighted mean binary log loss plus one half lambda weighted L2"
+    },
+    "probability_clip": [1e-12, 0.999999999999],
+    "post_validation_calibration_or_refit_permitted": false
+  },
+  "mechanism_diagnostics": {
+    "H1_surface": "October-December all two-state compatible rows, comparing repeat_count_positive with repeat_count_zero within orientation.",
+    "H2_surface": "Cycle_13 current_state_5; clock quartiles and future destination 8 are diagnostic outcomes only, never predictors.",
+    "H4_surface": "Continuation rows whose completed prior current and other runs both lasted at least two bars.",
+    "H5_surface": "Realized cycle_13 current_state_5 target loops; current, next, and return run durations are used only after outcome realization."
+  },
+  "support": {
+    "primary_continuation_rows_minimum": 5000,
+    "primary_continuation_positives_minimum": 1000,
+    "stocks_minimum": 20,
+    "sessions_minimum": 50,
+    "cycles_required": 13,
+    "orientations_required": 26,
+    "supported_orientation": {"rows_minimum": 100, "positives_minimum": 20},
+    "supported_calibration_bin_rows_minimum": 250,
+    "durable_prior_rows_minimum": 2000,
+    "durable_prior_positives_minimum": 400
+  },
+  "evaluation": {
+    "primary_weight": "inverse_compatible_weight",
+    "secondary_weight": "unweighted",
+    "proper_losses": ["binary_log_loss", "brier"],
+    "calibration": {
+      "fixed_probability_bins": 10,
+      "qburst_orientation_ECE_no_worse_than_qoffset_calibration": true,
+      "qburst_orientation_maximum_supported_bin_error_limit": 0.03
+    },
+    "temporal_slices": ["2024-10", "2024-11", "2024-12"],
+    "market_transfer": "leave_one_stock_out_every_symbol",
+    "orientation_slices": "cycle_id_by_current_state",
+    "durable_prior_slice": true,
+    "session_bootstrap": {"block_sessions": 5, "draws": 4999, "confidence": 0.95, "seed": 20260711},
+    "paired_test": {
+      "method": "9999_draw_session_level_Rademacher_sign_flip",
+      "comparisons": ["qburst_orientation_vs_qfull9", "qburst_orientation_vs_qoffset_calibration"],
+      "endpoints": ["log_loss", "brier"],
+      "Holm_family_size": 4,
+      "familywise_alpha": 0.05
+    }
+  },
+  "primary_model_gate": {
+    "minimum_pooled_relative_log_loss_improvement_vs_qoffset_calibration": 0.005,
+    "pooled_brier_no_worse_than_qoffset_calibration": true,
+    "both_qfull9_and_qoffset_bootstrap_upper_bounds_at_or_below_zero": true,
+    "all_four_Holm_endpoints_pass": true,
+    "every_validation_month_log_loss_and_brier_no_worse_than_qoffset_calibration": true,
+    "every_leave_one_stock_out_log_loss_and_brier_no_worse_than_qoffset_calibration": true,
+    "minimum_supported_orientations_with_lower_log_loss": 20,
+    "maximum_supported_orientation_log_loss_harm": 0.005,
+    "calibration_gate": true,
+    "durable_prior_log_loss_and_brier_no_worse_than_qoffset_calibration": true
+  },
+  "decision": {
+    "all_H1_H2_H4_H5_checks_pass_and_primary_model_fails": "retain_burst_mechanism_as_post_inspection_hypothesis_without_retaining_a_forecaster",
+    "primary_model_gate_passes": "development_burst_continuation_candidate_pending_unseen_validation",
+    "primary_model_gate_fails": "burst_continuation_model_rejected_or_unconfirmed",
+    "same_experiment_refinement_permitted": false,
+    "later_period_scoring": false,
+    "prospective_shadow_entry": false,
+    "named_loop_good_or_high_promotion_permitted": false,
+    "trading_rule_or_PnL_model_permitted": false
+  },
+  "data_labels": {
+    "provider_bars": "regular_session_five_minute_provider_OHLC",
+    "direct_volume_label": "historical_volume_not_used",
+    "direction_or_signed_return_used": false,
+    "price_consequence_used": false
+  },
+  "integrity": {
+    "independent_audit_required": true,
+    "auditor_may_not_import_runner": true,
+    "replay_sequence_features_models_predictions_mechanism_diagnostics_losses_calibration_bootstrap_slices_gates_and_decision": true,
+    "all_safety_flags_exact": true
+  },
+  "planned_artifact_root": "/private/tmp/stocker_loop_burst_mechanism_v1_20260711"
+}

@@ -1,0 +1,89 @@
+{
+  "files": [
+    {
+      "bytes": 4817,
+      "name": "bootstrap_metrics.csv",
+      "sha256": "21f36093eb12273340d65a993d16f8e4a02ef71f00e17b3c750f4029673860e2"
+    },
+    {
+      "bytes": 1233602,
+      "name": "control_outcomes.parquet",
+      "sha256": "eecb638fac264f23e0dc702fa206228249348cad751b6b9066f9345f2f7b2bfb"
+    },
+    {
+      "bytes": 3737,
+      "name": "cost_sensitivity.csv",
+      "sha256": "4dfc6911547ae1606533efeb531f5257a271dcf146555e93b7a6d937847ef832"
+    },
+    {
+      "bytes": 3816,
+      "name": "data_coverage.csv",
+      "sha256": "2dea0822ad4b82f36424e2a906e711f94993f487ec9c0dca43d5a89075ad9c69"
+    },
+    {
+      "bytes": 7286,
+      "name": "decision.json",
+      "sha256": "ef1c08d604c9d3b62879101653b352ffe65fe201366dfdbec2b9822d31ffb553"
+    },
+    {
+      "bytes": 3632,
+      "name": "detector_metrics.csv",
+      "sha256": "62914a453cafe959f46a81ca8229854a7b12ffb728791e1c351fad3fbd21462e"
+    },
+    {
+      "bytes": 10111,
+      "name": "event_counts.csv",
+      "sha256": "303fdc588254b0662ae2f4f1ecfd8b1f007491c0965a99b75c1da56f1fae098f"
+    },
+    {
+      "bytes": 1140328,
+      "name": "event_outcomes.parquet",
+      "sha256": "94d0e8f98d30cc99d08cddfe189cc57223dbd34004333d9b3041e571be53f972"
+    },
+    {
+      "bytes": 11566,
+      "name": "monthly_metrics.csv",
+      "sha256": "930f068e42d256b38e9e94e0bfe84c0fbf40de436e68418c89da7e9cd599da30"
+    },
+    {
+      "bytes": 1640929,
+      "name": "paired_outcomes.parquet",
+      "sha256": "54322e52731a02bc8ab8ad500e257c7982d252c272e3036b50b3c1c8b38359bc"
+    },
+    {
+      "bytes": 7152,
+      "name": "path_diagnostics.csv",
+      "sha256": "ebcd84234b4296e6f10b9b2de7efa82ae93ad8ebcb4cb59c54a7850c01c060f8"
+    },
+    {
+      "bytes": 713324,
+      "name": "pre_outcome_controls.parquet",
+      "sha256": "bba8c8de2d3118002dc1c4ed47a7d8308c2c86cf00ac0f060d4da7b49ddd1371"
+    },
+    {
+      "bytes": 1114356,
+      "name": "pre_outcome_events.parquet",
+      "sha256": "a3fce429fca51437b87be3adaa354e918ea1a2da28a9f95fe3aa48d0f3ae114e"
+    },
+    {
+      "bytes": 3584,
+      "name": "raw_data_coverage.csv",
+      "sha256": "e0ca30bfd67220ca7a7191f8e7241450f7dc2a6b6d2e3e22fdd7b4237b1054d3"
+    },
+    {
+      "bytes": 33151,
+      "name": "source_hashes.json",
+      "sha256": "f3c0d4bae26ce371fc96b90bee9d60af340692ef8180bf5382069357e56610c0"
+    },
+    {
+      "bytes": 21919,
+      "name": "stock_deletions.csv",
+      "sha256": "8e49dd0f40378a460dcb4335c88e8334b90edb626057004b1192d98b3d209ef0"
+    },
+    {
+      "bytes": 30534,
+      "name": "summary.json",
+      "sha256": "fc5598c6750bfa36594fb39103be4560b88df79790710ead1f59d6d93b96ce22"
+    }
+  ]
+}

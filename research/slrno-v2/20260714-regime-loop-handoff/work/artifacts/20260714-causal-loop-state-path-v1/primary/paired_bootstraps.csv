@@ -1,0 +1,17 @@
+period,candidate,policy,family,rows,action_rows,paired_mean_difference_bps,ci_lower,ci_upper,p_one_sided,draws_valid,sessions,holm_adjusted_p,passes_holm_0_05
+2023,cycle_04|state4,terminal_route_event_next_open_else_fixed,primary_terminal,132,118,-55.85372707297511,-95.2185243063772,-17.198675504447632,0.9988002399520096,5000,93,1.0,False
+2025,cycle_04|state4,terminal_route_event_next_open_else_fixed,primary_terminal,96,87,-15.142608835444278,-64.34127779336339,29.834742786989132,0.7450509898020395,5000,51,1.0,False
+2023,cycle_07|state5,terminal_route_event_next_open_else_fixed,primary_terminal,722,636,-7.352825194072878,-23.781879471142716,9.09114544113524,0.8076384723055389,5000,178,1.0,False
+2025,cycle_07|state5,terminal_route_event_next_open_else_fixed,primary_terminal,713,585,-11.64338280270048,-28.10798508809656,5.08513968297958,0.9124175164967007,5000,165,1.0,False
+2023,cycle_04|state4,exact_completion_next_open_else_fixed,secondary_exit_family,132,14,-3.7900548044424878,-16.870063899373033,8.618284473625723,0.7336532693461307,5000,93,1.0,False
+2023,cycle_04|state4,first_post_entry_transition_next_open_else_fixed,secondary_exit_family,132,132,-50.091197622917605,-92.35995260880934,-7.474314349198196,0.989002199560088,5000,93,1.0,False
+2023,cycle_04|state4,route_invalidation_next_open_else_fixed,secondary_exit_family,132,104,-52.06367226853262,-93.64023236162369,-14.115649052803693,0.9978004399120176,5000,93,1.0,False
+2025,cycle_04|state4,exact_completion_next_open_else_fixed,secondary_exit_family,96,20,-9.775466009745564,-27.94977387129078,6.046777082030679,0.882623475304939,5000,51,1.0,False
+2025,cycle_04|state4,first_post_entry_transition_next_open_else_fixed,secondary_exit_family,96,95,-24.13708271285398,-79.86684130843557,25.932436543294738,0.8254349130173965,5000,51,1.0,False
+2025,cycle_04|state4,route_invalidation_next_open_else_fixed,secondary_exit_family,96,67,-5.3671428256987115,-47.3368406594706,36.297107656527054,0.6110777844431113,5000,51,1.0,False
+2023,cycle_07|state5,exact_completion_next_open_else_fixed,secondary_exit_family,722,180,7.687863806927299,-1.3616568474619544,16.930053876435647,0.047590481903619274,5000,178,0.5710857828434313,False
+2023,cycle_07|state5,first_post_entry_transition_next_open_else_fixed,secondary_exit_family,722,688,-7.0089418945704836,-25.059030377942662,11.821744963015426,0.7740451909618077,5000,178,1.0,False
+2023,cycle_07|state5,route_invalidation_next_open_else_fixed,secondary_exit_family,722,456,-15.040689001000176,-30.436124558694846,0.15188768184350562,0.9736052789442111,5000,178,1.0,False
+2025,cycle_07|state5,exact_completion_next_open_else_fixed,secondary_exit_family,713,199,-7.572576139253156,-16.13448270129171,1.784659846890094,0.944011197760448,5000,165,1.0,False
+2025,cycle_07|state5,first_post_entry_transition_next_open_else_fixed,secondary_exit_family,713,675,-7.841710372537817,-23.391122687625227,7.362840146701688,0.8410317936412718,5000,165,1.0,False
+2025,cycle_07|state5,route_invalidation_next_open_else_fixed,secondary_exit_family,713,386,-4.070806663447324,-16.94524104823379,8.479580809195314,0.7448510297940412,5000,165,1.0,False

@@ -1,0 +1,44 @@
+{
+  "checks": {
+    "all_base_and_snapshot_paths_replayed": true,
+    "artifact_manifest_complete_and_valid": true,
+    "base_causal_features_independently_reconstructed": true,
+    "base_population_independently_reconstructed": true,
+    "direct_equations_refit_and_recalibrated": true,
+    "earliest_sequential_policy_replayed": true,
+    "frozen_pre_outcome_files_match": true,
+    "frozen_source_hashes_match": true,
+    "no_loop_or_context_outcome_leakage": true,
+    "pre_outcome_ledgers_exclude_outcomes": true,
+    "research_only_opened_status": true,
+    "sequential_causal_features_independently_reconstructed": true,
+    "sequential_equation_refit_and_recalibrated": true,
+    "snapshot_identity_complete": true
+  },
+  "contract_id": "20260714-selective-payoff-equations-v1",
+  "errors": {
+    "artifact_manifest": 0,
+    "base_categorical": 0,
+    "base_path": 0,
+    "base_population_symmetric_difference": 0,
+    "forbidden_pre_outcome_columns": [],
+    "frozen_ledgers": 0,
+    "policy_logic": 0,
+    "snapshot_categorical": 0,
+    "snapshot_path": 0,
+    "source_hashes": 0
+  },
+  "live_ordering_enabled": false,
+  "maximum_errors": {
+    "base_causal": 0.0,
+    "base_path_numeric": 0.0,
+    "direct_probability": 0.0,
+    "sequential_probability": 0.0,
+    "snapshot_causal": 0.0,
+    "snapshot_path_numeric": 0.0
+  },
+  "order_placement": "disabled",
+  "passed": 14,
+  "research_only": true,
+  "total": 14
+}

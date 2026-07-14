@@ -1,0 +1,13 @@
+model,policy_type,group,rows,action_rows,action_coverage,fixed_mean_net_bps,policy_mean_net_bps,paired_difference_bps
+sequential_route_plus_price_path,point_mean_diagnostic,pooled,401,227,0.5660847880299252,69.86728523388526,54.72073595442288,-15.146549279462398
+sequential_route_plus_price_path,point_mean_diagnostic,cycle_04|state4,112,75,0.6696428571428571,-15.16734665132054,-15.028407691247187,0.13893896007335677
+sequential_route_plus_price_path,point_mean_diagnostic,cycle_07|state5,289,152,0.5259515570934256,102.82188305790967,81.7515459485926,-21.070337109317087
+sequential_route_plus_price_path,uncertainty_aware,pooled,401,0,0.0,69.86728523388526,69.86728523388526,0.0
+sequential_route_plus_price_path,uncertainty_aware,cycle_04|state4,112,0,0.0,-15.16734665132054,-15.16734665132054,0.0
+sequential_route_plus_price_path,uncertainty_aware,cycle_07|state5,289,0,0.0,102.82188305790967,102.82188305790967,0.0
+sequential_route_state_only,point_mean_diagnostic,pooled,401,183,0.456359102244389,69.86728523388526,61.66194600630187,-8.205339227583407
+sequential_route_state_only,point_mean_diagnostic,cycle_04|state4,112,64,0.5714285714285714,-15.16734665132054,-16.672429375219433,-1.5050827238988898
+sequential_route_state_only,point_mean_diagnostic,cycle_07|state5,289,119,0.4117647058823529,102.82188305790967,92.01990463166653,-10.801978426243151
+sequential_route_state_only,uncertainty_aware,pooled,401,0,0.0,69.86728523388526,69.86728523388526,0.0
+sequential_route_state_only,uncertainty_aware,cycle_04|state4,112,0,0.0,-15.16734665132054,-15.16734665132054,0.0
+sequential_route_state_only,uncertainty_aware,cycle_07|state5,289,0,0.0,102.82188305790967,102.82188305790967,0.0

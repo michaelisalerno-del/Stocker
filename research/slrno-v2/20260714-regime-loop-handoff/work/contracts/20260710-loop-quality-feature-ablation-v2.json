@@ -1,0 +1,379 @@
+{
+  "contract_id": "loop_quality_feature_ablation_v2",
+  "contract_frozen_at_utc": "2026-07-10T21:56:00Z",
+  "scientific_status": "exploratory_source_attribution_using_already_opened_development_and_backward_portability_periods",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "model_run_authorized_by_this_file": false,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Determine whether the pooled conditional movement-quality information previously carried by qfull is explained by causal candidate-route topology and current-state rotation, by unique cycle identity, by cycle-current-state interaction, or by the last-three-state history token.",
+  "non_objectives": [
+    "changing any frozen per-loop quality grade",
+    "promoting cycle_07, cycle_09, cycle_13, or any other cycle",
+    "predicting direction or signed return",
+    "constructing P&L, a strategy, an order, a position, or a deployment path",
+    "opening or modifying either prospective shadow",
+    "using 2025, backward-2023, or partial-2026 as prospective validation"
+  ],
+  "periods": {
+    "fit_period": 2024,
+    "causal_oof_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "oof_schedule": "For each July-December month, fit new ablation models only on strictly earlier 2024 months and predict that month.",
+    "development_score": 2025,
+    "backward_portability_score": 2023,
+    "2025_status": "already_opened_development_not_validation",
+    "2023_status": "already_opened_backward_portability_with_future_fitted_2024_parameters_not_validation",
+    "partial_2026_permitted": false,
+    "prospective_claim_permitted": false,
+    "later_period_promotion_permitted": false
+  },
+  "frozen_lineage": {
+    "state_model": "frozen eight-state causal semi-Markov detector fitted on 2024",
+    "structural_loop_model": "retained 2024-fitted last-three-state fixed-loop identity model",
+    "cycles": "the frozen twenty compatible fixed cycles",
+    "quality_outcomes_thresholds_labels_controls_and_overlap_weights": "exactly per_loop_movement_quality_v1",
+    "state_or_structural_refit_permitted": false,
+    "cycle_change_or_substitution_permitted": false,
+    "outcome_threshold_change_permitted": false,
+    "frozen_grade_change_permitted": false,
+    "existing_shadow_change_permitted": false,
+    "source_pins": {
+      "per_loop_movement_quality_v1_contract_sha256": "67d64c463df52f01f360561ef0a69d5772b7eec0409468c93d6eb5a630dee02e",
+      "fixed_cycles_csv_sha256": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253",
+      "frozen_semimarkov_parameters_npz_sha256": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+      "quality_thresholds_2024_json_sha256": "f9e2355e36dae28e4279dfabe74645cb3a363b706d95d4179955093b80015b72",
+      "quality_feature_manifest_json_sha256": "b3db72b43ad15f89ac8fedd182d2c5eee3931786dc600a339dc8714dad89ddd6",
+      "quality_fit_manifest_json_sha256": "0a911d631fcc98445d60fa098a219313fabf3d88e78aa1137ab8b684c0e9ee58"
+    }
+  },
+  "cohort_and_targets": {
+    "unit": "the exact frozen compatible anchor-cycle row",
+    "quality_fit_rows": "realized_loop_label == 1 only",
+    "positive_overlap_weight": "1 / number of positive frozen-cycle labels at the anchor",
+    "targets": [
+      "absolute_return_bps",
+      "future_range_bps"
+    ],
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "ordered_classes_and_thresholds": "exact frozen 2024 P75 and P90 classes from per_loop_movement_quality_v1",
+    "conditional_surface": "q75 and q90 on realized-loop rows with inverse-overlap weights",
+    "joint_surface": "the unchanged frozen structural probability s(i,c) multiplied by each conditional q75 or q90",
+    "future_loop_identity_is_label_not_feature": true,
+    "direction_or_signed_return_used": false,
+    "stock_identity_feature_used": false
+  },
+  "shared_model_specification": {
+    "class": "multinomial LogisticRegression",
+    "C": 0.2,
+    "solver": "lbfgs",
+    "max_iter": 1000,
+    "random_state": 20260710,
+    "one_ordered_model_per_target_and_horizon": true,
+    "temperature": 1.0,
+    "temperature_reason": "All twelve frozen qcontext and qfull OOF selections chose 1.0; fixing 1.0 prevents calibration tuning from confounding the feature ablation.",
+    "new_hyperparameter_search_permitted": false,
+    "numeric_imputation_and_scaling": "exact frozen 2024 medians and StandardScaler(with_mean=False) construction from per_loop_movement_quality_v1",
+    "shared_context_width": 17,
+    "shared_context_features": "frozen current-state one-hot plus the exact nine causal numeric controls",
+    "probability_outputs": "q75=P(class_1)+P(class_2), q90=P(class_2), with 0 <= q90 <= q75 <= 1"
+  },
+  "candidate_rotation_construction": {
+    "cycle_core": "remove the repeated terminal state from the frozen cycle string",
+    "compatible_rotations": "all deduplicated rotations of the cycle core whose first state equals the causally filtered current state, each closed by appending the current state",
+    "rotation_selection_using_future_path_permitted": false,
+    "aggregation": "uniform arithmetic mean over all compatible rotations; structural probability, realized route, and future states may not weight or select a rotation",
+    "candidate_next_state_distribution": "for each of eight states, the fraction of compatible rotations whose first future destination is that state",
+    "future_route_state_composition": "for each of eight states, the mean fraction of the transition-length future destinations occupying that state across compatible rotations",
+    "transition_length_encoding": "one-hot over lengths 2, 3, and 4",
+    "rotation_ambiguity_features": [
+      "compatible_rotation_count_minus_one",
+      "entropy of the candidate-next-state distribution divided by log(8), with zero for a point mass"
+    ],
+    "causality_rule": "Every topology value must be computable from the frozen cycle definition and current filtered state before the next provider bar exists."
+  },
+  "frozen_centroid_features": {
+    "source": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/frozen_semimarkov_parameters.npz::means",
+    "source_shape": [
+      8,
+      14
+    ],
+    "state_index": "the frozen semantic state ID 0 through 7; the means array was estimated after semantic remapping",
+    "normalization": "for each of fourteen dimensions, center and population-standardize across the eight frozen state centroids only; a zero-dispersion dimension becomes zero",
+    "blocks": [
+      "expected standardized centroid of the candidate next-state distribution, width 14",
+      "expected standardized centroid of the future-route state composition, width 14",
+      "expected next-state centroid minus the standardized current-state centroid, width 14"
+    ],
+    "future_or_current_bar_emissions_read_permitted": false,
+    "historical_volume_note": "Two frozen emission-centroid dimensions were derived from provider historical_volume during the original 2024 state fit. They are frozen semantic coordinates, not a new current-row volume feature, exchange-wide volume, or order flow."
+  },
+  "models": {
+    "qcontext": {
+      "features": "shared causal context only",
+      "width": 17,
+      "role": "frozen context baseline",
+      "implementation": "reuse the exact sealed qcontext OOF and scoring probabilities; do not refit"
+    },
+    "qroute_topology": {
+      "features": "shared context plus candidate-route topology",
+      "topology_blocks": [
+        {
+          "name": "candidate_next_state_distribution",
+          "width": 8,
+          "feature_scale": 1.0
+        },
+        {
+          "name": "future_route_state_composition",
+          "width": 8,
+          "feature_scale": 1.0
+        },
+        {
+          "name": "transition_length_one_hot",
+          "width": 3,
+          "feature_scale": 1.0
+        },
+        {
+          "name": "centroid_expectations_and_delta",
+          "width": 42,
+          "feature_scale": 0.5
+        },
+        {
+          "name": "rotation_ambiguity",
+          "width": 2,
+          "feature_scale": 1.0
+        }
+      ],
+      "topology_width": 63,
+      "total_width": 80,
+      "cycle_id_one_hot_permitted": false,
+      "history_token_permitted": false,
+      "role": "test whether semantic candidate route topology explains the pooled signal"
+    },
+    "qcycle_main": {
+      "features": "shared context plus frozen cycle one-hot",
+      "cycle_main_width": 20,
+      "cycle_main_feature_scale": 1.0,
+      "total_width": 37,
+      "topology_features_included": false,
+      "history_token_permitted": false,
+      "role": "competing cycle-identity representation; qcycle_main versus qroute_topology is explicitly non-nested"
+    },
+    "qcycle_state": {
+      "features": "qcycle_main plus cycle-by-current-state",
+      "cycle_by_current_state_width": 160,
+      "cycle_by_current_state_feature_scale": 0.5,
+      "total_width": 197,
+      "history_token_permitted": false,
+      "role": "test incremental current-state rotation information beyond cycle main effect"
+    },
+    "qfull": {
+      "features": "the exact existing qcycle feature set: shared context, cycle main, cycle-by-current-state, and cycle-by-last-three-state history token",
+      "cycle_by_history_token_width": 12960,
+      "cycle_by_history_token_feature_scale": 0.25,
+      "total_width": 13157,
+      "topology_features_included": false,
+      "role": "sealed full-signal reference",
+      "implementation": "reuse the exact sealed qcycle/qfull OOF and scoring probabilities; do not refit"
+    }
+  },
+  "fair_comparison_rules": {
+    "same_rows_labels_weights_folds_seed_solver_C_and_temperature": true,
+    "qcontext_and_qfull_replay_tolerance": 1e-12,
+    "qcontext_and_qfull_replay_scope": "every OOF and scoring probability plus all frozen aggregate losses",
+    "new_models_to_fit_if_execution_is_later_authorized": [
+      "qroute_topology",
+      "qcycle_main",
+      "qcycle_state"
+    ],
+    "qcycle_main_vs_qroute_topology_interpretation": "paired non-nested representation comparison; superiority is evidence that explicit cycle identity represents information not retained by the chosen topology summary, but is not a formal conditional-variable test",
+    "post_score_feature_scale_or_model_change_permitted": false
+  },
+  "primary_loss_pooling": {
+    "binary_cells": 12,
+    "definition": "two targets times three horizons times two tiers",
+    "within_cell_weighting": "frozen inverse-overlap weight on conditional rows and unit weight on compatible rows for the joint surface",
+    "pooled_loss": "arithmetic mean of the twelve within-cell weighted mean losses so P75 prevalence cannot dominate P90",
+    "paired_daily_series": "within each session compute the twelve available within-cell weighted candidate-minus-baseline loss differences, then take their arithmetic mean",
+    "paired_quarter_and_stock_series": "the same equal-cell construction within every required quarter and every leave-one-stock-out deletion",
+    "proper_losses": [
+      "binary log loss",
+      "Brier score"
+    ]
+  },
+  "multiplicity_and_uncertainty": {
+    "primary_comparison_family": [
+      "qroute_topology versus qcontext",
+      "qroute_topology non-inferiority versus qfull",
+      "qcycle_main versus qroute_topology",
+      "qcycle_state versus qcycle_main",
+      "qfull versus qcycle_state"
+    ],
+    "familywise_alpha": 0.05,
+    "method": "five predeclared one-sided 99% moving-block intervals, equivalent to Bonferroni alpha 0.01 per primary comparison",
+    "block_length_sessions": 5,
+    "bootstrap_draws": 10000,
+    "same_resampled_block_indices_for_every_model_in_a_comparison": true,
+    "seed": 20260710,
+    "exploratory_cell_or_rotation_intervals": "95% and explicitly non-confirmatory"
+  },
+  "common_superiority_gate": {
+    "applies_to": [
+      "qroute_topology versus qcontext",
+      "qcycle_main versus qroute_topology",
+      "qcycle_state versus qcycle_main",
+      "qfull versus qcycle_state"
+    ],
+    "minimum_pooled_relative_log_loss_improvement": 0.0025,
+    "pooled_brier_difference_below_zero": true,
+    "pooled_log_loss_and_brier_99_percent_block_upper_bounds_below_zero": true,
+    "every_required_quarter_pooled_log_loss_and_brier_difference_below_zero": true,
+    "every_leave_one_stock_out_pooled_log_loss_and_brier_difference_below_zero": true,
+    "each_of_twelve_cells_maximum_relative_log_loss_degradation": 0.0025,
+    "both_target_aggregates_log_loss_and_brier_no_worse": true,
+    "all_three_horizon_aggregates_log_loss_and_brier_no_worse": true,
+    "conditional_calibration": {
+      "candidate_ece_no_more_than_baseline_plus": 0.005,
+      "candidate_maximum_supported_bin_error_no_more_than_baseline_plus": 0.01
+    },
+    "joint_calibration": {
+      "candidate_ece_no_more_than_baseline_plus": 0.0025,
+      "candidate_maximum_supported_bin_error_no_more_than_baseline_plus": 0.005
+    },
+    "both_conditional_and_joint_surfaces_must_pass": true
+  },
+  "topology_signal_retention_gate": {
+    "precondition": "sealed qfull must reproduce and pass versus qcontext on the pooled conditional and joint surfaces",
+    "conditional_log_loss_gain_retained_minimum": 0.9,
+    "joint_log_loss_gain_retained_minimum": 0.9,
+    "conditional_brier_gain_retained_minimum": 0.8,
+    "joint_brier_gain_retained_minimum": 0.8,
+    "gain_retention_formula": "(loss(qcontext)-loss(qroute_topology)) / (loss(qcontext)-loss(qfull)); denominator must be positive",
+    "noninferiority_margin": "ten percent of the positive qfull-versus-qcontext pooled gain, calculated separately for each loss and surface",
+    "qroute_minus_qfull_pooled_99_percent_block_upper_bound_at_or_below_margin": true,
+    "every_quarter_and_leave_one_stock_out_difference_at_or_below_margin": true,
+    "each_cell_maximum_full_gain_loss": 0.25,
+    "each_cell_rule": "qroute_topology must retain at least 75% of the positive qfull gain where qfull improves; a cell with non-positive qfull gain is descriptive and cannot make retention pass",
+    "conditional_ece_no_more_than_qfull_plus": 0.005,
+    "joint_ece_no_more_than_qfull_plus": 0.0025,
+    "both_surfaces_must_pass": true
+  },
+  "calibration_bins_and_support": {
+    "fixed_probability_bins": 10,
+    "oof_minimum_supported_conditional_bin_rows": 50,
+    "oof_minimum_supported_joint_bin_rows": 250,
+    "scoring_minimum_supported_conditional_bin_rows": 100,
+    "scoring_minimum_supported_joint_bin_rows": 500,
+    "base_cycle_support": "exact frozen support rules from per_loop_movement_quality_v1",
+    "pooled_oof_minimum_effective_conditional_weight": 20000,
+    "pooled_scoring_minimum_effective_conditional_weight": 25000,
+    "unsupported_slice": "reported as unsupported, never counted as a pass"
+  },
+  "rotation_level_diagnostics": {
+    "causal_slices": [
+      "cycle_id by current_state",
+      "candidate compatible_rotation_count",
+      "candidate-next-state entropy quartile using 2024-frozen cut points"
+    ],
+    "evaluation_only_slice": "realized compatible rotation identity may be reconstructed after the outcome solely as a descriptive label; it may never enter a model, calibrator, selector, or confirmatory gate",
+    "oof_minimum_realized_rows": 100,
+    "scoring_minimum_realized_rows": 200,
+    "minimum_stocks": 10,
+    "required_quarters": "both OOF quarters or all four scoring quarters",
+    "source_attribution_no_sign_reversal_rule": "For a claimed source comparison, no supported causal current-state or rotation-ambiguity slice may have positive candidate-minus-baseline pooled log-loss and Brier differences.",
+    "multiple_rotation_aggregation_audit": "independently reproduce every compatible rotation, deduplication, uniform mixture, next-state distribution, composition vector, and entropy"
+  },
+  "two_axis_reporting": {
+    "absolute_movement_axis": {
+      "inputs": "raw frozen observed exceedance rates and model mean q75/q90",
+      "exploratory_hypotheses_already_identified": [
+        "cycle_07 absolute-high persistence",
+        "cycle_13 absolute-high persistence"
+      ],
+      "status": "post-result exploratory, not eligible for a frozen grade",
+      "may_satisfy_incremental_gate": false
+    },
+    "incremental_vs_context_axis": {
+      "inputs": "paired proper-loss, calibration, block interval, quarter, stock-deletion, and rotation-slice comparisons",
+      "exploratory_hypothesis_already_identified": "cycle_09 is the strongest prior incremental candidate but failed robustness",
+      "may_be_replaced_by_absolute_high_rate": false
+    },
+    "required_output": "Report both axes side by side for every cycle without combining them into a single score or tier."
+  },
+  "source_attribution_decision_rules": {
+    "no_reference_signal": "qfull fails exact replay or its frozen pooled improvement versus qcontext is not positive and robust",
+    "topology_sufficient": "qroute_topology passes versus qcontext, passes the topology-retention gate versus qfull, and none of qcycle_main-versus-qroute, qcycle_state-versus-qcycle_main, or qfull-versus-qcycle_state passes its superiority gate",
+    "topology_dominant_with_residual_detail": "qroute_topology passes retention, and one or more predeclared identity, state-rotation, or history increments also passes",
+    "cycle_identity_representation_needed": "qcycle_main passes the non-nested superiority gate versus qroute_topology; describe this as representation evidence, not a conditional-variable proof",
+    "current_state_rotation_needed": "qcycle_state passes versus qcycle_main",
+    "history_token_needed": "qfull passes versus qcycle_state",
+    "unresolved": "qfull reference signal exists but topology retention fails and no deeper superiority comparison passes robustly",
+    "cell_level_label_restriction": "A pooled attribution may not be generalized to a target, horizon, tier, cycle, or rotation whose own supported diagnostic reverses sign."
+  },
+  "period_transfer_rule": {
+    "provisional_source_attribution": "determined from frozen July-December 2024 causal OOF only",
+    "pre_score_freeze": "all 2024 predictions, gates, attribution labels, model parameters, topology mappings, source hashes, and code hashes must be frozen before the scoring runner is permitted to load 2025 or 2023 row-level outcomes",
+    "2025_and_2023_rule": "recalculate every applicable superiority, retention, calibration, interval, quarter, stock, and rotation diagnostic",
+    "retention_across_periods": "a 2024 attribution is portable only when the required paired direction remains non-positive in both later periods and all later support and noninferiority gates pass",
+    "demotion_only": true,
+    "later_period_promotion_or_source_substitution": false,
+    "prospective_language": false
+  },
+  "stop_rules": [
+    "Stop before fitting if any pinned input hash, cohort reconstruction, cycle definition, state-centroid shape, semantic state index, threshold, control, label, or overlap weight fails audit.",
+    "Stop before fitting if any topology feature depends on a realized future state, realized rotation, future duration, outcome, session end, price after the anchor, or stock identity.",
+    "Stop before interpretation if sealed qcontext or qfull probabilities and losses fail exact replay at tolerance 1e-12.",
+    "Stop before scoring later periods if any 2024 fold is non-causal, a model fails convergence, probabilities are non-finite or not nested, pooled support fails, or an independent pre-score audit fails.",
+    "Stop source attribution and report no_reference_signal if the sealed qfull reference signal does not pass its precondition.",
+    "Stop a comparison family at unconfirmed when its 2024 primary gate fails; 2025 or 2023 may not revive or promote it.",
+    "Stop and require a separately frozen V3 contract for any feature, scale, penalty, calibration, threshold, support, rotation aggregation, or gate change suggested after results are read.",
+    "Stop immediately if either prospective shadow, any 2026 outcome, or any live, demo, paper, broker, order, position, deployment, or strategy path would be read or changed."
+  ],
+  "planned_artifacts_if_execution_is_separately_authorized": {
+    "root": "/private/tmp/stocker_loop_quality_feature_ablation_v2_20260710",
+    "runner": "work/run_loop_quality_feature_ablation_v2.py",
+    "independent_audit": "work/audit_loop_quality_feature_ablation_v2.py",
+    "required_outputs": [
+      "topology_feature_manifest.json",
+      "rotation_mapping.csv",
+      "oof_predictions_2024.parquet",
+      "model_parameters.npz",
+      "paired_pooled_gates_2024.json",
+      "cell_diagnostics_2024.csv",
+      "rotation_diagnostics_2024.csv",
+      "pre_score_audit.json",
+      "scoring_diagnostics_2025.csv",
+      "scoring_diagnostics_2023.csv",
+      "period_transfer_gates.json",
+      "source_attribution.json",
+      "independent_artifact_audit.json",
+      "summary.json"
+    ]
+  },
+  "integrity_and_safety": {
+    "contract_and_future_source_hashes_frozen_before_fit": true,
+    "independent_feature_fold_probability_loss_gate_and_attribution_reconstruction_required": true,
+    "no_secret_or_api_key_storage": true,
+    "no_2026_rows": true,
+    "provider_bars": "regular-session five-minute provider OHLCV",
+    "provider_volume_name_if_referenced": "historical_volume",
+    "provider_volume_is_exchange_wide_or_order_flow": false,
+    "existing_frozen_quality_grades_unchanged": true,
+    "existing_aggregate_movement_shadow_unchanged": true,
+    "existing_per_loop_quality_shadow_unchanged": true,
+    "new_shadow_created_by_this_contract": false
+  }
+}

@@ -1,0 +1,191 @@
+{
+  "application_modified": false,
+  "contract_id": "20260714-first-class-profitable-move-detectors-v1",
+  "detectors": {
+    "H1_downside_expansion_exhaustion_long": {
+      "checks": {
+        "2025": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        },
+        "2026": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        }
+      },
+      "decision": "detector_rejected_or_descriptive_only"
+    },
+    "H2_failed_breakdown_reclaim_long": {
+      "checks": {
+        "2025": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        },
+        "2026": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        }
+      },
+      "decision": "detector_rejected_or_descriptive_only"
+    },
+    "H3_two_bar_reversal_confirmation_long": {
+      "checks": {
+        "2025": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        },
+        "2026": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        }
+      },
+      "decision": "detector_rejected_or_descriptive_only"
+    },
+    "H4_opening_range_failed_breakdown_long": {
+      "checks": {
+        "2025": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        },
+        "2026": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        }
+      },
+      "decision": "detector_rejected_or_descriptive_only"
+    },
+    "H5_activity_activated_downside_expansion_long": {
+      "checks": {
+        "2025": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        },
+        "2026": {
+          "dynamic_net_holm": false,
+          "dynamic_net_lower_positive": false,
+          "dynamic_net_positive": false,
+          "minimum_event_support": true,
+          "minimum_stock_support": true,
+          "positive_month_majority": false,
+          "precision_at_least_0_60": false,
+          "precision_lift_at_least_0_05": false,
+          "precision_lift_holm": false,
+          "precision_lift_lower_positive": false,
+          "precision_lower_at_least_0_55": false,
+          "stock_deletion_breadth": false,
+          "survives_7_5_bps_per_side": false
+        }
+      },
+      "decision": "detector_rejected_or_descriptive_only"
+    }
+  },
+  "economic_edge_claim": false,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "overall_decision": "all_detectors_rejected_or_descriptive_only",
+  "primary_cost_bps_per_side": 5.0,
+  "research_only": true,
+  "retained_for_prospective_research_logging_only": [],
+  "scientific_status": "retrospective_portability_development_on_opened_2025_and_partial_2026_not_validation",
+  "strategy_promotion": false,
+  "validation_claim": false
+}

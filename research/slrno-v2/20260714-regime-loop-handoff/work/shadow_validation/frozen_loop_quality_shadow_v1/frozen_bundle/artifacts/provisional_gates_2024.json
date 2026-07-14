@@ -1,0 +1,12 @@
+{
+  "economic_edge_claim": false,
+  "good_movement_quality_cycles": 0,
+  "high_movement_quality_cycles": 0,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "promotion_permitted": false,
+  "prospective_validated": false,
+  "research_only": true,
+  "scientific_status": "2024_internal_forward_provisional_only",
+  "unqualified_cycles": 20
+}

@@ -1,0 +1,238 @@
+{
+  "contract_id": "causal_setup_conditions_v1",
+  "contract_frozen_at_utc": "2026-07-12T00:00:00Z",
+  "scientific_status": "2024_internal_monthly_oof_setup_pattern_research",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "strategy_promotion_permitted": false,
+  "economic_edge_claim_permitted": false,
+  "question": "Do causal setup conditions convert the retained state-history movement forecast into more robust post-confirmation price capture?",
+  "skill_workflow": "slrno-bar-pattern-research",
+  "periods": {
+    "development_year": 2024,
+    "validation_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "movement_predictions": "monthly expanding-window OOF predictions from regime_utility_ablation_v1",
+    "underlying_state_definition": "frozen eight-state detector fitted on full 2024",
+    "2025_setup_pnl_read_permitted": false,
+    "2023_setup_pnl_read_permitted": false,
+    "2026_permitted": false,
+    "prospective_claim_permitted": false
+  },
+  "sources": {
+    "oof_movement_predictions": "/private/tmp/stocker_regime_utility_ablation_v1_20260711/oof_predictions_2024.parquet",
+    "oof_independent_audit": "/private/tmp/stocker_regime_utility_ablation_v1_20260711/independent_audit.json",
+    "frozen_prediction_thresholds": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/prediction_thresholds_2024.csv",
+    "provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "bars": "regular-session five-minute provider OHLC",
+    "provider_price_basis": "provider OHLC exactly as stored; no independent corporate-action adjustment",
+    "provider_volume_label": "historical_volume_not_used",
+    "bid_ask_quotes_available": false,
+    "intrabar_ordering_available": false
+  },
+  "cohort": {
+    "anchor": "exact July-December 2024 monthly-OOF run-entry anchor",
+    "symbols": "the twenty-two symbols present in the OOF prediction ledger",
+    "maximum_anchor_bar_ordinal": 53,
+    "full_session_bar_count": 78,
+    "horizons_bars_from_anchor": [
+      6,
+      12,
+      24
+    ],
+    "exact_same_session_support_required": true,
+    "full_session_grid": "ordered union of regular-session dates in the twenty-two provider tapes; inactive symbol/session sleeves are zero-return cash"
+  },
+  "movement_gate": {
+    "prediction": "monthly-OOF history-layer future-range prediction",
+    "operator": ">=",
+    "threshold_source": "already-frozen full-2024 raw_history predicted-range P75 from the preceding P&L contract",
+    "thresholds_bps": {
+      "6": 210.3204137212535,
+      "12": 283.3242044166901,
+      "24": 372.9191260003554
+    },
+    "setup_outcome_or_pnl_used_to_set_threshold": false,
+    "post_score_threshold_change_permitted": false
+  },
+  "common_close_confirmation": {
+    "activation": "inspect the next one through three completed bars after the anchor",
+    "upper_confirmation": "first future close strictly above the completed anchor high",
+    "lower_confirmation": "first future close strictly below the completed anchor low",
+    "direction": "upper confirmation long; lower confirmation short",
+    "no_confirmation": "no trade",
+    "entry": "open of the bar immediately after confirmation",
+    "exit": "close of anchor plus horizon bars",
+    "minimum_holding_bars": 3,
+    "stop_or_take_profit": "none",
+    "same_bar_direction_ambiguity": "impossible because one close cannot be strictly above anchor high and below anchor low",
+    "future_confirmation_bar_used_in_entry_price": false
+  },
+  "pattern_hypotheses": [
+    {
+      "id": "H1_close_confirmation",
+      "candidate": "close_confirmed_all",
+      "baseline": "oco_anchor_breakout_all",
+      "definition": "replace first intrabar high/low touch with a completed close outside the anchor range, then enter next bar",
+      "expected_benefit": "reduce wick and ambiguous-bar whipsaw",
+      "safety_risk": "uses up to three future bars for confirmation, so entry and outcome accounting must begin strictly afterward",
+      "stop_condition": "candidate lacks support or does not improve net daily return versus OCO at every horizon"
+    },
+    {
+      "id": "H2_movement_gate",
+      "candidate": "history_gate_close_confirmed",
+      "baseline": "close_confirmed_all",
+      "definition": "arm close confirmation only when the causal history-layer future-range forecast exceeds its frozen P75",
+      "expected_benefit": "avoid confirmations in low-movement conditions",
+      "safety_risk": "threshold comes from full-2024 prediction distribution and is development-only",
+      "stop_condition": "candidate does not improve net daily return versus ungated close confirmation at every horizon"
+    },
+    {
+      "id": "H3_strong_close",
+      "candidate": "history_gate_strong_close",
+      "baseline": "history_gate_close_confirmed",
+      "definition": "confirmation bar body is at least half its range and closes in the outer quartile in the breakout direction",
+      "parameters": {
+        "minimum_body_fraction": 0.5,
+        "outer_close_fraction": 0.75
+      },
+      "expected_benefit": "distinguish decisive closes from weak range escapes",
+      "safety_risk": "confirmation quality is known only at that bar close; entry must remain next-bar open",
+      "stop_condition": "candidate does not improve the gated baseline at every horizon"
+    },
+    {
+      "id": "H4_compression",
+      "candidate": "history_gate_compression_close",
+      "baseline": "history_gate_close_confirmed",
+      "definition": "mean provider bar range percentage over anchor and prior five bars is at most 75% of the mean over anchor and prior twenty-three bars",
+      "parameters": {
+        "short_window_bars": 6,
+        "long_window_bars": 24,
+        "maximum_ratio": 0.75,
+        "minimum_anchor_ordinal": 23
+      },
+      "expected_benefit": "select compression-to-expansion setups",
+      "safety_risk": "excludes early-session anchors and may reduce support",
+      "stop_condition": "support fails or candidate does not improve the gated baseline at every horizon"
+    },
+    {
+      "id": "H5_trend_alignment",
+      "candidate": "history_gate_trend_aligned_close",
+      "baseline": "history_gate_close_confirmed",
+      "definition": "confirmed direction matches the sign of log close return from six completed bars before the anchor through the anchor close",
+      "parameters": {
+        "trend_lookback_bars": 6,
+        "zero_return_qualifies": false
+      },
+      "expected_benefit": "avoid countertrend range breaks",
+      "safety_risk": "trend and regime history may be redundant",
+      "stop_condition": "candidate does not improve the gated baseline at every horizon"
+    }
+  ],
+  "oco_baseline": {
+    "upper_trigger": "anchor high with high >= trigger",
+    "lower_trigger": "anchor low with low <= trigger",
+    "activation": "next bar through horizon",
+    "open_gap_ordering": "an open at or beyond exactly one trigger establishes that side first",
+    "intrabar_both_touch": "cancel signal as path ambiguous",
+    "entry": "worse of trigger or triggering-bar open",
+    "exit": "anchor-plus-horizon close"
+  },
+  "overlap_and_portfolio": {
+    "recomputed_independently_within_each_setup_and_horizon": true,
+    "one_armed_window_per_symbol": true,
+    "greedy_rule": "accept earliest ex-ante eligible anchor, then reject anchors with ordinal below accepted ordinal plus horizon, including when confirmation or setup quality fails",
+    "same_exit_close_rearming": true,
+    "equal_symbol_sleeves": 22,
+    "leverage": false,
+    "overnight_positions": false,
+    "net_trade_return": "direction * (exit / entry - 1) - 2 * per_side_cost_bps / 10000",
+    "within_sleeve_compounding": "product(1 + sequential net trade return) - 1",
+    "daily_portfolio_return": "mean of twenty-two fixed sleeves, inactive sleeves zero"
+  },
+  "costs": {
+    "grid_bps_per_side": [
+      0,
+      1,
+      2,
+      5,
+      10
+    ],
+    "primary_bps_per_side": 5,
+    "interpretation": "sensitivity only; provider OHLC has no executable spread or impact"
+  },
+  "metrics": {
+    "support": [
+      "armed signals",
+      "confirmed setups",
+      "condition failures",
+      "twenty-two stock coverage",
+      "month coverage"
+    ],
+    "trade": [
+      "mean and median net bps",
+      "win rate",
+      "profit factor"
+    ],
+    "portfolio": [
+      "cumulative return",
+      "annualized return",
+      "annualized volatility",
+      "descriptive zero-rate Sharpe",
+      "maximum drawdown",
+      "exposure"
+    ],
+    "slices": [
+      "horizon",
+      "validation month",
+      "session clock quartile",
+      "leave-one-stock-out deletion",
+      "cost level"
+    ],
+    "uncertainty": {
+      "unit": "session date",
+      "method": "non-circular overlapping five-session moving-block bootstrap",
+      "draws": 5000,
+      "interval": "2.5th and 97.5th percentiles",
+      "random_state": 20260712,
+      "absolute": "mean daily portfolio return",
+      "paired": "candidate daily return minus its frozen baseline using aligned resampled dates"
+    }
+  },
+  "retention_gate_each_hypothesis": {
+    "minimum_confirmed_trades_each_horizon": 500,
+    "minimum_stocks_with_confirmed_trade_each_horizon": 15,
+    "minimum_confirmed_trades_each_validation_month_and_horizon": 50,
+    "positive_mean_net_trade_bps_each_horizon_at_primary_cost": true,
+    "positive_cumulative_return_each_horizon_at_primary_cost": true,
+    "absolute_daily_bootstrap_lower_bound_above_zero_each_horizon": true,
+    "paired_daily_advantage_over_frozen_baseline_lower_bound_above_zero_each_horizon": true,
+    "positive_cumulative_return_each_validation_month_and_horizon": true,
+    "positive_cumulative_return_under_every_leave_one_stock_out_deletion_and_horizon": true,
+    "all_required": true,
+    "pass_interpretation": "retain as a 2024 internal setup research hypothesis only; no strategy or edge claim",
+    "failure_interpretation": "reject or leave descriptive; do not tune parameters on the opened result"
+  },
+  "integrity": {
+    "contract_runner_and_source_hashes_frozen_before_scoring": true,
+    "exact_reconstruction_of_features_confirmations_entries_costs_metrics_bootstraps_and_decisions_required": true,
+    "no_volume_feature": true,
+    "no_later_period_setup_pnl": true,
+    "prospective_shadow_unchanged": true,
+    "required_labels": {
+      "research_only": true,
+      "live_ordering_enabled": false,
+      "order_placement": "disabled"
+    }
+  }
+}

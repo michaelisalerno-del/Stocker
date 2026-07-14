@@ -1,0 +1,156 @@
+{
+  "contract_id": "20260713-loop-payoff-phase-path-v1",
+  "frozen_before_scoring": true,
+  "implementation_amendments_before_successful_scoring": [
+    {
+      "reason": "The initial pre-score run stopped before outputs because state-run positions are global within symbol while ledger bar ordinals are session-local.",
+      "change": "Translate admission and frozen-exit positions into the state-run coordinate using anchor_start_pos minus bar_ordinal.",
+      "hypotheses_thresholds_costs_or_decision_gates_changed": false,
+      "payoff_results_inspected_before_change": false
+    },
+    {
+      "reason": "The second pre-score run stopped before outputs because ledger bar_ordinal is a model ordinal and can differ from the provider-tape row ordinal; frozen execution advances from start_timestamp.",
+      "change": "Locate the anchor provider row by start_timestamp, then advance entry_step and 24 provider rows exactly as the frozen execution engine.",
+      "hypotheses_thresholds_costs_or_decision_gates_changed": false,
+      "payoff_results_inspected_before_change": false
+    }
+  ],
+  "scientific_status": "post-inspection causal retrospective development for a prospective logging contract; not validation",
+  "sealed_data_status": {
+    "genuinely_unseen_sessions_available": false,
+    "reason": "The common provider files extend through 2026-06-29, but repository research outputs already span 2026 and no seal predating these hypotheses exists.",
+    "prospective_validation_claim_allowed": false,
+    "2023_or_2025_validation_claim_allowed": false
+  },
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "position_or_order_functionality_allowed": false,
+  "strategy_promotion_allowed": false,
+  "application_code_modification_allowed": false,
+  "inputs": {
+    "anchor_panels": {
+      "2023": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_2023.parquet",
+      "2025": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_2025.parquet"
+    },
+    "accepted_signal_ledger": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/accepted_signal_ledger.parquet",
+    "fixed_cycles": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/fixed_cycles.csv",
+    "runs": {
+      "2023": "/private/tmp/stocker_sealed_backward_2023_complete_detector_20260710/backward_2023_filtered_runs.parquet",
+      "2024_hazard_fit": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/train_2024_filtered_runs.csv",
+      "2025": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/test_2025_filtered_runs.csv"
+    },
+    "provider_roots": {
+      "2023": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock",
+      "2025": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock"
+    },
+    "parent_report": "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/reports/20260713-dynamic-loop-context-edge-v1.md",
+    "parent_handoff": "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/discovery_candidates/20260713-dynamic-loop-context-edge-v1.json"
+  },
+  "population": {
+    "periods": [2023, 2025],
+    "symbols": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "source_strategy": "breakout_loop_scores_range_p75",
+    "source_horizon_bars_from_anchor": 24,
+    "source_status": "filled",
+    "primary_candidates": [
+      {"top_predicted_parent_loop": "cycle_04", "anchor_current_state": 4, "orientation": "4->2->4"},
+      {"top_predicted_parent_loop": "cycle_07", "anchor_current_state": 5, "orientation": "5->6->5"}
+    ],
+    "matched_control_orientations": [
+      {"top_predicted_parent_loop": "cycle_04", "anchor_current_state": 2, "orientation": "2->4->2"},
+      {"top_predicted_parent_loop": "cycle_07", "anchor_current_state": 6, "orientation": "6->5->6"}
+    ],
+    "baselines": ["unfiltered_frozen_signal", "loop_only", "matched_opposite_orientation"]
+  },
+  "causal_admission_features": {
+    "admission_bar": "provider row matched by anchor start_timestamp plus frozen breakout entry_step",
+    "admission_state": "the frozen causal state assignment covering the admission bar",
+    "orientation_survived_to_admission": "the anchor state run still covers the admission bar; no intervening transition",
+    "regime_age_bars": "admission ordinal minus current run start ordinal plus one",
+    "duration_percentile": "percentile of admission age within 2024 non-terminal completed durations for the admission state",
+    "exit_before_frozen_close_hazard": "empirical 2024 state-specific P(duration < required age at frozen close | duration >= admission age), excluding session-terminal right-censored runs",
+    "atr14": "mean true range of the 14 completed bars strictly before admission",
+    "forbidden": ["realized current-run duration as a feature", "future state", "future return", "realized loop/child/morph label"]
+  },
+  "predeclared_bins": {
+    "regime_age_bars": ["1", "2-3", "4-6", "7-12", "13+"],
+    "duration_percentile": ["<0.50", "0.50-0.80", ">=0.80"],
+    "exit_hazard": ["<0.50", "0.50-0.80", ">=0.80"]
+  },
+  "payoff_path": {
+    "primary_cost_bps_per_side": 5,
+    "round_trip_cost_bps": 10,
+    "primary_final_payoff": "frozen gross return bps minus 10 bps",
+    "path_window": "admission bar through the already-frozen anchor+24 close",
+    "mfe": "directional best high/low excursion from frozen entry price",
+    "mae": "directional worst low/high excursion from frozen entry price",
+    "time_to_excursion": "zero-based bars after admission",
+    "atr_normalization": "excursion price distance divided by admission ATR14",
+    "path_classes": {
+      "final_positive": "net final payoff > 0",
+      "timing_failure": "net final payoff <= 0 and gross MFE > 10 bps",
+      "no_usable_move": "net final payoff <= 0 and gross MFE <= 10 bps"
+    },
+    "intrabar_caveat": "Entry-bar MAE ordering is not observable from OHLC; post-entry-bar excursions are reported separately and are the conservative diagnostic."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_orientation_staleness",
+      "expected_benefit": "Separate forecasts whose anchor regime survives until fill from forecasts already invalidated by a transition.",
+      "safety_risk": "Using realized total duration would leak; only state known at admission and elapsed age are features.",
+      "stop_condition": "No consistent payoff separation across both opened periods and both candidates."
+    },
+    {
+      "id": "H2_age_exit_hazard",
+      "expected_benefit": "Identify whether regime maturity and inability to survive the payoff window explain losing occurrences.",
+      "safety_risk": "Hazard tuning on scored periods; prevented by a fixed 2024-only estimator and fixed bins.",
+      "stop_condition": "Hazard/payoff association changes sign or is economically negligible across candidate-period cells."
+    },
+    {
+      "id": "H3_path_timing",
+      "expected_benefit": "Distinguish wrong fixed-exit timing from absence of a cost-clearing move.",
+      "safety_risk": "OHLC intrabar ordering ambiguity; conservative post-entry path is reported.",
+      "stop_condition": "Losses predominantly have no cost-clearing MFE and no stable earlier path advantage."
+    },
+    {
+      "id": "H4_orientation_specificity",
+      "expected_benefit": "Show whether any phase/path result belongs to the frozen orientation rather than the parent loop generically.",
+      "safety_risk": "Controls are descriptive, not randomized or prospective.",
+      "stop_condition": "Matched opposite orientations show equal or stronger effects."
+    }
+  ],
+  "inference": {
+    "moving_block_bootstrap_draws": 5000,
+    "moving_block_sessions": 5,
+    "confidence_interval": 0.95,
+    "multiplicity": "Holm correction across the four candidate x period hazard association endpoints",
+    "primary_mechanism_endpoint": "AUC of negative exit hazard for positive net payoff; 0.5 is null",
+    "secondary_endpoints": ["orientation-survival mean-net difference", "timing-failure share", "no-usable-move share"],
+    "minimum_candidate_period_rows": 50
+  },
+  "decision": {
+    "payoff_timing_feature_supported_for_logging_requires": [
+      "at least 50 rows in every candidate x period cell",
+      "negative-hazard payoff AUC is above 0.5 in all four cells",
+      "all four one-sided hazard endpoints pass Holm at 0.05",
+      "the orientation-survival payoff difference is positive in all four cells",
+      "leave-one-stock-out signs are stable for at least 16 of 20 deletions in every candidate x period cell"
+    ],
+    "possible_future_action": "Specify immutable prospective real-time logging fields only.",
+    "strategy_or_app_promotion": false,
+    "economic_edge_claim_allowed": false
+  },
+  "evidence_labels": {
+    "prices": "EODHD/provider 5-minute regular-session OHLCV",
+    "volume": "historical_volume_activity_proxy; not used in this experiment",
+    "quotes_or_ticks_used": false,
+    "spread_or_order_book_used": false
+  }
+}

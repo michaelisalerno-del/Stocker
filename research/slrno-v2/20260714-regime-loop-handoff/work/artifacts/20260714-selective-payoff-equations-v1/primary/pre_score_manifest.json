@@ -1,0 +1,167 @@
+{
+  "contract_id": "20260714-selective-payoff-equations-v1",
+  "frozen_ledgers": {
+    "data_coverage.csv": {
+      "bytes": 1813,
+      "sha256": "31b9ed3b6a0616258094d861602c2043b4caf1480796511980df5804efde871f"
+    },
+    "population_counts.csv": {
+      "bytes": 219,
+      "sha256": "bb8fd47d7e022cba855c593007d6007b2218b22ed03fd5cca4ee100ab33342e2"
+    },
+    "pre_outcome_base_events.parquet": {
+      "bytes": 836328,
+      "sha256": "6d4af7ce62ee4ff91f347f4ad411352062d059ad987611af6369474c5702eee0"
+    },
+    "pre_outcome_sequential_snapshots.parquet": {
+      "bytes": 2399558,
+      "sha256": "15418667c35770e339c5bf5e5a79087faf454ec681f90e02314828ef7c0f4b98"
+    }
+  },
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true,
+  "scientific_status": "post_inspection_causal_retrospective_equation_development_on_opened_2024_not_validation",
+  "source_hashes": {
+    "accepted_setup_signals_2024": {
+      "bytes": 4982892,
+      "path": "/private/tmp/stocker_causal_setup_conditions_v1_20260712/accepted_setup_signals_2024.parquet",
+      "sha256": "a6259fe2a645c2bf7c42cec67fa9714b673b3710d4c4bac3074111268484feb6"
+    },
+    "anchor_panel_2024": {
+      "bytes": 13021127,
+      "path": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+      "sha256": "788fd81909d1c5d3e6ee20e3e36e3ebb74199188e41052ea1b04f61c96fa9932"
+    },
+    "auditor": {
+      "bytes": 39237,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/audit_selective_payoff_equations_v1.py",
+      "sha256": "63dc949f0e29260dc098f4d62806b01443d5bb078a1086be2543ef9122220998"
+    },
+    "contract": {
+      "bytes": 11441,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/contracts/20260714-selective-payoff-equations-v1.json",
+      "sha256": "a11f7702b2766c0dfe91f9c47b87a38051244be357665e759ce4445bf03970b8"
+    },
+    "fixed_cycles": {
+      "bytes": 446,
+      "path": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/fixed_cycles.csv",
+      "sha256": "ee0adb9e09226f47a94902ad1ab3ccc996b557592abab00e7338074e8cc055de"
+    },
+    "parent_first_class_artifact_manifest": {
+      "bytes": 2673,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/artifacts/20260714-first-class-profitable-move-detectors-v1/primary/artifact_manifest.json",
+      "sha256": "26cf5de2e603bdbd3229299b8b7048ddfe8e121e6ac769497a86fbcbce85ce14"
+    },
+    "provider_2024_AAL": {
+      "bytes": 1307671,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+      "sha256": "f5c2206c55e64391dffa896a9419f49d0bbfdbf3ce9fced6ade866daa59855ad"
+    },
+    "provider_2024_AAOI": {
+      "bytes": 1422328,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+      "sha256": "3b7fdfbeaa5f5d880023c76850764587d186daee5c8c6e3c377c43ffc93f0901"
+    },
+    "provider_2024_APLD": {
+      "bytes": 1438146,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+      "sha256": "2f80ee3c3cb5f3720e9cfb29214212be4ee8087fa2d8a28ee097794c8c38ae73"
+    },
+    "provider_2024_ASTS": {
+      "bytes": 1566235,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+      "sha256": "70ba2866df310333253f5120c0c9eb07c5001cfd048bbe827d29516c983724fa"
+    },
+    "provider_2024_CIFR": {
+      "bytes": 1361531,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+      "sha256": "6de8cb7378b322bcd41321d91eb69add6ee9aa72513b420f1579483d166010ef"
+    },
+    "provider_2024_HIMS": {
+      "bytes": 1462307,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+      "sha256": "92e40332d7416cf51da0905c4678a7ef24fca1d54b723db86fd2c7fa5c9c1032"
+    },
+    "provider_2024_IONQ": {
+      "bytes": 1482776,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+      "sha256": "5b7b6325e6e8de1b689dca5a21abef805ec9be3835cd11fb1dc2cefcef6494ce"
+    },
+    "provider_2024_IREN": {
+      "bytes": 1471346,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+      "sha256": "b10db5ee6fb5af776f0819a05417515025f362c26ae55f292bdc161403f81471"
+    },
+    "provider_2024_MARA": {
+      "bytes": 1421075,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+      "sha256": "bdc4c7b0a48d831a3296a969ed9f4864a953ae7e45da9741b1d04897b6928619"
+    },
+    "provider_2024_MP": {
+      "bytes": 1365374,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+      "sha256": "433b6f30f5ef70f1461dc159a628291f56012dfc7f15e69fc26981de81315a25"
+    },
+    "provider_2024_MRNA": {
+      "bytes": 1504989,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+      "sha256": "c83a4b505ab3975c46f0898c2bf5f718fecedc6cdeb266c9c90805d4c70981ab"
+    },
+    "provider_2024_MSTR": {
+      "bytes": 1860345,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+      "sha256": "103a3cc0e2697f5f7c91b52522177e13c3c208abc96d8b97471f35853f276ef4"
+    },
+    "provider_2024_NVTS": {
+      "bytes": 1328538,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+      "sha256": "fbb607e5c39b050952d2fdf0ca275e0057bc14462050826b5b8da5f44aef8718"
+    },
+    "provider_2024_QBTS": {
+      "bytes": 1470982,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+      "sha256": "244a42e18390e13380fb23993ae3beffbc3574b895526f5e1157843b7f8a394b"
+    },
+    "provider_2024_RGTI": {
+      "bytes": 1479543,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+      "sha256": "9003303e270718e59b2edd768a45f7a1228a645b72d6d0e8b397064a928e60a4"
+    },
+    "provider_2024_RIOT": {
+      "bytes": 1387568,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+      "sha256": "7886f7e13fff310362b803d3aaa40dabf9f6c17b94fd430dcebef267996e72e3"
+    },
+    "provider_2024_RIVN": {
+      "bytes": 1328107,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+      "sha256": "2ef6ef196aa9f22561a0b1bd0c4485767b4eb845d5b41ab7dff6cadf22ca1ac4"
+    },
+    "provider_2024_SMCI": {
+      "bytes": 1672490,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+      "sha256": "95ecce4c8ccb760f558689107d0c0a0046f4e658294d3d5f0628124aa3a853da"
+    },
+    "provider_2024_SOFI": {
+      "bytes": 1409503,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+      "sha256": "a4d30109e6e9011f5c431d7f1e698af6864d4749a6399b719bce7de55b2ffc26"
+    },
+    "provider_2024_WULF": {
+      "bytes": 1377268,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet",
+      "sha256": "6ebf3e2552b1c12eceb21840f6707b5330a8b07888a0c39bce6410d7df182e29"
+    },
+    "runner": {
+      "bytes": 66709,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/run_selective_payoff_equations_v1.py",
+      "sha256": "983b421f194f8af51efbf2171158c473dedf1b03bbf8de111ff4e9d18610fe02"
+    },
+    "tests": {
+      "bytes": 6427,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/tests/test_selective_payoff_equations_v1.py",
+      "sha256": "54ae8f68833026c02c8cbd07a80f851e1f8183481793b792876ca9194196f072"
+    }
+  }
+}

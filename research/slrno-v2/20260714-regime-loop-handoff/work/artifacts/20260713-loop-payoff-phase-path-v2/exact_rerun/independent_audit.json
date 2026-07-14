@@ -1,0 +1,31 @@
+{
+  "audit": "independent_loop_payoff_phase_path_v2",
+  "checks": {
+    "calendar_190_sessions": true,
+    "candidate_and_path_metric_replay": true,
+    "decision_replay": true,
+    "hazard_and_state_replay": true,
+    "net_identity": true,
+    "parent_candidate_population_replay": true,
+    "safety": true,
+    "source_hashes": true,
+    "stock_deletion_replay": true,
+    "warmup_excluded": true
+  },
+  "checks_passed": 10,
+  "checks_total": 10,
+  "live_ordering_enabled": false,
+  "metrics": {
+    "admission_state_errors": 0,
+    "candidate_population_count_error": 0,
+    "deletion_replay_errors": 0.0,
+    "maximum_hazard_error": 0.0,
+    "maximum_metric_error": 5.551115123125783e-17,
+    "maximum_net_identity_error_bps": 0.0,
+    "maximum_percentile_error": 0.0,
+    "path_count_error": 0.0
+  },
+  "order_placement": "disabled",
+  "pass": true,
+  "research_only": true
+}

@@ -1,0 +1,83 @@
+{
+  "application_modified": false,
+  "contract_id": "20260714-long-short-neutral-detector-v1",
+  "economic_edge_claim": false,
+  "live_ordering_enabled": false,
+  "models": {
+    "M1_price_context": {
+      "checks": {
+        "2025": {
+          "all_leave_one_stock_out_positive": false,
+          "directional_net_lower_positive": false,
+          "log_loss_holm": false,
+          "log_loss_improvement_positive": false,
+          "long_precision_at_least_0_55": false,
+          "macro_f1_lower_positive": true,
+          "minimum_directional_coverage": true,
+          "minimum_directional_outputs": true,
+          "minimum_stock_breadth": true,
+          "positive_at_7_5_bps_per_side": false,
+          "positive_month_majority": false,
+          "short_precision_at_least_0_55": false
+        },
+        "2026": {
+          "all_leave_one_stock_out_positive": false,
+          "directional_net_lower_positive": false,
+          "log_loss_holm": false,
+          "log_loss_improvement_positive": false,
+          "long_precision_at_least_0_55": false,
+          "macro_f1_lower_positive": true,
+          "minimum_directional_coverage": true,
+          "minimum_directional_outputs": true,
+          "minimum_stock_breadth": true,
+          "positive_at_7_5_bps_per_side": false,
+          "positive_month_majority": false,
+          "short_precision_at_least_0_55": false
+        }
+      },
+      "comparator": "M0_clock_prior",
+      "decision": "rejected_or_descriptive_only"
+    },
+    "M2_price_plus_activity": {
+      "checks": {
+        "2025": {
+          "all_leave_one_stock_out_positive": false,
+          "directional_net_lower_positive": false,
+          "log_loss_holm": false,
+          "log_loss_improvement_positive": false,
+          "long_precision_at_least_0_55": false,
+          "macro_f1_lower_positive": false,
+          "minimum_directional_coverage": true,
+          "minimum_directional_outputs": true,
+          "minimum_stock_breadth": true,
+          "positive_at_7_5_bps_per_side": false,
+          "positive_month_majority": false,
+          "short_precision_at_least_0_55": false
+        },
+        "2026": {
+          "all_leave_one_stock_out_positive": false,
+          "directional_net_lower_positive": false,
+          "log_loss_holm": false,
+          "log_loss_improvement_positive": false,
+          "long_precision_at_least_0_55": false,
+          "macro_f1_lower_positive": true,
+          "minimum_directional_coverage": true,
+          "minimum_directional_outputs": true,
+          "minimum_stock_breadth": true,
+          "positive_at_7_5_bps_per_side": false,
+          "positive_month_majority": false,
+          "short_precision_at_least_0_55": false
+        }
+      },
+      "comparator": "M1_price_context",
+      "decision": "rejected_or_descriptive_only"
+    }
+  },
+  "order_placement": "disabled",
+  "overall_decision": "all_three_state_detectors_rejected_or_descriptive_only",
+  "research_only": true,
+  "retained_for_prospective_research_logging_only": [],
+  "scientific_status": "causal_retrospective_three_state_development_on_opened_data_not_validation",
+  "strategy_promotion": false,
+  "validation_claim": false
+}

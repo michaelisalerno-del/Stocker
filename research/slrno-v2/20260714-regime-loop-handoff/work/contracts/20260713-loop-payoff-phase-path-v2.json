@@ -1,0 +1,97 @@
+{
+  "contract_id": "20260713-loop-payoff-phase-path-v2",
+  "frozen_before_scoring": true,
+  "scientific_status": "post-inspection causal retrospective development for a prospective logging contract; not validation",
+  "correction_from_v1": {
+    "reason": "V1 mistakenly scored all 250 sessions instead of the parent's 190-session post-warm-up score surface.",
+    "v1_results_opened": true,
+    "only_change": "Exclude the first 60 completed provider sessions in each period before enriching or scoring signals.",
+    "hypotheses_features_costs_bins_bootstrap_or_decision_gates_changed": false,
+    "v1_status": "exploratory_all_session_diagnostic_not_primary"
+  },
+  "sealed_data_status": {
+    "genuinely_unseen_sessions_available": false,
+    "prospective_validation_claim_allowed": false,
+    "2023_or_2025_validation_claim_allowed": false
+  },
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "position_or_order_functionality_allowed": false,
+  "strategy_promotion_allowed": false,
+  "application_code_modification_allowed": false,
+  "inputs": {
+    "base_v1_contract": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/contracts/20260713-loop-payoff-phase-path-v1.json",
+    "base_v1_runner": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/run_loop_payoff_phase_path_v1.py",
+    "anchor_panels": {
+      "2023": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_2023.parquet",
+      "2025": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_2025.parquet"
+    },
+    "accepted_signal_ledger": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/accepted_signal_ledger.parquet",
+    "fixed_cycles": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/fixed_cycles.csv",
+    "runs": {
+      "2023": "/private/tmp/stocker_sealed_backward_2023_complete_detector_20260710/backward_2023_filtered_runs.parquet",
+      "2024_hazard_fit": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/train_2024_filtered_runs.csv",
+      "2025": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/test_2025_filtered_runs.csv"
+    },
+    "provider_roots": {
+      "2023": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock",
+      "2025": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock"
+    },
+    "parent_report": "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/reports/20260713-dynamic-loop-context-edge-v1.md",
+    "parent_handoff": "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/discovery_candidates/20260713-dynamic-loop-context-edge-v1.json"
+  },
+  "population": {
+    "periods": [2023, 2025],
+    "provider_sessions_each_period": 250,
+    "warmup_completed_sessions": 60,
+    "score_sessions_each_period": 190,
+    "session_filter_timing": "before feature enrichment and payoff scoring",
+    "symbols": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "source_strategy": "breakout_loop_scores_range_p75",
+    "source_horizon_bars_from_anchor": 24,
+    "source_status": "filled",
+    "primary_candidates": ["cycle_04|state4", "cycle_07|state5"],
+    "matched_controls": ["cycle_04|state2", "cycle_07|state6"],
+    "parent_expected_candidate_counts": {
+      "2023|cycle_04|state4": 132,
+      "2023|cycle_07|state5": 722,
+      "2025|cycle_04|state4": 96,
+      "2025|cycle_07|state5": 713
+    }
+  },
+  "methods_inherited_unchanged_from_v1": {
+    "causal_features": ["admission state", "orientation survival to admission", "regime age", "2024 duration percentile", "2024 exit-before-frozen-close hazard", "prior-bar ATR14"],
+    "primary_cost_bps_per_side": 5,
+    "round_trip_cost_bps": 10,
+    "path_window": "timestamp-matched provider anchor through frozen anchor+24 provider-row close",
+    "path_classes": ["final_positive", "timing_failure", "no_usable_move"],
+    "bootstrap_draws": 5000,
+    "bootstrap_block_sessions": 5,
+    "multiplicity": "Holm across four candidate-period hazard AUC endpoints",
+    "minimum_candidate_period_rows": 50
+  },
+  "decision": {
+    "requires": [
+      "support >= 50 in all four candidate-period cells",
+      "negative-hazard payoff AUC > 0.5 in all four cells",
+      "all four one-sided endpoints pass Holm at 0.05",
+      "orientation-survival payoff difference > 0 in all four cells",
+      "negative-hazard AUC > 0.5 in at least 16 of 20 leave-one-stock-out deletions in all four cells"
+    ],
+    "possible_future_action": "prospective immutable logging contract only",
+    "economic_edge_claim_allowed": false,
+    "strategy_or_app_promotion": false
+  },
+  "evidence_labels": {
+    "prices": "EODHD/provider 5-minute regular-session OHLCV",
+    "volume": "historical_volume_activity_proxy; not used",
+    "quotes_or_ticks_used": false
+  }
+}

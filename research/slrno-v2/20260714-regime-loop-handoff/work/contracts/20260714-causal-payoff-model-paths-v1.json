@@ -1,0 +1,291 @@
+{
+  "contract_id": "20260714-causal-payoff-model-paths-v1",
+  "frozen_before_model_scoring": true,
+  "scientific_status": "causal retrospective cross-surface development; not sealed validation",
+  "purpose": "Test direct payoff-state modelling, causal route-branch forecasting, and route-plus-price sequential payoff modelling for the two frozen loop orientations without reopening their 2023 or 2025 payoff surfaces.",
+  "sealed_data_status": {
+    "genuinely_unseen_sessions_available": false,
+    "development_period": 2024,
+    "development_period_previously_used_elsewhere": true,
+    "validation_claim_allowed": false,
+    "economic_edge_claim_allowed": false,
+    "strategy_promotion_allowed": false,
+    "diversion_specific_hypothesis_test_allowed": false,
+    "reason": "2024 was previously used for causal research and no immutable pre-hypothesis seal exists; the expected-leg-then-diversion payoff hypothesis remains reserved for genuinely new observations."
+  },
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "position_or_order_functionality_allowed": false,
+    "application_code_modification_allowed": false,
+    "repository_write_allowed": false
+  },
+  "inputs": {
+    "base_loader_runner": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/run_loop_payoff_phase_path_v1.py",
+    "accepted_setup_signals_2024": "/private/tmp/stocker_causal_setup_conditions_v1_20260712/accepted_setup_signals_2024.parquet",
+    "anchor_panel_2024": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+    "state_runs_2024": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/train_2024_filtered_runs.csv",
+    "fixed_cycles": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/fixed_cycles.csv",
+    "provider_root_2024": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "parent_report": "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/reports/20260714-causal-loop-state-path-v1.md",
+    "parent_handoff": "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/discovery_candidates/20260714-causal-loop-state-path-v1.json",
+    "prospective_log_contract_v2": "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/contracts/20260714-loop-payoff-prospective-log-v2.json"
+  },
+  "population": {
+    "period": 2024,
+    "surface": "causal_setup_conditions_v1 OCO anchor breakouts",
+    "surface_relation_to_parent": "different causal breakout surface; tests mechanism transfer, not an exact rerun of breakout_loop_scores_range_p75",
+    "setup": "oco_anchor_breakout_all",
+    "family": "oco_baseline",
+    "horizon_bars_from_anchor": 24,
+    "status": "filled",
+    "surface_sessions": 128,
+    "surface_first_session": "2024-07-01",
+    "surface_last_session": "2024-12-31",
+    "warmup_completed_sessions": 60,
+    "score_completed_sessions": 68,
+    "rolling_training_sessions": 60,
+    "route_probability_minimum_history_sessions": 20,
+    "symbols": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "excluded_2024_only_symbols": ["AXTI", "OKLO"],
+    "primary_candidates": [
+      {
+        "candidate": "cycle_04|state4",
+        "cycle_dictionary": "2->4->2",
+        "anchor_state": 4,
+        "expected_alternate_state": 2,
+        "expected_rotation": "4->2->4",
+        "full_surface_expected_rows": 259
+      },
+      {
+        "candidate": "cycle_07|state5",
+        "cycle_dictionary": "5->6->5",
+        "anchor_state": 5,
+        "expected_alternate_state": 6,
+        "expected_rotation": "5->6->5",
+        "full_surface_expected_rows": 432
+      }
+    ],
+    "primary_cost_bps_per_side": 5.0,
+    "round_trip_cost_bps": 10.0
+  },
+  "causal_clock": {
+    "admission": "OCO breakout fill inside the provider bar at anchor position plus entry_step.",
+    "admission_features": "Only anchor-close information, prior completed bars, signal values known at fill, and state transitions strictly before the entry bar are allowed.",
+    "entry_bar_state": "Forbidden at admission because its completed-bar label is unavailable until that bar closes.",
+    "sequential_state": "A transition or price-path feature becomes available only after its 5-minute bar closes.",
+    "sequential_exit": "Hypothetical next provider open after a completed checkpoint bar; same-bar execution is forbidden.",
+    "training": "Every prediction is fit only from rows belonging to completed sessions strictly before the score session.",
+    "intrabar_order": "Unknown; sequential MFE and MAE exclude the entry bar and use only fully completed post-entry bars."
+  },
+  "outcomes": {
+    "admission_primary": "frozen anchor+24 gross return minus 10 bps round-trip cost",
+    "route_label": "five-way outcome-only topology through anchor+24: no_transition, expected_leg_partial, exact_parent_completion, incompatible_first_transition, expected_leg_then_diversion",
+    "sequential_primary": "hold advantage in bps: frozen-close gross payoff minus checkpoint-next-open gross payoff",
+    "sequential_policy_payoff": "next-open gross payoff minus round-trip cost when a negative-exit class is emitted, otherwise frozen-close net payoff"
+  },
+  "admission_features": {
+    "numeric": [
+      "top_loop_probability",
+      "top_loop_margin",
+      "entry_step",
+      "entry_session_fraction",
+      "anchor_body_fraction",
+      "anchor_upper_wick_fraction",
+      "anchor_lower_wick_fraction",
+      "anchor_range_fraction",
+      "current_bar_log_return",
+      "return_sum_6",
+      "mean_abs_return_12",
+      "session_return",
+      "bar_range_pct",
+      "atr14_prior_fraction",
+      "anchor_range_atr",
+      "prior_regime_age_bars"
+    ],
+    "categorical": [
+      "candidate",
+      "direction_label",
+      "previous_state_1_label",
+      "pre_entry_path_status",
+      "clock_quartile_label",
+      "prior_completed_state_label"
+    ],
+    "forbidden": [
+      "gross_return_bps",
+      "net_return_bps",
+      "future state",
+      "future duration",
+      "entry-bar completed state",
+      "realised route topology",
+      "MFE or MAE",
+      "realised child or morph",
+      "future OHLC"
+    ]
+  },
+  "sequential_checkpoints": {
+    "fractions_of_post_entry_holding_window": [0.25, 0.5, 0.75],
+    "ordinal_rule": "ceil(fraction * bars_from_entry_to_frozen_close), deduplicated, requiring 1 <= checkpoint_offset < bars_from_entry_to_frozen_close",
+    "reason": "fixed quartiles of each remaining holding window; not selected from opened V2/V3 excursion timing"
+  },
+  "sequential_route_only_features": {
+    "inherit": "all admission features plus causal prequential route probabilities",
+    "numeric": ["checkpoint_fraction", "bars_elapsed", "bars_remaining", "current_regime_age_bars"],
+    "categorical": ["causal_route_status", "current_completed_state_label"]
+  },
+  "sequential_price_path_additions": [
+    "directional_close_return_bps",
+    "running_post_entry_mfe_bps",
+    "running_post_entry_mae_bps",
+    "running_close_peak_bps",
+    "causal_close_retracement_bps",
+    "mfe_prior_atr",
+    "mae_prior_atr",
+    "retracement_prior_atr",
+    "mean_completed_bar_range_prior_atr",
+    "current_bar_body_fraction",
+    "current_bar_upper_wick_fraction",
+    "current_bar_lower_wick_fraction"
+  ],
+  "models": {
+    "route_forecast": {
+      "type": "multinomial logistic regression",
+      "penalty": "L2",
+      "C": 1.0,
+      "solver": "lbfgs",
+      "max_iter": 2000,
+      "probability_floor": "mix fitted probabilities with 2 percent uniform mass across the five frozen classes",
+      "baseline": "candidate-specific Dirichlet-smoothed class prior with alpha=1",
+      "prequential_start": "after 20 completed surface sessions"
+    },
+    "payoff_models": {
+      "type": "BayesianRidge after median/mode imputation, standardisation, and dense one-hot encoding",
+      "hyperparameters": {
+        "max_iter": 300,
+        "tol": 1e-6,
+        "alpha_1": 1e-6,
+        "alpha_2": 1e-6,
+        "lambda_1": 1e-6,
+        "lambda_2": 1e-6
+      },
+      "interpretation": "bounded ridge partial-pooling proxy, not a claim of a fully specified hierarchical Bayesian market model",
+      "variants": [
+        "admission_only",
+        "admission_plus_causal_route_probabilities",
+        "sequential_route_state_only",
+        "sequential_route_plus_price_path"
+      ]
+    },
+    "uncertainty_class": {
+      "interval": "two-sided 90 percent posterior-predictive interval using z=1.6448536269514722",
+      "admission_positive": "lower bound > 0 net bps",
+      "admission_negative": "upper bound < 0 net bps",
+      "sequential_hold_positive": "lower bound > 0 hold-advantage bps",
+      "sequential_exit_negative": "upper bound < 0 hold-advantage bps",
+      "otherwise": "unknown_abstain",
+      "point_mean_policy": "reported only as an uncertainty-ignoring diagnostic and cannot qualify"
+    }
+  },
+  "hypotheses": [
+    {
+      "id": "H1_direct_admission_payoff_state",
+      "target_files": ["admission_predictions.parquet", "admission_model_metrics.csv", "admission_selector_metrics.csv", "admission_bootstraps.csv"],
+      "expected_research_benefit": "Determine whether compact causal admission information supports a calibrated positive/negative/unknown net-payoff state.",
+      "safety_or_validity_risk": "A forced rank or outcome-derived threshold could manufacture coverage.",
+      "validation_command": "uv run pytest work/tests/test_causal_payoff_model_paths_v1.py && uv run python work/audit_causal_payoff_model_paths_v1.py --artifact <output>",
+      "stop_condition": "Reject if positive-class coverage, paired advantage, uncertainty, month stability, leave-one-stock-out robustness, or 5-bps-per-side absolute payoff fails in either candidate."
+    },
+    {
+      "id": "H2_route_branch_forecast",
+      "target_files": ["route_predictions.parquet", "route_forecast_metrics.csv", "route_bootstraps.csv"],
+      "expected_research_benefit": "Test whether the future five-way route topology is forecastable causally rather than merely known after completion.",
+      "safety_or_validity_risk": "Using realised topology, entry-bar state, or future run duration in features would create direct leakage.",
+      "validation_command": "independent audit must prove every route training session precedes its score session and the feature allowlist excludes outcome fields",
+      "stop_condition": "Reject route forecasting if log-loss improvement over the candidate prior is not positive with a multiplicity-controlled block interval for pooled and both candidate surfaces."
+    },
+    {
+      "id": "H3_predicted_route_adds_to_direct_payoff",
+      "target_files": ["admission_predictions.parquet", "admission_model_metrics.csv", "admission_selector_metrics.csv"],
+      "expected_research_benefit": "Test causal route probabilities as auxiliary payoff features without substituting route identity for payoff.",
+      "safety_or_validity_risk": "In-sample route probabilities would transmit the realised route label into the payoff model.",
+      "validation_command": "audit every stored route probability as a prequential prediction made before the row session",
+      "stop_condition": "Reject incremental route value if admission-plus-route does not improve forecast error and conservative selector payoff over admission-only in both candidates."
+    },
+    {
+      "id": "H4_sequential_route_plus_price_path",
+      "target_files": ["snapshot_predictions.parquet", "sequential_policy_rows.parquet", "sequential_model_metrics.csv", "sequential_policy_metrics.csv", "sequential_bootstraps.csv"],
+      "expected_research_benefit": "Test whether causal route state joined to completed-bar excursion and retracement identifies when holding to anchor+24 has negative remaining expectancy.",
+      "safety_or_validity_risk": "Selecting checkpoint bars or retracement thresholds from opened MFE/MAE paths would be post-inspection tuning.",
+      "validation_command": "audit fixed quartile checkpoints, exclusion of entry-bar excursions, strict next-open exits, and rolling prior-session training",
+      "stop_condition": "Reject if the uncertainty-aware policy lacks coverage or fails paired fixed-close, route-only, month, stock-deletion, cost, and block-interval gates in either candidate."
+    },
+    {
+      "id": "H5_diversion_specific_payoff",
+      "target_files": ["decision.json", "summary.json"],
+      "expected_research_benefit": "Preserve the strongest V3 branch hypothesis for a genuinely prospective test.",
+      "safety_or_validity_risk": "Testing or tuning it on any already-opened period would convert a post-inspection pattern into false validation.",
+      "validation_command": "decision artifact must record deferred_no_sealed_data and no diversion-specific payoff or exit table may be emitted",
+      "stop_condition": "Do not score until a new immutable data seal and activation timestamp exist."
+    }
+  ],
+  "evaluation": {
+    "bootstrap_draws": 5000,
+    "bootstrap_seed": 20260714,
+    "bootstrap_session_block_length": 5,
+    "groups": ["pooled", "cycle_04|state4", "cycle_07|state5"],
+    "primary_multiplicity": "Separate Holm families across the three pooled/candidate endpoints for route log-loss, direct admission selector, and sequential route-plus-price policy.",
+    "route_metrics": ["multiclass log loss", "multiclass Brier score", "top-class accuracy", "candidate-prior paired log-loss improvement"],
+    "payoff_forecast_metrics": ["MAE", "RMSE", "Spearman correlation", "calibration slope and intercept", "positive/negative/unknown coverage"],
+    "economic_metrics": ["mean gross and net bps", "per-opportunity selector return with abstentions zero", "selected mean net bps", "paired difference", "coverage"],
+    "robustness": ["calendar month", "leave-one-stock-out", "2.5, 5, 7.5, and 10 bps per-side cost sensitivity", "session-block uncertainty"],
+    "direct_admission_gate": [
+      "score support >= 50 in pooled and both candidate groups",
+      "uncertainty-aware positive coverage >= 5 percent in pooled and both candidates",
+      "selected mean net payoff > 0 at 5 bps per side in pooled and both candidates",
+      "paired selector-minus-unfiltered mean > 0 with 95 percent block lower bound > 0 and Holm pass in pooled and both candidates",
+      "positive paired selector difference in a majority of scored calendar months in both candidates",
+      "positive paired selector difference in at least 16 of 20 leave-one-stock-out deletions",
+      "forecast Spearman correlation > 0 in pooled and both candidates"
+    ],
+    "route_forecast_gate": [
+      "score support >= 50 in pooled and both candidate groups",
+      "route log-loss improvement over prior > 0 with 95 percent block lower bound > 0 and Holm pass in all three groups",
+      "model multiclass Brier score lower than prior in all three groups",
+      "positive log-loss improvement in a majority of scored calendar months in both candidates"
+    ],
+    "route_increment_gate": [
+      "admission-plus-route RMSE lower than admission-only in both candidates",
+      "admission-plus-route conservative selector paired return higher than admission-only in both candidates"
+    ],
+    "sequential_gate": [
+      "score support >= 50 in pooled and both candidate groups",
+      "uncertainty-aware exit coverage >= 5 percent in pooled and both candidates",
+      "paired policy-minus-fixed mean > 0 with 95 percent block lower bound > 0 and Holm pass in all three groups",
+      "route-plus-price paired return higher than route-state-only in both candidates",
+      "absolute route-plus-price policy mean net > 0 at 5 bps per side in pooled and both candidates",
+      "positive paired fixed-close difference in a majority of scored calendar months in both candidates",
+      "positive paired fixed-close difference in at least 16 of 20 leave-one-stock-out deletions"
+    ],
+    "possible_decisions": [
+      "direct_payoff_state_supported_for_prospective_logging_only",
+      "route_forecast_supported_as_auxiliary_only",
+      "sequential_path_state_supported_for_prospective_logging_only",
+      "all_tested_model_paths_rejected_or_unknown",
+      "diversion_hypothesis_deferred_no_sealed_data"
+    ],
+    "promotion_allowed": false
+  },
+  "provenance": {
+    "prices": "EODHD/provider 5-minute regular-session OHLCV",
+    "volume": "historical_volume_activity_proxy; not used",
+    "quotes_or_ticks_used": false,
+    "intrabar_order_known": false
+  }
+}

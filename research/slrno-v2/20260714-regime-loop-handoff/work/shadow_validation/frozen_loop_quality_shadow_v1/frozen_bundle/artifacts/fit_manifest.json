@@ -1,0 +1,134 @@
+{
+  "anchors": 70374,
+  "classes": {
+    "0": "movement <= frozen 2024 p75",
+    "1": "frozen 2024 p75 < movement <= frozen 2024 p90",
+    "2": "movement > frozen 2024 p90"
+  },
+  "compatible_anchor_cycle_rows": 460276,
+  "context_feature_width": 17,
+  "contract_id": "per_loop_movement_quality_v1",
+  "direct_volume_input": false,
+  "direction_excluded": true,
+  "economic_edge_claim": false,
+  "fit_period": 2024,
+  "horizons": [
+    6,
+    12,
+    24
+  ],
+  "live_ordering_enabled": false,
+  "model": {
+    "C": 0.2,
+    "class": "LogisticRegression",
+    "max_iter": 1000,
+    "random_state": 20260710,
+    "solver": "lbfgs"
+  },
+  "model_audit": {
+    "models": {
+      "qcontext__absolute_return_bps__h12": {
+        "feature_width": 17,
+        "n_iter": 35,
+        "temperature": 1.0
+      },
+      "qcontext__absolute_return_bps__h24": {
+        "feature_width": 17,
+        "n_iter": 25,
+        "temperature": 1.0
+      },
+      "qcontext__absolute_return_bps__h6": {
+        "feature_width": 17,
+        "n_iter": 74,
+        "temperature": 1.0
+      },
+      "qcontext__future_range_bps__h12": {
+        "feature_width": 17,
+        "n_iter": 66,
+        "temperature": 1.0
+      },
+      "qcontext__future_range_bps__h24": {
+        "feature_width": 17,
+        "n_iter": 60,
+        "temperature": 1.0
+      },
+      "qcontext__future_range_bps__h6": {
+        "feature_width": 17,
+        "n_iter": 105,
+        "temperature": 1.0
+      },
+      "qcycle__absolute_return_bps__h12": {
+        "feature_width": 13157,
+        "n_iter": 153,
+        "temperature": 1.0
+      },
+      "qcycle__absolute_return_bps__h24": {
+        "feature_width": 13157,
+        "n_iter": 145,
+        "temperature": 1.0
+      },
+      "qcycle__absolute_return_bps__h6": {
+        "feature_width": 13157,
+        "n_iter": 157,
+        "temperature": 1.0
+      },
+      "qcycle__future_range_bps__h12": {
+        "feature_width": 13157,
+        "n_iter": 152,
+        "temperature": 1.0
+      },
+      "qcycle__future_range_bps__h24": {
+        "feature_width": 13157,
+        "n_iter": 152,
+        "temperature": 1.0
+      },
+      "qcycle__future_range_bps__h6": {
+        "feature_width": 13157,
+        "n_iter": 177,
+        "temperature": 1.0
+      }
+    }
+  },
+  "oof_months": [
+    "2024-07",
+    "2024-08",
+    "2024-09",
+    "2024-10",
+    "2024-11",
+    "2024-12"
+  ],
+  "order_placement": "disabled",
+  "qcycle_blocks": {
+    "cycle_by_history_token_scale": 0.25,
+    "cycle_by_history_token_width": 12960,
+    "cycle_by_state_scale": 0.5,
+    "cycle_by_state_width": 160,
+    "cycle_one_hot_scale": 1.0,
+    "cycle_one_hot_width": 20,
+    "post_block_rescaling": false,
+    "scaled_context": 17
+  },
+  "qcycle_feature_width": 13157,
+  "realised_anchor_cycle_rows": 32677,
+  "realised_anchor_weight": 29296.0,
+  "research_only": true,
+  "signed_return_excluded": true,
+  "targets": [
+    "absolute_return_bps",
+    "future_range_bps"
+  ],
+  "temperature_grid": [
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    2.0
+  ],
+  "temperature_ranking": [
+    "weighted_oof_log_loss",
+    "absolute_temperature_distance_from_one",
+    "temperature"
+  ],
+  "volume_note": "Price-quality models use no volume directly. The frozen upstream state detector uses provider historical_volume features; this is not exchange-wide volume or order flow.",
+  "weighting": "each realised anchor-cycle receives 1 / realised cycles at anchor"
+}

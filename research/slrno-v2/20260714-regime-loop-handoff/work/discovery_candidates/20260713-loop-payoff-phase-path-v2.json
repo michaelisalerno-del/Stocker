@@ -1,0 +1,60 @@
+{
+  "candidate_id": "20260713-loop-payoff-phase-path-v2",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "scientific_status": "post_inspection_causal_retrospective_development_not_validation",
+  "sealed_data_available": false,
+  "primary_decision": {
+    "name": "regime_age_and_exit_hazard_as_payoff_admission_discriminator",
+    "decision": "rejected",
+    "reason": "negative-hazard payoff AUC ranged from 0.495 to 0.545, every 95% interval crossed 0.5, no endpoint passed Holm, and orientation-survival effects changed sign"
+  },
+  "frozen_parent_candidates": [
+    {
+      "cell": "cycle_04|current_state_4",
+      "horizon_bars_from_anchor": 24,
+      "status": "opened_retrospective_hypothesis_only",
+      "score_surface": {
+        "2023": {"rows": 132, "mean_net_bps": 26.5406},
+        "2025": {"rows": 96, "mean_net_bps": 30.7493}
+      },
+      "strategy_promotion": false
+    },
+    {
+      "cell": "cycle_07|current_state_5",
+      "horizon_bars_from_anchor": 24,
+      "status": "opened_retrospective_hypothesis_only",
+      "score_surface": {
+        "2023": {"rows": 722, "mean_net_bps": 7.0203},
+        "2025": {"rows": 713, "mean_net_bps": 17.0376}
+      },
+      "strategy_promotion": false
+    }
+  ],
+  "market_behaviour_finding": {
+    "name": "cost_clearing_excursion_then_payoff_reversal",
+    "status": "meaningful_path_hypothesis_for_prospective_logging_not_an_exit_rule",
+    "timing_failure_share_of_losers_range": [0.8, 0.9363],
+    "timing_failure_median_time_to_mfe_bars_range": [2, 5],
+    "timing_failure_median_time_to_mae_bars_range": [15, 18],
+    "caveat": "MFE and MAE are hindsight outcomes; thresholds or exits may not be tuned from opened 2023/2025 results"
+  },
+  "next_hypothesis_family": {
+    "priority": "causal_path_state_exit_logging",
+    "components": [
+      "detectable parent-loop completion at completed-bar close",
+      "running ATR-normalised favorable excursion and retracement",
+      "predicted-loop probability decay and orientation invalidation",
+      "positive_negative_unknown exit-state prediction with uncertainty and abstention"
+    ],
+    "admission_dictionary_expansion": false,
+    "prospective_logging_contract": "../contracts/20260713-loop-payoff-prospective-log-v1.json"
+  },
+  "provider_volume_label": "historical_volume_activity_proxy_not_used",
+  "quotes_or_ticks_used": false,
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "report": "../reports/20260713-loop-payoff-phase-path-v2.md",
+  "primary_artifacts": "../artifacts/20260713-loop-payoff-phase-path-v2/primary"
+}

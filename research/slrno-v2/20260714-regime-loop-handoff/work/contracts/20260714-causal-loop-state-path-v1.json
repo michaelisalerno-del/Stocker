@@ -1,0 +1,208 @@
+{
+  "contract_id": "20260714-causal-loop-state-path-v1",
+  "frozen_before_path_conditioned_payoff_scoring": true,
+  "scientific_status": "post-inspection causal retrospective mechanism development for a prospective logging contract; not validation",
+  "purpose": "Determine whether causally observed parent-loop path events explain or improve the early-gain/late-loss payoff split inside the two frozen loop orientations without tuning admission conditions or price thresholds.",
+  "sealed_data_status": {
+    "genuinely_unseen_sessions_available": false,
+    "2023_or_2025_validation_claim_allowed": false,
+    "economic_edge_claim_allowed": false,
+    "strategy_promotion_allowed": false
+  },
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "position_or_order_functionality_allowed": false,
+    "application_code_modification_allowed": false,
+    "repository_write_allowed": false
+  },
+  "inputs": {
+    "base_loader_runner": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/run_loop_payoff_phase_path_v1.py",
+    "v2_signal_level_artifact": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/artifacts/20260713-loop-payoff-phase-path-v2/primary/signal_level_path_diagnostics.parquet",
+    "v2_report": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/reports/20260713-loop-payoff-phase-path-v2.md",
+    "v2_handoff": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/discovery_candidates/20260713-loop-payoff-phase-path-v2.json",
+    "v2_prospective_log_contract": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/contracts/20260713-loop-payoff-prospective-log-v1.json",
+    "fixed_cycles": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/fixed_cycles.csv",
+    "runs": {
+      "2023": "/private/tmp/stocker_sealed_backward_2023_complete_detector_20260710/backward_2023_filtered_runs.parquet",
+      "2025": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/test_2025_filtered_runs.csv"
+    },
+    "provider_roots": {
+      "2023": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock",
+      "2025": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock"
+    }
+  },
+  "population": {
+    "periods": [2023, 2025],
+    "score_sessions_each_period": 190,
+    "population_source": "exact V2 signal-level artifact after the first 60 completed provider sessions were excluded",
+    "symbols": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "primary_candidates": [
+      {
+        "candidate": "cycle_04|state4",
+        "cycle_dictionary": "2->4->2",
+        "anchor_state": 4,
+        "expected_alternate_state": 2,
+        "expected_rotation_from_anchor": "4->2->4",
+        "expected_rows": {"2023": 132, "2025": 96}
+      },
+      {
+        "candidate": "cycle_07|state5",
+        "cycle_dictionary": "5->6->5",
+        "anchor_state": 5,
+        "expected_alternate_state": 6,
+        "expected_rotation_from_anchor": "5->6->5",
+        "expected_rows": {"2023": 722, "2025": 713}
+      }
+    ],
+    "descriptive_matched_controls": [
+      {"candidate": "cycle_04|state2", "anchor_state": 2, "expected_alternate_state": 4},
+      {"candidate": "cycle_07|state6", "anchor_state": 6, "expected_alternate_state": 5}
+    ],
+    "source_strategy": "breakout_loop_scores_range_p75",
+    "source_horizon_bars_from_anchor": 24,
+    "primary_cost_bps_per_side": 5,
+    "round_trip_cost_bps": 10
+  },
+  "causal_clock": {
+    "state_label_availability": "A transition is observable only after the first completed 5-minute bar assigned to the new state closes.",
+    "hypothetical_exit_price": "The next provider bar open after event detection.",
+    "same_bar_execution_forbidden": true,
+    "event_before_entry": "Recorded as a pre-entry path status but never treated as a post-entry exit event.",
+    "event_on_entry_bar": "Detected only after that bar closes and may exit only at the following provider open.",
+    "latest_actionable_event": "The detection bar must have a following provider open at or before the frozen anchor+24 close bar.",
+    "fallback": "If the specified event is absent, pre-entry, or not actionable before the frozen close, retain the frozen anchor+24 close.",
+    "forbidden_event_inputs": [
+      "future state beyond the detection bar",
+      "future run duration or run end",
+      "MFE or MAE",
+      "future OHLC",
+      "final payoff",
+      "realised child or morph identity"
+    ]
+  },
+  "outcome_only_path_topology": {
+    "window": "anchor state-run start through the frozen anchor+24 state position, inclusive",
+    "categories": {
+      "no_transition": "No state transition occurs by the frozen close.",
+      "expected_leg_partial": "The first transition is anchor_state->expected_alternate_state and no second transition occurs by the frozen close.",
+      "exact_parent_completion": "The first two transitions are anchor_state->expected_alternate_state->anchor_state; later transitions do not change the first-completion label.",
+      "incompatible_first_transition": "The first transition is not to the expected alternate state.",
+      "expected_leg_then_diversion": "The first transition reaches the expected alternate state but the second transition is not back to the anchor state."
+    },
+    "use_as_admission_feature": false,
+    "interpretation": "Descriptive oracle classification of the completed 24-bar path; only the first causally observed terminal event may drive a hypothetical exit."
+  },
+  "pre_entry_path_status": {
+    "clock": "Uses only transition bars strictly before the entry bar.",
+    "categories": ["orientation_intact", "expected_leg_active", "completed_before_entry", "invalidated_before_entry"],
+    "use_for_admission_filter": false
+  },
+  "causal_event_definitions": {
+    "first_post_entry_transition": "First transition bar whose state position is at or after the entry state position.",
+    "exact_completion": "First return to anchor_state after the immediately preceding expected alternate leg, provided the anchor route had not already completed or invalidated before entry.",
+    "route_invalidation": "First incompatible transition from anchor_state, or first diversion after the expected alternate leg, provided invalidation was not already known before entry.",
+    "terminal_route_event": "Whichever of exact_completion or route_invalidation is first; route construction makes them mutually exclusive before the first terminal event."
+  },
+  "hypothetical_exit_policies": [
+    "fixed_anchor_h24_close",
+    "terminal_route_event_next_open_else_fixed",
+    "exact_completion_next_open_else_fixed",
+    "route_invalidation_next_open_else_fixed",
+    "first_post_entry_transition_next_open_else_fixed"
+  ],
+  "hypotheses": [
+    {
+      "id": "H1_path_topology_separates_payoff_anatomy",
+      "target_files": ["signal_path_events.parquet", "path_topology_metrics.csv", "path_topology_payoff_class.csv"],
+      "expected_benefit": "Determine whether fixed-close winners, timing failures, and no-usable-move losses occupy different parent-state paths.",
+      "safety_or_validity_risk": "The 24-bar topology is oracle-only and could be mistaken for an admission predictor.",
+      "validation_command": "uv run pytest work/tests/test_causal_loop_state_path_v1.py",
+      "stop_condition": "Stop any admission-rule interpretation; topology may only motivate prospectively logged causal events."
+    },
+    {
+      "id": "H2_terminal_route_event_preserves_payoff",
+      "target_files": ["exit_policy_metrics.csv", "paired_bootstraps.csv", "quarter_metrics.csv", "stock_deletion_metrics.csv"],
+      "expected_benefit": "Test an untuned path-state exit that reacts to exact completion or route invalidation and may prevent favorable excursion from being surrendered.",
+      "safety_or_validity_risk": "Detecting with the transition bar and exiting at that same bar would leak the completed-bar label.",
+      "validation_command": "uv run python work/run_causal_loop_state_path_v1.py --out <new-output> && uv run python work/audit_causal_loop_state_path_v1.py --artifact <new-output>",
+      "stop_condition": "Do not carry this path beyond prospective logging unless all four primary candidate-period paired endpoints clear support, positive effect, block interval, Holm, quarter, leave-one-stock-out, and absolute-cost gates on genuinely sealed data."
+    },
+    {
+      "id": "H3_completion_and_invalidation_have_distinct_roles",
+      "target_files": ["event_coverage.csv", "exit_policy_metrics.csv", "event_timing_metrics.csv"],
+      "expected_benefit": "Separate profit capture after exact parent completion from loss containment after route failure.",
+      "safety_or_validity_risk": "Selecting whichever event looks best after results would create an unregistered exit family.",
+      "validation_command": "uv run python work/audit_causal_loop_state_path_v1.py --artifact <new-output>",
+      "stop_condition": "Treat completion-only and invalidation-only policies as secondary exploratory mechanisms with family-wise multiplicity control; do not choose one as a rule from opened periods."
+    },
+    {
+      "id": "H4_route_structure_beats_generic_transition_timing",
+      "target_files": ["exit_policy_metrics.csv", "policy_contrast_metrics.csv"],
+      "expected_benefit": "Distinguish information in the expected loop route from the generic effect of shortening exposure after any state change.",
+      "safety_or_validity_risk": "A shorter holding period can masquerade as loop-path information.",
+      "validation_command": "uv run python work/audit_causal_loop_state_path_v1.py --artifact <new-output>",
+      "stop_condition": "If the terminal-route policy does not consistently beat the first-transition control, interpret any benefit as holding-time evidence rather than parent-loop evidence."
+    },
+    {
+      "id": "H5_child_or_morph_followup_requires_causal_forecast",
+      "target_files": ["summary.json", "20260714-causal-loop-state-path-v1 discovery handoff"],
+      "expected_benefit": "Identify whether unresolved topology suggests parent-loop coarseness without using realised child or morph labels.",
+      "safety_or_validity_risk": "Realised child or morph identity is an oracle label.",
+      "validation_command": "independent leakage audit must confirm no child or morph outcome enters event or payoff logic",
+      "stop_condition": "Do not test child or morph admission conditions unless a separate causal forecast is frozen first."
+    }
+  ],
+  "evaluation": {
+    "primary_policy": "terminal_route_event_next_open_else_fixed",
+    "primary_comparator": "fixed_anchor_h24_close",
+    "primary_endpoints": "paired mean net-return difference in each of four primary candidate-period cells",
+    "bootstrap": {
+      "draws": 5000,
+      "seed": 20260714,
+      "session_block_length": 5,
+      "unit": "session-clustered paired trade differences",
+      "alternative": "policy minus fixed is greater than zero"
+    },
+    "primary_multiplicity": "Holm adjustment across the four primary terminal-policy endpoints",
+    "secondary_multiplicity": "Separate Holm adjustment across the twelve completion-only, invalidation-only, and first-transition endpoints",
+    "primary_mechanism_gate": [
+      "candidate support >= 50 in every candidate-period cell",
+      "actionable terminal-route events >= 30 in every candidate-period cell",
+      "paired mean difference > 0 in every candidate-period cell",
+      "95% session-block interval lower bound > 0 in every candidate-period cell",
+      "all four one-sided primary endpoints pass Holm at 0.05",
+      "at least three of four quarters have positive paired mean difference in every candidate-period cell",
+      "at least 16 of 20 leave-one-stock-out deletions have positive paired mean difference in every candidate-period cell",
+      "absolute primary-policy mean net return remains positive at 5 bps per side in every candidate-period cell"
+    ],
+    "cost_sensitivity_bps_per_side": [2.5, 5.0, 7.5, 10.0],
+    "path_descriptives": [
+      "support and share",
+      "fixed-close positive rate and mean net payoff",
+      "timing-failure and no-usable-move rates",
+      "MFE, MAE, and time-to-excursion",
+      "event coverage, detection bar, next-open payoff, and fallback rate"
+    ],
+    "robustness": ["calendar quarter", "leave-one-stock-out", "cost sensitivity", "matched-orientation descriptive control"],
+    "promotion_allowed": false,
+    "possible_decisions": [
+      "path_event_family_not_supported",
+      "generic_transition_timing_only",
+      "route_event_family_merits_prospective_logging_only"
+    ]
+  },
+  "provenance": {
+    "prices": "EODHD/provider 5-minute regular-session OHLCV",
+    "volume": "historical_volume_activity_proxy; not used",
+    "quotes_or_ticks_used": false,
+    "intrabar_order_known": false
+  }
+}

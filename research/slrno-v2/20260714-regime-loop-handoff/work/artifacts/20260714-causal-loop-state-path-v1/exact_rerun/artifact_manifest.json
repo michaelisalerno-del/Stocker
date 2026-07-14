@@ -1,0 +1,82 @@
+{
+  "files": [
+    {
+      "bytes": 19863,
+      "name": "cost_sensitivity.csv",
+      "sha256": "a52f7ca80e84be1f7f766bc4123b9d5a07ba99dd230a434969a9d3159acdf6d0"
+    },
+    {
+      "bytes": 3189,
+      "name": "data_coverage.csv",
+      "sha256": "1b8179ad5352473c78332973246dcfdee45b2ac949160a74ed16d0a5c97a44af"
+    },
+    {
+      "bytes": 1099,
+      "name": "decision.json",
+      "sha256": "b96ead04f87e503e53d7c619a9f77352520265fd257968875d9ed0ad794a782f"
+    },
+    {
+      "bytes": 4109,
+      "name": "event_coverage.csv",
+      "sha256": "6eed964c42654b6861f61570e27a534d28fd71b896a6fb5066a354835d4f802e"
+    },
+    {
+      "bytes": 4782,
+      "name": "event_timing_metrics.csv",
+      "sha256": "3dfdb1205d741ae47d8812c1b0469f9375c06faf83dbb82b1a7554e3da74b64f"
+    },
+    {
+      "bytes": 7803,
+      "name": "exit_policy_metrics.csv",
+      "sha256": "2cc32958645a8f993a0e7e0d6172def53e2b319038d8a6ec986e6f552d71f1d3"
+    },
+    {
+      "bytes": 3151,
+      "name": "paired_bootstraps.csv",
+      "sha256": "fb6743f415820c8b9c7e30fee6c515e115bc26c949818f6d61e96a5346fc7ef0"
+    },
+    {
+      "bytes": 7094,
+      "name": "path_topology_metrics.csv",
+      "sha256": "7d90444bcb7ca6050fead591c5d8223889d97f2b41b06914fb432602ab49e218"
+    },
+    {
+      "bytes": 10783,
+      "name": "path_topology_payoff_class.csv",
+      "sha256": "9b31a4c4e152d111c81c2569c347d40fc8f7889bd8b0a930962343627577d9ee"
+    },
+    {
+      "bytes": 676,
+      "name": "policy_contrast_metrics.csv",
+      "sha256": "fd290a1c69ac40d8f0cde712a02f1bee5da944faedc8895b829d41bf933b303d"
+    },
+    {
+      "bytes": 6523,
+      "name": "quarter_metrics.csv",
+      "sha256": "3f1fc0a4c357415d1ad9992b1e6d50c88fdb9b2598f7077a6ce6eddc288b8c36"
+    },
+    {
+      "bytes": 840875,
+      "name": "signal_path_events.parquet",
+      "sha256": "afa6bfb11e931a64be785ee23e0f9a60df962e041d5fd61f3e0c595469ab7f69"
+    },
+    {
+      "bytes": 5035,
+      "name": "source_hashes.json",
+      "sha256": "c9433aa9fd08153361b38482dd594a5de35993379822357b6b403d2701e18d38"
+    },
+    {
+      "bytes": 36469,
+      "name": "stock_deletion_metrics.csv",
+      "sha256": "10a511031f54c2d75d80313bba62a9e3ddcc35dc556036960779d4af40b5a8d1"
+    },
+    {
+      "bytes": 19853,
+      "name": "summary.json",
+      "sha256": "080f8649a70e543cc5f03fcfde2ffa5c4f4d02759cd2b5422ff5e30345e294a3"
+    }
+  ],
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true
+}

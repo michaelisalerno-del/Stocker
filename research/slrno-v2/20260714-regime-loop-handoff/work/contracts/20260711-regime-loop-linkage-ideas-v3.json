@@ -1,0 +1,43 @@
+{
+  "contract_id": "regime_loop_linkage_ideas_v3",
+  "contract_frozen_at_utc": "2026-07-11T22:35:00Z",
+  "scientific_status": "post_inspection_2024_causal_oof_linkage_development_test_after_code_only_serialization_amendment",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "prospective_validation_claim_permitted": false,
+  "semantic_parent": {
+    "path": "work/contracts/20260711-regime-loop-linkage-ideas-v2.json",
+    "sha256": "090aaec2860f7c0df0dc8f0cb86d1d7fe1d2d72a1110695fce1ff7af859f2aa1",
+    "inherit_every_hypothesis_model_threshold_gate_and_decision_rule": true
+  },
+  "implementation_parent": {
+    "path": "work/run_regime_loop_linkage_ideas_v2.py",
+    "sha256": "b38a17b5e5023951e992004fac51e4c264af2c65e7f19c4b35ecea14cbd5e6ba"
+  },
+  "v2_fail_closed_record": {
+    "source_identity_and_v2_structural_diagnostic_passed": true,
+    "models_and_metrics_computed_in_memory": true,
+    "metrics_or_probabilities_printed_or_inspected": false,
+    "artifact_root_created": false,
+    "failure": "pandas_empty_qualified_slice_apply_returned_DataFrame_without_tolist",
+    "information_exposed": "the_qualified_attraction_slice_subset_was_empty_at_the_serialization_point",
+    "statistical_change_made_in_v3": false
+  },
+  "only_code_amendment": {
+    "old": "empty_DataFrame_apply_axis_1_then_tolist",
+    "new": "explicit_list_comprehension_over_qualified_slice_itertuples",
+    "changes_probabilities_metrics_gates_or_slice_qualification": false
+  },
+  "planned_artifact_root": "/private/tmp/stocker_regime_loop_linkage_ideas_v3_20260711",
+  "unchanged_boundaries": {
+    "same_experiment_refinement_permitted": false,
+    "later_period_scoring": false,
+    "prospective_shadow_read_or_write_permitted": false,
+    "named_loop_good_or_high_promotion_permitted": false,
+    "trading_rule_or_PnL_model_permitted": false,
+    "direction_or_signed_return_used": false,
+    "direct_volume_label": "historical_volume_not_used",
+    "independent_audit_required": true
+  }
+}

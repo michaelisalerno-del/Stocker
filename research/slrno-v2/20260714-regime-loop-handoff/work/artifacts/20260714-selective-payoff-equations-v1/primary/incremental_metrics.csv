@@ -1,0 +1,4 @@
+comparison,rows,new_model_mean_per_opportunity_bps,base_model_mean_per_opportunity_bps,incremental_mean_bps
+context_only_minus_prediction_only,1645,0.0,0.0,0.0
+context_plus_loop_minus_context_only,1645,0.0,0.0,0.0
+sequential_confirmation_minus_context_plus_loop,1645,0.0,0.0,0.0

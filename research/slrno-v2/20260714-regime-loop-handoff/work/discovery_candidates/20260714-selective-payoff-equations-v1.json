@@ -1,0 +1,122 @@
+{
+  "candidate_id": "20260714-selective-payoff-equations-v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "application_modified": false,
+  "scientific_status": "post_inspection_causal_retrospective_equation_development_on_opened_2024_not_validation",
+  "sealed_validation_performed": false,
+  "sealed_data_available": false,
+  "primary_decision": {
+    "decision": "all_equations_rejected_or_unknown",
+    "reason": "prediction-only, context-only, context-plus-full-loop-mixture, and sequential confirmation produced zero calibrated positive-expectancy admissions; the full loop vector worsened context log-loss"
+  },
+  "population": {
+    "surface": "causal_setup_conditions_v1 OCO anchor breakouts",
+    "period": 2024,
+    "surface_sessions": 128,
+    "frozen_base_events": 3339,
+    "frozen_sequential_snapshots": 10017,
+    "eligible_sequential_snapshots": 6780,
+    "primary_base_rows": 1645,
+    "primary_sequential_prediction_rows": 3300,
+    "stocks": 20,
+    "primary_cost_bps_per_side": 5
+  },
+  "equations": [
+    {
+      "id": "prediction_only",
+      "decision": "rejected_or_unknown",
+      "raw_auc": 0.494754,
+      "raw_log_loss": 0.69179,
+      "calibrated_positive_coverage": 0.0
+    },
+    {
+      "id": "E1_context_only",
+      "decision": "rejected_or_unknown",
+      "raw_auc": 0.534319,
+      "raw_log_loss": 0.687824,
+      "context_log_loss_improvement_vs_prediction": 0.003967,
+      "improvement_interval": [-0.005522, 0.014133],
+      "calibrated_positive_coverage": 0.0
+    },
+    {
+      "id": "E2_context_plus_loop_mixture",
+      "decision": "rejected_or_unknown",
+      "raw_auc": 0.529808,
+      "raw_log_loss": 0.692916,
+      "loop_log_loss_improvement_vs_context": -0.005092,
+      "improvement_interval": [-0.009689, -0.000475],
+      "interpretation": "all 20 frozen loop compatibility scores harmed payoff prediction on this surface",
+      "calibrated_positive_coverage": 0.0
+    },
+    {
+      "id": "E3_sequential_confirmation",
+      "decision": "rejected_or_unknown_with_prospective_negative_veto_lead",
+      "raw_auc": 0.58784,
+      "raw_log_loss": 0.674588,
+      "maximum_calibrated_probability_mean": 0.519934,
+      "maximum_calibrated_probability_lower": 0.472559,
+      "median_break_even_probability": 0.547205,
+      "maximum_point_expected_net_bps": -4.5201,
+      "maximum_conservative_expected_net_bps": -11.8356,
+      "calibrated_positive_coverage": 0.0
+    }
+  ],
+  "unfiltered_base": {
+    "target_first_rate": 0.431611,
+    "mean_net_bps": -16.9711
+  },
+  "post_inspection_diagnostics": {
+    "promotion_allowed": false,
+    "sequential_raw_top_5_percent": {
+      "rows": 165,
+      "target_first_precision": 0.5515,
+      "mean_net_bps": 8.432,
+      "why_not_a_rule": "hindsight global percentile, nonmonotonic top tail, multiple snapshots per base event, and no frozen stability or multiplicity test"
+    },
+    "sequential_raw_bottom_10_percent": {
+      "rows": 330,
+      "target_first_precision": 0.2485,
+      "mean_net_bps": -22.744,
+      "interpretation": "prospective negative-veto hypothesis only"
+    }
+  },
+  "main_findings": [
+    "Loop prediction remains structural context rather than a payoff detector.",
+    "Static local context contains only weak and insecure payoff ranking information.",
+    "Adding the complete loop-score vector does not utilise the information beneficially on this surface and securely worsens the predeclared improvement endpoint.",
+    "Completed one-to-three-bar path state is the strongest tested information family but does not reach calibrated risk-specific break-even.",
+    "The available equation is better suited to prospective negative or unknown classification than positive admission."
+  ],
+  "retired_paths": [
+    "the frozen prediction-only, context-only, full-loop-mixture, and sequential equations on opened 2024",
+    "new loop-score interactions or subsets selected from opened 2024",
+    "probability percentile, checkpoint, target, stop, risk, horizon, support, or calibration tuning on opened 2024",
+    "the post-inspection raw top-five-percent and bottom-ten-percent tails",
+    "forcing an action when calibrated expected net remains negative"
+  ],
+  "next_path": {
+    "name": "prospective_positive_negative_unknown_sequential_payoff_state",
+    "status": "specification_only_not_activated",
+    "primary_hypothesis": "completed path may support a stable negative veto with nonzero coverage",
+    "secondary_hypothesis": "positive admission remains possible but requires genuinely prospective support above risk-specific break-even",
+    "loop_role": "control or structural context only until incremental payoff value is demonstrated prospectively"
+  },
+  "provider_volume_label": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "strategy_promotion": false,
+  "integrity": {
+    "focused_tests": "12_of_12_passed",
+    "independent_audit": "14_of_14_passed",
+    "maximum_reconstruction_or_refit_error": 0.0,
+    "exact_rerun": "all_23_files_byte_identical",
+    "pre_score_manifest_sha256": "49ca78c91a0b7092c906ec37a880eebb1b3dcebadb4dee09adc6b7dd1596efa5",
+    "artifact_manifest_sha256": "d7741f5cb622125dc3e5c9f65e9a1cdb8c86aaff7d61e2a21623794d2e7eb613"
+  },
+  "prospective_logging_contract": "../contracts/20260714-selective-payoff-prospective-log-v1.json",
+  "report": "../reports/20260714-selective-payoff-equations-v1.md",
+  "primary_artifacts": "../artifacts/20260714-selective-payoff-equations-v1/primary",
+  "exact_rerun": "../artifacts/20260714-selective-payoff-equations-v1/exact_rerun"
+}

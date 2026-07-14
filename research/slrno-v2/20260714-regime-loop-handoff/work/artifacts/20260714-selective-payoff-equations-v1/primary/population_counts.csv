@@ -1,0 +1,9 @@
+metric,value
+failed_clock_atr_or_risk_filter,2234
+post_cooldown_rows,3339
+pre_cooldown_rows,3460
+selected_source_rows,5694
+base_sessions,128
+base_symbols,20
+sequential_snapshots,10017
+eligible_sequential_snapshots,6780

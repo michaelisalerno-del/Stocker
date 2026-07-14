@@ -1,0 +1,335 @@
+{
+  "contract_id": "historical_volume_entry_onset_ablation_v2",
+  "contract_frozen_at_utc": "2026-07-12T14:15:00Z",
+  "scientific_status": "2024_post_outcome_internal_development_incremental_historical_volume_ablation",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "strategy_promotion_permitted": false,
+  "economic_edge_claim_permitted": false,
+  "pnl_evaluation_permitted": false,
+  "question": "Does provider historical_volume add causal entry-onset information beyond the same price-and-clock HGB model?",
+  "skill_workflow": "slrno-bar-pattern-research",
+  "interpretation": {
+    "primary_object": "incremental historical-volume information for entry-onset probabilities and alert timing",
+    "volume_label": "historical_volume",
+    "volume_meaning": "provider OHLCV volume attached to each historical five-minute bar; not exchange-wide consolidated volume, aggressor-side volume, order flow, quote count, tick count, or order-book depth",
+    "no_order_flow_claim": true,
+    "not_a_trading_strategy": true,
+    "not_a_terminal_return_forecast": true,
+    "prior_price_only_outcomes_known_before_this_contract": true,
+    "2024_is_post_outcome_development_for_this_question": true,
+    "prospective_or_untouched_validation_claim_permitted": false,
+    "forbidden_inputs": [
+      "regime",
+      "state",
+      "loop",
+      "cycle",
+      "B0",
+      "template",
+      "named_pattern_flag",
+      "prior_prediction",
+      "order_flow",
+      "trade_aggressor",
+      "bid_ask_quote",
+      "order_book",
+      "news",
+      "fundamental"
+    ],
+    "forbidden_outputs": [
+      "P&L",
+      "cost-adjusted return",
+      "profit factor",
+      "Sharpe",
+      "drawdown",
+      "position",
+      "order"
+    ]
+  },
+  "periods": {
+    "data_year": 2024,
+    "prediction_months": [
+      "2024-06",
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "validation_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "train_rule": "an anchor may train a monthly model only when its complete future path ends strictly before the score month begins",
+    "same_score_month_outcomes_read_before_that_month_probability": false,
+    "prior_completed_validation_month_path_labels_may_train_later_folds": true,
+    "2023_read_permitted": false,
+    "2025_read_permitted": false,
+    "2026_read_permitted": false
+  },
+  "sources": {
+    "provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "provider_path_template": "symbol={symbol}/timeframe=5m/data.parquet",
+    "columns_read": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "bars": "regular-session five-minute provider OHLCV",
+    "provider_price_basis": "provider OHLC exactly as stored; no independent corporate-action adjustment",
+    "provider_volume_label": "historical_volume",
+    "raw_provider_column_name": "volume",
+    "bid_ask_quotes_available": false,
+    "intrabar_ordering_available": false
+  },
+  "universe": {
+    "symbols": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "AXTI",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "OKLO",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "size": 22,
+    "selection": "inherited convenience cohort; not universe-independent",
+    "training_and_metric_weighting": "raw weight exactly 1 / (represented sessions for the symbol * rows in the symbol-session), then normalized to mean one"
+  },
+  "target_blind_volume_coverage": {
+    "accepted_price_valid_regular_rows": 424583,
+    "finite_positive_historical_volume_rows": 424472,
+    "missing_or_nonfinite_historical_volume_rows": 111,
+    "zero_historical_volume_rows": 0,
+    "negative_historical_volume_rows": 0,
+    "minimum_positive_historical_volume": 1.0,
+    "median_historical_volume": 72435.5,
+    "maximum_historical_volume": 104903877.0,
+    "missing_handling": "current-missing indicator plus fold-training median imputation of derived continuous features; no future value, backward fill, or forward fill"
+  },
+  "decision_and_path": {
+    "decision_time": "after completed bar t",
+    "reference_price": "exact next five-minute open at t+1",
+    "horizons_bars": [6, 12, 24],
+    "scale": "median exact true range in basis points over the last min(12, available) contiguous completed bars ending at t-1",
+    "minimum_prior_contiguous_bars_for_scale": 3,
+    "scale_floor_bps": 1.0,
+    "upper_barrier": "next_open * exp(scale_bps / 10000)",
+    "lower_barrier": "next_open * exp(-scale_bps / 10000)",
+    "classes": {
+      "0": "no_entry: no hit by horizon or intrabar ambiguous first touch",
+      "1": "long_first",
+      "2": "short_first"
+    },
+    "ambiguous_same_bar_dual_touch": "failure; never infer intrabar ordering",
+    "gap_open_rule": "an open at or beyond exactly one barrier establishes that side first",
+    "wrong_first_no_hit_and_ambiguous_are_conservative_failures": true,
+    "expected_eligible_rows_2024": {"6": 365075, "12": 330577, "24": 264817},
+    "expected_validation_rows": {"6": 186112, "12": 168639, "24": 135240},
+    "expected_june_rows": {"6": 27733, "12": 25143, "24": 20214}
+  },
+  "price_features": {
+    "source": "exact frozen 40-feature raw-OHLC entry-onset V1 surface",
+    "count": 40,
+    "runner_hash_bound": true
+  },
+  "historical_volume_features_in_order": [
+    "historical_volume_missing_current",
+    "historical_volume_log_change_1",
+    "historical_volume_log_ratio_prior_3",
+    "historical_volume_log_ratio_prior_6",
+    "historical_volume_log_ratio_prior_12",
+    "historical_volume_log_ratio_segment_prior_mean",
+    "historical_volume_recent_3_minus_older_12",
+    "historical_volume_prior_12_log_std",
+    "historical_volume_availability_12",
+    "historical_volume_range_interaction_6",
+    "historical_volume_body_interaction_6"
+  ],
+  "historical_volume_feature_definitions": {
+    "base_transform": "lv_t = log1p(historical_volume_t) when finite and nonnegative, else missing",
+    "exact_group": "symbol, regular-session date, and contiguous five-minute segment; all rolling windows reset at a gap",
+    "historical_volume_missing_current": "1 when historical_volume_t is missing or nonfinite, else 0",
+    "historical_volume_log_change_1": "lv_t - lv_(t-1), requiring both exact bars",
+    "historical_volume_log_ratio_prior_3": "lv_t minus mean(lv) of exact bars t-3 through t-1, requiring all 3",
+    "historical_volume_log_ratio_prior_6": "lv_t minus mean(lv) of exact bars t-6 through t-1, requiring all 6",
+    "historical_volume_log_ratio_prior_12": "lv_t minus mean(lv) of exact bars t-12 through t-1, requiring all 12",
+    "historical_volume_log_ratio_segment_prior_mean": "lv_t minus expanding mean(lv) of all earlier bars in the exact segment, requiring at least 3 prior bars",
+    "historical_volume_recent_3_minus_older_12": "mean(lv) over t-2 through t minus mean(lv) over t-14 through t-3, requiring all 15 exact bars",
+    "historical_volume_prior_12_log_std": "population standard deviation of lv over t-12 through t-1, requiring all 12",
+    "historical_volume_availability_12": "finite lv count over exact bars t-11 through t divided by 12; early segment bars remain fractions below one",
+    "historical_volume_range_interaction_6": "historical_volume_log_ratio_prior_6 multiplied by causal price log_range_ratio_6",
+    "historical_volume_body_interaction_6": "historical_volume_log_ratio_prior_6 multiplied by causal price signed_body_fraction; a price-volume interaction, not signed or aggressor-side volume"
+  },
+  "algorithms": [
+    {
+      "name": "price_hgb",
+      "features": "the frozen 40 price-and-clock features",
+      "estimator": "HistGradientBoostingClassifier",
+      "role": "incremental baseline"
+    },
+    {
+      "name": "price_historical_volume_hgb",
+      "features": "the same 40 price-and-clock features plus the 11 historical_volume features in frozen order",
+      "estimator": "HistGradientBoostingClassifier",
+      "role": "only candidate"
+    }
+  ],
+  "shared_estimator_parameters": {
+    "loss": "log_loss",
+    "learning_rate": 0.05,
+    "max_iter": 100,
+    "max_leaf_nodes": 7,
+    "max_depth": 3,
+    "min_samples_leaf": 500,
+    "l2_regularization": 10.0,
+    "max_bins": 64,
+    "early_stopping": false,
+    "random_state": 20260712
+  },
+  "hypotheses": [
+    {
+      "id": "HV1_activity_shock",
+      "question": "Do current-versus-prior historical-volume shocks improve first-passage class probabilities beyond price?",
+      "features": ["historical_volume_log_change_1", "historical_volume_log_ratio_prior_3", "historical_volume_log_ratio_prior_6", "historical_volume_log_ratio_prior_12"],
+      "expected_research_benefit": "separate unusually active bars from visually similar price bars",
+      "safety_risk": "must not be called order flow or market-wide participation",
+      "stop_condition": "reject if the full volume model does not improve both log loss and Brier stably versus price_hgb"
+    },
+    {
+      "id": "HV2_activity_persistence",
+      "question": "Do segment-relative level, short-versus-older acceleration, and prior variability add information?",
+      "features": ["historical_volume_log_ratio_segment_prior_mean", "historical_volume_recent_3_minus_older_12", "historical_volume_prior_12_log_std"],
+      "expected_research_benefit": "distinguish a one-bar spike from sustained activity",
+      "safety_risk": "session clock and symbol scale can confound raw volume; no raw volume level is included",
+      "stop_condition": "leave descriptive if local volume sensitivity is not recurrent across at least five months and fifteen stocks"
+    },
+    {
+      "id": "HV3_price_volume_interaction",
+      "question": "Does relative historical volume change the meaning of bar range or body direction?",
+      "features": ["historical_volume_range_interaction_6", "historical_volume_body_interaction_6"],
+      "expected_research_benefit": "test whether downside-expansion reversal alerts differ when the completed bar is unusually active",
+      "safety_risk": "the signed-body interaction is not buy/sell volume",
+      "stop_condition": "reject as a broad entry sign if matched price-only onset evidence fails frozen path gates"
+    },
+    {
+      "id": "HV4_missingness_and_transfer",
+      "question": "Is any apparent improvement stable across months and unchanged-prediction stock deletions rather than driven by missingness or stock identity?",
+      "features": ["historical_volume_missing_current", "historical_volume_availability_12"],
+      "expected_research_benefit": "falsify provider-quality and symbol-scale artifacts",
+      "safety_risk": "the inherited 22-stock cohort is not universe-independent",
+      "stop_condition": "reject if fewer than 18 of 22 stock deletions improve both probability losses at any horizon"
+    }
+  ],
+  "thresholds_and_onsets": {
+    "source": "immediately prior monthly OOF probability ledger",
+    "fire_probability_quantile": 0.95,
+    "rearm_probability_quantile": 0.75,
+    "weighted_quantile_method": "left-continuous inverse weighted empirical CDF using stable value order",
+    "candidate_algorithm": "price_historical_volume_hgb",
+    "separate_long_and_short_hysteresis": true,
+    "reset_each_exact_segment": true,
+    "no_horizon_cooldown": true,
+    "strict_side_comparison": true
+  },
+  "matched_price_controls": {
+    "purpose": "incremental historical-volume test beyond the price-only HGB surface",
+    "control_algorithm": "price_hgb",
+    "candidate_side_imposed_on_control": true,
+    "matching": "same symbol, score month, and horizon; prefer same 15-minute bin, same price-history availability bucket, and different session; deterministic relaxations to 30-minute bin then local pool",
+    "rank": "control price-only probability for the imposed side descending, then anchor_id ascending",
+    "without_replacement_within_candidate_horizon_side": true,
+    "own_anchor_excluded": true,
+    "minimum_match_rate": 0.95,
+    "outcome_blind": true
+  },
+  "metrics": {
+    "probability": ["multiclass log loss", "multiclass Brier", "top-class accuracy", "macro one-vs-rest AUC"],
+    "entry_onset": ["conservative correct-first precision", "wrong-first rate", "no-hit rate", "ambiguous rate", "rapid correct within three bars", "favourable excursion scale units", "adverse excursion scale units", "pre-confirmation adverse scale units", "directional dominance scale units"],
+    "slices": ["horizon", "side", "validation month", "stock", "unchanged-prediction leave-one-stock-out deletion", "session clock quartile"],
+    "bootstrap": {
+      "unit": "session date after within-symbol/session aggregation",
+      "method": "paired non-circular overlapping five-session moving-block bootstrap",
+      "draws": 5000,
+      "block_sessions": 5,
+      "one_sided_alpha_per_side": 0.025,
+      "lower_quantile": 0.025,
+      "upper_quantile": 0.975,
+      "random_state": 20260712
+    }
+  },
+  "retention_gates": {
+    "probability_all_required_each_horizon": {
+      "pooled_log_loss_improvement_gt": 0.0,
+      "pooled_brier_improvement_gt": 0.0,
+      "minimum_months_both_losses_better": 4,
+      "minimum_leave_one_stock_out_deletions_both_losses_better": 18
+    },
+    "entry_onset_all_required_each_side_and_horizon": {
+      "minimum_onsets": 500,
+      "minimum_onsets_each_month": 50,
+      "minimum_stocks": 15,
+      "minimum_side_onsets": 100,
+      "minimum_side_stocks": 10,
+      "minimum_match_rate": 0.95,
+      "minimum_absolute_precision_lift": 0.02,
+      "minimum_relative_precision_lift": 0.05,
+      "minimum_rapid_success_lift": 0.01,
+      "directional_dominance_lift_positive": true,
+      "pre_confirmation_adverse_not_worse": true,
+      "all_multiplicity_adjusted_lower_bounds_positive": true,
+      "minimum_positive_precision_lift_months": 4,
+      "minimum_positive_precision_lift_stock_deletions": 18
+    },
+    "pass_interpretation": "retain only as a 2024 post-outcome development hypothesis for a genuinely new prospective shadow test",
+    "failure_interpretation": "historical_volume did not add a broad stable entry-onset signal under this frozen representation"
+  },
+  "reason_extraction": {
+    "written_before_final_evaluation_join": true,
+    "method": "for each candidate onset, replace all 11 volume features by their fold-training medians and measure the change in chosen-versus-opposite HGB probability margin",
+    "label": "local historical-volume group sensitivity; not additive, causal attribution, order flow, or participation confirmation",
+    "recurring_month_requirement": 5,
+    "recurring_stock_requirement": 15,
+    "post_outcome_feature_or_signature_enrichment": "exploratory only and cannot rescue the frozen hypotheses"
+  },
+  "integrity": {
+    "contract_runner_environment_and_whole_provider_hashes_frozen_before_volume_scoring": true,
+    "each_score_month_probability_generated_before_same_month_outcomes_are_attached": true,
+    "prior_completed_month_labels_used_for_later_folds": true,
+    "predictions_thresholds_onsets_controls_and_volume_sensitivities_hashed_before_final_all_fold_evaluation_join": true,
+    "independent_reconstruction_required": true,
+    "any_post_score_change_requires_new_version": true,
+    "required_labels": {
+      "research_only": true,
+      "live_ordering_enabled": false,
+      "order_placement": "disabled",
+      "provider_volume_label": "historical_volume"
+    }
+  }
+}

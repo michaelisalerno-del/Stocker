@@ -1,0 +1,327 @@
+{
+  "contract_id": "20260714-first-class-profitable-move-detectors-v1",
+  "frozen_before_scoring": true,
+  "scientific_status": "retrospective_portability_development_on_opened_2025_and_partial_2026_not_validation",
+  "purpose": "Test whether five compact causal entry detectors identify usable long moves with high target-first precision, explicit coverage, structural invalidation, and positive cost-adjusted dynamic payoff without using regimes or loops.",
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "position_or_order_functionality_allowed": false,
+    "application_code_modification_allowed": false,
+    "repository_write_allowed": false,
+    "strategy_promotion_allowed": false
+  },
+  "opened_data_status": {
+    "genuinely_unseen_sessions_available": false,
+    "validation_claim_allowed": false,
+    "economic_edge_claim_allowed": false,
+    "origin_period": 2024,
+    "origin_period_use": "hypothesis_seeding_only_not_rescored",
+    "portability_periods": [
+      2025,
+      2026
+    ],
+    "portability_period_warning": "Both periods have participated elsewhere in the research lineage. Freezing this detector family prevents further outcome tuning but does not make either period prospective validation.",
+    "aal_2026_excluded": true,
+    "aal_2026_reason": "Three terminal AAL OHLC rows were exposed during the timestamp/schema seal audit before this contract was written."
+  },
+  "data": {
+    "provider": "EODHD historical five-minute bars",
+    "provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "timeframe": "5m",
+    "timezone": "America/New_York",
+    "regular_session": "09:30 inclusive to 16:00 exclusive",
+    "off_grid_policy": "Rows not exactly on a five-minute boundary, including nonzero seconds, are excluded and counted; they are never rounded or coerced.",
+    "source_columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "volume_label": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "volume_use": "Only detector H5 may use current completed-bar historical volume relative to the prior six completed bars.",
+    "quotes_or_ticks_used": false,
+    "intrabar_ohlc_order": "unknown",
+    "period_bounds": {
+      "2025": [
+        "2025-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z"
+      ],
+      "2026": [
+        "2026-01-01T00:00:00Z",
+        "2026-06-30T00:00:00Z"
+      ]
+    },
+    "symbols_2025": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "symbols_2026": [
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ]
+  },
+  "causal_clock": {
+    "decision": "A detector may use only the completed decision bar and earlier contiguous completed bars from the same regular session.",
+    "admission": "Hypothetical admission is the exact next five-minute provider open.",
+    "entry_open": "The next open becomes available only at admission; it may determine causal risk eligibility but not whether the prior detector fired.",
+    "outcome": "Future highs, lows, closes, target/stop hits, MFE, MAE, and fixed-horizon returns are forbidden until the pre-outcome event ledger is hashed.",
+    "expiry": "Twenty-four exact contiguous bars beginning with the admission bar.",
+    "late_session": "Decision bar ordinal must be no greater than 53 so the full 24-bar regular-session window is scheduled to exist.",
+    "gaps": "Any non-five-minute gap, including an excluded off-grid row, starts a new causal segment. Rows lacking an exact future path are skipped and counted.",
+    "cooldown": "Within each symbol, session, and detector, no new event may fire for 24 decision bars after an emitted event.",
+    "execution": "Research counterfactual only; no order or position exists."
+  },
+  "shared_features": {
+    "bar_range_bps": "10000 * (high - low) / open",
+    "signed_body_bps": "10000 * (close / open - 1)",
+    "close_location": "(close - low) / (high - low)",
+    "lower_wick_fraction": "(min(open, close) - low) / (high - low)",
+    "true_range_bps": "10000 * max(high-low, abs(high-prior_close), abs(low-prior_close)) / prior_close",
+    "prior_scale_bps": "median true_range_bps of the prior 12 contiguous bars, excluding the decision bar",
+    "return_3_bps": "10000 * (decision_close / close_three_bars_earlier - 1)",
+    "prior_12_low": "minimum low of the prior 12 contiguous bars, excluding the decision bar",
+    "opening_range_low": "minimum low of exact session ordinals 0 through 5",
+    "relative_activity_6": "current positive finite historical_volume divided by the geometric mean of the prior six positive finite completed-bar values"
+  },
+  "detectors": [
+    {
+      "id": "H1_downside_expansion_exhaustion_long",
+      "direction": "long",
+      "origin": "Frozen from the opened 2024 raw-OHLC long-reversal lead; portability only.",
+      "conditions": [
+        "bar_range_bps / prior_scale_bps >= 1.25",
+        "signed_body_bps / prior_scale_bps <= -0.75",
+        "close_location <= 0.20",
+        "return_3_bps / prior_scale_bps <= -1.00"
+      ],
+      "invalidation": "decision-bar low",
+      "expected_benefit": "Detect exhaustion after a downside expansion without a fitted model.",
+      "safety_risk": "The mechanism was seeded by opened 2024 outcomes and cannot be called validation.",
+      "stop_condition": "Reject unless every high-accuracy and economic gate passes in both portability periods."
+    },
+    {
+      "id": "H2_failed_breakdown_reclaim_long",
+      "direction": "long",
+      "origin": "Classic failed-breakout mechanism selected before portability scoring.",
+      "conditions": [
+        "decision low is at least 0.10 prior_scale_bps below prior_12_low",
+        "decision close > prior_12_low",
+        "lower_wick_fraction >= 0.40",
+        "return_3_bps < 0"
+      ],
+      "invalidation": "decision-bar low",
+      "expected_benefit": "Require an observable sweep and reclaim rather than infer exhaustion from a fitted score.",
+      "safety_risk": "A tiny breach or same-bar target/stop ambiguity could overstate reversal quality; both are handled conservatively.",
+      "stop_condition": "Reject unless every high-accuracy and economic gate passes in both portability periods."
+    },
+    {
+      "id": "H3_two_bar_reversal_confirmation_long",
+      "direction": "long",
+      "origin": "Confirmation-stage variant of the opened downside-expansion hypothesis.",
+      "conditions": [
+        "prior bar satisfies the H1 range, body, and close-location conditions using its own lagged scale",
+        "decision bar closes above the prior bar midpoint",
+        "decision close > decision open",
+        "decision close_location >= 0.65"
+      ],
+      "invalidation": "minimum low of the expansion and confirmation bars",
+      "expected_benefit": "Trade coverage for cleaner confirmation and reduce immediate adverse paths.",
+      "safety_risk": "Confirmation may enter after the usable reversal has already occurred.",
+      "stop_condition": "Reject unless every high-accuracy and economic gate passes in both portability periods."
+    },
+    {
+      "id": "H4_opening_range_failed_breakdown_long",
+      "direction": "long",
+      "origin": "Opening-range failed-breakout family with the early-session clue frozen before portability scoring.",
+      "conditions": [
+        "decision ordinal is 6 through 35",
+        "decision low is at least 0.10 prior_scale_bps below opening_range_low",
+        "decision close > opening_range_low",
+        "lower_wick_fraction >= 0.35",
+        "return_3_bps < 0"
+      ],
+      "invalidation": "decision-bar low",
+      "expected_benefit": "Detect an early-session failed downside auction at a meaningful session level.",
+      "safety_risk": "The early-session emphasis was observed after opened 2024 analysis.",
+      "stop_condition": "Reject unless every high-accuracy and economic gate passes in both portability periods."
+    },
+    {
+      "id": "H5_activity_activated_downside_expansion_long",
+      "direction": "long",
+      "origin": "Frozen activity-timing variant of H1; the 1.10 ratio is a post-inspection 2024 hypothesis.",
+      "conditions": [
+        "all H1 conditions",
+        "relative_activity_6 >= 1.10"
+      ],
+      "invalidation": "decision-bar low",
+      "expected_benefit": "Test historical activity as movement timing after price supplies direction.",
+      "safety_risk": "Historical provider volume is only an activity proxy and the threshold is opened-data-derived.",
+      "stop_condition": "Reject unless every high-accuracy and economic gate passes in both portability periods."
+    }
+  ],
+  "risk_and_outcome": {
+    "risk_bps": "10000 * (entry_open - structural_invalidation) / entry_open",
+    "risk_eligibility_bps": [
+      20,
+      250
+    ],
+    "target": "entry_open plus one structural risk distance",
+    "stop": "the frozen structural invalidation price",
+    "primary_horizon_bars": 24,
+    "target_first_success": "Target is touched before stop within 24 bars.",
+    "same_bar_dual_touch": "Conservative stop-first failure because intrabar OHLC order is unknown.",
+    "open_gap_rule": "Admission-bar and later opens beyond target or stop establish that side first; an open cannot be beyond both.",
+    "no_touch": "Exit at the close of bar 24.",
+    "dynamic_gross_bps": "10000 * (counterfactual_exit / entry_open - 1)",
+    "dynamic_net_bps": "dynamic_gross_bps minus round-trip cost",
+    "fixed_h24_net_bps": "10000 * (bar24_close / entry_open - 1) minus round-trip cost",
+    "clean_success_secondary": "target_first and target reached within six bars and pre-target MAE <= 0.50R",
+    "excursions": "MFE, MAE, time-to-MFE, time-to-MAE, target/stop time, and pre-target MAE are outcome-only."
+  },
+  "matched_control": {
+    "ratio": "one control per emitted event",
+    "eligibility": "same symbol, period, month, long direction, clock bucket, exact 24-bar path, and not a detector event for that family",
+    "different_session_required": true,
+    "clock_bucket": "six fixed 13-bar regular-session buckets",
+    "selection": "deterministic nearest prior_scale_bps with SHA-256 tie-break, without reading future outcomes",
+    "risk": "copy the detector event risk_bps symmetrically around the control next-open entry",
+    "reuse": "forbidden within detector family and period"
+  },
+  "costs": {
+    "primary_bps_per_side": 5,
+    "round_trip_bps": 10,
+    "sensitivity_bps_per_side": [
+      2.5,
+      5,
+      7.5,
+      10
+    ],
+    "market_impact_modelled": false,
+    "short_borrow_modelled": false
+  },
+  "accuracy_definition": {
+    "primary": "target-first precision among every emitted event; stop-first, dual-touch ambiguity, and no-touch all count as failures",
+    "coverage": "events per 10,000 eligible decision anchors plus sessions and stocks represented",
+    "baseline": "one-to-one outcome-blind matched controls",
+    "accuracy_warning": "A detector cannot qualify by abstaining almost everywhere, by reporting resolved paths only, or by ignoring costs."
+  },
+  "evaluation": {
+    "periods": [
+      2025,
+      2026
+    ],
+    "bootstrap_draws": 5000,
+    "bootstrap_seed": 20260714,
+    "session_block_length": 5,
+    "multiplicity": "Separate Holm families across all five detectors and both periods for target-first precision lift and absolute dynamic net payoff.",
+    "minimum_events": {
+      "2025": 150,
+      "2026": 75
+    },
+    "minimum_stocks": {
+      "2025": 15,
+      "2026": 14
+    },
+    "qualification_gates": [
+      "minimum event and stock support in both periods",
+      "target-first precision >= 0.60 in both periods",
+      "95 percent session-block lower precision bound >= 0.55 in both periods",
+      "precision lift over matched controls >= 0.05 with lower bound > 0 and Holm-adjusted p <= 0.05 in both periods",
+      "mean dynamic net payoff > 0 with lower bound > 0 and Holm-adjusted p <= 0.05 at 5 bps per side in both periods",
+      "mean dynamic net payoff remains positive at 7.5 bps per side in both periods",
+      "positive dynamic net payoff in a majority of calendar months in both periods",
+      "positive dynamic net payoff and precision lift in at least 16 of 20 leave-one-stock-out deletions for 2025 and 15 of 19 for 2026"
+    ],
+    "descriptive_only": [
+      "fixed 24-bar net payoff",
+      "rapid target within three bars",
+      "clean_success_secondary",
+      "MFE, MAE, timing, and path efficiency",
+      "detector overlap",
+      "H5 minus H1 activity increment"
+    ],
+    "possible_decisions": [
+      "detector_supported_for_prospective_research_logging_only",
+      "detector_descriptive_but_unqualified",
+      "detector_rejected",
+      "all_detectors_rejected_or_descriptive_only"
+    ],
+    "promotion_allowed": false
+  },
+  "artifacts": {
+    "pre_outcome_events": "pre_outcome_events.parquet",
+    "pre_outcome_controls": "pre_outcome_controls.parquet",
+    "event_outcomes": "event_outcomes.parquet",
+    "control_outcomes": "control_outcomes.parquet",
+    "detector_metrics": "detector_metrics.csv",
+    "bootstrap_metrics": "bootstrap_metrics.csv",
+    "monthly_metrics": "monthly_metrics.csv",
+    "stock_deletions": "stock_deletions.csv",
+    "cost_sensitivity": "cost_sensitivity.csv",
+    "path_diagnostics": "path_diagnostics.csv",
+    "decision": "decision.json",
+    "summary": "summary.json",
+    "source_hashes": "source_hashes.json",
+    "artifact_manifest": "artifact_manifest.json"
+  },
+  "provenance": {
+    "origin_reports": [
+      "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/reports/20260712-clean-slate-causal-ohlc-entries-v1.md",
+      "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/reports/20260712-raw-ohlc-entry-onset-discovery-v1.md",
+      "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/reports/20260712-historical-volume-entry-onset-ablation-v2.md",
+      "/Users/michaelsalerno/Documents/Codex/2026-07-10-regime-loop-research-handoff-user-objective/work/reports/20260714-causal-payoff-model-paths-v1.md"
+    ],
+    "repository": "/Users/michaelsalerno/StockerLocal",
+    "application_modified": false
+  },
+  "forbidden": [
+    "regime, state, loop, cycle, child, morph, template, B0, or realised route inputs",
+    "future OHLCV, future state, future duration, target, stop, MFE, MAE, or payoff in detector conditions",
+    "selecting a detector, threshold, risk band, horizon, target, stop, session window, or cost from portability outcomes",
+    "dropping ambiguous, no-touch, losing, or low-confidence emitted events from precision",
+    "calling 2025 or partial 2026 validation",
+    "promoting any finding to live, paper, demo, broker, deployment, position, order, or application functionality"
+  ]
+}

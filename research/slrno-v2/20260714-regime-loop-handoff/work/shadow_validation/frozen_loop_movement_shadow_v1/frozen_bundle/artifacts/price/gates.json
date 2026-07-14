@@ -1,0 +1,144 @@
+{
+  "absolute_movement_retained": true,
+  "directional_consequence_retained": false,
+  "economic_edge_claim": false,
+  "live_ordering_enabled": false,
+  "movement_consequence_retained": true,
+  "order_placement": "disabled",
+  "periods": {
+    "2023": {
+      "direction": {
+        "auc_pass": false,
+        "ece_pass": false,
+        "intervals_horizons_quarters_deletions_pass": false,
+        "maximum_supported_bin_error_pass": true,
+        "pass": false,
+        "relative_primary_improvement": -0.00039597860949634967,
+        "relative_primary_pass": false
+      },
+      "movement": {
+        "absolute_return_bps": {
+          "correlation_better_all_horizons": true,
+          "intervals_horizons_quarters_deletions_pass": true,
+          "pass": true,
+          "relative_primary_improvement": 0.012037185003007418,
+          "relative_primary_pass": true
+        },
+        "future_range_bps": {
+          "correlation_better_all_horizons": true,
+          "intervals_horizons_quarters_deletions_pass": true,
+          "pass": true,
+          "relative_primary_improvement": 0.036706417963258055,
+          "relative_primary_pass": true
+        }
+      },
+      "representation_check": {
+        "absolute_return_bps": {
+          "loop_minus_history_mean_loss": -136.90148519046863,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": 0.007567533072406372
+        },
+        "direction": {
+          "loop_minus_history_mean_loss": -0.013727479803503027,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": 0.019352202306341198
+        },
+        "future_range_bps": {
+          "loop_minus_history_mean_loss": 7.2331067849794755,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": -0.00029179029751220926
+        },
+        "signed_return_bps": {
+          "loop_minus_history_mean_loss": -520.9208445371487,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": 0.013439819600019678
+        }
+      },
+      "signed_return": {
+        "correlation_pass": false,
+        "decile_spread_pass": false,
+        "intervals_horizons_quarters_deletions_pass": false,
+        "pass": false,
+        "relative_primary_improvement": -0.00042854641813793235,
+        "relative_primary_pass": false
+      },
+      "support": {
+        "anchors": 66563,
+        "dates": 250,
+        "direction_classes_each_horizon": true,
+        "pass": true,
+        "quarters": 4,
+        "states": 8,
+        "stocks": 20
+      }
+    },
+    "2025": {
+      "direction": {
+        "auc_pass": false,
+        "ece_pass": false,
+        "intervals_horizons_quarters_deletions_pass": false,
+        "maximum_supported_bin_error_pass": false,
+        "pass": false,
+        "relative_primary_improvement": -0.000870228205446112,
+        "relative_primary_pass": false
+      },
+      "movement": {
+        "absolute_return_bps": {
+          "correlation_better_all_horizons": true,
+          "intervals_horizons_quarters_deletions_pass": true,
+          "pass": true,
+          "relative_primary_improvement": 0.010032129768231925,
+          "relative_primary_pass": true
+        },
+        "future_range_bps": {
+          "correlation_better_all_horizons": true,
+          "intervals_horizons_quarters_deletions_pass": true,
+          "pass": true,
+          "relative_primary_improvement": 0.0349888682645443,
+          "relative_primary_pass": true
+        }
+      },
+      "representation_check": {
+        "absolute_return_bps": {
+          "loop_minus_history_mean_loss": -180.38116190133462,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": 0.011112620083855534
+        },
+        "direction": {
+          "loop_minus_history_mean_loss": -0.01735458405283108,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": 0.02434305764829249
+        },
+        "future_range_bps": {
+          "loop_minus_history_mean_loss": -57.834864167922305,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": 0.0029474951440657243
+        },
+        "signed_return_bps": {
+          "loop_minus_history_mean_loss": -415.38394693385163,
+          "loop_not_more_than_0_25pct_worse": true,
+          "loop_relative_to_history": 0.011351943118100708
+        }
+      },
+      "signed_return": {
+        "correlation_pass": false,
+        "decile_spread_pass": false,
+        "intervals_horizons_quarters_deletions_pass": false,
+        "pass": false,
+        "relative_primary_improvement": -0.00091640662935494,
+        "relative_primary_pass": false
+      },
+      "support": {
+        "anchors": 70883,
+        "dates": 250,
+        "direction_classes_each_horizon": true,
+        "pass": true,
+        "quarters": 4,
+        "states": 8,
+        "stocks": 22
+      }
+    }
+  },
+  "range_movement_retained": true,
+  "research_only": true
+}

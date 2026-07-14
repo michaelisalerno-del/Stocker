@@ -1,0 +1,11 @@
+{
+  "attempt": "amended_pre_score_run_2",
+  "scored_artifacts_produced": false,
+  "payoff_results_inspected": false,
+  "failure": "ledger bar_ordinal is the frozen model ordinal and is not always the provider-tape row ordinal; the frozen execution engine advances from start_timestamp",
+  "scientific_contract_changed": false,
+  "implementation_fix": "locate the anchor provider row by start_timestamp, then advance entry_step and 24 provider rows exactly as the frozen execution engine did",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled"
+}

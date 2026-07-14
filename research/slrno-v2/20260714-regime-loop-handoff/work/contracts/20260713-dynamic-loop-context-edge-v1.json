@@ -1,0 +1,125 @@
+{
+  "contract_id": "20260713-dynamic-loop-context-edge-v1",
+  "scientific_status": "post-inspection retrospective development and backward-portability test; not prospective validation",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "strategy_promotion_allowed": false,
+  "inputs": {
+    "anchor_panels": {
+      "2023": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_2023.parquet",
+      "2024_threshold_fit": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+      "2025": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_2025.parquet"
+    },
+    "accepted_signal_ledger": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/accepted_signal_ledger.parquet",
+    "fixed_cycles": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/fixed_cycles.csv",
+    "execution_manifest": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/execution_manifest.json",
+    "provider_roots": {
+      "2023": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock",
+      "2025": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock"
+    }
+  },
+  "population": {
+    "periods": [2025, 2023],
+    "symbols": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "horizons_bars": [6, 12, 24],
+    "source_strategy": "breakout_loop_scores_range_p75",
+    "overlay_only": true,
+    "overlay_note": "The dynamic selector may reject a frozen accepted signal but does not refill a later overlapping opportunity."
+  },
+  "forecast_identity": {
+    "assignment": "argmax of the 20 causal loop_score columns at the anchor",
+    "tie_break": "lowest cycle index",
+    "realized_loop_label_used": false,
+    "compatibility_invariant": "the anchor's current state must be a member of the selected rotation-invariant parent cycle",
+    "current_state_conditioner_used": true
+  },
+  "context_families": {
+    "primary": "loop_current_regime",
+    "families": [
+      "loop_only",
+      "loop_current_regime",
+      "loop_previous_regime",
+      "loop_regime_path",
+      "loop_direction",
+      "loop_volatility",
+      "loop_range",
+      "loop_session",
+      "loop_volume",
+      "loop_joint_all"
+    ],
+    "current_regime": "state at the causal anchor; this identifies the orientation within a rotation-invariant parent loop",
+    "previous_regime": "previous_state_1 at the anchor; value 8 is the causal session/start sentinel",
+    "regime_path": "current state x previous_state_1",
+    "direction": "session_return bucketed by 2024 anchor-panel tertiles",
+    "volatility": "mean_abs_return_12 bucketed at the 2024 anchor-panel median",
+    "range": "bar_range_pct bucketed at the 2024 anchor-panel median",
+    "session": "bar_index_in_session: open 0-11, middle 12-35, late 36-53",
+    "volume": "current historical provider volume divided by the prior 20 sessions' median volume at the same bar ordinal; minimum 10 prior observations; low/high split at 1.0; otherwise unknown",
+    "joint_all": "top loop x current regime x previous regime x direction x volatility x range x session x volume"
+  },
+  "dynamic_selector": {
+    "training_window_completed_sessions": 60,
+    "warmup_sessions": 60,
+    "primary_cost_bps_per_side": 5,
+    "round_trip_cost_bps": 10,
+    "minimum_filled_trade_support": 20,
+    "shrinkage_pseudocount": 50,
+    "loop_estimate_shrinks_to": "rolling global mean net return",
+    "context_estimate_shrinks_to": "rolling top-loop mean net return",
+    "unsupported_context_backoff": "top-loop estimate",
+    "unsupported_loop_action": "inactive",
+    "active_rule": "past-only shrunk net mean bps > 0",
+    "update_frequency": "once per session before that session's anchors",
+    "same_session_outcomes_used": false,
+    "active_age_bins_sessions": ["1-5", "6-10", "11-20", "21-40", "41+"]
+  },
+  "descriptive_drift": {
+    "block_sessions": 20,
+    "minimum_filled_trades_per_cell_block": 5,
+    "cell": "top predicted loop x current regime x horizon",
+    "profitability": "mean net trade return after 5 bps per side is positive",
+    "diagnostics": [
+      "adjacent-block sign agreement",
+      "positive-cell retention",
+      "profitable-cell Jaccard overlap",
+      "adjacent-block Spearman correlation",
+      "consecutive profitable-block streak lengths"
+    ]
+  },
+  "portfolio": {
+    "daily_construction": "compound non-overlapping filled signals within each symbol sleeve, sum sleeves, divide by fixed universe size 20",
+    "overnight_positions": false,
+    "bid_ask_quotes_used": false,
+    "market_impact_modeled": false,
+    "short_locate_or_borrow_modeled": false,
+    "provider_volume_label": "historical_volume_activity_proxy"
+  },
+  "inference": {
+    "moving_block_bootstrap_draws": 5000,
+    "moving_block_sessions": 5,
+    "confidence_interval": 0.95,
+    "familywise_adjustment": "Holm across primary absolute, versus unfiltered, and versus loop-only endpoints over both periods and all horizons"
+  },
+  "decision": {
+    "context_edge_supported_requires": [
+      "primary cumulative return and mean net trade are positive in both periods at all three horizons",
+      "primary paired daily-return 95% lower bound versus unfiltered is above zero in both periods at all three horizons",
+      "primary paired daily-return 95% lower bound versus loop-only is above zero in both periods at all three horizons",
+      "all 18 primary one-sided bootstrap endpoints pass Holm at 0.05",
+      "primary individualized decision coverage is at least 0.20 in both periods at all three horizons"
+    ],
+    "finite_lifetime_supported_requires": [
+      "primary age 1-10 session mean net trade is positive in both periods at all three horizons",
+      "primary age 21+ session mean net trade is lower than age 1-10 in both periods at all three horizons"
+    ],
+    "overall_hypothesis_requires_both": true,
+    "economic_edge_claim_allowed": false,
+    "prospective_validation_claim_allowed": false
+  }
+}

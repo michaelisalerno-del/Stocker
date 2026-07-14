@@ -1,0 +1,411 @@
+{
+  "contract_id": "clean_slate_causal_ohlc_entries_v1",
+  "contract_frozen_at_utc": "2026-07-12T00:00:00Z",
+  "scientific_status": "2024_internal_monthly_expanding_oof_entry_research",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "strategy_promotion_permitted": false,
+  "economic_edge_claim_permitted": false,
+  "question": "Can fixed algorithms identify causal long, short, or abstain entries from raw completed-bar OHLC measurements without regimes, loops, templates, or any prior detector output?",
+  "skill_workflow": "slrno-bar-pattern-research",
+  "scope": {
+    "feature_and_model_slate": "fresh",
+    "universe_independence": false,
+    "universe_selection": "previously assembled twenty-two-stock 2024 convenience cohort; no prior detector outputs are inputs, but symbol selection is inherited, so the experiment is clean with respect to features and models, not independent with respect to universe selection",
+    "broad_universe_generalization_permitted": false,
+    "prospective_claim_permitted": false,
+    "forbidden_inputs": [
+      "regime",
+      "state",
+      "loop",
+      "cycle",
+      "B0",
+      "template",
+      "named_pattern_flag",
+      "prior_detector_prediction",
+      "volume",
+      "order_flow",
+      "quote",
+      "tick",
+      "news",
+      "fundamental"
+    ]
+  },
+  "periods": {
+    "data_year": 2024,
+    "validation_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "fold_rule": "fit once before each validation month using only eligible anchors whose target exit timestamp is strictly before validation-month start",
+    "2025_read_permitted": false,
+    "2023_read_permitted": false,
+    "2026_read_permitted": false,
+    "untouched_holdout_claim_permitted": false
+  },
+  "sources": {
+    "provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "provider_path_template": "symbol={symbol}/timeframe=5m/data.parquet",
+    "columns_read": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "bars": "regular-session five-minute provider OHLC",
+    "provider_price_basis": "provider OHLC exactly as stored; no independent corporate-action adjustment",
+    "provider_volume_label": "historical_volume_not_used",
+    "bid_ask_quotes_available": false,
+    "intrabar_ordering_used": false,
+    "spread_or_impact_observed": false
+  },
+  "universe": {
+    "symbols": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "AXTI",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "OKLO",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "size": 22,
+    "training_row_weighting": "within each fold and horizon, weights are normalized to mean one and give each represented symbol equal total weight"
+  },
+  "bar_validation": {
+    "timezone": "America/New_York",
+    "regular_session_local_time": "09:30 inclusive through 16:00 exclusive",
+    "duplicate_symbol_timestamp": "error",
+    "finite_positive_ohlc_required": true,
+    "ohlc_order_required": "low <= min(open, close) <= max(open, close) <= high",
+    "gap_handling": "start a new causal segment whenever adjacent timestamps within a symbol/session differ from exactly five minutes",
+    "silent_bad_session_drop_permitted": false,
+    "observed_target_blind_2024_regular_rows": 424583,
+    "observed_target_blind_2024_union_sessions": 252,
+    "observed_target_blind_2024_symbol_sessions": 5539,
+    "observed_target_blind_within_session_nonfive_minute_gaps": 2612
+  },
+  "cohort": {
+    "decision_time": "after the current bar close",
+    "candidate_surface": "every completed regular-session bar having exact same-session five-minute support through its horizon",
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "horizon_specific_cohorts": true,
+    "exact_continuity": "anchor, entry bar, every intervening bar, and exit bar must occupy one contiguous five-minute symbol/session segment",
+    "entry": "open of the bar exactly five minutes after the completed decision bar",
+    "exit": "close exactly horizon times five minutes after the decision bar",
+    "target_bps": "10000 * (exit_close / next_bar_open - 1)",
+    "no_overnight": true,
+    "expected_exact_2024_rows_by_horizon": {
+      "6": 383168,
+      "12": 347620,
+      "24": 280982
+    },
+    "expected_exact_validation_rows_by_horizon": {
+      "6": 195292,
+      "12": 177276,
+      "24": 143472
+    },
+    "skipped_support_reasons_required": [
+      "nonfinite_or_invalid_ohlc",
+      "duplicate_timestamp",
+      "outside_regular_session",
+      "nonfive_minute_gap",
+      "insufficient_same_session_horizon"
+    ]
+  },
+  "feature_policy": {
+    "continuous_only": true,
+    "causal_prefix_only": true,
+    "rolling_scope": "current contiguous symbol/session segment only, ending at the completed decision bar",
+    "missing_feature_policy": "retain missing early-window values and replace them only with the relevant fold-and-horizon training median",
+    "zero_range_policy": {
+      "signed_body_fraction": 0.0,
+      "absolute_body_fraction": 0.0,
+      "upper_wick_fraction": 0.0,
+      "lower_wick_fraction": 0.0,
+      "close_location": 0.5,
+      "session_range_location": 0.5
+    },
+    "epsilon": 1e-12,
+    "clock_features": [
+      "clock_fraction",
+      "clock_fraction_squared",
+      "clock_sin_1",
+      "clock_cos_1",
+      "clock_sin_2",
+      "clock_cos_2"
+    ],
+    "full_features_in_order": [
+      "clock_fraction",
+      "clock_fraction_squared",
+      "clock_sin_1",
+      "clock_cos_1",
+      "clock_sin_2",
+      "clock_cos_2",
+      "log_close_open",
+      "log_high_low",
+      "signed_body_fraction",
+      "absolute_body_fraction",
+      "upper_wick_fraction",
+      "lower_wick_fraction",
+      "close_location",
+      "close_return_1",
+      "close_return_3",
+      "close_return_6",
+      "close_return_12",
+      "mean_abs_close_return_3",
+      "mean_abs_close_return_6",
+      "mean_abs_close_return_12",
+      "std_close_return_3",
+      "std_close_return_6",
+      "std_close_return_12",
+      "mean_log_range_3",
+      "mean_log_range_6",
+      "mean_log_range_12",
+      "log_range_ratio_6",
+      "log_range_ratio_12",
+      "session_log_return",
+      "distance_to_session_high",
+      "distance_from_session_low",
+      "session_range_location",
+      "running_log_range",
+      "distance_to_rolling_high_6",
+      "distance_from_rolling_low_6",
+      "distance_to_rolling_high_12",
+      "distance_from_rolling_low_12",
+      "availability_3",
+      "availability_6",
+      "availability_12"
+    ],
+    "formulas": {
+      "clock_fraction": "minutes since 09:30 divided by 385",
+      "clock_harmonics": "sin and cos at 2*pi*q and 4*pi*q",
+      "log_close_open": "log(close/open)",
+      "log_high_low": "log(high/low)",
+      "body_and_wicks": "fractions of current high-low range, using the frozen zero-range neutral values",
+      "close_location": "(close-low)/(high-low)",
+      "close_return_n": "log(close_t/close_t_minus_n) when n exact prior segment bars exist, otherwise missing",
+      "mean_abs_close_return_n": "mean absolute one-bar log close return over n complete contiguous returns, otherwise missing",
+      "std_close_return_n": "population standard deviation of one-bar log close return over n complete contiguous returns, otherwise missing",
+      "mean_log_range_n": "mean log(high/low) over n completed contiguous bars including t, otherwise missing",
+      "log_range_ratio_n": "current log(high/low) minus mean_log_range_n",
+      "session_log_return": "log(close/current-session first valid bar open)",
+      "distance_to_session_high": "log(close/running session high)",
+      "distance_from_session_low": "log(close/running session low)",
+      "session_range_location": "(close-running session low)/(running session high-running session low)",
+      "running_log_range": "log(running session high/running session low)",
+      "distance_to_rolling_high_n": "log(close/rolling n-bar high), with n full contiguous bars required",
+      "distance_from_rolling_low_n": "log(close/rolling n-bar low), with n full contiguous bars required",
+      "availability_n": "min(number of bars in the current contiguous segment through t divided by n, 1)"
+    }
+  },
+  "algorithms": [
+    {
+      "name": "clock_ridge",
+      "role": "time-only null baseline",
+      "features": "clock_features",
+      "imputation": "training medians",
+      "scaler": "StandardScaler fitted on training rows only",
+      "estimator": "Ridge",
+      "parameters": {
+        "alpha": 10.0,
+        "fit_intercept": true,
+        "solver": "lsqr",
+        "tol": 1e-06
+      }
+    },
+    {
+      "name": "full_ridge",
+      "role": "transparent linear candidate",
+      "features": "full_features_in_order",
+      "imputation": "training medians",
+      "scaler": "StandardScaler fitted on training rows only",
+      "estimator": "Ridge",
+      "parameters": {
+        "alpha": 10.0,
+        "fit_intercept": true,
+        "solver": "lsqr",
+        "tol": 1e-06
+      }
+    },
+    {
+      "name": "full_hgb",
+      "role": "shallow nonlinear candidate",
+      "features": "full_features_in_order",
+      "imputation": "training medians",
+      "scaler": "none",
+      "estimator": "HistGradientBoostingRegressor",
+      "parameters": {
+        "loss": "squared_error",
+        "learning_rate": 0.05,
+        "max_iter": 100,
+        "max_leaf_nodes": 7,
+        "max_depth": 3,
+        "min_samples_leaf": 500,
+        "l2_regularization": 10.0,
+        "max_bins": 64,
+        "early_stopping": false,
+        "random_state": 20260712
+      }
+    }
+  ],
+  "model_selection": {
+    "cross_validation_inside_fold": false,
+    "hyperparameter_search": false,
+    "feature_selection": false,
+    "ensembling": false,
+    "calibration": false,
+    "target_clipping_or_winsorization": false,
+    "outcome_based_algorithm_choice": false,
+    "input_sort": "symbol, session_date, timestamp stable"
+  },
+  "actions": {
+    "primary_threshold_gross_bps": 10.0,
+    "descriptive_thresholds_gross_bps": [
+      20.0,
+      40.0
+    ],
+    "long": "prediction >= positive threshold",
+    "short": "prediction <= negative threshold",
+    "abstain": "otherwise",
+    "threshold_tuning": false,
+    "sensitivity_rescue_permitted": false
+  },
+  "prediction_before_outcome_integrity": {
+    "required": true,
+    "ledger_contents": "anchor key, fold, symbol, session, decision timestamp, clock ordinal, model, horizon, prediction, and fixed actions only",
+    "validation_prices_or_outcomes_in_ledger": false,
+    "ledger_and_action_sha256_written_before_validation_outcome_join": true
+  },
+  "overlap_and_portfolio": {
+    "greedy_nonoverlap": "within each model, horizon, threshold, symbol, and session accept the earliest non-abstaining action and suppress later actions strictly before anchor timestamp plus horizon times five minutes; an action at the prior exit timestamp is eligible",
+    "abstentions_block": false,
+    "cost_sensitivity_changes_signal_selection": false,
+    "equal_symbol_sleeves": 22,
+    "inactive_or_missing_symbol_session": "zero-return cash",
+    "leverage": false,
+    "within_sleeve_compounding": "product of one plus sequential same-day net trade returns minus one",
+    "daily_portfolio_return": "mean of the twenty-two fixed sleeves",
+    "gross_trade_return": "direction * (exit_close / next_bar_open - 1)",
+    "net_trade_return": "gross_trade_return - 2 * per_side_cost_bps / 10000"
+  },
+  "costs": {
+    "grid_bps_per_side": [
+      0,
+      1,
+      2,
+      5,
+      10
+    ],
+    "primary_bps_per_side": 5,
+    "interpretation": "sensitivity assumptions only; provider OHLC contains no executable spread, slippage, or market impact"
+  },
+  "metrics": {
+    "prediction": [
+      "MSE",
+      "MAE",
+      "relative MSE improvement versus clock_ridge",
+      "Pearson correlation",
+      "Spearman correlation",
+      "calibration intercept and slope",
+      "prediction deciles",
+      "long short abstain rates"
+    ],
+    "action": [
+      "accepted trades",
+      "long and short counts",
+      "mean and median net bps",
+      "win rate",
+      "profit factor",
+      "cumulative and annualized return",
+      "annualized volatility",
+      "descriptive zero-rate Sharpe",
+      "maximum drawdown",
+      "exposure"
+    ],
+    "slices": [
+      "horizon",
+      "validation month",
+      "side",
+      "session clock quartile",
+      "cost",
+      "unchanged-prediction leave-one-stock-out deletion"
+    ],
+    "inference": {
+      "unit": "session date after fixed-sleeve aggregation",
+      "bootstrap": "non-circular overlapping five-session moving-block bootstrap",
+      "draws": 5000,
+      "quantiles": [
+        0.025,
+        0.975
+      ],
+      "random_state": 20260712,
+      "paired_sampling": "identical dates and blocks for candidate-minus-clock comparisons",
+      "multiplicity": "the 2.5th-percentile one-sided lower bound is required independently for each of the two candidates, a Bonferroni allocation across full_ridge and full_hgb; all-horizon conjunction is an intersection-union gate"
+    }
+  },
+  "retention_gate_per_candidate": {
+    "evaluated_only_at": "10 gross-bps action threshold and 5 bps per-side cost",
+    "minimum_nonoverlapping_trades_each_horizon": 500,
+    "minimum_trades_each_validation_month_and_horizon": 50,
+    "minimum_stocks_each_horizon": 15,
+    "minimum_long_trades_each_horizon": 100,
+    "minimum_short_trades_each_horizon": 100,
+    "minimum_stocks_each_side_and_horizon": 10,
+    "minimum_relative_pooled_mse_improvement_vs_clock_each_horizon": 0.0025,
+    "mae_not_worse_than_clock_each_horizon": true,
+    "paired_daily_mse_improvement_bootstrap_lower_above_zero_each_horizon": true,
+    "positive_pearson_correlation_each_horizon": true,
+    "minimum_mse_improvement_months_each_horizon": 4,
+    "positive_mean_net_trade_bps_each_horizon": true,
+    "positive_cumulative_return_each_horizon": true,
+    "absolute_daily_return_bootstrap_lower_above_zero_each_horizon": true,
+    "paired_daily_return_advantage_vs_clock_lower_above_zero_each_horizon": true,
+    "positive_cumulative_return_each_month_and_horizon": true,
+    "positive_cumulative_return_every_stock_deletion_and_horizon": true,
+    "positive_long_mean_net_bps_each_horizon": true,
+    "positive_short_mean_net_bps_each_horizon": true,
+    "all_required": true,
+    "pass_interpretation": "retain as a 2024 internal entry hypothesis only and freeze for genuinely unseen post-freeze shadow sessions",
+    "failure_interpretation": "reject the candidate without changing features, models, thresholds, or gates after opening results"
+  },
+  "integrity": {
+    "contract_runner_environment_and_source_hashes_frozen_before_scoring": true,
+    "whole_provider_files_hashed": true,
+    "exact_independent_reconstruction_required": true,
+    "result_visible_code_correction_policy": "any correction after results are visible invalidates v1; a changed design requires v2 and new future data",
+    "required_labels": {
+      "research_only": true,
+      "live_ordering_enabled": false,
+      "order_placement": "disabled"
+    }
+  }
+}

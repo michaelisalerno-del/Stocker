@@ -1,0 +1,269 @@
+{
+  "contract_id": "regime_loop_linkage_ideas_v1",
+  "contract_frozen_at_utc": "2026-07-11T22:00:00Z",
+  "scientific_status": "post_inspection_2024_causal_oof_linkage_development_test",
+  "prospective_validation_claim_permitted": false,
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Test whether causal regime/history loop-occurrence probabilities and loop-conditioned movement probabilities can be linked into reliable probabilities that a compatible loop both occurs and is followed by large absolute movement or future range.",
+  "known_before_freeze": {
+    "all_periods_are_opened_development_or_portability_evidence": true,
+    "retained_occurrence_component": "last_three_state_qhistory",
+    "rejected_occurrence_head": "qfull9_improved_pooled_2024_loss_but_reversed_in_four_supported_cycle_state_orientations",
+    "rejected_quality_head": "qhier_improved_pooled_loss_but_failed_calibration_and_supported_slice_reliability",
+    "rejected_completion_timing": "joint_history_semimarkov_completion_failed_incremental_ranking_and_long_horizon_calibration",
+    "current_named_good_or_high_loops": 0,
+    "implication": "A linked model must pass its own joint-event reliability gates. Pooled gains from its rejected components do not pre-authorize retention."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_minimal_time_topology_link",
+      "question": "Does the limited B0/stress/session-clock attraction probability multiplied by semantic route-topology movement probability improve the joint event over history times state/context?",
+      "model": "minimal_time_topology",
+      "stop": "Fails pooled proper loss, calibration, temporal, stock, regime-orientation, ranking, or multiplicity gates."
+    },
+    {
+      "id": "H2_raw_full_link",
+      "question": "Do the full nine-factor occurrence and hierarchical quality probabilities reinforce one another when directly composed?",
+      "model": "raw_full_link",
+      "stop": "Any local reliability failure rejects the raw composition despite a pooled gain."
+    },
+    {
+      "id": "H3_fixed_partial_pooling",
+      "question": "Does a predeclared fifty-percent log-odds shrinkage of both full heads back toward retained baselines preserve useful linkage while removing local reversals?",
+      "model": "partial_full_link",
+      "stop": "No post-hoc shrinkage weight change is allowed; failure at 0.5 stops this idea."
+    },
+    {
+      "id": "H4_dependency_learning",
+      "question": "Can a causal second-stage model learn dependence between occurrence and movement probabilities better than an independence product or a one-dimensional product recalibration?",
+      "models": ["calibrated_raw_product", "dependency_stack"],
+      "stop": "The dependency stack must beat the frozen baseline and raw product under all global gates; average calibration alone is insufficient."
+    },
+    {
+      "id": "H5_regime_loop_time_attraction_slices",
+      "question": "Within a globally passing dependency model, are any supported cycle-current-state-entry-clock slices consistently better in both temporal halves and all six P75 movement cells?",
+      "model": "dependency_stack",
+      "stop": "If the global stack fails, all slices fail closed; otherwise every reported slice must pass support, temporal, target-horizon, calibration, and Holm gates."
+    }
+  ],
+  "frozen_sources": {
+    "factor_occurrence_oof": {
+      "path": "/private/tmp/stocker_factor_conditioned_loop_occurrence_v1_20260711/oof_predictions_2024.parquet",
+      "sha256": "422a7cd24f7e797daef6e5a81756460308bb50a6bf9e2d179dd64abe0b07c6bc",
+      "rows": 361220,
+      "required_audit": {
+        "path": "/private/tmp/stocker_factor_conditioned_loop_occurrence_v1_20260711/pre_score_audit.json",
+        "sha256": "18d4290c50f749ce6ec5434324afa82cd7bebafcd8be198ed8b1c6c7361eedb1",
+        "required_fields": {"rejection_verified": true, "scoring_authorized": false}
+      }
+    },
+    "hierarchical_quality_oof": {
+      "path": "/private/tmp/stocker_hierarchical_loop_quality_algorithm_v1_20260711/oof_predictions_2024.parquet",
+      "sha256": "d7fb8710bdcbda4687bd05a290a8081b89f7d8909697e5e2a2a5523f2caf0c74",
+      "rows": 216438,
+      "required_audit": {
+        "path": "/private/tmp/stocker_hierarchical_loop_quality_algorithm_v1_20260711/independent_artifact_audit.json",
+        "sha256": "dba20b5692cca01eb70b60a1c0cb44230af0c0565ba54d035e8d61bb90b3c755",
+        "required_field": {"all_passed": true}
+      }
+    },
+    "factor_contract": {
+      "path": "work/contracts/20260711-factor-conditioned-loop-occurrence-v1.json",
+      "sha256": "ef8b61bdd4f6671fa64713551a9991f6e4591c3c96bc1ccc324c81b7195bfe7d"
+    },
+    "quality_contract": {
+      "path": "work/contracts/20260711-hierarchical-loop-quality-algorithm-v1.json",
+      "sha256": "f6956b6ab0495a49669f714df834d1fd0fdaa13b0ecf4b123d6c54c0fc9b5936"
+    },
+    "detector_or_component_refit_permitted": false,
+    "parent_prediction_change_permitted": false
+  },
+  "population_and_join": {
+    "source_prediction_months": ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"],
+    "primary_evaluation_months": ["2024-09", "2024-10", "2024-11", "2024-12"],
+    "meta_training_rule": "strictly_earlier_available_2024_OOF_months_with_at_least_July_and_August_before_first_prediction",
+    "one_to_one_join_keys": ["symbol_norm", "session_date", "start_timestamp", "cycle_index"],
+    "quality_population_is_left_surface": true,
+    "all_quality_rows_must_join_factor_rows": true,
+    "factor_only_rows_are_outside_price_exact_cohort_and_are_not_scored": true,
+    "required_identity_matches": ["cycle_id", "state", "current_state", "loop_occurs_or_target"],
+    "qhistory_must_equal_parent_loop_probability_tolerance": 1e-12,
+    "later_period_paths_permitted": false,
+    "partial_2026_permitted": false,
+    "prospective_shadow_read_or_write_permitted": false
+  },
+  "data_and_outcomes": {
+    "provider_bars": "regular_session_five_minute_provider_OHLC",
+    "direct_volume_label": "historical_volume_not_used",
+    "direction_or_signed_return_used": false,
+    "joint_target": "loop_occurs_and_quality_class_at_or_above_tier",
+    "movement_targets": ["absolute_return_bps", "future_range_bps"],
+    "horizons_bars": [6, 12, 24],
+    "tiers": ["p75", "p90"],
+    "cells": 12,
+    "cost_or_exit_model": "not_applicable_no_trading_rule_or_return_direction_test"
+  },
+  "component_probability_mapping": {
+    "occurrence": {
+      "retained": "qhistory",
+      "limited_time": "qlimited4",
+      "full_context": "qfull9"
+    },
+    "quality": {
+      "baseline": "qcontext",
+      "semantic_topology": "qroute_topology",
+      "hierarchical": "qhier"
+    },
+    "all_probabilities_must_be_raw_causal_OOF": true,
+    "probability_clip": [1e-6, 0.999999]
+  },
+  "fixed_compositions": {
+    "baseline": "qhistory_times_qcontext",
+    "occurrence_only": "qfull9_times_qcontext",
+    "topology_only": "qhistory_times_qroute_topology",
+    "minimal_time_topology": "qlimited4_times_qroute_topology",
+    "raw_full_link": "qfull9_times_qhier",
+    "partial_full_link": {
+      "occurrence": "logit_qhistory_plus_0.5_times_logit_qfull9_minus_logit_qhistory",
+      "quality": "logit_qcontext_plus_0.5_times_logit_qhier_minus_logit_qcontext",
+      "composition": "shrunk_occurrence_times_shrunk_quality",
+      "shrinkage": 0.5,
+      "weight_tuning_permitted": false
+    }
+  },
+  "causal_meta_models": {
+    "fit_cells_separately": true,
+    "sample_weight": "inverse_compatible_weight",
+    "validation_months": ["2024-09", "2024-10", "2024-11", "2024-12"],
+    "training_months": "all_available_source_prediction_months_strictly_before_validation_month",
+    "calibrated_raw_product": {
+      "features": ["logit_raw_full_link"],
+      "estimator": "binary_LogisticRegression"
+    },
+    "dependency_stack": {
+      "features": [
+        "logit_qhistory",
+        "logit_qfull9_minus_logit_qhistory",
+        "logit_qcontext",
+        "logit_qhier_minus_logit_qcontext",
+        "occurrence_residual_times_quality_residual"
+      ],
+      "interpretation": "The interaction tests dependence beyond separate occurrence and movement residuals."
+    },
+    "preprocessing": "StandardScaler_fit_with_training_sample_weights_only",
+    "estimator": {
+      "class": "sklearn_LogisticRegression_binary",
+      "C": 0.1,
+      "solver": "lbfgs",
+      "max_iter": 2000,
+      "tol": 1e-10,
+      "random_state": 20260711,
+      "class_weight": null
+    },
+    "post_hoc_calibration_permitted": false,
+    "stock_cycle_state_or_clock_identity_features_permitted": false
+  },
+  "evaluation": {
+    "primary_weight": "inverse_compatible_weight",
+    "secondary_weight": "unweighted",
+    "pooled_cell_aggregation": "equal_mean_of_the_12_cell_metrics",
+    "losses": ["binary_log_loss", "brier"],
+    "calibration": {
+      "fixed_probability_bins": 10,
+      "minimum_supported_bin_rows": 500,
+      "absolute_maximum_supported_bin_error": 0.02,
+      "candidate_ECE_no_worse_than_baseline_required_cells": 12
+    },
+    "temporal_slices": ["2024-09", "2024-10", "2024-11", "2024-12"],
+    "two_half_slices": ["2024-09_to_2024-10", "2024-11_to_2024-12"],
+    "market_transfer": "leave_one_stock_out_every_symbol",
+    "regime_loop_slices": "cycle_id_by_current_state",
+    "regime_loop_slice_support": {"rows_minimum": 500, "joint_positive_labels_across_12_cells_minimum": 30},
+    "ranking": {
+      "unit": "anchor_target_horizon_tier",
+      "metric": "top_three_recall_among_positive_joint_labels",
+      "minimum_pooled_gain": 0.0,
+      "no_cell_degradation": true
+    },
+    "session_bootstrap": {
+      "block_sessions": 5,
+      "draws": 4999,
+      "confidence": 0.95,
+      "seed": 20260711
+    },
+    "paired_test": {
+      "method": "9999_draw_session_level_Rademacher_sign_flip",
+      "correction": "Holm_over_candidate_variant_by_loss_endpoint",
+      "familywise_alpha": 0.05
+    }
+  },
+  "global_variant_gate": {
+    "candidate_variants": [
+      "minimal_time_topology",
+      "raw_full_link",
+      "partial_full_link",
+      "calibrated_raw_product",
+      "dependency_stack"
+    ],
+    "minimum_primary_pooled_relative_log_loss_improvement_vs_baseline": 0.005,
+    "primary_pooled_brier_difference_below_zero": true,
+    "both_primary_bootstrap_upper_bounds_below_zero": true,
+    "both_Holm_adjusted_p_values_at_or_below": 0.05,
+    "all_12_cells_log_loss_and_brier_no_worse_than_baseline": true,
+    "all_12_cells_calibration_pass": true,
+    "every_evaluation_month_log_loss_and_brier_below_baseline": true,
+    "every_leave_one_stock_out_log_loss_and_brier_no_worse_than_baseline": true,
+    "zero_supported_cycle_current_state_log_loss_or_brier_reversals": true,
+    "top_three_recall_noninferior_in_all_cells": true,
+    "dependency_stack_additional_requirements": {
+      "pooled_log_loss_and_brier_below_raw_full_link": true,
+      "pooled_log_loss_and_brier_below_calibrated_raw_product": true
+    }
+  },
+  "attraction_slice_screen": {
+    "model": "dependency_stack",
+    "dimensions": ["cycle_id", "current_state", "entry_clock_quartile"],
+    "tier": "p75_only",
+    "cells": 6,
+    "support": {"compatible_rows_minimum": 500, "joint_positives_across_cells_minimum": 50, "stocks_minimum": 15},
+    "minimum_equal_cell_relative_log_loss_improvement_vs_baseline": 0.01,
+    "all_six_cells_log_loss_and_brier_no_worse": true,
+    "both_temporal_halves_log_loss_and_brier_below_baseline": true,
+    "maximum_supported_bin_error": 0.03,
+    "session_sign_flip": "9999_draw_one_sided",
+    "multiplicity": "Holm_across_all_supported_slices",
+    "global_dependency_stack_must_pass_first": true,
+    "result_label": "development_attraction_slice_only_not_good_or_high_loop"
+  },
+  "decision": {
+    "retained_label": "development_linkage_candidate_pending_unseen_validation",
+    "rejected_label": "linkage_idea_rejected_or_unconfirmed",
+    "priority_if_multiple_global_variants_pass": [
+      "minimal_time_topology",
+      "partial_full_link",
+      "calibrated_raw_product",
+      "dependency_stack",
+      "raw_full_link"
+    ],
+    "zero_passing_variants": "retain_no_linkage_component_and_report_diagnostics_without_tuning",
+    "same_experiment_refinement_permitted": false,
+    "later_period_scoring": false,
+    "prospective_shadow_entry": false,
+    "named_loop_good_or_high_promotion_permitted": false,
+    "trading_rule_or_PnL_model_permitted": false
+  },
+  "integrity": {
+    "independent_audit_required": true,
+    "auditor_may_not_import_runner": true,
+    "replay_join_targets_components_compositions_meta_fits_losses_calibration_slices_ranking_Holm_and_decision": true,
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "no_later_period_or_shadow_path_resolution": true,
+    "all_safety_flags_exact": true
+  },
+  "planned_artifact_root": "/private/tmp/stocker_regime_loop_linkage_ideas_v1_20260711"
+}

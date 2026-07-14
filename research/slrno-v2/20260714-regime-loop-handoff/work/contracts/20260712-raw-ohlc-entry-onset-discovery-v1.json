@@ -1,0 +1,556 @@
+{
+  "contract_id": "raw_ohlc_entry_onset_discovery_v1",
+  "contract_frozen_at_utc": "2026-07-12T00:00:00Z",
+  "scientific_status": "2024_internal_monthly_expanding_oof_entry_sign_discovery",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "strategy_promotion_permitted": false,
+  "economic_edge_claim_permitted": false,
+  "pnl_evaluation_permitted": false,
+  "question": "Which continuous causal OHLC conditions mark the onset of a clean upward or downward price path from the next-bar open?",
+  "skill_workflow": "slrno-bar-pattern-research",
+  "interpretation": {
+    "primary_object": "entry sign onset",
+    "not_a_terminal_return_forecast": true,
+    "not_a_trading_strategy": true,
+    "operational_time_language": "first barrier confirmation time, not the unknowable true start of a move",
+    "feature_and_model_slate": "raw-OHLC only",
+    "universe_independence": false,
+    "universe_selection": "previously assembled twenty-two-stock 2024 convenience cohort; the target and algorithms are entry-sign research, but the universe is inherited",
+    "prospective_claim_permitted": false,
+    "forbidden_inputs": [
+      "regime",
+      "state",
+      "loop",
+      "cycle",
+      "B0",
+      "template",
+      "named_pattern_flag",
+      "prior_prediction",
+      "volume",
+      "order_flow",
+      "quote",
+      "tick",
+      "news",
+      "fundamental"
+    ],
+    "forbidden_outputs": [
+      "P&L",
+      "cost-adjusted return",
+      "profit factor",
+      "Sharpe",
+      "drawdown",
+      "position",
+      "order"
+    ]
+  },
+  "periods": {
+    "data_year": 2024,
+    "calibration_prediction_month": "2024-06",
+    "validation_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "prediction_schedule": "generate monthly expanding OOF probabilities for June through December; June calibrates July alert thresholds and each later score month uses only the immediately preceding OOF month",
+    "train_rule": "an anchor may train a monthly model only when its entire future path ends strictly before that month begins",
+    "fold_chronology": {
+      "same_score_month_outcomes_read_before_that_month_probability": false,
+      "prior_completed_validation_month_path_labels_may_train_later_folds": true,
+      "global_bundle_written_after_some_prior_validation_month_training_labels_are_read": true,
+      "global_bundle_written_before_final_all_fold_evaluation_join": true,
+      "global_bundle_written_before_any_validation_outcome_is_read": false,
+      "interpretation": "causal monthly expanding OOF development, not a globally sealed July-December holdout"
+    },
+    "2023_read_permitted": false,
+    "2025_read_permitted": false,
+    "2026_read_permitted": false,
+    "untouched_holdout_claim_permitted": false
+  },
+  "sources": {
+    "provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "provider_path_template": "symbol={symbol}/timeframe=5m/data.parquet",
+    "columns_read": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "bars": "regular-session five-minute provider OHLC",
+    "provider_price_basis": "provider OHLC exactly as stored; no independent corporate-action adjustment",
+    "provider_volume_label": "historical_volume_not_used",
+    "bid_ask_quotes_available": false,
+    "intrabar_ordering_available": false
+  },
+  "universe": {
+    "symbols": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "AXTI",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "OKLO",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "size": 22,
+    "training_weighting": "raw weight 1 divided by the number of represented sessions for that symbol and the eligible row count for that symbol/session; normalize all weights to mean one",
+    "metric_aggregation": "within symbol/session first, then equal-symbol aggregation"
+  },
+  "bar_validation": {
+    "timezone": "America/New_York",
+    "regular_session_local_time": "09:30 inclusive through 16:00 exclusive",
+    "duplicate_symbol_timestamp": "error",
+    "finite_positive_ohlc_required": true,
+    "ohlc_order_required": "low <= min(open, close) <= max(open, close) <= high",
+    "gap_handling": "start a new causal segment whenever adjacent timestamps within a symbol/session differ from exactly five minutes",
+    "exact_future_path_required": true,
+    "observed_target_blind_regular_rows": 424583,
+    "observed_target_blind_union_sessions": 252,
+    "observed_target_blind_symbol_sessions": 5539,
+    "observed_target_blind_within_session_nonfive_minute_gaps": 2612
+  },
+  "decision_and_path": {
+    "decision_time": "after completed bar t closes",
+    "reference_price": "open of exact next five-minute bar t+1",
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "future_path": "all highs and lows from t+1 through t+h inclusive in the same exact segment",
+    "minimum_prior_contiguous_bars_for_scale": 3,
+    "maximum_prior_contiguous_bars_for_scale": 12,
+    "scale_ends_at": "t-1, excluding the decision bar",
+    "true_range_bps_formula": "10000 * max(log(high/low), abs(log(high/previous_close)), abs(log(low/previous_close)))",
+    "segment_first_bar_true_range": "use 10000 * log(high/low) because no exact prior close exists",
+    "causal_scale": "median true_range_bps over the last min(12, available) exact bars ending at t-1",
+    "scale_floor_bps": 1.0,
+    "barrier_multiple": 1.0,
+    "upper_barrier": "next_open * exp(causal_scale_bps / 10000)",
+    "lower_barrier": "next_open * exp(-causal_scale_bps / 10000)",
+    "open_gap_ordering": "on each future bar, an open at or beyond exactly one barrier establishes that barrier first",
+    "dual_touch_inside_open": "if the open is inside both barriers and that bar high and low touch both, classify intrabar_ambiguous and never infer ordering",
+    "classes": {
+      "0": "no_entry",
+      "1": "long_first",
+      "2": "short_first"
+    },
+    "no_entry_components": [
+      "no_hit_by_horizon",
+      "intrabar_ambiguous"
+    ],
+    "conservative_precision": "wrong-first, no-hit, and ambiguous alerts all count as failures",
+    "path_outcomes_retained": [
+      "upside_mfe_bps",
+      "downside_mfe_bps",
+      "first_confirmation_step",
+      "status",
+      "favourable_excursion_scale_units",
+      "adverse_excursion_scale_units",
+      "pre_confirmation_adverse_scale_units",
+      "directional_dominance_scale_units",
+      "rapid_correct_confirmation_within_3_bars"
+    ],
+    "pre_confirmation_adverse_endpoint": "include the first-confirmation bar conservatively because within-bar ordering beyond the frozen first-touch rule is unknowable",
+    "expected_target_blind_eligible_rows_2024": {
+      "6": 365075,
+      "12": 330577,
+      "24": 264817
+    },
+    "expected_target_blind_validation_rows_july_december": {
+      "6": 186112,
+      "12": 168639,
+      "24": 135240
+    },
+    "expected_target_blind_calibration_rows_june": {
+      "6": 27733,
+      "12": 25143,
+      "24": 20214
+    }
+  },
+  "features": {
+    "source": "the exact frozen forty-feature continuous causal OHLC surface from clean_slate_causal_ohlc_entries_v1",
+    "continuous_only": true,
+    "rolling_scope": "current exact symbol/session segment ending at t",
+    "missing_policy": "fold-training median imputation only",
+    "clock_features": [
+      "clock_fraction",
+      "clock_fraction_squared",
+      "clock_sin_1",
+      "clock_cos_1",
+      "clock_sin_2",
+      "clock_cos_2"
+    ],
+    "full_features_in_order": [
+      "clock_fraction",
+      "clock_fraction_squared",
+      "clock_sin_1",
+      "clock_cos_1",
+      "clock_sin_2",
+      "clock_cos_2",
+      "log_close_open",
+      "log_high_low",
+      "signed_body_fraction",
+      "absolute_body_fraction",
+      "upper_wick_fraction",
+      "lower_wick_fraction",
+      "close_location",
+      "close_return_1",
+      "close_return_3",
+      "close_return_6",
+      "close_return_12",
+      "mean_abs_close_return_3",
+      "mean_abs_close_return_6",
+      "mean_abs_close_return_12",
+      "std_close_return_3",
+      "std_close_return_6",
+      "std_close_return_12",
+      "mean_log_range_3",
+      "mean_log_range_6",
+      "mean_log_range_12",
+      "log_range_ratio_6",
+      "log_range_ratio_12",
+      "session_log_return",
+      "distance_to_session_high",
+      "distance_from_session_low",
+      "session_range_location",
+      "running_log_range",
+      "distance_to_rolling_high_6",
+      "distance_from_rolling_low_6",
+      "distance_to_rolling_high_12",
+      "distance_from_rolling_low_12",
+      "availability_3",
+      "availability_6",
+      "availability_12"
+    ],
+    "fixed_reason_groups": {
+      "clock": [
+        "clock_fraction",
+        "clock_fraction_squared",
+        "clock_sin_1",
+        "clock_cos_1",
+        "clock_sin_2",
+        "clock_cos_2"
+      ],
+      "current_bar_geometry": [
+        "log_close_open",
+        "log_high_low",
+        "signed_body_fraction",
+        "absolute_body_fraction",
+        "upper_wick_fraction",
+        "lower_wick_fraction",
+        "close_location"
+      ],
+      "recent_directional_motion": [
+        "close_return_1",
+        "close_return_3",
+        "close_return_6",
+        "close_return_12"
+      ],
+      "volatility_and_range_level": [
+        "mean_abs_close_return_3",
+        "mean_abs_close_return_6",
+        "mean_abs_close_return_12",
+        "std_close_return_3",
+        "std_close_return_6",
+        "std_close_return_12",
+        "mean_log_range_3",
+        "mean_log_range_6",
+        "mean_log_range_12",
+        "running_log_range"
+      ],
+      "range_change": [
+        "log_range_ratio_6",
+        "log_range_ratio_12"
+      ],
+      "session_drift": [
+        "session_log_return"
+      ],
+      "location_relative_to_extremes": [
+        "distance_to_session_high",
+        "distance_from_session_low",
+        "session_range_location",
+        "distance_to_rolling_high_6",
+        "distance_from_rolling_low_6",
+        "distance_to_rolling_high_12",
+        "distance_from_rolling_low_12"
+      ],
+      "history_availability": [
+        "availability_3",
+        "availability_6",
+        "availability_12"
+      ]
+    }
+  },
+  "algorithms": [
+    {
+      "name": "clock_logit",
+      "role": "time-only probability baseline",
+      "features": "clock_features",
+      "estimator": "LogisticRegression",
+      "scaler": "StandardScaler fitted on training rows only",
+      "parameters": {
+        "penalty": "l2",
+        "C": 0.2,
+        "fit_intercept": true,
+        "solver": "lbfgs",
+        "max_iter": 500,
+        "tol": 1e-06,
+        "random_state": 20260712
+      }
+    },
+    {
+      "name": "full_logit",
+      "role": "interpretable entry-sign candidate",
+      "features": "full_features_in_order",
+      "estimator": "LogisticRegression",
+      "scaler": "StandardScaler fitted on training rows only",
+      "parameters": {
+        "penalty": "l2",
+        "C": 0.2,
+        "fit_intercept": true,
+        "solver": "lbfgs",
+        "max_iter": 500,
+        "tol": 1e-06,
+        "random_state": 20260712
+      }
+    },
+    {
+      "name": "full_hgb",
+      "role": "shallow nonlinear entry-sign candidate",
+      "features": "full_features_in_order",
+      "estimator": "HistGradientBoostingClassifier",
+      "scaler": "none",
+      "parameters": {
+        "loss": "log_loss",
+        "learning_rate": 0.05,
+        "max_iter": 100,
+        "max_leaf_nodes": 7,
+        "max_depth": 3,
+        "min_samples_leaf": 500,
+        "l2_regularization": 10.0,
+        "max_bins": 64,
+        "early_stopping": false,
+        "random_state": 20260712
+      }
+    }
+  ],
+  "model_policy": {
+    "one_model_per_month_horizon_algorithm": true,
+    "class_reweighting": false,
+    "hyperparameter_search": false,
+    "cross_validation_inside_fold": false,
+    "feature_selection": false,
+    "calibration_refit": false,
+    "target_clipping": false,
+    "probability_classes_required": [
+      0,
+      1,
+      2
+    ]
+  },
+  "thresholds_and_onsets": {
+    "threshold_source": "immediately preceding month's OOF probabilities for the same algorithm and horizon",
+    "weighted_quantile_weights": "equal symbol and equal symbol/session using the frozen metric-weight formula",
+    "weighted_quantile_method": "left-continuous inverse weighted empirical CDF: the smallest stably sorted value whose cumulative weight is at least q times total weight",
+    "fire_probability_quantile": 0.95,
+    "rearm_probability_quantile": 0.75,
+    "long_probability": "P(long_first)",
+    "short_probability": "P(short_first)",
+    "long_fire": "P(long_first) >= prior-month long fire threshold and P(long_first) > P(short_first)",
+    "short_fire": "P(short_first) >= prior-month short fire threshold and P(short_first) > P(long_first)",
+    "conflict": "if both sides meet fire conditions, record conflict and emit no onset",
+    "state_reset": "reset both side arms at each symbol/session/exact-segment boundary",
+    "hysteresis": "after a side fires it cannot fire again until its probability drops below that side's prior-month 75th-percentile rearm threshold",
+    "primary_event": "first causal fire after an armed state; persistent high scores are one entry-sign episode",
+    "horizon_cooldown_used": false,
+    "terminal_return_or_same_score_month_outcome_used_in_threshold_or_onset_mapping": false
+  },
+  "matched_clock_controls": {
+    "required": true,
+    "coverage": "one outcome-blind clock control for each candidate onset",
+    "side": "the candidate onset side is imposed on its control",
+    "selection_score": "clock_logit probability for the imposed side, descending",
+    "without_replacement_within_candidate_algorithm_horizon_side": true,
+    "different_session_preferred": true,
+    "exact_match_fields": [
+      "symbol",
+      "month",
+      "horizon",
+      "side",
+      "15-minute clock bin",
+      "history-availability bucket"
+    ],
+    "clock_bin_definitions": {
+      "15-minute": "bar_ordinal integer-divided by 3",
+      "30-minute": "bar_ordinal integer-divided by 6"
+    },
+    "history_availability_bucket": "0 when availability_12 < 0.5; 1 when 0.5 <= availability_12 < 1.0; 2 when availability_12 == 1.0",
+    "relaxation_tiers": [
+      "exact fields and different session",
+      "same symbol/month/horizon/side and 30-minute clock bin/availability bucket",
+      "same symbol/month/horizon/side and 30-minute clock bin",
+      "same symbol/month/horizon/side"
+    ],
+    "deterministic_tie_break": "anchor_id ascending",
+    "candidate_processing_order": "onset_id ascending within candidate algorithm, horizon, and side",
+    "own_anchor_excluded": true,
+    "same_session_policy": "tier 0 requires a different session; relaxation tiers 1 through 3 may use the same session when necessary",
+    "minimum_match_rate": 0.95,
+    "path_outcomes_used_in_selection": false
+  },
+  "hypotheses": [
+    {
+      "id": "H1_full_logit_probability",
+      "question": "Do continuous OHLC features improve every-anchor three-class probability quality over clock alone?",
+      "candidate": "full_logit",
+      "baseline": "clock_logit",
+      "stop_condition": "proper-score advantage is not positive at every horizon or lacks temporal/stock stability"
+    },
+    {
+      "id": "H2_full_hgb_probability",
+      "question": "Does shallow nonlinear structure improve every-anchor three-class probability quality over clock alone?",
+      "candidate": "full_hgb",
+      "baseline": "clock_logit",
+      "stop_condition": "proper-score advantage is not positive at every horizon or lacks temporal/stock stability"
+    },
+    {
+      "id": "H3_full_logit_entry_onsets",
+      "question": "Do interpretable score onsets identify cleaner and earlier direction confirmations than equal-coverage clock controls, long and short separately?",
+      "candidate": "full_logit",
+      "baseline": "matched_clock_control",
+      "stop_condition": "support, conservative precision, quality, speed, bootstrap, month, or stock stability fails"
+    },
+    {
+      "id": "H4_full_hgb_entry_onsets",
+      "question": "Do nonlinear score onsets identify cleaner and earlier direction confirmations than equal-coverage clock controls, long and short separately?",
+      "candidate": "full_hgb",
+      "baseline": "matched_clock_control",
+      "stop_condition": "support, conservative precision, quality, speed, bootstrap, month, or stock stability fails"
+    },
+    {
+      "id": "H5_recurring_observable_signs",
+      "question": "Which pre-evaluation-join feature groups repeatedly cause the causal monthly fitted algorithms to fire across months and stocks?",
+      "candidate": "same-score-month-outcome-blind reason dictionary",
+      "baseline": "no recurring sign",
+      "stop_condition": "contribution direction appears in fewer than five months or fewer than fifteen stocks"
+    }
+  ],
+  "metrics": {
+    "every_anchor_probability": [
+      "multiclass log loss",
+      "multiclass Brier score",
+      "top-class accuracy",
+      "macro one-vs-rest AUC",
+      "class calibration"
+    ],
+    "entry_onset": [
+      "onset count",
+      "long and short support",
+      "conservative correct-first precision",
+      "wrong-first rate",
+      "no-hit rate",
+      "ambiguous rate",
+      "resolved-only precision descriptive",
+      "rapid correct confirmation within three bars",
+      "favourable excursion scale units",
+      "adverse excursion scale units",
+      "pre-confirmation adverse scale units",
+      "directional dominance scale units",
+      "first-confirmation lead bars"
+    ],
+    "slices": [
+      "horizon",
+      "side",
+      "validation month",
+      "stock",
+      "unchanged-prediction leave-one-stock-out deletion",
+      "session clock quartile"
+    ],
+    "clock_quartile_definition": "min(bar_ordinal * 4 integer-divided by 78, 3)",
+    "inference": {
+      "unit": "session date with within-symbol/session aggregation first",
+      "bootstrap": "paired non-circular overlapping five-session moving-block bootstrap",
+      "draws": 5000,
+      "random_state": 20260712,
+      "candidate_side_multiplicity_family": 4,
+      "one_sided_alpha_per_candidate_side": 0.0125,
+      "lower_quantile": 0.0125,
+      "upper_quantile": 0.9875
+    }
+  },
+  "retention_gate_per_candidate_side": {
+    "minimum_onsets_each_horizon": 500,
+    "minimum_onsets_each_validation_month_and_horizon": 50,
+    "minimum_stocks_each_horizon": 15,
+    "minimum_side_onsets_each_horizon": 100,
+    "minimum_side_stocks_each_horizon": 10,
+    "minimum_matched_control_rate": 0.95,
+    "probability_log_loss_better_than_clock_each_horizon": true,
+    "probability_brier_better_than_clock_each_horizon": true,
+    "probability_minimum_months_with_both_log_loss_and_brier_better_each_horizon": 4,
+    "probability_minimum_unchanged_prediction_stock_deletions_with_both_better_each_horizon": 18,
+    "minimum_absolute_precision_lift_each_horizon": 0.05,
+    "minimum_relative_precision_lift_each_horizon": 0.10,
+    "minimum_rapid_success_lift_each_horizon": 0.02,
+    "positive_directional_dominance_lift_each_horizon": true,
+    "pre_confirmation_adverse_not_worse_each_horizon": true,
+    "bootstrap_bounds_support_precision_rapid_dominance_and_adverse_each_horizon": true,
+    "minimum_positive_precision_lift_months_each_horizon": 4,
+    "minimum_positive_precision_lift_stock_deletions_each_horizon": 18,
+    "all_required": true,
+    "pass_interpretation": "retain only as a recurring 2024 internal entry-sign hypothesis for genuinely new shadow sessions",
+    "failure_interpretation": "reject or leave descriptive; do not alter barriers, thresholds, sides, features, or reason groups after outcomes are opened"
+  },
+  "reason_extraction": {
+    "written_before_final_all_fold_evaluation_join": true,
+    "written_before_any_validation_outcome_is_read": false,
+    "same_score_month_outcomes_used_for_that_fold_reasons": false,
+    "prior_completed_validation_month_labels_may_have_trained_later_fold_models": true,
+    "full_logit": "exact chosen-direction versus opposite-direction standardized logit contributions, aggregated into frozen feature groups; contributions plus intercept must reconstruct the directional logit margin",
+    "full_hgb": "chosen-direction probability-margin change when one frozen feature group is replaced by fold-training medians; label as local sensitivity, not additive or causal explanation",
+    "top_groups_per_onset": 3,
+    "recurring_month_requirement": 5,
+    "recurring_stock_requirement": 15,
+    "plain_language_mapping_frozen_before_outcomes": true,
+    "post_outcome_correct_vs_failed_enrichment": "exploratory only and cannot rescue any hypothesis"
+  },
+  "integrity": {
+    "contract_runner_environment_and_whole_provider_hashes_frozen_before_scoring": true,
+    "each_score_month_probability_generated_before_same_month_outcomes_are_read": true,
+    "prior_completed_validation_month_labels_used_in_later_expanding_folds": true,
+    "global_bundle_written_before_final_all_fold_evaluation_join": true,
+    "global_bundle_written_before_any_validation_outcome_is_read": false,
+    "pre_outcome_artifact_filename_semantics": "legacy shorthand meaning before the final all-fold evaluation join; it does not mean that prior completed validation-month training labels were globally unread",
+    "independent_reconstruction_required": true,
+    "any_post_score_change_requires_new_version_and_new_future_data": true,
+    "required_labels": {
+      "research_only": true,
+      "live_ordering_enabled": false,
+      "order_placement": "disabled"
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "contract_id": "20260714-selective-payoff-prospective-log-v1",
+  "status": "specification_only_not_activated",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "position_or_order_functionality_allowed": false,
+  "application_implementation_authorized": false,
+  "strategy_promotion_allowed": false,
+  "purpose": "Prospectively determine whether completed-path information supports a calibrated negative veto, a positive admission, or only unknown abstention after static context and full loop-score combinations failed on opened 2024.",
+  "opened_development_evidence": {
+    "artifact": "../artifacts/20260714-selective-payoff-equations-v1/primary",
+    "period": 2024,
+    "scientific_status": "post_inspection_causal_retrospective_equation_development_not_validation",
+    "do_not_retest_or_tune": true,
+    "findings": [
+      "Prediction-only payoff AUC was 0.495.",
+      "Context-only payoff AUC was 0.534 and did not securely improve log-loss over predictions.",
+      "Adding all 20 loop compatibility scores worsened context log-loss by 0.00509 on average, with a session-block interval wholly below zero for improvement.",
+      "One-to-three-bar sequential path state reached AUC 0.588 but no calibrated point or conservative expected-net estimate crossed zero.",
+      "All primary and point diagnostic equations abstained on every primary opportunity.",
+      "A post-inspection raw-probability tail looked positive but was not monotonic, used a hindsight global percentile, and cannot define an activation threshold.",
+      "The low sequential-probability tail was strongly negative descriptively and motivates a prospective veto hypothesis only."
+    ]
+  },
+  "activation_requirements": [
+    "Set an immutable activation timestamp before the first new observation.",
+    "Use only genuinely unseen sessions after model source, causal features, costs, calibration, support, and evaluation code are hashed.",
+    "Log the full eligible population before positive, negative, or unknown classification.",
+    "Keep alert, completed checkpoint, hypothetical next-open admission, and sealed outcome ledgers separate.",
+    "Do not choose a probability percentile, confirmation checkpoint, target, stop, horizon, calibration neighbourhood, or support threshold from opened 2024 tails.",
+    "Do not activate or implement through the trading application without separate explicit authorization."
+  ],
+  "frozen_targets": {
+    "positive": "lower uncertainty bound of cost-adjusted target-before-invalidation expectancy above zero",
+    "negative_veto": "upper uncertainty bound of cost-adjusted expectancy below zero",
+    "unknown_abstain": "all remaining observations",
+    "primary_cost_bps_per_side": 5,
+    "accuracy": "precision conditional on class jointly reported with coverage",
+    "economic_target": "net payoff per full eligible opportunity as well as per selected observation"
+  },
+  "prospective_hypotheses": [
+    {
+      "id": "P1_sequential_negative_veto",
+      "priority": "primary",
+      "claim": "One-to-three completed bars may identify a calibrated negative payoff state with nonzero stable coverage.",
+      "guard": "No bottom-tail threshold from opened 2024 may be reused."
+    },
+    {
+      "id": "P2_sequential_positive_admission",
+      "priority": "secondary",
+      "claim": "Sequential path state may eventually identify a positive expectancy class once genuinely prospective support exists.",
+      "guard": "The opened raw top-five-percent diagnostic is not a rule, threshold, or validation result."
+    },
+    {
+      "id": "P3_loop_scores_context_only",
+      "priority": "control",
+      "claim": "Loop scores remain structural context and must demonstrate incremental prospective payoff value before entering an admission equation.",
+      "guard": "The full opened-2024 loop vector cannot be retuned or interaction-mined."
+    }
+  ],
+  "required_fields": [
+    "all frozen prediction or loop compatibility scores with mass and availability timestamp",
+    "causal local context at the completed decision bar",
+    "one, two, and three completed-bar path snapshots",
+    "structural risk and risk-specific break-even probability",
+    "raw and causally calibrated target-first probabilities",
+    "positive, negative, or unknown state with uncertainty and support",
+    "next-open counterfactual only",
+    "target, invalidation, no-touch, MFE, MAE, gross, and net outcomes opened only after window close"
+  ],
+  "evaluation": [
+    "calibration and log-loss against prior-only baselines",
+    "positive and negative precision with coverage",
+    "paired net payoff per full opportunity",
+    "session-block uncertainty and multiplicity control",
+    "time and quarter stability",
+    "leave-one-stock-out robustness",
+    "2.5, 5, 7.5, and 10 bps per-side cost sensitivity",
+    "independent source, timestamp, leakage, outcome-seal, and exact-rerun audit"
+  ],
+  "provenance": {
+    "historical_volume": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "five_minute_intrabar_order": "unknown",
+    "market_or_sector_context": "must come from a separately frozen timestamp-audited source"
+  }
+}

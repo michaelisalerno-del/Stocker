@@ -1,0 +1,107 @@
+{
+  "files": [
+    {
+      "bytes": 46005,
+      "name": "active_episodes.csv",
+      "sha256": "44c70d713c6e6e30e924a7d41a8ab25159289135f0530f93437e9a1cdd7e4179"
+    },
+    {
+      "bytes": 4882,
+      "name": "adjacent_block_drift.csv",
+      "sha256": "b7ef252a4cabf3a2b78be148d5fa8cfc7ebc620fe091e4decf2133fee78d3b5f"
+    },
+    {
+      "bytes": 137036,
+      "name": "cell_block_profitability.csv",
+      "sha256": "ceae439dc0c836e06d63c1364dd182a6f7bffc910a534586cf759c0c3edf2019"
+    },
+    {
+      "bytes": 63364,
+      "name": "chronology_audit.csv",
+      "sha256": "953c92e28ce4edc155495789276053fbc0e5ab01bcb0834108fdcefb381f39d6"
+    },
+    {
+      "bytes": 215,
+      "name": "condition_thresholds_2024.json",
+      "sha256": "d6d0d93a5dd633c8040ee929be5d4069bcf1d3259d5faca6dfd3cdfa06682a6a"
+    },
+    {
+      "bytes": 102033,
+      "name": "daily_portfolio_returns.parquet",
+      "sha256": "2ee2530528a1dc15f29e5e3bb0cc1c70f906e62bfd6a13f38e0be6e0d4e5db56"
+    },
+    {
+      "bytes": 997,
+      "name": "decision.json",
+      "sha256": "d44dce3c5eefad763d2d20163b70532b067cf614fc5ed00dd5e84891e5a643ca"
+    },
+    {
+      "bytes": 336,
+      "name": "historical_volume_audit.csv",
+      "sha256": "70e0e848dd38433268ade239448cf73d39fe74e20bdf523136f4fd884a88c452"
+    },
+    {
+      "bytes": 1385,
+      "name": "independent_audit.json",
+      "sha256": "6c5d9be26781f2cfab369240606b5025cab313429406f012c22627707953d2ed"
+    },
+    {
+      "bytes": 2334,
+      "name": "lifecycle_age_metrics.csv",
+      "sha256": "349c962a294abf0f7a08d3c346306837e62591d4556051b35d7b294d35e34884"
+    },
+    {
+      "bytes": 582,
+      "name": "lifetime_comparisons.csv",
+      "sha256": "0cea7785b41b2ff706d4fa10eea22dd0be52792c77da9261db168f7f1c3ff49d"
+    },
+    {
+      "bytes": 2868,
+      "name": "primary_bootstraps.csv",
+      "sha256": "31a9f79484af9b34bc837aa2e24d4d727e4bccc3b6607feeb04ebcbc0925c8db"
+    },
+    {
+      "bytes": 289662,
+      "name": "primary_cell_states.parquet",
+      "sha256": "8e33354abe7762a6bb805a62f504c5af28f3e540a126b94ef46eb7ea76a6c5b3"
+    },
+    {
+      "bytes": 6916,
+      "name": "profitable_cell_streaks.csv",
+      "sha256": "1d8880d84e025bd8f33371cbf46ebc32f5585b3652df899e7c659c60aa198696"
+    },
+    {
+      "bytes": 35647,
+      "name": "quarter_metrics.csv",
+      "sha256": "ea4d5bbdcaaa6fdbf1238efe5f2bad2ad937dd3784e632be837cc4220d18a6cb"
+    },
+    {
+      "bytes": 4862949,
+      "name": "scored_signal_ledger.parquet",
+      "sha256": "3869bd246192e392c7a51c2a4453e52940a023882edf63bf3a149998cb9ee075"
+    },
+    {
+      "bytes": 18089,
+      "name": "selector_metrics.csv",
+      "sha256": "e1844130656ec329689ad8e11b8aec32afde2c18a37c13e520dfc19782ec09b3"
+    },
+    {
+      "bytes": 4915,
+      "name": "source_hashes.json",
+      "sha256": "754ae356440a37a8c0fb6430fb247e72b174046131cac6cb18251d1b67eed438"
+    },
+    {
+      "bytes": 56368,
+      "name": "stock_deletion_metrics.csv",
+      "sha256": "16186dc6bf35dfccc1b2314399acefe793b6807c5711070d593f104f81682fed"
+    },
+    {
+      "bytes": 19485,
+      "name": "summary.json",
+      "sha256": "3d1238a567479b48c87dcf20b76c89b9204c42909b894cc98cfde5e2a38605e1"
+    }
+  ],
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true
+}

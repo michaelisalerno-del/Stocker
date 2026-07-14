@@ -1,0 +1,88 @@
+{
+  "context_retained": false,
+  "history_retained": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "periods": {
+    "2023": {
+      "context_vs_history": {
+        "ece_pass": true,
+        "intervals_pass": true,
+        "maximum_supported_bin_error_pass": false,
+        "negative_cycle_count": 17,
+        "pass": false,
+        "per_cycle_pass": true,
+        "quarters_pass": true,
+        "relative_log_loss_pass": true,
+        "stock_deletions_pass": true,
+        "top_three_recall_difference": 0.0003537735849056256,
+        "top_three_recall_pass": true,
+        "top_three_recall_requirement": 0.0
+      },
+      "history_vs_first_order": {
+        "ece_pass": true,
+        "intervals_pass": true,
+        "maximum_supported_bin_error_pass": true,
+        "negative_cycle_count": 20,
+        "pass": true,
+        "per_cycle_pass": true,
+        "quarters_pass": true,
+        "relative_log_loss_pass": true,
+        "stock_deletions_pass": true,
+        "top_three_recall_difference": 0.05853773584905664,
+        "top_three_recall_pass": true,
+        "top_three_recall_requirement": 0.05
+      },
+      "support": {
+        "current_states": 8,
+        "cycles": 20,
+        "minimum_cycle_positives": 871,
+        "pass": true,
+        "positives": 42400,
+        "quarters": 4,
+        "rows": 709455,
+        "stocks": 20
+      }
+    },
+    "2025": {
+      "context_vs_history": {
+        "ece_pass": true,
+        "intervals_pass": true,
+        "maximum_supported_bin_error_pass": false,
+        "negative_cycle_count": 20,
+        "pass": false,
+        "per_cycle_pass": true,
+        "quarters_pass": true,
+        "relative_log_loss_pass": true,
+        "stock_deletions_pass": true,
+        "top_three_recall_difference": 0.0009085191138443749,
+        "top_three_recall_pass": true,
+        "top_three_recall_requirement": 0.0
+      },
+      "history_vs_first_order": {
+        "ece_pass": true,
+        "intervals_pass": true,
+        "maximum_supported_bin_error_pass": true,
+        "negative_cycle_count": 20,
+        "pass": true,
+        "per_cycle_pass": true,
+        "quarters_pass": true,
+        "relative_log_loss_pass": true,
+        "stock_deletions_pass": true,
+        "top_three_recall_difference": 0.06552985300626646,
+        "top_three_recall_pass": true,
+        "top_three_recall_requirement": 0.05
+      },
+      "support": {
+        "current_states": 8,
+        "cycles": 20,
+        "minimum_cycle_positives": 516,
+        "pass": true,
+        "positives": 42927,
+        "quarters": 4,
+        "rows": 711877,
+        "stocks": 22
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "continuous_model": {
+    "alpha": 10.0,
+    "class": "Ridge",
+    "solver": "lsqr"
+  },
+  "direction_model": {
+    "C": 0.2,
+    "class": "LogisticRegression",
+    "max_iter": 500,
+    "random_state": 20260710,
+    "solver": "lbfgs"
+  },
+  "feature_widths": {
+    "loop_scores": 37,
+    "raw_history": 665,
+    "state_context": 17
+  },
+  "horizons": [
+    6,
+    12,
+    24
+  ],
+  "live_ordering_enabled": false,
+  "loop_score_columns": [
+    "loop_score_01",
+    "loop_score_02",
+    "loop_score_03",
+    "loop_score_04",
+    "loop_score_05",
+    "loop_score_06",
+    "loop_score_07",
+    "loop_score_08",
+    "loop_score_09",
+    "loop_score_10",
+    "loop_score_11",
+    "loop_score_12",
+    "loop_score_13",
+    "loop_score_14",
+    "loop_score_15",
+    "loop_score_16",
+    "loop_score_17",
+    "loop_score_18",
+    "loop_score_19",
+    "loop_score_20"
+  ],
+  "numeric_controls": [
+    "b0_entry_numeric",
+    "b0_entry_high_stress",
+    "entry_time_sin",
+    "entry_time_cos",
+    "current_bar_log_return",
+    "return_sum_6",
+    "mean_abs_return_12",
+    "session_return",
+    "bar_range_pct"
+  ],
+  "numeric_medians": {
+    "b0_entry_high_stress": 0.0,
+    "b0_entry_numeric": 0.0,
+    "bar_range_pct": 0.005699951085824075,
+    "current_bar_log_return": 0.0,
+    "entry_time_cos": -0.5000000000000004,
+    "entry_time_sin": 0.3919666098600751,
+    "mean_abs_return_12": 0.0034697407896629017,
+    "return_sum_6": 0.0003632852771070237,
+    "session_return": -0.0019618606079920015
+  },
+  "order_placement": "disabled",
+  "representations": [
+    "state_context",
+    "raw_history",
+    "loop_scores"
+  ],
+  "research_only": true,
+  "volume_label": "historical_volume_not_used"
+}

@@ -1,0 +1,674 @@
+{
+  "contract_id": "factor_conditioned_loop_occurrence_v1",
+  "contract_frozen_at_utc": "2026-07-11T17:38:07Z",
+  "scientific_status": "post_result_development_on_opened_2024_with_2025_development_and_backward_2023_demotion_only",
+  "objective": "Test whether nine causal run-entry factors combined with the retained last-three-state pattern improve probabilities for the same twenty overlapping fixed-loop occurrence labels.",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "execution_authorization": "offline_research_only",
+  "deployment_enabled": false,
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "movement_quality_claim": false,
+  "non_objectives": [
+    "direction",
+    "signed_return",
+    "price_consequence",
+    "pnl",
+    "economic_edge",
+    "tradability",
+    "broker_execution",
+    "paper_or_demo_orders",
+    "deployment",
+    "promotion_of_any_loop_to_good_or_high_movement_quality"
+  ],
+  "periods": {
+    "fit_and_causal_development": 2024,
+    "outer_oof_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "inner_validation_months_begin": "2024-04",
+    "development_score": 2025,
+    "backward_portability_score": 2023,
+    "later_periods_are_prospective": false,
+    "forbidden": [
+      2026,
+      "prospective_shadow"
+    ]
+  },
+  "frozen_sources": {
+    "runs_2024": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/train_2024_filtered_runs.csv",
+      "sha256": "9557298a1a1bc32d47e15a3be31c453f81e019c5a9b1cf76401e4ad4613614d0",
+      "rows": 110949,
+      "stocks": 22
+    },
+    "runs_2025": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/test_2025_filtered_runs.csv",
+      "sha256": "174e5880e084edd894faee64c38dc0db9cf22bddc449340ee0dd85ebd697c3a9",
+      "rows": 109658,
+      "stocks": 22
+    },
+    "runs_2023": {
+      "path": "/private/tmp/stocker_sealed_backward_2023_complete_detector_20260710/backward_2023_filtered_runs.parquet",
+      "sha256": "674ce436bd5d39ba09d3d8ac0f53ab8560c2bc5362add7dcaa8110f5ba97521f",
+      "rows": 107159,
+      "stocks": 20
+    },
+    "cycles": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/fixed_cycle_shuffled_nulls.csv",
+      "sha256": "5695f09a7573a110034d251b5abdc40c2f37a11cc7198b196636a624c7d1ad22",
+      "count": 20
+    },
+    "retained_path_parameters": {
+      "path": "/private/tmp/stocker_causal_loop_prefix_path_forecast_20260710/model_parameters.npz",
+      "sha256": "72f7cdf5e9aabc142630c0eb4486e11dace0cb03c1b5b5fd4da2f06d13b8cda7"
+    },
+    "retained_path_gates": {
+      "path": "/private/tmp/stocker_causal_loop_prefix_path_forecast_20260710/gates.json",
+      "sha256": "a845d03e5adb2f102322148fe2d2571aab3c9283154a839eacbe2d40427a983d"
+    },
+    "provider_hash_manifest": {
+      "path": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/source_hashes.json",
+      "sha256": "b63b51dc41c7868fc54cb0a9b1114e9095b2fdd89a9510baaec7c375db1da619"
+    },
+    "provider_root_2024_2025": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "provider_root_2023": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock"
+  },
+  "population_and_target": {
+    "forecast_origin": "after_the_current_regular_session_five_minute_provider_bar_closes",
+    "anchor_universe": "every_filtered_state_run_entry_in_the_frozen_period_run_file",
+    "natural_key": [
+      "symbol_norm",
+      "session_date",
+      "start_timestamp"
+    ],
+    "natural_key_merge_must_be_one_to_one": true,
+    "silent_row_drops_allowed": false,
+    "price_horizon_anchor_panels_forbidden": true,
+    "compatible_anchor_cycle_rows_expected": {
+      "2024": 759212,
+      "2025": 711877,
+      "2023": 709455
+    },
+    "positive_rows_expected": {
+      "2024": 46630,
+      "2025": 42927,
+      "2023": 42400
+    },
+    "session_end_destination": 8,
+    "loop_labels": "twenty_overlapping_multi_label_fixed_cycle_occurrences",
+    "target_definition": "one_when_the_next_two_to_four_filtered_destinations_exactly_complete_any_compatible_rotation_of_the_cycle_and_zero_otherwise",
+    "future_destination_shift": "shift_filtered_states_only_within_symbol_norm_and_session_date_and_fill_every_unavailable_step_with_destination_8_never_with_the_next_session",
+    "terminal_anchor_semantics": "a_run_with_no_next_state_has_all_compatible_loop_labels_zero_and_remains_in_residual_fitting_lambda_selection_pooled_evaluation_and_ranking;_only_the_terminal_slice_is_report_only_and_exempt_from_positive_support_gates",
+    "maximum_future_state_steps_used_only_for_label": 4,
+    "softmax_across_cycles_forbidden": true,
+    "split_and_resample_unit": "session"
+  },
+  "feature_construction": {
+    "pattern": {
+      "columns": [
+        "previous_state_2",
+        "previous_state_1",
+        "state"
+      ],
+      "token_formula": "((previous_state_2 * 9 + previous_state_1) * 8 + state)",
+      "token_width": 648,
+      "fold_local_history_offset_required_in_2024_oof": true,
+      "full_2024_frozen_history_offset_allowed_only_for_final_fit_and_later_scoring": true
+    },
+    "limited4": [
+      "b0_entry_numeric",
+      "b0_entry_high_stress",
+      "entry_time_sin",
+      "entry_time_cos"
+    ],
+    "new5": [
+      "current_bar_log_return",
+      "return_sum_6",
+      "mean_abs_return_12",
+      "session_return",
+      "bar_range_pct"
+    ],
+    "full9": [
+      "b0_entry_numeric",
+      "b0_entry_high_stress",
+      "entry_time_sin",
+      "entry_time_cos",
+      "current_bar_log_return",
+      "return_sum_6",
+      "mean_abs_return_12",
+      "session_return",
+      "bar_range_pct"
+    ],
+    "entry_clock": "recompute_from_start_timestamp_in_America_New_York_including_seconds_relative_to_09_30_over_390_minutes",
+    "stored_run_time_sin_cos_forbidden": true,
+    "price_factor_formulas": {
+      "current_bar_log_return": "log(close / previous_close), with first session bar log(close / open)",
+      "return_sum_6": "within_session_rolling_sum_of_current_bar_log_return_window_6_min_periods_1",
+      "mean_abs_return_12": "within_session_rolling_mean_absolute_current_bar_log_return_window_12_min_periods_1",
+      "session_return": "log(close / session_open)",
+      "bar_range_pct": "(high - low) / open"
+    },
+    "b0_missing_policy": "map_missing_b0_state_numeric_to_neutral_zero_exactly_as_the_retained_limited_model_and_report_b0_unknown_as_a_diagnostic_slice_not_a_predictor",
+    "numeric_preprocessing": "after_declared_imputation_z_equals_x_minus_training_prefix_anchor_level_median_divided_by_the_square_root_of_the_training_prefix_anchor_level_mean_squared_deviation_from_that_median_with_zero_or_nonfinite_scale_replaced_by_one",
+    "future_factors_forbidden": true,
+    "duration_end_position_end_timestamp_next_state_and_has_next_as_predictors_forbidden": true,
+    "stock_identity_predictor_forbidden": true,
+    "volume": {
+      "used": false,
+      "label": "historical_volume_not_used",
+      "provider_bars": "regular_session_five_minute_provider_OHLCV"
+    },
+    "provider_scan_and_factor_table": {
+      "columns_materialized": ["timestamp", "open", "high", "low", "close"],
+      "predicate_pushdown": "apply_timestamp_greater_equal_January_1_UTC_and_less_than_next_January_1_UTC_in_the_Parquet_scan_before_materialization",
+      "timestamp": "parse_or_validate_as_UTC_and_stop_on_null_or_out_of_year_row",
+      "regular_session_filter": "convert_to_America_New_York_and_keep_local_minutes_at_least_570_and_less_than_960",
+      "session_date": "local_America_New_York_calendar_date",
+      "placeholder_cleanup_before_ordering_and_rolling": "after_year_predicate_and_regular_session_filter_discard_only_rows_where_open_high_low_and_close_are_all_null_exactly_as_the_frozen_pre_state_lineage_did;_stop_on_any_partial_OHLC_null_or_null_timestamp",
+      "fit_2024_placeholder_audit": {
+        "discarded_rows": 5539,
+        "all_four_OHLC_null_rows": 5539,
+        "partial_null_rows": 0,
+        "run_entry_natural_key_intersection": 0,
+        "canonical_discarded_key_columns": ["symbol_norm", "timestamp_ns_utc"],
+        "canonical_discarded_key_hash_rule": "stable_sort_then_SHA256_UTF8_LF_CSV_with_header_symbol_norm_comma_timestamp_ns_utc_and_decimal_UTC_nanoseconds",
+        "canonical_discarded_key_sha256": "0925d79df089152ff694326c6b3b28d89e03e7ac6885dd4493112fa845bfc997",
+        "per_symbol": {
+          "AAL": 10,
+          "AAOI": 13,
+          "APLD": 10,
+          "ASTS": 13,
+          "AXTI": 2370,
+          "CIFR": 10,
+          "HIMS": 7,
+          "IONQ": 8,
+          "IREN": 8,
+          "MARA": 10,
+          "MP": 7,
+          "MRNA": 10,
+          "MSTR": 17,
+          "NVTS": 11,
+          "OKLO": 2797,
+          "QBTS": 18,
+          "RGTI": 96,
+          "RIOT": 9,
+          "RIVN": 9,
+          "SMCI": 9,
+          "SOFI": 9,
+          "WULF": 88
+        }
+      },
+      "later_placeholder_rule": "apply_the_identical_all_four_null_cleanup_only_after_score_authorization_and_audit_discarded_counts_keys_hash_and_zero_run_entry_intersection_without_using_later_counts_to_refit_or_select",
+      "ordering": "after_placeholder_cleanup_symbol_norm_then_timestamp_ascending_stable",
+      "failures": "stop_on_duplicate_symbol_timestamp_any_remaining_nonfinite_or_nonpositive_OHLC_high_below_max_open_close_or_low_above_min_open_close",
+      "grouping": "all_rolling_and_session_features_grouped_only_within_symbol_norm_and_local_session_date",
+      "canonical_table_columns": ["symbol_norm", "timestamp_ns_utc", "session_date", "bar_ordinal", "current_bar_log_return", "return_sum_6", "mean_abs_return_12", "session_return", "bar_range_pct"],
+      "canonical_table_hash": "sort_by_symbol_norm_timestamp_ns_utc_then_SHA256_the_UTF8_LF_terminated_CSV_with_header_integer_fields_in_decimal_and_float_fields_formatted_dot17g",
+      "fit_2024_canonical_retained_factor_table_sha256": "f07a1feae8aa4e61092131f659648eaaf39fdb8ce211d3e7f931b56abda1891a",
+      "fit_phase_year": 2024,
+      "later_year_tables_forbidden_before_authorization": true
+    }
+  },
+  "models": {
+    "qhistory": "fold_local_retained_history_transition_kernel_multiplied_along_each_compatible_path",
+    "qold_limited_path": "fold_local_history_plus_B0_stress_clock_transition_kernel_with_anchor_factors_repeated_along_the_hypothetical_path_reported_only_as_a_lineage_baseline",
+    "qpattern": "fixed_history_logit_offset_plus_direct_cycle_and_cycle_current_state_residual_head",
+    "qlimited4": "qpattern_plus_limited4_global_cycle_route_and_history_token_factor_interactions",
+    "qfull9": "qpattern_plus_full9_global_cycle_route_and_history_token_factor_interactions",
+    "primary_candidate": "qfull9",
+    "path_semantics": "entry_factors_are_used_once_in_the_direct_anchor_cycle_residual_head_and_are_never_repeated_down_hypothetical_transitions",
+    "history_offset_coefficient": 1.0,
+    "residual_probability": "sigmoid(logit(clip(qhistory,1e-12,1-1e-12)) + X_beta)",
+    "exact_design": {
+      "category_order": {
+        "cycle": "cycle_id_ascending_with_cycle_20_as_reference",
+        "route": "within_each_cycle_current_state_ascending_with_the_largest_compatible_state_as_reference",
+        "history_token": "integer_0_through_647",
+        "factor": "the_declared_limited4_or_full9_order"
+      },
+      "weighted_contrast_formula": "for_nonreference_level_j_column_j_is_one_on_j_minus_p_j_divided_by_p_reference_on_the_reference_level_and_zero_otherwise",
+      "contrast_weights": "training_prefix_inverse_number_of_compatible_cycles_per_anchor",
+      "cycle_contrast_width": 19,
+      "route_contrast_width": 24,
+      "qpattern_blocks_in_order": [
+        "global_intercept_width_1",
+        "cycle_contrast_width_19",
+        "within_cycle_route_contrast_width_24"
+      ],
+      "factor_blocks_appended_in_order": [
+        "global_factor",
+        "cycle_contrast_times_factor_factor_major_then_contrast_ascending",
+        "route_contrast_times_factor_factor_major_then_contrast_ascending",
+        "history_token_one_hot_times_factor_factor_major_then_token_ascending"
+      ],
+      "history_token_factor_centered": false,
+      "history_token_factor_backoff": "the_global_cycle_and_route_factor_blocks_supply_backoff_and_unsupported_token_columns_are_zero",
+      "qpattern_width": 44,
+      "qlimited4_width": 2812,
+      "qfull9_width": 6272,
+      "serialized_design_dtype": "float64_CSR",
+      "coefficient_objective_and_gradient_dtype": "float64",
+      "validation_and_scoring": "reuse_training_prefix_contrast_weights_numeric_transform_token_support_mask_and_column_order_without_recentering",
+      "fit_loss_row_weight": 1.0,
+      "global_intercept_penalty_multiplier": 0.0
+    },
+    "normalized_objective": "mean_unweighted_compatible_row_binary_log_loss_plus_one_half_lambda_times_weighted_L2",
+    "class_weights": null,
+    "ridge_lambda_grid": [
+      0.0001,
+      0.0003,
+      0.001,
+      0.003
+    ],
+    "lambda_tie_tolerance": 1e-12,
+    "lambda_tie_break": "largest_lambda",
+    "penalty_multipliers": {
+      "global_intercept": 0.0,
+      "cycle_residual": 4.0,
+      "route_residual": 8.0,
+      "global_factor": 1.0,
+      "cycle_factor": 4.0,
+      "route_factor": 8.0,
+      "history_token_factor": 32.0
+    },
+    "centering": {
+      "cycle": "weighted_sum_to_zero_reference_contrasts_from_training_prefix_inverse_compatible_anchor_weights",
+      "route": "weighted_sum_to_zero_reference_contrasts_within_cycle_from_training_prefix_inverse_compatible_anchor_weights",
+      "history_token_factor": "not_centered_sparse_indicator_times_factor",
+      "later_rows_recentered": false
+    },
+    "numeric_transform": {
+      "b0_missing_first_action": "replace_missing_b0_state_numeric_with_neutral_zero",
+      "all_factor_imputation": "replace_any_remaining_nonfinite_value_with_the_training_prefix_median_and_stop_if_a_declared_price_factor_is_nonfinite_before_imputation",
+      "missing_b0_high_stress": "replace_with_zero_before_the_common_numeric_transform",
+      "center": "training_prefix_anchor_level_median_before_anchor_cycle_expansion",
+      "scale": "square_root_of_the_training_prefix_anchor_level_mean_squared_deviation_from_that_median",
+      "zero_or_nonfinite_scale": "replace_with_one",
+      "formula": "z_equals_x_imputed_minus_training_median_divided_by_training_median_centered_RMS",
+      "later_rows": "reuse_training_prefix_medians_and_scales"
+    },
+    "token_factor_support": {
+      "minimum_training_prefix_anchors": 200,
+      "anchor_count_definition": "unique_anchor_ids_for_the_token_before_anchor_cycle_expansion",
+      "minimum_training_prefix_positive_compatible_labels": 50,
+      "positive_count_definition": "sum_of_overlapping_positive_anchor_cycle_labels_after_expansion",
+      "mask_rule": "compute_once_per_training_prefix_from_the_common_labels_and_share_the_identical_mask_between_qlimited4_and_qfull9",
+      "below_support_action": "all_token_factor_coordinates_for_that_token_are_exactly_zero"
+    },
+    "solver": {
+      "library": "scipy.optimize.minimize",
+      "method": "L-BFGS-B",
+      "max_iter": 1000,
+      "ftol": 1e-12,
+      "gtol": 1e-8,
+      "seed": 20260711,
+      "n_jobs": 1,
+      "initial_coefficients": 0.0,
+      "required_result": "optimizer_success_true_finite_objective_and_gradient_and_converged_strictly_before_max_iter_otherwise_stop"
+    },
+    "fold_local_history_kernel": {
+      "model": "sklearn.linear_model.LogisticRegression_multinomial",
+      "C": 0.2,
+      "solver": "lbfgs",
+      "max_iter": 500,
+      "tol": 0.0001,
+      "random_state": 20260710,
+      "token_matrix_dtype": "float32",
+      "coefficient_dtype": "float64",
+      "destination_class_order": [0, 1, 2, 3, 4, 5, 6, 7, 8],
+      "session_end_destination": 8,
+      "step_probability_clip": [1e-12, 0.999999999999],
+      "path_rule": "multiply_destination_probabilities_along_each_rotation_then_sum_compatible_rotations_and_clip_the_final_loop_probability_to_1e-12_1_minus_1e-12"
+    },
+    "fold_local_old_limited_kernel": {
+      "model_settings": "identical_to_fold_local_history_kernel",
+      "additional_raw_float32_columns": [
+        "b0_entry_numeric_neutral_zero_imputed",
+        "b0_entry_high_stress",
+        "entry_time_sin",
+        "entry_time_cos"
+      ],
+      "hypothetical_path_rule": "repeat_the_same_anchor_limited4_vector_at_every_transition_exactly_as_the_rejected_lineage_model"
+    },
+    "raw_probabilities_are_primary": true,
+    "post_hoc_calibration_allowed": false,
+    "final_and_later_offset_rule": "load_the_pinned_full_2024_history_and_old_limited_parameters_and_require_exact_reproduction_of_the_pinned_2025_and_2023_qhistory_and_qold_limited_probabilities_before_candidate_scoring;_an_equivalent_refit_is_not_allowed"
+  },
+  "causal_nested_selection": {
+    "outer_rule": "for_each_outer_month_July_through_December_fit_only_sessions_strictly_before_that_month",
+    "inner_rule": "for_each_available_validation_month_April_through_the_month_before_the_outer_month_fit_only_sessions_strictly_before_the_inner_month",
+    "models_receive_identical_folds_and_lambda_budget": true,
+    "lambda_selected_separately_per_head": ["qpattern", "qlimited4", "qfull9"],
+    "stored_lambda_selections": "three_selected_values_for_every_outer_fold_and_three_for_the_full_fit",
+    "selection_objective": "equal_mean_of_inner_month_unweighted_compatible_row_log_loss",
+    "literal_outer_schedule": {
+      "2024-07": ["2024-04", "2024-05", "2024-06"],
+      "2024-08": ["2024-04", "2024-05", "2024-06", "2024-07"],
+      "2024-09": ["2024-04", "2024-05", "2024-06", "2024-07", "2024-08"],
+      "2024-10": ["2024-04", "2024-05", "2024-06", "2024-07", "2024-08", "2024-09"],
+      "2024-11": ["2024-04", "2024-05", "2024-06", "2024-07", "2024-08", "2024-09", "2024-10"],
+      "2024-12": ["2024-04", "2024-05", "2024-06", "2024-07", "2024-08", "2024-09", "2024-10", "2024-11"]
+    },
+    "full_fit_lambda_validation_months": ["2024-04", "2024-05", "2024-06", "2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"],
+    "full_fit_lambda_rule": "select_from_the_equal_mean_of_the_literal_April_through_December_causal_month_scores_then_fit_all_2024",
+    "outer_labels_may_select_only_later_outer_folds_and_the_final_development_lambda": true,
+    "an_outer_month_may_not_select_its_own_lambda": true,
+    "later_labels_may_not_fit_select_scale_or_calibrate": true,
+    "whole_sessions_indivisible": true
+  },
+  "support_gates": {
+    "2024_outer_oof": {
+      "minimum_compatible_rows": 300000,
+      "minimum_positive_rows": 10000,
+      "cycles": 20,
+      "minimum_positive_rows_per_cycle": 100,
+      "minimum_stocks": 20,
+      "quarters": 2,
+      "current_states": 8
+    },
+    "later_each_period": {
+      "minimum_compatible_rows": 300000,
+      "minimum_positive_rows": 10000,
+      "cycles": 20,
+      "minimum_positive_rows_per_cycle": 100,
+      "minimum_stocks": 18,
+      "quarters": 4,
+      "current_states": 8
+    },
+    "fixed_calibration_bin_minimum_rows": 500,
+    "supported_cycle_slice": {
+      "minimum_rows": 500,
+      "minimum_positives": 40
+    },
+    "supported_general_slice": {
+      "minimum_rows": 5000,
+      "minimum_positives": 100
+    }
+  },
+  "evaluation": {
+    "primary_surface": "raw_unweighted_compatible_anchor_cycle_rows",
+    "mandatory_robustness_surface": "inverse_number_of_compatible_cycles_per_anchor_weighted",
+    "proper_losses": [
+      "binary_log_loss",
+      "brier"
+    ],
+    "calibration": {
+      "bins": [
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0
+      ],
+      "metrics": [
+        "ECE",
+        "maximum_supported_bin_error"
+      ],
+      "bin_index": "minimum_of_floor_10_times_raw_probability_and_9_so_probability_one_enters_bin_9",
+      "ECE_formula": "sum_over_nonempty_bins_bin_row_count_divided_by_total_unweighted_primary_rows_times_absolute_mean_probability_minus_event_rate",
+      "maximum_supported_bin_error_formula": "maximum_absolute_mean_probability_minus_event_rate_over_bins_with_at_least_500_rows",
+      "no_supported_bin_action": "fail_closed"
+    },
+    "ranking": {
+      "universe": "compatible_cycles_per_anchor",
+      "tie_break": "cycle_id_ascending",
+      "primary": [
+        "top_three_recall",
+        "top_three_precision",
+        "positive_anchor_hit_rate"
+      ],
+      "diagnostic": [
+        "top_one_recall",
+        "mean_reciprocal_rank"
+      ]
+    },
+    "moving_block_sessions": 5,
+    "bootstrap_draws": 999,
+    "bootstrap_confidence": 0.95,
+    "bootstrap_exact": {
+      "daily_aggregation": "within_each_session_date_take_the_mean_compatible_row_loss_difference_on_the_declared_surface",
+      "date_order": "session_date_ascending",
+      "blocks": "all_overlapping_contiguous_length_five_date_blocks_with_circular_wrap",
+      "resample": "PCG64_seed_20260711_plus_period_offset_draw_ceiling_n_over_5_block_starts_with_replacement_and_truncate_to_n_dates",
+      "common_resample_matrix": "identical_across_all_six_primary_loss_endpoints_within_a_period",
+      "quantile_method": "linear",
+      "family": "three_primary_baselines_times_two_losses",
+      "familywise_rule": "Bonferroni_one_sided_alpha_0.05_divided_by_6",
+      "upper_quantile": 0.9916666666666667,
+      "literal_period_seed_offsets": {
+        "2024": 0,
+        "2025": 10000,
+        "2023": 20000
+      }
+    },
+    "mandatory_slices": [
+      "outer_month_or_later_quarter",
+      "leave_one_stock_out",
+      "cycle",
+      "current_state",
+      "transition_length",
+      "cycle_current_state_orientation",
+      "B0_stress",
+      "B0_unknown",
+      "entry_clock_quartile_frozen_from_2024",
+      "each_new_factor_quartile_frozen_from_2024",
+      "terminal_next_destination",
+      "nonterminal_next_destination",
+      "early_entry_bar_ordinal_at_most_53",
+      "late_entry_bar_ordinal_above_53"
+    ],
+    "slice_gate_scope": {
+      "all_three_primary_baselines_both_losses": [
+        "outer_month_or_later_quarter",
+        "leave_one_stock_out",
+        "current_state",
+        "transition_length",
+        "nonterminal_next_destination",
+        "early_entry_bar_ordinal_at_most_53"
+      ],
+      "all_three_primary_baselines_log_loss_minimum_15_of_20": ["cycle"],
+      "qfull9_vs_qlimited4_both_losses_no_positive_supported_slice": [
+        "cycle_current_state_orientation",
+        "each_new_factor_quartile_frozen_from_2024"
+      ],
+      "report_only": [
+        "B0_stress",
+        "B0_unknown",
+        "entry_clock_quartile_frozen_from_2024",
+        "terminal_next_destination",
+        "late_entry_bar_ordinal_above_53"
+      ],
+      "terminal_rows": "included_in_all_model_fitting_selection_and_pooled_evaluation_with_zero_loop_positives_by_construction;_the_terminal_only_slice_is_report_only_and_exempt_from_generic_positive_support_floor"
+    },
+    "bar_ordinal": "zero_based_chronological_provider_row_order_within_symbol_session_including_the_preserved_2025_04_10_09_33_19_row",
+    "quartile_rules": {
+      "2024_OOF": "each_outer_fold_uses_only_its_training_prefix_unique_anchor_factor_values",
+      "later_periods": "use_full_2024_unique_anchor_factor_values",
+      "probabilities_or_labels_used": false,
+      "quantiles": [0.25, 0.5, 0.75],
+      "quantile_method": "linear",
+      "tie_rule": "numpy_searchsorted_cutpoints_side_right_so_a_value_equal_to_a_cutpoint_enters_the_higher_quartile"
+    },
+    "slice_support_mapping": {
+      "cycle_current_state_orientation": "supported_cycle_slice_minimum_500_rows_and_40_positives",
+      "each_new_factor_quartile": "supported_general_slice_minimum_5000_rows_and_100_positives"
+    },
+    "inverse_compatible_weighted_mean": "sum_weight_times_value_divided_by_sum_weight_where_weight_equals_one_divided_by_the_number_of_compatible_cycles_for_that_anchor"
+  },
+  "primary_gates": {
+    "qfull9_vs_qhistory": {
+      "minimum_relative_log_loss_improvement": 0.01,
+      "pooled_brier_difference_below_zero": true,
+      "moving_block_log_loss_upper_below_zero": true,
+      "moving_block_brier_upper_below_zero": true,
+      "minimum_top_three_recall_gain": 0.005
+    },
+    "qfull9_vs_qpattern": {
+      "minimum_relative_log_loss_improvement": 0.005,
+      "pooled_brier_difference_below_zero": true,
+      "moving_block_log_loss_upper_below_zero": true,
+      "moving_block_brier_upper_below_zero": true,
+      "minimum_top_three_recall_gain": 0.002
+    },
+    "qfull9_vs_qlimited4": {
+      "minimum_relative_log_loss_improvement": 0.0025,
+      "pooled_brier_difference_below_zero": true,
+      "moving_block_log_loss_upper_below_zero": true,
+      "moving_block_brier_upper_below_zero": true,
+      "minimum_top_three_recall_gain": 0.002
+    },
+    "qfull9_vs_qold_limited_path": {
+      "pooled_log_loss_difference_at_most_zero": true,
+      "pooled_brier_difference_at_most_zero": true,
+      "top_three_recall_difference_at_least_zero": true
+    },
+    "calibration": {
+      "ECE_no_greater_than_qhistory_qpattern_and_qlimited4": true,
+      "maximum_supported_bin_error_limit": 0.02,
+      "maximum_supported_bin_error_margin_vs_qhistory": 0.005
+    },
+    "ranking_noninferiority": {
+      "scope": "qfull9_versus_each_of_qhistory_qpattern_and_qlimited4",
+      "top_three_precision_minimum_difference": 0.0,
+      "positive_anchor_hit_rate_minimum_difference": -0.002
+    },
+    "stability": {
+      "negative_log_loss_and_brier_difference_every_period_quarter_or_2024_outer_month": true,
+      "negative_log_loss_and_brier_difference_every_leave_one_stock_out": true,
+      "minimum_cycles_with_lower_log_loss": 15,
+      "no_supported_current_state_reversal": true,
+      "no_supported_transition_length_reversal": true,
+      "nonterminal_slice_must_improve": true,
+      "early_entry_slice_must_improve": true,
+      "mandatory_inverse_compatible_weighted_no_reversal": true
+    },
+    "all_comparisons_must_pass": true
+  },
+  "falsification": {
+    "draws": 999,
+    "seed": 20260711,
+    "observed_and_null_statistics": {
+      "unweighted_log_loss": "positive_relative_improvement_equals_(mean_LL_qlimited4_minus_mean_LL_candidate_or_null)_divided_by_mean_LL_qlimited4_on_eligible_rows",
+      "inverse_compatible_weighted_log_loss": "positive_relative_improvement_equals_(weighted_mean_LL_qlimited4_minus_weighted_mean_LL_candidate_or_null)_divided_by_weighted_mean_LL_qlimited4_where_weight_is_one_divided_by_anchor_compatible_cycle_count_on_eligible_rows",
+      "top_three_recall": "candidate_top_three_recall_minus_qlimited4_top_three_recall_on_eligible_anchors"
+    },
+    "transformation": "within_symbol_month_current_state_sort_anchors_by_session_date_then_start_timestamp_and_circularly_shift_the_complete_full_minus_limited_residual_logit_vector_for_all_compatible_cycles_by_a_nonzero_session_boundary_offset_using_the_same_shift_for_every_cycle",
+    "singleton_or_one_session_strata": "leave_unchanged_and_exclude_from_the_null_statistic_support_count",
+    "eligible_rows_and_anchors": "both_observed_and_null_statistics_use_only_strata_with_at_least_two_sessions",
+    "null_logit_formula": "eta_null_equals_eta_qlimited4_plus_shifted_eta_qfull9_minus_eta_qlimited4_then_probability_equals_sigmoid_eta_null",
+    "stratum_order": "symbol_ascending_then_month_ascending_then_current_state_ascending",
+    "draw_order": "draw_major_then_lexicographic_stratum_order",
+    "offset_draw": "for_a_stratum_with_S_sessions_draw_boundary_k_uniformly_from_1_through_S_minus_1_then_reorder_whole_session_blocks_as_k_plus_1_through_S_followed_by_1_through_k_equivalently_left_rotate_the_anchor_vector_sequence_by_the_cumulative_anchor_count_through_session_k",
+    "draw_rng": "numpy_PCG64_seed_20260711",
+    "empirical_p_formula": "(1 + count(null_statistic_at_least_observed)) / 1000",
+    "empirical_p_value_limit": 0.01,
+    "holm_family": [
+      "unweighted_log_loss",
+      "inverse_compatible_weighted_log_loss",
+      "top_three_recall"
+    ],
+    "holm_order": ["unweighted_log_loss", "inverse_compatible_weighted_log_loss", "top_three_recall"],
+    "holm_step_rule": "sort_p_values_ascending_with_declared_holm_order_as_tie_break_and_require_p_rank_at_most_0.01_divided_by_3_minus_rank_plus_1_for_every_rank",
+    "exact_zero_block_invariants": [
+      "embedding_fitted_qlimited4_structural_and_limited_coefficients_in_qfull9_with_every_new5_coordinate_zero_reproduces_qlimited4",
+      "embedding_fitted_qpattern_structural_coefficients_in_either_factor_design_with_every_factor_coordinate_zero_reproduces_qpattern",
+      "setting_every_residual_coordinate_zero_reproduces_qhistory"
+    ]
+  },
+  "irregular_provider_cohort": {
+    "primary_action": "retain_for_exact_frozen_lineage_comparability",
+    "date": "2025-04-10",
+    "timestamp_new_york": "09:33:19",
+    "symbols": [
+      "CIFR",
+      "IREN",
+      "NVTS",
+      "RIVN",
+      "WULF"
+    ],
+    "expected_symbol_date_cells": 5,
+    "expected_run_entries": 93,
+    "expected_compatible_rows": 547,
+    "verification": "require_exactly_one_09_33_19_America_New_York_provider_row_in_each_named_symbol_date_cell_and_no_other_symbol_with_that_timestamp_on_that_date",
+    "secondary_robustness": "from_already_frozen_2025_predictions_delete_every_row_whose_symbol_and_session_date_match_one_of_the_five_named_cells_without_refit_reselection_recentering_or_rescaling",
+    "secondary_expected_deleted_runs": 93,
+    "secondary_expected_deleted_compatible_rows": 547,
+    "secondary_gate": "every_2025_pooled_primary_gate_sign_and_numeric_threshold_that_passed_before_deletion_must_remain_passing_after_deletion",
+    "post_result_cleaning_forbidden": true
+  },
+  "decision_rule": {
+    "2024_all_gates_pass": "factor_conditioned_loop_occurrence_development_candidate",
+    "2024_any_gate_fails": "factor_conditioned_loop_occurrence_rejected_2024_and_do_not_score_later_periods",
+    "later_both_periods_preserve_every_gate": "development_candidate_retained_pending_prospective",
+    "later_any_period_fails": "development_algorithm_unconfirmed",
+    "later_periods_can_promote": false,
+    "parent_loop_identity_model_changed": false,
+    "good_or_high_movement_quality_grade_changed": false
+  },
+  "independent_audit_contract": {
+    "production_imports_allowed": false,
+    "pre_score_audit_required": true,
+    "pre_score_reconstruct": [
+      "source_hashes_and_year_bounds",
+      "run_order_previous_states_and_next_destination",
+      "all_twenty_overlapping_loop_labels",
+      "all_five_price_factors_from_bars_at_or_before_entry",
+      "fold_membership_and_no_session_overlap",
+      "prefix_only_preprocessing_and_centers",
+      "fold_local_history_offsets",
+      "all_grid_scores_and_tie_breaks",
+      "OOF_probabilities_metrics_calibration_ranking_slices_falsification_and_decision",
+      "full_fit_parameters_and_manifest"
+    ],
+    "score_only_requires_hash_bound_authorization": true,
+    "authorization_marker_required_fields": [
+      "contract_sha256",
+      "runner_sha256",
+      "fit_complete_sha256",
+      "complete_fit_artifact_manifest_sha256",
+      "auditor_source_sha256",
+      "auditor_result_sha256",
+      "auditor_all_passed",
+      "development_2024_primary_pass",
+      "scoring_authorized",
+      "research_only",
+      "live_ordering_enabled",
+      "order_placement",
+      "shadow_tree_read",
+      "shadow_tree_written"
+    ],
+    "authorization_conditions": "all_hashes_match_current_files_auditor_all_passed_true_2024_primary_pass_true_scoring_authorized_true_exact_safety_flags_and_no_shadow_access",
+    "pristine_scoring_namespace": "before_resolving_any_later_path_score_only_requires_no_2025_or_2023_prediction_metric_gate_summary_or_completion_artifact_in_the_output_root",
+    "post_score_audit_required_if_later_scoring_authorized": true,
+    "raw_feature_reconstruction_tolerance": 1e-12,
+    "numeric_replay_strategy": "independently_reconstruct_and_verify_raw_features_then_replay_optimization_from_the_verified_serialized_design_float_arrays_to_avoid_one_ULP_solver_path_divergence",
+    "maximum_probability_replay_error": 1e-10,
+    "phase_isolation": "fit_and_pre_score_audit_may_resolve_only_2024_run_rows_and_year_bounded_2024_provider_rows;_later_paths_hashes_rows_and_provider_data_may_be_resolved_only_after_hash_bound_authorization",
+    "fail_closed": true
+  },
+  "stop_rules": [
+    "stop_on_any_source_hash_or_row_count_mismatch",
+    "stop_on_any_noncausal_or_future_feature",
+    "stop_if_any_run_entry_fails_the_one_to_one_provider_merge",
+    "stop_if_fold_local_history_offsets_are_not_used_for_2024_OOF",
+    "stop_if_2024_support_primary_raw_calibration_stability_or_falsification_fails",
+    "stop_before_2025_or_2023_unless_independent_pre_score_audit_authorizes_scoring",
+    "stop_on_any_2026_or_prospective_shadow_read_or_write",
+    "stop_on_any_safety_label_mismatch"
+  ],
+  "planned_artifact_root": "/private/tmp/stocker_factor_conditioned_loop_occurrence_v1_20260711"
+}

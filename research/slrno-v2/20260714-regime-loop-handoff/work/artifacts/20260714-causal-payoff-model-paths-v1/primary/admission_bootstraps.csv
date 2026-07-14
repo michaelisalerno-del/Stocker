@@ -1,0 +1,7 @@
+family,model,group,rows,observed_mean,ci_lower,ci_upper,p_one_sided,draws,sessions,holm_adjusted_p,passes_holm_0_05
+direct_admission,admission_only,pooled,401,-69.86728523388526,-112.41791156771347,-29.36212223044525,0.9998000399920016,5000,67,1.0,False
+direct_admission,admission_only,cycle_04|state4,112,15.16734665132054,-35.01980844608077,59.366405847634404,0.2735452909418116,5000,46,0.8206358728254348,False
+direct_admission,admission_only,cycle_07|state5,289,-102.82188305790967,-154.43717125080445,-52.473557024163405,1.0,5000,64,1.0,False
+route_augmented_admission,admission_plus_causal_route_probabilities,pooled,401,-69.86728523388526,-110.80011111744996,-29.32586418481348,0.9998000399920016,5000,67,1.0,False
+route_augmented_admission,admission_plus_causal_route_probabilities,cycle_04|state4,112,15.16734665132054,-32.989508552126026,61.00429976323931,0.2705458908218356,5000,46,0.8116376724655068,False
+route_augmented_admission,admission_plus_causal_route_probabilities,cycle_07|state5,289,-102.82188305790967,-153.57895194190647,-54.62503005400671,1.0,5000,64,1.0,False

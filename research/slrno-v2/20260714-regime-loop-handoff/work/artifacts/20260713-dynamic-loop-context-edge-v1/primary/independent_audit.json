@@ -1,0 +1,41 @@
+{
+  "audit": "independent_dynamic_loop_context_edge_v1",
+  "auditor_sha256": "111f6562dfbbd1db577d41b58f12d818fc594ab9ba0cf5bf48eea676e33f212b",
+  "checks": {
+    "bootstrap_replay": true,
+    "cell_block_replay": true,
+    "chronology": true,
+    "daily_return_replay": true,
+    "frozen_rejection_decision": true,
+    "initial_artifact_manifest": true,
+    "lifetime_replay": true,
+    "net_return_identity": true,
+    "no_forbidden_future_columns": true,
+    "primary_boolean_replay": true,
+    "primary_numeric_replay": true,
+    "primary_replay_population": true,
+    "safety_contract": true,
+    "safety_decision": true,
+    "sampled_historical_volume_replay": true,
+    "selector_metric_replay": true,
+    "source_hashes": true,
+    "top_loop_identity_replay": true
+  },
+  "checks_passed": 18,
+  "checks_total": 18,
+  "live_ordering_enabled": false,
+  "metrics": {
+    "maximum_bootstrap_error": 9.90960785651751e-17,
+    "maximum_cell_block_error": 1.1368683772161603e-13,
+    "maximum_daily_return_error": 0.0,
+    "maximum_lifetime_error": 1.7763568394002505e-15,
+    "maximum_primary_estimate_error_bps": 0.0,
+    "maximum_sampled_volume_ratio_error": 0.0,
+    "maximum_selector_metric_error": 1.1102230246251565e-16,
+    "maximum_top_loop_probability_error": 0.0
+  },
+  "order_placement": "disabled",
+  "pass": true,
+  "rejection_verified": true,
+  "research_only": true
+}

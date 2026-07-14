@@ -1,0 +1,47 @@
+{
+  "candidate_id": "20260713-dynamic-loop-context-edge-v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "primary_hypothesis": {
+    "name": "dynamic predicted-parent-loop x current-regime profitability",
+    "decision": "rejected",
+    "reason": "past-only 60-session profitability estimates were negative in five of six period-horizon cells and never had a secure paired advantage over loop-only"
+  },
+  "market_behaviour_finding": {
+    "name": "loop-regime profitability drift",
+    "status": "descriptively_observed_but_not_actionably_forecastable",
+    "typical_profitable_streak_sessions": 20,
+    "adjacent_positive_cell_retention_range": [0.4269, 0.5475],
+    "adjacent_rank_correlation_range": [-0.0806, 0.1924]
+  },
+  "post_inspection_hypotheses": [
+    {
+      "cell": "cycle_04|current_state_4",
+      "horizon_bars": 24,
+      "status": "freeze_before_unseen_test_only",
+      "opened_period_evidence": {
+        "2023": {"filled_trades": 132, "mean_net_trade_bps": 26.5406},
+        "2025": {"filled_trades": 96, "mean_net_trade_bps": 30.7493}
+      },
+      "known_failure": "2023_Q4_mean_net_trade_bps_-33.538",
+      "strategy_promotion": false
+    },
+    {
+      "cell": "cycle_07|current_state_5",
+      "horizon_bars": 24,
+      "status": "freeze_before_unseen_test_only",
+      "opened_period_evidence": {
+        "2023": {"filled_trades": 722, "mean_net_trade_bps": 7.0203},
+        "2025": {"filled_trades": 713, "mean_net_trade_bps": 17.0376}
+      },
+      "known_failure": "2023_Q3_mean_net_trade_bps_-13.715",
+      "strategy_promotion": false
+    }
+  ],
+  "provider_volume_label": "historical_volume_activity_proxy",
+  "quotes_or_ticks_used": false,
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "report": "../reports/20260713-dynamic-loop-context-edge-v1.md"
+}

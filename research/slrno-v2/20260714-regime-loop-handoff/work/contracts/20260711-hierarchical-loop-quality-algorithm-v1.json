@@ -1,0 +1,534 @@
+{
+  "contract_id": "hierarchical_loop_quality_algorithm_v1",
+  "contract_frozen_at_utc": "2026-07-11T08:38:25Z",
+  "scientific_status": "post_result_development_algorithm_using_already_opened_2024_2025_and_backward_2023_evidence",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "model_run_authorized_by_this_file": true,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Test whether a single causal, jointly regularized hierarchy over semantic route topology, cycle identity, and compatible cycle-current-state orientation improves the calibration and proper-loss reliability of large absolute-movement and future-range probabilities.",
+  "non_objectives": [
+    "changing, promoting, or replacing any frozen parent loop-quality grade",
+    "refitting or replacing the frozen eight-state detector or structural loop forecaster",
+    "predicting direction, signed return, profit, loss, economic edge, or tradability",
+    "building a strategy, order, position, broker, paper, demo, live, deployment, or runtime path",
+    "opening, reading, writing, or modifying either prospective shadow or its ledger",
+    "using partial-2026 or any later unseen outcome",
+    "describing 2024, 2025, or backward-2023 as prospective validation"
+  ],
+  "periods": {
+    "fit_period": 2024,
+    "causal_outer_oof_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "development_score": 2025,
+    "backward_portability_score": 2023,
+    "2024_status": "already_opened_post_result_algorithm_development_not_fresh_validation",
+    "2025_status": "already_opened_development_not_validation",
+    "2023_status": "already_opened_backward_portability_with_future_fitted_2024_parameters_not_validation",
+    "partial_2026_permitted": false,
+    "prospective_claim_permitted": false,
+    "later_period_promotion_permitted": false
+  },
+  "frozen_lineage": {
+    "state_model": "frozen eight-state causal forward semi-Markov detector fitted on 2024",
+    "structural_loop_model": "retained 2024-fitted last-three-state fixed-loop identity forecaster",
+    "structural_probability": "the unchanged frozen s(i,c)",
+    "cycles": "the unchanged frozen twenty compatible fixed cycles and forty-four compatible cycle-current-state units",
+    "thresholds_labels_controls_overlap_weights_and_parent_grades": "exactly per_loop_movement_quality_v1",
+    "v3_topology": "exact compatible-rotation construction, frozen centroid normalization, sixty-three topology columns, and feature scaling from loop_quality_feature_ablation_v3",
+    "state_or_structural_refit_permitted": false,
+    "cycle_or_rotation_mapping_change_permitted": false,
+    "threshold_label_weight_or_parent_grade_change_permitted": false,
+    "source_pins": {
+      "per_loop_movement_quality_v1_contract_sha256": "67d64c463df52f01f360561ef0a69d5772b7eec0409468c93d6eb5a630dee02e",
+      "loop_quality_feature_ablation_v3_contract_sha256": "221a016e78c353a70261fe724cdfc4d312e355febfc353449844b31b8862702d",
+      "loop_quality_feature_ablation_v3_runner_sha256": "c3aa481dd880e35cc0cc07baa41b6d6c2ed1c380d935e31ce8c1a9d4ff7f05c8",
+      "loop_quality_feature_ablation_v3_fit_complete_sha256": "99c4e97d9779a4fa190640628ea8482aa258eebb820921b3bdbdde1d89b67730",
+      "loop_quality_feature_ablation_v3_pre_score_audit_sha256": "f4c79f0935c8e65eeb5235879d007b5213b882dc592efdde19f38aa172eca53b",
+      "loop_quality_feature_ablation_v3_scoring_complete_sha256": "c4a168100f122f7421dd1e4ad0f55cca9dd9c98dde86401c513351f0880f932a",
+      "loop_quality_feature_ablation_v3_independent_artifact_audit_sha256": "b31c2d5c1b367f1ef93d4b24f00e6ee0c94c7cf64a63a8cc3ad975d9bd40ab5f",
+      "loop_quality_feature_ablation_v3_topology_manifest_sha256": "27c9f9fe8d33934341fa308110d775335707e66559774f8ed94682169a4e45ae",
+      "loop_quality_feature_ablation_v3_rotation_mapping_sha256": "5c0f851ec05d796b8c0b5be1e712d7b011268cdb9b54979bb23c41ed9456b2c0",
+      "loop_quality_feature_ablation_v3_model_parameters_sha256": "39c7d212abbb9f26f167d7d4234bb64d03d22d2594fe039833eb6e75addf7105",
+      "loop_quality_feature_ablation_v3_oof_predictions_sha256": "c47d6c3c6f6ae0922cd79c5cc0d4ed3068a828c02145ac1ee38c6ec4cae5c2ab",
+      "fixed_cycles_csv_sha256": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253",
+      "frozen_semimarkov_parameters_npz_sha256": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+      "quality_thresholds_2024_json_sha256": "f9e2355e36dae28e4279dfabe74645cb3a363b706d95d4179955093b80015b72",
+      "quality_feature_manifest_json_sha256": "b3db72b43ad15f89ac8fedd182d2c5eee3931786dc600a339dc8714dad89ddd6",
+      "quality_fit_manifest_json_sha256": "0a911d631fcc98445d60fa098a219313fabf3d88e78aa1137ab8b684c0e9ee58",
+      "parent_oof_predictions_2024_parquet_sha256": "689b8853ec482c07a46faea48f49665df8c92612ef28bc9934fe2df2e97e7d30",
+      "parent_training_long_2024_parquet_sha256": "a901d868f65af5ddcaf296221606d2afe5dae1a8a16f3a59ae8990801acec256",
+      "anchor_panel_train_2024_parquet_sha256": "788fd81909d1c5d3e6ee20e3e36e3ebb74199188e41052ea1b04f61c96fa9932",
+      "parent_final_cycle_tiers_csv_sha256": "2d4e4bd2ef26db396244fe7cd20a8485aba1814eaeacf5326916823225d7c598",
+      "parent_gates_json_sha256": "0e64c9a9dee02b1860117078a811387f64ec6324e7edb2ec2b4b2104ee3b7637",
+      "parent_summary_json_sha256": "5c409a890e47b3b0fd86ae9a0052c905498ac6b1d84a32414811f7b4acee3930"
+    },
+    "direct_pre_fit_verification": "The runner and independent auditor must directly hash every pinned file, including the parent OOF cohort, parent realized-loop training cohort, anchor controls, fixed cycles, frozen state parameters, V3 topology map/manifest/OOF/model bundle, parent thresholds, gates, grades, and summary. A hash-chain reference without direct file verification is insufficient."
+  },
+  "cohort_and_targets": {
+    "unit": "the exact frozen compatible anchor-cycle row",
+    "quality_fit_rows": "realized_loop_label == 1 only",
+    "positive_overlap_weight": "1 / number of positive frozen-cycle labels at the anchor",
+    "targets": [
+      "absolute_return_bps",
+      "future_range_bps"
+    ],
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "ordered_classes_and_thresholds": "the exact frozen 2024 P75 and P90 classes from per_loop_movement_quality_v1",
+    "conditional_surface": "q75 and q90 on realized-loop rows with inverse-overlap weights",
+    "joint_surface": "unchanged frozen structural probability s(i,c) multiplied by q75 or q90",
+    "joint_target": "realized_loop_label multiplied by the corresponding frozen movement-exceedance label",
+    "future_loop_identity_is_label_not_feature": true,
+    "direction_or_signed_return_used": false,
+    "stock_identity_feature_used": false,
+    "provider_volume_used_by_this_algorithm": false
+  },
+  "feature_construction": {
+    "context_block": {
+      "width": 17,
+      "columns": "frozen current-state one-hot width eight plus the exact nine causal numeric controls from per_loop_movement_quality_v1",
+      "numeric_imputation": "the exact frozen 2024 numeric medians",
+      "scaling": "StandardScaler(with_mean=False) fitted with conditional_weight on each applicable realized-loop training fold only; validation and scoring use that training-fold scaler"
+    },
+    "route_topology_block": {
+      "width": 63,
+      "construction": "exact V3 compatible-rotation, uniform-mixture, next-state, route-composition, transition-length, centroid, delta, rotation-count, and entropy features",
+      "feature_scales": "exact V3 scales: columns 0 through 18 and 61 through 62 scale 1.0; centroid columns 19 through 60 scale 0.5",
+      "future_realized_route_used": false,
+      "historical_volume_note": "Two frozen semantic-centroid coordinates originated from provider historical_volume in the original detector. They are frozen coordinates, not a new row-level volume feature, exchange-wide volume, or order flow."
+    },
+    "cycle_block": {
+      "width": 20,
+      "canonical_order": "cycle_index zero through nineteen from the pinned fixed_cycles.csv",
+      "training_fold_weighted_center": "mu_cycle[j] = sum_i conditional_weight[i] * 1(cycle_index[i] == j) / sum_i conditional_weight[i], using realized-loop rows in that fit's training fold only",
+      "row_vector": "a_cycle * (one_hot_cycle - mu_cycle)",
+      "validation_and_scoring_rule": "reuse the fitted training-fold mu_cycle without recentering"
+    },
+    "compatible_cycle_state_block": {
+      "width": 44,
+      "canonical_order": "lexicographic cycle_index then current_state order from the pinned V3 rotation_mapping.csv",
+      "training_fold_weighted_center": "For route g belonging to cycle c, mu_route[g|c] = sum_i conditional_weight[i] * 1(route[i] == g) / sum_i conditional_weight[i] * 1(cycle[i] == c), using realized-loop rows in that fit's training fold only.",
+      "row_vector": "For a row in cycle c, all route coordinates outside c are exactly zero and the coordinates inside c equal a_route * (one_hot_route_within_c - mu_route[.|c]).",
+      "centering_scope": "within cycle, never global across the forty-four routes",
+      "positive_weight_rule": "Stop if total training-fold weight W <= 0 or if any frozen cycle's training-fold weight W_c <= 0.",
+      "validation_and_scoring_rule": "reuse the fitted training-fold mu_route without recentering",
+      "incompatible_or_unknown_route_rule": "fail closed; the frozen mapping must contain every row"
+    },
+    "total_width_nonzero_pair": 144,
+    "causality_rule": "Every feature, imputer, scaler, centering vector, and mapping used at a prediction timestamp must be fixed from frozen structure or fitted strictly before that prediction month.",
+    "forbidden_features": [
+      "realized future rotation",
+      "future state or duration",
+      "outcome or future price",
+      "session-end outcome",
+      "stock identity",
+      "last-three-state history token",
+      "new current-row volume or order-flow feature"
+    ]
+  },
+  "model_specification": {
+    "name": "qhier",
+    "class": "multinomial LogisticRegression",
+    "one_ordered_model_per_target_and_horizon": true,
+    "number_of_models_per_fit": 6,
+    "C": 0.2,
+    "solver": "lbfgs",
+    "max_iter": 2000,
+    "tol": 1e-10,
+    "random_state": 20260711,
+    "temperature": 1.0,
+    "sample_weight": "conditional_weight",
+    "class_order": [
+      0,
+      1,
+      2
+    ],
+    "probability_outputs": "q75=P(class_1)+P(class_2), q90=P(class_2), with 0 <= q90 <= q75 <= 1",
+    "same_selected_scale_pair_for_all_six_models": true,
+    "new_temperature_or_model_hyperparameter_search_permitted": false
+  },
+  "scale_grid": {
+    "ordered_literal_pairs_are_normative": true,
+    "pair_order": "[a_cycle, a_route]",
+    "pairs": [
+      [0.0, 0.0],
+      [0.125, 0.0625],
+      [0.125, 0.125],
+      [0.25, 0.0625],
+      [0.25, 0.125],
+      [0.25, 0.25],
+      [0.5, 0.0625],
+      [0.5, 0.125],
+      [0.5, 0.25],
+      [0.5, 0.5],
+      [1.0, 0.0625],
+      [1.0, 0.125],
+      [1.0, 0.25],
+      [1.0, 0.5],
+      [1.0, 1.0]
+    ],
+    "pair_count": 15,
+    "nonzero_pair_constraint": "0 < a_route <= a_cycle",
+    "post_freeze_pair_addition_or_removal_permitted": false,
+    "zero_pair_endpoint": {
+      "definition": "the exact causal V3 qroute_topology probability, not a tighter-tolerance V1 refit",
+      "july_december_source": "reuse the pinned sealed V3 causal OOF qroute_topology probabilities exactly",
+      "april_june_source": "regenerate causal qroute_topology predictions with the exact V3 80-feature construction and V3 settings C=0.2, solver=lbfgs, max_iter=1000, random_state=20260710, temperature=1.0, fitting each validation month only on strictly earlier 2024 rows",
+      "selected_for_outer_fold": "reuse or regenerate the exact qroute_topology prediction for that outer month and store no V1 model coefficients for that fold",
+      "selected_for_full_fit": "the final algorithm falls back exactly to the pinned full-2024 V3 qroute_topology model and stores no new qhier model coefficients",
+      "identity_tolerance": 1e-12
+    }
+  },
+  "causal_nested_selection": {
+    "inner_validation_schedule": {
+      "2024-07": [
+        "2024-04",
+        "2024-05",
+        "2024-06"
+      ],
+      "2024-08": [
+        "2024-05",
+        "2024-06",
+        "2024-07"
+      ],
+      "2024-09": [
+        "2024-06",
+        "2024-07",
+        "2024-08"
+      ],
+      "2024-10": [
+        "2024-07",
+        "2024-08",
+        "2024-09"
+      ],
+      "2024-11": [
+        "2024-08",
+        "2024-09",
+        "2024-10"
+      ],
+      "2024-12": [
+        "2024-09",
+        "2024-10",
+        "2024-11"
+      ]
+    },
+    "inner_prediction_rule": "For every pair and inner validation month, fit all six nonzero-pair models only on realized-loop 2024 rows from strictly earlier calendar months; the zero pair uses its exact V3 source rule.",
+    "outer_fit_rule": "After selecting one pair for an outer month, fit that pair's six models on all eligible realized-loop 2024 rows strictly before the outer month and predict every compatible row in the outer month.",
+    "selection_loss_cells": "the twelve conditional binary log-loss cells: two targets times three horizons times P75/P90",
+    "within_cell_weighting": "conditional_weight on realized-loop rows",
+    "selection_objective": "arithmetic mean of the twelve within-cell weighted mean binary log losses, so P75, P90, target, and horizon cells have equal weight",
+    "one_pair_shared_across_six_tasks": true,
+    "tie_set": "every pair whose selection objective is no more than 1e-6 above the minimum",
+    "tie_break": "within the tie set choose smaller a_route, then smaller a_cycle",
+    "final_full_fit_selection_months": [
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "final_selection_rule": "For each literal pair, generate the three causal validation predictions with training strictly before each validation month, evaluate the same equal-cell objective, apply the same tie rule, then fit the selected nonzero pair on all eligible 2024 realized-loop rows or use the exact zero-pair fallback.",
+    "selection_outcome_may_not_be_changed_after_outer_results": true
+  },
+  "support_gates": {
+    "v3_unique_oof_cohort_gate_reused": {
+      "minimum_total_effective_inverse_overlap_weight": 10000,
+      "minimum_effective_inverse_overlap_weight_each_required_quarter": 5000,
+      "required_quarters": [
+        "2024_q3",
+        "2024_q4"
+      ],
+      "minimum_sessions": 100,
+      "minimum_stocks": 18,
+      "minimum_effective_inverse_overlap_weight_each_stock": 50,
+      "minimum_realized_anchor_cycle_rows_reconstruction_integrity": 15000,
+      "repeated_target_horizon_tier_weight_permitted": false
+    },
+    "fit_fold_integrity": "Every fit must have positive total weight, all three ordered classes for every task, finite features, the full frozen category mapping, and a nonempty validation month.",
+    "later_scoring_minimum_effective_conditional_weight": 25000,
+    "causal_slice_support": {
+      "slice_families": [
+        "cycle_id by current_state",
+        "compatible_rotation_count",
+        "candidate-next-state entropy quartile using 2024-frozen cut points"
+      ],
+      "oof": {
+        "minimum_realized_rows": 100,
+        "minimum_effective_weight": 75,
+        "minimum_sessions": 40,
+        "minimum_stocks": 10,
+        "required_quarters": 2
+      },
+      "scoring": {
+        "minimum_realized_rows": 200,
+        "minimum_effective_weight": 150,
+        "minimum_sessions": 80,
+        "minimum_stocks": 10,
+        "required_quarters": 4
+      },
+      "unsupported_required_cycle_current_state_orientation": "the parent cycle is ineligible for a named development-candidate label"
+    },
+    "per_cycle_good_and_high_support": "reuse every exact V1 fit, OOF, scoring, positive/negative, stock, and quarter support threshold without weakening"
+  },
+  "primary_comparisons_and_gates": {
+    "candidate": "qhier",
+    "sealed_baseline_replay": "Every qcontext and qroute_topology OOF and scoring probability must replay the pinned V3 value at absolute tolerance 1e-12 before it may be used in selection, loss, calibration, slice, or grade calculations.",
+    "baselines": [
+      "qcontext",
+      "qroute_topology"
+    ],
+    "endpoint_family": "two baselines times conditional/joint surfaces times log-loss/Brier losses equals eight primary endpoints",
+    "minimum_pooled_relative_log_loss_improvement": {
+      "qhier_vs_qcontext": {
+        "conditional": 0.005,
+        "joint": 0.0025
+      },
+      "qhier_vs_qroute_topology": {
+        "conditional": 0.001,
+        "joint": 0.0005
+      }
+    },
+    "pooled_brier_difference_below_zero": true,
+    "uncertainty": {
+      "method": "paired five-session moving-block bootstrap",
+      "draws": 20000,
+      "seed": 20260711,
+      "same_resampled_block_indices_for_all_models_endpoints_and_losses": true,
+      "session_order": "ascending session_date",
+      "daily_endpoint": "Within each session, compute each available finite target-horizon-tier cell-weighted candidate-minus-baseline loss difference and take the arithmetic mean of the available values. An unavailable cell is NaN and is skipped, never replaced by zero.",
+      "blocks": "all overlapping consecutive blocks of length min(5,n_sessions)",
+      "resample_algorithm": "Let L=min(5,n_sessions). Use NumPy Generator(PCG64(seed)) to draw one common matrix containing exactly ceil(n_sessions/L) block-start indices per draw; concatenate the selected blocks in sampled order, trim to exactly n_sessions, and take the finite-value mean.",
+      "missing_value_stop": "Stop if the observed endpoint has no finite session value or any resampled endpoint has no finite value.",
+      "quantile_method": "numpy.quantile method=linear",
+      "familywise_alpha": 0.05,
+      "endpoint_count": 8,
+      "one_sided_confidence_level_each_endpoint": 0.99375,
+      "upper_quantile": 0.99375,
+      "each_candidate_minus_baseline_upper_bound_below_zero": true
+    },
+    "robustness": {
+      "every_required_quarter_log_loss_and_brier_difference_no_greater_than_zero": true,
+      "every_leave_one_stock_out_log_loss_and_brier_difference_no_greater_than_zero": true,
+      "each_of_twelve_cells_maximum_relative_log_loss_degradation": 0.0025,
+      "both_target_aggregates_log_loss_and_brier_no_worse": true,
+      "all_three_horizon_aggregates_log_loss_and_brier_no_worse": true,
+      "both_conditional_and_joint_surfaces_must_pass": true
+    },
+    "calibration": {
+      "fixed_probability_bins": 10,
+      "bin_index": "min(floor(10 * probability), 9)",
+      "conditional_weights": "inverse-overlap conditional_weight on realized-loop rows",
+      "joint_weights": "unit weight on all compatible rows",
+      "ece": "sum over every nonempty fixed bin of bin_weight / total_weight times abs(weighted_observed_rate - weighted_mean_probability)",
+      "maximum_supported_bin_error": "maximum absolute weighted observed-minus-predicted gap only over bins meeting the raw-row support threshold; weights do not replace the raw-row threshold",
+      "oof_minimum_supported_conditional_bin_rows": 50,
+      "oof_minimum_supported_joint_bin_rows": 250,
+      "scoring_minimum_supported_conditional_bin_rows": 100,
+      "scoring_minimum_supported_joint_bin_rows": 500,
+      "every_cell_qhier_ece_no_greater_than_qcontext": true,
+      "every_cell_qhier_ece_no_greater_than_qroute_topology": true,
+      "conditional_absolute_maximum_supported_bin_error": 0.02,
+      "joint_absolute_maximum_supported_bin_error": 0.01,
+      "no_supported_bin_rule": "fail the corresponding cell rather than return a passing missing value",
+      "ordered_probability_nesting_required": true
+    },
+    "slice_pooling": "For each supported slice and each model comparison, calculate each of the twelve target-horizon-tier within-slice weighted mean differences and take their arithmetic mean separately for log loss and Brier. Conditional values use realized rows and conditional_weight. Slice support is always determined on realized rows. Joint losses are then evaluated with unit weights over every compatible row belonging to that supported causal slice.",
+    "strict_supported_slice_rule": "On both conditional and joint surfaces, every supported slice in every causal slice family must have qhier-minus-qcontext and qhier-minus-qroute_topology pooled log-loss <= 0 and Brier difference <= 0. Any positive difference is a sign reversal and fails the algorithm gate.",
+    "primary_algorithm_label": {
+      "development_algorithm_supported": "every primary loss, interval, cell, target, horizon, quarter, stock-deletion, calibration, nesting, supported-slice, support, and falsification gate passes in causal 2024 OOF",
+      "development_algorithm_unconfirmed": "one or more required primary gates fails"
+    }
+  },
+  "secondary_qfull_noninferiority": {
+    "candidate": "qhier",
+    "baseline": "sealed qfull",
+    "precondition": "the corresponding qfull-versus-qcontext pooled gain is positive",
+    "margin": "ten percent of the positive qfull-versus-qcontext pooled gain, calculated separately for conditional/joint and log-loss/Brier",
+    "endpoint_count": 4,
+    "method": "paired five-session moving-block bootstrap with the same 20000 draws and seed",
+    "resampling": "Reuse the exact primary ascending session calendar and common block-start matrix. With L=min(5,n_sessions), each draw has exactly ceil(n_sessions/L) starts; concatenate, trim to n_sessions, and use numpy.quantile(method=linear). Stop on an observed or resampled endpoint without a finite value.",
+    "one_sided_confidence_level_each_endpoint": 0.9875,
+    "qhier_minus_qfull_pooled_difference_and_upper_bound_at_or_below_margin": true,
+    "role": "secondary reference-retention result; it cannot rescue a failed primary comparison or create a named cycle label"
+  },
+  "falsification_checks": {
+    "predictions_refitted_per_null_draw": false,
+    "draws": 999,
+    "seed": 20260711,
+    "cohort": "frozen causal July-December 2024 OOF predictions",
+    "outcome_vector_unit": "the complete twelve-label movement vector at each unique anchor, kept intact across overlapping compatible cycle rows",
+    "strata": "symbol_norm by quarter",
+    "canonical_stratum_order": "lexicographic symbol_norm then quarter",
+    "canonical_anchor_order": "ascending session_date, start_timestamp, then anchor_id; duplicate anchor ordering keys fail closed",
+    "minimum_unique_anchors_each_stratum": 2,
+    "singleton_or_empty_stratum_rule": "stop the run rather than leave a stratum unchanged",
+    "rng": "NumPy Generator(PCG64(20260711)) consumed draw-major first, then lexicographic-stratum-major within each draw",
+    "odd_draws": "within every stratum, apply one uniformly sampled integer circular offset from 1 through n_unique_anchors-1 to the canonically ordered complete outcome vectors",
+    "even_draws": "within every stratum, apply one RNG permutation to the canonically ordered complete outcome vectors; an identity permutation is redrawn until non-identity",
+    "same_transformed_outcomes_for_every_model": true,
+    "statistics": "Exactly four relative log-loss improvement statistics indexed by baseline in {qcontext,qroute_topology} and surface in {conditional,joint}: T_observed=(L_baseline-L_qhier)/L_baseline, where every L is the arithmetic mean of the twelve within-cell weighted mean log losses.",
+    "joint_target_under_transform": "the structural loop-occurrence label remains fixed and joint_target=loop_occurs*transformed_movement_label",
+    "empirical_one_sided_p_value": "For each statistic, p=(1 + number of the 999 T_null values greater than or equal to T_observed) / 1000.",
+    "multiplicity": "four fixed statistics use a stricter per-statistic threshold of 0.01, which is no larger than Bonferroni 0.0125",
+    "maximum_p_value_each_of_four_statistics": 0.01,
+    "failure_effect": "the primary algorithm label is unconfirmed and no named development-candidate label may be issued",
+    "purpose": "test whether the frozen prediction-outcome alignment exceeds label alignments created without refitting; this is a falsification diagnostic, not prospective validation"
+  },
+  "named_cycle_development_candidates": {
+    "scope": "all twenty frozen cycles and all three horizons, reported only after the primary algorithm evaluation",
+    "good_hypothesis_family_size": 60,
+    "high_hypothesis_family_size": 60,
+    "good_family_method": "Holm step-down at familywise alpha 0.025 across the sixty cycle-horizon P75 good hypotheses",
+    "high_family_method": "separate Holm step-down at familywise alpha 0.025 across the sixty cycle-horizon P90 high hypotheses",
+    "high_is_gatekept_by_good": true,
+    "global_gate_precondition": "The causal-2024 primary global algorithm label must be development_algorithm_supported; otherwise every named output is development_unqualified before Holm testing.",
+    "required_orientation_definition": "For a named cycle, required orientations are every one of the pinned forty-four cycle-current-state units whose cycle_id equals that cycle; not merely orientations observed above support in one period.",
+    "component_family_each_cycle_horizon_tier": "Exactly ten components: for each of the two targets, conditional log-loss difference, conditional Brier difference, joint log-loss difference, joint Brier difference, and context-residual lift.",
+    "fixed_hypothesis_order": "sixty units ordered by cycle_index zero through nineteen, then horizon [6,12,24]",
+    "component_daily_calendar": "Use the exact common ascending unique-session-date calendar from the primary bootstrap. Each component is its applicable within-session weighted mean on that calendar; a session with no applicable rows is NaN. Conditional lift is the weighted within-session mean of y-qcontext for the corresponding target, horizon, and tier on realized-loop rows. The observed statistic is nanmean. Stop if there is no finite observed value or any resample contains no finite value.",
+    "component_uncertainty": "Reuse the exact already-generated primary 20000-draw common block-start matrix and calendar; do not reinitialize PCG64. With L=min(5,n_calendar_sessions), every draw contains exactly ceil(n_calendar_sessions/L) starts. Concatenate the selected overlapping blocks, trim to n_calendar_sessions, and take nanmean for every named hypothesis and component.",
+    "centered_null": "For each component z set z0=z-nanmean(z). For a loss component whose alternative is a negative mean, p=(1 + number of centered-null bootstrap nanmeans <= observed nanmean(z))/(20000+1). For lift whose alternative is a positive mean, p=(1 + number of centered-null bootstrap nanmeans >= observed nanmean(z))/(20000+1).",
+    "unit_p_value": "maximum of the exactly ten required component p-values for that cycle-horizon-tier hypothesis",
+    "holm_algorithm": "Within each sixty-hypothesis family, stable-sort by unit p-value ascending, then cycle_index ascending, then horizon in [6,12,24]. At rank k starting at one, compare p to 0.025/(60-k+1); reject sequentially and stop at the first failure, with that and every later hypothesis unconfirmed.",
+    "high_family_gatekeeping_implementation": "Before high-family Holm sorting, set the high unit p-value to 1.0 for every cycle-horizon whose good hypothesis did not pass all point gates and good-family Holm. A high label also requires the corresponding good label.",
+    "point_gate_separation": "The exact V1 rate, mean-probability, proper-loss magnitude, confidence-bound, calibration, support, structural, robustness, and lift point gates apply separately from Holm and cannot be replaced by a small unit p-value.",
+    "base_semantics": "reuse every exact per_loop_movement_quality_v1 support, structural reliability, observed-rate, mean-probability, context-lift, proper-loss, uncertainty, quarter, leave-one-stock-out, calibration, two-target, horizon, and global-grade gate",
+    "candidate_probability_substitution": "In every V1 named-cycle formula and gate, replace candidate qcycle75 and qcycle90 with the causal qhier75 and qhier90 from this algorithm, and replace each joint candidate with the sealed structural probability s(i,c) multiplied by qhier75 or qhier90. Keep qcontext, s(i,c), the first-order structural baseline, structural targets, movement targets, thresholds, overlap weights, and support cohorts unchanged and sealed.",
+    "additional_orientation_rule": "every frozen compatible cycle-current-state orientation required by a cycle must satisfy causal-slice support and the strict no-sign-reversal rule; an unsupported or reversing orientation makes that cycle unqualified",
+    "permitted_output_labels": [
+      "development_high_candidate",
+      "development_good_candidate",
+      "development_unqualified"
+    ],
+    "parent_grade_changed": false,
+    "prospective_validated": false,
+    "economic_or_trading_interpretation_permitted": false
+  },
+  "period_transfer_rule": {
+    "provisional_decision_source": "frozen causal July-December 2024 OOF only",
+    "pre_score_freeze": "all OOF predictions, inner selections, fold centers/scalers, full-2024 selections and parameters, diagnostics, gates, candidate labels, source hashes, runner hash, and fit artifact hashes must be frozen before 2025 or 2023 row-level outcomes are loaded",
+    "independent_pre_score_audit_required": true,
+    "2025_and_2023_rule": "recalculate every applicable support, loss, interval, target, horizon, quarter, stock-deletion, calibration, slice, noninferiority, falsification-excluding-refits, and named-candidate diagnostic",
+    "demotion_only": true,
+    "later_period_promotion_or_candidate_substitution": false,
+    "portable_label": "development_portable may be appended only to an already passing 2024 development label that passes the same applicable gates in both later opened periods",
+    "prospective_language": false
+  },
+  "independent_audit_contract": {
+    "production_runner_import_permitted": false,
+    "production_model_feature_selection_metric_gate_grade_or_falsification_code_import_permitted": false,
+    "pre_score_reconstruction": [
+      "all pinned hashes and cohort joins",
+      "the forty-four-route canonical map and all sixty-three topology features",
+      "all fifteen literal scale pairs and the zero-pair identity",
+      "every training-fold scaler and weighted centering vector",
+      "all April-December causal candidate predictions",
+      "every inner and final scale selection and tie break",
+      "all outer OOF and full-2024 fits, coefficients, and probabilities",
+      "all support, loss, bootstrap, calibration, slice, falsification, multiplicity, and candidate-label calculations",
+      "the later-period load lock and absence of forbidden paths"
+    ],
+    "post_score_reconstruction": "independently reconstruct every 2025 and backward-2023 prediction, diagnostic, gate, demotion-only transfer decision, summary field, and artifact hash",
+    "probability_replay_tolerance": 1e-12,
+    "gate_replay_tolerance": 1e-12,
+    "scoring_authorization_requires_every_pre_score_check": true
+  },
+  "stop_rules": [
+    "Stop before fitting if the contract hash or any pinned input hash, cohort row identity, threshold, label, control, overlap weight, state index, cycle, route mapping, topology feature, or parent grade differs.",
+    "Stop before fitting if any feature or centering value depends on a realized future route, future state, future duration, outcome, future price, session end, stock identity, partial-2026 row, or forbidden path.",
+    "Stop before fitting if the literal scale grid is not exactly fifteen ordered pairs or the zero endpoint is not exact V3 qroute_topology under its declared source rule.",
+    "Stop a fit if any training month is not strictly earlier than its validation month, a scaler or centering vector is fit outside the training fold, a task lacks one of the three classes, support fails, optimization does not converge below max_iter, or any probability is non-finite, outside [0,1], or non-nested.",
+    "Stop before later-period loading unless the complete 2024 fit-only bundle is frozen and an independent no-production-import pre-score audit passes every check and explicitly sets scoring_authorized true.",
+    "Stop a primary comparison and label the algorithm unconfirmed when any required 2024 primary, calibration, slice, support, or falsification gate fails; later periods may not revive it.",
+    "Stop a named cycle at development_unqualified when any exact V1, Holm, support, orientation, calibration, or sign-reversal gate fails.",
+    "Stop and require a separately frozen new contract for any post-result feature, scale pair, tie break, fold, model, solver, tolerance, seed, threshold, support rule, bootstrap, calibration rule, multiplicity rule, falsification rule, or label change; do not iterate the same claim on these opened outcomes.",
+    "Stop immediately if either prospective shadow, any 2026 outcome, or any live, demo, paper, broker, order, position, P&L, deployment, runtime, or strategy path would be read or changed."
+  ],
+  "planned_implementation_and_artifacts": {
+    "root": "/private/tmp/stocker_hierarchical_loop_quality_algorithm_v1_20260711",
+    "runner": "work/run_hierarchical_loop_quality_algorithm_v1.py",
+    "independent_audit": "work/audit_hierarchical_loop_quality_algorithm_v1.py",
+    "fit_phase_outputs": [
+      "feature_manifest.json",
+      "route_mapping.csv",
+      "fold_schedule.json",
+      "hyperparameter_grid.json",
+      "inner_selection_2024.csv",
+      "outer_fold_audit_2024.csv",
+      "oof_predictions_2024.parquet",
+      "model_parameters.npz",
+      "full_fit_audit.json",
+      "support_2024.json",
+      "cell_diagnostics_2024.csv",
+      "calibration_diagnostics_2024.csv",
+      "rotation_diagnostics_2024.csv",
+      "falsification_diagnostics_2024.json",
+      "algorithm_gates_2024.json",
+      "per_loop_grades_2024.csv",
+      "provisional_decision.json",
+      "fit_source_hashes_pre_fit.json",
+      "fit_source_hashes.json",
+      "fit_complete.json",
+      "pre_score_audit.json"
+    ],
+    "scoring_phase_outputs": [
+      "scoring_predictions_2025.parquet",
+      "support_2025.json",
+      "cell_diagnostics_2025.csv",
+      "calibration_diagnostics_2025.csv",
+      "rotation_diagnostics_2025.csv",
+      "algorithm_gates_2025.json",
+      "per_loop_grades_2025.csv",
+      "scoring_predictions_2023.parquet",
+      "support_2023.json",
+      "cell_diagnostics_2023.csv",
+      "calibration_diagnostics_2023.csv",
+      "rotation_diagnostics_2023.csv",
+      "algorithm_gates_2023.json",
+      "per_loop_grades_2023.csv",
+      "evaluation_source_hashes.json",
+      "period_transfer_gates.json",
+      "scoring_complete.json",
+      "summary.json",
+      "independent_artifact_audit.json"
+    ],
+    "artifact_root_is_ephemeral": true,
+    "archive_before_reboot_if_exact_replay_is_required": true
+  },
+  "integrity_and_safety": {
+    "contract_and_source_hashes_frozen_before_fit": true,
+    "fit_only_freeze_before_later_outcomes": true,
+    "independent_pre_and_post_score_reconstruction_required": true,
+    "no_secret_or_api_key_storage": true,
+    "no_2026_rows": true,
+    "provider_bars": "regular-session five-minute provider OHLCV",
+    "provider_volume_name_if_referenced": "historical_volume",
+    "provider_volume_is_exchange_wide_or_order_flow": false,
+    "existing_frozen_quality_grades_unchanged": true,
+    "existing_aggregate_movement_shadow_unchanged": true,
+    "existing_per_loop_quality_shadow_unchanged": true,
+    "new_shadow_created_by_this_contract": false,
+    "direction_signed_return_pnl_cost_spread_slippage_position_order_broker_strategy_or_deployment_columns_permitted": false
+  },
+  "execution_authorization": {
+    "authorized": true,
+    "authorized_at_user_turn": "2026-07-11",
+    "user_instructions": [
+      "Also let's use an algorithm",
+      "Continue"
+    ],
+    "scope": "freeze, implement, fit, independently audit, and evaluate this research-only causal hierarchical movement-quality algorithm on 2024; only after a passing independent pre-score audit, score the already-opened 2025 development and backward-2023 portability periods under demotion-only rules",
+    "live_or_order_authorization": false
+  }
+}

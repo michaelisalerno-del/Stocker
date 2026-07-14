@@ -1,0 +1,131 @@
+{
+  "candidate_id": "20260714-first-class-profitable-move-detectors-v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "application_modified": false,
+  "scientific_status": "retrospective_portability_development_on_opened_2025_and_partial_2026_not_validation",
+  "sealed_validation_performed": false,
+  "sealed_data_available": false,
+  "primary_decision": {
+    "decision": "all_detectors_rejected_or_descriptive_only",
+    "reason": "none of five frozen causal bar-pattern detectors achieved 60-percent target-first precision, positive after-cost dynamic payoff, secure paired-control lift, cost survival, time stability, or leave-one-stock-out robustness in both periods"
+  },
+  "problem_definition": {
+    "primary_label": "plus_1R_target_before_structural_invalidation_inside_24_bars",
+    "entry_clock": "next_provider_open_after_completed_signal_bar",
+    "same_bar_target_and_stop": "conservative_failure",
+    "primary_cost_bps_per_side": 5,
+    "accuracy": "target_first_precision_over_every_emitted_event",
+    "profitability": "dynamic_cost_adjusted_payoff_separate_from_accuracy",
+    "coverage_required": true
+  },
+  "population": {
+    "frozen_events": 8656,
+    "frozen_controls": 8656,
+    "scored_pairs": 8544,
+    "periods": [2025, 2026],
+    "stocks_2025": 20,
+    "stocks_2026": 19,
+    "AAL_2026": "excluded_by_frozen_source_contract"
+  },
+  "tested_detectors": [
+    {
+      "id": "H1_downside_expansion_exhaustion_long",
+      "decision": "rejected",
+      "precision_2025": 0.323664,
+      "precision_2026": 0.40613,
+      "dynamic_net_bps_2025": -20.3813,
+      "dynamic_net_bps_2026": -14.7307
+    },
+    {
+      "id": "H2_failed_breakdown_reclaim_long",
+      "decision": "rejected",
+      "precision_2025": 0.45846,
+      "precision_2026": 0.504707,
+      "paired_lift_2025": -0.015259,
+      "paired_lift_2026": 0.039826,
+      "dynamic_net_bps_2025": -14.5157,
+      "dynamic_net_bps_2026": -9.06724,
+      "note": "best headline 2026 cell, but its lift interval crossed zero, Holm-adjusted p was 0.392, and 2025 reversed"
+    },
+    {
+      "id": "H3_two_bar_reversal_confirmation_long",
+      "decision": "rejected",
+      "precision_2025": 0.45908,
+      "precision_2026": 0.450262,
+      "dynamic_net_bps_2025": -15.0701,
+      "dynamic_net_bps_2026": -15.4707
+    },
+    {
+      "id": "H4_opening_range_failed_breakdown_long",
+      "decision": "rejected",
+      "precision_2025": 0.397463,
+      "precision_2026": 0.476987,
+      "dynamic_net_bps_2025": -22.7903,
+      "dynamic_net_bps_2026": -11.8925
+    },
+    {
+      "id": "H5_activity_activated_downside_expansion_long",
+      "decision": "rejected_with_descriptive_fixed_h24_lead_only",
+      "precision_2025": 0.306358,
+      "precision_2026": 0.421801,
+      "dynamic_net_bps_2025": -21.8901,
+      "dynamic_net_bps_2026": -13.7224,
+      "fixed_h24_net_bps_2025": 7.82927,
+      "fixed_h24_net_bps_2026": 5.13817,
+      "fixed_h24_guard": "medians were negative, the 2026 trimmed mean was negative, both block intervals crossed zero widely, and structural failures remained negative at h24"
+    }
+  ],
+  "robustness": {
+    "dynamic_net_block_intervals_positive": 0,
+    "detector_periods_with_positive_net_after_any_stock_deletion": 0,
+    "detector_periods_reaching_60_percent_precision_after_any_stock_deletion": 0,
+    "detector_periods_positive_at_2_5_bps_per_side": 0,
+    "qualified_detectors": 0
+  },
+  "path_findings": [
+    "The detectors did not forecast favorable-before-adverse excursion ordering.",
+    "Tight H1/H5 risks created many unresolved five-minute dual touches, but wider and nearly ambiguity-free H2/H3 paths still failed.",
+    "Large full-window MFE did not imply a usable entry because MAE and invalidation often came first.",
+    "H5 target-first paths activated rapidly, but future success cannot be used as a causal admission filter.",
+    "H5 structural failures were still negative after 24 bars on average, so simply removing the stop is not supported."
+  ],
+  "retired_paths": [
+    "the five exact V1 bar-pattern detector definitions on opened 2025 and partial 2026",
+    "tuning their bar, wick, range, activity, opening-range, cooldown, target, stop, or horizon thresholds on the opened outcomes",
+    "calling a high MFE or positive arithmetic h24 mean a profitable detector",
+    "using realised success, MFE, MAE, hit order, child, morph, loop, or regime outcome as a causal filter",
+    "optimising hit rate without risk-specific cost-adjusted expectancy and coverage"
+  ],
+  "next_path": {
+    "name": "selective_alert_confirmation_admission_path",
+    "status": "prospective_specification_only_not_activated",
+    "stages": [
+      "setup_alert",
+      "causal_confirmation",
+      "selective_admission_or_abstention",
+      "separate_active_path_payoff_state"
+    ],
+    "primary_rule": "positive only when the conservative lower uncertainty bound of cost-adjusted expectancy exceeds zero",
+    "accuracy_reporting": "precision jointly with coverage, calibration, support, and expected net bps",
+    "post_inspection_hypothesis": "alert_then_confirm_then_test_continuation",
+    "guard": "confirmation levels, timing, risk, reward, and horizon cannot be selected from V1 outcomes"
+  },
+  "provider_volume_label": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+  "quotes_or_order_book_used": false,
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "strategy_promotion": false,
+  "integrity": {
+    "focused_tests": "10_of_10_passed",
+    "independent_audit": "12_of_12_passed",
+    "exact_rerun": "all_19_files_byte_identical",
+    "pre_score_manifest_sha256": "f3c0d4bae26ce371fc96b90bee9d60af340692ef8180bf5382069357e56610c0",
+    "artifact_manifest_sha256": "26cf5de2e603bdbd3229299b8b7048ddfe8e121e6ac769497a86fbcbce85ce14"
+  },
+  "prospective_logging_contract": "../contracts/20260714-first-class-profitable-move-prospective-log-v1.json",
+  "report": "../reports/20260714-first-class-profitable-move-detectors-v1.md",
+  "primary_artifacts": "../artifacts/20260714-first-class-profitable-move-detectors-v1/primary",
+  "exact_rerun": "../artifacts/20260714-first-class-profitable-move-detectors-v1/exact_rerun"
+}

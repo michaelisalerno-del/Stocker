@@ -1,0 +1,23 @@
+{
+  "broker_connection_enabled": false,
+  "checks": {
+    "all_18_primary_bootstrap_endpoints_pass_holm_0_05": false,
+    "context_edge_supported": false,
+    "early_1_10_positive_and_late_21_plus_lower_both_periods_all_horizons": false,
+    "individualized_decision_fraction_at_least_0_20_both_periods_all_horizons": true,
+    "overall_hypothesis_supported": false,
+    "paired_bootstrap_lower_bounds_above_zero_vs_unfiltered_and_loop_only_both_periods_all_horizons": false,
+    "positive_cumulative_and_mean_net_trade_both_periods_all_horizons": false
+  },
+  "decision": "dynamic_loop_context_profitability_hypothesis_not_supported",
+  "economic_edge_claim": false,
+  "live_or_paper_use_authorized": false,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "paper_or_demo_execution_enabled": false,
+  "primary_cost_bps_per_side": 5,
+  "primary_selector": "loop_current_regime",
+  "prospective_validation_claim": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

@@ -40,7 +40,12 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
 
 ## Commands and results
 
-To be completed after implementation.
+- The first primary command at implementation SHA `07be73486fe8cd658261a65ea287be4318fb8b47`
+  stopped before creating the output directory. A reporting-only conversion tried to cast the
+  nullable mean of an empty active slice (`pd.NA`) to `float`. No model, threshold, feature,
+  target, or metric changed and no artifact was written.
+- The correction maps only that empty descriptive rate to missing (`NaN`). Every model and
+  comparator is regenerated from scratch under the subsequent committed SHA.
 
 ## Scientific decision
 

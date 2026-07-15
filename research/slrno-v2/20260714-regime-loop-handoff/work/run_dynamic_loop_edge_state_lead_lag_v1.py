@@ -212,6 +212,7 @@ def economic_metrics(joins: pd.DataFrame) -> pd.DataFrame:
         for keys, group in observed.groupby(grouping, observed=True, sort=True):
             key_tuple = keys if isinstance(keys, tuple) else (keys,)
             active = group.loc[group["active"]]
+            positive_rate = active["target_payoff_positive"].mean()
             records.append(
                 {
                     "dimension": dimension,
@@ -223,7 +224,9 @@ def economic_metrics(joins: pd.DataFrame) -> pd.DataFrame:
                     "active_net_payoff_bps": float(active["target_robust_net_bps"].sum()),
                     "active_mean_net_payoff_bps": float(active["target_robust_net_bps"].mean()),
                     "active_median_net_payoff_bps": float(active["target_robust_net_bps"].median()),
-                    "active_positive_rate": float(active["target_payoff_positive"].mean()),
+                    "active_positive_rate": (
+                        float(positive_rate) if pd.notna(positive_rate) else np.nan
+                    ),
                 }
             )
     no_filter = observed.drop_duplicates(

@@ -83,6 +83,16 @@ def test_exact_match_rejects_different_setup_with_same_loop_label() -> None:
     assert match["structural_lineage_opportunity_id"] != "same-loop-replacement"
 
 
+def test_session_local_anchor_reuse_is_not_persistent_exact_identity() -> None:
+    opportunities = _opportunities()
+    opportunities.loc[1, "anchor_id"] = opportunities.loc[0, "anchor_id"]
+
+    matches = match_next_session_setups(opportunities.iloc[:1], opportunities, _calendar())
+
+    assert not bool(matches.iloc[0]["exact_match"])
+    assert pd.isna(matches.iloc[0]["matched_opportunity_id"])
+
+
 def test_replacement_opportunity_never_enters_exact_matched_population() -> None:
     opportunities = _opportunities()
     matches = match_next_session_setups(opportunities.iloc[:1], opportunities, _calendar())

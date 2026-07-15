@@ -240,7 +240,7 @@ def build_episode_attribution(
             & indexed_forecasts["calendar_session_index"].ge(
                 episode.episode_onset_index - lookback_sessions
             )
-            & indexed_forecasts["calendar_session_index"].le(episode.episode_onset_index)
+            & indexed_forecasts["calendar_session_index"].lt(episode.episode_onset_index)
         ]
 
         def first_positive(

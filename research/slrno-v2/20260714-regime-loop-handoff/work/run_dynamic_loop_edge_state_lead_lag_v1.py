@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# ruff: noqa: E402, E501
 """Research-only lead-lag attribution for frozen Dynamic Loop Edge State V2.
 
 This runner reads hash-pinned V2 research artifacts.  It cannot place orders,
@@ -14,7 +13,6 @@ import importlib.util
 import json
 import math
 import subprocess
-import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
@@ -23,12 +21,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-WORK = Path(__file__).resolve().parent
-REPO = WORK.parents[3]
-PACKAGE_SOURCE = REPO / "packages/stocker_research/src"
-if str(PACKAGE_SOURCE) not in sys.path:
-    sys.path.insert(0, str(PACKAGE_SOURCE))
 
 from stocker_research.dynamic_loop_edge_state_lead_lag.episodes import (
     attach_hindsight_episode_targets,
@@ -57,6 +49,8 @@ from stocker_research.dynamic_loop_edge_state_lead_lag.metrics import (
     validate_paired_training_identity,
 )
 
+WORK = Path(__file__).resolve().parent
+REPO = WORK.parents[3]
 CONTRACT_PATH = WORK / "contracts/20260715-dynamic-loop-edge-state-lead-lag-v1.json"
 V2_RUNNER = WORK / "run_dynamic_loop_edge_state_v2.py"
 V2_MODULE_ROOT = REPO / "packages/stocker_research/src/stocker_research/dynamic_loop_edge_state"
@@ -610,8 +604,11 @@ def _evaluate_rebuilt_pair(
 
 
 def rebuild_registered_sensitivities(
-    contract: Mapping[str, Any], metadata: Mapping[str, str]
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    contract: Mapping[str, Any],
+    metadata: Mapping[str, str],
+    *,
+    joint_exclusion_sets: Mapping[str, Sequence[str]] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Rebuild all stock-dependent states for frozen median/hazard/LOO analyses."""
 
     v2 = load_frozen_v2_runner()
@@ -717,30 +714,50 @@ def rebuild_registered_sensitivities(
         result.insert(0, "sensitivity", f"hazard_{float(hazard):.6f}")
         sensitivity_rows.append(result)
 
+    def exclusion_result(excluded_stocks: Sequence[str], *, prefix: str) -> pd.DataFrame:
+        excluded = {str(stock) for stock in excluded_stocks}
+        excluded_surface = surface.loc[~surface["symbol_norm"].isin(excluded)].copy()
+        if excluded_surface.empty:
+            raise ValueError("stock exclusion removed the entire research universe")
+        excluded_surface = v2.rebuild_surface_context_for_universe(
+            excluded_surface,
+            universe_size=int(excluded_surface["symbol_norm"].nunique()),
+        )
+        excluded_panel, _ = v2.aggregate_payoff_panels(excluded_surface, config)
+        excluded_keys = cell_keys(excluded_surface)
+        excluded_features = v2.build_feature_panel(
+            excluded_surface,
+            excluded_panel,
+            calendars,
+            excluded_keys,
+            required_features,
+        )
+        return model_pair(
+            excluded_surface,
+            excluded_panel,
+            excluded_features,
+            excluded_keys,
+            prefix=prefix,
+        )
+
     loo_rows: list[pd.DataFrame] = []
     for excluded in sorted(surface["symbol_norm"].astype(str).unique()):
-        loo_surface = surface.loc[~surface["symbol_norm"].eq(excluded)].copy()
-        loo_surface = v2.rebuild_surface_context_for_universe(
-            loo_surface, universe_size=int(loo_surface["symbol_norm"].nunique())
-        )
-        loo_panel, _ = v2.aggregate_payoff_panels(loo_surface, config)
-        loo_keys = cell_keys(loo_surface)
-        loo_features = v2.build_feature_panel(
-            loo_surface, loo_panel, calendars, loo_keys, required_features
-        )
-        result = model_pair(
-            loo_surface,
-            loo_panel,
-            loo_features,
-            loo_keys,
-            prefix=f"loo-{excluded}",
-        )
+        result = exclusion_result([excluded], prefix=f"loo-{excluded}")
         result.insert(0, "excluded_stock", excluded)
         result["all_stock_dependent_inputs_rebuilt"] = True
         loo_rows.append(result)
+
+    joint_rows: list[pd.DataFrame] = []
+    for label, excluded_stocks in (joint_exclusion_sets or {}).items():
+        result = exclusion_result(excluded_stocks, prefix=f"joint-{label}")
+        result.insert(0, "stress_test", str(label))
+        result["excluded_stocks_json"] = json.dumps(sorted(map(str, excluded_stocks)))
+        result["all_stock_dependent_inputs_rebuilt"] = True
+        joint_rows.append(result)
     return (
         pd.concat(sensitivity_rows, ignore_index=True, sort=False),
         pd.concat(loo_rows, ignore_index=True, sort=False),
+        (pd.concat(joint_rows, ignore_index=True, sort=False) if joint_rows else pd.DataFrame()),
     )
 
 
@@ -860,16 +877,36 @@ def create_plots(
     return plot_names
 
 
-def scientific_decision(paired_metrics: pd.DataFrame) -> str:
+SUPPORT_DECISION_GATES = (
+    "coherent_lead_shape",
+    "useful_pre_onset_forecasts",
+    "positive_both_periods_or_defensible_heterogeneity",
+    "not_concentrated",
+    "twice_cost_executable_translation_survives",
+    "leave_one_stock_out_directionally_stable",
+    "not_population_or_capacity_confounded",
+    "independent_audit_and_exact_rerun_pass",
+)
+
+
+def scientific_decision(
+    paired_metrics: pd.DataFrame,
+    *,
+    support_gates: Mapping[str, bool] | None = None,
+) -> str:
+    """Apply the registered rule conservatively; missing support gates fail closed."""
+
     primary = paired_metrics.loc[
         paired_metrics["scope"].eq("all") & paired_metrics["target_lead_sessions"].eq(1)
     ].iloc[0]
-    if (
-        float(primary["paired_brier_improvement"]) > 0.0
-        and float(primary["paired_economic_increment_bps"]) > 0.0
-    ):
+    if float(primary["paired_brier_improvement"]) <= 0.0:
+        return "leading_features_no_incremental_value"
+    if float(primary["paired_economic_increment_bps"]) <= 0.0:
+        return "leading_features_no_incremental_value"
+    gates = support_gates or {}
+    if all(gates.get(name, False) for name in SUPPORT_DECISION_GATES):
         return "supported_prospectively_only_required"
-    return "leading_features_no_incremental_value"
+    return "hypothesis_rejected"
 
 
 def render_report(
@@ -919,6 +956,22 @@ def render_report(
             "auc",
             "active_count",
             "mean_target_payoff_when_active_bps",
+        ]
+    ]
+    transition_context = calibration_metrics.loc[
+        calibration_metrics["model_name"].isin([CONTROL_MODEL, FULL_MODEL])
+        & calibration_metrics["target_lead_sessions"].eq(1)
+    ][
+        [
+            "model_name",
+            "onset_operational_predictions",
+            "onset_precision",
+            "onset_recall",
+            "false_onset_rate",
+            "onset_probability_brier_score",
+            "survival_brier_score",
+            "survival_log_loss",
+            "survival_ece",
         ]
     ]
     immediate = delay_summary.loc[
@@ -971,6 +1024,14 @@ def render_report(
             "paired_economic_increment_bps",
         ]
     ]
+    best_stock_rebuilt = stresses.loc[
+        stresses["stress_test"].eq("remove_best_stock_fully_rebuilt")
+        & stresses["target_lead_sessions"].eq(1)
+    ].iloc[0]
+    top_five_stocks_rebuilt = stresses.loc[
+        stresses["stress_test"].eq("remove_top_five_stocks_fully_rebuilt")
+        & stresses["target_lead_sessions"].eq(1)
+    ].iloc[0]
     loo_lead_one = loo.loc[loo["target_lead_sessions"].eq(1)]
     loo_positive = int(loo_lead_one["paired_brier_improvement"].gt(0.0).sum())
     loo_economic_positive = int(loo_lead_one["paired_economic_increment_bps"].gt(0.0).sum())
@@ -1026,33 +1087,61 @@ def render_report(
 
 ## Decision
 
-**{decision}**. This is an opened-data attribution experiment, not a strategy search or prospective validation. The original one-session sign reversal is **population-confounded**; the frozen structural feature overlay does not improve next-session state calibration.
+**{decision}**. This is an opened-data attribution experiment, not a strategy search or
+prospective validation. The original one-session sign reversal is **population-confounded**;
+the frozen structural feature overlay does not improve next-session state calibration.
 
 ## Hypothesis and frozen registration
 
-V2's same-session full hierarchy lost **{float(immediate["net_payoff_bps"]):,.2f} bps**, while its shifted-policy diagnostic made **{float(shifted["net_payoff_bps"]):,.2f} bps**. The registered post-V2 question was whether the unchanged feature overlay at session *t* predicts the same loop/orientation's settled robust payoff at *t+1* better than the otherwise identical hierarchy without the feature overlay. Lead 1 was primary before scoring; leads 0, 2, 3, and 5 were shape diagnostics. All V2 model, feature, 24-bar horizon, hazard, threshold, cost, settlement, and exit settings remained frozen.
+V2's same-session full hierarchy lost
+**{float(immediate["net_payoff_bps"]):,.2f} bps**, while its shifted-policy diagnostic made
+**{float(shifted["net_payoff_bps"]):,.2f} bps**. The registered post-V2 question was whether
+the unchanged feature overlay at session *t* predicts the same loop/orientation's settled robust
+payoff at *t+1* better than the otherwise identical hierarchy without the feature overlay. Lead 1
+was primary before scoring; leads 0, 2, 3, and 5 were shape diagnostics. All V2 model, feature,
+24-bar horizon, hazard, threshold, cost, settlement, and exit settings remained frozen.
 
-The state-lead test and executable trade-delay test are separate. State targets use the explicit within-period trading-session calendar and never turn a missing payoff into zero. The matched trade test requires a persistent same-setup identifier and fails closed.
+The state-lead test and executable trade-delay test are separate. State targets use the explicit
+within-period trading-session calendar and never turn a missing payoff into zero. The matched trade
+test requires a persistent same-setup identifier and fails closed.
 
 ## Data, timestamps, and boundaries
 
 - Opened V2 periods: 2023 and 2025; period joins reset and cannot bridge the gap.
 - Forecast freeze: V2 `prediction_frozen_at`, equal to its decision timestamp.
 - Feature and settled-training availability must be strictly earlier than the freeze.
-- Target: robust equal-stock winsorised session net payoff at the registered 24-bar horizon, strictly positive for the binary event.
-- V2 stores unique `opportunity_id`/`anchor_id` within a session, but no persistent cross-session setup or event-lineage identifier. Consequently exact delayed-trade identity is unavailable rather than inferred.
+- Target: robust equal-stock winsorised session net payoff at the registered 24-bar horizon,
+  strictly positive for the binary event.
+- V2 stores unique `opportunity_id`/`anchor_id` within a session, but no persistent cross-session
+  setup or event-lineage identifier. Consequently exact delayed-trade identity is unavailable
+  rather than inferred.
 
 ## Reconstruction of the V2 delay
 
-The V2 implementation grouped by period × loop × orientation × horizon, shifted `accepted` by one **opportunity session**, then applied that flag to current opportunities and their unchanged current entries, exits, costs, and 24-bar outcomes. It did not shift a forecast onto the same trade. It retained 55 accepted signals, dropped 231, and introduced 213; introduced payoff minus dropped payoff is **18,430.92 bps**, exactly the reported sign change. Policy gaps were not always one calendar step. There is no overlap resolver or portfolio-capacity allocator in this ledger, so the effect is changed admission population/composition, not freed capacity.
+The V2 implementation grouped by period × loop × orientation × horizon, shifted `accepted` by one
+**opportunity session**, then applied that flag to current opportunities and their unchanged current
+entries, exits, costs, and 24-bar outcomes. It did not shift a forecast onto the same trade. It
+retained 55 accepted signals, dropped 231, and introduced 213; introduced payoff minus dropped
+payoff is **18,430.92 bps**, exactly the reported sign change. Policy gaps were not always one
+calendar step. There is no overlap resolver or portfolio-capacity allocator in this ledger, so the
+effect is changed admission population/composition, not freed capacity.
 
 ## Primary paired state result
 
-At lead 1, there were {int(primary["paired_observable_targets"]):,} paired observable cells. Control-minus-full Brier improvement was **{float(primary["paired_brier_improvement"]):.6f}** (negative means the full model is worse; 95% session-block interval {float(primary["brier_ci_lower"]):.6f} to {float(primary["brier_ci_upper"]):.6f}). Log-loss improvement was **{float(primary["paired_log_loss_improvement"]):.6f}** and the frozen active-state economic increment was **{float(primary["paired_economic_increment_bps"]):,.2f} bps**. Posterior expected payoff is identical by construction; only the frozen feature overlay changes predictive/operational probabilities.
+At lead 1, there were {int(primary["paired_observable_targets"]):,} paired observable cells.
+Control-minus-full Brier improvement was
+**{float(primary["paired_brier_improvement"]):.6f}** (negative means the full model is worse; 95%
+session-block interval {float(primary["brier_ci_lower"]):.6f} to
+{float(primary["brier_ci_upper"]):.6f}). Log-loss improvement was
+**{float(primary["paired_log_loss_improvement"]):.6f}** and the frozen active-state economic
+increment was **{float(primary["paired_economic_increment_bps"]):,.2f} bps**. Posterior expected
+payoff is identical by construction; only the frozen feature overlay changes predictive and
+operational probabilities.
 
 {lead_table}
 
-No lead has positive paired Brier improvement. Lead 1 is worse than same-session Brier, not better calibrated for t+1. Holm adjustment does not rescue the result; the signed effect is adverse.
+No lead has positive paired Brier improvement. Lead 1 is worse than same-session Brier, not better
+calibrated for t+1. Holm adjustment does not rescue the result; the signed effect is adverse.
 
 ### Calibration at leads 0 and 1
 
@@ -1062,45 +1151,120 @@ The contextual lead-1 comparator table is:
 
 {markdown_table(calibration_context)}
 
+Operational onset precision uses only frozen non-active-to-active state transitions, while onset
+probability and survival calibration retain their separate frozen probabilities:
+
+{markdown_table(transition_context)}
+
 ### Feature attribution and period stability
 
-The feature increment is not monotonic with next-session payoff. Its lead-1 Spearman association with realised payoff is **{float(contribution_rank["spearman_future_payoff"]):.4f}** (p={float(contribution_rank["spearman_future_payoff_p_value"]):.4f}); its association with the positive-payoff event is **{float(contribution_rank["spearman_positive_event"]):.4f}** (p={float(contribution_rank["spearman_positive_event_p_value"]):.4f}). The strongest positive-contribution bin has mean t+1 payoff **{float(contribution_bins.iloc[-1]["mean_future_payoff_bps"]):,.2f} bps**, versus **{float(contribution_bins.iloc[0]["mean_future_payoff_bps"]):,.2f} bps** in the most negative-contribution bin. No target-informed cutoff was searched.
+The feature increment is not monotonic with next-session payoff. Its lead-1 Spearman association
+with realised payoff is **{float(contribution_rank["spearman_future_payoff"]):.4f}**
+(p={float(contribution_rank["spearman_future_payoff_p_value"]):.4f}); its association with the
+positive-payoff event is **{float(contribution_rank["spearman_positive_event"]):.4f}**
+(p={float(contribution_rank["spearman_positive_event_p_value"]):.4f}). The strongest
+positive-contribution bin has mean t+1 payoff
+**{float(contribution_bins.iloc[-1]["mean_future_payoff_bps"]):,.2f} bps**, versus
+**{float(contribution_bins.iloc[0]["mean_future_payoff_bps"]):,.2f} bps** in the most
+negative-contribution bin. No target-informed cutoff was searched.
 
 {markdown_table(contribution_bins)}
 
-Lead-1 Brier improvement is negative in both opened periods; economic translation is approximately flat in 2023 and negative in 2025.
+Lead-1 Brier improvement is negative in both opened periods; economic translation is approximately
+flat in 2023 and negative in 2025.
 
 {markdown_table(period_lead_one)}
 
 ## Matched trade-delay result
 
-Exact same-setup matches: **{int(exact["matched_opportunities"])} / {int(exact["source_opportunities"])} ({float(exact["match_rate"]):.1%})**. Therefore restarted-horizon, constant-terminal, and twice-cost exact paired effects are unavailable, not zero. A separately labelled structural-lineage diagnostic found **{int(structural_match["matched_opportunities"])} / {int(structural_match["source_opportunities"])}** different later setups: their source trades made **{float(structural_match["immediate_net_payoff_bps"]):,.2f} bps** and the later distinct setups made **{float(structural_match["delayed_restarted_horizon_net_bps"]):,.2f} bps**. This is composition context, not evidence for delayed execution of the original setup. Original intraday terminal times generally precede next-session entries, so constant-terminal exposure is impossible for those rows. Existing-position exits remain unchanged.
+Exact same-setup matches: **{int(exact["matched_opportunities"])} /
+{int(exact["source_opportunities"])} ({float(exact["match_rate"]):.1%})**. Therefore
+restarted-horizon, constant-terminal, and twice-cost exact paired effects are unavailable, not zero.
+A separately labelled structural-lineage diagnostic found
+**{int(structural_match["matched_opportunities"])} /
+{int(structural_match["source_opportunities"])}** different later setups: their source trades made
+**{float(structural_match["immediate_net_payoff_bps"]):,.2f} bps** and the later distinct setups
+made **{float(structural_match["delayed_restarted_horizon_net_bps"]):,.2f} bps**. This is
+composition context, not evidence for delayed execution of the original setup. Original intraday
+terminal times generally precede next-session entries, so constant-terminal exposure is impossible
+for those rows. MFE, MAE, exposure, and drawdown comparisons are consequently unavailable for the
+zero-row exact population rather than imputed from different setups. Existing-position exits remain
+unchanged.
 
 ## Stress, concentration, and episodes
 
-At twice costs, the paired lead-1 **state-level active-set translation** is **{float(twice["paired_economic_increment_bps"]):,.2f} bps**; no exact matched trade population exists for an executable cost stress. Median aggregation gives **{float(median_lead_one["paired_economic_increment_bps"]):,.2f} bps** but still worsens Brier by **{float(median_lead_one["paired_brier_improvement"]):.6f}**, so it cannot support the hypothesis. Both frozen hazard sensitivities also worsen Brier:
+At twice costs, the paired lead-1 **state-level active-set translation** is
+**{float(twice["paired_economic_increment_bps"]):,.2f} bps**; no exact matched trade population
+exists for an executable cost stress. Median aggregation gives
+**{float(median_lead_one["paired_economic_increment_bps"]):,.2f} bps** but still worsens Brier by
+**{float(median_lead_one["paired_brier_improvement"]):.6f}**, so it cannot support the hypothesis.
+Both frozen hazard sensitivities also worsen Brier:
 
 {markdown_table(hazard_lead_one)}
 
-Fully rebuilt leave-one-stock-out lead-1 calibration improves in **{loo_positive}/{len(loo_lead_one)}** exclusions and the economic increment is positive in only **{loo_economic_positive}/{len(loo_lead_one)}**; every excluded-stock run rebuilds the payoff panel, breadth/context, shared hierarchy, cell states, and targets.
+Fully rebuilt leave-one-stock-out lead-1 calibration improves in
+**{loo_positive}/{len(loo_lead_one)}** exclusions and the economic increment is positive in only
+**{loo_economic_positive}/{len(loo_lead_one)}**; every excluded-stock run rebuilds the payoff
+panel, breadth/context, shared hierarchy, cell states, and targets.
 
-The rejected lead-1 economic difference is materially concentrated: top stock **{top_stock["entity"]}** contributes {float(top_stock["absolute_contribution_share"]):.1%} of absolute stock allocation and the top five contribute {top_five_stock_share:.1%}; top episode **{top_episode["entity"]}** contributes {float(top_episode["absolute_contribution_share"]):.1%} and the top five contribute {top_five_episode_share:.1%}. The largest loop (**{top_loop["entity"]}**) and orientation (**{top_orientation["entity"]}**) absolute shares are {float(top_loop["absolute_contribution_share"]):.1%} and {float(top_orientation["absolute_contribution_share"]):.1%}, respectively.
+The separately predeclared best-stock and top-five-stock removals also rebuild every stock-dependent
+input. Their lead-1 Brier/economic results are
+**{float(best_stock_rebuilt["paired_brier_improvement"]):.6f} /
+{float(best_stock_rebuilt["paired_economic_increment_bps"]):,.2f} bps** and
+**{float(top_five_stocks_rebuilt["paired_brier_improvement"]):.6f} /
+{float(top_five_stocks_rebuilt["paired_economic_increment_bps"]):,.2f} bps**, respectively.
 
-Of {episode_total} hindsight-labelled episode rows, {structurally_led} meet the predeclared descriptive structurally-led rule ({structural_positive} have positive mean episode payoff). The other classes are {int(episode_classes.get("simultaneous", 0))} simultaneous, {int(episode_classes.get("payoff_history_led", 0))} payoff-history-led, and {int(episode_classes.get("unpredicted", 0))} unpredicted. Rising breadth precedes {breadth_precursor}, rising coherence precedes {coherence_precursor}, and neither precursor appears for {neither_precursor}; these overlapping descriptive counts do not establish incremental prediction because the paired probability and rank tests are adverse. Episode labels were attached after forecast freezing and never entered features.
+The rejected lead-1 economic difference is materially concentrated: top stock
+**{top_stock["entity"]}** contributes
+{float(top_stock["absolute_contribution_share"]):.1%} of absolute stock allocation and the top five
+contribute {top_five_stock_share:.1%}; top episode **{top_episode["entity"]}** contributes
+{float(top_episode["absolute_contribution_share"]):.1%} and the top five contribute
+{top_five_episode_share:.1%}. The largest loop (**{top_loop["entity"]}**) and orientation
+(**{top_orientation["entity"]}**) absolute shares are
+{float(top_loop["absolute_contribution_share"]):.1%} and
+{float(top_orientation["absolute_contribution_share"]):.1%}, respectively.
+
+Of {episode_total} hindsight-labelled episode rows, {structurally_led} meet the predeclared
+descriptive structurally-led rule ({structural_positive} have positive mean episode payoff). The
+other classes are {int(episode_classes.get("simultaneous", 0))} simultaneous,
+{int(episode_classes.get("payoff_history_led", 0))} payoff-history-led, and
+{int(episode_classes.get("unpredicted", 0))} unpredicted. Rising breadth precedes
+{breadth_precursor}, rising coherence precedes {coherence_precursor}, and neither precursor appears
+for {neither_precursor}; these overlapping descriptive counts do not establish incremental
+prediction because the paired probability and rank tests are adverse. Episode labels were attached
+after forecast freezing and never entered features.
 
 ## Scientific interpretation and failures
 
-The feature overlay makes probabilities substantially more extreme without improving ranking or calibration against future settled payoff. It neither establishes a general one-session precursor nor turns the V2 policy shift into an executable same-setup delay. The one-session P&L reversal is explained exactly by dropped versus introduced opportunities; changed stock/loop/time composition is consequential, while overlap, capacity, retained-row entry clocks, holding periods, and costs are unchanged.
+The feature overlay makes probabilities substantially more extreme without improving ranking or
+calibration against future settled payoff. It neither establishes a general one-session precursor
+nor turns the V2 policy shift into an executable same-setup delay. The one-session P&L reversal is
+explained exactly by dropped versus introduced opportunities; changed stock/loop/time composition
+is consequential, while overlap, capacity, retained-row entry clocks, holding periods, and costs
+are unchanged.
 
-The experiment cannot estimate a physical one-session delayed trade effect because V2 lacks persistent setup lineage and because the original 24-bar intraday exit is over before the next session. That is a data-identity limitation, not permission to substitute another setup.
+The experiment cannot estimate a physical one-session delayed trade effect because V2 lacks
+persistent setup lineage and because the original 24-bar intraday exit is over before the next
+session. That is a data-identity limitation, not permission to substitute another setup.
 
 ## Reproducibility and safety
 
-Run `{metadata["run_id"]}` used git `{metadata["git_sha"]}`, contract `{metadata["contract_hash"]}`, and V2 data snapshot `{metadata["data_snapshot_hash"]}`. Primary and exact-rerun tables/plots are audited byte-for-byte. The runner is research-only and touches no broker, order, deployment, position, exit, or application-runtime path.
+Run `{metadata["run_id"]}` used git `{metadata["git_sha"]}`, contract
+`{metadata["contract_hash"]}`, and V2 data snapshot `{metadata["data_snapshot_hash"]}`. Primary and
+exact-rerun tables/plots are audited byte-for-byte. The runner is research-only and touches no
+broker, order, deployment, position, exit, or application-runtime path.
+
+Prospective mode rejects the opened V2 source and periods, requires a newly generated external
+forecast surface and data-snapshot hash, accepts only a contemporaneous freeze, and appends later
+outcomes through a separate create-only command. It does not score or execute trades.
 
 ## Exact recommendation
 
-Do not promote or retune the V2 structural feature gate. The single most valuable next experiment is a **prospective, execution-free holdout log** of the frozen full/control pair on genuinely unopened sessions, with a persistent cross-session setup/event-lineage identifier added at research-data creation time; settle outcomes append-only and revisit only after the predeclared sample is complete.
+Do not promote or retune the V2 structural feature gate. The single most valuable next experiment
+is a **prospective, execution-free holdout log** of the frozen full/control pair on genuinely
+unopened sessions, with a persistent cross-session setup/event-lineage identifier added at
+research-data creation time; settle outcomes append-only and revisit only after the predeclared
+sample is complete.
 """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report, encoding="utf-8")
@@ -1124,17 +1288,59 @@ def artifact_manifest(output: Path, report: Path) -> dict[str, object]:
     }
 
 
+def _read_record_table(path: Path) -> pd.DataFrame:
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
+    if path.suffix == ".csv":
+        return pd.read_csv(path)
+    if path.suffix in {".jsonl", ".ndjson"}:
+        return pd.read_json(path, lines=True)
+    raise ValueError(f"unsupported prospective record format: {path.suffix}")
+
+
 def prospective_log_session(
-    session: str, ledger_root: Path, contract: Mapping[str, Any], contract_hash: str
+    session: str,
+    ledger_root: Path,
+    contract: Mapping[str, Any],
+    contract_hash: str,
+    *,
+    source_path: Path,
+    data_snapshot_hash: str,
+    current_timestamp: pd.Timestamp | None = None,
 ) -> int:
+    """Append contemporaneous unopened-session forecasts from an external frozen scorer."""
+
     verify_frozen_v2(contract)
-    primary = resolve_v2_root(contract, "v2_primary_root")
-    source = pd.read_parquet(primary / "causal_edge_state_forecasts.parquet")
+    opened_periods = {int(period) for period in contract["inputs"]["periods"]}
+    session_timestamp = pd.Timestamp(session)
+    if session_timestamp.year in opened_periods:
+        raise ValueError("prospective logging cannot replay an opened V2 period")
+    if data_snapshot_hash == contract["frozen_lineage"]["v2_data_snapshot_sha256"]:
+        raise ValueError("prospective logging requires a new data snapshot")
+    primary = resolve_v2_root(contract, "v2_primary_root").resolve()
+    source_path = source_path.resolve()
+    if source_path == primary or primary in source_path.parents:
+        raise ValueError("prospective logging cannot copy the opened V2 forecast artifact")
+    source = _read_record_table(source_path)
     source = source.loc[
         source["model_name"].isin(contract["models"])
         & source["score_session"].astype(str).eq(session)
     ]
+    if source.empty:
+        raise ValueError(f"no prospective forecasts for session {session}")
+    if source["run_id"].astype(str).eq(str(contract["frozen_lineage"]["v2_run_id"])).any():
+        raise ValueError("prospective logging requires a newly generated source run")
+    now = pd.Timestamp.now(tz="UTC") if current_timestamp is None else current_timestamp
+    if now.tzinfo is None:
+        raise ValueError("current prospective timestamp must be timezone-aware")
+    now = now.tz_convert("UTC")
+    freeze = pd.to_datetime(source["prediction_frozen_at"], utc=True, errors="raise")
+    if freeze.gt(now).any() or freeze.lt(now - pd.Timedelta(minutes=5)).any():
+        raise ValueError("prospective source freeze must be contemporaneous and not backdated")
+    if session_timestamp.date() < now.date():
+        raise ValueError("prospective effective session cannot precede the logging date")
     metadata = _metadata(contract, contract_hash)
+    metadata["data_snapshot_hash"] = data_snapshot_hash
     forecasts = build_frozen_forecast_ledger(source, metadata)
     ledger = ProspectiveResearchLedger(ledger_root)
     for row in forecasts.itertuples(index=False):
@@ -1179,6 +1385,22 @@ def prospective_log_session(
             }
         )
     return len(forecasts)
+
+
+def append_prospective_outcomes(source_path: Path, ledger_root: Path) -> int:
+    """Append settlements separately without revising any forecast record."""
+
+    outcomes = _read_record_table(source_path)
+    if outcomes.empty:
+        raise ValueError("prospective outcome source is empty")
+    ledger = ProspectiveResearchLedger(ledger_root)
+    for values in outcomes.to_dict(orient="records"):
+        record = {
+            key: (None if value is pd.NA or value is pd.NaT or pd.isna(value) else value)
+            for key, value in values.items()
+        }
+        ledger.append_outcome(record)
+    return len(outcomes)
 
 
 def run(output: Path, report: Path) -> None:
@@ -1237,7 +1459,34 @@ def run(output: Path, report: Path) -> None:
     matches, matched_summary, restarted, constant = trade_delay_outputs(reconstructed, features)
     concentration, lead_one = contribution_concentration(paired)
     stress = attribution_stress_tests(paired, concentration, lead_one)
-    sensitivity, loo = rebuild_registered_sensitivities(contract, metadata)
+    stock_ranking = concentration.loc[
+        concentration["dimension"].eq("stock_equal_allocation")
+    ].sort_values("economic_contribution_bps", ascending=False, kind="stable")
+    best_stock = str(stock_ranking.iloc[0]["entity"])
+    top_five_stocks = tuple(stock_ranking.head(5)["entity"].astype(str))
+    sensitivity, loo, joint_exclusions = rebuild_registered_sensitivities(
+        contract,
+        metadata,
+        joint_exclusion_sets={
+            "remove_top_five_stocks_fully_rebuilt": top_five_stocks,
+        },
+    )
+    stress = stress.loc[
+        ~stress["stress_test"].isin(
+            [
+                "remove_top_1_stock_equal_allocation",
+                "remove_top_5_stock_equal_allocation",
+            ]
+        )
+    ]
+    best_stock_stress = loo.loc[loo["excluded_stock"].eq(best_stock)].copy()
+    best_stock_stress["stress_test"] = "remove_best_stock_fully_rebuilt"
+    best_stock_stress["excluded_stocks_json"] = json.dumps([best_stock])
+    rebuilt_stock_stresses = pd.concat(
+        [best_stock_stress, joint_exclusions], ignore_index=True, sort=False
+    )
+    rebuilt_stock_stresses["detail"] = "all stock-dependent inputs fully rebuilt"
+    stress = pd.concat([stress, rebuilt_stock_stresses], ignore_index=True, sort=False)
     sensitivity_for_stress = sensitivity.copy()
     sensitivity_for_stress["stress_test"] = sensitivity_for_stress["sensitivity"]
     stress = pd.concat([stress, sensitivity_for_stress], ignore_index=True, sort=False)
@@ -1334,18 +1583,38 @@ def main() -> None:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--prospective-session")
     parser.add_argument("--prospective-ledger-root", type=Path)
+    parser.add_argument("--prospective-source", type=Path)
+    parser.add_argument("--prospective-data-snapshot-hash")
+    parser.add_argument("--prospective-outcomes", type=Path)
     args = parser.parse_args()
+    if args.prospective_session and args.prospective_outcomes:
+        parser.error("forecast and outcome prospective modes are separate append operations")
     if args.prospective_session:
         if args.prospective_ledger_root is None:
             parser.error("--prospective-ledger-root is required for prospective logging")
+        if args.prospective_source is None:
+            parser.error("--prospective-source is required for prospective logging")
+        if args.prospective_data_snapshot_hash is None:
+            parser.error("--prospective-data-snapshot-hash is required for prospective logging")
         contract, contract_hash = load_contract()
         count = prospective_log_session(
             args.prospective_session,
             args.prospective_ledger_root.resolve(),
             contract,
             contract_hash,
+            source_path=args.prospective_source,
+            data_snapshot_hash=args.prospective_data_snapshot_hash,
         )
         print(f"wrote {count} immutable research forecasts")
+        return
+    if args.prospective_outcomes:
+        if args.prospective_ledger_root is None:
+            parser.error("--prospective-ledger-root is required for outcome append")
+        count = append_prospective_outcomes(
+            args.prospective_outcomes,
+            args.prospective_ledger_root.resolve(),
+        )
+        print(f"wrote {count} immutable research outcomes")
         return
     run(args.output.resolve(), args.report.resolve())
 

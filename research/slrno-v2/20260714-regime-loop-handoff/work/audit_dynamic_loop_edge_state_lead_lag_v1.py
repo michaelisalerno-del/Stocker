@@ -403,6 +403,86 @@ def audit(primary: Path, exact: Path, primary_report: Path, exact_report: Path) 
         f"lead1_brier={primary_row['brier_improvement']:.12f}",
     )
 
+    calibration = pd.read_csv(primary / "lead_calibration_metrics.csv")
+    state_keys = ["model_name", "period", "loop_id", "orientation", "horizon"]
+    state = (
+        joins.loc[:, ["forecast_id", *state_keys, "score_session", "edge_state"]]
+        .drop_duplicates("forecast_id")
+        .sort_values([*state_keys, "score_session"], kind="stable")
+    )
+    previous_state = state.groupby(state_keys, observed=True)["edge_state"].shift(1)
+    state["audited_onset_prediction"] = (
+        state["edge_state"].eq("active") & previous_state.notna() & previous_state.ne("active")
+    )
+    lead_one_scored = joins.loc[
+        joins["target_lead_sessions"].eq(1) & joins["target_payoff_available"].eq(True)
+    ].merge(
+        state[["forecast_id", "audited_onset_prediction"]],
+        on="forecast_id",
+        how="left",
+        validate="many_to_one",
+    )
+    transition_ok = True
+    survival_ok = True
+    for model_name in (CONTROL, FULL):
+        current = lead_one_scored.loc[lead_one_scored["model_name"].eq(model_name)]
+        exported_row = calibration.loc[
+            calibration["model_name"].eq(model_name) & calibration["target_lead_sessions"].eq(1)
+        ].iloc[0]
+        onset_prediction = current["audited_onset_prediction"].astype(bool).to_numpy()
+        onset_target = current["target_episode_onset_within_lead"].astype(bool).to_numpy()
+        predicted = int(onset_prediction.sum())
+        precision = (
+            float(np.sum(onset_prediction & onset_target) / predicted) if predicted else np.nan
+        )
+        recall = (
+            float(np.sum(onset_prediction & onset_target) / onset_target.sum())
+            if onset_target.sum()
+            else np.nan
+        )
+        transition_ok = transition_ok and predicted == int(
+            exported_row["onset_operational_predictions"]
+        )
+        transition_ok = bool(
+            transition_ok
+            and (
+                (pd.isna(precision) and pd.isna(exported_row["onset_precision"]))
+                or np.isclose(precision, float(exported_row["onset_precision"]), atol=1e-12)
+            )
+        )
+        transition_ok = bool(
+            transition_ok
+            and (
+                (pd.isna(recall) and pd.isna(exported_row["onset_recall"]))
+                or np.isclose(recall, float(exported_row["onset_recall"]), atol=1e-12)
+            )
+        )
+        survival_target = current["target_episode_survival"].astype(float).to_numpy()
+        survival_probability = np.clip(
+            current["p_survive_horizon"].astype(float).to_numpy(), 1e-12, 1 - 1e-12
+        )
+        survival_brier = float(np.mean((survival_probability - survival_target) ** 2))
+        survival_ok = bool(
+            survival_ok
+            and np.isclose(
+                survival_brier,
+                float(exported_row["survival_brier_score"]),
+                atol=1e-12,
+            )
+        )
+    check(
+        results,
+        "operational_onset_transition_metrics",
+        transition_ok,
+        "independently rebuilt non-active-to-active transitions",
+    )
+    check(
+        results,
+        "survival_probability_metrics",
+        survival_ok,
+        "independently rebuilt lead-1 survival Brier",
+    )
+
     full_decisions = v2_decisions.loc[v2_decisions["model_name"].eq(FULL)]
     delay = independently_reconstruct_delay(full_decisions)
     immediate = delay.loc[delay["immediate"] & delay["status"].eq("filled")]
@@ -462,6 +542,21 @@ def audit(primary: Path, exact: Path, primary_report: Path, exact_report: Path) 
         .sum()
         == 0,
         "hindsight attached only after freeze",
+    )
+    episode_attribution = pd.read_parquet(primary / "hindsight_episode_attribution.parquet")
+    strictly_led = episode_attribution.loc[
+        episode_attribution["episode_attribution_class"].eq("structurally_led"),
+        "full_forecast_lead_sessions_relative_to_onset",
+    ]
+    payoff_led = episode_attribution.loc[
+        episode_attribution["episode_attribution_class"].eq("payoff_history_led"),
+        "control_forecast_lead_sessions_relative_to_onset",
+    ]
+    check(
+        results,
+        "episode_leads_strictly_precede_onset",
+        bool(strictly_led.gt(0).all() and payoff_led.gt(0).all()),
+        "zero-lead onset-session forecasts are not labelled leading",
     )
     loo = pd.read_csv(primary / "leave_one_stock_out_results.csv")
     check(

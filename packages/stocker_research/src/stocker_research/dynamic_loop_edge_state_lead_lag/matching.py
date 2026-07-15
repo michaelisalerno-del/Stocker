@@ -33,7 +33,6 @@ PERSISTENT_ID_FIELDS: Final[tuple[str, ...]] = (
     "setup_id",
     "persistent_anchor_id",
     "parent_setup_id",
-    "anchor_id",
 )
 
 

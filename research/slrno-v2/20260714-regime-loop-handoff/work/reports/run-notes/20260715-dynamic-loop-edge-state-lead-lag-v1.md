@@ -69,6 +69,25 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   false lead, causing both representative plot selectors to choose it. The positive example is now
   constrained to positive mean episode payoff and the false example to non-positive payoff. Only
   plots, manifests, and their audit hashes are regenerated; scored tables are unchanged.
+- The required final two-axis review then identified evaluation-contract defects, rather than an
+  unfavourable-model correction: onset precision had thresholded `p_on_next` instead of using the
+  registered frozen non-active-to-active transition; episode survival was joined but not scored;
+  episode attribution allowed a forecast on the onset session to count as leading; and the generic
+  V2 `anchor_id` was not proven persistent across sessions. These are corrected without changing
+  any V2 forecast, feature, threshold, payoff, cost, or target observation. Onset and survival
+  metrics are independently audited, lead attribution is now strictly pre-onset, and only explicitly
+  persistent identity fields can create an exact match.
+- The same review found that the initial prospective smoke mode could replay the opened V2 ledger.
+  It now rejects opened periods/sources, requires a new external frozen forecast surface and data
+  snapshot, enforces a contemporaneous freeze, fails on an empty requested session, and provides a
+  separate create-only outcome append command. The registered decision helper also fails closed
+  unless every support gate is explicitly present, and best/top-five-stock removal stresses rebuild
+  all stock-dependent inputs. The runner's blanket Ruff exemption was removed; it passes the
+  configured rules even with `--ignore-noqa`.
+- Because these are implementation defects relative to the pre-scoring contract, all affected
+  primary/exact artifacts, stress rebuilds, reports, plots, manifests, and independent audit outputs
+  are regenerated from scratch under the post-review scoring commit. The earlier artifact set is
+  retained outside the result path only as a superseded diagnostic and is not reported as final.
 
 ## Scientific decision
 

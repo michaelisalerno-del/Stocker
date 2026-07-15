@@ -182,6 +182,25 @@ def _calibration_fit(y: np.ndarray, probability: np.ndarray) -> tuple[float, flo
     return float(model.coef_[0, 0]), float(model.intercept_[0])
 
 
+def _attach_operational_onset_predictions(lead_joins: pd.DataFrame) -> pd.DataFrame:
+    cell = ["model_name", "period", "loop_id", "orientation", "horizon"]
+    state = (
+        lead_joins.loc[:, [*cell, "score_session", "edge_state"]]
+        .drop_duplicates([*cell, "score_session"])
+        .sort_values([*cell, "score_session"], kind="stable")
+    )
+    previous = state.groupby(cell, observed=True)["edge_state"].shift(1)
+    state["onset_operational_prediction"] = (
+        state["edge_state"].eq("active") & previous.notna() & previous.ne("active")
+    )
+    return lead_joins.merge(
+        state.loc[:, [*cell, "score_session", "onset_operational_prediction"]],
+        on=[*cell, "score_session"],
+        how="left",
+        validate="many_to_one",
+    )
+
+
 def lead_calibration_metrics(lead_joins: pd.DataFrame) -> pd.DataFrame:
     """Compute prequential calibration and frozen-active classification by lead."""
 
@@ -194,13 +213,22 @@ def lead_calibration_metrics(lead_joins: pd.DataFrame) -> pd.DataFrame:
             "target_payoff_positive",
             "target_robust_net_bps",
             "p_next_payoff_positive",
+            "p_on_next",
+            "p_survive_horizon",
             "edge_state",
             "target_episode_onset_within_lead",
+            "target_episode_survival",
+            "period",
+            "score_session",
+            "loop_id",
+            "orientation",
+            "horizon",
         },
         "calibration",
     )
+    scored = _attach_operational_onset_predictions(lead_joins)
     records: list[dict[str, object]] = []
-    for (model_name, lead), group in lead_joins.groupby(
+    for (model_name, lead), group in scored.groupby(
         ["model_name", "target_lead_sessions"], observed=True, sort=True
     ):
         observed = group.loc[group["target_payoff_available"].eq(True)].copy()  # noqa: E712
@@ -225,8 +253,17 @@ def lead_calibration_metrics(lead_joins: pd.DataFrame) -> pd.DataFrame:
             observed["target_episode_onset_within_lead"].fillna(False).astype(bool).to_numpy()
         )
         onset_prediction = (
-            observed["p_on_next"].ge(0.5).to_numpy() if "p_on_next" in observed else active
+            observed["onset_operational_prediction"].fillna(False).to_numpy(dtype=bool)
         )
+        onset_probability = _clip_probability(observed["p_on_next"])
+        survival_target = (
+            observed["target_episode_survival"].fillna(False).astype(bool).to_numpy(dtype=float)
+        )
+        survival_probability = _clip_probability(observed["p_survive_horizon"])
+        onset_slope, onset_intercept = _calibration_fit(
+            onset_target.astype(float), onset_probability
+        )
+        survival_slope, survival_intercept = _calibration_fit(survival_target, survival_probability)
         record.update(
             {
                 "brier_score": float(np.mean((probability - y) ** 2)),
@@ -248,6 +285,7 @@ def lead_calibration_metrics(lead_joins: pd.DataFrame) -> pd.DataFrame:
                 ),
                 "positive_payoff_rate": float(y.mean()),
                 "abstention_rate": float(observed["edge_state"].eq("unknown").mean()),
+                "onset_operational_predictions": int(onset_prediction.sum()),
                 "onset_precision": (
                     float(np.sum(onset_prediction & onset_target) / onset_prediction.sum())
                     if onset_prediction.sum()
@@ -261,6 +299,32 @@ def lead_calibration_metrics(lead_joins: pd.DataFrame) -> pd.DataFrame:
                 "false_onset_rate": (
                     float(np.sum(onset_prediction & ~onset_target) / onset_prediction.sum())
                     if onset_prediction.sum()
+                    else np.nan
+                ),
+                "onset_probability_brier_score": float(
+                    np.mean((onset_probability - onset_target.astype(float)) ** 2)
+                ),
+                "onset_probability_log_loss": float(
+                    np.mean(_binary_log_loss(onset_target.astype(float), onset_probability))
+                ),
+                "onset_probability_ece": expected_calibration_error(
+                    onset_target.astype(float), onset_probability
+                ),
+                "onset_probability_calibration_slope": onset_slope,
+                "onset_probability_calibration_intercept": onset_intercept,
+                "survival_observations": len(survival_target),
+                "survival_brier_score": float(
+                    np.mean((survival_probability - survival_target) ** 2)
+                ),
+                "survival_log_loss": float(
+                    np.mean(_binary_log_loss(survival_target, survival_probability))
+                ),
+                "survival_ece": expected_calibration_error(survival_target, survival_probability),
+                "survival_calibration_slope": survival_slope,
+                "survival_calibration_intercept": survival_intercept,
+                "survival_auc": (
+                    float(roc_auc_score(survival_target, survival_probability))
+                    if len(np.unique(survival_target)) == 2
                     else np.nan
                 ),
             }

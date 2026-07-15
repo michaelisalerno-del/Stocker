@@ -573,11 +573,14 @@ def _evaluate_rebuilt_pair(
 ) -> pd.DataFrame:
     forecasts = _forecast_ids(forecasts, prefix)
     outcomes = build_settled_outcome_ledger(panel, metadata)
+    causal_opportunities = opportunities.copy()
+    if "score_session" not in causal_opportunities and "session_date" in causal_opportunities:
+        causal_opportunities["score_session"] = causal_opportunities["session_date"].astype(str)
     joins = build_lead_target_joins(
         forecasts,
         outcomes,
         features,
-        opportunities,
+        causal_opportunities,
         LeadRegistration(),
     )
     paired = build_paired_prediction_table(joins)

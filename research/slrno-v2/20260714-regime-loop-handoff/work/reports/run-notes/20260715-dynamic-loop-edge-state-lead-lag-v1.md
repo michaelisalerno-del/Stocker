@@ -51,6 +51,11 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   but omitted from the paired table's evaluation-only target whitelist, so concentration reporting
   could not find it. The correction carries only that hindsight diagnostic identifier into the
   paired output; it remains absent from all forecast features. All outputs are regenerated again.
+- The following command at SHA `891c7e7ce873fa8002242e807994519903685676` reached the
+  registered sensitivity rebuild and stopped before output creation. The frozen decision ledger
+  calls its session `score_session`, while V2's rebuilt raw research surface retains
+  `session_date`; the opportunity-status adapter required an explicit causal alias. The correction
+  renames that already-known session field only for missing/unfilled target classification.
 
 ## Scientific decision
 

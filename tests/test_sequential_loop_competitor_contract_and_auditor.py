@@ -50,6 +50,7 @@ def test_exact_rerun_verifier_detects_one_byte_machine_artifact_drift(tmp_path: 
     exact.mkdir()
     (primary / "metrics.csv").write_bytes(b"a,b\n1,2\n")
     (exact / "metrics.csv").write_bytes(b"a,b\n1,2\n")
+    (exact / "exact_rerun_identity.json").write_text('{"byte_identical": true}\n')
 
     assert runner.verify_exact_rerun(exact, primary)["byte_identical"] is True
     (exact / "metrics.csv").write_bytes(b"a,b\n1,3\n")

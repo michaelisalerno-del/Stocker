@@ -2624,7 +2624,11 @@ def artifact_manifest(output: Path) -> dict[str, str]:
 
 def verify_exact_rerun(output: Path, primary: Path) -> dict[str, object]:
     extensions = {".parquet", ".csv", ".json"}
-    excluded = {"artifact_manifest.json", "independent_audit.json"}
+    excluded = {
+        "artifact_manifest.json",
+        "exact_rerun_identity.json",
+        "independent_audit.json",
+    }
     output_files = {
         path.name: path
         for path in output.iterdir()

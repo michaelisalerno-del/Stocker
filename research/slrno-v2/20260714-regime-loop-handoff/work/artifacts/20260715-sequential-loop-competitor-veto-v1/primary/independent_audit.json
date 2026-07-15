@@ -1,0 +1,209 @@
+{
+  "auditor_version": "sequential_loop_competitor_veto_independent_audit_v1",
+  "checks": [
+    {
+      "detail": {
+        "accepted_signal_ledger": "97b846c3efe0c87a4c9daae5294a07410c7b31e1fea188749dec2ffc7e1308b4",
+        "execution_anchors_2023": "be0b738c26785e3d0c82f2a57f7b30abe5d328147011541d8c1d7d246a1aa1cf",
+        "execution_anchors_2025": "69916e2c5e2f2311aa0c7de7b8aabe4a3d39200cf669c81a9bf1a9feb54acad5",
+        "scoring_2023": "16ea8a4d1611a432b0fa7e6b895c41e0331a57659831f940bb5bcf47d86a35c7",
+        "scoring_2025": "13d52ca52ffba83145deede48fbe646e69f46b041b8512617f1eff704a31f245"
+      },
+      "name": "data_snapshot_identity",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "contract_identity",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "git_and_configuration_metadata",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "clock_census_past_only",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "period_boundaries",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "research_only_safety_flags",
+      "passed": true
+    },
+    {
+      "detail": [],
+      "name": "no_runtime_execution_path_changed",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 8360
+      },
+      "name": "good_bad_unknown_classification_rebuilt",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "training_cutoffs_strict",
+      "passed": true
+    },
+    {
+      "detail": {
+        "groups": 92853,
+        "max_error": 2.220446049250313e-16
+      },
+      "name": "posterior_normalisation",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "explicit_unknown_mass",
+      "passed": true
+    },
+    {
+      "detail": {
+        "groups": 500
+      },
+      "name": "transition_compatibility_rebuilt",
+      "passed": true
+    },
+    {
+      "detail": {
+        "groups": 500
+      },
+      "name": "posterior_equation_rebuilt",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "smoothed_nonzero_likelihoods",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "checkpoint_feature_availability",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "event_lineage_integrity",
+      "passed": true
+    },
+    {
+      "detail": [],
+      "name": "future_and_episode_inputs_absent",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "remaining_payoff_clock",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "constant_terminal_costs",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "restarted_horizon_separate",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "missing_and_too_late_not_zero",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 50
+      },
+      "name": "independent_2025_price_replay",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 59556
+      },
+      "name": "paired_fixed_population",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "no_replacement_opportunities",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "existing_positions_unchanged",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "delayed_admission_constant_terminal_label",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "static_sequential_paired_identity",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 20
+      },
+      "name": "leave_one_stock_out_rebuilt",
+      "passed": true
+    },
+    {
+      "detail": [],
+      "name": "predeclared_stress_family",
+      "passed": true
+    },
+    {
+      "detail": {
+        "expected_total": -3071.8555865494745,
+        "stock_total": -3071.8555865496996
+      },
+      "name": "primary_concentration_rebuilt",
+      "passed": true
+    },
+    {
+      "detail": null,
+      "name": "missing_target_outcomes_separate_from_losses",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 13
+      },
+      "name": "profitable_losing_elimination_timing_rebuilt",
+      "passed": true
+    },
+    {
+      "detail": {
+        "files": 29
+      },
+      "name": "machine_readable_and_plot_hashes",
+      "passed": true
+    },
+    {
+      "detail": {
+        "files": 24,
+        "mismatches": []
+      },
+      "name": "primary_exact_rerun_identity",
+      "passed": true
+    }
+  ],
+  "passed_checks": 34,
+  "status": "pass",
+  "total_checks": 34
+}

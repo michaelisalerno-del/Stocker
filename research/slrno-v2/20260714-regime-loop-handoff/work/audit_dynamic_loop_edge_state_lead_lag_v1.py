@@ -174,7 +174,7 @@ def independently_reconstruct_delay(decisions: pd.DataFrame) -> pd.DataFrame:
 
 
 def comparable_files(root: Path) -> dict[str, str]:
-    excluded = {"artifact_manifest.json", "independent_audit.json", "research_report.md"}
+    excluded = {"independent_audit.json", "research_report.md"}
     return {
         path.name: sha256(path)
         for path in sorted(root.iterdir())

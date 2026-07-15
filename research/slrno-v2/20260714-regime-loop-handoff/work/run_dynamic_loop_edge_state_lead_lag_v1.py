@@ -998,7 +998,9 @@ def artifact_manifest(output: Path, report: Path) -> dict[str, object]:
     files = [
         {"name": path.name, "bytes": path.stat().st_size, "sha256": sha256(path)}
         for path in sorted(output.iterdir())
-        if path.is_file() and path.name not in {"artifact_manifest.json", "independent_audit.json"}
+        if path.is_file()
+        and path.name
+        not in {"artifact_manifest.json", "independent_audit.json", "research_report.md"}
     ]
     files.append(
         {"name": "research_report.md", "bytes": report.stat().st_size, "sha256": sha256(report)}

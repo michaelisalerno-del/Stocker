@@ -99,6 +99,7 @@ def build_paired_prediction_table(
         "target_independent_stock_ids",
         "target_effective_sample_size",
         "target_episode_state",
+        "target_episode_id",
         "target_episode_onset_within_lead",
         "target_episode_survival",
     )

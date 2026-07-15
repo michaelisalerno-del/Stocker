@@ -46,6 +46,11 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   target, or metric changed and no artifact was written.
 - The correction maps only that empty descriptive rate to missing (`NaN`). Every model and
   comparator is regenerated from scratch under the subsequent committed SHA.
+- The next primary command at SHA `00090ce69f300e137598563bfeb3496622614bf4` also stopped
+  before output creation. The post-freeze episode identifier had been attached to the lead ledger
+  but omitted from the paired table's evaluation-only target whitelist, so concentration reporting
+  could not find it. The correction carries only that hindsight diagnostic identifier into the
+  paired output; it remains absent from all forecast features. All outputs are regenerated again.
 
 ## Scientific decision
 

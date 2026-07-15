@@ -386,6 +386,7 @@ def build_lead_target_joins(
     expanded["target_payoff_available"] = expanded["target_status"].eq("payoff_settled")
     expanded["target_payoff_positive"] = expanded["target_payoff_positive"].astype("boolean")
     expanded["target_episode_state"] = pd.NA
+    expanded["target_episode_id"] = pd.NA
     expanded["target_episode_onset_within_lead"] = pd.NA
     expanded["target_episode_survival"] = pd.NA
     expanded["lead_join_id"] = [

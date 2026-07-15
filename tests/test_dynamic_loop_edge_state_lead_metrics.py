@@ -58,6 +58,7 @@ def _synthetic_pairs(*, related: bool) -> pd.DataFrame:
                         "target_independent_stock_ids": '["AAA","BBB","CCC"]',
                         "target_effective_sample_size": 3.0,
                         "target_episode_state": "positive" if target[target_index] else "neutral",
+                        "target_episode_id": "episode-1" if target[target_index] else pd.NA,
                         "target_episode_onset_within_lead": False,
                         "target_episode_survival": False,
                     }

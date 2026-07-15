@@ -61,6 +61,10 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   `tabulate` package is not installed. Its incomplete, unmanifested output was quarantined under
   `/tmp` and is not an experiment result. A local deterministic Markdown renderer removes the
   optional dependency; every scored comparator is rerun rather than copying the partial tables.
+- Primary and exact scoring completed at SHA `858517e84a8cecf3c46ca5557821887ef804c4d0`.
+  The auditor was then corrected to exclude the exact report's in-directory copy from the generic
+  artifact set; reports remain subject to their separate required hash comparison. This audit-only
+  normalization does not alter scored artifacts, and the audit records its own commit and file hash.
 
 ## Scientific decision
 

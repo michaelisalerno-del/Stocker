@@ -174,7 +174,7 @@ def independently_reconstruct_delay(decisions: pd.DataFrame) -> pd.DataFrame:
 
 
 def comparable_files(root: Path) -> dict[str, str]:
-    excluded = {"artifact_manifest.json", "independent_audit.json"}
+    excluded = {"artifact_manifest.json", "independent_audit.json", "research_report.md"}
     return {
         path.name: sha256(path)
         for path in sorted(root.iterdir())
@@ -502,6 +502,10 @@ def audit(primary: Path, exact: Path, primary_report: Path, exact_report: Path) 
     file_hashes = {name: value for name, value in sorted(primary_files.items())}
     return {
         "audit_id": "dynamic_loop_edge_state_lead_lag_v1_independent_audit",
+        "audit_git_sha": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, text=True
+        ).strip(),
+        "auditor_sha256": sha256(Path(__file__)),
         "passed": passed,
         "research_only": True,
         "execution_enabled": False,

@@ -1,0 +1,180 @@
+{
+  "audit_git_sha": "a6f0c3b7d24be7a9f10ae16902d65fba605855a8",
+  "audit_id": "dynamic_loop_edge_state_lead_lag_v1_independent_audit",
+  "auditor_sha256": "068cee37ab2098787e3edffb028b55bcb9968fdf04ec150540f953e99985d0db",
+  "checks": [
+    {
+      "detail": "ba0b41bd9dab96617358f6029bca13d6acfd205842a0706cee709cada5a65e9a",
+      "name": "contract_identity",
+      "passed": true
+    },
+    {
+      "detail": "registered=(0,1,2,3,5); primary=1",
+      "name": "lead_family_registration",
+      "passed": true
+    },
+    {
+      "detail": "d498275dc306ed347372e94a1b6ea9394e3ed4be7f9236566439ec9879cf7570",
+      "name": "frozen_v2_runner_hash",
+      "passed": true
+    },
+    {
+      "detail": "four reusable V2 modules",
+      "name": "frozen_v2_module_hashes",
+      "passed": true
+    },
+    {
+      "detail": "primary=30 files; exact=30 files",
+      "name": "primary_exact_machine_readable_and_plot_identity",
+      "passed": true
+    },
+    {
+      "detail": "ed2c7fdb8ae4b8a3236965e972f21164819dee609144239673a15d02eaf6ddc5",
+      "name": "primary_exact_report_identity",
+      "passed": true
+    },
+    {
+      "detail": "git=858517e84a8cecf3c46ca5557821887ef804c4d0; contract=ba0b41bd9dab96617358f6029bca13d6acfd205842a0706cee709cada5a65e9a",
+      "name": "git_and_configuration_metadata",
+      "passed": true
+    },
+    {
+      "detail": "broker/order/deployment/execution disabled",
+      "name": "research_only_safety_flags",
+      "passed": true
+    },
+    {
+      "detail": "33440",
+      "name": "forecast_unique_ids",
+      "passed": true
+    },
+    {
+      "detail": "3760",
+      "name": "outcome_unique_ids",
+      "passed": true
+    },
+    {
+      "detail": "features and settled training strictly precede freeze",
+      "name": "forecast_freeze_and_feature_availability",
+      "passed": true
+    },
+    {
+      "detail": "copied from immutable frozen V2 run",
+      "name": "forecast_not_revised_after_outcome",
+      "passed": true
+    },
+    {
+      "detail": "explicit within-period trading sessions",
+      "name": "target_lead_calendar_joins",
+      "passed": true
+    },
+    {
+      "detail": "no 2023-to-2025 join",
+      "name": "period_boundaries",
+      "passed": true
+    },
+    {
+      "detail": "missing=111876",
+      "name": "missing_targets_not_zero",
+      "passed": true
+    },
+    {
+      "detail": "joined directly to frozen V2 source_data_id",
+      "name": "settled_target_identity",
+      "passed": true
+    },
+    {
+      "detail": "paired=41800",
+      "name": "full_no_feature_paired_population_identity",
+      "passed": true
+    },
+    {
+      "detail": "only frozen feature overlay differs",
+      "name": "full_no_feature_identical_training_state",
+      "passed": true
+    },
+    {
+      "detail": "Brier and economics rebuilt",
+      "name": "independent_paired_metrics",
+      "passed": true
+    },
+    {
+      "detail": "lead1_brier=-0.054737210758",
+      "name": "primary_endpoint_registration_and_value",
+      "passed": true
+    },
+    {
+      "detail": "275/-9416.383 immediate; 259/+9014.535 shifted",
+      "name": "original_v2_delay_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": "gross - entry/exit/all applicable costs",
+      "name": "cost_calculations",
+      "passed": true
+    },
+    {
+      "detail": "same-loop/lineage candidates never promoted to exact",
+      "name": "exact_same_setup_and_no_replacement",
+      "passed": true
+    },
+    {
+      "detail": "original terminal precedes next-session entry",
+      "name": "restarted_and_constant_terminal_separate",
+      "passed": true
+    },
+    {
+      "detail": "hindsight attached only after freeze",
+      "name": "episode_label_isolation",
+      "passed": true
+    },
+    {
+      "detail": "20 stocks; panels/features/shared/cell states and targets rebuilt",
+      "name": "leave_one_stock_out_rebuilding",
+      "passed": true
+    },
+    {
+      "detail": "changed_paths_since_v2=43",
+      "name": "no_runtime_or_execution_paths_modified",
+      "passed": true
+    }
+  ],
+  "contract_hash": "ba0b41bd9dab96617358f6029bca13d6acfd205842a0706cee709cada5a65e9a",
+  "exact_report_hash": "ed2c7fdb8ae4b8a3236965e972f21164819dee609144239673a15d02eaf6ddc5",
+  "execution_enabled": false,
+  "machine_readable_and_plot_hashes": {
+    "artifact_manifest.json": "0e73fa0aeae0b2ee13135530a940e1cf356432a658f46f9205647c29294713e8",
+    "calibration_lead_0_1.png": "e1a61274e3d33988b1143bf498b8ae2599982c6b86d9a64cd40fd2e6195be980",
+    "concentration_results.csv": "b26eaa205b2b059cd7429ec0a0d5ed7e7e5dcb4a7dd21b42811ee9118a28b3f5",
+    "constant_terminal_time_delayed_trades.parquet": "fa6711ff191b37565329aa86eea38fd2a853260bdfda9982ac049f0c7e1b196d",
+    "exact_matched_trade_delay_results.csv": "05aedbccccaf4e0f0dfe3a75ba5b563d24598072b46c95f2b93f5bb795f948f6",
+    "example_false_structural_lead.png": "95777de406eae179da8e0df827bba02202ffe5e032e34367a8be3c77ab5e1ae1",
+    "example_structurally_led_episode.png": "d03a56f394174d6d8aa21e85ca251d2875a2cb4d25a0f69ab315c899aa90ecde",
+    "feature_contribution_predictions.parquet": "c7ac63feb79da4a7c2f21423ca461819a0396c751d21d5cfc4075848758f689e",
+    "feature_contribution_summary.csv": "6b792ca7ecd1bf97790af629b8eeafeaab0b2492066d4eaa6a75871f8f2bddd0",
+    "feature_contribution_vs_t1_payoff.png": "237bf294fdddc07c6f337c2d492b121b56badc9907125ba22149fb9dc94f435b",
+    "forecast_to_target_lead_joins.parquet": "e348121ee116ffda9f684d5b924d378ed449b9cffdca513cbd43ad815e918d2b",
+    "frozen_forecast_ledger.parquet": "8bd15d3f7b6bfbdcf83765788c3f968b4d2cfaee60c26a70d1c84fe941bf282c",
+    "full_vs_no_feature_paired_predictions.parquet": "ada16604dcce7bf7d455cbd1ecc75d3eee6dc43ccada94a0ab6f09728b107ba2",
+    "hindsight_episode_attribution.parquet": "e6c1cd2096ea5fea6cbf6fb550b25cf45a2646dbc20cae9206372a230ec668df",
+    "lead_calibration_bins.csv": "174172348bf6835b3db196364c2fdd57136a60c12e1913675397617ff9240153",
+    "lead_calibration_metrics.csv": "4e95e496897ecc054e64a23739ce5dc2024cf9522e669a60738be61a66545aec",
+    "lead_economic_metrics.csv": "9dff8ccdef19a9e7b312955760e4e253ee57e733423f3b5230890cf3c9995d1d",
+    "lead_paired_brier_improvement.png": "85dcda09707388998456d296e538d9b3f424e397fa7d49a3a1dffa05439f7c74",
+    "lead_paired_economic_increment.png": "36b1ce876449faf2440321f650dddb25de729bf1407380c413acf496237cc5db",
+    "leave_one_stock_out_results.csv": "46ba7a5afdcf9dfe7df653f964e9ebea262a41432783f92a91e6b34014a2345f",
+    "opportunity_population_decomposition.csv": "955a8e2747b0c8d04b79685ac92d479115dab590841d947004faed763e698a9d",
+    "original_v2_delay_reconstruction.parquet": "ed353238288b9651e392327fd17c7552b4796b578ff40a6ab6984370d3c91a23",
+    "original_v2_delay_summary.csv": "7fed25fca0c43666dee94574b3825a5908dbec895f0384cb63d109d4b5922c2a",
+    "original_vs_corrected_delay_population.png": "28f8731fa12d333d5e25246800f8936ab3aeebf04a53a4e017a8cade8d6950e5",
+    "paired_lead_metrics.csv": "7fc0dc48f7f637a8b38fd8c460011662392c34f578e589a8836c0fbc633533e6",
+    "restarted_horizon_delayed_trades.parquet": "2bda80465dd413f8b89f7b0dfeea36491e14881fbda73a6ea40e740a9b19835a",
+    "run_metadata.json": "275087cb892624f080639c8680eb4821c94a687a548145bf9a58a7d92881a922",
+    "same_setup_match_classification.parquet": "5e7b83c06709a1f54296c65e3fa2623c71321fb45c0491c8bd0629568d6a4fa4",
+    "settled_outcome_ledger.parquet": "cd89c5b59edfc1a9a21d074cad97650f3a71e7dbbcd7508c1810c6772f654443",
+    "stress_test_results.csv": "07e2187f659b682623bc6c466982d94b4b12786c267c98fa62677fa6059a88cf"
+  },
+  "passed": true,
+  "primary_report_hash": "ed2c7fdb8ae4b8a3236965e972f21164819dee609144239673a15d02eaf6ddc5",
+  "research_only": true
+}

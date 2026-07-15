@@ -1,0 +1,25 @@
+stress_test,paired_economic_increment_bps,detail,sensitivity,target_lead_sessions,paired_forecasts,paired_observable_targets,paired_brier_improvement,paired_log_loss_improvement,paired_absolute_error_improvement_bps,primary_registered_endpoint
+primary_lead_1,-403.678587182,,,,,,,,,
+twice_costs,-63.6785871817,,,,,,,,,
+one_bar_delayed_entry_within_session,,unavailable_without_frozen_causal_bar_path,,,,,,,,
+remove_top_1_stock_equal_allocation,-889.011587781,attribution_only; stock-dependent model state not rebuilt here,,,,,,,,
+remove_top_5_stock_equal_allocation,-1517.62959321,attribution_only; stock-dependent model state not rebuilt here,,,,,,,,
+remove_top_1_episode,-679.966828407,attribution_only; stock-dependent model state not rebuilt here,,,,,,,,
+remove_top_5_episode,-699.917257333,attribution_only; stock-dependent model state not rebuilt here,,,,,,,,
+period_2023,9.1280677866,,,,,,,,,
+period_2025,-412.806654968,,,,,,,,,
+median_session_aggregation,2974.340194,,median_session_aggregation,0,8360,2801,-0.0446182360461,-0.203507842354,0,False
+median_session_aggregation,1100.27478327,,median_session_aggregation,1,8360,2787,-0.0572237019523,-0.272431800975,0,True
+median_session_aggregation,13.3524270254,,median_session_aggregation,2,8360,2769,-0.051050990322,-0.254659692233,0,False
+median_session_aggregation,-2948.90876687,,median_session_aggregation,3,8360,2752,-0.0472598327311,-0.214457599317,0,False
+median_session_aggregation,-1931.56152951,,median_session_aggregation,5,8360,2722,-0.0488247874439,-0.262693962877,0,False
+hazard_0.033333,1461.39505508,,hazard_0.033333,0,8360,2801,-0.0502400246436,-0.213169630561,0,False
+hazard_0.033333,-968.456447748,,hazard_0.033333,1,8360,2787,-0.0557943467293,-0.259456995363,0,True
+hazard_0.033333,-584.562908827,,hazard_0.033333,2,8360,2769,-0.0530398872996,-0.253909816992,0,False
+hazard_0.033333,-451.58850359,,hazard_0.033333,3,8360,2752,-0.0480717814794,-0.211193859271,0,False
+hazard_0.033333,-1731.30292723,,hazard_0.033333,5,8360,2722,-0.0445381985319,-0.246686105292,0,False
+hazard_0.071429,2474.75961883,,hazard_0.071429,0,8360,2801,-0.0480581191477,-0.2144846236,0,False
+hazard_0.071429,263.875266902,,hazard_0.071429,1,8360,2787,-0.053276651162,-0.260740763653,0,True
+hazard_0.071429,182.703563538,,hazard_0.071429,2,8360,2769,-0.0511072438938,-0.255368105316,0,False
+hazard_0.071429,-1081.44782417,,hazard_0.071429,3,8360,2752,-0.0461834599515,-0.212614127305,0,False
+hazard_0.071429,-1661.87973569,,hazard_0.071429,5,8360,2722,-0.0423135646738,-0.248289432753,0,False

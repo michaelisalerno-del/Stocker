@@ -1,0 +1,7 @@
+decomposition_component,opportunity_rows,filled_rows,gross_payoff_bps,cost_bps,net_payoff_bps,overlap_or_capacity_change,entry_or_exit_clock_changed_on_retained_rows
+dropped,231,222,-2028.74890265,2220,-4248.74890265,False,False
+introduced,213,206,16242.1694343,2060,14182.1694343,False,False
+rejected_both,9883,9445,77367.1301567,94450,-17082.8698433,False,False
+retained,55,53,-4637.63413487,530,-5167.63413487,False,False
+reported_immediate,286,275,-6666.38303752,2750,-9416.38303752,False,False
+reported_shifted_policy,268,259,11604.5352995,2590,9014.53529946,False,False

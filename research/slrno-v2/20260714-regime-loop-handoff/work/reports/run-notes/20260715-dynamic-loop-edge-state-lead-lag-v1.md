@@ -56,6 +56,11 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   calls its session `score_session`, while V2's rebuilt raw research surface retains
   `session_date`; the opportunity-status adapter required an explicit causal alias. The correction
   renames that already-known session field only for missing/unfilled target classification.
+- The run at SHA `0776ed0969be5105b46e8aef9485e7b7a0375ad7` completed every model and
+  stress rebuild, then failed while rendering the Markdown report because pandas' optional
+  `tabulate` package is not installed. Its incomplete, unmanifested output was quarantined under
+  `/tmp` and is not an experiment result. A local deterministic Markdown renderer removes the
+  optional dependency; every scored comparator is rerun rather than copying the partial tables.
 
 ## Scientific decision
 

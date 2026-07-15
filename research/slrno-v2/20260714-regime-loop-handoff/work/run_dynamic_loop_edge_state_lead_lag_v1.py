@@ -104,6 +104,28 @@ def write_csv(frame: pd.DataFrame, path: Path) -> None:
     frame.to_csv(path, index=False, lineterminator="\n", float_format="%.12g")
 
 
+def markdown_table(frame: pd.DataFrame) -> str:
+    """Render Markdown without pandas' optional tabulate dependency."""
+
+    def render(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        if isinstance(value, (float, np.floating)):
+            return f"{float(value):.6f}"
+        return str(value).replace("|", "\\|").replace("\n", " ")
+
+    headers = [str(column) for column in frame.columns]
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    lines.extend(
+        "| " + " | ".join(render(value) for value in row) + " |"
+        for row in frame.itertuples(index=False, name=None)
+    )
+    return "\n".join(lines)
+
+
 def git_value(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=REPO, text=True).strip()
 
@@ -893,17 +915,19 @@ def render_report(
     loo_lead_one = loo.loc[loo["target_lead_sessions"].eq(1)]
     loo_positive = int(loo_lead_one["paired_brier_improvement"].gt(0.0).sum())
 
-    lead_table = overall[
-        [
-            "target_lead_sessions",
-            "paired_observable_targets",
-            "paired_brier_improvement",
-            "paired_log_loss_improvement",
-            "paired_economic_increment_bps",
-            "brier_ci_lower",
-            "brier_ci_upper",
+    lead_table = markdown_table(
+        overall[
+            [
+                "target_lead_sessions",
+                "paired_observable_targets",
+                "paired_brier_improvement",
+                "paired_log_loss_improvement",
+                "paired_economic_increment_bps",
+                "brier_ci_lower",
+                "brier_ci_upper",
+            ]
         ]
-    ].to_markdown(index=False, floatfmt=".6f")
+    )
     report = f"""# Dynamic Loop Edge State Lead-Lag V1
 
 ## Decision
@@ -938,7 +962,7 @@ No lead has positive paired Brier improvement. Lead 1 is worse than same-session
 
 ### Calibration at leads 0 and 1
 
-{calibration_pair.to_markdown(index=False, floatfmt=".6f")}
+{markdown_table(calibration_pair)}
 
 The lead-1 contribution-bin table contains {len(contribution_lead_one)} rows. Its monotonic/rank diagnostics are reported machine-readably; no target-informed cutoff was searched.
 

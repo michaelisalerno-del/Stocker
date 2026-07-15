@@ -1,0 +1,7 @@
+model_name,concentration_type,top_item,top_item_net_pnl_bps,top_five_share_of_positive_contribution
+ewma_short_memory,best_stocks,CIFR,1520.06435546593,0.8214087691414673
+hierarchical_change_point,best_stocks,AAOI,2054.9893815350974,0.795221248318262
+no_payoff_state_filter,best_stocks,AAOI,11744.054333282653,0.7858153722184704
+payoff_only_change_point,best_stocks,QBTS,4080.847798321006,0.764088508749971
+v1_60_session_selector,best_stocks,APLD,7953.877598318193,0.7972965500604768
+hierarchical_change_point,best_episodes,episode_0016,4067.021876816244,0.13109895220788595

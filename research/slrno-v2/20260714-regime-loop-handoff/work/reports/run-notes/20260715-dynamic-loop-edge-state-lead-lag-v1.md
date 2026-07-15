@@ -65,6 +65,10 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   The auditor was then corrected to exclude the exact report's in-directory copy from the generic
   artifact set; reports remain subject to their separate required hash comparison. This audit-only
   normalization does not alter scored artifacts, and the audit records its own commit and file hash.
+- Visual QA found that the first chronological structurally-led classification was also a negative
+  false lead, causing both representative plot selectors to choose it. The positive example is now
+  constrained to positive mean episode payoff and the false example to non-positive payoff. Only
+  plots, manifests, and their audit hashes are regenerated; scored tables are unchanged.
 
 ## Scientific decision
 

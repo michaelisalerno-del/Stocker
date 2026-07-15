@@ -822,6 +822,8 @@ def create_plots(
         ].copy()
         if label.startswith("example_false"):
             candidates = candidates.loc[candidates["mean_session_payoff_bps"].le(0.0)]
+        else:
+            candidates = candidates.loc[candidates["mean_session_payoff_bps"].gt(0.0)]
         figure, axis = plt.subplots(figsize=(8, 4))
         if candidates.empty:
             axis.text(0.5, 0.5, "No qualifying frozen example", ha="center", va="center")

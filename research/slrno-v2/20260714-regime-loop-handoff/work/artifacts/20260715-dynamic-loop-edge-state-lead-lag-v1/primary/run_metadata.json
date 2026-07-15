@@ -42,7 +42,7 @@
     "settled_outcome_ledger.parquet",
     "stress_test_results.csv"
   ],
-  "git_sha": "858517e84a8cecf3c46ca5557821887ef804c4d0",
+  "git_sha": "2341be2e22a01eec4e290667f8bde2dd08ddced6",
   "hazard_sensitivities": [
     0.03333333333333333,
     0.07142857142857142

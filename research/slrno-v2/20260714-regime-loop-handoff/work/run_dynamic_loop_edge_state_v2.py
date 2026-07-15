@@ -63,6 +63,7 @@ PRIMARY_MODELS = (
     "v1_60_session_selector",
     "ewma_short_memory",
     "payoff_only_change_point",
+    "hierarchical_payoff_history_change_point",
     "hierarchical_change_point",
 )
 
@@ -527,6 +528,57 @@ def _causal_transition_surprise(surface: pd.DataFrame) -> pd.Series:
     return result.astype(float)
 
 
+def rebuild_surface_context_for_universe(
+    surface: pd.DataFrame,
+    *,
+    universe_size: int,
+) -> pd.DataFrame:
+    """Recompute causal population features after a universe perturbation."""
+
+    if universe_size <= 0:
+        raise ValueError("universe_size must be positive")
+    result = surface.drop(
+        columns=[
+            "structural_breadth",
+            "market_return",
+            "market_volatility",
+            "transition_surprise",
+        ],
+        errors="ignore",
+    ).copy()
+    result = result.sort_values(
+        ["period", "session_date", "start_timestamp", "symbol_norm"], kind="stable"
+    )
+    result["transition_surprise"] = _causal_transition_surprise(result)
+    cell_keys = ["period", "session", "loop_id", "orientation", "horizon"]
+    breadth = (
+        result.groupby(cell_keys, observed=True)["symbol_norm"]
+        .nunique()
+        .div(float(universe_size))
+        .rename("structural_breadth")
+        .reset_index()
+    )
+    market = (
+        result.groupby(["period", "session"], observed=True)
+        .agg(
+            market_return=("session_return", "mean"),
+            market_volatility=("mean_abs_return_12", "mean"),
+        )
+        .reset_index()
+    )
+    return result.merge(
+        breadth,
+        on=cell_keys,
+        how="left",
+        validate="many_to_one",
+    ).merge(
+        market,
+        on=["period", "session"],
+        how="left",
+        validate="many_to_one",
+    )
+
+
 def build_trade_surface(
     ledger: pd.DataFrame,
     config: Mapping[str, Any],
@@ -557,30 +609,7 @@ def build_trade_surface(
         1.0 / (1.0 + np.maximum(surface["volume_ratio"].to_numpy(float), 0.0)),
         np.nan,
     )
-    surface["transition_surprise"] = _causal_transition_surprise(surface)
-    cell_keys = ["period", "session", "loop_id", "orientation", "horizon"]
-    breadth = (
-        surface.groupby(cell_keys, observed=True)["symbol_norm"]
-        .nunique()
-        .div(len(symbols))
-        .rename("structural_breadth")
-        .reset_index()
-    )
-    market = (
-        surface.groupby(["period", "session"], observed=True)
-        .agg(
-            market_return=("session_return", "mean"),
-            market_volatility=("mean_abs_return_12", "mean"),
-        )
-        .reset_index()
-    )
-    surface = surface.merge(breadth, on=cell_keys, how="left", validate="many_to_one")
-    surface = surface.merge(
-        market,
-        on=["period", "session"],
-        how="left",
-        validate="many_to_one",
-    )
+    surface = rebuild_surface_context_for_universe(surface, universe_size=len(symbols))
     clock = derive_execution_clock(surface)
     for column in clock:
         surface[column] = clock[column]
@@ -772,20 +801,27 @@ def bocpd_settings_from_config(
 def hierarchy_settings_from_config(
     config: Mapping[str, Any],
     *,
-    payoff_only: bool,
+    enable_hierarchy: bool,
+    include_leading_features: bool,
 ) -> HierarchicalSettings:
     hierarchy = config["hierarchy"]
     return HierarchicalSettings(
         pooling_strength_sessions=(
-            0.0 if payoff_only else float(hierarchy["pooling_strength_sessions"])
+            0.0 if not enable_hierarchy else float(hierarchy["pooling_strength_sessions"])
         ),
         minimum_shared_cells_per_session=int(hierarchy["minimum_shared_cells_per_session"]),
         sparse_uncertainty_inflation_bps=(
-            0.0 if payoff_only else float(hierarchy["sparse_uncertainty_inflation_bps"])
+            0.0 if not enable_hierarchy else float(hierarchy["sparse_uncertainty_inflation_bps"])
         ),
         lower_bound_confidence=float(config["thresholds"]["lower_bound_confidence"]),
         feature_logit_weights=(
-            {} if payoff_only else dict(config["features"]["leading_feature_logit_weights"])
+            {}
+            if not include_leading_features
+            else dict(config["features"]["leading_feature_logit_weights"])
+        ),
+        independent_stock_reference=float(hierarchy["independent_stock_reference"]),
+        effective_sample_size_per_session_reference=float(
+            hierarchy["effective_sample_size_per_session_reference"]
         ),
     )
 
@@ -830,7 +866,8 @@ def run_change_point_model(
     payoff_panel: pd.DataFrame,
     feature_panel: pd.DataFrame,
     cell_keys_by_period: Mapping[int, Sequence[tuple[str, str, int]]],
-    payoff_only: bool,
+    enable_hierarchy: bool,
+    include_leading_features: bool,
     hazard: float | None = None,
     active_probability: float | None = None,
     survival_probability: float | None = None,
@@ -838,7 +875,7 @@ def run_change_point_model(
     feature_weights = config["features"]["leading_feature_logit_weights"]
     required_features = (
         ()
-        if payoff_only
+        if not include_leading_features
         else tuple(name for name in feature_weights if name != "out_of_distribution_score")
     )
     rows: list[pd.DataFrame] = []
@@ -852,7 +889,11 @@ def run_change_point_model(
             feature_panel=period_features,
             cell_keys=list(cell_keys_by_period[period]),
             bocpd_settings=bocpd_settings_from_config(config, hazard=hazard),
-            hierarchy_settings=hierarchy_settings_from_config(config, payoff_only=payoff_only),
+            hierarchy_settings=hierarchy_settings_from_config(
+                config,
+                enable_hierarchy=enable_hierarchy,
+                include_leading_features=include_leading_features,
+            ),
             decision_thresholds=decision_thresholds_from_config(
                 config,
                 active_probability=active_probability,
@@ -868,7 +909,7 @@ def run_change_point_model(
                 horizon_bars=int(config["registered_target"]["fixed_horizon_bars"]),
                 session_bars=int(config["registered_target"]["session_bars"]),
                 required_features=required_features,
-                include_leading_features=not payoff_only,
+                include_leading_features=include_leading_features,
                 random_seed=int(config["evaluation"]["fixed_random_seed"]),
             ),
         )
@@ -972,7 +1013,9 @@ def run_ewma_model(
                     support = SupportEvidence(0.0, 0, 0, 0.0)
                     mean = 0.0
                     std = float(config["observation_model"]["scale_prior_bps"])
+                    predictive_std = std
                     p_positive = 0.5
+                    p_next_payoff_positive = 0.5
                     run_length = 0.0
                 else:
                     count = int(state["count"])
@@ -997,6 +1040,12 @@ def run_ewma_model(
                             float(config["ewma"]["minimum_variance_bps2"]),
                         )
                     )
+                    predictive_std = math.sqrt(
+                        max(
+                            float(state["variance"]),
+                            float(config["ewma"]["minimum_variance_bps2"]),
+                        )
+                    )
                     p_positive = float(
                         student_t.cdf(
                             mean / std,
@@ -1005,7 +1054,16 @@ def run_ewma_model(
                             ),
                         )
                     )
-                p_off = alpha * 0.5 + (1.0 - alpha) * (1.0 - p_positive)
+                    p_next_payoff_positive = float(
+                        student_t.cdf(
+                            mean / predictive_std,
+                            df=float(
+                                config["observation_model"]["student_t_degrees_of_freedom_floor"]
+                            ),
+                        )
+                    )
+                p_on = alpha * p_positive
+                p_off = alpha * (1.0 - p_positive)
                 survival = (1.0 - p_off) ** (horizon / session_bars)
                 quantile = student_t.ppf(
                     float(config["thresholds"]["lower_bound_confidence"]),
@@ -1020,10 +1078,13 @@ def run_ewma_model(
                     posterior_lower_bound_net_bps=mean - quantile * std,
                     p_edge_positive=p_positive,
                     p_edge_active=p_positive,
-                    p_on_next=alpha * 0.5 + (1.0 - alpha) * p_positive,
+                    p_on_next=p_on,
                     p_off_next=p_off,
                     p_survive_horizon=survival,
                     out_of_distribution_score=0.0,
+                    posterior_predictive_std_net_bps=predictive_std,
+                    p_next_payoff_positive=p_next_payoff_positive,
+                    hierarchical_cell_weight=1.0,
                 )
                 decision = classify_edge_state(
                     forecast,
@@ -1102,6 +1163,26 @@ def build_v1_forecasts(
     previous = frame.groupby(["period", "cell_key"], observed=True)["active"].shift()
     changed = previous.notna() & previous.ne(frame["active"])
     active = frame["active"].astype(bool)
+    p_on_next = pd.Series(index=frame.index, dtype=float)
+    p_off_next = pd.Series(index=frame.index, dtype=float)
+    for _, indices in frame.groupby(["period", "cell_key"], observed=True).groups.items():
+        on_count = 0
+        off_count = 0
+        inactive_origins = 0
+        active_origins = 0
+        previous_active: bool | None = None
+        for index in indices:
+            current_active = bool(active.loc[index])
+            if previous_active is not None:
+                if previous_active:
+                    active_origins += 1
+                    off_count += int(not current_active)
+                else:
+                    inactive_origins += 1
+                    on_count += int(current_active)
+            p_on_next.loc[index] = (on_count + 1.0) / (inactive_origins + 2.0)
+            p_off_next.loc[index] = (off_count + 1.0) / (active_origins + 2.0)
+            previous_active = current_active
     p_binary = np.where(active, 0.999, 0.001)
     prior_scale = float(config["observation_model"]["scale_prior_bps"])
     lower_quantile = student_t.ppf(
@@ -1128,9 +1209,17 @@ def build_v1_forecasts(
     )
     frame["p_edge_positive"] = p_binary
     frame["p_edge_active"] = p_binary
-    frame["p_on_next"] = np.where(active, 0.999, 0.001)
-    frame["p_off_next"] = np.where(active, 0.001, 0.999)
-    frame["p_survive_horizon"] = np.where(active, 0.999, 0.001)
+    frame["p_on_next"] = p_on_next
+    frame["p_off_next"] = p_off_next
+    frame["p_survive_horizon"] = (1.0 - frame["p_off_next"]) ** (
+        horizon / int(config["registered_target"]["session_bars"])
+    )
+    frame["posterior_predictive_std_net_bps"] = prior_scale
+    frame["p_next_payoff_positive"] = student_t.cdf(
+        frame["estimate_net_bps"].astype(float) / prior_scale,
+        df=float(config["observation_model"]["student_t_degrees_of_freedom_floor"]),
+    )
+    frame["hierarchical_cell_weight"] = 1.0
     frame["out_of_distribution_score"] = 0.0
     frame["effective_sessions"] = 60.0
     frame["independent_stocks"] = 0
@@ -1166,8 +1255,10 @@ def build_v1_forecasts(
         "p_on_next",
         "p_off_next",
         "p_survive_horizon",
+        "p_next_payoff_positive",
         "posterior_mean_net_bps",
         "posterior_std_net_bps",
+        "posterior_predictive_std_net_bps",
         "posterior_lower_bound_net_bps",
         "posterior_run_length_mean",
         "posterior_run_length_mode",
@@ -1176,6 +1267,7 @@ def build_v1_forecasts(
         "raw_fills",
         "effective_sample_size",
         "out_of_distribution_score",
+        "hierarchical_cell_weight",
         "edge_state",
         "admit_new_entry",
         "reason_codes",
@@ -1406,7 +1498,11 @@ def evaluate_prediction_models(
             frame = frame.loc[frame["model_name"].eq(model_name)].copy()
             if frame.empty:
                 continue
-            probabilities = np.clip(frame["p_edge_positive"].to_numpy(float), 1e-6, 1 - 1e-6)
+            probabilities = np.clip(
+                frame["p_next_payoff_positive"].to_numpy(float),
+                1e-6,
+                1 - 1e-6,
+            )
             targets = frame["positive_target"].to_numpy(bool)
             log_loss = float(
                 -np.mean(targets * np.log(probabilities) + (~targets) * np.log(1.0 - probabilities))
@@ -1418,7 +1514,10 @@ def evaluate_prediction_models(
             false_positive = int(np.sum(predicted & ~targets))
             false_negative = int(np.sum(~predicted & targets))
             correct = predicted == targets
-            std = np.maximum(frame["posterior_std_net_bps"].to_numpy(float), 1e-6)
+            std = np.maximum(
+                frame["posterior_predictive_std_net_bps"].to_numpy(float),
+                1e-6,
+            )
             continuous_log_density = float(
                 np.mean(
                     student_t.logpdf(
@@ -1651,6 +1750,8 @@ def identify_hindsight_episodes(
             episode_id = f"episode_{episode_counter:04d}"
             onset = str(segment["score_session"].iloc[0])
             episode_end = str(segment["score_session"].iloc[-1])
+            decay_rows = segment.loc[segment["hindsight_payoff_state"].eq("decaying")]
+            decay_onset = str(decay_rows["score_session"].iloc[0]) if not decay_rows.empty else None
             period = int(key[0])
             loop_id = str(key[1])
             orientation = str(key[2])
@@ -1686,28 +1787,37 @@ def identify_hindsight_episodes(
             captured = float(segment.loc[captured_mask, "robust_net_payoff_bps"].sum())
             missed = float(segment.loc[~captured_mask, "robust_net_payoff_bps"].sum())
             duration = end_index - onset_index + 1
-            feature_history = feature_panel.loc[
+            onset_feature_history = feature_panel.loc[
                 feature_panel["period"].eq(period)
                 & feature_panel["loop_id"].eq(loop_id)
                 & feature_panel["orientation"].eq(orientation)
                 & feature_panel["score_session"].le(onset)
             ].sort_values("score_session", kind="stable")
-            recent_features = feature_history.tail(3)
-            earlier_features = feature_history.iloc[:-3].tail(3)
 
             def feature_change(
                 name: str,
-                recent: pd.DataFrame = recent_features,
-                earlier: pd.DataFrame = earlier_features,
+                history: pd.DataFrame,
             ) -> float:
+                recent = history.tail(3)
+                earlier = history.iloc[:-3].tail(3)
                 if recent.empty or earlier.empty:
                     return math.nan
                 return float(recent[name].mean() - earlier[name].mean())
 
-            breadth_change = feature_change("structural_breadth")
-            coherence_change = feature_change("top_second_margin")
-            dispersion_change = feature_change("payoff_dispersion")
-            surprise_change = feature_change("transition_surprise")
+            breadth_change = feature_change("structural_breadth", onset_feature_history)
+            coherence_change = feature_change("top_second_margin", onset_feature_history)
+            if decay_onset is None:
+                dispersion_change = math.nan
+                surprise_change = math.nan
+            else:
+                decay_feature_history = feature_panel.loc[
+                    feature_panel["period"].eq(period)
+                    & feature_panel["loop_id"].eq(loop_id)
+                    & feature_panel["orientation"].eq(orientation)
+                    & feature_panel["score_session"].le(decay_onset)
+                ].sort_values("score_session", kind="stable")
+                dispersion_change = feature_change("payoff_dispersion", decay_feature_history)
+                surprise_change = feature_change("transition_surprise", decay_feature_history)
             episode_rows.append(
                 {
                     "episode_id": episode_id,
@@ -1717,6 +1827,7 @@ def identify_hindsight_episodes(
                     "horizon": int(key[3]),
                     "hindsight_estimated_onset": onset,
                     "hindsight_estimated_end": episode_end,
+                    "hindsight_estimated_decay_onset": decay_onset,
                     "duration_sessions": duration,
                     "observed_payoff_sessions": int(len(segment)),
                     "mean_session_payoff_bps": float(segment["robust_net_payoff_bps"].mean()),
@@ -1770,7 +1881,7 @@ def change_point_diagnostics(
         state_change = model.groupby(["period", "loop_id", "orientation"], observed=True)[
             "edge_state"
         ].transform(lambda values: values.ne(values.shift()) & values.shift().notna())
-        detected = model.loc[model["p_change_now"].ge(threshold) | state_change].copy()
+        detected = model.loc[model["p_change_now"].ge(threshold)].copy()
         activation_delays: list[float] = []
         termination_delays: list[float] = []
         lag_ratios: list[float] = []
@@ -1887,6 +1998,7 @@ def change_point_diagnostics(
                 else math.nan,
                 "detected_change_points": int(len(detected)),
                 "false_change_points": false_changes,
+                "operational_state_transitions": int(state_change.sum()),
                 "mean_fraction_episode_captured_after_activation": float(
                     np.mean(captured_fractions)
                 )
@@ -1906,9 +2018,40 @@ def change_point_diagnostics(
     return pd.DataFrame(rows)
 
 
+def episode_trade_contributions(
+    decisions: pd.DataFrame,
+    episodes: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attribute accepted full-model payoff to hindsight windows for diagnostics."""
+
+    full = decisions.loc[
+        decisions["model_name"].eq("hierarchical_change_point") & decisions["accepted_filled"]
+    ]
+    rows: list[dict[str, object]] = []
+    for episode in episodes.itertuples(index=False):
+        matched = full.loc[
+            full["period"].eq(int(episode.period))
+            & full["loop_id"].eq(str(episode.loop_id))
+            & full["orientation"].eq(str(episode.orientation))
+            & full["score_session"].between(
+                str(episode.hindsight_estimated_onset),
+                str(episode.hindsight_estimated_end),
+            )
+        ]
+        rows.append(
+            {
+                "episode_id": str(episode.episode_id),
+                "accepted_trade_count": int(len(matched)),
+                "accepted_net_pnl_bps": float(matched["primary_net_payoff_bps"].sum()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def concentration_analysis(
     slices: pd.DataFrame,
     episodes: pd.DataFrame,
+    decisions: pd.DataFrame,
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for model_name, frame in slices.loc[slices["dimension"].eq("stock")].groupby(
@@ -1931,17 +2074,22 @@ def concentration_analysis(
                 else math.nan,
             }
         )
-    if not episodes.empty:
-        best_episode = episodes.sort_values("total_episode_payoff_bps", ascending=False).iloc[0]
-        positive_total = episodes["total_episode_payoff_bps"].clip(lower=0.0).sum()
+    episode_contributions = episode_trade_contributions(decisions, episodes)
+    if not episode_contributions.empty:
+        best_episode = episode_contributions.sort_values(
+            "accepted_net_pnl_bps", ascending=False
+        ).iloc[0]
+        positive_total = episode_contributions["accepted_net_pnl_bps"].clip(lower=0.0).sum()
         rows.append(
             {
                 "model_name": "hierarchical_change_point",
                 "concentration_type": "best_episodes",
                 "top_item": best_episode["episode_id"],
-                "top_item_net_pnl_bps": float(best_episode["total_episode_payoff_bps"]),
+                "top_item_net_pnl_bps": float(best_episode["accepted_net_pnl_bps"]),
                 "top_five_share_of_positive_contribution": float(
-                    episodes.nlargest(5, "total_episode_payoff_bps")["total_episode_payoff_bps"]
+                    episode_contributions.nlargest(5, "accepted_net_pnl_bps")[
+                        "accepted_net_pnl_bps"
+                    ]
                     .clip(lower=0.0)
                     .sum()
                     / positive_total
@@ -1997,12 +2145,112 @@ def _delayed_policy(decisions: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def retrain_leave_one_stock_out_decisions(
+    *,
+    surface: pd.DataFrame,
+    base_decisions: pd.DataFrame,
+    calendars: Mapping[int, pd.DataFrame],
+    config: Mapping[str, Any],
+    configuration_hash: str,
+    run_id: str,
+) -> dict[str, pd.DataFrame]:
+    """Retrain every population-dependent full-model component without one stock."""
+
+    required_features = tuple(
+        name
+        for name in config["features"]["leading_feature_logit_weights"]
+        if name != "out_of_distribution_score"
+    )
+    symbols = sorted(surface["symbol_norm"].astype(str).unique())
+    results: dict[str, pd.DataFrame] = {}
+    for excluded_stock in symbols:
+        loo_surface = surface.loc[~surface["symbol_norm"].eq(excluded_stock)].copy()
+        remaining_symbols = int(loo_surface["symbol_norm"].nunique())
+        loo_surface = rebuild_surface_context_for_universe(
+            loo_surface,
+            universe_size=remaining_symbols,
+        )
+        loo_panel, _ = aggregate_payoff_panels(loo_surface, config)
+        loo_cell_keys = {
+            int(period): sorted(
+                {
+                    (str(row.loop_id), str(row.orientation), int(row.horizon))
+                    for row in loo_surface.loc[loo_surface["period"].eq(int(period))].itertuples(
+                        index=False
+                    )
+                }
+            )
+            for period in config["evaluation"]["periods"]
+        }
+        loo_features = build_feature_panel(
+            loo_surface,
+            loo_panel,
+            calendars,
+            loo_cell_keys,
+            required_features,
+        )
+        label = f"hierarchical_change_point_leave_one_out_{excluded_stock}"
+        loo_forecast = run_change_point_model(
+            model_name=label,
+            config=config,
+            configuration_hash=configuration_hash,
+            run_id=run_id,
+            calendars=calendars,
+            payoff_panel=loo_panel,
+            feature_panel=loo_features,
+            cell_keys_by_period=loo_cell_keys,
+            enable_hierarchy=True,
+            include_leading_features=True,
+        )
+        replaced = _replace_policy(base_decisions, loo_forecast, label=label)
+        results[excluded_stock] = replaced.loc[
+            ~replaced["symbol_norm"].eq(excluded_stock)
+        ].reset_index(drop=True)
+    return results
+
+
+def _stress_admission_mask(
+    forecast: pd.DataFrame,
+    config: Mapping[str, Any],
+    *,
+    active_probability: float,
+    survival_probability: float,
+) -> pd.Series:
+    """Reapply the admission contract while varying only registered probabilities."""
+
+    support = config["support"]
+    thresholds = config["thresholds"]
+    immutable_block = (
+        forecast["reason_codes"]
+        .astype(str)
+        .str.contains(
+            "decaying_state|retired_state|unresolved_outcomes|"
+            "structural_breadth_collapse|high_cost_pressure",
+            regex=True,
+        )
+    )
+    return (
+        forecast["p_edge_active"].ge(float(active_probability))
+        & forecast["posterior_lower_bound_net_bps"].gt(0.0)
+        & forecast["p_survive_horizon"].ge(float(survival_probability))
+        & forecast["p_off_next"].lt(float(thresholds["decaying_termination_probability"]))
+        & forecast["effective_sessions"].ge(int(support["minimum_independent_sessions"]))
+        & forecast["independent_stocks"].ge(int(support["minimum_independent_stocks"]))
+        & forecast["effective_sample_size"].ge(float(support["minimum_effective_sample_size"]))
+        & forecast["posterior_std_net_bps"].le(float(support["maximum_posterior_std_net_bps"]))
+        & forecast["out_of_distribution_score"].le(float(thresholds["out_of_distribution_score"]))
+        & forecast["required_features_available"].astype(bool)
+        & ~immutable_block
+    )
+
+
 def stress_test_results(
     decisions: pd.DataFrame,
     forecasts: pd.DataFrame,
     episodes: pd.DataFrame,
     config: Mapping[str, Any],
     sensitivity_decisions: Mapping[str, pd.DataFrame],
+    leave_one_stock_out_decisions: Mapping[str, pd.DataFrame],
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
@@ -2013,6 +2261,7 @@ def stress_test_results(
         model_name: str,
         cost_multiplier: float = 1.0,
         detail: str = "",
+        universe_size: int = 20,
     ) -> None:
         rows.append(
             {
@@ -2023,7 +2272,7 @@ def stress_test_results(
                 **trading_summary(
                     frame,
                     cost_multiplier=cost_multiplier,
-                    universe_size=20,
+                    universe_size=universe_size,
                 ),
             }
         )
@@ -2044,12 +2293,13 @@ def stress_test_results(
         )
 
     full = decisions.loc[decisions["model_name"].eq("hierarchical_change_point")].copy()
-    for stock in sorted(full["symbol_norm"].astype(str).unique()):
+    for stock, retrained in sorted(leave_one_stock_out_decisions.items()):
         record(
             "leave_one_stock_out",
-            full.loc[~full["symbol_norm"].eq(stock)],
+            retrained,
             model_name="hierarchical_change_point",
-            detail=f"excluded={stock}",
+            detail=f"excluded={stock};full_model_retrained=true",
+            universe_size=max(int(full["symbol_norm"].nunique()) - 1, 1),
         )
     filled = full.loc[full["accepted_filled"]].copy()
     month_net = filled.groupby("month")["primary_net_payoff_bps"].sum()
@@ -2061,8 +2311,19 @@ def stress_test_results(
             model_name="hierarchical_change_point",
             detail=f"removed={best_month}",
         )
-    if not episodes.empty:
-        best_episode = episodes.nlargest(1, "total_episode_payoff_bps").iloc[0]
+    episode_contributions = episode_trade_contributions(decisions, episodes)
+    profitable_episode_contributions = (
+        episode_contributions.loc[episode_contributions["accepted_net_pnl_bps"].gt(0.0)]
+        if not episode_contributions.empty
+        else episode_contributions
+    )
+    if not profitable_episode_contributions.empty:
+        best_contribution = profitable_episode_contributions.nlargest(
+            1, "accepted_net_pnl_bps"
+        ).iloc[0]
+        best_episode = episodes.loc[
+            episodes["episode_id"].eq(best_contribution["episode_id"])
+        ].iloc[0]
         in_episode = (
             full["period"].eq(int(best_episode["period"]))
             & full["loop_id"].eq(str(best_episode["loop_id"]))
@@ -2077,6 +2338,13 @@ def stress_test_results(
             full.loc[~in_episode],
             model_name="hierarchical_change_point",
             detail=f"removed={best_episode['episode_id']}",
+        )
+    else:
+        record(
+            "remove_best_profitable_episode",
+            full,
+            model_name="hierarchical_change_point",
+            detail="no_positive_accepted_episode",
         )
     liquid_values = full["dollar_volume_proxy"].replace([np.inf, -np.inf], np.nan).dropna()
     if not liquid_values.empty:
@@ -2115,22 +2383,12 @@ def stress_test_results(
         )
 
     main_forecast = forecasts.loc[forecasts["model_name"].eq("hierarchical_change_point")].copy()
-    support = config["support"]
-    ood_threshold = float(config["thresholds"]["out_of_distribution_score"])
     for active_threshold in config["thresholds"]["nearby_active_probability"]:
-        admitted = (
-            main_forecast["p_edge_active"].ge(float(active_threshold))
-            & main_forecast["posterior_lower_bound_net_bps"].gt(0.0)
-            & main_forecast["p_survive_horizon"].ge(
-                float(config["thresholds"]["survival_probability"])
-            )
-            & main_forecast["effective_sessions"].ge(int(support["minimum_independent_sessions"]))
-            & main_forecast["independent_stocks"].ge(int(support["minimum_independent_stocks"]))
-            & main_forecast["effective_sample_size"].ge(
-                float(support["minimum_effective_sample_size"])
-            )
-            & main_forecast["out_of_distribution_score"].le(ood_threshold)
-            & main_forecast["required_features_available"].astype(bool)
+        admitted = _stress_admission_mask(
+            main_forecast,
+            config,
+            active_probability=float(active_threshold),
+            survival_probability=float(config["thresholds"]["survival_probability"]),
         )
         policy = _replace_policy(
             decisions,
@@ -2145,17 +2403,11 @@ def stress_test_results(
             detail=f"threshold={active_threshold}",
         )
     for survival_threshold in config["thresholds"]["nearby_survival_probability"]:
-        admitted = (
-            main_forecast["p_edge_active"].ge(float(config["thresholds"]["active_probability"]))
-            & main_forecast["posterior_lower_bound_net_bps"].gt(0.0)
-            & main_forecast["p_survive_horizon"].ge(float(survival_threshold))
-            & main_forecast["effective_sessions"].ge(int(support["minimum_independent_sessions"]))
-            & main_forecast["independent_stocks"].ge(int(support["minimum_independent_stocks"]))
-            & main_forecast["effective_sample_size"].ge(
-                float(support["minimum_effective_sample_size"])
-            )
-            & main_forecast["out_of_distribution_score"].le(ood_threshold)
-            & main_forecast["required_features_available"].astype(bool)
+        admitted = _stress_admission_mask(
+            main_forecast,
+            config,
+            active_probability=float(config["thresholds"]["active_probability"]),
+            survival_probability=float(survival_threshold),
         )
         policy = _replace_policy(
             decisions,
@@ -2333,16 +2585,33 @@ def hypothesis_assessment(
     checks: list[bool] = []
     if {
         "hierarchical_change_point",
+        "hierarchical_payoff_history_change_point",
+    } <= set(pooled.index):
+        feature_brier = float(pooled.loc["hierarchical_change_point", "brier_score"]) < float(
+            pooled.loc["hierarchical_payoff_history_change_point", "brier_score"]
+        )
+        feature_log_loss = float(
+            pooled.loc["hierarchical_change_point", "predictive_log_loss"]
+        ) < float(pooled.loc["hierarchical_payoff_history_change_point", "predictive_log_loss"])
+        feature_improved = feature_brier and feature_log_loss
+        checks.append(feature_improved)
+        evidence.append(
+            "breadth/coherence improved both Brier and log loss over the same hierarchy without leading features"
+            if feature_improved
+            else "breadth/coherence did not improve both Brier and log loss over the same hierarchy without leading features"
+        )
+    if {
+        "hierarchical_payoff_history_change_point",
         "payoff_only_change_point",
     } <= set(pooled.index):
-        calibrated = float(pooled.loc["hierarchical_change_point", "brier_score"]) < float(
-            pooled.loc["payoff_only_change_point", "brier_score"]
-        )
-        checks.append(calibrated)
+        pooling_improved = float(
+            pooled.loc["hierarchical_payoff_history_change_point", "brier_score"]
+        ) < float(pooled.loc["payoff_only_change_point", "brier_score"])
+        checks.append(pooling_improved)
         evidence.append(
-            "breadth/coherence improved Brier over payoff-only"
-            if calibrated
-            else "breadth/coherence did not improve Brier over payoff-only"
+            "hierarchical pooling improved Brier over unpooled payoff-only BOCPD"
+            if pooling_improved
+            else "hierarchical pooling did not improve Brier over unpooled payoff-only BOCPD"
         )
     if {"hierarchical_change_point", "v1_60_session_selector"} <= set(change.index):
         full_lag = float(change.loc["hierarchical_change_point", "detection_lag_ratio"])
@@ -2503,13 +2772,13 @@ The statistical unit is session × loop × orientation × 24 bars. Multiple fill
 
 ## 7. Model implementation
 
-Four frozen selectors were compared: V1, a 10-observation-half-life EWMA with support and uncertainty, payoff-only Student-t BOCPD, and the full hierarchical Student-t BOCPD. The primary BOCPD hazard is 0.05 per observed session (broad geometric mean 20 sessions), with 1/30 and 1/14 sensitivities. Run-length branches are bounded at 120 sessions. A Normal-Inverse-Gamma update supplies Student-t predictives, and one observation is clipped at four branch-predictive scales for robust sufficient-statistic updates.
+The four registered selectors were compared: V1, a 10-observation-half-life EWMA with support and uncertainty, payoff-only Student-t BOCPD, and the full hierarchical Student-t BOCPD. A fifth diagnostic, hierarchical payoff-history BOCPD without leading features, isolates feature value from pooling value. The primary BOCPD hazard is 0.05 per observed session (broad geometric mean 20 sessions), with 1/30 and 1/14 sensitivities. Run-length branches are bounded at 120 sessions. A Normal-Inverse-Gamma update supplies Student-t predictives, and one observation is clipped at four branch-predictive scales for robust sufficient-statistic updates.
 
-Separate `p_on_next`, `p_off_next`, and `p_survive_horizon` outputs drive `unknown`, `active`, `decaying`, and `retired` states. Only `active` admits a new entry; the existing frozen exit is always retained.
+`p_edge_positive` concerns the latent state mean. Calibration and Brier scoring instead use `p_next_payoff_positive`, the Student-t probability that the next settled session observation is positive, with observation predictive uncertainty. `p_on_next` is conditional on currently being inactive; `p_off_next` is conditional on currently being active; `p_survive_horizon` compounds the conditional off probability over 24/78 of a session. These outputs drive `unknown`, `active`, `decaying`, and `retired` states. Only `active` admits a new entry; the existing frozen exit is always retained.
 
 ## 8. Hierarchical pooling approximation
 
-The shared environment is an online winsorised mean across eligible loop/orientation session cells. Each cell retains its own BOCPD. The published mean is an empirical-Bayes blend whose cell weight increases with current-run independent sessions relative to a frozen 12-session pooling strength. Shared and cell uncertainty are combined, with extra sparse-cell variance. This is a practical approximation: it does not learn dynamic loop loadings or a joint covariance matrix, and population contamination remains possible despite the sensitivity and leave-one-stock-out checks.
+The shared environment is an online winsorised mean across eligible loop/orientation session cells. Each cell retains its own BOCPD. The empirical-Bayes cell evidence is `effective sessions × sqrt(capped independent-stock factor × capped ESS-per-session factor)`, compared with a frozen 12-session pooling strength. Shared and cell uncertainty are combined, with extra sparse-cell variance. This is a practical approximation: it does not learn dynamic loop loadings or a joint covariance matrix, and population contamination remains possible. Every leave-one-stock-out stress fully rebuilds breadth, market context, session payoffs, shared state, cell posteriors, features, and forecasts before rescoring.
 
 ## 9. Leakage controls
 
@@ -2517,7 +2786,7 @@ The processing order is explicit: settle complete prior sessions; update shared 
 
 ## 10. Test results
 
-Before the final historical run, 28 focused V2 tests passed and the exact V1 summary SHA-256 matched its archived exact rerun. Final repository-suite and static-check results are recorded in the run note and handoff response.
+The focused V2 suite and full repository suite were executed before the final historical run; exact counts and commands are recorded in the run note and handoff response. The exact V1 summary SHA-256 matched its archived exact rerun. Regression coverage includes settlement timing, same-session exclusion, immutable frozen history, next-observation calibration semantics, hierarchy evidence weighting, conditional transition probabilities, decay-boundary diagnostics, and leave-one-stock-out context rebuilding.
 
 ## 11. Model comparison
 
@@ -2525,7 +2794,7 @@ Before the final historical run, 28 focused V2 tests passed and the exact V1 sum
 
 ## 12. Probability calibration
 
-Positive target: robust session net payoff strictly above zero after 10 bps round trip. Calibration used fixed decile bins; rows were scored prequentially. The machine-readable calibration table has {len(calibration_pooled):,} pooled bin rows. An abstaining model is `unknown`, not a correct positive prediction.
+Positive target: the next settled robust session net payoff is strictly above zero after the 10 bps round trip. Calibration uses the frozen next-observation Student-t probability and fixed decile bins; rows were scored prequentially. The machine-readable calibration table has {len(calibration_pooled):,} pooled bin rows. An abstaining model is `unknown`, not a correct positive prediction.
 
 ## 13. Activation and termination delays
 
@@ -2549,7 +2818,7 @@ The table in section 11 reports frozen-exit results after 5 bps per side. Accept
 
 ## 18. Leave-one-stock-out
 
-The full model produced {len(deletions)} leave-one-stock-out rows. Net P&L range: {float(deletions["net_pnl_bps"].min()) if not deletions.empty else math.nan:.2f} to {float(deletions["net_pnl_bps"].max()) if not deletions.empty else math.nan:.2f} bps; positive deletions: {int(deletions["net_pnl_bps"].gt(0).sum())}/{len(deletions)}.
+The full model produced {len(deletions)} fully retrained leave-one-stock-out rows. Each deletion rebuilt population features, payoff panels, shared/cell states, forecasts, and admissions. Net P&L range: {float(deletions["net_pnl_bps"].min()) if not deletions.empty else math.nan:.2f} to {float(deletions["net_pnl_bps"].max()) if not deletions.empty else math.nan:.2f} bps; positive deletions: {int(deletions["net_pnl_bps"].gt(0).sum())}/{len(deletions)}.
 
 ## 19. Episode analysis
 
@@ -2567,7 +2836,7 @@ Best-stock diagnostic: {safe(best_stock.iloc[0].to_dict()) if not best_stock.emp
 
 ## 22. Did breadth/coherence lead payoff changes?
 
-Breadth increased before {breadth_rate:.1%} of hindsight episodes and top-versus-second coherence increased before {coherence_rate:.1%}. Dispersion increased before decay in {dispersion_rate:.1%}; structural surprise increased in {surprise_rate:.1%}. These are descriptive lead diagnostics. The stronger causal test is whether the full model improved Brier/log loss and delay over payoff-only; see sections 11 and 13.
+Breadth increased before {breadth_rate:.1%} of hindsight episodes and top-versus-second coherence increased before {coherence_rate:.1%}. Dispersion and structural surprise are measured at each episode's hindsight-estimated decay onset, not its payoff onset: dispersion increased before decay in {dispersion_rate:.1%}; structural surprise increased in {surprise_rate:.1%}. These are hindsight descriptive diagnostics. The isolated causal feature test compares the full model with `hierarchical_payoff_history_change_point`, which has identical pooling but no leading features; the unpooled payoff-only comparison separately tests pooling.
 
 ## 23. Hypothesis assessment
 
@@ -2579,7 +2848,7 @@ Higher filtered P&L alone is not treated as success. Calibration, delay, costs, 
 
 ## 24. Exact next recommendation
 
-Freeze this V2 implementation and log it prospectively on genuinely new sessions without execution. Do not retune thresholds on 2023/2025. The single highest-value next experiment is a sealed prospective comparison of payoff-only versus breadth/coherence hierarchy, with immutable forecasts and enough independent session/stock support to estimate activation and termination calibration.
+Freeze this V2 implementation and log it prospectively on genuinely new sessions without execution. Do not retune thresholds on 2023/2025. The single highest-value next experiment is a sealed prospective comparison of the full model against the identical hierarchical model without leading features, with immutable forecasts and enough independent session/stock support to estimate activation and termination calibration.
 
 ## Reproducibility
 
@@ -2633,6 +2902,7 @@ def build_run_metadata(
         "repository_branch": _git_value("branch", "--show-current"),
         "data_snapshot_identifier": data_snapshot,
         "source_hashes": source_hashes,
+        "recovery_equivalence": pre_score.get("recovery_equivalence", {}),
         "universe_snapshot_identifier": hash_json(universe),
         "symbols": universe,
         "configuration_hash": configuration_hash,
@@ -2645,6 +2915,9 @@ def build_run_metadata(
         "observation_model_settings": config["observation_model"],
         "thresholds": config["thresholds"],
         "minimum_support_requirements": config["support"],
+        "evaluated_models": [*PRIMARY_MODELS, "no_payoff_state_filter"],
+        "feature_isolation_ablation": "hierarchical_payoff_history_change_point",
+        "leave_one_stock_out": "fully_retrained_population_features_panels_shared_and_cell_states",
         "random_seed": config["evaluation"]["fixed_random_seed"],
         "training_and_evaluation_dates": config["evaluation"]["period_date_ranges"],
         "decision_timestamp_convention": config["decision_clock"],
@@ -2728,7 +3001,20 @@ def main() -> None:
         payoff_panel=primary_panel,
         feature_panel=feature_panel,
         cell_keys_by_period=cell_keys_by_period,
-        payoff_only=True,
+        enable_hierarchy=False,
+        include_leading_features=False,
+    )
+    hierarchical_payoff_history = run_change_point_model(
+        model_name="hierarchical_payoff_history_change_point",
+        config=config,
+        configuration_hash=configuration_hash,
+        run_id=run_id,
+        calendars=calendars,
+        payoff_panel=primary_panel,
+        feature_panel=feature_panel,
+        cell_keys_by_period=cell_keys_by_period,
+        enable_hierarchy=True,
+        include_leading_features=False,
     )
     hierarchical = run_change_point_model(
         model_name="hierarchical_change_point",
@@ -2739,7 +3025,8 @@ def main() -> None:
         payoff_panel=primary_panel,
         feature_panel=feature_panel,
         cell_keys_by_period=cell_keys_by_period,
-        payoff_only=False,
+        enable_hierarchy=True,
+        include_leading_features=True,
     )
     ewma = run_ewma_model(
         config=config,
@@ -2751,7 +3038,9 @@ def main() -> None:
     )
     v1_forecasts = build_v1_forecasts(primary_states, calendars, config, configuration_hash, run_id)
     forecasts = pd.concat(
-        [v1_forecasts, ewma, payoff_only, hierarchical], ignore_index=True, sort=False
+        [v1_forecasts, ewma, payoff_only, hierarchical_payoff_history, hierarchical],
+        ignore_index=True,
+        sort=False,
     )
     forecasts["source_data_snapshot_id"] = data_snapshot_identifier
     decisions = build_trade_decisions(
@@ -2776,7 +3065,7 @@ def main() -> None:
         float(config["change_point"]["change_reset_probability"]),
     )
     slices = trading_slices(decisions)
-    concentration = concentration_analysis(slices, episodes)
+    concentration = concentration_analysis(slices, episodes, decisions)
 
     median_feature_panel = build_feature_panel(
         surface,
@@ -2794,7 +3083,8 @@ def main() -> None:
         payoff_panel=median_panel,
         feature_panel=median_feature_panel,
         cell_keys_by_period=cell_keys_by_period,
-        payoff_only=False,
+        enable_hierarchy=True,
+        include_leading_features=True,
     )
     sensitivity_decisions: dict[str, pd.DataFrame] = {
         "alternative_robust_session_aggregation_median": _replace_policy(
@@ -2813,7 +3103,8 @@ def main() -> None:
             payoff_panel=primary_panel,
             feature_panel=feature_panel,
             cell_keys_by_period=cell_keys_by_period,
-            payoff_only=False,
+            enable_hierarchy=True,
+            include_leading_features=True,
             hazard=float(hazard),
         )
         sensitivity_decisions[f"change_point_hazard_{float(hazard):.6f}"] = _replace_policy(
@@ -2821,12 +3112,21 @@ def main() -> None:
             hazard_forecast,
             label=f"hierarchical_change_point_hazard_{float(hazard):.6f}",
         )
+    leave_one_stock_out_decisions = retrain_leave_one_stock_out_decisions(
+        surface=surface,
+        base_decisions=decisions,
+        calendars=calendars,
+        config=config,
+        configuration_hash=configuration_hash,
+        run_id=run_id,
+    )
     stresses = stress_test_results(
         decisions,
         forecasts,
         episodes,
         config,
         sensitivity_decisions,
+        leave_one_stock_out_decisions,
     )
 
     command = " ".join(shlex.quote(item) for item in [sys.executable, *sys.argv])

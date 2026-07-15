@@ -1,6 +1,6 @@
 {
   "contract_id": "20260714-dynamic-loop-edge-state-v2",
-  "model_version": "dynamic_loop_edge_state_v2.0.0",
+  "model_version": "dynamic_loop_edge_state_v2.1.0",
   "scientific_status": "causal_retrospective_development_on_already_opened_2023_and_2025_surfaces_not_prospective_validation",
   "safety": {
     "research_only": true,
@@ -26,7 +26,7 @@
     "loop_identifier": "top causal parent-loop cycle_id",
     "orientation": "current causal state within the rotation-invariant parent loop",
     "cost_model_version": "frozen_regime_loop_pnl_sanity_v1_fixed_5bps_per_side",
-    "feature_schema_version": "dynamic_loop_edge_state_features_v2.0.0",
+    "feature_schema_version": "dynamic_loop_edge_state_features_v2.1.0",
     "market_or_sector_context": "causal anchor-level market summaries available; sector labels unavailable and not substituted",
     "quotes_or_ticks_available": false,
     "input_adapter": "hash_verified_v1_derived_outputs_recovered_after_original_ephemeral_anchor_and_2023_provider_files_expired",
@@ -100,7 +100,9 @@
     "minimum_shared_cells_per_session": 2,
     "shared_aggregation": "equal-cell winsorized mean",
     "sparse_uncertainty_inflation_bps": 80.0,
-    "loading_approximation": "empirical-Bayes evidence weight between shared and cell BOCPD posteriors"
+    "loading_approximation": "empirical-Bayes evidence weight between shared and cell BOCPD posteriors",
+    "independent_stock_reference": 5.0,
+    "effective_sample_size_per_session_reference": 5.0
   },
   "support": {
     "warmup_completed_sessions": 60,
@@ -186,6 +188,7 @@
     "hindsight_episode_labels_allowed_as_features": false,
     "fixed_random_seed": 20260714,
     "calibration_bins": 10,
+    "calibration_probability": "posterior predictive probability that the next settled robust session payoff is positive",
     "episode_positive_threshold_bps": 0.0,
     "episode_neutral_band_bps": 5.0,
     "episode_smoothing_sessions": 5,

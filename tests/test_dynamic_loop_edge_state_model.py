@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from stocker_research.dynamic_loop_edge_state.decision import (
     DecisionThresholds,
@@ -209,6 +210,76 @@ def test_hierarchical_pooling_helps_sparse_cell_only_when_shared_evidence_is_rel
     assert positive_forecast.p_edge_positive > negative_forecast.p_edge_positive
     assert positive_forecast.posterior_mean_net_bps > negative_forecast.posterior_mean_net_bps
     assert positive_forecast.posterior_std_net_bps > 0.0
+
+
+def test_pooling_weight_uses_independent_stocks_and_effective_sample_size() -> None:
+    common = ("cycle_01", "state_1", 24)
+    sparse = ("cycle_02", "state_2", 24)
+    settings = HierarchicalSettings(
+        pooling_strength_sessions=12.0,
+        independent_stock_reference=5.0,
+        effective_sample_size_per_session_reference=5.0,
+    )
+    one_stock = HierarchicalPayoffModel(BOCPDSettings(), settings)
+    five_stocks = HierarchicalPayoffModel(BOCPDSettings(), settings)
+    for index in range(8):
+        one_stock.update_session(
+            f"s{index:03d}",
+            [
+                _observation(index, common, -30.0),
+                _observation(index, sparse, 30.0, ("A",)),
+            ],
+        )
+        five_stocks.update_session(
+            f"s{index:03d}",
+            [
+                _observation(index, common, -30.0),
+                _observation(index, sparse, 30.0, ("A", "B", "C", "D", "E")),
+            ],
+        )
+
+    sparse_forecast, _ = one_stock.forecast(sparse, horizon_bars=24, session_bars=78)
+    broad_forecast, _ = five_stocks.forecast(sparse, horizon_bars=24, session_bars=78)
+
+    assert broad_forecast.hierarchical_cell_weight > sparse_forecast.hierarchical_cell_weight
+
+
+def test_event_probability_uses_predictive_observation_uncertainty() -> None:
+    cell = ("cycle_08", "state_3", 24)
+    model = HierarchicalPayoffModel(BOCPDSettings(), HierarchicalSettings())
+    for index, value in enumerate([20.0, -10.0, 25.0, -15.0, 30.0]):
+        model.update_session(f"s{index:03d}", [_observation(index, cell, value)])
+
+    forecast, _ = model.forecast(cell, horizon_bars=24, session_bars=78)
+
+    assert forecast.posterior_predictive_std_net_bps >= forecast.posterior_std_net_bps
+    assert 0.0 < forecast.p_next_payoff_positive < 1.0
+
+
+def test_onset_and_termination_probabilities_are_conditional_transitions() -> None:
+    cell = ("cycle_09", "state_4", 24)
+    model = HierarchicalPayoffModel(
+        BOCPDSettings(hazard_probability=0.05),
+        HierarchicalSettings(feature_logit_weights={"breadth": 0.5}),
+    )
+    model.update_session("s000", [_observation(0, cell, 20.0)])
+
+    payoff_history_only, _ = model.forecast(
+        cell,
+        horizon_bars=24,
+        session_bars=78,
+        include_leading_features=False,
+    )
+    forecast, _ = model.forecast(
+        cell,
+        horizon_bars=24,
+        session_bars=78,
+        leading_features={"breadth": 1.0},
+    )
+
+    assert forecast.p_on_next + forecast.p_off_next < 0.2
+    assert forecast.p_next_payoff_positive > payoff_history_only.p_next_payoff_positive
+    assert forecast.p_survive_horizon == pytest.approx((1.0 - forecast.p_off_next) ** (24.0 / 78.0))
 
 
 def test_zero_pooling_payoff_only_model_has_a_finite_cold_start_forecast() -> None:

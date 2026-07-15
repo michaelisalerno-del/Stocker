@@ -46,6 +46,8 @@ class BOCPDPosterior:
     posterior_mean_net_bps: float
     posterior_std_net_bps: float
     p_edge_positive: float
+    posterior_predictive_std_net_bps: float
+    p_next_payoff_positive: float
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,9 @@ class EdgeForecast:
     p_off_next: float
     p_survive_horizon: float
     out_of_distribution_score: float
+    posterior_predictive_std_net_bps: float = math.nan
+    p_next_payoff_positive: float = 0.5
+    hierarchical_cell_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -102,6 +107,8 @@ class HierarchicalSettings:
     sparse_uncertainty_inflation_bps: float = 80.0
     lower_bound_confidence: float = 0.9
     feature_logit_weights: Mapping[str, float] = field(default_factory=dict)
+    independent_stock_reference: float = 5.0
+    effective_sample_size_per_session_reference: float = 5.0
 
     def __post_init__(self) -> None:
         if self.pooling_strength_sessions < 0.0:
@@ -110,6 +117,10 @@ class HierarchicalSettings:
             raise ValueError("minimum shared cells must be positive")
         if self.sparse_uncertainty_inflation_bps < 0.0:
             raise ValueError("uncertainty inflation cannot be negative")
+        if self.independent_stock_reference <= 0.0:
+            raise ValueError("independent-stock reference must be positive")
+        if self.effective_sample_size_per_session_reference <= 0.0:
+            raise ValueError("effective-sample-size reference must be positive")
         if not 0.5 < self.lower_bound_confidence < 1.0:
             raise ValueError("lower-bound confidence must be in (0.5, 1)")
 
@@ -257,6 +268,27 @@ class RobustBOCPD:
                 student_t.cdf(self._mu / scales, df=degrees),
             )
         )
+        predictive_scales = np.sqrt(
+            np.maximum(
+                self._beta * (self._kappa + 1.0) / (self._alpha * self._kappa),
+                1e-12,
+            )
+        )
+        predictive_component_variances = (
+            predictive_scales**2 * degrees / np.maximum(degrees - 2.0, 1e-6)
+        )
+        predictive_variance = float(
+            np.dot(
+                self._probabilities,
+                predictive_component_variances + (self._mu - mean) ** 2,
+            )
+        )
+        next_positive = float(
+            np.dot(
+                self._probabilities,
+                student_t.cdf(self._mu / predictive_scales, df=degrees),
+            )
+        )
         return BOCPDPosterior(
             p_change_now=float(self._probabilities[0]),
             posterior_run_length_mean=float(np.dot(self._probabilities, run_lengths)),
@@ -264,6 +296,8 @@ class RobustBOCPD:
             posterior_mean_net_bps=mean,
             posterior_std_net_bps=math.sqrt(max(variance, 1e-12)),
             p_edge_positive=float(np.clip(positive, 0.0, 1.0)),
+            posterior_predictive_std_net_bps=math.sqrt(max(predictive_variance, variance, 1e-12)),
+            p_next_payoff_positive=float(np.clip(next_positive, 0.0, 1.0)),
         )
 
 
@@ -362,7 +396,21 @@ class HierarchicalPayoffModel:
         cell = state.model.snapshot() if state is not None else None
         shared = self.shared.snapshot()
         support = self._support(state, cell)
-        evidence = support.effective_sessions
+        session_evidence = support.effective_sessions
+        stock_factor = min(
+            support.independent_stocks / self.hierarchy.independent_stock_reference,
+            1.0,
+        )
+        effective_sample_size_per_session = support.effective_sample_size / max(
+            session_evidence,
+            1.0,
+        )
+        effective_sample_factor = min(
+            effective_sample_size_per_session
+            / self.hierarchy.effective_sample_size_per_session_reference,
+            1.0,
+        )
+        evidence = session_evidence * math.sqrt(max(stock_factor * effective_sample_factor, 0.0))
         pooling_disabled = self.hierarchy.pooling_strength_sessions == 0.0
         if pooling_disabled and cell is None:
             cell = RobustBOCPD(self.bocpd_settings).snapshot()
@@ -380,6 +428,8 @@ class HierarchicalPayoffModel:
                 posterior_mean_net_bps=shared.posterior_mean_net_bps,
                 posterior_std_net_bps=shared.posterior_std_net_bps,
                 p_edge_positive=shared.p_edge_positive,
+                posterior_predictive_std_net_bps=shared.posterior_predictive_std_net_bps,
+                p_next_payoff_positive=shared.p_next_payoff_positive,
             )
         mean = (
             cell_weight * cell.posterior_mean_net_bps
@@ -393,8 +443,17 @@ class HierarchicalPayoffModel:
             / max(evidence + 1.0, 1.0)
         )
         std = math.sqrt(max(variance, 1e-12))
+        predictive_variance = (
+            cell_weight**2 * cell.posterior_predictive_std_net_bps**2
+            + (1.0 - cell_weight) ** 2 * shared.posterior_predictive_std_net_bps**2
+            + (1.0 - cell_weight)
+            * self.hierarchy.sparse_uncertainty_inflation_bps**2
+            / max(evidence + 1.0, 1.0)
+        )
+        predictive_std = math.sqrt(max(predictive_variance, variance, 1e-12))
         degrees = self.bocpd_settings.degrees_of_freedom_floor
         p_positive = float(student_t.cdf(mean / std, df=degrees))
+        base_next_payoff_positive = float(student_t.cdf(mean / predictive_std, df=degrees))
         features = leading_features or {}
         feature_effect = (
             sum(
@@ -407,6 +466,8 @@ class HierarchicalPayoffModel:
         )
         bounded_positive = float(np.clip(p_positive, 1e-9, 1.0 - 1e-9))
         p_active = float(expit(logit(bounded_positive) + feature_effect))
+        bounded_next_positive = float(np.clip(base_next_payoff_positive, 1e-9, 1.0 - 1e-9))
+        p_next_payoff_positive = float(expit(logit(bounded_next_positive) + feature_effect))
         decay_pressure = max(0.0, -feature_effect)
         next_hazard = float(
             np.clip(
@@ -416,20 +477,11 @@ class HierarchicalPayoffModel:
             )
         )
         new_state_positive = float(expit(feature_effect))
-        p_on_next = float(
-            np.clip(
-                next_hazard * new_state_positive + (1.0 - next_hazard) * p_active,
-                0.0,
-                1.0,
-            )
-        )
-        p_off_next = float(
-            np.clip(
-                next_hazard * (1.0 - new_state_positive) + (1.0 - next_hazard) * (1.0 - p_active),
-                0.0,
-                1.0,
-            )
-        )
+        # Conditional transition probabilities: onset is conditioned on the
+        # state currently being inactive; termination is conditioned on it
+        # currently being active.  With no change, each state persists.
+        p_on_next = float(np.clip(next_hazard * new_state_positive, 0.0, 1.0))
+        p_off_next = float(np.clip(next_hazard * (1.0 - new_state_positive), 0.0, 1.0))
         horizon_fraction = horizon_bars / session_bars
         survival = float((1.0 - p_off_next) ** horizon_fraction)
         quantile = float(student_t.ppf(self.hierarchy.lower_bound_confidence, df=degrees))
@@ -452,6 +504,9 @@ class HierarchicalPayoffModel:
                 p_off_next=p_off_next,
                 p_survive_horizon=survival,
                 out_of_distribution_score=float(out_of_distribution_score),
+                posterior_predictive_std_net_bps=predictive_std,
+                p_next_payoff_positive=p_next_payoff_positive,
+                hierarchical_cell_weight=cell_weight,
             ),
             support,
         )

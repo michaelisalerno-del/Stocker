@@ -883,6 +883,7 @@ def render_report(
     episodes: pd.DataFrame,
     stresses: pd.DataFrame,
     loo: pd.DataFrame,
+    concentration: pd.DataFrame,
     decision: str,
 ) -> None:
     overall = paired_metrics.loc[paired_metrics["scope"].eq("all")].sort_values(
@@ -900,7 +901,24 @@ def render_report(
             "brier_score",
             "log_loss",
             "ece",
+            "calibration_slope",
+            "calibration_intercept",
             "auc",
+        ]
+    ]
+    calibration_context = calibration_metrics.loc[
+        calibration_metrics["target_lead_sessions"].eq(1)
+    ][
+        [
+            "model_name",
+            "observable_targets",
+            "brier_score",
+            "log_loss",
+            "ece",
+            "calibration_slope",
+            "auc",
+            "active_count",
+            "mean_target_payoff_when_active_bps",
         ]
     ]
     immediate = delay_summary.loc[
@@ -910,12 +928,86 @@ def render_report(
         delay_summary["decomposition_component"].eq("reported_shifted_policy")
     ].iloc[0]
     exact = matched.loc[matched["population"].eq("exact_same_setup_primary")].iloc[0]
+    structural_match = matched.loc[
+        matched["population"].eq("structural_lineage_diagnostic_not_exact")
+    ].iloc[0]
     contribution_lead_one = contribution.loc[contribution["target_lead_sessions"].eq(1)]
+    contribution_bins = contribution_lead_one.loc[
+        contribution_lead_one["contribution_bin"].astype(str).str.startswith("bin_")
+    ][
+        [
+            "contribution_bin",
+            "forecasts",
+            "mean_feature_contribution",
+            "mean_future_payoff_bps",
+            "positive_payoff_rate",
+            "independent_stock_support",
+        ]
+    ]
+    contribution_rank = contribution_lead_one.loc[
+        contribution_lead_one["contribution_bin"].eq("continuous_rank_diagnostic")
+    ].iloc[0]
     structurally_led = int(episodes["episode_attribution_class"].eq("structurally_led").sum())
     episode_total = len(episodes)
+    episode_classes = episodes["episode_attribution_class"].value_counts()
+    structural_rows = episodes.loc[episodes["episode_attribution_class"].eq("structurally_led")]
+    structural_positive = int(structural_rows["mean_session_payoff_bps"].gt(0.0).sum())
+    breadth_precursor = int(episodes["preceded_by_rising_breadth"].sum())
+    coherence_precursor = int(episodes["preceded_by_rising_coherence"].sum())
+    neither_precursor = int(episodes["neither_precursor_appeared"].sum())
     twice = stresses.loc[stresses["stress_test"].eq("twice_costs")].iloc[0]
+    median_lead_one = stresses.loc[
+        stresses["stress_test"].eq("median_session_aggregation")
+        & stresses["target_lead_sessions"].eq(1)
+    ].iloc[0]
+    hazard_lead_one = stresses.loc[
+        stresses["stress_test"].isin(["hazard_0.033333", "hazard_0.071429"])
+        & stresses["target_lead_sessions"].eq(1)
+    ][
+        [
+            "stress_test",
+            "paired_brier_improvement",
+            "paired_log_loss_improvement",
+            "paired_economic_increment_bps",
+        ]
+    ]
     loo_lead_one = loo.loc[loo["target_lead_sessions"].eq(1)]
     loo_positive = int(loo_lead_one["paired_brier_improvement"].gt(0.0).sum())
+    loo_economic_positive = int(loo_lead_one["paired_economic_increment_bps"].gt(0.0).sum())
+    period_lead_one = paired_metrics.loc[
+        paired_metrics["scope"].eq("period") & paired_metrics["target_lead_sessions"].eq(1)
+    ][
+        [
+            "scope_value",
+            "paired_observable_targets",
+            "paired_brier_improvement",
+            "paired_log_loss_improvement",
+            "paired_economic_increment_bps",
+            "brier_ci_lower",
+            "brier_ci_upper",
+        ]
+    ].rename(columns={"scope_value": "period"})
+
+    stock_concentration = concentration.loc[
+        concentration["dimension"].eq("stock_equal_allocation")
+    ].sort_values("rank_within_dimension")
+    episode_concentration = concentration.loc[concentration["dimension"].eq("episode")].sort_values(
+        "rank_within_dimension"
+    )
+    loop_concentration = concentration.loc[concentration["dimension"].eq("loop")].sort_values(
+        "rank_within_dimension"
+    )
+    orientation_concentration = concentration.loc[
+        concentration["dimension"].eq("orientation")
+    ].sort_values("rank_within_dimension")
+    top_stock = stock_concentration.iloc[0]
+    top_episode = episode_concentration.iloc[0]
+    top_loop = loop_concentration.iloc[0]
+    top_orientation = orientation_concentration.iloc[0]
+    top_five_stock_share = float(stock_concentration.head(5)["absolute_contribution_share"].sum())
+    top_five_episode_share = float(
+        episode_concentration.head(5)["absolute_contribution_share"].sum()
+    )
 
     lead_table = markdown_table(
         overall[
@@ -966,17 +1058,35 @@ No lead has positive paired Brier improvement. Lead 1 is worse than same-session
 
 {markdown_table(calibration_pair)}
 
-The lead-1 contribution-bin table contains {len(contribution_lead_one)} rows. Its monotonic/rank diagnostics are reported machine-readably; no target-informed cutoff was searched.
+The contextual lead-1 comparator table is:
+
+{markdown_table(calibration_context)}
+
+### Feature attribution and period stability
+
+The feature increment is not monotonic with next-session payoff. Its lead-1 Spearman association with realised payoff is **{float(contribution_rank["spearman_future_payoff"]):.4f}** (p={float(contribution_rank["spearman_future_payoff_p_value"]):.4f}); its association with the positive-payoff event is **{float(contribution_rank["spearman_positive_event"]):.4f}** (p={float(contribution_rank["spearman_positive_event_p_value"]):.4f}). The strongest positive-contribution bin has mean t+1 payoff **{float(contribution_bins.iloc[-1]["mean_future_payoff_bps"]):,.2f} bps**, versus **{float(contribution_bins.iloc[0]["mean_future_payoff_bps"]):,.2f} bps** in the most negative-contribution bin. No target-informed cutoff was searched.
+
+{markdown_table(contribution_bins)}
+
+Lead-1 Brier improvement is negative in both opened periods; economic translation is approximately flat in 2023 and negative in 2025.
+
+{markdown_table(period_lead_one)}
 
 ## Matched trade-delay result
 
-Exact same-setup matches: **{int(exact["matched_opportunities"])} / {int(exact["source_opportunities"])} ({float(exact["match_rate"]):.1%})**. Therefore restarted-horizon and constant-terminal exact paired effects are unavailable, not zero. A separately labelled structural-lineage diagnostic exists but uses a different later setup and is not evidence for delayed execution of the original setup. Original intraday terminal times generally precede next-session entries, so constant-terminal exposure is impossible for those rows. Existing-position exits remain unchanged.
+Exact same-setup matches: **{int(exact["matched_opportunities"])} / {int(exact["source_opportunities"])} ({float(exact["match_rate"]):.1%})**. Therefore restarted-horizon, constant-terminal, and twice-cost exact paired effects are unavailable, not zero. A separately labelled structural-lineage diagnostic found **{int(structural_match["matched_opportunities"])} / {int(structural_match["source_opportunities"])}** different later setups: their source trades made **{float(structural_match["immediate_net_payoff_bps"]):,.2f} bps** and the later distinct setups made **{float(structural_match["delayed_restarted_horizon_net_bps"]):,.2f} bps**. This is composition context, not evidence for delayed execution of the original setup. Original intraday terminal times generally precede next-session entries, so constant-terminal exposure is impossible for those rows. Existing-position exits remain unchanged.
 
 ## Stress, concentration, and episodes
 
-At twice costs, the paired lead-1 state translation is **{float(twice["paired_economic_increment_bps"]):,.2f} bps**. Fully rebuilt leave-one-stock-out lead-1 calibration improves in only **{loo_positive}/{len(loo_lead_one)}** exclusions; every excluded-stock run rebuilds the payoff panel, breadth/context, shared hierarchy, cell states, and targets. Median aggregation and only the two V2-frozen hazard alternatives are in `stress_test_results.csv`.
+At twice costs, the paired lead-1 **state-level active-set translation** is **{float(twice["paired_economic_increment_bps"]):,.2f} bps**; no exact matched trade population exists for an executable cost stress. Median aggregation gives **{float(median_lead_one["paired_economic_increment_bps"]):,.2f} bps** but still worsens Brier by **{float(median_lead_one["paired_brier_improvement"]):.6f}**, so it cannot support the hypothesis. Both frozen hazard sensitivities also worsen Brier:
 
-Of {episode_total} hindsight-positive episodes, {structurally_led} meet the predeclared descriptive structurally-led rule. Episode labels were attached after forecast freezing and never entered features. This opened-data classification is diagnostic, not a prediction or trading rule. Detailed stock/loop/orientation/month/episode contributions show whether any descriptive slice is concentrated.
+{markdown_table(hazard_lead_one)}
+
+Fully rebuilt leave-one-stock-out lead-1 calibration improves in **{loo_positive}/{len(loo_lead_one)}** exclusions and the economic increment is positive in only **{loo_economic_positive}/{len(loo_lead_one)}**; every excluded-stock run rebuilds the payoff panel, breadth/context, shared hierarchy, cell states, and targets.
+
+The rejected lead-1 economic difference is materially concentrated: top stock **{top_stock["entity"]}** contributes {float(top_stock["absolute_contribution_share"]):.1%} of absolute stock allocation and the top five contribute {top_five_stock_share:.1%}; top episode **{top_episode["entity"]}** contributes {float(top_episode["absolute_contribution_share"]):.1%} and the top five contribute {top_five_episode_share:.1%}. The largest loop (**{top_loop["entity"]}**) and orientation (**{top_orientation["entity"]}**) absolute shares are {float(top_loop["absolute_contribution_share"]):.1%} and {float(top_orientation["absolute_contribution_share"]):.1%}, respectively.
+
+Of {episode_total} hindsight-labelled episode rows, {structurally_led} meet the predeclared descriptive structurally-led rule ({structural_positive} have positive mean episode payoff). The other classes are {int(episode_classes.get("simultaneous", 0))} simultaneous, {int(episode_classes.get("payoff_history_led", 0))} payoff-history-led, and {int(episode_classes.get("unpredicted", 0))} unpredicted. Rising breadth precedes {breadth_precursor}, rising coherence precedes {coherence_precursor}, and neither precursor appears for {neither_precursor}; these overlapping descriptive counts do not establish incremental prediction because the paired probability and rank tests are adverse. Episode labels were attached after forecast freezing and never entered features.
 
 ## Scientific interpretation and failures
 
@@ -1212,6 +1322,7 @@ def run(output: Path, report: Path) -> None:
         episode_attribution,
         stress,
         loo,
+        concentration,
         decision,
     )
     write_json(output / "artifact_manifest.json", artifact_manifest(output, report))

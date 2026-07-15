@@ -72,4 +72,41 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
 
 ## Scientific decision
 
-Pending frozen scoring.
+`leading_features_no_incremental_value` and
+`original_delay_result_population_confounded`.
+
+- Primary lead-1 paired Brier improvement (control minus full): `-0.0547372`
+  with 95% session-block interval `[-0.0639287, -0.0458031]`.
+- Primary lead-1 paired economic state increment: `-403.6786 bps`.
+- Lead-1 results are calibration-negative in both 2023 (`-0.0603283`) and
+  2025 (`-0.0489708`).
+- Every registered lead has adverse paired Brier performance. The lead-1 feature
+  increment has negative realised-payoff rank association (`rho=-0.04485`).
+- Exact same-setup delayed matches: `0/286`; no restarted-horizon,
+  constant-terminal, or twice-cost executable paired estimate is identifiable.
+- Fully rebuilt leave-one-stock-out calibration improvements: `0/20`; economic
+  increments are positive in `6/20` exclusions.
+- Independent audit: `27/27` checks passed; primary/exact manifest and report
+  hashes are identical.
+
+## Final validation commands
+
+```bash
+rtk env PYTHONPATH=packages/stocker_research/src .venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py --output research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/primary --report research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260715-dynamic-loop-edge-state-lead-lag-v1.md
+rtk env PYTHONPATH=packages/stocker_research/src .venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py --output research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun --report research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun/research_report.md
+rtk env PYTHONPATH=packages/stocker_research/src .venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py --primary research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/primary --exact research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun --primary-report research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260715-dynamic-loop-edge-state-lead-lag-v1.md --exact-report research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun/research_report.md
+rtk .venv/bin/pytest -q tests/test_dynamic_loop_edge_state_model.py tests/test_dynamic_loop_edge_state_session_payoff.py tests/test_dynamic_loop_edge_state_walkforward.py tests/test_run_dynamic_loop_edge_state_v2.py tests/test_audit_dynamic_loop_edge_state_v2.py
+rtk .venv/bin/pytest -q tests/test_dynamic_loop_edge_state_lead_targets.py tests/test_dynamic_loop_edge_state_trade_delay.py tests/test_dynamic_loop_edge_state_lead_metrics.py tests/test_dynamic_loop_edge_state_immutable_logging.py tests/test_dynamic_loop_edge_state_lead_lag_artifacts.py
+rtk .venv/bin/pytest -q
+rtk .venv/bin/ruff format --check packages/stocker_research/src/stocker_research/dynamic_loop_edge_state_lead_lag research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py tests/test_dynamic_loop_edge_state_lead_targets.py tests/test_dynamic_loop_edge_state_trade_delay.py tests/test_dynamic_loop_edge_state_lead_metrics.py tests/test_dynamic_loop_edge_state_immutable_logging.py tests/test_dynamic_loop_edge_state_lead_lag_artifacts.py
+rtk .venv/bin/ruff check packages/stocker_research/src/stocker_research/dynamic_loop_edge_state_lead_lag research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py tests/test_dynamic_loop_edge_state_lead_targets.py tests/test_dynamic_loop_edge_state_trade_delay.py tests/test_dynamic_loop_edge_state_lead_metrics.py tests/test_dynamic_loop_edge_state_immutable_logging.py tests/test_dynamic_loop_edge_state_lead_lag_artifacts.py
+rtk .venv/bin/mypy --strict packages/stocker_research/src/stocker_research/dynamic_loop_edge_state_lead_lag research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py
+rtk .venv/bin/ruff check .
+rtk git diff --check
+```
+
+Results: frozen V2 suite `37 passed`; new suite `23 passed`; full repository
+suite passed with four pre-existing NumPy mean-of-empty-slice warnings; scoped
+format/lint passed for 13 files; strict mypy passed for 7 source files. The
+repository-wide Ruff command remains non-green with 1,153 pre-existing unrelated
+violations, as expected; no unrelated cleanup was performed.

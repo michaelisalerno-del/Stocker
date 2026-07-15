@@ -1518,6 +1518,8 @@ def build_veto_accounting(
         "bars_remaining",
         "bad_loop_mass",
         "good_to_bad_odds",
+        "anchor_good_mass",
+        "anchor_bad_mass",
         "unknown_loop_mass",
         "decision_state",
         "target_remaining_net_bps",
@@ -1533,6 +1535,12 @@ def build_veto_accounting(
     for opportunity in joined.itertuples(index=False):
         source_payoff = float(opportunity.original_net_payoff_bps)
         has_checkpoint = not pd.isna(opportunity.checkpoint_id)
+        anchor_bad_mass = float(opportunity.anchor_bad_mass)
+        anchor_odds = (
+            float(opportunity.anchor_good_mass) / anchor_bad_mass
+            if has_checkpoint and anchor_bad_mass > 0.0
+            else math.inf
+        )
         policies = {
             "base_no_rejection": "retained",
             "bad_mass_veto": (
@@ -1540,7 +1548,10 @@ def build_veto_accounting(
                 if has_checkpoint and float(opportunity.bad_loop_mass) >= 0.5
                 else "retained"
             ),
-            "good_to_bad_odds_veto": (
+            "static_anchor_good_to_bad_odds_veto": (
+                "rejected" if has_checkpoint and anchor_odds <= 1.0 else "retained"
+            ),
+            "sequential_good_to_bad_odds_veto": (
                 "rejected"
                 if has_checkpoint and float(opportunity.good_to_bad_odds) <= 1.0
                 else "retained"
@@ -2387,6 +2398,14 @@ def write_report(
         veto_metrics["policy"].eq("full_sequential_conservative_veto")
         & veto_metrics["period_slice"].eq("all")
     ].iloc[0]
+    static_odds = veto_metrics.loc[
+        veto_metrics["policy"].eq("static_anchor_good_to_bad_odds_veto")
+        & veto_metrics["period_slice"].eq("all")
+    ].iloc[0]
+    sequential_odds = veto_metrics.loc[
+        veto_metrics["policy"].eq("sequential_good_to_bad_odds_veto")
+        & veto_metrics["period_slice"].eq("all")
+    ].iloc[0]
     delayed = veto_metrics.loc[
         veto_metrics["policy"].eq("delayed_admit_after_resolution")
         & veto_metrics["period_slice"].eq("all")
@@ -2454,6 +2473,8 @@ Primary paired rows: **{int(paired.paired_rows):,}**. Sequential-minus-anchor Br
 {period_lines}
 
 The negative-veto accounting keeps one immutable source row and never refills overlap/capacity. The full conservative veto avoided **{full_veto.losses_avoided_bps:.2f} bps** of losses and mistakenly rejected **{full_veto.profits_mistakenly_rejected_bps:.2f} bps** of profits, for **{full_veto.net_negative_veto_value_bps:.2f} bps** net veto value at **{full_veto.coverage:.1%}** coverage. This is a selection-only diagnostic on the original entry clock.
+
+The static anchor good-to-bad odds veto produced **{static_odds.net_negative_veto_value_bps:.2f} bps** veto value at **{static_odds.coverage:.1%}** coverage. The identically thresholded sequential odds veto produced **{sequential_odds.net_negative_veto_value_bps:.2f} bps** at **{sequential_odds.coverage:.1%}**, an incremental **{sequential_odds.net_negative_veto_value_bps - static_odds.net_negative_veto_value_bps:.2f} bps** over the anchor comparator.
 
 The separate executable translation waits until causal admission, enters at the next provider open, and retains the original anchor-plus-24 terminal clock. It produced **{delayed.policy_net_payoff_bps:.2f} bps** at **{delayed.coverage:.1%}** coverage. Restarted-h24 payoff is exported only as a secondary table and is never mixed with constant-terminal payoff.
 

@@ -346,7 +346,7 @@ def _check_accounting(audit: Auditor, root: Path) -> None:
     accounting = _load(root, "veto_accounting.parquet")
     general = accounting.loc[accounting["track"].eq("track_b_prior_only")]
     policy_counts = general.groupby("opportunity_id")["policy"].nunique()
-    audit.check("paired_fixed_population", policy_counts.eq(5).all(), {"rows": len(general)})
+    audit.check("paired_fixed_population", policy_counts.eq(6).all(), {"rows": len(general)})
     audit.check(
         "no_replacement_opportunities",
         accounting["replacement_opportunity_id"].isna().all(),

@@ -6,13 +6,17 @@ This directory is the complete research-only SLRNO V2 investigation handoff as o
 
 Read these reports in order:
 
-1. [`work/reports/20260713-dynamic-loop-context-edge-v1.md`](work/reports/20260713-dynamic-loop-context-edge-v1.md)
-2. [`work/reports/20260714-selective-payoff-equations-v1.md`](work/reports/20260714-selective-payoff-equations-v1.md)
-3. [`work/reports/20260714-long-short-neutral-detector-v1.md`](work/reports/20260714-long-short-neutral-detector-v1.md)
+1. [`work/reports/20260714-dynamic-loop-edge-state-v2.md`](work/reports/20260714-dynamic-loop-edge-state-v2.md)
+2. [`work/reports/20260713-dynamic-loop-context-edge-v1.md`](work/reports/20260713-dynamic-loop-context-edge-v1.md)
+3. [`work/reports/20260714-selective-payoff-equations-v1.md`](work/reports/20260714-selective-payoff-equations-v1.md)
+4. [`work/reports/20260714-long-short-neutral-detector-v1.md`](work/reports/20260714-long-short-neutral-detector-v1.md)
 
-The latest conclusion is that long, short, and neutral are useful first-class research states, but the tested one-shot static detector did not identify direction profitably. The next prospective-only specification is:
+The latest conclusion is that temporary payoff states are visible descriptively, but the registered full hierarchical breadth/coherence model is rejected: it was less calibrated, slower, and materially worse after costs than both V1 and the payoff-only change-point model. The payoff-only model's positive retrospective P&L is not prospective validation and was not robust enough to approve. The exact rerun and 48-check independent audit are stored at:
 
-- [`work/contracts/20260714-dynamic-long-short-neutral-prospective-log-v1.json`](work/contracts/20260714-dynamic-long-short-neutral-prospective-log-v1.json)
+- [`work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/`](work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/)
+- [`work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/independent_audit.json`](work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/independent_audit.json)
+
+The highest-value next experiment is a sealed prospective, no-execution comparison of the full model against the identical hierarchical model with leading features disabled. Do not retune on the opened 2023/2025 surfaces.
 
 ## Included material
 

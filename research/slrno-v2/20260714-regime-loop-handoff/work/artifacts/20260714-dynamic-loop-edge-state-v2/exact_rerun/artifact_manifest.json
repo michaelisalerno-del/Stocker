@@ -61,9 +61,9 @@
       "sha256": "5ad3a1b3877c5063db8ce6dee883a08826802dafbde9978861ea5f9b2c36e6a4"
     },
     {
-      "bytes": 13150,
+      "bytes": 13449,
       "name": "run_metadata.json",
-      "sha256": "cefcb01d87cb8c1ef47c04ead8f54d7b7f272fe188d736ff02798357d3014a24"
+      "sha256": "cb9f663173ac2863a798607116ebe8389be93f5094e28d79dcd72f6351cf5656"
     },
     {
       "bytes": 576937,
@@ -86,9 +86,9 @@
       "sha256": "9032507a79966629d47e0928fdcf5254ef949d349d6b5d7c8bdaf6f84c26461d"
     },
     {
-      "bytes": 15492,
-      "name": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260714-dynamic-loop-edge-state-v2.md",
-      "sha256": "92dda9fa9d403501cc9dc05cbc6de6918103a45622b1e821aae652879144be84"
+      "bytes": 15731,
+      "name": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260714-dynamic-loop-edge-state-v2-exact-rerun.md",
+      "sha256": "1d46c721a1db590c618df82db580dcc6bfcc40b4e456e2fc0a8d283c715af0af"
     }
   ],
   "live_ordering_enabled": false,

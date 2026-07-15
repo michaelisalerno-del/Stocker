@@ -162,4 +162,4 @@ Freeze this V2 implementation and log it prospectively on genuinely new sessions
 - Branch: `agent/slrno-research-handoff`
 - Configuration SHA-256: `8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373`
 - Data snapshot SHA-256: `66be016db2be4b55e0309dfe7a1ec4ee6b99a0b490af8d9abfa11b5832dc1a6a`
-- Command: `/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/.venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_v2.py`
+- Command: `/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/.venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_v2.py --output research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun --report research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260714-dynamic-loop-edge-state-v2-exact-rerun.md`

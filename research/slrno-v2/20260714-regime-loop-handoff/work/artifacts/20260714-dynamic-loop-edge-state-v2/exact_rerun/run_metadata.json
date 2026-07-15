@@ -9,7 +9,7 @@
     "primary_hazard_probability_per_observed_session": 0.05,
     "selection_basis": "V1 median profitable cell streak was about 20 sessions; geometric hazard remains broad rather than fixing duration"
   },
-  "command": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/.venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_v2.py",
+  "command": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/.venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_v2.py --output research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun --report research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260714-dynamic-loop-edge-state-v2-exact-rerun.md",
   "configuration_hash": "8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373",
   "configuration_path": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260714-dynamic-loop-edge-state-v2.json",
   "cost_model_version": "frozen_regime_loop_pnl_sanity_v1_fixed_5bps_per_side",
@@ -36,16 +36,16 @@
   "feature_schema_version": "dynamic_loop_edge_state_features_v2.1.0",
   "fixed_horizon_bars": 24,
   "generated_artifact_paths": [
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/session_payoff_panel.parquet",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/causal_edge_state_forecasts.parquet",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/trade_decisions.parquet",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/model_comparison_metrics.csv",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/calibration_results.csv",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/change_point_diagnostics.csv",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/hindsight_episode_diagnostics.parquet",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/stress_test_results.csv",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/run_metadata.json",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260714-dynamic-loop-edge-state-v2.md"
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/session_payoff_panel.parquet",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/causal_edge_state_forecasts.parquet",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/trade_decisions.parquet",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/model_comparison_metrics.csv",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/calibration_results.csv",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/change_point_diagnostics.csv",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/hindsight_episode_diagnostics.parquet",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/stress_test_results.csv",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/run_metadata.json",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260714-dynamic-loop-edge-state-v2-exact-rerun.md"
   ],
   "git_sha": "ca3537a0f337097a9a75abf87ae4bf419fae6a5d",
   "hypothesis_assessment": "rejected",
@@ -79,9 +79,9 @@
   },
   "repository_branch": "agent/slrno-research-handoff",
   "representative_episode_plots": [
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/episode_0016-cycle_05-state_0-2023.png",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/episode_0205-cycle_13-state_7-2025.png",
-    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary/episode_0200-cycle_13-state_5-2025.png"
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/episode_0016-cycle_05-state_0-2023.png",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/episode_0205-cycle_13-state_7-2025.png",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun/episode_0200-cycle_13-state_5-2025.png"
   ],
   "research_only": true,
   "run_id": "20260714-dynamic-loop-edge-state-v2-8c68a7c1-66be016d",

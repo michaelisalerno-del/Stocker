@@ -2120,7 +2120,7 @@ def _replace_policy(
         how="left",
         validate="many_to_one",
     )
-    base["accepted"] = base["stress_admit"].fillna(False).astype(bool)
+    base["accepted"] = base["stress_admit"].eq(True)
     base["accepted_filled"] = base["accepted"] & base["status"].eq("filled")
     base["model_name"] = label
     return base
@@ -2140,7 +2140,7 @@ def _delayed_policy(decisions: pd.DataFrame) -> pd.DataFrame:
         how="left",
         validate="many_to_one",
     )
-    result["accepted"] = result["delayed_accept"].fillna(False).astype(bool)
+    result["accepted"] = result["delayed_accept"].eq(True)
     result["accepted_filled"] = result["accepted"] & result["status"].eq("filled")
     return result
 

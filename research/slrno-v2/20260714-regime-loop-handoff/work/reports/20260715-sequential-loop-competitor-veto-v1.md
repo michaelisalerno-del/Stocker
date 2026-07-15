@@ -77,8 +77,8 @@ Exact next recommendation: prospectively log the immutable anchor and checkpoint
 
 ## Reproducibility and field assumptions
 
-- Run ID: `sequential-veto-500c56c9572a4c122a0f3ac4`
-- Git SHA: `bd8c87c9e5d0b61b0aecc7adda5ee2765cd95f41`
+- Run ID: `sequential-veto-5c76a755c8f8b5e1651e688f`
+- Git SHA: `78c380dfa80ee396af7293de9447820a283da068`
 - Contract SHA-256: `49b55b4c4ba394cf3260652b977d527623fe9d4b1299df8fcf3e73708a0fd609`
 - Data snapshot: `bea06a259c9820488a8fc143f2ee1aaa7f289cad4d5817e351e67d222c5a040b`
 - Source opportunities: 10,382; filled: 9,926

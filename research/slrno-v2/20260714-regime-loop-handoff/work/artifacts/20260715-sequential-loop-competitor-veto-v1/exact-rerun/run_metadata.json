@@ -31,7 +31,7 @@
   "decision_timestamp_convention": "anchor bar close; transition after first new-state bar close",
   "fixed_horizon_bars": 24,
   "generated_at": "2026-07-15T00:00:00+00:00",
-  "git_sha": "bd8c87c9e5d0b61b0aecc7adda5ee2765cd95f41",
+  "git_sha": "78c380dfa80ee396af7293de9447820a283da068",
   "model_version": "sequential_loop_competitor_veto_v1.0.0",
   "periods": [
     2023,
@@ -47,7 +47,7 @@
   "provider_2023_limitation": "full intermediate tape unavailable; frozen execution anchors retain anchor next-open and terminal prices only",
   "random_seed": 20260715,
   "repository_branch": "agent/slrno-research-handoff",
-  "run_id": "sequential-veto-500c56c9572a4c122a0f3ac4",
+  "run_id": "sequential-veto-5c76a755c8f8b5e1651e688f",
   "safety": {
     "application_runtime_changed": false,
     "broker_connection_enabled": false,

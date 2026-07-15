@@ -29,7 +29,7 @@ The separate executable translation waits until causal admission, enters at the 
 
 ## 19–26. Earliness, capture, errors, targets, competitors, regime, clock, and costs
 
-Median resolution-lag ratio was **0.167**. Among positive original opportunities with observable remaining paths, mean capturable payoff fraction was **3.275**. MFE/MAE are outcome diagnostics only and never posterior inputs.
+Median resolution-lag ratio was **0.167**. Among positive original opportunities with observable remaining paths, mean capturable payoff fraction was **3.275** and median was **0.872**. The ratio is not bounded at one: an adverse pre-checkpoint move or a small original payoff denominator can leave more payoff after the checkpoint than the original anchor trade realised. MFE/MAE are outcome diagnostics only and never posterior inputs.
 
 Major named-family competitors:
 
@@ -44,7 +44,14 @@ Major named-family competitors:
 - cycle_07: cycle_11 (good), n=56, anchor mass=0.066, elimination rate=82.1%, median=5.0 bars
 - cycle_07: cycle_13 (bad), n=28, anchor mass=0.050, elimination rate=89.3%, median=5.0 bars
 
-Named-family result rows and the full regime × clock census are machine-readable. Competitor prevalence is reported by anchor regime and clock phase; elimination timing is split by profitable versus losing target outcomes. Unsupported competitor pairs remain unknown.
+Bad-competitor timing by observed target outcome:
+
+- cycle_04 versus bad cycle_06: winner elimination=0.0% (median nan bars), loser elimination=66.7% (median 1.0 bars), n=4
+- cycle_04 versus bad cycle_08: winner elimination=100.0% (median 6.0 bars), loser elimination=100.0% (median 1.0 bars), n=5
+- cycle_07 versus bad cycle_11: winner elimination=69.2% (median 2.0 bars), loser elimination=72.7% (median 7.5 bars), n=25
+- cycle_07 versus bad cycle_13: winner elimination=83.3% (median 8.0 bars), loser elimination=93.3% (median 4.0 bars), n=28
+
+There is no coherent earlier-elimination signature in winners: the `cycle_04` bad-pair counts are sparse, while the supported `cycle_07` bad competitors have lower winner elimination rates and mixed timing. The census keeps **136** missing target-payoff competitor cells separate from losses. Named-family result rows and the full regime × clock census are machine-readable; unsupported competitor pairs remain unknown.
 
 Twice-cost and one-bar-delay results are in `stress_test_results.csv`. The 2023 intermediate tape is unavailable: event-checkpoint next opens and terminal closes are reconstructed from hash-pinned frozen execution anchors, while 2023 fixed-bar payoffs, one-bar delays, and MFE/MAE remain missing—not zero.
 
@@ -70,8 +77,8 @@ Exact next recommendation: prospectively log the immutable anchor and checkpoint
 
 ## Reproducibility and field assumptions
 
-- Run ID: `sequential-veto-500c56c9572a4c122a0f3ac4`
-- Git SHA: `bd8c87c9e5d0b61b0aecc7adda5ee2765cd95f41`
+- Run ID: `sequential-veto-5c76a755c8f8b5e1651e688f`
+- Git SHA: `78c380dfa80ee396af7293de9447820a283da068`
 - Contract SHA-256: `49b55b4c4ba394cf3260652b977d527623fe9d4b1299df8fcf3e73708a0fd609`
 - Data snapshot: `bea06a259c9820488a8fc143f2ee1aaa7f289cad4d5817e351e67d222c5a040b`
 - Source opportunities: 10,382; filled: 9,926

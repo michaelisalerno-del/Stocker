@@ -88,6 +88,10 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   primary/exact artifacts, stress rebuilds, reports, plots, manifests, and independent audit outputs
   are regenerated from scratch under the post-review scoring commit. The earlier artifact set is
   retained outside the result path only as a superseded diagnostic and is not reported as final.
+- Corrected primary and exact scoring completed at SHA
+  `2341be2e22a01eec4e290667f8bde2dd08ddced6`. The corrected result retains the same
+  primary payoff-state endpoint, while strict episode attribution changes the descriptive counts
+  and the expanded metric table now records operational onset and survival calibration.
 
 ## Scientific decision
 
@@ -105,7 +109,7 @@ The V2 `_delayed_policy` did not move an original opportunity or entry. It shift
   constant-terminal, or twice-cost executable paired estimate is identifiable.
 - Fully rebuilt leave-one-stock-out calibration improvements: `0/20`; economic
   increments are positive in `6/20` exclusions.
-- Independent audit: `27/27` checks passed; primary/exact manifest and report
+- Independent audit: `31/31` checks passed; primary/exact manifest and report
   hashes are identical.
 
 ## Final validation commands
@@ -124,7 +128,7 @@ rtk .venv/bin/ruff check .
 rtk git diff --check
 ```
 
-Results: frozen V2 suite `37 passed`; new suite `23 passed`; full repository
+Results: frozen V2 suite `37 passed`; new suite `30 passed`; full repository
 suite passed with four pre-existing NumPy mean-of-empty-slice warnings; scoped
 format/lint passed for 13 files; strict mypy passed for 7 source files. The
 repository-wide Ruff command remains non-green with 1,153 pre-existing unrelated

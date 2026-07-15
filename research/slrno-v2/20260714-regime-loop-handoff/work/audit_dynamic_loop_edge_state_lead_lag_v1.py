@@ -568,6 +568,24 @@ def audit(primary: Path, exact: Path, primary_report: Path, exact_report: Path) 
         ),
         "20 stocks; panels/features/shared/cell states and targets rebuilt",
     )
+    stress = pd.read_csv(primary / "stress_test_results.csv")
+    rebuilt_stock_stress = stress.loc[
+        stress["stress_test"].isin(
+            [
+                "remove_best_stock_fully_rebuilt",
+                "remove_top_five_stocks_fully_rebuilt",
+            ]
+        )
+    ]
+    check(
+        results,
+        "best_and_top_five_stock_stresses_rebuilt",
+        bool(
+            len(rebuilt_stock_stress) == 10
+            and rebuilt_stock_stress["all_stock_dependent_inputs_rebuilt"].astype(bool).all()
+        ),
+        "both registered stock-removal stresses rebuild all five leads",
+    )
 
     changed = subprocess.check_output(
         [

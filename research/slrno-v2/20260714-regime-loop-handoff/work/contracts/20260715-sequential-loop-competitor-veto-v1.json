@@ -67,7 +67,17 @@
     "v2_artifacts": {
       "causal_edge_state_forecasts.parquet": "352c670fac8c8eae79ae9e79edc0b805ae12d62d7018865c4fe31c8cdf66f797",
       "trade_decisions.parquet": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f",
-      "session_payoff_panel.parquet": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7"
+      "session_payoff_panel.parquet": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7",
+      "hindsight_episode_states.parquet": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3",
+      "hindsight_episode_diagnostics.parquet": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be"
+    },
+    "v2_rebuild_runner": {
+      "path": "run_dynamic_loop_edge_state_v2.py",
+      "sha256": "d498275dc306ed347372e94a1b6ea9394e3ed4be7f9236566439ec9879cf7570"
+    },
+    "v2_rebuild_config": {
+      "path": "contracts/20260714-dynamic-loop-edge-state-v2.json",
+      "sha256": "8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373"
     },
     "provider_2025_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
     "provider_2025_hash_source": "v1_source_hashes.provider_2025_*",

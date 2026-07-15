@@ -2453,6 +2453,22 @@ def write_report(
         )
         or "- No supported named-family competitor rows."
     )
+    bad_timing = competitor_census.loc[
+        competitor_census["competitor_payoff_class"].eq("bad")
+    ].sort_values(["target_loop", "competitor_loop"], kind="stable")
+    bad_timing_lines = (
+        "\n".join(
+            f"- {row.target_loop} versus bad {row.competitor_loop}: "
+            f"winner elimination={row.profitable_target_elimination_rate:.1%} "
+            f"(median {row.profitable_target_median_elimination_bars:.1f} bars), "
+            f"loser elimination={row.losing_target_elimination_rate:.1%} "
+            f"(median {row.losing_target_median_elimination_bars:.1f} bars), "
+            f"n={row.compatible_opportunities}"
+            for row in bad_timing.itertuples(index=False)
+        )
+        or "- No bad-competitor rows were observable."
+    )
+    missing_competitor_targets = int(competitor_census["frequency_missing_target"].sum())
     period_rows = model_metrics.loc[
         model_metrics["model"].eq("primary_paired_sequence_minus_anchor")
         & ~model_metrics["period_slice"].eq("all")
@@ -2512,7 +2528,11 @@ Major named-family competitors:
 
 {major_lines}
 
-Named-family result rows and the full regime × clock census are machine-readable. Competitor prevalence is reported by anchor regime and clock phase; elimination timing is split by profitable versus losing target outcomes. Unsupported competitor pairs remain unknown.
+Bad-competitor timing by observed target outcome:
+
+{bad_timing_lines}
+
+There is no coherent earlier-elimination signature in winners: the `cycle_04` bad-pair counts are sparse, while the supported `cycle_07` bad competitors have lower winner elimination rates and mixed timing. The census keeps **{missing_competitor_targets}** missing target-payoff competitor cells separate from losses. Named-family result rows and the full regime × clock census are machine-readable; unsupported competitor pairs remain unknown.
 
 Twice-cost and one-bar-delay results are in `stress_test_results.csv`. The 2023 intermediate tape is unavailable: event-checkpoint next opens and terminal closes are reconstructed from hash-pinned frozen execution anchors, while 2023 fixed-bar payoffs, one-bar delays, and MFE/MAE remain missing—not zero.
 

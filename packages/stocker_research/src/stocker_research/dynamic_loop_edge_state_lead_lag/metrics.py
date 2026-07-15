@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -92,7 +93,10 @@ def build_paired_prediction_table(
         "target_payoff_available",
         "target_payoff_positive",
         "target_robust_net_bps",
+        "target_robust_gross_bps",
+        "target_cost_contribution_bps",
         "target_independent_stocks",
+        "target_independent_stock_ids",
         "target_effective_sample_size",
         "target_episode_state",
         "target_episode_onset_within_lead",
@@ -137,11 +141,21 @@ def build_paired_prediction_table(
 
 
 def _clip_probability(values: pd.Series) -> np.ndarray:
-    return np.clip(pd.to_numeric(values, errors="raise").to_numpy(dtype=float), 1e-12, 1 - 1e-12)
+    return cast(
+        np.ndarray,
+        np.clip(
+            pd.to_numeric(values, errors="raise").to_numpy(dtype=float),
+            1e-12,
+            1 - 1e-12,
+        ),
+    )
 
 
 def _binary_log_loss(y: np.ndarray, probability: np.ndarray) -> np.ndarray:
-    return -(y * np.log(probability) + (1.0 - y) * np.log(1.0 - probability))
+    return cast(
+        np.ndarray,
+        -(y * np.log(probability) + (1.0 - y) * np.log(1.0 - probability)),
+    )
 
 
 def expected_calibration_error(y: np.ndarray, probability: np.ndarray, *, bins: int = 10) -> float:
@@ -191,7 +205,7 @@ def lead_calibration_metrics(lead_joins: pd.DataFrame) -> pd.DataFrame:
         observed = group.loc[group["target_payoff_available"].eq(True)].copy()  # noqa: E712
         record: dict[str, object] = {
             "model_name": model_name,
-            "target_lead_sessions": int(lead),
+            "target_lead_sessions": int(str(lead)),
             "eligible_forecasts": len(group),
             "observable_targets": len(observed),
             "coverage": len(observed) / len(group) if len(group) else np.nan,
@@ -307,9 +321,9 @@ def _session_block_bootstrap(
     if np.isclose(brier, 0.0).all():
         output["brier_bootstrap_p_value"] = 1.0
     else:
-        output["brier_bootstrap_p_value"] = float(
-            min(1.0, 2.0 * min(np.mean(brier <= 0.0), np.mean(brier >= 0.0)))
-        )
+        negative_tail = float(np.mean(brier <= 0.0))
+        positive_tail = float(np.mean(brier >= 0.0))
+        output["brier_bootstrap_p_value"] = min(1.0, 2.0 * min(negative_tail, positive_tail))
     return output
 
 
@@ -318,11 +332,12 @@ def _holm_adjust(values: pd.Series) -> pd.Series:
     available = values.dropna().sort_values(kind="stable")
     running = 0.0
     count = len(available)
+    adjusted_values: dict[Hashable, float] = {}
     for rank, (index, value) in enumerate(available.items()):
-        adjusted = min(1.0, (count - rank) * float(value))
+        adjusted = min(1.0, (count - rank) * float(str(value)))
         running = max(running, adjusted)
-        result.loc[index] = running
-    return result
+        adjusted_values[index] = running
+    return pd.Series(adjusted_values, dtype=float).reindex(result.index)
 
 
 def paired_lead_metrics(
@@ -355,7 +370,7 @@ def paired_lead_metrics(
     for lead, group in paired.groupby("target_lead_sessions", observed=True, sort=True):
         components = _paired_components(group)
         record: dict[str, object] = {
-            "target_lead_sessions": int(lead),
+            "target_lead_sessions": int(str(lead)),
             "paired_forecasts": len(group),
             "paired_observable_targets": len(components),
         }
@@ -374,7 +389,7 @@ def paired_lead_metrics(
                 _session_block_bootstrap(
                     components,
                     resamples=bootstrap_resamples,
-                    seed=seed + int(lead),
+                    seed=seed + int(str(lead)),
                 )
             )
         records.append(record)
@@ -434,7 +449,7 @@ def summarize_feature_contributions(binned: pd.DataFrame) -> pd.DataFrame:
         )
         diagnostics.append(
             {
-                "target_lead_sessions": int(lead),
+                "target_lead_sessions": int(str(lead)),
                 "contribution_bin": "continuous_rank_diagnostic",
                 "forecasts": len(group),
                 "spearman_future_payoff": float(payoff_correlation.statistic),

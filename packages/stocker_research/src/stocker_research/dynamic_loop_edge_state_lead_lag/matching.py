@@ -135,9 +135,9 @@ def _next_session_map(calendar: pd.DataFrame) -> pd.DataFrame:
 
 
 def _equal_nonmissing(left: object, values: pd.Series) -> pd.Series:
-    if pd.isna(left):
+    if left is None or left is pd.NA or bool(pd.isna(left)):  # type: ignore[call-overload]
         return pd.Series(False, index=values.index)
-    return values.notna() & values.eq(left)
+    return values.notna() & values.astype("string").eq(str(left))
 
 
 def _identity_candidates(source: pd.Series, candidates: pd.DataFrame) -> pd.DataFrame:

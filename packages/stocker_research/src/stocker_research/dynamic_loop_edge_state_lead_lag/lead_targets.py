@@ -117,15 +117,33 @@ def build_frozen_forecast_ledger(
     frame["stock_id"] = pd.NA
     frame["independent_session_support"] = frame["effective_sessions"].astype(float)
     frame["independent_stock_support"] = frame["independent_stocks"].astype(int)
-    feature_columns = sorted(column for column in frame if column.startswith("z__"))
-    frame["frozen_feature_values_json"] = frame[feature_columns].apply(
-        lambda row: json.dumps(
+    feature_columns = sorted(
+        str(column) for column in frame.columns if str(column).startswith("z__")
+    )
+    feature_records = frame.loc[:, feature_columns].to_dict(orient="records")
+    frame["frozen_feature_values_json"] = [
+        json.dumps(
             {name: (None if pd.isna(value) else float(value)) for name, value in row.items()},
             sort_keys=True,
             separators=(",", ":"),
-        ),
-        axis=1,
-    )
+        )
+        for row in feature_records
+    ]
+    frame["feature_availability_timestamps_json"] = [
+        json.dumps(
+            {
+                name.removeprefix("z__"): (
+                    None if pd.isna(row[name]) else pd.Timestamp(availability).isoformat()
+                )
+                for name in feature_columns
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for row, availability in zip(
+            feature_records, frame["feature_max_availability_timestamp"], strict=True
+        )
+    ]
     frame["forecast_id"] = [
         _stable_id(
             "forecast",
@@ -163,7 +181,10 @@ def build_settled_outcome_ledger(
     required = {
         *OUTCOME_KEY_COLUMNS,
         "robust_net_payoff_bps",
+        "robust_gross_payoff_bps",
+        "cost_contribution_bps",
         "independent_stock_count",
+        "independent_stock_ids",
         "effective_sample_size",
         "data_availability_timestamp",
         "source_data_id",
@@ -286,8 +307,11 @@ def build_lead_target_joins(
         "horizon",
         "outcome_id",
         "robust_net_payoff_bps",
+        "robust_gross_payoff_bps",
+        "cost_contribution_bps",
         "target_payoff_positive",
         "independent_stock_count",
+        "independent_stock_ids",
         "effective_sample_size",
         "data_availability_timestamp",
     ]
@@ -297,7 +321,10 @@ def build_lead_target_joins(
                 "session": "target_session",
                 "outcome_id": "target_outcome_id",
                 "robust_net_payoff_bps": "target_robust_net_bps",
+                "robust_gross_payoff_bps": "target_robust_gross_bps",
+                "cost_contribution_bps": "target_cost_contribution_bps",
                 "independent_stock_count": "target_independent_stocks",
+                "independent_stock_ids": "target_independent_stock_ids",
                 "effective_sample_size": "target_effective_sample_size",
                 "data_availability_timestamp": "target_payoff_availability_timestamp",
             }

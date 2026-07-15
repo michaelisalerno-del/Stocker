@@ -60,7 +60,7 @@ REQUIRED_OUTCOME_FIELDS: Final[frozenset[str]] = frozenset(
 
 
 def _json_default(value: object) -> object:
-    if value is pd.NA or value is None:
+    if value is pd.NA or value is pd.NaT or value is None:
         return None
     if isinstance(value, (pd.Timestamp, np.datetime64)):
         return pd.Timestamp(value).isoformat()
@@ -83,7 +83,7 @@ def _canonical(record: Mapping[str, object]) -> str:
 
 
 def _timestamp(value: object, field: str) -> pd.Timestamp:
-    result = pd.Timestamp(value)
+    result = pd.Timestamp(str(value))
     if result.tzinfo is None:
         raise ValueError(f"{field} must be timezone-aware")
     return result
@@ -130,12 +130,17 @@ class ProspectiveResearchLedger:
             raise ValueError(f"missing prospective forecast fields: {missing}")
         freeze = _timestamp(record["forecast_freeze_timestamp"], "forecast freeze")
         creation = _timestamp(record["forecast_creation_timestamp"], "forecast creation")
-        feature_max = _timestamp(
-            record["feature_max_availability_timestamp"], "feature availability"
+        raw_feature_max = record["feature_max_availability_timestamp"]
+        feature_max = (
+            None
+            if raw_feature_max is None
+            or raw_feature_max is pd.NaT
+            or str(raw_feature_max) in {"NaT", "<NA>", "nan"}
+            else _timestamp(raw_feature_max, "feature availability")
         )
         if creation != freeze:
             raise ValueError("forecast creation must equal immutable freeze timestamp")
-        if feature_max >= freeze:
+        if feature_max is not None and feature_max >= freeze:
             raise ValueError("feature availability must be strictly before forecast freeze")
         if _contains_hindsight_or_episode(record["frozen_feature_values"]):
             raise ValueError("hindsight or episode labels are forbidden in forecast features")

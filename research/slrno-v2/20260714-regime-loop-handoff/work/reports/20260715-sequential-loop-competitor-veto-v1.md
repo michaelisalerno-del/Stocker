@@ -29,7 +29,7 @@ The separate executable translation waits until causal admission, enters at the 
 
 ## 19–26. Earliness, capture, errors, targets, competitors, regime, clock, and costs
 
-Median resolution-lag ratio was **0.167**. Among positive original opportunities with observable remaining paths, mean capturable payoff fraction was **3.275**. MFE/MAE are outcome diagnostics only and never posterior inputs.
+Median resolution-lag ratio was **0.167**. Among positive original opportunities with observable remaining paths, mean capturable payoff fraction was **3.275** and median was **0.872**. The ratio is not bounded at one: an adverse pre-checkpoint move or a small original payoff denominator can leave more payoff after the checkpoint than the original anchor trade realised. MFE/MAE are outcome diagnostics only and never posterior inputs.
 
 Major named-family competitors:
 

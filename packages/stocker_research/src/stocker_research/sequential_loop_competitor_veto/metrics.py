@@ -13,6 +13,23 @@ def _log_loss(y: np.ndarray, probability: np.ndarray) -> float:
     return float(-np.mean(y * np.log(clipped) + (1.0 - y) * np.log(1.0 - clipped)))
 
 
+def paired_economic_contribution(frame: pd.DataFrame) -> pd.Series:
+    """Return the row-level economic increment used by the paired endpoint."""
+
+    required = {
+        "target_remaining_net_bps",
+        "anchor_probability",
+        "sequential_probability",
+    }
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"missing paired contribution columns: {sorted(missing)}")
+    target = pd.to_numeric(frame["target_remaining_net_bps"], errors="coerce")
+    anchor = pd.to_numeric(frame["anchor_probability"], errors="coerce")
+    sequential = pd.to_numeric(frame["sequential_probability"], errors="coerce")
+    return target * (sequential - anchor)
+
+
 def paired_predictive_metrics(
     frame: pd.DataFrame,
     *,
@@ -44,11 +61,10 @@ def paired_predictive_metrics(
     y = pd.to_numeric(paired["target_positive"], errors="raise").to_numpy(float)
     anchor = pd.to_numeric(paired["anchor_probability"], errors="raise").to_numpy(float)
     sequential = pd.to_numeric(paired["sequential_probability"], errors="raise").to_numpy(float)
-    target = pd.to_numeric(paired["target_remaining_net_bps"], errors="raise").to_numpy(float)
     row_improvement = (anchor - y) ** 2 - (sequential - y) ** 2
     brier_improvement = float(np.mean(row_improvement))
     log_improvement = _log_loss(y, anchor) - _log_loss(y, sequential)
-    economic_increment = float(np.sum(target * (sequential - anchor)))
+    economic_increment = float(paired_economic_contribution(paired).sum(min_count=1))
 
     sessions = sorted(paired["session_date"].astype(str).unique())
     by_session = {

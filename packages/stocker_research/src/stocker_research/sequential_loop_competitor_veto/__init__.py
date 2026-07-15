@@ -12,7 +12,7 @@ from .decisions import (
     summarise_posterior,
 )
 from .immutable_ledger import ProspectiveCompetitorLedger
-from .metrics import paired_predictive_metrics
+from .metrics import paired_economic_contribution, paired_predictive_metrics
 from .model import (
     PosteriorSnapshot,
     compatibility_status,
@@ -42,6 +42,7 @@ __all__ = [
     "RollingTrainingOnlyCensus",
     "clock_bin",
     "ProspectiveCompetitorLedger",
+    "paired_economic_contribution",
     "paired_predictive_metrics",
     "compatibility_status",
     "initial_posterior",

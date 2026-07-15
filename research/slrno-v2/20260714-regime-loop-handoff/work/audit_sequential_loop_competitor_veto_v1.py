@@ -389,6 +389,80 @@ def _check_stress_rebuilds(audit: Auditor, root: Path) -> None:
     audit.check("predeclared_stress_family", required <= present, sorted(required - present))
 
 
+def _check_evaluation_attribution(audit: Auditor, root: Path) -> None:
+    comparator = _load(root, "static_anchor_comparator_predictions.parquet")
+    concentration = _load(root, "concentration_results.csv")
+    primary = concentration.loc[
+        concentration["analysis_scope"].eq("primary_paired_economic_increment")
+    ]
+    row_contribution = comparator["target_remaining_net_bps"] * (
+        comparator["sequential_probability"] - comparator["anchor_probability"]
+    )
+    expected_total = float(row_contribution.sum(min_count=1))
+    stock_total = float(
+        primary.loc[primary["dimension"].eq("stock"), "net_contribution_bps"].sum(min_count=1)
+    )
+    audit.check(
+        "primary_concentration_rebuilt",
+        math.isclose(expected_total, stock_total, abs_tol=TOLERANCE, rel_tol=0.0),
+        {"expected_total": expected_total, "stock_total": stock_total},
+    )
+
+    census = _load(root, "pairwise_target_competitor_census.parquet")
+    anchor = _load(root, "anchor_compatible_loop_sets.parquet")
+    eliminated = _load(root, "loop_elimination_events.parquet")
+    named = comparator.loc[comparator["population_role"].eq("named_target")][
+        ["opportunity_id", "target_loop", "original_net_payoff_bps"]
+    ].copy()
+    rows = anchor.merge(named, on="opportunity_id", how="inner", validate="many_to_one")
+    rows = rows.loc[~rows["loop_id"].eq(rows["target_loop"])].copy()
+    first = (
+        eliminated.sort_values(["opportunity_id", "checkpoint_timestamp", "loop_id"], kind="stable")
+        .drop_duplicates(["opportunity_id", "loop_id"], keep="first")[
+            ["opportunity_id", "loop_id", "bars_consumed"]
+        ]
+        .rename(columns={"bars_consumed": "elimination_bars"})
+    )
+    rows = rows.merge(first, on=["opportunity_id", "loop_id"], how="left", validate="one_to_one")
+    rows["profitable"] = rows["original_net_payoff_bps"].gt(0.0)
+    rebuilt: list[dict[str, object]] = []
+    for keys, group in rows.groupby(["target_loop", "loop_id", "payoff_class"], sort=True):
+        observed = group["elimination_bars"].notna()
+        profitable = group["profitable"]
+        rebuilt.append(
+            {
+                "target_loop": keys[0],
+                "competitor_loop": keys[1],
+                "competitor_payoff_class": keys[2],
+                "rebuilt_profitable_rate": float(observed.loc[profitable].mean()),
+                "rebuilt_losing_rate": float(observed.loc[~profitable].mean()),
+                "rebuilt_profitable_median": float(
+                    group.loc[observed & profitable, "elimination_bars"].median()
+                ),
+                "rebuilt_losing_median": float(
+                    group.loc[observed & ~profitable, "elimination_bars"].median()
+                ),
+            }
+        )
+    joined = census.merge(
+        pd.DataFrame(rebuilt),
+        on=["target_loop", "competitor_loop", "competitor_payoff_class"],
+        how="inner",
+        validate="one_to_one",
+    )
+    comparisons = [
+        ("profitable_target_elimination_rate", "rebuilt_profitable_rate"),
+        ("losing_target_elimination_rate", "rebuilt_losing_rate"),
+        ("profitable_target_median_elimination_bars", "rebuilt_profitable_median"),
+        ("losing_target_median_elimination_bars", "rebuilt_losing_median"),
+    ]
+    timing_ok = len(joined) == len(census) and all(
+        np.allclose(joined[left], joined[right], atol=TOLERANCE, rtol=0.0, equal_nan=True)
+        for left, right in comparisons
+    )
+    audit.check("profitable_losing_elimination_timing_rebuilt", timing_ok, {"rows": len(joined)})
+
+
 def _check_artifacts(audit: Auditor, root: Path, exact: Path | None) -> None:
     manifest = json.loads((root / "artifact_manifest.json").read_text())
     actual = {
@@ -478,6 +552,7 @@ def run_audit(root: Path, exact: Path | None, output: Path) -> dict[str, object]
     _check_remaining_payoff(audit, root, contract)
     _check_accounting(audit, root)
     _check_stress_rebuilds(audit, root)
+    _check_evaluation_attribution(audit, root)
     _check_artifacts(audit, root, exact)
     passed = sum(bool(check["passed"]) for check in audit.checks)
     result: dict[str, object] = {

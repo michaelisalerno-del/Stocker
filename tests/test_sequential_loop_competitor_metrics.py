@@ -4,7 +4,10 @@ import math
 
 import pandas as pd
 
-from stocker_research.sequential_loop_competitor_veto import paired_predictive_metrics
+from stocker_research.sequential_loop_competitor_veto import (
+    paired_economic_contribution,
+    paired_predictive_metrics,
+)
 
 
 def test_synthetic_leading_elimination_improves_paired_prediction() -> None:
@@ -42,3 +45,23 @@ def test_null_elimination_does_not_manufacture_incremental_value() -> None:
     assert math.isclose(result["brier_improvement"], 0.0)
     assert math.isclose(result["log_loss_improvement"], 0.0)
     assert math.isclose(result["paired_economic_increment_bps"], 0.0)
+
+
+def test_row_contributions_sum_to_registered_paired_economic_increment() -> None:
+    frame = pd.DataFrame(
+        {
+            "session_date": ["2025-01-01", "2025-01-02", "2025-01-03"],
+            "target_positive": [1, 0, 1],
+            "target_remaining_net_bps": [20.0, -10.0, 5.0],
+            "anchor_probability": [0.4, 0.4, 0.7],
+            "sequential_probability": [0.8, 0.2, 0.6],
+        }
+    )
+
+    contributions = paired_economic_contribution(frame)
+    result = paired_predictive_metrics(frame, bootstrap_resamples=1)
+
+    assert math.isclose(
+        float(contributions.sum()),
+        float(result["paired_economic_increment_bps"]),
+    )

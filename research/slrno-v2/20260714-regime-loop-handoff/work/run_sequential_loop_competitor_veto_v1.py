@@ -38,6 +38,7 @@ from stocker_research.sequential_loop_competitor_veto import (
     classify_payoff_families,
     clock_bin,
     initial_posterior,
+    paired_economic_contribution,
     paired_predictive_metrics,
     remaining_payoff,
     summarise_posterior,
@@ -1710,6 +1711,8 @@ def build_competitor_census(
     for keys, group in rows.groupby(group_columns, sort=True):
         eliminated = group["elimination_bars_consumed"].notna()
         profitable = group["profitable_target_outcome"]
+        profitable_eliminated = eliminated & profitable
+        losing_eliminated = eliminated & ~profitable
         summaries.append(
             {
                 "target_loop": keys[0],
@@ -1720,8 +1723,16 @@ def build_competitor_census(
                 "frequency_profitable_target": int(profitable.sum()),
                 "frequency_losing_target": int((~profitable).sum()),
                 "elimination_rate": float(eliminated.mean()),
+                "profitable_target_elimination_rate": float(eliminated.loc[profitable].mean()),
+                "losing_target_elimination_rate": float(eliminated.loc[~profitable].mean()),
                 "median_elimination_bars": float(
                     group.loc[eliminated, "elimination_bars_consumed"].median()
+                ),
+                "profitable_target_median_elimination_bars": float(
+                    group.loc[profitable_eliminated, "elimination_bars_consumed"].median()
+                ),
+                "losing_target_median_elimination_bars": float(
+                    group.loc[losing_eliminated, "elimination_bars_consumed"].median()
                 ),
                 "survives_until_too_late_rate": float(
                     (~eliminated | group["elimination_bars_consumed"].gt(18)).mean()
@@ -1749,34 +1760,42 @@ def build_competitor_census(
     return pd.DataFrame(summaries)
 
 
-def build_concentration(accounting: pd.DataFrame) -> pd.DataFrame:
-    selected = accounting.loc[accounting["policy"].eq("delayed_admit_after_resolution")].copy()
+def build_concentration(comparators: pd.DataFrame, accounting: pd.DataFrame) -> pd.DataFrame:
+    primary = comparators.copy()
+    primary["net_contribution_bps"] = paired_economic_contribution(primary)
+    primary["analysis_scope"] = "primary_paired_economic_increment"
+    delayed = accounting.loc[accounting["policy"].eq("delayed_admit_after_resolution")].copy()
+    delayed["net_contribution_bps"] = delayed["policy_net_payoff_bps"]
+    delayed["analysis_scope"] = "delayed_admission_policy_payoff"
     rows: list[dict[str, object]] = []
-    for dimension, column in {
-        "stock": "stock",
-        "loop": "target_loop",
-        "orientation": "orientation",
-        "period": "period",
-        "population": "population_role",
-    }.items():
-        contributions = (
-            selected.groupby(column, dropna=False)["policy_net_payoff_bps"]
-            .sum()
-            .sort_values(ascending=False)
-        )
-        absolute_total = float(contributions.abs().sum())
-        for rank, (key, value) in enumerate(contributions.items(), start=1):
-            rows.append(
-                {
-                    "dimension": dimension,
-                    "key": str(key),
-                    "rank": rank,
-                    "net_contribution_bps": float(value),
-                    "absolute_contribution_share": (
-                        abs(float(value)) / absolute_total if absolute_total > 0.0 else math.nan
-                    ),
-                }
+    for selected in (primary, delayed):
+        scope = str(selected["analysis_scope"].iloc[0])
+        for dimension, column in {
+            "stock": "stock",
+            "loop": "target_loop",
+            "orientation": "orientation",
+            "period": "period",
+            "population": "population_role",
+        }.items():
+            contributions = selected.groupby(column, dropna=False)["net_contribution_bps"].sum(
+                min_count=1
             )
+            order = contributions.abs().sort_values(ascending=False).index
+            contributions = contributions.reindex(order)
+            absolute_total = float(contributions.abs().sum())
+            for rank, (key, value) in enumerate(contributions.items(), start=1):
+                rows.append(
+                    {
+                        "analysis_scope": scope,
+                        "dimension": dimension,
+                        "key": str(key),
+                        "rank": rank,
+                        "net_contribution_bps": float(value),
+                        "absolute_contribution_share": (
+                            abs(float(value)) / absolute_total if absolute_total > 0.0 else math.nan
+                        ),
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -2437,12 +2456,13 @@ def write_report(
         f"{row.brier_improvement:.6f}, economic increment={row.paired_economic_increment_bps:.2f} bps"
         for row in period_rows.itertuples(index=False)
     )
-    concentration_top = concentration.loc[concentration["rank"].eq(1)].sort_values(
-        "dimension", kind="stable"
-    )
+    concentration_top = concentration.loc[
+        concentration["analysis_scope"].eq("primary_paired_economic_increment")
+        & concentration["rank"].eq(1)
+    ].sort_values("dimension", kind="stable")
     concentration_lines = "\n".join(
-        f"- {row.dimension}: {row.key}, absolute contribution share="
-        f"{row.absolute_contribution_share:.1%}"
+        f"- {row.dimension}: {row.key}, contribution={row.net_contribution_bps:.2f} bps, "
+        f"absolute share={row.absolute_contribution_share:.1%}"
         for row in concentration_top.itertuples(index=False)
     )
     audit_text = (
@@ -2660,7 +2680,7 @@ def run_historical(
     competitor_census = build_competitor_census(
         ledgers["anchor_sets"], ledgers["eliminations"], opportunities
     )
-    concentration = build_concentration(general_accounting)
+    concentration = build_concentration(comparators, general_accounting)
     stress_results = build_stress_results(comparators, ledgers["outcomes"], general_accounting)
     named_results, general_results = build_named_and_general_results(
         comparators, ledgers["checkpoints"]

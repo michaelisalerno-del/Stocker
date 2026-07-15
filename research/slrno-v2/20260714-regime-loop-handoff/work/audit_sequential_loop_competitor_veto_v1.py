@@ -165,9 +165,15 @@ def _check_structural_posterior(audit: Auditor, root: Path) -> None:
         np.allclose(group_total.to_numpy(float), 1.0, atol=TOLERANCE, rtol=0.0),
         {"groups": len(group_total), "max_error": float((group_total - 1.0).abs().max())},
     )
-    unknown = posterior.loc[posterior["loop_id"].eq("__unknown__")]
+    independently_summarised_unknown = (
+        posterior.loc[posterior["payoff_class"].eq("unknown")]
+        .groupby(["checkpoint_id", "track"])["posterior_probability"]
+        .sum()
+        .rename("rebuilt_unknown_mass")
+        .reset_index()
+    )
     unknown_join = timeline.merge(
-        unknown[["checkpoint_id", "track", "posterior_probability"]],
+        independently_summarised_unknown,
         on=["checkpoint_id", "track"],
         how="left",
         validate="one_to_one",
@@ -176,7 +182,7 @@ def _check_structural_posterior(audit: Auditor, root: Path) -> None:
         "explicit_unknown_mass",
         np.allclose(
             unknown_join["unknown_loop_mass"],
-            unknown_join["posterior_probability"],
+            unknown_join["rebuilt_unknown_mass"],
             atol=TOLERANCE,
             rtol=0.0,
         ),
@@ -288,10 +294,15 @@ def _check_remaining_payoff(audit: Auditor, root: Path, contract: Mapping[str, A
 
     source = pd.read_parquet(
         contract["inputs"]["accepted_signal_ledger"]["path"],
-        columns=["anchor_id", "period", "direction"],
+        columns=["anchor_id", "period", "strategy", "horizon", "direction"],
     )
+    source = source.loc[
+        source["strategy"].eq("breakout_loop_scores_range_p75") & source["horizon"].eq(24)
+    ].copy()
+    source["period"] = source["period"].astype(int)
     source = source.drop_duplicates(["period", "anchor_id"])
     sample = available.loc[available["period"].eq(2025)].head(50).copy()
+    sample["period"] = sample["period"].astype(int)
     if sample.empty:
         audit.check("independent_2025_price_replay", False, "no 2025 rows")
         return

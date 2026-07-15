@@ -4,7 +4,7 @@ import ast
 import importlib.util
 import json
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 REPO = Path(__file__).resolve().parents[1]
 WORK = REPO / "research/slrno-v2/20260714-regime-loop-handoff/work"
@@ -81,6 +81,32 @@ def test_research_files_do_not_import_execution_or_broker_modules() -> None:
             if isinstance(node, (ast.Import, ast.ImportFrom))
             for alias in node.names
         ]
-        assert not any(
-            token in imported for token in forbidden for imported in imports
-        ), path
+        assert not any(token in imported for token in forbidden for imported in imports), path
+
+
+def test_reconstructed_2023_checkpoint_at_terminal_is_unavailable() -> None:
+    runner = _load(WORK / "run_sequential_loop_competitor_veto_v1.py", "terminal_clock_runner")
+    timestamp = "2023-04-03T16:25:00Z"
+    opportunity = SimpleNamespace(
+        status="filled",
+        direction=1,
+        period=2023,
+        terminal_timestamp=timestamp,
+        symbol_norm="A",
+        session_date="2023-04-03",
+    )
+    checkpoint = SimpleNamespace(
+        checkpoint_timestamp=timestamp,
+        checkpoint_type="first_completed_transition",
+    )
+
+    result = runner._outcome_for_checkpoint(
+        opportunity,
+        checkpoint,
+        {},
+        {},
+        {},
+    )
+
+    assert result["outcome_status"] == "too_late"
+    assert result["constant_terminal_net_bps"] != 0.0

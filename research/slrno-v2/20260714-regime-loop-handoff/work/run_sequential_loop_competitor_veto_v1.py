@@ -574,6 +574,9 @@ def _outcome_for_checkpoint(
         return base
     checkpoint_time = pd.Timestamp(checkpoint.checkpoint_timestamp)
     terminal = pd.Timestamp(opportunity.terminal_timestamp)
+    if checkpoint_time >= terminal:
+        base["outcome_status"] = "too_late"
+        return base
     if int(opportunity.period) == 2025:
         bars = bars_2025.get(
             (str(opportunity.symbol_norm), str(opportunity.session_date)), pd.DataFrame()

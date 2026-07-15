@@ -409,11 +409,29 @@ def _check_evaluation_attribution(audit: Auditor, root: Path) -> None:
     )
 
     census = _load(root, "pairwise_target_competitor_census.parquet")
+    audit.check(
+        "missing_target_outcomes_separate_from_losses",
+        census["compatible_opportunities"]
+        .eq(
+            census["frequency_profitable_target"]
+            + census["frequency_losing_target"]
+            + census["frequency_missing_target"]
+        )
+        .all(),
+    )
     anchor = _load(root, "anchor_compatible_loop_sets.parquet")
     eliminated = _load(root, "loop_elimination_events.parquet")
-    named = comparator.loc[comparator["population_role"].eq("named_target")][
-        ["opportunity_id", "target_loop", "original_net_payoff_bps"]
-    ].copy()
+    accounting = _load(root, "veto_accounting.parquet")
+    named = accounting.loc[
+        accounting["track"].eq("track_a_named_family")
+        & accounting["policy"].eq("base_no_rejection")
+        & accounting["population_role"].eq("named_target")
+    ][["opportunity_id", "source_net_payoff_bps"]].rename(
+        columns={"source_net_payoff_bps": "original_net_payoff_bps"}
+    )
+    identity = anchor[["opportunity_id", "orientation"]].drop_duplicates()
+    named = named.merge(identity, on="opportunity_id", how="left", validate="one_to_one")
+    named["target_loop"] = named["orientation"].map({"state_4": "cycle_04", "state_5": "cycle_07"})
     rows = anchor.merge(named, on="opportunity_id", how="inner", validate="many_to_one")
     rows = rows.loc[~rows["loop_id"].eq(rows["target_loop"])].copy()
     first = (

@@ -1705,14 +1705,19 @@ def build_competitor_census(
         how="left",
         validate="one_to_one",
     )
-    rows["profitable_target_outcome"] = rows["original_net_payoff_bps"].gt(0.0)
+    rows["target_payoff_observed"] = rows["original_net_payoff_bps"].notna()
+    rows["profitable_target_outcome"] = rows["target_payoff_observed"] & rows[
+        "original_net_payoff_bps"
+    ].gt(0.0)
     group_columns = ["top_loop", "loop_id", "payoff_class"]
     summaries: list[dict[str, object]] = []
     for keys, group in rows.groupby(group_columns, sort=True):
         eliminated = group["elimination_bars_consumed"].notna()
+        observed = group["target_payoff_observed"]
         profitable = group["profitable_target_outcome"]
+        losing = observed & ~profitable
         profitable_eliminated = eliminated & profitable
-        losing_eliminated = eliminated & ~profitable
+        losing_eliminated = eliminated & losing
         summaries.append(
             {
                 "target_loop": keys[0],
@@ -1721,10 +1726,11 @@ def build_competitor_census(
                 "compatible_opportunities": group["opportunity_id"].nunique(),
                 "mean_anchor_posterior_mass": float(group["initial_posterior_probability"].mean()),
                 "frequency_profitable_target": int(profitable.sum()),
-                "frequency_losing_target": int((~profitable).sum()),
+                "frequency_losing_target": int(losing.sum()),
+                "frequency_missing_target": int((~observed).sum()),
                 "elimination_rate": float(eliminated.mean()),
                 "profitable_target_elimination_rate": float(eliminated.loc[profitable].mean()),
-                "losing_target_elimination_rate": float(eliminated.loc[~profitable].mean()),
+                "losing_target_elimination_rate": float(eliminated.loc[losing].mean()),
                 "median_elimination_bars": float(
                     group.loc[eliminated, "elimination_bars_consumed"].median()
                 ),

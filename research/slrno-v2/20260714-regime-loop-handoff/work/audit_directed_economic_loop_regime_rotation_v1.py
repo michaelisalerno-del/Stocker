@@ -570,16 +570,25 @@ def run_audit(primary: Path, exact: Path) -> dict[str, object]:
         f"pair edges={len(pair_graph)}; supported={int(pair_graph.support_status.eq('supported').sum())}",
     )
     loo = pd.read_csv(primary / "leave_one_stock_out_results.csv")
+    stress = pd.read_csv(primary / "stress_test_results.csv")
+    blocked_rebuild = stress.loc[
+        stress["stress_test"].eq("fully_rebuilt_median_and_leave_one_stock_out")
+        & stress["status"].eq("blocked_missing_hash_pinned_v2_rebuild_inputs")
+        & stress["result_imputed"].eq(False)
+    ]
     add(
-        "leave_one_stock_out_fully_rebuilt",
+        "leave_one_stock_out_rebuild_or_fail_closed_blocker",
         bool(
-            not loo.empty
-            and loo["all_stock_dependent_states_rebuilt"].astype(bool).all()
-            and loo["family_aggregates_rebuilt"].astype(bool).all()
-            and loo["transition_graph_rebuilt"].astype(bool).all()
-            and loo["activation_labels_rebuilt"].astype(bool).all()
+            (
+                not loo.empty
+                and loo["all_stock_dependent_states_rebuilt"].astype(bool).all()
+                and loo["family_aggregates_rebuilt"].astype(bool).all()
+                and loo["transition_graph_rebuilt"].astype(bool).all()
+                and loo["activation_labels_rebuilt"].astype(bool).all()
+            )
+            or (loo.empty and not blocked_rebuild.empty)
         ),
-        f"exclusions={len(loo)}",
+        f"exclusions={len(loo)}; blocked_fail_closed={not blocked_rebuild.empty}",
     )
     nulls = pd.read_csv(primary / "null_test_results.csv")
     add(

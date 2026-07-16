@@ -280,6 +280,8 @@ def scientific_decision(
         return "activation_prediction_not_economically_useful"
     if not null_metrics.empty and bool(null_metrics["brier_improvement"].gt(0.0).all()):
         return "no_directed_rotation"
+    if loo_results.empty:
+        return "activation_rotation_predictive_tradeability_unknown"
     if not loo_results.empty and float(loo_results["brier_improvement"].gt(0.0).mean()) < 0.5:
         return "pair_transition_sparse_or_concentrated"
     if not concentration.empty and float(concentration["absolute_contribution_share"].max()) > 0.5:
@@ -1859,7 +1861,7 @@ def write_report(
         f"mean Brier improvement {loo_results.brier_improvement.mean():.6f}; "
         f"positive in {loo_results.brier_improvement.gt(0).mean():.1%} of fully rebuilt exclusions"
         if not loo_results.empty
-        else "not completed"
+        else f"not completed; blocker: {metadata.get('rebuild_blocker', 'unavailable')}"
     )
     null_lines = "\n".join(
         f"- {row.null_test}: Brier improvement {row.brier_improvement:.6f}, log-loss improvement {row.log_loss_improvement:.6f}"
@@ -2170,13 +2172,42 @@ def run_historical(
             },
         ]
     )
+    rebuild_blocker: str | None = None
     if rebuild_stresses:
-        rebuilt_stress, loo_results = run_rebuilt_stresses(
-            contract,
-            taxonomy,
-            run_id=run_id,
-        )
-        stress_rows.extend(rebuilt_stress.to_dict(orient="records"))
+        try:
+            rebuilt_stress, loo_results = run_rebuilt_stresses(
+                contract,
+                taxonomy,
+                run_id=run_id,
+            )
+            stress_rows.extend(rebuilt_stress.to_dict(orient="records"))
+        except FileNotFoundError as error:
+            rebuild_blocker = str(error)
+            loo_results = pd.DataFrame(
+                columns=[
+                    "excluded_stock",
+                    "paired_rows",
+                    "brier_improvement",
+                    "log_loss_improvement",
+                    "all_stock_dependent_states_rebuilt",
+                    "family_aggregates_rebuilt",
+                    "transition_graph_rebuilt",
+                    "activation_labels_rebuilt",
+                ]
+            )
+            stress_rows.append(
+                {
+                    "stress_test": "fully_rebuilt_median_and_leave_one_stock_out",
+                    "status": "blocked_missing_hash_pinned_v2_rebuild_inputs",
+                    "blocker": rebuild_blocker,
+                    "result_imputed": False,
+                    "rerun_command_after_restore": (
+                        "PYTHONPATH=packages/stocker_research/src .venv/bin/python "
+                        "research/slrno-v2/20260714-regime-loop-handoff/work/"
+                        "run_directed_economic_loop_regime_rotation_v1.py"
+                    ),
+                }
+            )
     else:
         loo_results = pd.DataFrame()
         stress_rows.append(
@@ -2322,6 +2353,7 @@ def run_historical(
             "run_directed_economic_loop_regime_rotation_v1.py --output <OUTPUT> --report <REPORT>"
         ),
         "rebuild_stresses_executed": rebuild_stresses,
+        "rebuild_blocker": rebuild_blocker,
         "safety": contract["safety"],
         "artifact_names": sorted([*detailed, *summaries]),
         "plot_names": sorted(path.name for path in plot_paths),

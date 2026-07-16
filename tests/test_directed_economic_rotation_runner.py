@@ -79,6 +79,37 @@ def test_primary_scientific_decision_cannot_ignore_failed_increment() -> None:
     )
 
 
+def test_provisional_support_is_forbidden_without_fully_rebuilt_loo() -> None:
+    module = _load()
+    comparisons = pd.DataFrame(
+        {
+            "comparison": ["M3_vs_M1", "M3_vs_M2"],
+            "target_window_sessions": [3, 3],
+            "period_slice": ["all", "all"],
+            "brier_improvement": [0.01, 0.01],
+            "log_loss_improvement": [0.01, 0.01],
+        }
+    )
+    economic = pd.DataFrame(
+        {
+            "model_name": ["M3_directed_family_rotation"],
+            "total_net_payoff_bps": [100.0],
+        }
+    )
+    nulls = pd.DataFrame({"brier_improvement": [-0.01, 0.0, 0.01]})
+
+    assert (
+        module.scientific_decision(
+            comparisons,
+            economic_metrics=economic,
+            null_metrics=nulls,
+            loo_results=pd.DataFrame(),
+            concentration=pd.DataFrame(),
+        )
+        == "activation_rotation_predictive_tradeability_unknown"
+    )
+
+
 def test_exact_rerun_comparison_fails_on_changed_machine_readable_file(
     tmp_path: Path,
 ) -> None:

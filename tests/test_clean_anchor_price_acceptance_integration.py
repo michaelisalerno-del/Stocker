@@ -67,6 +67,8 @@ def test_exact_frozen_named_population_and_static_veto_reconstruct() -> None:
     }
     expected = source["static_anchor_veto_score"].gt(1.0)
     assert expected.eq(source["static_anchor_veto_pass"]).all()
+    assert {"original_entry_price", "original_exit_price"}.issubset(source.columns)
+    assert "entry_price" not in source.columns
 
 
 def test_frozen_control_loader_excludes_generalized_track_b_surface() -> None:

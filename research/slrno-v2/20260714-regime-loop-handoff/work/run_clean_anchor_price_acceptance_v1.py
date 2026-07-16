@@ -276,6 +276,8 @@ def build_source_population(
             "start_timestamp": "anchor_timestamp",
             "entry_timestamp": "original_entry_timestamp",
             "exit_timestamp": "original_terminal_timestamp",
+            "entry_price": "original_entry_price",
+            "exit_price": "original_exit_price",
             "primary_net_payoff_bps": "original_net_payoff_bps",
             "gross_payoff_bps": "original_gross_payoff_bps",
             "primary_total_cost_bps": "original_total_cost_bps",

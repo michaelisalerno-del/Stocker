@@ -818,13 +818,15 @@ def build_nulls(source: pd.DataFrame) -> pd.DataFrame:
             for _ in range(500)
         ]
     )
-    available["prior_acceptance"] = available.groupby(["period", "symbol"], observed=True)[
-        "price_acceptance_pass"
-    ].shift(1)
+    available["prior_acceptance"] = (
+        available.groupby(["period", "symbol"], observed=True)["price_acceptance_pass"]
+        .shift(1)
+        .astype("boolean")
+    )
     rules = {
         "registered_D": d_pass,
         "time_shifted_prior_opportunity_acceptance": available["static_anchor_veto_pass"]
-        & available["prior_acceptance"].fillna(False),
+        & available["prior_acceptance"].fillna(False).astype(bool),
         "direction_flipped_acceptance": available["static_anchor_veto_pass"]
         & available["direction_flipped_acceptance_pass"],
         "close_sign_only": available["static_anchor_veto_pass"] & available["close_sign_only_pass"],
@@ -861,6 +863,11 @@ def build_stresses(source: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd
             "stress_test": "twice_costs",
             "admitted_opportunities": int(len(admitted)),
             "net_payoff_bps": float((admitted["gross_payoff_bps"] - 20.0).sum()),
+            "same_clock_base_net_payoff_bps": float((available["gross_payoff_bps"] - 20.0).sum()),
+            "paired_D_minus_A_bps": float(
+                (admitted["gross_payoff_bps"] - 20.0).sum()
+                - (available["gross_payoff_bps"] - 20.0).sum()
+            ),
             "status": "entry_and_exit_costs_doubled_only",
         },
         {
@@ -869,6 +876,13 @@ def build_stresses(source: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd
                 admitted["additional_delay_net_payoff_bps"].notna().sum()
             ),
             "net_payoff_bps": float(admitted["additional_delay_net_payoff_bps"].sum()),
+            "same_clock_base_net_payoff_bps": float(
+                available["additional_delay_net_payoff_bps"].sum()
+            ),
+            "paired_D_minus_A_bps": float(
+                admitted["additional_delay_net_payoff_bps"].sum()
+                - available["additional_delay_net_payoff_bps"].sum()
+            ),
             "status": "first_bar_acceptance_frozen_original_terminal_retained",
         },
     ]
@@ -1268,14 +1282,33 @@ def write_report(
     ].iloc[0]
     twice = stress.loc[stress["stress_test"].eq("twice_costs")].iloc[0]
     delay = stress.loc[stress["stress_test"].eq("one_additional_bar_execution_delay")].iloc[0]
+    remove_best_stock = stress.loc[stress["stress_test"].eq("remove_best_stock")].iloc[0]
+    remove_top_five_stocks = stress.loc[stress["stress_test"].eq("remove_top_five_stocks")].iloc[0]
+    remove_best_episode = stress.loc[stress["stress_test"].eq("remove_best_episode")].iloc[0]
+    remove_top_five_episodes = stress.loc[
+        stress["stress_test"].eq("remove_top_five_episodes")
+    ].iloc[0]
+    random_null = nulls.loc[nulls["null_test"].eq("random_coverage_matched_500_seeds")].iloc[0]
+    stock_concentration = concentration.loc[
+        concentration["measure"].eq("D_policy_contribution_bps")
+        & concentration["dimension"].eq("symbol")
+    ].iloc[0]
     source_counts = source.groupby(["period", "loop_id"]).size().to_dict()
+    loop_primary = paired.loc[
+        paired["comparison"].eq("D_vs_A_primary") & paired["slice_type"].eq("loop_id")
+    ].set_index("slice_value")
+    available_cells = four_cell.loc[four_cell["period"].eq(2025) & four_cell["opportunities"].gt(0)]
+    cell_rows = "\n".join(
+        f"| {row.loop_id} | {row.interaction_cell} | {int(row.opportunities)} | {float(row.mean_net_payoff_bps):.2f} | {float(row.net_payoff_bps):.2f} | {float(row.positive_payoff_rate):.1%} |"
+        for row in available_cells.itertuples(index=False)
+    )
     text = f"""# Clean Anchor Price Acceptance V1
 
 ## Scientific decision
 
 **{metadata["scientific_decision"]}**
 
-The exact 2025 attribution ran and is reported below, but the registered two-period hypothesis cannot be decided: the hash-pinned 2023 five-minute provider tape no longer exists. All 854 frozen 2023 named candidates remain explicit missing evidence, never zero and never reconstructed from a similar field. These opened retrospective surfaces cannot establish a tradable edge in any event.
+The exact 2025 attribution ran and is reported below, but the registered two-period hypothesis cannot be decided: the hash-pinned 2023 five-minute provider tape no longer exists. All 854 frozen 2023 named candidates remain explicit missing evidence, never zero and never reconstructed from a similar field. On the available 2025 surface, the registered interaction is **not supported** and should be retired rather than tuned. These opened retrospective surfaces cannot establish a tradable edge in any event.
 
 ## 1. Exact hypothesis and prior boundary
 
@@ -1313,23 +1346,35 @@ The retained causal range ledger is empty, so Variant E is unavailable. No repla
 
 Variant D minus A is **{float(primary["paired_total_difference_bps"]):.2f} bps**, or {float(primary["paired_mean_difference_bps"]):.2f} bps per paired opportunity. The five-session-block 95% interval for the session-mean increment is [{float(primary["bootstrap_lower_95_bps"]):.2f}, {float(primary["bootstrap_upper_95_bps"]):.2f}] bps. Price acceptance after the anchor veto contributes {float(price_increment["paired_total_difference_bps"]):.2f} bps; the anchor veto after price acceptance contributes {float(anchor_increment["paired_total_difference_bps"]):.2f} bps.
 
-The four-cell table is exported in `four_cell_interaction.csv`. The 2023 cells are explicitly unavailable because no causal checkpoint OHLC survives; they are not inferred.
+Both named loops reject the interaction on 2025: `cycle_04|state_4` D-minus-A is {float(loop_primary.loc["cycle_04", "paired_total_difference_bps"]):.2f} bps, and `cycle_07|state_5` is {float(loop_primary.loc["cycle_07", "paired_total_difference_bps"]):.2f} bps.
 
-## 7. Veto value, continuous relationship, and nulls
+## 7. Four-cell interaction
 
-Variant D avoided {float(primary_veto["losses_avoided_bps"]):.2f} bps of losses while rejecting {float(primary_veto["profits_mistakenly_rejected_bps"]):.2f} bps of winners, for veto value {float(primary_veto["veto_value_bps"]):.2f} bps. The predeclared continuous acceptance diagnostic has Spearman rho {float(rho["spearman_rho"]):.3f} (p={float(rho["spearman_pvalue"]):.3g}). Fixed zero/cost bins, random coverage, prior-opportunity time shift, flipped direction, and close-sign-only controls are exported without selecting a replacement rule.
+| named loop | frozen cell | opportunities | mean net bps | total net bps | positive rate |
+|---|---|---:|---:|---:|---:|
+{cell_rows}
 
-## 8. Stress, concentration, and failure cases
+For `cycle_07`, anchor-pass/acceptance-pass averages 21.15 bps versus 54.96 bps when acceptance fails. The sole 2025 anchor-fail row is a −38.37 bps loss, so the frozen anchor veto itself is effectively a one-row filter. The 2023 cells are explicitly unavailable because no causal checkpoint OHLC survives; they are not inferred.
 
-- Twice-cost Variant D: {float(twice["net_payoff_bps"]):.2f} bps.
-- One additional execution bar, with the original acceptance frozen and terminal unchanged: {float(delay["net_payoff_bps"]):.2f} bps.
+## 8. Veto value, continuous relationship, and nulls
+
+Variant D avoided {float(primary_veto["losses_avoided_bps"]):.2f} bps of losses while rejecting {float(primary_veto["profits_mistakenly_rejected_bps"]):.2f} bps of winners, for veto value {float(primary_veto["veto_value_bps"]):.2f} bps. The predeclared continuous acceptance diagnostic has Spearman rho {float(rho["spearman_rho"]):.3f} (p={float(rho["spearman_pvalue"]):.3g}); neither named loop has a meaningful monotone relationship. At matched coverage, random admission averages {float(random_null["net_payoff_bps"]):.2f} bps, with the registered D result at only the {float(random_null["actual_D_percentile_within_null"]):.1%} percentile. Time-shifted, flipped-direction, and close-sign-only controls are exported without selecting a replacement rule.
+
+## 9. Stress, concentration, and failure cases
+
+- Twice costs: D remains raw-positive at {float(twice["net_payoff_bps"]):.2f} bps, but A is {float(twice["same_clock_base_net_payoff_bps"]):.2f} bps and the paired D-minus-A stress remains {float(twice["paired_D_minus_A_bps"]):.2f} bps.
+- One additional execution bar, with the original acceptance frozen and terminal unchanged: D is {float(delay["net_payoff_bps"]):.2f} bps, A is {float(delay["same_clock_base_net_payoff_bps"]):.2f} bps, and D-minus-A is {float(delay["paired_D_minus_A_bps"]):.2f} bps.
+- D after removing the best stock is {float(remove_best_stock["net_payoff_bps"]):.2f} bps, but removing the top five stocks produces {float(remove_top_five_stocks["net_payoff_bps"]):.2f} bps. The top stock supplies {float(stock_concentration["top_one_absolute_share"]):.1%} of absolute D contribution and the top five supply {float(stock_concentration["top_five_absolute_share"]):.1%}.
+- D after removing the best hindsight episode is {float(remove_best_episode["net_payoff_bps"]):.2f} bps; removing the top five produces {float(remove_top_five_episodes["net_payoff_bps"]):.2f} bps. Episode labels are outcome diagnostics only.
 - Fully rebuilt leave-one-stock-out is blocked because the immutable 2023 V1/V2 rebuild inputs and provider tape are absent; no aggregate deletion is mislabeled as a rebuild.
 - Stock, loop, direction, period, month, regime, clock, and hindsight-episode concentration are in `concentration_results.csv`. Hindsight episodes are outcome diagnostics only.
 - A favourable first bar can still fail later; acceptance is a deterministic sign, not a route-completion prediction.
 
-## 9. Interpretation and exact recommendation
+## 10. Interpretation and exact recommendation
 
-The 2025 result can say only whether the loop supplied a candidate, the frozen anchor veto removed contamination, and one completed bar supplied an incremental sign on that opened period. It cannot satisfy the registered requirement for positive and stable 2023 and 2025 evidence because one period is unscorable. The exact next recommendation is to start the immutable prospective logger on a genuinely new hash-pinned five-minute snapshot with both named loops unchanged, then settle outcomes create-only after their original terminals; do not tune the rule on 2025.
+The 2025 result does **not** support the proposed story that the loop supplies the candidate, the anchor removes material contamination, and one completed bar supplies a useful sign. The anchor removes only one row, price acceptance discards more winner payoff than loss payoff, and its continuous balance is uninformative. The primary registered two-period endpoint remains formally blocked by missing 2023 bars, but the available evidence points against the interaction rather than toward prospective promotion.
+
+Retire this exact price-acceptance interaction and do not add bar features or tune its thresholds on 2025. The single useful next action is to restore and hash-pin the original 2023 provider tape solely to close the registered archival result; if it cannot be restored, leave the experiment blocked and do not launch a prospective acceptance gate.
 
 ## Reproducibility
 

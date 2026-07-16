@@ -354,9 +354,35 @@ def _check_stress_and_separation(root: Path) -> tuple[bool, str]:
         return False, "twice-cost stress did not charge 20 bps"
     if not np.allclose(twice["stressed_net_payoff_bps"], twice["gross_payoff_bps"] - 20.0):
         return False, "twice-cost stress changed more than costs"
+    stress = pd.read_csv(root / "stress_test_results.csv")
+    source = pd.read_parquet(root / "named_source_opportunity_ledger.parquet")
+    available = source.loc[source["source_available"]]
+    admitted = available.loc[
+        available["static_anchor_veto_pass"] & available["price_acceptance_pass"]
+    ]
+    twice_summary = stress.loc[stress["stress_test"].eq("twice_costs")].iloc[0]
+    expected_twice_base = float((available["gross_payoff_bps"] - 20.0).sum())
+    expected_twice_d = float((admitted["gross_payoff_bps"] - 20.0).sum())
+    if not math.isclose(
+        float(twice_summary["paired_D_minus_A_bps"]),
+        expected_twice_d - expected_twice_base,
+        abs_tol=1e-8,
+    ):
+        return False, "twice-cost paired D-minus-A stress does not reconstruct"
     delay = pd.read_parquet(root / "additional_bar_delay_ledger.parquet")
     if delay["price_acceptance_decision_recomputed"].any():
         return False, "extra-delay stress recomputed first-bar acceptance"
+    delay_summary = stress.loc[stress["stress_test"].eq("one_additional_bar_execution_delay")].iloc[
+        0
+    ]
+    expected_delay_base = float(available["additional_delay_net_payoff_bps"].sum())
+    expected_delay_d = float(admitted["additional_delay_net_payoff_bps"].sum())
+    if not math.isclose(
+        float(delay_summary["paired_D_minus_A_bps"]),
+        expected_delay_d - expected_delay_base,
+        abs_tol=1e-8,
+    ):
+        return False, "extra-delay paired D-minus-A stress does not reconstruct"
     restarted = pd.read_parquet(root / "restarted_horizon_diagnostic_ledger.parquet")
     if "net_payoff_bps" in restarted.columns:
         return False, "constant-terminal net was mixed into restarted table"

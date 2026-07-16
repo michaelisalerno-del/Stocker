@@ -58,3 +58,10 @@ def test_research_safety_rejects_runtime_paths() -> None:
     assert module.prohibited_changed_paths(
         ["packages/stocker_core/src/stocker_core/broker/orders.py"]
     ) == ["packages/stocker_core/src/stocker_core/broker/orders.py"]
+
+
+def test_graph_event_names_map_to_independent_ledger_columns() -> None:
+    module = _load()
+
+    assert module.source_event_column("active") == "source_active"
+    assert module.source_event_column("newly_decaying") == "newly_decaying"

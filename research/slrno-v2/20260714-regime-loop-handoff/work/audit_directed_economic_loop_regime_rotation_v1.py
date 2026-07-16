@@ -92,6 +92,14 @@ def prohibited_changed_paths(paths: Iterable[str]) -> list[str]:
     return sorted(path for path in paths if not path.startswith(allowed))
 
 
+def source_event_column(event: str) -> str:
+    if event == "active":
+        return "source_active"
+    if event in {"newly_decaying", "newly_retired"}:
+        return event
+    raise ValueError(f"unregistered source event: {event}")
+
+
 def _json_safe(value: object) -> object:
     if value is None or value is pd.NA or value is pd.NaT:
         return None
@@ -325,11 +333,10 @@ def _check_graph(root: Path) -> tuple[bool, str]:
         ].copy()
         base_support = len(destination)
         base_activations = int(destination["activation_target"].fillna(False).sum())
+        event_column = source_event_column(str(row.source_event))
         source = events.loc[
             events["period"].eq(row.period) & events["destination_family"].eq(row.source_family)
-        ][["score_session", row.source_event]].rename(
-            columns={row.source_event: "source_event_present"}
-        )
+        ][["score_session", event_column]].rename(columns={event_column: "source_event_present"})
         conditioned = destination.merge(
             source,
             left_on="forecast_session",
@@ -669,6 +676,7 @@ def run_audit(primary: Path, exact: Path) -> dict[str, object]:
             "economic_cost_and_identity_joins": True,
         },
         "research_only": True,
+        "auditor_sha256": sha256(Path(__file__)),
     }
 
 

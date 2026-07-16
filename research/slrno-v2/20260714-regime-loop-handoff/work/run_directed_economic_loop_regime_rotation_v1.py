@@ -1794,6 +1794,7 @@ def write_report(
     loo_results: pd.DataFrame,
     concentration: pd.DataFrame,
     timing: pd.DataFrame,
+    targets: pd.DataFrame,
 ) -> None:
     primary_comparison = comparisons.loc[
         comparisons["comparison"].eq("M3_vs_M1")
@@ -1828,7 +1829,7 @@ def write_report(
     )
     edge_lines = (
         "\n".join(
-            f"- {row.source_family} `{row.source_event}` → {row.destination_family}: "
+            f"- {int(row.period)}: {row.source_family} `{row.source_event}` → {row.destination_family}: "
             f"shrunk lift {row.shrunk_lift:.3f}, support {int(row.support)}, activations {int(row.activations)}"
             for row in supported.head(12).itertuples(index=False)
         )
@@ -1844,6 +1845,14 @@ def write_report(
     event_lines = "\n".join(
         f"- {row.destination_family}: active onsets {int(row.newly_active)}, decays {int(row.newly_decaying)}, retirements {int(row.newly_retired)}"
         for row in event_counts.itertuples(index=False)
+    )
+    primary_targets = targets.loc[
+        targets["target_window_sessions"].eq(3) & targets["target_available"]
+    ]
+    base_rate_lines = "\n".join(
+        f"- {family}: {group.activation_target.fillna(False).mean():.1%} "
+        f"({int(group.activation_target.fillna(False).sum())}/{len(group)})"
+        for family, group in primary_targets.groupby("destination_family", sort=True, observed=True)
     )
     economic = economic_metrics.loc[
         economic_metrics["model_name"].eq("M3_directed_family_rotation")
@@ -1862,6 +1871,25 @@ def write_report(
         f"positive in {loo_results.brier_improvement.gt(0).mean():.1%} of fully rebuilt exclusions"
         if not loo_results.empty
         else f"not completed; blocker: {metadata.get('rebuild_blocker', 'unavailable')}"
+    )
+    rebuild_text = (
+        "The median aggregation and every stock exclusion were fully rebuilt."
+        if not loo_results.empty
+        else "Neither the median aggregation nor the leave-one-stock-out states could be rebuilt; no aggregate approximation or imputed result was substituted."
+    )
+    m3_system = system_metrics.loc[
+        system_metrics["model_name"].eq("M3_directed_family_rotation")
+        & system_metrics["target_window_sessions"].eq(3)
+        & system_metrics["system_windows"].notna()
+    ]
+    system_text = (
+        f"Across {int(m3_system.iloc[0].system_windows)} observable system windows, "
+        f"{int(m3_system.iloc[0].no_activation_observations)} had no activation and "
+        f"{int(m3_system.iloc[0].multiple_activation_observations)} had multiple activations. "
+        f"M3 no-activation Brier was {float(m3_system.iloc[0].no_activation_brier):.6f}; "
+        f"multiple-activation Brier was {float(m3_system.iloc[0].multiple_activation_brier):.6f}."
+        if not m3_system.empty
+        else "No system-level activation window was observable."
     )
     null_lines = "\n".join(
         f"- {row.null_test}: Brier improvement {row.brier_improvement:.6f}, log-loss improvement {row.log_loss_improvement:.6f}"
@@ -1908,6 +1936,10 @@ Source lifecycle census:
 
 {event_lines}
 
+Observed three-session destination activation rates (evaluation labels, not live priors):
+
+{base_rate_lines}
+
 Supported end-of-period family edges (descriptive graph table; not individually promoted):
 
 {edge_lines}
@@ -1927,6 +1959,8 @@ Primary M3-versus-M1 paired Brier improvement: **{primary_comparison.brier_impro
 
 M4 is secondary: pair activation rates are shown only at frozen support (20 rows and four activations) and shrunk toward M3 family forecasts. Unsupported pair edges remain unknown. No-activation and multiple-activation probabilities are exported separately; multi-label scoring is not mixed with first-activation ranking.
 
+{system_text}
+
 Activation timing: {timing_text}. Because all primary onsets follow the forecast, the mapped episode payoff is entirely post-forecast at the family-label level; this does not imply that a qualifying trade exists.
 
 Opportunity translation uses only later frozen no-filter V2 opportunities with the exact predicted destination family inside the three-session window. Missing families are not replaced and overlap/capacity is not refilled. M3 result: {economic_text}.
@@ -1937,7 +1971,7 @@ Registered nulls:
 
 {null_lines}
 
-Fully rebuilt leave-one-stock-out: {loo_text}. The median session aggregation is fully rebuilt. The minimum-two-bar dwell and alternate taxonomy sensitivities are explicitly not applicable because neither was registered for this session-level source; primary states were not silently changed.
+Fully rebuilt leave-one-stock-out: {loo_text}. {rebuild_text} The minimum-two-bar dwell and alternate taxonomy sensitivities are explicitly not applicable because neither was registered for this session-level source; primary states were not silently changed.
 
 Concentration diagnostics:
 
@@ -1948,6 +1982,8 @@ Concentration diagnostics:
 Failure modes include sparse newly-decaying/retired edges, long positive family unions that suppress new-onset labels, family aggregation where one active pair masks another pair's retirement, calibrated episode prediction without a later eligible opportunity, and contribution concentration. A structured graph or one high-lift edge is not evidence of tradeability.
 
 Scientific decision: **`{metadata["scientific_decision"]}`**.
+
+The directed graph is therefore descriptive rather than incrementally predictive on these opened periods. Destination own history is sufficient under the registered comparison; M3 neither forecasts the next profitable family better nor translates into positive subsequent opportunity payoff.
 
 This decision distinguishes historical description from prediction: every scored forecast was frozen before its target, but the periods were already opened. Independent audit and exact-rerun identity are separate machine-readable artifacts and are required before the result can justify even prospective logging.
 
@@ -2379,6 +2415,7 @@ def run_historical(
         loo_results=loo_results,
         concentration=concentration,
         timing=timing,
+        targets=state["targets"],
     )
 
 

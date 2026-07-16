@@ -1242,6 +1242,70 @@ def make_plots(
     fig.tight_layout()
     fig.savefig(paths[-1], dpi=120, metadata={"Software": MODEL_VERSION})
     plt.close(fig)
+
+    representative_rules = [
+        (
+            "clean accepted winner",
+            available["static_anchor_veto_pass"]
+            & available["price_acceptance_pass"]
+            & available["net_payoff_bps"].gt(0.0),
+            False,
+        ),
+        (
+            "clean accepted loser",
+            available["static_anchor_veto_pass"]
+            & available["price_acceptance_pass"]
+            & available["net_payoff_bps"].lt(0.0),
+            True,
+        ),
+        (
+            "contaminated correctly rejected",
+            ~available["static_anchor_veto_pass"] & available["net_payoff_bps"].lt(0.0),
+            True,
+        ),
+        (
+            "favourable first bar, later loss",
+            available["price_acceptance_pass"] & available["net_payoff_bps"].lt(0.0),
+            True,
+        ),
+    ]
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
+    for axis, (title, mask, ascending) in zip(axes.ravel(), representative_rules, strict=True):
+        candidates = available.loc[mask].sort_values(
+            ["net_payoff_bps", "opportunity_id"],
+            ascending=[ascending, True],
+            kind="stable",
+        )
+        if candidates.empty:
+            axis.text(0.5, 0.5, "no eligible example", ha="center", va="center")
+            axis.set_title(title)
+            continue
+        row = candidates.iloc[0]
+        reference = float(row["anchor_close"])
+        direction = int(row["direction"])
+        prices = np.array(
+            [
+                reference,
+                float(row["checkpoint_close"]),
+                float(row["entry_price"]),
+                float(row["exit_price"]),
+            ]
+        )
+        values = 10_000.0 * direction * (prices / reference - 1.0)
+        axis.plot([0, 1, 2, 3], values, marker="o")
+        checkpoint_high = 10_000.0 * direction * (float(row["checkpoint_high"]) / reference - 1.0)
+        checkpoint_low = 10_000.0 * direction * (float(row["checkpoint_low"]) / reference - 1.0)
+        axis.vlines(1, min(checkpoint_high, checkpoint_low), max(checkpoint_high, checkpoint_low))
+        axis.axhline(0.0, color="black", linewidth=0.8)
+        axis.set_title(
+            f"{title}\n{row['symbol']} {row['loop_id']} net={float(row['net_payoff_bps']):.1f}"
+        )
+        axis.set_xticks([0, 1, 2, 3], ["anchor", "bar close", "entry", "terminal"])
+        axis.set_ylabel("direction-adjusted bps")
+    paths.append(plot_root / "representative_outcomes.png")
+    fig.tight_layout()
+    fig.savefig(paths[-1], dpi=120, metadata={"Software": MODEL_VERSION})
+    plt.close(fig)
     return paths
 
 

@@ -69,6 +69,19 @@ def test_exact_frozen_named_population_and_static_veto_reconstruct() -> None:
     assert expected.eq(source["static_anchor_veto_pass"]).all()
 
 
+def test_frozen_control_loader_excludes_generalized_track_b_surface() -> None:
+    runner = _runner()
+    contract, _, _ = runner.load_and_verify_contract()
+    controls = runner.build_source_population(contract, track="track_b_prior_only")
+
+    assert len(controls) == 641
+    assert set(controls["population_role"]) == {"negative_control", "neutral_control"}
+    assert set(zip(controls["loop_id"], controls["orientation"], strict=True)) == {
+        ("cycle_04", "state_2"),
+        ("cycle_07", "state_6"),
+    }
+
+
 def _synthetic_source(
     payoffs: list[float], anchors: list[bool], acceptance: list[bool]
 ) -> pd.DataFrame:

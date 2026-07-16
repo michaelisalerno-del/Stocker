@@ -162,7 +162,19 @@ def _check_population(root: Path, contract: Mapping[str, Any]) -> tuple[bool, st
         return False, f"named family count drift: {actual}"
     if not bool(source["direction"].isin([-1, 1]).all()):
         return False, "ambiguous source direction survived fail-closed construction"
-    return True, "all 1,663 frozen named source identities and family counts match"
+    controls = pd.read_parquet(root / "control_source_opportunity_ledger.parquet")
+    expected_controls = {
+        (2023, "negative_control", "cycle_07", "state_6"): 331,
+        (2023, "neutral_control", "cycle_04", "state_2"): 8,
+        (2025, "negative_control", "cycle_07", "state_6"): 296,
+        (2025, "neutral_control", "cycle_04", "state_2"): 6,
+    }
+    actual_controls = (
+        controls.groupby(["period", "population_role", "loop_id", "orientation"]).size().to_dict()
+    )
+    if actual_controls != expected_controls:
+        return False, f"frozen control population drift: {actual_controls}"
+    return True, "all 1,663 named and 641 frozen control identities and counts match"
 
 
 def _check_static_veto(root: Path) -> tuple[bool, str]:

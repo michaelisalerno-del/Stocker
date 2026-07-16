@@ -186,6 +186,10 @@ def build_source_population(
     masses = pd.read_parquet(_resolved(contract["inputs"]["anchor_mass_ledger"]["path"]))
     trades = pd.read_parquet(_resolved(contract["inputs"]["v2_trade_decisions"]["path"]))
     selected = _population_policy_rows(policy, track=track)
+    if track == "track_b_prior_only":
+        selected = selected.loc[
+            selected["population_role"].isin(["negative_control", "neutral_control"])
+        ].copy()
     no_filter = trades.loc[trades["model_name"].eq("no_payoff_state_filter")].copy()
     if no_filter["opportunity_id"].duplicated().any():
         raise AssertionError("V2 no-filter opportunity identities are not unique")
@@ -1318,7 +1322,7 @@ The registered primary comparison asks whether the exact frozen Sequential Loop 
 
 - `cycle_04|state_4`: 2023={source_counts.get((2023, "cycle_04"), 0)}, 2025={source_counts.get((2025, "cycle_04"), 0)}.
 - `cycle_07|state_5`: 2023={source_counts.get((2023, "cycle_07"), 0)}, 2025={source_counts.get((2025, "cycle_07"), 0)}.
-- Controls remain separately labelled in machine-readable outputs.
+- Frozen controls are `cycle_04|state_2` (neutral) and `cycle_07|state_6` (negative); they remain separately labelled and never enter the primary result.
 - Source opportunity identity is the frozen V2 `opportunity_id`, joined one-to-one to the frozen Sequential Veto `event_lineage_id` and policy row.
 - The anchor reference is V2 `anchor_close`, independently required to equal the hash-pinned provider close at `start_timestamp`.
 

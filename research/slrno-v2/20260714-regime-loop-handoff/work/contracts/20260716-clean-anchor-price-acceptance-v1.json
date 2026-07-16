@@ -1,0 +1,281 @@
+{
+  "contract_id": "20260716-clean-anchor-price-acceptance-v1",
+  "experiment_version": "clean_anchor_price_acceptance_v1.0.0",
+  "registered_before_scoring": true,
+  "scientific_status": "opened_2023_and_2025_research_attribution_not_validation",
+  "purpose": "Test whether the exact frozen static anchor good-to-bad veto plus one deterministic completed-bar directional acceptance rule improves constant-terminal remaining payoff on the same delayed candidate population.",
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "ig_integration_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "application_runtime_changed": false,
+    "position_management_changed": false,
+    "existing_exit_logic_changed": false,
+    "api_keys_or_secrets_used": false,
+    "strategy_promotion_allowed": false
+  },
+  "opened_data_status": {
+    "opened_periods": [2023, 2025],
+    "permitted_claim": "retrospective causal mechanism attribution or a frozen prospective logging hypothesis",
+    "forbidden_claims": ["validation", "tradable_edge", "strategy_approval", "deployment_approval"]
+  },
+  "frozen_lineage": {
+    "branch": "agent/slrno-research-handoff",
+    "starting_commit": "152c56d8ec7289f78716f44ed4b89224aa6b012c",
+    "directed_rotation_known_commit": "1b89071b41139b87640de28c8f9abba17cd750a0",
+    "sequential_veto_scored_commit": "78c380dfa80ee396af7293de9447820a283da068",
+    "sequential_veto_contract_hash": "49b55b4c4ba394cf3260652b977d527623fe9d4b1299df8fcf3e73708a0fd609",
+    "fixed_horizon_bars": 24,
+    "provider_bar_minutes": 5,
+    "cost_bps_per_side": 5.0,
+    "round_trip_cost_bps": 10.0
+  },
+  "prior_experiment_boundary": {
+    "already_tested": [
+      "a fitted one-to-three completed-bar equation on a different 2024 OCO population",
+      "static anchor good-to-bad odds as a selection-only veto",
+      "sequential structural competitor elimination through multiple checkpoints",
+      "payoff-state BOCPD and hierarchy models",
+      "same-pair structural feature lead-lag attribution",
+      "directed family economic rotation"
+    ],
+    "not_previously_tested": [
+      "the exact static Track-A named-family anchor veto combined with the deterministic first completed post-anchor bar rule",
+      "Variant D versus Variant A on the identical one-bar-delayed entry and original terminal clock",
+      "the four-cell anchor-veto by one-bar acceptance interaction on the frozen named candidates",
+      "the simple interaction without a fitted payoff classifier or replacement opportunities"
+    ],
+    "selective_payoff_equations_difference": "Selective Payoff Equations V1 used a different 2024 OCO population, checkpoints one through three, many fitted sequential features, later-entry risk rules, and a restarted 24-bar path. It did not use the frozen Sequential Veto Track-A decision, these named candidates, this binary rule, or this paired constant-terminal ablation."
+  },
+  "inputs": {
+    "v2_trade_decisions": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/trade_decisions.parquet",
+      "sha256": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f",
+      "source_model": "no_payoff_state_filter"
+    },
+    "static_anchor_policy_ledger": {
+      "path": "../artifacts/20260715-sequential-loop-competitor-veto-v1/primary/sequential_rejection_decisions.parquet",
+      "sha256": "98f3e3dad7f90724f0a00f3e24a5a03ee1ad912c4b3795b815346749c6427004",
+      "policy": "static_anchor_good_to_bad_odds_veto",
+      "named_track": "track_a_named_family",
+      "control_track": "track_b_prior_only"
+    },
+    "anchor_mass_ledger": {
+      "path": "../artifacts/20260715-sequential-loop-competitor-veto-v1/primary/good_bad_unknown_mass_timeline.parquet",
+      "sha256": "30393db7d1e4b12e92e4d64a39c86fa1e3e789e2b351d68e2f519d36a65be87e"
+    },
+    "episode_states": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/hindsight_episode_states.parquet",
+      "sha256": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3",
+      "evaluation_only": true
+    },
+    "episode_diagnostics": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/hindsight_episode_diagnostics.parquet",
+      "sha256": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be",
+      "evaluation_only": true
+    },
+    "provider_hash_manifest": {
+      "path": "../artifacts/20260713-dynamic-loop-context-edge-v1/primary/source_hashes.json",
+      "sha256": "754ae356440a37a8c0fb6430fb247e72b174046131cac6cb18251d1b67eed438",
+      "provider_hash_prefix": "provider_2025_"
+    },
+    "provider_2025_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "provider_2025_integrity": "all twenty frozen provider files matched the manifest before contract freeze",
+    "provider_2023_status": "unavailable_no_surviving_hash_pinned_five_minute_tape",
+    "range_prediction_ledger": {
+      "path": "../shadow_validation/frozen_loop_movement_shadow_v1/prediction_ledger.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": "empty_no_mappable_predictions"
+    }
+  },
+  "populations": {
+    "primary_named": [
+      {"loop_id": "cycle_04", "orientation": "state_4", "cycle": "2->4->2"},
+      {"loop_id": "cycle_07", "orientation": "state_5", "cycle": "5->6->5"}
+    ],
+    "controls": [
+      {"loop_id": "cycle_04", "orientation": "state_2", "role": "neutral_control"},
+      {"loop_id": "cycle_07", "orientation": "state_6", "role": "negative_control"}
+    ],
+    "named_source_counts_before_price_scoring": {
+      "2023": {"cycle_04|state_4": 132, "cycle_07|state_5": 722, "total": 854},
+      "2025": {"cycle_04|state_4": 96, "cycle_07|state_5": 713, "total": 809},
+      "all": 1663
+    },
+    "provider_availability_before_price_scoring": {
+      "2023": "zero first-bar rows available; every named source remains explicit missing_source_data",
+      "2025": "all 809 named rows have exact anchor, first-post-anchor, next-open entry, and terminal bars"
+    },
+    "replacement_opportunities_allowed": false,
+    "overlap_or_capacity_refill_allowed": false,
+    "failed_named_family_replacement_allowed": false
+  },
+  "source_identity": {
+    "primary_key": "opportunity_id",
+    "event_lineage_source": "Sequential Veto event_lineage_id",
+    "anchor_id_source": "V2 anchor_id",
+    "direction_source": "V2 no_payoff_state_filter.direction",
+    "valid_directions": [-1, 1],
+    "ambiguous_direction": "unavailable_fail_closed",
+    "anchor_timestamp_source": "V2 start_timestamp",
+    "anchor_reference_price": "V2 anchor_close",
+    "anchor_reference_verification": "must equal the hash-pinned provider close at start_timestamp",
+    "original_terminal_source": "V2 exit_timestamp",
+    "terminal_verification": "must equal start_timestamp plus 125 minutes and the close of the provider bar beginning at start plus 120 minutes",
+    "source_run_id": "V2 run_id plus Sequential Veto experiment_run_id",
+    "duplicate_identity": "fail_closed"
+  },
+  "static_anchor_veto": {
+    "source_policy": "static_anchor_good_to_bad_odds_veto",
+    "named_track": "track_a_named_family",
+    "classification": "exact frozen Sequential Veto good, bad, and unknown classifications",
+    "good_to_bad_odds": "anchor_good_mass divided by anchor_bad_mass; infinity when anchor_bad_mass is zero",
+    "threshold": 1.0,
+    "pass_rule": "retained when odds are strictly greater than 1.0",
+    "reject_rule": "rejected when odds are less than or equal to 1.0",
+    "decision_source": "immutable frozen policy ledger",
+    "after_first_bar_update_allowed": false,
+    "reason_codes": {
+      "pass": "static_anchor_good_to_bad_odds_above_1",
+      "pass_no_bad_mass": "static_anchor_no_bad_mass",
+      "reject": "static_anchor_good_to_bad_odds_at_or_below_1",
+      "missing": "missing_frozen_static_anchor_veto"
+    }
+  },
+  "checkpoint": {
+    "registered_checkpoint_count": 1,
+    "bar_duration_minutes": 5,
+    "anchor_bar_start": "start_timestamp",
+    "first_post_anchor_bar_start": "start_timestamp plus 5 minutes exactly",
+    "checkpoint_freeze_timestamp": "start_timestamp plus 10 minutes, after the first post-anchor bar closes",
+    "entry_timestamp": "start_timestamp plus 10 minutes exactly, at the next provider open",
+    "additional_delay_entry_timestamp": "start_timestamp plus 15 minutes exactly",
+    "missing_exact_bar": "unavailable_not_shifted",
+    "same_bar_close_execution_allowed": false,
+    "regular_session": "America/New_York 09:30 inclusive through 16:00 exclusive"
+  },
+  "price_acceptance": {
+    "long_signed_close_bps": "10000 * (checkpoint_close / anchor_reference_price - 1)",
+    "long_favourable_bps": "10000 * (checkpoint_high / anchor_reference_price - 1)",
+    "long_adverse_bps": "10000 * (1 - checkpoint_low / anchor_reference_price)",
+    "short_signed_close_bps": "10000 * (1 - checkpoint_close / anchor_reference_price)",
+    "short_favourable_bps": "10000 * (1 - checkpoint_low / anchor_reference_price)",
+    "short_adverse_bps": "10000 * (checkpoint_high / anchor_reference_price - 1)",
+    "acceptance_balance_bps": "favourable_excursion_bps - adverse_excursion_bps",
+    "primary_pass_rule": "signed_close_return_bps > 0 and favourable_excursion_bps > adverse_excursion_bps",
+    "zero_signed_close_passes": false,
+    "threshold_tuning_allowed": false,
+    "diagnostic_bins_bps": ["(-inf,-10]", "(-10,0]", "(0,10]", "(10,inf)"],
+    "close_sign_only_comparator": "signed_close_return_bps > 0"
+  },
+  "range_permission": {
+    "variant": "E_secondary",
+    "registered_rule_if_point_prediction_existed": "predicted_remaining_range_bps > 3 * round_trip_cost_bps",
+    "multiplier": 3.0,
+    "available": false,
+    "unavailability_reason": "The retained prospective movement ledger is empty and no immutable per-opportunity 2023/2025 causal range predictions exist. The 2024 Regime Utility fitting inputs are ephemeral and missing. No replacement model may be fit.",
+    "normalised_acceptance_available": false
+  },
+  "economic_clock": {
+    "primary": "constant_terminal",
+    "all_variants_entry": "exact provider open at checkpoint freeze timestamp",
+    "all_variants_terminal": "original V2 exit_timestamp",
+    "terminal_price": "provider close of the bar ending at original exit_timestamp",
+    "cost_bps_per_side": 5.0,
+    "entry_and_exit_costs_charged": true,
+    "missing_price": "unavailable_not_zero",
+    "entry_at_or_after_terminal": "too_late_not_zero",
+    "secondary": "restarted_24_bars_from_delayed_entry",
+    "restarted_and_constant_separate": true
+  },
+  "variants": {
+    "A_same_clock_base": ["source_available"],
+    "B_anchor_veto_only": ["source_available", "static_anchor_veto_pass"],
+    "C_price_acceptance_only": ["source_available", "price_acceptance_pass"],
+    "D_anchor_veto_plus_price_acceptance": ["source_available", "static_anchor_veto_pass", "price_acceptance_pass"],
+    "E_anchor_veto_plus_price_acceptance_plus_range": ["source_available", "static_anchor_veto_pass", "price_acceptance_pass", "range_permission_pass"],
+    "primary_variant": "D_anchor_veto_plus_price_acceptance",
+    "primary_control": "A_same_clock_base",
+    "variant_E_status": "unavailable_registered_not_scored"
+  },
+  "primary_comparisons": [
+    "D_vs_A",
+    "D_vs_B",
+    "D_vs_C",
+    "B_vs_A",
+    "C_vs_A",
+    "E_vs_D_secondary_unavailable"
+  ],
+  "nulls": {
+    "random_coverage_matched_repetitions": 500,
+    "random_seed": 20260716,
+    "time_shift": "prior available opportunity acceptance within period and symbol; never future",
+    "direction_flip": true,
+    "close_sign_only": true
+  },
+  "uncertainty": {
+    "bootstrap_resamples": 2000,
+    "session_block_length": 5,
+    "confidence": 0.95,
+    "seed": 20260716,
+    "paired_unit": "immutable source opportunity",
+    "block_unit": "chronological trading session within period"
+  },
+  "stress_tests": {
+    "twice_costs": true,
+    "one_additional_bar_execution_delay": true,
+    "median_economic_aggregation": "blocked_with_range_and_classification_rebuild_inputs_missing",
+    "remove_best_stock": true,
+    "remove_top_five_stocks": true,
+    "remove_best_episode": true,
+    "remove_top_five_episodes": true,
+    "periods_separately": [2023, 2025],
+    "named_loops_separately": true,
+    "fully_rebuilt_leave_one_stock_out": "blocked_if_hash_pinned_V1_and_V2_rebuild_inputs_remain_missing",
+    "minimum_liquidity_subset": "V2 frozen within-period 0.5 dollar_volume_proxy quantile, outcome-free diagnostic",
+    "unbounded_search_allowed": false
+  },
+  "prospective_logging": {
+    "execution_enabled": false,
+    "forecast_rows_immutable": true,
+    "outcomes_create_only": true,
+    "duplicate_ids_fail_closed": true,
+    "opened_historical_sources_rejected_in_holdout_mode": true,
+    "new_data_snapshot_required_in_holdout_mode": true,
+    "empty_requested_session_fails": true
+  },
+  "decision_rule": {
+    "requirements": [
+      "D improves paired remaining payoff over A",
+      "D is positive in 2023 and 2025",
+      "both named loops contribute",
+      "D improves over B and C",
+      "veto value is positive",
+      "coverage is nontrivial",
+      "twice-cost and additional-delay results remain positive",
+      "best-stock and best-episode deletion remain positive",
+      "continuous acceptance is directionally coherent",
+      "constant-terminal rather than only restarted payoff is positive",
+      "population identity and no replacement are verified",
+      "exact rerun and independent audit pass"
+    ],
+    "allowed_conclusions": [
+      "clean_anchor_price_acceptance_supported_prospectively_only_required",
+      "price_acceptance_incremental_anchor_veto_supported",
+      "anchor_veto_supported_price_acceptance_not_incremental",
+      "price_acceptance_supported_anchor_veto_not_incremental",
+      "range_permission_incremental",
+      "directionally_coherent_but_economically_insufficient",
+      "named_loop_specific_descriptive_only",
+      "concentrated_or_unstable",
+      "same_clock_interaction_not_supported",
+      "hypothesis_rejected",
+      "experiment_blocked_by_missing_anchor_or_bar_identity"
+    ]
+  },
+  "random_seed": 20260716
+}

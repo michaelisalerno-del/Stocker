@@ -103,3 +103,25 @@ def test_runner_refuses_to_overwrite_an_existing_output(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError):
         module.ensure_new_output(output)
+
+
+def test_contextual_comparator_preserves_family_forecast_freeze_timestamp() -> None:
+    module = _load()
+    contract, _, _ = module.verify_contract_and_inputs()
+    surfaces = module.load_frozen_surfaces(contract)
+    state = module.build_core_state_targets(
+        pair_states=surfaces["pair_states"],
+        session_panel=surfaces["session_panel"],
+        pair_episodes=surfaces["episode_diagnostics"],
+        taxonomy=surfaces["taxonomy"],
+    )
+
+    comparators = module.comparator_forecasts(
+        surfaces["all_pair_forecasts"],
+        surfaces["taxonomy"],
+        state["targets"],
+    )
+
+    assert not comparators.empty
+    assert "forecast_freeze_timestamp" in comparators.columns
+    assert comparators["forecast_timestamp"].eq(comparators["forecast_freeze_timestamp"]).all()

@@ -574,6 +574,7 @@ def comparator_forecasts(
                 right_on=["period", "forecast_session", "destination_family"],
                 how="left",
                 validate="one_to_one",
+                suffixes=("", "_target"),
             )
             one_step = np.clip(frame["max_p_on_next"].fillna(0.5).to_numpy(float), 1e-6, 1 - 1e-6)
             frame["predicted_activation_probability"] = 1.0 - np.power(1.0 - one_step, window)

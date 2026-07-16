@@ -1,0 +1,103 @@
+{
+  "audit_id": "clean_anchor_price_acceptance_v1_independent_audit",
+  "auditor_version": "1.0.0",
+  "broker_connection_enabled": false,
+  "checks": {
+    "checkpoint_acceptance_and_payoff": {
+      "detail": "independently reconstructed all 809 available 2025 checkpoints and payoffs",
+      "passed": true
+    },
+    "contract_and_input_identity": {
+      "detail": "contract 807e9d6b72e3ea59d9ca960f8d03f1e2b482ceb50086844bef298b1e8e06e42d and 7 inputs independently hashed",
+      "passed": true
+    },
+    "feature_availability_and_no_future_path": {
+      "detail": "verified causal freeze and feature isolation on 809 rows",
+      "passed": true
+    },
+    "named_candidate_population": {
+      "detail": "all 1,663 named and 641 frozen control identities and counts match",
+      "passed": true
+    },
+    "paired_primary_metric": {
+      "detail": "independently paired 809 observable source opportunities",
+      "passed": true
+    },
+    "primary_exact_rerun_identity": {
+      "detail": "compared 33 machine and plot files",
+      "passed": true
+    },
+    "provider_hash_identity": {
+      "detail": "independently hashed 20 frozen 2025 provider files",
+      "passed": true
+    },
+    "research_only_changed_paths": {
+      "detail": "14 changed paths are confined to research, tests, and research package",
+      "passed": true
+    },
+    "static_anchor_veto_identity": {
+      "detail": "reconstructed 1663 frozen odds decisions at strict threshold 1.0",
+      "passed": true
+    },
+    "stress_and_horizon_separation": {
+      "detail": "twice-cost, frozen extra delay, and restarted separation verified",
+      "passed": true
+    },
+    "variant_population_pairing": {
+      "detail": "five variants preserve 1663 source identities",
+      "passed": true
+    }
+  },
+  "contract_hash": "807e9d6b72e3ea59d9ca960f8d03f1e2b482ceb50086844bef298b1e8e06e42d",
+  "deployment_enabled": false,
+  "exact_identity": {
+    "byte_identical": true,
+    "compared_files_including_plots": 33,
+    "extra_files": [],
+    "hash_mismatches": [],
+    "missing_files": []
+  },
+  "execution_enabled": false,
+  "existing_exit_management_enabled": false,
+  "git_sha": "1b7a415b6c2ca7419047f7209617f845650abce9",
+  "order_placement_enabled": false,
+  "passed": true,
+  "position_management_enabled": false,
+  "primary_artifact_hashes": {
+    "additional_bar_delay_ledger.parquet": "28b20e4098592b937db608be0d70e47953135d131233882e520f0fec9548d67f",
+    "artifact_manifest.json": "2a47ccb3f5d599ab1862da31a910b22af72c3a10b4e49996f96907ed31920d40",
+    "concentration_results.csv": "f3534a0e863d391000885ede9cfdbb3f717d189d87e21d1888fe848f76c1ec66",
+    "constant_terminal_remaining_payoff_ledger.parquet": "340c2059ca79565151d8103629e43e125461a2ceb9cc1902f39e1ccd78f51839",
+    "continuous_acceptance_diagnostics.csv": "b0cdc272dbf08a2f2145ba0c29bd008ebc8f4833f0692ba0f48fac9eb7007641",
+    "control_source_opportunity_ledger.parquet": "38b48df08d91a69660273941bf1173367c44de87b838d9d9bef2fb2332f1739e",
+    "control_variant_decision_ledger.parquet": "ca6eda676d1b9a884971d508f6a7e24efdf68b2f4d3bc70e849ae87ea44646cd",
+    "control_variant_metrics.csv": "5c155e19c97d4136421ec1140bfac1eeb2d565d84b92af9e95e9ef504edb583f",
+    "first_bar_checkpoint_ledger.parquet": "48c8ff57669f3dbf02c30360e1108fcd7559e9f1132ec216f23207bc700e18ed",
+    "four_cell_interaction.csv": "6678b48f8ba7d3f2a3752db93fae08f57a646326823de5b25126c58a738ddf25",
+    "frozen_experiment_contract.json": "807e9d6b72e3ea59d9ca960f8d03f1e2b482ceb50086844bef298b1e8e06e42d",
+    "leave_one_stock_out_results.csv": "4723e837dc406fd04a0a86dfa631ae50063eb4ba3633c2f49c6b78fbc4afb22d",
+    "named_source_opportunity_ledger.parquet": "5a6e938600fd4cb2e749d6a437ce019c984733830a58328c1f337fbbf583c281",
+    "null_test_results.csv": "ebd81e7cb01cbd51945716afe1703e9f27bee4fc44141ac7b6330f87b73384ac",
+    "paired_comparison_metrics.csv": "3ba9c1e70374fc93bbff1bfc740abc9329dd120957a8c46fd1f09542c3e62f20",
+    "plots/acceptance_balance_vs_remaining_payoff.png": "d93b1fdea9cdc51e0ff8b903e0c0974ea1d4be604509d01d1012a7f0a0bcb40b",
+    "plots/anchor_acceptance_four_cell.png": "929dfa7ea6e81d55d99597fa7e7fc330576bbf3988b87058883886f95aacbce0",
+    "plots/representative_outcomes.png": "507047b4b75ebfac64291efcaea62aaee35751c9ba2f3a698c177765e12bf5a7",
+    "plots/variant_D_by_loop_period.png": "6d8676b376af10593ef64a236078a0a81bac063251e97ecaa0072ed63b3780c8",
+    "plots/variant_D_vs_A_paired_session.png": "5b91211d566ff8975269adb3eb35cc9c8f4fba791f3986e6259285c3ee2d3252",
+    "plots/variant_cumulative_payoff.png": "925b3fbe42ac196a3cc176d9b7f65af37332e0fa4670744b6250383ba103271e",
+    "plots/variant_payoff_and_coverage.png": "9895170a379299e2b7351703f3f286b50531406fb365a13b092a07f09d24b064",
+    "price_acceptance_feature_ledger.parquet": "267447433d5361c4dfeb2e06c20365e9e6e3f2d0daaab38d3b492184975cb44c",
+    "primary_paired_opportunity_differences.parquet": "188ce62da6ef7e38d3cb4a289245e6c2944b69625e827827d863536457a0d680",
+    "prospective_immutable_forecast_ledger_schema.json": "27f73ceadd996b16289dc4985fd53c222e2a3cb523a3742ca31aecdc39fa5c17",
+    "range_permission_ledger.parquet": "98d43278a5ffd445d35b4ec83e94ca719e7626ed739931847ea3966d74d1f5ec",
+    "restarted_horizon_diagnostic_ledger.parquet": "d80668594df953b55a0fe6953b22e29d98005a065dbe402d539030dcc0cf3ab9",
+    "run_metadata.json": "7faac13ff8241fe0bd78f6e8312586bb5c95d55224f3dc682a3e42711aefd369",
+    "static_anchor_veto_ledger.parquet": "6cfd75826b26871a022af9817353f8168dd0b97a9b97856b42f7401e67863330",
+    "stress_test_results.csv": "0b3ec0b7038c20c94786423cb5598ab99679a184967340c3333220fe51059a49",
+    "twice_cost_ledger.parquet": "3c99d1c898f7af1c59e8ff36da5ad80c61b83ef97dc2858f41be91c665170830",
+    "variant_decision_ledger.parquet": "4c20198ae8462ec1af2cf43f54990266b8b7c0f9833747e208a9577dcce4ccde",
+    "variant_metrics.csv": "f4e9629d628ba5f535e26fa017ebb2eb877014de19a5e785b77b17525ce2d5a6",
+    "veto_accounting.csv": "a3bf49593d90b4c6219191576c51eb89a3f6df36017d80e5706198fdae434592"
+  },
+  "research_only": true
+}

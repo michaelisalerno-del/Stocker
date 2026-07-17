@@ -1,0 +1,53 @@
+{
+  "execution_enabled": false,
+  "opened_periods_forbidden_in_holdout": [
+    2023,
+    2025
+  ],
+  "opportunity_ledger": {
+    "immutable": true,
+    "required_fields": [
+      "run_id",
+      "git_sha",
+      "contract_hash",
+      "data_snapshot_hash",
+      "source_run_id",
+      "source_artifact_hash",
+      "source_opportunity_hash",
+      "opportunity_id",
+      "anchor_id",
+      "event_lineage_id",
+      "symbol",
+      "session",
+      "loop_id",
+      "orientation",
+      "frozen_direction",
+      "anchor_timestamp",
+      "t0_entry_timestamp",
+      "t0_entry_price",
+      "expected_t1_timestamp",
+      "original_terminal_timestamp",
+      "provider_data_hash",
+      "forecast_freeze_timestamp"
+    ]
+  },
+  "outcome_ledger": {
+    "create_only": true,
+    "separate_from_forecast_and_timing": true,
+    "settles_after_original_terminal": true
+  },
+  "research_only": true,
+  "safety": {
+    "broker_connection_enabled": false,
+    "deployment_enabled": false,
+    "existing_exit_management_enabled": false,
+    "order_placement_enabled": false,
+    "position_management_enabled": false
+  },
+  "schema_version": "fixed_one_bar_entry_latency_prospective_v1",
+  "timing_ledger": {
+    "create_only": true,
+    "exact_t1": "t0_entry_timestamp plus five minutes",
+    "separate_from_opportunity": true
+  }
+}

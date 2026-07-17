@@ -1,0 +1,254 @@
+{
+  "contract_id": "20260716-fixed-one-bar-entry-latency-v1",
+  "experiment_name": "Fixed One-Bar Entry Latency V1",
+  "registered_before_scoring": true,
+  "registration_date": "2026-07-16",
+  "scientific_status": "opened retrospective 2023 and 2025 development surfaces; no trading approval or untouched validation claim permitted",
+  "frozen_lineage": {
+    "branch": "agent/slrno-research-handoff",
+    "starting_commit": "6617f9499da3a37389affe32a1672df49ed73a47",
+    "clean_anchor_execution_commit": "1b7a415b6c2ca7419047f7209617f845650abce9",
+    "clean_anchor_artifact_commit": "6617f9499da3a37389affe32a1672df49ed73a47"
+  },
+  "safety": {
+    "research_only": true,
+    "broker_connection_enabled": false,
+    "live_ordering_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "order_placement": "disabled",
+    "position_management_changed": false,
+    "existing_exit_logic_changed": false,
+    "deployment_enabled": false,
+    "application_runtime_changed": false,
+    "secrets_accessed": false
+  },
+  "prior_test_boundary": {
+    "exact_t0_t1_test_previously_existed": false,
+    "clean_anchor_difference": "Clean Anchor Price Acceptance V1 entered every available row at anchor_timestamp plus 10 minutes. The frozen source is an OCO breakout execution whose actual T0 entry occurs at anchor_timestamp plus 5 * entry_step minutes, with entry_step ranging from 1 through 24. Clean Anchor therefore did not compare each actual T0 fill with the exact next provider open after that fill bar.",
+    "causal_implication": "For rows with entry_step greater than one, anchor plus 10 minutes is not one bar after T0 and may precede the time at which the frozen breakout direction became known. Those rows cannot establish fixed post-fill latency.",
+    "primary_resolution": "T1 is the exact provider open at original_entry_timestamp plus one completed five-minute T0 fill bar. This is the only source-faithful one-bar latency applied to every immutable T0 opportunity.",
+    "threshold_or_filter_search_allowed": false
+  },
+  "inputs": {
+    "v2_trade_decisions": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/trade_decisions.parquet",
+      "sha256": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f",
+      "model_name": "no_payoff_state_filter"
+    },
+    "sequential_veto_policy": {
+      "path": "../artifacts/20260715-sequential-loop-competitor-veto-v1/primary/sequential_rejection_decisions.parquet",
+      "sha256": "98f3e3dad7f90724f0a00f3e24a5a03ee1ad912c4b3795b815346749c6427004",
+      "named_track": "track_a_named_family",
+      "control_track": "track_b_prior_only",
+      "population_identity_only": true
+    },
+    "clean_anchor_named_source": {
+      "path": "../artifacts/20260716-clean-anchor-price-acceptance-v1/primary/named_source_opportunity_ledger.parquet",
+      "sha256": "5a6e938600fd4cb2e749d6a437ce019c984733830a58328c1f337fbbf583c281",
+      "identity_and_source_field_reconciliation_only": true
+    },
+    "clean_anchor_control_source": {
+      "path": "../artifacts/20260716-clean-anchor-price-acceptance-v1/primary/control_source_opportunity_ledger.parquet",
+      "sha256": "38b48df08d91a69660273941bf1173367c44de87b838d9d9bef2fb2332f1739e",
+      "identity_and_source_field_reconciliation_only": true
+    },
+    "clean_anchor_metadata": {
+      "path": "../artifacts/20260716-clean-anchor-price-acceptance-v1/primary/run_metadata.json",
+      "sha256": "7faac13ff8241fe0bd78f6e8312586bb5c95d55224f3dc682a3e42711aefd369"
+    },
+    "episode_diagnostics": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/hindsight_episode_diagnostics.parquet",
+      "sha256": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be",
+      "evaluation_only": true
+    },
+    "provider_2025_hash_manifest": {
+      "path": "../artifacts/20260713-dynamic-loop-context-edge-v1/primary/source_hashes.json",
+      "sha256": "754ae356440a37a8c0fb6430fb247e72b174046131cac6cb18251d1b67eed438",
+      "provider_hash_prefix": "provider_2025_"
+    },
+    "provider_2023_hash_manifest": {
+      "path": "../artifacts/20260713-loop-payoff-phase-path-v1/exact_rerun/source_hashes.json",
+      "sha256": "c86d8116f0dc0a9e12afaa4e7927ca0f91be2147e4373c47243f70cb2f7bcfda",
+      "provider_hash_prefix": "provider_2023_"
+    },
+    "provider_2025_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "expired_provider_2023_root": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock"
+  },
+  "provider_2023_archive_search": {
+    "allowed": "only an existing file matching the per-symbol SHA-256 in provider_2023_hash_manifest",
+    "forbidden": [
+      "fresh provider download",
+      "approximate reconstruction",
+      "imputed delayed open",
+      "price inferred from payoff summary"
+    ],
+    "pre_score_search_roots": [
+      "/Users/michaelsalerno/Documents/Codex",
+      "/Users/michaelsalerno/StockerLocal",
+      "/private/tmp"
+    ],
+    "pre_score_candidate_files_hashed": 20,
+    "pre_score_exact_hash_matches": 0,
+    "status": "unavailable_no_matching_original_2023_provider_files"
+  },
+  "populations": {
+    "primary_named": [
+      {"loop_id": "cycle_04", "orientation": "state_4", "role": "named_candidate"},
+      {"loop_id": "cycle_07", "orientation": "state_5", "role": "named_candidate"}
+    ],
+    "controls": [
+      {"loop_id": "cycle_04", "orientation": "state_2", "role": "neutral_control"},
+      {"loop_id": "cycle_07", "orientation": "state_6", "role": "negative_control"}
+    ],
+    "expected_named_source_counts": {
+      "2023": {"cycle_04|state_4": 132, "cycle_07|state_5": 722, "total": 854},
+      "2025": {"cycle_04|state_4": 96, "cycle_07|state_5": 713, "total": 809},
+      "all": 1663
+    },
+    "expected_control_source_counts": {
+      "2023": {"cycle_04|state_2": 8, "cycle_07|state_6": 331, "total": 339},
+      "2025": {"cycle_04|state_2": 6, "cycle_07|state_6": 296, "total": 302},
+      "all": 641
+    },
+    "replacement_opportunities_allowed": false,
+    "overlap_or_capacity_refill_allowed": false,
+    "replacement_loop_selection_allowed": false
+  },
+  "source_identity": {
+    "primary_key": "opportunity_id",
+    "source_model": "V2 no_payoff_state_filter",
+    "source_strategy": "breakout_loop_scores_range_p75",
+    "source_status": "filled",
+    "source_horizon_bars": 24,
+    "direction_source": "frozen OCO breakout direction available when the T0 fill bar triggers",
+    "valid_directions": [-1, 1],
+    "ambiguous_identity_or_direction": "unavailable_fail_closed",
+    "anchor_id_must_match": true,
+    "event_lineage_id_must_match": true,
+    "loop_and_orientation_must_match": true,
+    "source_artifact_hash_required": true
+  },
+  "t0_original_entry": {
+    "timestamp": "stored V2 entry_timestamp, equal to anchor_timestamp plus 5 * entry_step minutes",
+    "price": "stored frozen OCO breakout fill: long max(upper threshold, trigger-bar open), short min(lower threshold, trigger-bar open)",
+    "same_bar_open_assumed": false,
+    "stored_values_are_primary": true,
+    "gross_return_bps": "10000 * direction * (original_terminal_price / t0_entry_price - 1)",
+    "cost_bps_per_side": 5.0,
+    "entry_and_exit_costs_charged": true
+  },
+  "t1_fixed_latency": {
+    "primary_latency_bars": 1,
+    "bar_duration_minutes": 5,
+    "expected_timestamp": "original_entry_timestamp plus 5 minutes",
+    "causal_semantics": "wait for the exact T0 breakout-fill provider bar to complete, then enter unconditionally at the next provider open",
+    "decision_uses_intervening_bar_contents": false,
+    "missing_exact_open": "unavailable_not_shifted_not_zero",
+    "later_open_substitution_allowed": false,
+    "entry_at_or_after_terminal": "unavailable_too_late_not_zero"
+  },
+  "terminal": {
+    "shared_primary_timestamp": "stored V2 exit_timestamp",
+    "verification": "anchor_timestamp plus 125 minutes",
+    "price": "close of provider bar beginning five minutes before the stored terminal timestamp",
+    "t0_t1_share_terminal": true,
+    "primary_horizon_restart_allowed": false
+  },
+  "secondary_diagnostics": {
+    "t2_latency_bars": 2,
+    "t2_expected_timestamp": "original_entry_timestamp plus 10 minutes",
+    "t2_may_replace_t1": false,
+    "restarted_h24_from_t1": true,
+    "restarted_h24_separate_from_primary": true,
+    "clean_anchor_anchor_plus_10_reconstruction": "context_only_not_a_latency_variant",
+    "first_bar_ohlc_may_filter_population": false,
+    "hindsight_episode_labels": "concentration_and_attribution_only"
+  },
+  "primary_endpoint": {
+    "paired_unit": "same immutable opportunity_id with exact T0 and exact T1",
+    "delta": "t1_net_return_bps minus t0_net_return_bps",
+    "primary_population": "paired named candidates",
+    "named_loops_reported_separately": true,
+    "combined_named_summary_secondary": true,
+    "controls_reported_separately": true,
+    "periods_reported_separately": [2023, 2025],
+    "missing_t1_excluded_from_both_paired_t0_and_t1_levels": true
+  },
+  "uncertainty": {
+    "bootstrap_resamples": 2000,
+    "session_block_length": 5,
+    "confidence": 0.95,
+    "random_seed": 20260716,
+    "session_statistic": "mean opportunity delta within period and trading session",
+    "sign_test": "two-sided exact binomial on nonzero paired opportunity deltas"
+  },
+  "cost_stress": {
+    "primary_cost_bps_per_side": 5.0,
+    "twice_cost_bps_per_side": 10.0,
+    "only_cost_components_change": true,
+    "timestamp_dependent_spread_model_present": false
+  },
+  "nulls": {
+    "random_t0_or_t1_jitter_repetitions": 500,
+    "random_seed": 20260716,
+    "prior_session_shift_if_identity_permits": true,
+    "timestamp_offset_falsification": true,
+    "broad_equal_clock_control": "frozen control orientations only; no replacement population"
+  },
+  "stresses": {
+    "twice_costs": true,
+    "t2_latency": true,
+    "remove_best_stock": true,
+    "remove_top_five_stocks": true,
+    "remove_best_episode": true,
+    "remove_top_five_episodes": true,
+    "periods_separately": [2023, 2025],
+    "named_loops_separately": true,
+    "controls_separately": true,
+    "fully_rebuilt_leave_one_stock_out": "not_applicable_no_trained_or_stock-dependent_model; row-deletion concentration must not be called rebuilt LOO",
+    "minimum_liquidity_subset": "only frozen V2 dollar_volume_proxy if reported",
+    "clock_bin_concentration": true,
+    "unbounded_search_allowed": false
+  },
+  "prospective_logging": {
+    "execution_enabled": false,
+    "opportunity_rows_immutable": true,
+    "timing_rows_create_only": true,
+    "outcome_rows_create_only": true,
+    "duplicate_ids_fail_closed": true,
+    "opened_periods_forbidden_in_holdout": [2023, 2025],
+    "new_data_snapshot_required_in_holdout": true,
+    "forecast_may_be_rewritten_after_outcome": false
+  },
+  "decision_rule": {
+    "support_requires": [
+      "T1 paired mean delta is positive",
+      "five-session-block 95 percent interval is above zero",
+      "both named loops improve",
+      "both 2023 and 2025 improve",
+      "controls do not improve equally or more",
+      "twice-cost delta remains positive",
+      "best-stock and top-five-stock deletions remain positive",
+      "best-episode and top-five-episode deletions remain positive",
+      "no clock, regime, direction, stock, month, or episode dominates",
+      "shared-terminal result is positive",
+      "population identity and exact clock checks pass",
+      "exact rerun and independent audit pass",
+      "a genuinely prospective cohort later confirms the frozen relationship"
+    ],
+    "allowed_conclusions": [
+      "fixed_one_bar_latency_supported_prospectively_only_required",
+      "named_loop_entry_signal_appears_early",
+      "general_one_bar_timing_effect_not_loop_specific",
+      "cycle_04_specific_latency_descriptive_only",
+      "cycle_07_specific_latency_descriptive_only",
+      "timing_improvement_concentrated_or_unstable",
+      "t1_positive_but_not_incremental_to_t0",
+      "same_terminal_latency_not_supported",
+      "experiment_blocked_by_missing_2023_provider_tape",
+      "hypothesis_rejected",
+      "experiment_blocked_by_entry_or_terminal_identity"
+    ]
+  },
+  "random_seed": 20260716
+}

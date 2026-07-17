@@ -1043,7 +1043,16 @@ def qualify_provisional_leads(
         rows.append(row)
         if not reasons:
             qualified.append({**entry, "lead_qualification": row})
-    return pd.DataFrame(rows), qualified
+    qualification = pd.DataFrame(
+        rows,
+        columns=[
+            "signature_id",
+            "direction",
+            "provisional_prospective_lead",
+            "rejection_reasons_json",
+        ],
+    )
+    return qualification, qualified
 
 
 def scientific_decision_label(

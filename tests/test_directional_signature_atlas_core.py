@@ -57,6 +57,19 @@ def _auditor_module() -> ModuleType:
     return module
 
 
+def _runner_module() -> ModuleType:
+    path = (
+        Path(__file__).parents[1]
+        / "research/slrno-v2/20260714-regime-loop-handoff/work"
+        / "run_directional_signature_atlas_v1.py"
+    )
+    specification = importlib.util.spec_from_file_location("atlas_runner_test_module", path)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
 def test_every_feature_timestamp_is_no_later_than_decision() -> None:
     decision = pd.Timestamp("2025-01-02 15:30:00+00:00")
     frame = pd.DataFrame(
@@ -369,3 +382,22 @@ def test_track_b_auditor_rejects_summary_comparison_tamper() -> None:
     assert valid
     assert not tampered
     assert "summary_comparison_tamper" in detail
+
+
+def test_empty_provisional_lead_qualification_retains_frozen_schema() -> None:
+    runner = _runner_module()
+    qualification, library = runner.qualify_provisional_leads(
+        [],
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )
+    assert list(qualification.columns) == [
+        "signature_id",
+        "direction",
+        "provisional_prospective_lead",
+        "rejection_reasons_json",
+    ]
+    assert qualification.empty
+    assert library == []

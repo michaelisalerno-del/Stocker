@@ -505,6 +505,19 @@ def _check_metrics(root: Path) -> tuple[bool, str]:
     ]
     if not all(bootstrap_checks):
         return False, "session-block interval does not independently reconstruct"
+    decomposition = pd.read_csv(root / "entry_price_decomposition_summary.csv")
+    profitable_adverse = decomposition.loc[
+        decomposition["slice_type"].eq("t0_outcome")
+        & decomposition["slice_value"].eq("positive")
+        & decomposition["entry_move_cell"].eq("adverse_before_t1")
+    ]
+    expected_profitable_adverse = paired.loc[
+        paired["t0_net_return_bps"].gt(0.0) & paired["direction_adjusted_entry_move_bps"].lt(0.0)
+    ]
+    if len(profitable_adverse) != 1 or int(profitable_adverse.iloc[0]["opportunities"]) != len(
+        expected_profitable_adverse
+    ):
+        return False, "profitable-row adverse-move diagnostic does not reconstruct"
     return True, f"paired metrics and 2,000-draw block interval reconstruct for {len(paired)} rows"
 
 

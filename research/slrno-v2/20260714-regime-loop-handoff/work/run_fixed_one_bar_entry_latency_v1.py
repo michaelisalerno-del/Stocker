@@ -682,6 +682,14 @@ def build_entry_decomposition(paired: pd.DataFrame) -> pd.DataFrame:
     for dimension in ["period", "loop_id", "orientation", "direction_label"]:
         for value, group in paired.groupby(dimension, dropna=False, sort=True):
             slices.append((dimension, str(value), group))
+    if "t0_net_return_bps" in paired:
+        t0_payoff = pd.to_numeric(paired["t0_net_return_bps"], errors="coerce")
+        slices.extend(
+            [
+                ("t0_outcome", "positive", paired.loc[t0_payoff.gt(0.0)]),
+                ("t0_outcome", "nonpositive", paired.loc[t0_payoff.le(0.0)]),
+            ]
+        )
     for slice_type, slice_value, group in slices:
         move = pd.to_numeric(group["direction_adjusted_entry_move_bps"], errors="coerce")
         delta = pd.to_numeric(group["paired_difference_bps"], errors="coerce")
@@ -1310,6 +1318,16 @@ def write_report(
         decomposition["slice_type"].eq("all")
         & decomposition["entry_move_cell"].eq("adverse_before_t1")
     ].iloc[0]
+    profitable = decomposition.loc[
+        decomposition["slice_type"].eq("t0_outcome")
+        & decomposition["slice_value"].eq("positive")
+        & decomposition["entry_move_cell"].eq("all")
+    ].iloc[0]
+    profitable_adverse = decomposition.loc[
+        decomposition["slice_type"].eq("t0_outcome")
+        & decomposition["slice_value"].eq("positive")
+        & decomposition["entry_move_cell"].eq("adverse_before_t1")
+    ].iloc[0]
     stock_concentration = concentration.loc[concentration["dimension"].eq("symbol")].iloc[0]
     loop_lines = "\n".join(
         f"| {row.slice_value} | {_as_int(row.paired_opportunities)} | {_as_float(row.t0_net_payoff_bps):.2f} | {_as_float(row.t1_net_payoff_bps):.2f} | {_as_float(row.paired_total_difference_bps):.2f} | {_as_float(row.paired_mean_difference_bps):.2f} |"
@@ -1404,7 +1422,7 @@ The named-versus-control comparison determines whether latency is loop-specific 
 
 ## 9. Entry-price decomposition
 
-The mean direction-adjusted T0-to-T1 entry move is {float(entry["mean_direction_adjusted_entry_move_bps"]):.2f} bps and the median is {float(entry["median_direction_adjusted_entry_move_bps"]):.2f} bps. Negative values mean price moved against the frozen direction and offered a better delayed price. Such adverse moves occur in {int(adverse["opportunities"])} of {int(entry["opportunities"])} pairs ({int(adverse["opportunities"]) / max(1, int(entry["opportunities"])):.1%}). The entry-move/delta Spearman relationship is {float(entry["move_delta_spearman_rho"]):.3f}; the exact return-convention reconciliation error is checked row by row and audited independently.
+The mean direction-adjusted T0-to-T1 entry move is {float(entry["mean_direction_adjusted_entry_move_bps"]):.2f} bps and the median is {float(entry["median_direction_adjusted_entry_move_bps"]):.2f} bps. Negative values mean price moved against the frozen direction and offered a better delayed price. Such adverse moves occur in {int(adverse["opportunities"])} of {int(entry["opportunities"])} pairs ({int(adverse["opportunities"]) / max(1, int(entry["opportunities"])):.1%}). Among T0-profitable rows, {int(profitable_adverse["opportunities"])} of {int(profitable["opportunities"])} ({int(profitable_adverse["opportunities"]) / max(1, int(profitable["opportunities"])):.1%}) move adversely before T1. The entry-move/delta Spearman relationship is {float(entry["move_delta_spearman_rho"]):.3f}; the exact return-convention reconciliation error is checked row by row and audited independently.
 
 This decomposition is diagnostic only. It does not create an inverse acceptance rule or select a subset.
 

@@ -193,3 +193,28 @@ def test_primary_metric_schema_has_one_authoritative_paired_count() -> None:
         metrics.loc[metrics["slice_value"].astype(str).eq("2023"), "paired_opportunities"].item()
         == 0
     )
+
+
+def test_entry_decomposition_reports_adverse_moves_within_t0_profitable_rows() -> None:
+    runner = _runner()
+    paired = pd.DataFrame(
+        {
+            "period": [2025, 2025, 2025],
+            "loop_id": ["cycle_04", "cycle_04", "cycle_07"],
+            "orientation": ["state_4", "state_4", "state_5"],
+            "direction_label": ["long", "long", "short"],
+            "t0_net_return_bps": [20.0, 10.0, -5.0],
+            "direction_adjusted_entry_move_bps": [-3.0, 4.0, -2.0],
+            "paired_difference_bps": [3.0, -4.0, 2.0],
+        }
+    )
+
+    diagnostic = runner.build_entry_decomposition(paired)
+    profitable_adverse = diagnostic.loc[
+        diagnostic["slice_type"].eq("t0_outcome")
+        & diagnostic["slice_value"].eq("positive")
+        & diagnostic["entry_move_cell"].eq("adverse_before_t1")
+    ].iloc[0]
+
+    assert profitable_adverse["opportunities"] == 1
+    assert profitable_adverse["opportunities_improved_fraction"] == 1.0

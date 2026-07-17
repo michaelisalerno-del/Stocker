@@ -1,0 +1,7 @@
+model_id,period,opportunities,directional_outputs,directional_coverage,neutral_rate,long_count,short_count,conflict_count,mean_net_bps_per_directional_output,net_bps_per_full_opportunity,total_net_bps,total_cost_bps,hit_rate,profit_factor,maximum_drawdown_bps,metric_basis,rows,coverage,mean_residual_bps_per_directional_output,mean_residual_bps_per_opportunity,total_residual_bps,absolute_profitability_claim_allowed
+directional_signature_atlas_v1,2024,9747,0,0,1,0,0,0,,0,0,0,,,0,relative_atlas,,,,,,
+contemporaneous_relative_strength,2024,,,,,,,,,,,,0.506390593047,1.02298200555,,relative_strength_baseline,9747,0.40135426285,1.81564332821,0.728716189593,7102.79669996,False
+directional_signature_atlas_v1,2025,9815,0,0,1,0,0,0,,0,0,0,,,0,relative_atlas,,,,,,
+contemporaneous_relative_strength,2025,,,,,,,,,,,,0.49505953889,1.03041458622,,relative_strength_baseline,9815,0.402139582272,2.13556584526,0.858795556926,8429.07839123,False
+directional_signature_atlas_v1,2026,4469,0,0,1,0,0,0,,0,0,0,,,0,relative_atlas,,,,,,
+contemporaneous_relative_strength,2026,,,,,,,,,,,,0.496038034865,0.953126422288,,relative_strength_baseline,4469,0.423584694563,-3.08895092694,-1.30843233491,-5847.38410469,False

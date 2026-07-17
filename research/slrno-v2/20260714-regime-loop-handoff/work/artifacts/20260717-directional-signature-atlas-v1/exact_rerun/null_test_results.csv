@@ -1,0 +1,8 @@
+null,tested_signatures,persistent_positive_count,maximum_validation_mean_net_bps,similar_persistent_validation_performance
+direction_labels_flipped,20,0,39.098169048,False
+feature_rows_wrong_session_lag,20,0,57.4759184323,False
+outcome_labels_permuted_within_period,20,0,20.1627947447,False
+random_atlas_controller_coverage_matched,0,0,0,False
+random_signatures_support_complexity_matched,20,0,21.0161922115,False
+state_history_permuted_within_clock_phase,10,0,4.66722970895,False
+stock_identity_permuted_within_timestamp,4,0,41.4119099787,False

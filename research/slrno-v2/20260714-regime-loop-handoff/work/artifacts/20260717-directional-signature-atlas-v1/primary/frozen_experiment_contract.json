@@ -1,0 +1,242 @@
+{
+  "contract_id": "20260717-directional-signature-atlas-v1",
+  "experiment": "Directional Signature Atlas V1",
+  "registered_at": "2026-07-17T00:00:00Z",
+  "implementation_base_git_sha": "9b0fcf7b702aff6ea4a14c06348d7cb757b98d82",
+  "known_completed_predecessor_git_sha": "1e0e1a4149961589b3213940d56fb6dd9450565d",
+  "research_only": true,
+  "execution_enabled": false,
+  "scientific_status": {
+    "all_periods_opened": true,
+    "prospective_validation_claim_allowed": false,
+    "tradable_edge_claim_allowed": false,
+    "final_2026_period_may_not_regenerate_or_modify_rules": true
+  },
+  "hypotheses": [
+    {
+      "id": "H1_state_history_clock",
+      "question": "Do short causal state motifs combined with a broad clock or movement condition show persistent absolute direction?",
+      "stop_condition": "No discovery rule survives unchanged through 2025 validation with positive lift, payoff, breadth, and twice-cost payoff."
+    },
+    {
+      "id": "H2_price_location_displacement",
+      "question": "Do coarse price-location, displacement, compression, and wick conditions show persistent absolute direction?",
+      "stop_condition": "Effects reverse, concentrate, or fail unchanged chronological validation."
+    },
+    {
+      "id": "H3_compact_loop_compatibility",
+      "question": "Do compact top-loop summaries add portable direction without using the raw loop-score vector?",
+      "stop_condition": "Compact loop rules fail validation or add no increment over state/history and price baselines."
+    },
+    {
+      "id": "H4_movement_permission",
+      "question": "Does the frozen direction-neutral range permission make directional effects clearer?",
+      "stop_condition": "Permission does not improve predeclared full-population signatures or atlas economics."
+    },
+    {
+      "id": "H5_relative_direction",
+      "question": "Are equal-universe relative winners and losers more predictable than absolute direction?",
+      "stop_condition": "Track B does not beat contemporaneous relative-strength on unchanged timestamps and cannot support an economic translation."
+    }
+  ],
+  "population": {
+    "provider": "EODHD historical five-minute bars",
+    "provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "timezone": "America/New_York",
+    "regular_session": "09:30 inclusive to 16:00 exclusive",
+    "exact_five_minute_grid_required": true,
+    "decision_ordinals": [12, 36],
+    "decision_clocks_new_york": ["10:30", "12:30"],
+    "horizon_bars": 24,
+    "entry": "exact provider open at decision ordinal plus one",
+    "terminal": "provider close at decision ordinal plus 24",
+    "one_opportunity_per_stock_per_clock": true,
+    "no_setup_loop_regime_direction_or_profitability_filter": true,
+    "missing_exact_paths": "retain with UNAVAILABLE target",
+    "expected_population_rows": 24410,
+    "expected_exact_outcome_rows": 24096,
+    "symbols_2024_2025": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "symbols_2026": [
+      "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP", "MRNA",
+      "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "aal_2026_policy": "exclude to preserve the already-frozen Long/Short/Neutral V1 source boundary"
+  },
+  "chronology": {
+    "discovery": {"period": 2024, "start": "2024-01-01", "end_exclusive": "2025-01-01"},
+    "validation": {"period": 2025, "start": "2025-01-01", "end_exclusive": "2026-01-01"},
+    "final_opened_holdout": {"period": 2026, "start": "2026-01-01", "end_exclusive": "2026-06-30"},
+    "normalisation": "discovery-only when a fixed economic scale is unavailable",
+    "final_opened_holdout_reuse": "scoring and reporting only"
+  },
+  "costs": {
+    "entry_bps": 5.0,
+    "exit_bps": 5.0,
+    "round_trip_bps": 10.0,
+    "market_impact_modelled": false,
+    "short_borrow_modelled": false,
+    "primary_dead_band_cost_multiple": 2.0,
+    "sensitivity_dead_band_cost_multiples": [1.0, 3.0],
+    "twice_cost_round_trip_bps": 20.0
+  },
+  "outcome": {
+    "primary": "fixed next-open to 24th-bar-close terminal economic action value",
+    "long": "gross terminal move strictly above +2x round-trip cost and net long payoff positive",
+    "short": "gross terminal move strictly below -2x round-trip cost and net short payoff positive",
+    "neutral": "neither direction clears the threshold after costs",
+    "unavailable": "entry, terminal, complete path, or data quality is missing",
+    "gross_short_is_negative_gross_long": true,
+    "diagnostics_only": ["future high-low range", "MFE long/short", "MAE long/short"],
+    "secondary_first_touch": "first touch of the primary +/-20 bps barrier; same-bar dual touch remains distinct"
+  },
+  "movement_permission": {
+    "model": "frozen_loop_movement_shadow_v1 loop_scores future_range_bps h24 point prediction at exact causal state-run entries only",
+    "fixed_clock_availability": "available only when a frozen causal state run begins on the completed fixed decision bar; otherwise missing and permission fails closed",
+    "uncertainty_lower_bound_available": false,
+    "rule": "predicted_future_range_bps_h24 > 3 * round_trip_cost_bps",
+    "threshold_bps": 30.0,
+    "direction_neutral": true,
+    "discovery_surfaces": ["full_population", "movement_permitted_population"]
+  },
+  "feature_schema_path": "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260717-directional-signature-atlas-v1-feature-schema.json",
+  "feature_rules": {
+    "all_values_known_by_completed_decision_bar": true,
+    "availability_timestamp_per_feature_required": true,
+    "motif_lengths": [2, 3, 4],
+    "motifs_use_only_causally_observed_state_runs": true,
+    "full_raw_loop_score_vector_allowed_in_primary_signatures": false,
+    "loop_summary_availability": "exact state-run entries only; arbitrary fixed bars are not silently scored",
+    "vti_state_input_boundary": "VTI ends 2026-06-26; VTI-dependent state, motif, loop, and movement fields are unavailable for 2026-06-29 fixed-clock rows, which remain in the population",
+    "stock_month_episode_future_route_mfe_mae_conditions_allowed": false,
+    "sector_relative_features": "unavailable; do not reconstruct from a similar field",
+    "quotes_spreads_order_book": "unavailable; fixed cost and historical activity proxy only"
+  },
+  "search": {
+    "maximum_conditions": 3,
+    "motif_counts_as_one_condition": true,
+    "univariate_and_pairwise_cap": 2000,
+    "three_condition_cap": 500,
+    "tree_candidate_cap": 100,
+    "tree_maximum_depth": 3,
+    "tree_minimum_leaf_rows": 80,
+    "discovery_stage_retained_cap": 100,
+    "frozen_discovery_long_cap": 10,
+    "frozen_discovery_short_cap": 10,
+    "validation_survivor_long_cap": 5,
+    "validation_survivor_short_cap": 5,
+    "caps_may_not_increase_after_scoring": true,
+    "tree_role": "propose interpretable rules on discovery data only"
+  },
+  "support": {
+    "minimum_rows": 80,
+    "minimum_independent_sessions": 30,
+    "minimum_independent_stocks": 8,
+    "maximum_single_stock_row_fraction": 0.25,
+    "minimum_calendar_months": 3,
+    "minimum_relevant_direction_outcomes": 15,
+    "same_rules_apply_in_validation": true
+  },
+  "discovery_score": {
+    "formula": "((mean_directional_net_bps / 10) + (2 * directional_lift)) * chronological_consistency * breadth_factor * support_factor * cost_survival * neighbourhood_stability - (2 * max(0, top_stock_absolute_contribution_share - 0.25)) - max(0, top_month_absolute_contribution_share - 0.35) - (0.15 * condition_count) - max(0, opposite_direction_rate - unconditional_opposite_direction_rate)",
+    "chronological_consistency": "fraction of discovery months with positive directional mean net payoff",
+    "breadth_factor": "min(1, independent_stocks / 12) * min(1, independent_sessions / 60)",
+    "support_factor": "min(1, sqrt(rows / 200))",
+    "cost_survival": "1 when twice-cost mean is positive, 0.5 when primary-cost mean alone is positive, else 0",
+    "neighbourhood_stability": "fraction of available immediately adjacent coarse conditions with compatible positive effect; 1 for non-ordered categorical conditions",
+    "ranking_tie_break": "higher support, fewer conditions, lexicographically smaller signature_id"
+  },
+  "multiplicity": {
+    "broad_discovery": "Benjamini-Hochberg false-discovery-rate control",
+    "broad_discovery_q": 0.10,
+    "retained_family": "Holm familywise correction",
+    "retained_family_alpha": 0.10,
+    "session_block_bootstrap_draws": 2000,
+    "session_block_bootstrap_seed": 20260717,
+    "broad_discovery_p_value": "larger one-sided session-level t-test p-value for directional mean net payoff and directional lift",
+    "retained_interval": "moving-session-block bootstrap 95% interval with block length five"
+  },
+  "validation_survival": {
+    "same_effect_sign": true,
+    "positive_net_payoff": true,
+    "positive_directional_lift": true,
+    "support_required": true,
+    "maximum_stock_fraction": 0.25,
+    "positive_month_fraction_strictly_greater_than": 0.5,
+    "twice_cost_positive_required": true,
+    "threshold_changes_allowed": false
+  },
+  "atlas_controller": {
+    "vote_weight": "one frozen signature one vote",
+    "minimum_votes": 1,
+    "opposite_vote": "NEUTRAL",
+    "movement_permission_failure": "NEUTRAL",
+    "no_vote": "NEUTRAL",
+    "non_positive_conservative_value": "NEUTRAL",
+    "final_holdout_weighting_allowed": false
+  },
+  "baselines": [
+    "always_neutral", "clock_only_base_rate", "prior_static_price_context_multinomial",
+    "one_bar_momentum", "one_bar_reversal", "opening_range_position_sign", "current_state_alone",
+    "current_state_plus_history", "movement_permission_plus_momentum", "shallow_logistic_compact_features"
+  ],
+  "nulls": [
+    "outcome_labels_permuted_within_period", "feature_rows_wrong_session_lag", "direction_labels_flipped",
+    "stock_identity_permuted_within_timestamp", "state_history_permuted_within_clock_phase",
+    "random_signatures_support_complexity_matched", "random_atlas_coverage_matched"
+  ],
+  "stresses": [
+    "twice_costs", "one_bar_execution_delay_same_terminal", "one_times_cost_dead_band",
+    "three_times_cost_dead_band", "movement_permission_on_off", "leave_one_stock_out_recomputed",
+    "remove_best_stock", "remove_top_five_stocks", "remove_best_month", "remove_best_episode",
+    "remove_top_five_episodes", "exclude_weakest_historical_activity_cohort", "coarse_clock_bin",
+    "motif_lengths_2_3_4", "adjacent_coarse_thresholds"
+  ],
+  "track_b": {
+    "secondary_only": true,
+    "benchmark": "equal-stock eligible-universe terminal return at identical decision timestamp",
+    "relative_long_fraction": 0.20,
+    "relative_short_fraction": 0.20,
+    "relative_neutral_fraction": 0.60,
+    "sector_result": "not enabled unless exact sector membership and contemporaneous sector returns are available",
+    "absolute_profitability_claim_allowed": false
+  },
+  "prospective_completion": {
+    "minimum_settled_opportunities": 2000,
+    "minimum_independent_sessions": 100,
+    "minimum_stocks": 15,
+    "minimum_completed_calendar_months": 4,
+    "minimum_long_outputs": 100,
+    "minimum_short_outputs": 100,
+    "minimum_sessions_with_long": 30,
+    "minimum_sessions_with_short": 30,
+    "opened_historical_through": "2026-06-26",
+    "requirements_may_not_change_after_logging_starts": true
+  },
+  "frozen_sources": {
+    "prior_fixed_clock_contract_sha256": "11d9a61bc72fe95cd5fa3c6809f971b1eeb053392c8175334f3d090210d751d1",
+    "prior_fixed_clock_runner_sha256": "71581388a32d028f91c40feafbba2df1e0ca572a17227a9ae7c992138e78f45f",
+    "state_preprocessing_sha256": "453988be81e1dd54dd892316ab0da41423197c5aec4afb691e9010e97e05fc67",
+    "state_parameters_sha256": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+    "fixed_cycles_sha256": "5695f09a7573a110034d251b5abdc40c2f37a11cc7198b196636a624c7d1ad22",
+    "loop_path_parameters_sha256": "72f7cdf5e9aabc142630c0eb4486e11dace0cb03c1b5b5fd4da2f06d13b8cda7",
+    "movement_feature_manifest_sha256": "47316220eacd56824f3d511c0a3b4b71e540cd7643ef7d89509de1654e14a5ce",
+    "movement_parameters_sha256": "0763687fab341d382e4086553a0f4a74ae1c2604b508e0daaeba161a3461ca07",
+    "vti_provider_sha256": "bd9e2b62ecd439963c909c51cf41517bc0d462d3cdeafa9c390f9a144973a067"
+  },
+  "safety": {
+    "broker_execution": false,
+    "ig_integration": false,
+    "live_trading": false,
+    "paper_or_demo_trading": false,
+    "orders": false,
+    "positions": false,
+    "position_management": false,
+    "existing_strategy_exits_modified": false,
+    "deployment": false,
+    "application_runtime_modified": false,
+    "api_keys_or_secrets": false
+  }
+}

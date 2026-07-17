@@ -1,0 +1,34 @@
+{
+  "gate_passed": true,
+  "multi_loop_leader_positive_payoff_share_median": 0.6498946257195766,
+  "multi_loop_leader_share_available": 41,
+  "multi_loop_leader_share_unavailable": 1,
+  "multi_loop_majority_leader_episodes": 33,
+  "multi_loop_over_80pct_leader_episodes": 11,
+  "multi_loop_same_regime_episodes": 42,
+  "multi_loop_same_regime_share_by_period": {
+    "2023": 0.38095238095238093,
+    "2025": 0.4090909090909091
+  },
+  "multi_pair_positive_session_share": 0.6521739130434783,
+  "multi_pair_positive_sessions": 210,
+  "periods": {
+    "2023": {
+      "multi_pair_positive_session_share": 0.5849056603773585,
+      "multi_pair_positive_sessions": 93,
+      "positive_sessions": 159
+    },
+    "2025": {
+      "multi_pair_positive_session_share": 0.7177914110429447,
+      "multi_pair_positive_sessions": 117,
+      "positive_sessions": 163
+    }
+  },
+  "positive_sessions": 322,
+  "run_id": "profitable-loop-episode-anatomy-v1-frozen-run",
+  "same_regime_episodes": 107,
+  "single_loop_same_regime_episodes": 65,
+  "source_artifact": "v2_hindsight_episode_states.parquet|v2_hindsight_episode_diagnostics.parquet",
+  "source_hash": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3|60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be",
+  "strict_positive_pair_rows": 674
+}

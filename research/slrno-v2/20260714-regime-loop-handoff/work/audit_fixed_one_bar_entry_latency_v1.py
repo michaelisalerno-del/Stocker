@@ -586,9 +586,23 @@ def _check_deletions_and_nulls(root: Path) -> tuple[bool, str]:
     groups = shifted.groupby(["period", "symbol"], sort=False)
     shifted["prior_ratio"] = groups["ratio"].shift(1)
     shifted["prior_date"] = groups["session_date"].shift(1)
+    contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+    first_symbol = str(paired["symbol"].iloc[0])
+    provider = _provider(contract, first_symbol)
+    calendar = sorted(
+        {
+            str(value)
+            for value in provider["timestamp"].dt.tz_convert("America/New_York").dt.date.unique()
+        }
+    )
+    previous_session = {
+        session: calendar[index - 1] if index > 0 else None
+        for index, session in enumerate(calendar)
+    }
+    shifted["expected_prior_date"] = shifted["session_date"].astype(str).map(previous_session)
     valid = shifted.loc[
         shifted["prior_ratio"].notna()
-        & shifted["prior_date"].astype(str).ne(shifted["session_date"].astype(str))
+        & shifted["prior_date"].astype(str).eq(shifted["expected_prior_date"].astype(str))
     ].copy()
     null_price = valid["t0_entry_price"] * valid["prior_ratio"]
     expected_shift = (
@@ -609,58 +623,137 @@ def _check_deletions_and_nulls(root: Path) -> tuple[bool, str]:
 
 def _check_stress_and_concentration(root: Path) -> tuple[bool, str]:
     paired = pd.read_parquet(root / "exact_paired_t0_t1_ledger.parquet")
+    controls = pd.read_parquet(root / "control_exact_paired_t0_t1_ledger.parquet")
     costs = pd.read_csv(root / "cost_stress_results.csv")
-    twice = costs.loc[
-        costs["population"].eq("named")
-        & costs["slice_type"].eq("all")
-        & costs["stress"].eq("twice_costs")
-    ].iloc[0]
-    t0 = float((paired["t0_gross_return_bps"] - 20.0).sum())
-    t1 = float((paired["t1_gross_return_bps"] - 20.0).sum())
-    if not math.isclose(float(twice["t0_net_payoff_bps"]), t0, abs_tol=1e-8):
-        return False, "twice-cost T0 level mismatch"
-    if not math.isclose(float(twice["t1_net_payoff_bps"]), t1, abs_tol=1e-8):
-        return False, "twice-cost T1 level mismatch"
-    if not math.isclose(float(twice["paired_difference_bps"]), t1 - t0, abs_tol=1e-8):
-        return False, "twice-cost paired delta mismatch"
+    cost_rows_checked = 0
+    for population, frame in [("named", paired), ("control", controls)]:
+        slices: list[tuple[str, str, pd.DataFrame]] = [("all", "all", frame)]
+        for dimension in ["period", "loop_id", "orientation"]:
+            slices.extend(
+                (dimension, str(value), group)
+                for value, group in frame.groupby(dimension, dropna=False, sort=True)
+            )
+        for slice_type, slice_value, group in slices:
+            for stress, cost in [("frozen_costs", 10.0), ("twice_costs", 20.0)]:
+                observed = costs.loc[
+                    costs["population"].eq(population)
+                    & costs["slice_type"].eq(slice_type)
+                    & costs["slice_value"].astype(str).eq(slice_value)
+                    & costs["stress"].eq(stress)
+                ]
+                if len(observed) != 1:
+                    return (
+                        False,
+                        f"cost stress row missing: {population}:{slice_type}:{slice_value}",
+                    )
+                t0 = float((group["t0_gross_return_bps"] - cost).sum())
+                t1 = float((group["t1_gross_return_bps"] - cost).sum())
+                row = observed.iloc[0]
+                if not all(
+                    [
+                        math.isclose(float(row["t0_net_payoff_bps"]), t0, abs_tol=1e-8),
+                        math.isclose(float(row["t1_net_payoff_bps"]), t1, abs_tol=1e-8),
+                        math.isclose(float(row["paired_difference_bps"]), t1 - t0, abs_tol=1e-8),
+                    ]
+                ):
+                    return False, f"cost stress mismatch: {population}:{slice_type}:{slice_value}"
+                cost_rows_checked += 1
     concentration = pd.read_csv(root / "concentration_results.csv")
-    stock = concentration.loc[concentration["dimension"].eq("symbol")]
-    contribution = paired.groupby("symbol")["paired_difference_bps"].sum()
-    shares = contribution.abs() / contribution.abs().sum()
-    if not math.isclose(
-        float(stock.iloc[0]["top_one_absolute_share"]), float(shares.max()), abs_tol=1e-10
+    concentration_rows_checked = 0
+    for dimension in concentration["dimension"].drop_duplicates().astype(str):
+        contribution = paired.groupby(dimension, dropna=False)["paired_difference_bps"].sum()
+        denominator = float(contribution.abs().sum())
+        shares = contribution.abs() / denominator if denominator > 0.0 else contribution * np.nan
+        expected_top_one = float(shares.max()) if len(shares) else np.nan
+        expected_top_five = float(shares.sort_values(ascending=False).head(5).sum())
+        expected_hhi = float(np.square(shares).sum()) if denominator > 0.0 else np.nan
+        observed_dimension = concentration.loc[concentration["dimension"].eq(dimension)]
+        if len(observed_dimension) != len(contribution):
+            return False, f"concentration row count mismatch: {dimension}"
+        for contributor, value in contribution.items():
+            observed = observed_dimension.loc[
+                observed_dimension["contributor"].astype(str).eq(str(contributor))
+            ]
+            if len(observed) != 1:
+                return False, f"concentration contributor missing: {dimension}:{contributor}"
+            concentration_row = observed.iloc[0]
+            expected_share = float(shares.get(contributor, np.nan))
+            checks = [
+                math.isclose(
+                    float(concentration_row["contribution_bps"]), float(value), abs_tol=1e-8
+                ),
+                math.isclose(
+                    float(concentration_row["absolute_contribution_share"]),
+                    expected_share,
+                    abs_tol=1e-10,
+                ),
+                math.isclose(
+                    float(concentration_row["top_one_absolute_share"]),
+                    expected_top_one,
+                    abs_tol=1e-10,
+                ),
+                math.isclose(
+                    float(concentration_row["top_five_absolute_share"]),
+                    expected_top_five,
+                    abs_tol=1e-10,
+                ),
+                math.isclose(float(concentration_row["herfindahl"]), expected_hhi, abs_tol=1e-10),
+            ]
+            if not all(checks):
+                return False, f"concentration mismatch: {dimension}:{contributor}"
+            concentration_rows_checked += 1
+    loo = pd.read_csv(root / "leave_one_stock_out_results.csv")
+    for symbol in sorted(paired["symbol"].astype(str).unique()):
+        observed = loo.loc[loo["excluded_symbol"].astype(str).eq(symbol)]
+        remaining = paired.loc[paired["symbol"].astype(str).ne(symbol)]
+        if len(observed) != 1 or not math.isclose(
+            float(observed.iloc[0]["paired_total_difference_bps"]),
+            float(remaining["paired_difference_bps"].sum()),
+            abs_tol=1e-8,
+        ):
+            return False, f"leave-one-stock-out mismatch: {symbol}"
+    deletion = pd.read_csv(root / "deletion_stress_results.csv")
+    threshold = paired.groupby("period")["dollar_volume_proxy"].transform("median")
+    liquid = paired.loc[paired["dollar_volume_proxy"].ge(threshold)]
+    liquid_row = deletion.loc[deletion["stress"].eq("minimum_liquidity_within_period_median")]
+    if len(liquid_row) != 1 or not math.isclose(
+        float(liquid_row.iloc[0]["paired_total_difference_bps"]),
+        float(liquid["paired_difference_bps"].sum()),
+        abs_tol=1e-8,
     ):
-        return False, "stock concentration mismatch"
+        return False, "minimum-liquidity stress mismatch"
     t2 = pd.read_parquet(root / "t2_sensitivity_ledger.parquet")
     if "t1_net_return_bps" in t2.columns or "paired_difference_bps" in t2.columns:
         return False, "T2 table was not kept separate from T1 naming"
     available_t2 = t2.loc[t2["t2_available"] & t2["population"].eq("named")].copy()
     providers: dict[str, pd.DataFrame] = {}
-    for row in available_t2.itertuples(index=False):
-        symbol = str(row.symbol)
+    for t2_row in available_t2.itertuples(index=False):
+        symbol = str(t2_row.symbol)
         if symbol not in providers:
             contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
             providers[symbol] = _provider(contract, symbol)
-        expected = _as_timestamp(row.original_entry_timestamp) + pd.Timedelta(minutes=10)
-        if _as_timestamp(row.t2_entry_timestamp) != expected:
-            return False, f"T2 clock mismatch: {row.opportunity_id}"
+        expected = _as_timestamp(t2_row.original_entry_timestamp) + pd.Timedelta(minutes=10)
+        if _as_timestamp(t2_row.t2_entry_timestamp) != expected:
+            return False, f"T2 clock mismatch: {t2_row.opportunity_id}"
         provider_row = providers[symbol].loc[providers[symbol]["timestamp"].eq(expected)]
         if len(provider_row) != 1:
-            return False, f"T2 provider open missing: {row.opportunity_id}"
+            return False, f"T2 provider open missing: {t2_row.opportunity_id}"
         t2_price = float(provider_row.iloc[0]["open"])
-        if not math.isclose(_as_float(row.t2_entry_price), t2_price, abs_tol=1e-12):
-            return False, f"T2 price mismatch: {row.opportunity_id}"
+        if not math.isclose(_as_float(t2_row.t2_entry_price), t2_price, abs_tol=1e-12):
+            return False, f"T2 price mismatch: {t2_row.opportunity_id}"
         t2_gross = (
-            10_000.0 * _as_int(row.direction) * (_as_float(row.terminal_price) / t2_price - 1.0)
+            10_000.0
+            * _as_int(t2_row.direction)
+            * (_as_float(t2_row.terminal_price) / t2_price - 1.0)
         )
-        if not math.isclose(_as_float(row.t2_net_return_bps), t2_gross - 10.0, abs_tol=1e-8):
-            return False, f"T2 net mismatch: {row.opportunity_id}"
+        if not math.isclose(_as_float(t2_row.t2_net_return_bps), t2_gross - 10.0, abs_tol=1e-8):
+            return False, f"T2 net mismatch: {t2_row.opportunity_id}"
         if not math.isclose(
-            _as_float(row.t2_minus_t0_bps),
-            (t2_gross - 10.0) - _as_float(row.t0_net_return_bps),
+            _as_float(t2_row.t2_minus_t0_bps),
+            (t2_gross - 10.0) - _as_float(t2_row.t0_net_return_bps),
             abs_tol=1e-8,
         ):
-            return False, f"T2 minus T0 mismatch: {row.opportunity_id}"
+            return False, f"T2 minus T0 mismatch: {t2_row.opportunity_id}"
     t2_metrics = pd.read_csv(root / "t2_sensitivity_metrics.csv").iloc[0]
     if not math.isclose(
         float(t2_metrics["t2_minus_t0_bps"]),
@@ -678,8 +771,8 @@ def _check_stress_and_concentration(root: Path) -> tuple[bool, str]:
     if "paired_difference_bps" in restarted.columns:
         return False, "restarted h24 contaminated the primary paired table"
     detail = (
-        f"twice costs, concentration, {len(available_t2)} T2 rows, "
-        "and restarted separation verified"
+        f"{cost_rows_checked} cost rows, {concentration_rows_checked} concentration rows, "
+        f"LOO/liquidity, {len(available_t2)} T2 rows, and restarted separation verified"
     )
     return True, detail
 
@@ -728,10 +821,20 @@ def _check_missing_2023(root: Path, contract: Mapping[str, Any]) -> tuple[bool, 
 
 def _check_safety(contract: Mapping[str, Any]) -> tuple[bool, str]:
     start = str(contract["frozen_lineage"]["starting_commit"])
-    output = subprocess.check_output(
-        ["git", "diff", "--name-only", f"{start}..HEAD"], cwd=REPO, text=True
+    commands = [
+        ["git", "diff", "--name-only", f"{start}..HEAD"],
+        ["git", "diff", "--name-only"],
+        ["git", "diff", "--cached", "--name-only"],
+        ["git", "ls-files", "--others", "--exclude-standard"],
+    ]
+    changed = sorted(
+        {
+            line
+            for command in commands
+            for line in subprocess.check_output(command, cwd=REPO, text=True).splitlines()
+            if line
+        }
     )
-    changed = [line for line in output.splitlines() if line]
     prohibited = prohibited_changed_paths(changed)
     if prohibited:
         return False, f"prohibited runtime paths changed: {prohibited}"

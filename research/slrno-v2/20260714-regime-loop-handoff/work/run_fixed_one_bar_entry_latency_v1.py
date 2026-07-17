@@ -867,7 +867,11 @@ def build_deletion_stress(paired: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
 
 
 def build_nulls(
-    paired: pd.DataFrame, control_paired: pd.DataFrame, t2_paired: pd.DataFrame
+    paired: pd.DataFrame,
+    control_paired: pd.DataFrame,
+    t2_paired: pd.DataFrame,
+    *,
+    trading_sessions: Sequence[str],
 ) -> pd.DataFrame:
     rng = np.random.default_rng(20260716)
     delta = paired["paired_difference_bps"].to_numpy(float)
@@ -881,9 +885,19 @@ def build_nulls(
     by_symbol = shifted.groupby(["period", "symbol"], sort=False)
     shifted["prior_session_entry_price_ratio"] = by_symbol["entry_price_ratio"].shift(1)
     shifted["prior_session_date"] = by_symbol["session_date"].shift(1)
+    ordered_sessions = sorted({str(value) for value in trading_sessions})
+    previous_session = {
+        session: ordered_sessions[index - 1] if index > 0 else None
+        for index, session in enumerate(ordered_sessions)
+    }
+    shifted["expected_prior_trading_session"] = (
+        shifted["session_date"].astype(str).map(previous_session)
+    )
     valid = shifted.loc[
         shifted["prior_session_entry_price_ratio"].notna()
-        & shifted["prior_session_date"].astype(str).ne(shifted["session_date"].astype(str))
+        & shifted["prior_session_date"]
+        .astype(str)
+        .eq(shifted["expected_prior_trading_session"].astype(str))
     ].copy()
     valid["null_t1_entry_price"] = (
         valid["t0_entry_price"] * valid["prior_session_entry_price_ratio"]
@@ -913,7 +927,7 @@ def build_nulls(
                 "opportunities": int(len(valid)),
                 "shifted_increment_bps": float(shifted_increment.sum()),
                 "shifted_mean_increment_bps": float(shifted_increment.mean()),
-                "status": "non_executable_prior_session_price_ratio_displacement",
+                "status": "non_executable_exact_prior_trading_session_price_ratio_displacement",
             },
             {
                 "null_test": "timestamp_offset_falsification_T2",
@@ -1557,7 +1571,21 @@ def run_historical(*, output: Path, report_path: Path, exact_rerun_of: Path | No
             }
         ]
     )
-    nulls = build_nulls(named_paired, control_paired, named_t2_paired)
+    trading_sessions = sorted(
+        {
+            str(value)
+            for frame in providers.values()
+            for value in pd.to_datetime(frame["timestamp"], utc=True)
+            .dt.tz_convert("America/New_York")
+            .dt.date.unique()
+        }
+    )
+    nulls = build_nulls(
+        named_paired,
+        control_paired,
+        named_t2_paired,
+        trading_sessions=trading_sessions,
+    )
     missing_2023 = build_missing_2023_report(contract)
     source_clock_audit = pd.DataFrame(
         [

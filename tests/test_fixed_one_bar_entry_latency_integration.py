@@ -141,9 +141,16 @@ def test_prior_session_null_applies_unrelated_entry_displacement_not_prior_payof
         }
     )
 
-    nulls = runner.build_nulls(paired, paired.iloc[0:0], paired)
+    nulls = runner.build_nulls(
+        paired,
+        paired.iloc[0:0],
+        paired,
+        trading_sessions=["2025-01-02", "2025-01-03", "2025-01-06"],
+    )
     shifted = nulls.loc[nulls["null_test"].eq("prior_session_entry_displacement")].iloc[0]
 
     assert shifted["opportunities"] == 2
-    assert shifted["status"] == "non_executable_prior_session_price_ratio_displacement"
+    assert (
+        shifted["status"] == "non_executable_exact_prior_trading_session_price_ratio_displacement"
+    )
     assert pd.notna(shifted["shifted_increment_bps"])

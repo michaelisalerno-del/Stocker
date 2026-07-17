@@ -154,3 +154,42 @@ def test_prior_session_null_applies_unrelated_entry_displacement_not_prior_payof
         shifted["status"] == "non_executable_exact_prior_trading_session_price_ratio_displacement"
     )
     assert pd.notna(shifted["shifted_increment_bps"])
+
+
+def test_primary_metric_schema_has_one_authoritative_paired_count() -> None:
+    runner = _runner()
+    source = pd.DataFrame(
+        {
+            "period": [2023, 2025],
+            "session_date": ["2023-01-03", "2025-01-02"],
+        }
+    )
+    all_pairs = source.assign(
+        t0_available=[True, True],
+        t1_available=[False, True],
+        paired_available=[False, True],
+    )
+    paired = pd.DataFrame(
+        {
+            "period": [2025],
+            "session_date": ["2025-01-02"],
+            "t0_net_return_bps": [10.0],
+            "t1_net_return_bps": [12.0],
+            "paired_difference_bps": [2.0],
+        }
+    )
+
+    metrics, _ = runner.build_primary_metrics(
+        source,
+        all_pairs,
+        paired,
+        dimensions=["period"],
+    )
+
+    assert "paired_opportunities" in metrics
+    assert "paired_opportunities_x" not in metrics
+    assert "paired_opportunities_y" not in metrics
+    assert (
+        metrics.loc[metrics["slice_value"].astype(str).eq("2023"), "paired_opportunities"].item()
+        == 0
+    )

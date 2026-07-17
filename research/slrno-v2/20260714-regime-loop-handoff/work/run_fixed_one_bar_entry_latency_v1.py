@@ -587,12 +587,18 @@ def build_primary_metrics(
                 "pairing_rate": float(subset["paired_available"].mean()) if len(subset) else np.nan,
             }
         )
+    metrics = metrics.rename(columns={"paired_opportunities": "scored_paired_opportunities"})
     metrics = pd.DataFrame(counts).merge(
         metrics,
         on=["slice_type", "slice_value"],
         how="left",
         validate="one_to_one",
     )
+    scored_count = metrics["scored_paired_opportunities"]
+    count_mismatch = scored_count.notna() & metrics["paired_opportunities"].ne(scored_count)
+    if bool(count_mismatch.any()):
+        raise AssertionError("paired metric count differs from exact availability accounting")
+    metrics = metrics.drop(columns="scored_paired_opportunities")
     bootstrap_rows: list[dict[str, object]] = []
     bootstrap_slices: list[tuple[str, str, pd.DataFrame]] = [("all", "all", paired)]
     for dimension in ["period", "loop_id", "orientation", "direction_label"]:

@@ -583,9 +583,9 @@ def prediction_metrics(
                 "_directional_payoff"
             ].sum()
         else:
-            batched_payoff = payoff_frame.groupby(
-                ["session", "decision_clock"], sort=True
-            )["_directional_payoff"].sum()
+            batched_payoff = payoff_frame.groupby(["session", "decision_clock"], sort=True)[
+                "_directional_payoff"
+            ].sum()
         cumulative = np.cumsum(batched_payoff.to_numpy(float))
         peak = np.maximum.accumulate(np.concatenate(([0.0], cumulative)))[:-1]
         losses = abs(float(payoff[payoff < 0.0].sum()))

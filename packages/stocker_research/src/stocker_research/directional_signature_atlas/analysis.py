@@ -124,9 +124,7 @@ def signature_metrics(frame: pd.DataFrame, signature: Signature) -> dict[str, An
     )
     stock_means = selected.groupby("symbol", sort=True)[payoff_column].mean()
     maximum_stock_row_fraction = (
-        float(selected["symbol"].value_counts(normalize=True).max())
-        if len(selected)
-        else math.nan
+        float(selected["symbol"].value_counts(normalize=True).max()) if len(selected) else math.nan
     )
     long_payoff = pd.to_numeric(selected["long_net_bps"], errors="coerce")
     short_payoff = pd.to_numeric(selected["short_net_bps"], errors="coerce")

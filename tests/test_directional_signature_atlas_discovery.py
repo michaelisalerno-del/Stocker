@@ -97,7 +97,9 @@ def _production_stage(
                     "symbol": f"S{stock_index:02d}",
                     "decision_clock": "clock_12",
                     "decision_timestamp": pd.Timestamp(f"{session} 15:30", tz="UTC"),
-                    feature: "1>3>1" if fires and feature.startswith("state_motif") else (
+                    feature: "1>3>1"
+                    if fires and feature.startswith("state_motif")
+                    else (
                         "other" if feature.startswith("state_motif") else ("yes" if fires else "no")
                     ),
                     "target": target,
@@ -414,9 +416,7 @@ def test_null_families_score_only_rules_their_transform_changes() -> None:
         state_motif_3=np.where(np.arange(200) % 2, "1>2>1", "2>1>2"),
         state_motif_4="2>1>2>1",
         same_orientation_repeat_bin=np.where(np.arange(200) % 3, "one", "two_plus"),
-        return_6_cross_sectional_rank_bin=np.where(
-            np.arange(200) % 2, "upper_quintile", "middle"
-        ),
+        return_6_cross_sectional_rank_bin=np.where(np.arange(200) % 2, "upper_quintile", "middle"),
         universe_breadth_bin=np.where(np.arange(200) % 4, "positive", "negative"),
         decision_timestamp=pd.date_range("2024-01-01", periods=200, freq="5min", tz="UTC"),
         round_trip_cost_bps=10.0,
@@ -470,8 +470,7 @@ def test_null_families_score_only_rules_their_transform_changes() -> None:
         ),
     ]
     library = [
-        {"signature": signature.to_dict(), "discovery_metrics": {}}
-        for signature in signatures
+        {"signature": signature.to_dict(), "discovery_metrics": {}} for signature in signatures
     ]
     atlas = frame[["period", "chronology_stage"]].assign(predicted_state="NEUTRAL")
     nulls = null_test_results(frame, library, signatures, atlas, seed=20260717).set_index("null")
@@ -583,12 +582,8 @@ def test_production_census_recovers_causal_motif_through_validation() -> None:
         "state_motif_3",
     )
     assert census["discovery_eligible"].any()
-    assert any(
-        entry["signature"]["conditions"][0]["value"] == "1>3>1" for entry in frozen
-    )
-    assert any(
-        entry["signature"]["conditions"][0]["value"] == "1>3>1" for entry in survivors
-    )
+    assert any(entry["signature"]["conditions"][0]["value"] == "1>3>1" for entry in frozen)
+    assert any(entry["signature"]["conditions"][0]["value"] == "1>3>1" for entry in survivors)
 
 
 def test_rare_levels_remain_in_pre_support_candidate_census() -> None:

@@ -95,6 +95,209 @@ ATLAS_PACKAGE_ROOT = (
 DEFAULT_OUTPUT_ROOT = HERE / "artifacts/20260717-directional-signature-atlas-v1/primary"
 AS_OF = pd.Timestamp("2026-06-29T19:55:00Z")
 
+_SIGNATURE_METRIC_COLUMNS = [
+    "signature_id",
+    "direction",
+    "source",
+    "condition_count",
+    "conditions_json",
+    "rows",
+    "sessions",
+    "stocks",
+    "months",
+    "long_count",
+    "short_count",
+    "neutral_count",
+    "long_rate",
+    "short_rate",
+    "neutral_rate",
+    "base_long_rate",
+    "base_short_rate",
+    "base_neutral_rate",
+    "long_lift",
+    "short_lift",
+    "directional_lift",
+    "opposite_direction_excess",
+    "mean_directional_net_bps",
+    "mean_opposite_net_bps",
+    "mean_long_net_bps",
+    "mean_short_net_bps",
+    "median_long_net_bps",
+    "median_short_net_bps",
+    "median_directional_net_bps",
+    "directional_economic_advantage_bps",
+    "total_net_bps",
+    "total_cost_bps",
+    "positive_payoff_rate",
+    "profit_factor",
+    "maximum_drawdown_bps",
+    "coverage",
+    "abstention",
+    "positive_month_fraction",
+    "positive_stock_count",
+    "positive_stock_fraction",
+    "maximum_single_stock_row_fraction",
+    "top_stock_absolute_contribution_share",
+    "top_five_stock_absolute_contribution_share",
+    "stock_contribution_hhi",
+    "top_month_absolute_contribution_share",
+    "top_five_month_absolute_contribution_share",
+    "month_contribution_hhi",
+    "hindsight_episode_attribution_status",
+    "top_episode_absolute_contribution_share",
+    "top_five_episode_absolute_contribution_share",
+    "episode_contribution_hhi",
+    "twice_cost_mean_net_bps",
+]
+_VALIDATION_METRIC_COLUMNS = [
+    *_SIGNATURE_METRIC_COLUMNS,
+    "discovery_score",
+    "raw_p_value",
+    "support_reasons",
+    "bootstrap_mean",
+    "bootstrap_lower",
+    "bootstrap_upper",
+    "holm_adjusted_p_value",
+    "validation_rejection_reasons",
+    "validation_survived",
+    "validation_rejection_reasons_json",
+]
+_FINAL_METRIC_COLUMNS = [
+    *_SIGNATURE_METRIC_COLUMNS,
+    "bootstrap_mean",
+    "bootstrap_lower",
+    "bootstrap_upper",
+    "discovery_score",
+    "conservative_value_bps",
+]
+_NEUTRAL_METRIC_COLUMNS = [
+    "neutral_veto_id",
+    "rows",
+    "sessions",
+    "stocks",
+    "months",
+    "neutral_count",
+    "neutral_rate",
+    "base_neutral_rate",
+    "neutral_lift",
+    "mean_long_net_bps",
+    "mean_short_net_bps",
+    "positive_month_fraction",
+    "top_stock_absolute_contribution_share",
+    "top_five_stock_absolute_contribution_share",
+    "stock_contribution_hhi",
+    "top_month_absolute_contribution_share",
+    "top_five_month_absolute_contribution_share",
+    "month_contribution_hhi",
+    "hindsight_episode_attribution_status",
+]
+_EMPTY_CSV_SCHEMAS: dict[str, list[str]] = {
+    "validation_signature_metrics.csv": _VALIDATION_METRIC_COLUMNS,
+    "final_opened_holdout_signature_metrics.csv": _FINAL_METRIC_COLUMNS,
+    "individual_signature_calibration_metrics.csv": [
+        "signature_id",
+        "direction",
+        "chronology_stage",
+        "rows",
+        "brier_long",
+        "brier_short",
+        "brier_neutral",
+        "macro_brier",
+        "directional_macro_brier",
+        "base_macro_brier",
+        "log_loss",
+        "ece_long",
+        "ece_short",
+        "ece_neutral",
+        "calibration_slope_long",
+        "calibration_slope_short",
+        "calibration_slope_status",
+        "reasonably_calibrated",
+    ],
+    "individual_signature_baseline_comparison.csv": [
+        "signature_id",
+        "direction",
+        "chronology_stage",
+        "rows",
+        "signature_mean_net_bps",
+        "momentum_mean_net_bps_same_rows",
+        "reversal_mean_net_bps_same_rows",
+        "stronger_than_momentum",
+        "stronger_than_reversal",
+    ],
+    "neutral_veto_final_opened_holdout_metrics.csv": [
+        *_NEUTRAL_METRIC_COLUMNS,
+        "raw_p_value",
+        "support_reasons",
+        "holm_adjusted_p_value",
+        "validation_rejection_reasons",
+        "neutral_validation_survived",
+    ],
+    "neutral_veto_stability_results.csv": [
+        "neutral_veto_id",
+        "chronology_stage",
+        "period",
+        "stress",
+        "removed",
+        "status",
+        *_NEUTRAL_METRIC_COLUMNS[1:],
+    ],
+    "signature_attribution_breakdowns.csv": [
+        "signature_id",
+        "direction",
+        "chronology_stage",
+        "dimension",
+        "value",
+        "rows",
+        "sessions",
+        "stocks",
+        "mean_net_bps",
+        "total_net_bps",
+        "directional_rate",
+        "directional_lift",
+    ],
+    "secondary_structural_signature_metrics.csv": [
+        "surface",
+        "source_feature",
+        "chronology_stage",
+        "value",
+        "signature_id",
+        "direction",
+        "rows",
+        "sessions",
+        "stocks",
+        "mean_directional_net_bps",
+        "directional_lift",
+        "selected_as_primary_population",
+    ],
+    "validation_metrics.csv": _VALIDATION_METRIC_COLUMNS,
+    "final_opened_holdout_metrics.csv": _FINAL_METRIC_COLUMNS,
+    "relative_validation_metrics.csv": _VALIDATION_METRIC_COLUMNS,
+    "relative_final_opened_holdout_metrics.csv": _FINAL_METRIC_COLUMNS,
+    "relative_leave_one_stock_out.csv": [
+        *_SIGNATURE_METRIC_COLUMNS,
+        "chronology_stage",
+        "period",
+        "stress",
+        "removed",
+        "relative_outcomes_recomputed",
+        "direct_cross_sectional_features_recomputed",
+        "structural_state_loop_movement_context",
+    ],
+    "relative_concentration_results.csv": [
+        "scope",
+        "signature_id",
+        "direction",
+        "dimension",
+        "status",
+        "groups",
+        "top_one_absolute_contribution_share",
+        "top_five_absolute_contribution_share",
+        "herfindahl_concentration",
+        "total_net_bps",
+    ],
+}
+
 
 def _load_module(name: str, path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
@@ -619,6 +822,11 @@ def _write_csv_allow_empty(
 ) -> None:
     if frame.empty:
         path.parent.mkdir(parents=True, exist_ok=True)
+        if not len(frame.columns):
+            schema = _EMPTY_CSV_SCHEMAS.get(path.name)
+            if schema is None:
+                raise ValueError(f"empty CSV requires an explicit frozen schema: {path}")
+            frame = pd.DataFrame(columns=schema)
         frame.to_csv(path, index=False, lineterminator="\n")
         return
     write_deterministic_csv(frame, path, sort_by=sort_by)
@@ -1086,9 +1294,7 @@ def scientific_decision_label(
     )
     if validation_survivors:
         return "signature_effects_concentrated_or_unstable"
-    if int(track_a.get("frozen_discovery_long", 0)) + int(
-        track_a.get("frozen_discovery_short", 0)
-    ):
+    if int(track_a.get("frozen_discovery_long", 0)) + int(track_a.get("frozen_discovery_short", 0)):
         return "discovery_signatures_failed_validation"
     return "no_persistent_directional_signatures"
 
@@ -1734,15 +1940,13 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         "final_scored_signatures": len(movement_final_metrics),
         "positive_final_scored_signatures": int(
             (
-                movement_final_metrics.get(
-                    "mean_directional_net_bps", pd.Series(dtype=float)
-                ).gt(0.0)
-                & movement_final_metrics.get(
-                    "directional_lift", pd.Series(dtype=float)
-                ).gt(0.0)
-                & movement_final_metrics.get(
-                    "twice_cost_mean_net_bps", pd.Series(dtype=float)
-                ).gt(0.0)
+                movement_final_metrics.get("mean_directional_net_bps", pd.Series(dtype=float)).gt(
+                    0.0
+                )
+                & movement_final_metrics.get("directional_lift", pd.Series(dtype=float)).gt(0.0)
+                & movement_final_metrics.get("twice_cost_mean_net_bps", pd.Series(dtype=float)).gt(
+                    0.0
+                )
             ).sum()
         ),
         "all_rows_permission_pass": bool(permitted_scored["movement_permission"].eq(True).all()),
@@ -1781,9 +1985,7 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
             ):
                 rows = stage_stress.loc[stage_stress["stress"].eq(stress_name)]
                 stable &= bool(len(rows) and rows["neutral_lift"].gt(0.0).all())
-            neighbours = stage_stress.loc[
-                stage_stress["stress"].eq("adjacent_threshold_neighbour")
-            ]
+            neighbours = stage_stress.loc[stage_stress["stress"].eq("adjacent_threshold_neighbour")]
             stable &= bool(neighbours.empty or neighbours["neutral_lift"].gt(0.0).all())
             twice = stage_stress.loc[stage_stress["stress"].eq("twice_cost")]
             stable &= bool(
@@ -2411,9 +2613,7 @@ def qualify_relative_persistence(
             ):
                 reasons.append(f"{stage}_stock_consistency")
             if float(metric["positive_month_fraction"]) <= float(
-                contract["validation_survival"][
-                    "positive_month_fraction_strictly_greater_than"
-                ]
+                contract["validation_survival"]["positive_month_fraction_strictly_greater_than"]
             ):
                 reasons.append(f"{stage}_month_consistency")
             if float(metric["opposite_direction_excess"]) > float(
@@ -2422,8 +2622,7 @@ def qualify_relative_persistence(
                 reasons.append(f"{stage}_opposite_direction_not_controlled")
 
             stage_stress = stress.loc[
-                stress["signature_id"].eq(signature_id)
-                & stress["chronology_stage"].eq(stage)
+                stress["signature_id"].eq(signature_id) & stress["chronology_stage"].eq(stage)
             ]
             for stress_name in (
                 "one_bar_execution_delay_same_terminal",
@@ -2434,9 +2633,7 @@ def qualify_relative_persistence(
                 stress_rows = stage_stress.loc[stage_stress["stress"].eq(stress_name)]
                 if stress_rows.empty or not stress_rows["mean_directional_net_bps"].gt(0.0).all():
                     reasons.append(f"{stage}_{stress_name}_not_positive")
-            neighbours = stage_stress.loc[
-                stage_stress["stress"].eq("adjacent_threshold_neighbour")
-            ]
+            neighbours = stage_stress.loc[stage_stress["stress"].eq("adjacent_threshold_neighbour")]
             if len(neighbours) and not neighbours["mean_directional_net_bps"].gt(0.0).all():
                 reasons.append(f"{stage}_adjacent_threshold_incompatible")
             for episode_name in ("remove_best_episode", "remove_top_five_episodes"):
@@ -2504,9 +2701,7 @@ def run_track_b(
             how="left",
             validate="one_to_one",
         )
-        return outcomes, relative_stage.loc[
-            relative_stage["target"].ne("UNAVAILABLE")
-        ].copy()
+        return outcomes, relative_stage.loc[relative_stage["target"].ne("UNAVAILABLE")].copy()
 
     discovery_absolute = _open_scoring_stage(
         historical_root, absolute_features, contract, "discovery"
@@ -2551,9 +2746,7 @@ def run_track_b(
             "broad_examined_directional_candidates": int(
                 census["stage"].isin(["univariate", "pairwise"]).sum()
             ),
-            "broad_directional_cap": int(
-                contract["search"]["univariate_and_pairwise_cap"]
-            ),
+            "broad_directional_cap": int(contract["search"]["univariate_and_pairwise_cap"]),
             "selection": "outcome_free_balanced_allocation",
         },
         output_root / "candidate_search_space.json",
@@ -2616,12 +2809,8 @@ def run_track_b(
     # both Track B rule-library seals have been materialized and hash-checked.
     absolute_joined, _ = _joined_scoring_frame(historical_root)
     absolute_joined = _assign_chronology_stage(absolute_joined, contract)
-    absolute_scored = absolute_joined.loc[
-        absolute_joined["target"].ne("UNAVAILABLE")
-    ].copy()
-    delayed_outcomes = pd.read_parquet(
-        historical_root / "one_bar_delay_outcome_ledger.parquet"
-    )
+    absolute_scored = absolute_joined.loc[absolute_joined["target"].ne("UNAVAILABLE")].copy()
+    delayed_outcomes = pd.read_parquet(historical_root / "one_bar_delay_outcome_ledger.parquet")
     absolute_delayed = absolute_joined.drop(
         columns=[
             "target",
@@ -2655,9 +2844,7 @@ def run_track_b(
     )
     absolute_delayed["long_net_bps"] = absolute_delayed["net_long_return_bps"]
     absolute_delayed["short_net_bps"] = absolute_delayed["net_short_return_bps"]
-    absolute_delayed = absolute_delayed.loc[
-        absolute_delayed["target"].ne("UNAVAILABLE")
-    ].copy()
+    absolute_delayed = absolute_delayed.loc[absolute_delayed["target"].ne("UNAVAILABLE")].copy()
     development_outcomes, development = construct_stage(
         _stage(absolute_scored, "development_context")
     )
@@ -2665,9 +2852,7 @@ def run_track_b(
         [development_outcomes, discovery_outcomes, validation_outcomes, final_outcomes],
         ignore_index=True,
     )
-    relative = pd.concat(
-        [development, discovery, validation, final], ignore_index=True
-    )
+    relative = pd.concat([development, discovery, validation, final], ignore_index=True)
     base_probabilities = {
         label: float((discovery["target"].eq(label).sum() + 1.0) / (len(discovery) + 3.0))
         for label in CLASSES
@@ -2709,9 +2894,7 @@ def run_track_b(
         ordered_bins=ordered_bins,
     )
     relative_stress = relative_stress.loc[
-        ~relative_stress["stress"].eq(
-            "leave_one_stock_out_direct_cross_section_recomputed"
-        )
+        ~relative_stress["stress"].eq("leave_one_stock_out_direct_cross_section_recomputed")
     ].copy()
     track_b_loso_rows: list[dict[str, Any]] = []
     for stage in ("discovery", "validation", "final_opened_holdout"):
@@ -2866,12 +3049,8 @@ def run_track_b(
     )
     beats_relative_strength = True
     for stage in ("validation", "final_opened_holdout"):
-        atlas_row = relative_economic.loc[
-            relative_economic["chronology_stage"].eq(stage)
-        ]
-        baseline_row = strength_economic.loc[
-            strength_economic["chronology_stage"].eq(stage)
-        ]
+        atlas_row = relative_economic.loc[relative_economic["chronology_stage"].eq(stage)]
+        baseline_row = strength_economic.loc[strength_economic["chronology_stage"].eq(stage)]
         beats_relative_strength &= bool(
             len(atlas_row)
             and len(baseline_row)
@@ -2922,9 +3101,7 @@ def run_track_b_phase(output_root: Path) -> dict[str, Any]:
         for field, expected in expected_audit_identity.items()
         if str(audit.get(field)) != str(expected)
     ]
-    audit_complete = int(audit.get("passed_check_count", -1)) == int(
-        audit.get("check_count", -2)
-    )
+    audit_complete = int(audit.get("passed_check_count", -1)) == int(audit.get("check_count", -2))
     audit_safe = audit.get("research_only") is True and audit.get("execution_enabled") is False
     if mismatches or not audit_complete or not audit_safe:
         raise RuntimeError(
@@ -2968,9 +3145,7 @@ def run_track_b_phase(output_root: Path) -> dict[str, Any]:
     track_a_summary_path = output_root / "track_a_summary.json"
     track_a_summary = json.loads(track_a_summary_path.read_text(encoding="utf-8"))
     track_a_summary["track_b"] = summary
-    track_a_summary["scientific_decision"] = scientific_decision_label(
-        track_a_summary, summary
-    )
+    track_a_summary["scientific_decision"] = scientific_decision_label(track_a_summary, summary)
     write_deterministic_json(track_a_summary, track_a_summary_path)
     generate_track_b_plot(output_root)
     write_artifact_manifest(output_root)

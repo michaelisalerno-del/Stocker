@@ -153,8 +153,7 @@ def candidate_search_space_counts(
     }
     univariate_rules = sum(levels.values())
     pairwise_rules = sum(
-        levels[left] * levels[right]
-        for left, right in combinations(sorted(levels), 2)
+        levels[left] * levels[right] for left, right in combinations(sorted(levels), 2)
     )
     return {
         "features": len(levels),
@@ -233,9 +232,7 @@ def generate_bounded_candidates(
     pairwise_rule_quota = broad_rule_cap - univariate_rule_quota
     broad_rows = 0
     selected_pairs: list[tuple[Condition, ...]] = []
-    univariate_queues = {
-        feature: deque(conditions_by_feature[feature]) for feature in features
-    }
+    univariate_queues = {feature: deque(conditions_by_feature[feature]) for feature in features}
     selected_univariate_rules = 0
     while selected_univariate_rules < univariate_rule_quota:
         made_progress = False
@@ -256,9 +253,7 @@ def generate_bounded_candidates(
         for left, right in combinations(features, 2)
         if conditions_by_feature[left] and conditions_by_feature[right]
     ]
-    feature_pairs.sort(
-        key=lambda pair: hashlib.sha256(f"{pair[0]}|{pair[1]}".encode()).hexdigest()
-    )
+    feature_pairs.sort(key=lambda pair: hashlib.sha256(f"{pair[0]}|{pair[1]}".encode()).hexdigest())
     for left, right in feature_pairs:
         pair_iterators.append(
             iter(product(conditions_by_feature[left], conditions_by_feature[right]))

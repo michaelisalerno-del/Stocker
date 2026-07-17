@@ -381,15 +381,11 @@ def stress_signature_library(
                 )
             for symbol in sorted(period_frame["symbol"].astype(str).unique()):
                 causal_stage = causal_source.loc[
-                    causal_source.get(
-                        "chronology_stage", causal_source["period"].astype(str)
-                    )
+                    causal_source.get("chronology_stage", causal_source["period"].astype(str))
                     .astype(str)
                     .eq(stage)
                 ]
-                recomputed = recompute_cross_sectional_after_stock_deletion(
-                    causal_stage, symbol
-                )
+                recomputed = recompute_cross_sectional_after_stock_deletion(causal_stage, symbol)
                 if "target" in recomputed:
                     recomputed = recomputed.loc[recomputed["target"].ne("UNAVAILABLE")]
                 row = _metric_row(
@@ -557,8 +553,7 @@ def null_test_results(
         entry
         for entry in library
         if any(
-            condition["feature"] in cross_columns
-            for condition in entry["signature"]["conditions"]
+            condition["feature"] in cross_columns for condition in entry["signature"]["conditions"]
         )
     ]
     record(
@@ -578,8 +573,7 @@ def null_test_results(
         entry
         for entry in library
         if any(
-            condition["feature"] in motif_columns
-            for condition in entry["signature"]["conditions"]
+            condition["feature"] in motif_columns for condition in entry["signature"]["conditions"]
         )
     ]
     record("state_history_permuted_within_clock_phase", motif_permuted, motif_library)

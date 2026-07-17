@@ -66,6 +66,23 @@ def safe_csv(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def verify_csv_schemas(root: Path) -> tuple[bool, str]:
+    """Reject emitted CSV artifacts that do not carry a parseable frozen header."""
+
+    failures: list[str] = []
+    csv_paths = sorted(root.rglob("*.csv"))
+    for path in csv_paths:
+        relative = str(path.relative_to(root))
+        try:
+            frame = pd.read_csv(path)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+            failures.append(f"{relative}:{type(exc).__name__}")
+            continue
+        if not len(frame.columns) or any(not str(column).strip() for column in frame.columns):
+            failures.append(f"{relative}:missing_header")
+    return not failures, f"csv_files={len(csv_paths)}; failures={failures}"
+
+
 def close(left: object, right: object, *, tolerance: float = 1e-8) -> bool:
     left_float = float(cast(Any, left))
     right_float = float(cast(Any, right))
@@ -400,9 +417,7 @@ def verify_motifs_and_loop_summaries(features: pd.DataFrame) -> tuple[bool, str]
         "predicted_future_range_bps",
         "predicted_absolute_movement_bps",
     ]
-    if bool(
-        features.loc[~structural_period, structural_columns].notna().any(axis=1).any()
-    ):
+    if bool(features.loc[~structural_period, structural_columns].notna().any(axis=1).any()):
         failures.append("full_2024_fitted_structural_fields_used_in_development_context")
     allowed = (
         features["state_run_entry_at_decision"].fillna(False).astype(bool)
@@ -450,15 +465,11 @@ def verify_sampled_structural_source_reconstruction(
             & panel["session_date"].astype(str).str.startswith("2026-")
         )
     ].copy()
-    panel = panel.sort_values(["symbol_norm", "timestamp"], kind="mergesort").reset_index(
-        drop=True
-    )
+    panel = panel.sort_values(["symbol_norm", "timestamp"], kind="mergesort").reset_index(drop=True)
     vti = core.prepare_symbol_bars("VTI", provider_root, start, as_of)
     vti_max = pd.to_datetime(vti["timestamp"], utc=True).max()
     panel = core.add_market_features(panel, vti)
-    panel["frozen_state_inputs_complete"] = pd.to_datetime(
-        panel["timestamp"], utc=True
-    ).le(vti_max)
+    panel["frozen_state_inputs_complete"] = pd.to_datetime(panel["timestamp"], utc=True).le(vti_max)
     b0 = core.build_causal_b0(symbols, provider_root, start, as_of)
     panel = panel.merge(
         b0[
@@ -480,9 +491,7 @@ def verify_sampled_structural_source_reconstruction(
     panel["b0_high_stress"] = panel["b0_stress_box"].eq("high_stress").astype(float)
     panel = core.add_emission_features(panel)
     panel = panel.sort_values(["symbol_norm", "session_date", "timestamp"], kind="mergesort")
-    preprocessing = pd.read_csv(
-        BUNDLE_ROOT / "artifacts/state/frozen_emission_preprocessing.csv"
-    )
+    preprocessing = pd.read_csv(BUNDLE_ROOT / "artifacts/state/frozen_emission_preprocessing.csv")
     state_parameters = dict(
         np.load(BUNDLE_ROOT / "artifacts/state/frozen_semimarkov_parameters.npz")
     )
@@ -540,8 +549,7 @@ def verify_sampled_structural_source_reconstruction(
             )
     anchor_frame = pd.DataFrame(anchors)
     ledger = features.loc[
-        features["symbol"].eq(symbol)
-        & features["chronology_stage"].ne("development_context")
+        features["symbol"].eq(symbol) & features["chronology_stage"].ne("development_context")
     ].copy()
     comparison = ledger.merge(
         anchor_frame,
@@ -562,11 +570,15 @@ def verify_sampled_structural_source_reconstruction(
         "state_motif_3",
         "state_motif_4",
     ):
-        left = sample[f"{column}_ledger"].astype(object).where(
-            sample[f"{column}_ledger"].notna(), "<NA>"
+        left = (
+            sample[f"{column}_ledger"]
+            .astype(object)
+            .where(sample[f"{column}_ledger"].notna(), "<NA>")
         )
-        right = sample[f"{column}_source"].astype(object).where(
-            sample[f"{column}_source"].notna(), "<NA>"
+        right = (
+            sample[f"{column}_source"]
+            .astype(object)
+            .where(sample[f"{column}_source"].notna(), "<NA>")
         )
         if not left.astype(str).eq(right.astype(str)).all():
             failures.append(f"sampled_source_{column}")
@@ -585,9 +597,7 @@ def verify_sampled_structural_source_reconstruction(
     cycles = core.load_cycles(BUNDLE_ROOT / "artifacts/state/fixed_cycle_shuffled_nulls.csv")
     path_parameters = dict(np.load(BUNDLE_ROOT / "artifacts/path/model_parameters.npz"))
     feature_manifest = load_json(BUNDLE_ROOT / "artifacts/price/feature_manifest.json")
-    outcome_parameters = dict(
-        np.load(BUNDLE_ROOT / "artifacts/price/outcome_model_parameters.npz")
-    )
+    outcome_parameters = dict(np.load(BUNDLE_ROOT / "artifacts/price/outcome_model_parameters.npz"))
     eligible = anchor_frame.loc[
         anchor_frame["state_run_entry_at_decision"].astype(bool)
         & anchor_frame["frozen_state_inputs_complete"].astype(bool)
@@ -595,9 +605,7 @@ def verify_sampled_structural_source_reconstruction(
     ].copy()
     eligible["state"] = eligible["current_state"].astype(int)
     eligible["b0_entry_numeric"] = pd.to_numeric(eligible["b0_state_numeric"], errors="coerce")
-    eligible["b0_entry_high_stress"] = pd.to_numeric(
-        eligible["b0_high_stress"], errors="coerce"
-    )
+    eligible["b0_entry_high_stress"] = pd.to_numeric(eligible["b0_high_stress"], errors="coerce")
     local = pd.to_datetime(eligible["timestamp"], utc=True).dt.tz_convert("America/New_York")
     phase = 2.0 * np.pi * (local.dt.hour * 60.0 + local.dt.minute - 570.0) / 390.0
     eligible["entry_time_sin"] = np.sin(phase)
@@ -661,9 +669,7 @@ def verify_sampled_structural_source_reconstruction(
             "compatibility_mass": mass,
             "compatibility_entropy": entropy,
             "compatible_loop_count": int(np.count_nonzero(scores > 0.0)),
-            "predicted_future_range_bps": float(
-                row.loop_scores__future_range_bps_prediction_24
-            ),
+            "predicted_future_range_bps": float(row.loop_scores__future_range_bps_prediction_24),
             "predicted_absolute_movement_bps": float(
                 row.loop_scores__absolute_return_bps_prediction_24
             ),
@@ -901,8 +907,7 @@ def verify_candidate_registry(
     if not (
         int(search_space["observed_univariate_directional_candidates"]) == univariate_space
         and int(search_space["observed_pairwise_directional_candidates"]) == pairwise_space
-        and int(search_space["broad_examined_directional_candidates"])
-        == univariate_pairwise
+        and int(search_space["broad_examined_directional_candidates"]) == univariate_pairwise
     ):
         failures.append("candidate_search_space_manifest")
     if int(registry["condition_count"].max()) > int(search["maximum_conditions"]):
@@ -957,9 +962,7 @@ def verify_candidate_registry(
             if len(selected)
             else math.nan
         )
-        if len(selected) and maximum_fraction > float(
-            support["maximum_single_stock_row_fraction"]
-        ):
+        if len(selected) and maximum_fraction > float(support["maximum_single_stock_row_fraction"]):
             expected_reasons.add("stock_concentration")
         if selected["session"].astype(str).str[:7].nunique() < int(
             support["minimum_calendar_months"]
@@ -1132,8 +1135,7 @@ def independent_track_a_lead_qualification(
                 ),
                 (int(metric["rows"]) < int(support["minimum_rows"]), "final_insufficient_rows"),
                 (
-                    int(metric["sessions"])
-                    < int(support["minimum_independent_sessions"]),
+                    int(metric["sessions"]) < int(support["minimum_independent_sessions"]),
                     "final_insufficient_sessions",
                 ),
                 (
@@ -1160,9 +1162,7 @@ def independent_track_a_lead_qualification(
                 "remove_top_five_stocks": "top_five_stock_removal_not_positive",
             }
             for stage in ("validation", "final_opened_holdout"):
-                stage_stress = signature_stress.loc[
-                    signature_stress["chronology_stage"].eq(stage)
-                ]
+                stage_stress = signature_stress.loc[signature_stress["chronology_stage"].eq(stage)]
                 for stress_name, reason in required.items():
                     values = stage_stress.loc[
                         stage_stress["stress"].eq(stress_name),
@@ -1181,16 +1181,13 @@ def independent_track_a_lead_qualification(
                 ]
                 if len(neighbours) and not neighbours["mean_directional_net_bps"].gt(0.0).all():
                     reasons.append(f"{stage}_adjacent_threshold_incompatible")
-            signature_calibration = calibration.loc[
-                calibration["signature_id"].eq(signature_id)
-            ]
-            if signature_calibration.empty or not signature_calibration[
-                "reasonably_calibrated"
-            ].astype(bool).all():
+            signature_calibration = calibration.loc[calibration["signature_id"].eq(signature_id)]
+            if (
+                signature_calibration.empty
+                or not signature_calibration["reasonably_calibrated"].astype(bool).all()
+            ):
                 reasons.append("probability_not_reasonably_calibrated")
-            signature_comparators = comparators.loc[
-                comparators["signature_id"].eq(signature_id)
-            ]
+            signature_comparators = comparators.loc[comparators["signature_id"].eq(signature_id)]
             if signature_comparators.empty or not (
                 signature_comparators["stronger_than_momentum"].astype(bool).all()
                 and signature_comparators["stronger_than_reversal"].astype(bool).all()
@@ -1201,9 +1198,7 @@ def independent_track_a_lead_qualification(
                 "signature_id": signature_id,
                 "direction": direction,
                 "provisional_prospective_lead": not reasons,
-                "rejection_reasons_json": json.dumps(
-                    sorted(set(reasons)), separators=(",", ":")
-                ),
+                "rejection_reasons_json": json.dumps(sorted(set(reasons)), separators=(",", ":")),
             }
         )
     return pd.DataFrame(
@@ -1282,8 +1277,11 @@ def verify_libraries_and_chronology(
         )
         expected_flags = expected_qualification["provisional_prospective_lead"].astype(bool)
         for column in ("signature_id", "direction", "rejection_reasons_json"):
-            if not recorded_qualification[column].astype(str).reset_index(drop=True).equals(
-                expected_qualification[column].astype(str).reset_index(drop=True)
+            if (
+                not recorded_qualification[column]
+                .astype(str)
+                .reset_index(drop=True)
+                .equals(expected_qualification[column].astype(str).reset_index(drop=True))
             ):
                 failures.append(f"lead_qualification:{column}")
         if not recorded_flags.reset_index(drop=True).equals(expected_flags.reset_index(drop=True)):
@@ -1417,9 +1415,7 @@ def verify_atlas_controller(
             short_votes += mask.astype(int)
             short_values[mask] += value
     movement_available = features["movement_permission"].notna().to_numpy()
-    movement = (
-        features["movement_permission"].astype("boolean").fillna(False).to_numpy(dtype=bool)
-    )
+    movement = features["movement_permission"].astype("boolean").fillna(False).to_numpy(dtype=bool)
     conflict = (long_votes > 0) & (short_votes > 0)
     states = np.full(len(features), "NEUTRAL", dtype=object)
     states[
@@ -1443,10 +1439,7 @@ def verify_atlas_controller(
     reasons[~movement_available] = "required_causal_feature_unavailable"
     reasons[movement & conflict] = "conflicting_votes"
     reasons[
-        movement
-        & ~conflict
-        & ((long_votes > 0) | (short_votes > 0))
-        & (states == "NEUTRAL")
+        movement & ~conflict & ((long_votes > 0) | (short_votes > 0)) & (states == "NEUTRAL")
     ] = "non_positive_conservative_value"
     reasons[states != "NEUTRAL"] = "supported_directional_vote"
     reasons[missing_required] = "required_causal_feature_unavailable"
@@ -1497,9 +1490,7 @@ def verify_atlas_aggregate_metrics(
             np.where(state.eq("SHORT"), group["short_net_bps"], 0.0),
         ).astype(float)
         batches = (
-            group.assign(_payoff=payoff)
-            .groupby("decision_timestamp", sort=True)["_payoff"]
-            .sum()
+            group.assign(_payoff=payoff).groupby("decision_timestamp", sort=True)["_payoff"].sum()
         )
         cumulative = batches.cumsum().to_numpy(float)
         peaks = np.maximum.accumulate(np.concatenate(([0.0], cumulative)))[:-1]
@@ -1570,17 +1561,18 @@ def verify_baselines(features: pd.DataFrame, baselines: pd.DataFrame) -> tuple[b
         expected = np.where(returns > 0.0, positive, np.where(returns < 0.0, negative, "NEUTRAL"))
         if not np.array_equal(expected, group["predicted_state"].astype(str).to_numpy()):
             failures.append(model_id)
-    predecessor = baselines.loc[
-        baselines["model_id"].eq("prior_static_price_context_multinomial")
-    ]
+    predecessor = baselines.loc[baselines["model_id"].eq("prior_static_price_context_multinomial")]
     if predecessor.empty or "metric_eligible" not in predecessor:
         failures.append("prior_static_price_context_identity")
     else:
         ineligible = predecessor.loc[~predecessor["metric_eligible"].astype(bool)]
         probabilities = ineligible[["p_long", "p_short", "p_neutral"]].to_numpy(float)
         if not (
-            predecessor.loc[predecessor["chronology_stage"].eq("development_context"),
-                            "metric_eligible"].eq(False).all()
+            predecessor.loc[
+                predecessor["chronology_stage"].eq("development_context"), "metric_eligible"
+            ]
+            .eq(False)
+            .all()
             and np.allclose(probabilities, 1.0 / 3.0)
             and ineligible["predicted_state"].astype(str).eq("NEUTRAL").all()
         ):
@@ -1656,9 +1648,7 @@ def verify_null_stress_and_concentration(
         direction = str(signature["direction"])
         payoff_column = "long_net_bps" if direction == "LONG" else "short_net_bps"
         selected = scored.loc[
-            condition_mask(
-                scored, cast(Sequence[Mapping[str, Any]], signature["conditions"])
-            )
+            condition_mask(scored, cast(Sequence[Mapping[str, Any]], signature["conditions"]))
         ].copy()
         if not selected.empty:
             sample_symbol = str(sorted(selected["symbol"].astype(str).unique())[0])
@@ -1676,9 +1666,7 @@ def verify_null_stress_and_concentration(
         stage = "validation"
         stage_frame = scored.loc[scored["chronology_stage"].eq(stage)]
         stage_selected = stage_frame.loc[
-            condition_mask(
-                stage_frame, cast(Sequence[Mapping[str, Any]], signature["conditions"])
-            )
+            condition_mask(stage_frame, cast(Sequence[Mapping[str, Any]], signature["conditions"]))
         ]
         twice_mean = float(
             (stage_selected[payoff_column] - stage_selected["round_trip_cost_bps"]).mean()
@@ -1738,8 +1726,7 @@ def independent_relative_persistence_qualification(
                 (float(metric["twice_cost_mean_net_bps"]) <= 0.0, "twice_cost_not_positive"),
                 (int(metric["rows"]) < int(support["minimum_rows"]), "insufficient_rows"),
                 (
-                    int(metric["sessions"])
-                    < int(support["minimum_independent_sessions"]),
+                    int(metric["sessions"]) < int(support["minimum_independent_sessions"]),
                     "insufficient_sessions",
                 ),
                 (
@@ -1794,8 +1781,7 @@ def independent_relative_persistence_qualification(
             if relevant_count < int(support["minimum_relevant_direction_outcomes"]):
                 reasons.append(f"{stage}_insufficient_directional_outcomes")
             stage_stress = stress.loc[
-                stress["signature_id"].eq(signature_id)
-                & stress["chronology_stage"].eq(stage)
+                stress["signature_id"].eq(signature_id) & stress["chronology_stage"].eq(stage)
             ]
             for stress_name in (
                 "one_bar_execution_delay_same_terminal",
@@ -1806,9 +1792,7 @@ def independent_relative_persistence_qualification(
                 stress_rows = stage_stress.loc[stage_stress["stress"].eq(stress_name)]
                 if stress_rows.empty or not stress_rows["mean_directional_net_bps"].gt(0.0).all():
                     reasons.append(f"{stage}_{stress_name}_not_positive")
-            neighbours = stage_stress.loc[
-                stage_stress["stress"].eq("adjacent_threshold_neighbour")
-            ]
+            neighbours = stage_stress.loc[stage_stress["stress"].eq("adjacent_threshold_neighbour")]
             if len(neighbours) and not neighbours["mean_directional_net_bps"].gt(0.0).all():
                 reasons.append(f"{stage}_adjacent_threshold_incompatible")
             for episode_name in ("remove_best_episode", "remove_top_five_episodes"):
@@ -1824,9 +1808,7 @@ def independent_relative_persistence_qualification(
                 "signature_id": signature_id,
                 "direction": direction,
                 "strict_persistent_relative_signature": not reasons,
-                "rejection_reasons_json": json.dumps(
-                    sorted(set(reasons)), separators=(",", ":")
-                ),
+                "rejection_reasons_json": json.dumps(sorted(set(reasons)), separators=(",", ":")),
             }
         )
     return pd.DataFrame(
@@ -1859,11 +1841,14 @@ def verify_relative_atlas_baseline_comparison(
         failures.append("duplicate_prediction")
     beats = not failures
     for stage in ("validation", "final_opened_holdout"):
-        stage_outcomes = relative.loc[relative["chronology_stage"].eq(stage), [
-            "opportunity_id",
-            "long_net_bps",
-            "short_net_bps",
-        ]]
+        stage_outcomes = relative.loc[
+            relative["chronology_stage"].eq(stage),
+            [
+                "opportunity_id",
+                "long_net_bps",
+                "short_net_bps",
+            ],
+        ]
         stage_metrics: dict[str, float] = {}
         for label, predictions in (("atlas", atlas), ("relative_strength", baseline)):
             selected = stage_outcomes.merge(
@@ -1920,9 +1905,7 @@ def verify_track_b(root: Path) -> tuple[bool, str]:
     expected_rank = expected_residual.groupby(
         relative_absolute["decision_timestamp"], sort=False
     ).rank(method="average")
-    expected_percentile = (expected_rank - 1.0) / (expected_peer_count - 1.0).replace(
-        0.0, np.nan
-    )
+    expected_percentile = (expected_rank - 1.0) / (expected_peer_count - 1.0).replace(0.0, np.nan)
     relative_long_fraction = float(contract["track_b"]["relative_long_fraction"])
     relative_short_fraction = float(contract["track_b"]["relative_short_fraction"])
     expected_target = np.where(
@@ -1962,9 +1945,9 @@ def verify_track_b(root: Path) -> tuple[bool, str]:
         failures.append("track_b_discovery_library_count")
     if int(summary["validation_survivors"]) != len(survivor_library):
         failures.append("track_b_survivor_count")
-    if not {
-        str(entry["signature"]["signature_id"]) for entry in survivor_library
-    } <= {str(entry["signature"]["signature_id"]) for entry in discovery_library}:
+    if not {str(entry["signature"]["signature_id"]) for entry in survivor_library} <= {
+        str(entry["signature"]["signature_id"]) for entry in discovery_library
+    }:
         failures.append("track_b_validation_regenerated_rules")
     features = pd.read_parquet(root / "outcome_free_feature_ledger.parquet")
     session_dates = pd.to_datetime(features["session"])
@@ -1996,12 +1979,8 @@ def verify_track_b(root: Path) -> tuple[bool, str]:
         validate="one_to_one",
         suffixes=("", "_relative"),
     )
-    relative_scored["round_trip_cost_bps"] = relative_scored.pop(
-        "round_trip_cost_bps_relative"
-    )
-    relative_scored = relative_scored.loc[
-        relative_scored["target"].ne("UNAVAILABLE")
-    ].copy()
+    relative_scored["round_trip_cost_bps"] = relative_scored.pop("round_trip_cost_bps_relative")
+    relative_scored = relative_scored.loc[relative_scored["target"].ne("UNAVAILABLE")].copy()
     comparison_ok, comparison_detail = verify_relative_atlas_baseline_comparison(
         relative_scored,
         pd.read_parquet(track_root / "relative_atlas_decisions.parquet"),
@@ -2033,9 +2012,10 @@ def verify_track_b(root: Path) -> tuple[bool, str]:
                 validation_metrics["validation_survived"].astype(bool), "signature_id"
             ].astype(str)
         )
-        if not {
-            str(entry["signature"]["signature_id"]) for entry in survivor_library
-        } <= survived_ids:
+        if (
+            not {str(entry["signature"]["signature_id"]) for entry in survivor_library}
+            <= survived_ids
+        ):
             failures.append("track_b_unqualified_validation_survivor")
     for seal_name, library_name, hash_field in (
         (
@@ -2089,15 +2069,16 @@ def verify_track_b(root: Path) -> tuple[bool, str]:
     ) != len(expected_qualification):
         failures.append("track_b_persistence_qualification_shape")
     elif len(expected_qualification):
-        recorded_flags = recorded_qualification[
-            "strict_persistent_relative_signature"
-        ].map(lambda value: str(value).lower() == "true")
-        expected_flags = expected_qualification[
-            "strict_persistent_relative_signature"
-        ].astype(bool)
+        recorded_flags = recorded_qualification["strict_persistent_relative_signature"].map(
+            lambda value: str(value).lower() == "true"
+        )
+        expected_flags = expected_qualification["strict_persistent_relative_signature"].astype(bool)
         for column in ("signature_id", "direction", "rejection_reasons_json"):
-            if not recorded_qualification[column].astype(str).reset_index(drop=True).equals(
-                expected_qualification[column].astype(str).reset_index(drop=True)
+            if (
+                not recorded_qualification[column]
+                .astype(str)
+                .reset_index(drop=True)
+                .equals(expected_qualification[column].astype(str).reset_index(drop=True))
             ):
                 failures.append(f"track_b_persistence_qualification:{column}")
         if not recorded_flags.reset_index(drop=True).equals(expected_flags.reset_index(drop=True)):
@@ -2111,8 +2092,7 @@ def verify_track_b(root: Path) -> tuple[bool, str]:
     if (
         int(summary["candidate_signatures_examined"]) != len(registry)
         or int(summary["persistent_relative_final_signatures"]) != len(persistent_ids)
-        or sorted(cast(list[str], summary["persistent_relative_signature_ids"]))
-        != persistent_ids
+        or sorted(cast(list[str], summary["persistent_relative_signature_ids"])) != persistent_ids
     ):
         failures.append("track_b_summary_reconstruction")
     return not failures, f"rows={len(relative)}; summary={summary}; failures={failures}"
@@ -2131,8 +2111,10 @@ def verify_scientific_decision(root: Path, *, include_track_b: bool) -> tuple[bo
         expected = "persistent_short_signatures_only"
     elif int(summary.get("neutral_validation_and_final_strict_stable", 0)):
         expected = "neutral_veto_more_reliable_than_direction"
-    elif include_track_b and int(track_b.get("persistent_relative_final_signatures", 0)) and bool(
-        track_b.get("atlas_beats_relative_strength_validation_and_final")
+    elif (
+        include_track_b
+        and int(track_b.get("persistent_relative_final_signatures", 0))
+        and bool(track_b.get("atlas_beats_relative_strength_validation_and_final"))
     ):
         expected = "relative_direction_more_predictable_than_absolute"
     else:
@@ -2246,9 +2228,7 @@ def verify_prospective(root: Path, prospective_root: Path | None) -> tuple[bool,
             for field, expected in expected_identity.items():
                 if str(row.get(field)) != str(expected):
                     failures.append(f"forecast_identity:{opportunity_id}:{field}")
-            if str(row.get("training_data_snapshot_hash")) != str(
-                metadata["data_snapshot_sha256"]
-            ):
+            if str(row.get("training_data_snapshot_hash")) != str(metadata["data_snapshot_sha256"]):
                 failures.append(f"forecast_training_snapshot:{opportunity_id}")
             if not str(row.get("data_snapshot_hash", "")).strip() or row.get(
                 "data_snapshot_hash"
@@ -2438,9 +2418,7 @@ def verify_safety(metadata: Mapping[str, Any], contract: Mapping[str, Any]) -> t
         "strategy_exit",
     )
     prohibited.extend(
-        path
-        for path in changed
-        if any(token in path.lower() for token in forbidden_path_tokens)
+        path for path in changed if any(token in path.lower() for token in forbidden_path_tokens)
     )
     prohibited = sorted(set(prohibited))
     if prohibited:
@@ -2520,6 +2498,8 @@ def run_audit(
     add_check(checks, "feature_schema_identity", schema_ok, str(metadata["feature_schema_sha256"]))
     manifest_ok, manifest_detail = verify_manifest(primary)
     add_check(checks, "artifact_manifest", manifest_ok, manifest_detail)
+    csv_schema_ok, csv_schema_detail = verify_csv_schemas(primary)
+    add_check(checks, "machine_readable_csv_schemas", csv_schema_ok, csv_schema_detail)
     source_ok, source_detail, identities = verify_source_identity(primary, metadata)
     add_check(checks, "data_snapshot_identity", source_ok, source_detail)
     pins_ok, pins_detail = verify_frozen_source_pins(contract, identities)

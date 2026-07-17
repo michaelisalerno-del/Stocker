@@ -401,3 +401,21 @@ def test_empty_provisional_lead_qualification_retains_frozen_schema() -> None:
     ]
     assert qualification.empty
     assert library == []
+
+
+def test_all_required_empty_csv_artifacts_retain_frozen_schemas(tmp_path: Path) -> None:
+    runner = _runner_module()
+    for filename, expected_columns in runner._EMPTY_CSV_SCHEMAS.items():
+        path = tmp_path / filename
+        runner._write_csv_allow_empty(pd.DataFrame(), path, sort_by=[expected_columns[0]])
+        parsed = pd.read_csv(path)
+        assert list(parsed.columns) == expected_columns
+        assert parsed.empty
+
+
+def test_independent_auditor_rejects_headerless_csv_artifacts(tmp_path: Path) -> None:
+    auditor = _auditor_module()
+    (tmp_path / "headerless.csv").write_text("\n", encoding="utf-8")
+    passed, detail = auditor.verify_csv_schemas(tmp_path)
+    assert not passed
+    assert "EmptyDataError" in detail

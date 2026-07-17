@@ -239,4 +239,3 @@ Freeze and prospectively log the causal feature ledger and neutral-veto states w
 - Independent audit: 22/22 passed
 - Exact rerun: 67 artifacts byte-identical; no missing, extra, or mismatched files
 - Safety: research-only; broker, IG, orders, positions, exits, deployment, runtime, keys, and secrets unchanged
-

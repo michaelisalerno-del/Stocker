@@ -50,7 +50,11 @@ from stocker_research.directional_signature_atlas.models import (
     baseline_predictions,
     prediction_metrics,
 )
-from stocker_research.directional_signature_atlas.prospective import ProspectiveLedger
+from stocker_research.directional_signature_atlas.prospective import (
+    ProspectiveLedger,
+    build_forecast_record,
+    build_settlement_record,
+)
 from stocker_research.directional_signature_atlas.robustness import (
     null_test_results,
     stress_signature_library,
@@ -75,6 +79,9 @@ PRIOR_CONTRACT_PATH = HERE / "contracts/20260714-long-short-neutral-detector-v1.
 PRIOR_RUNNER_PATH = HERE / "run_long_short_neutral_detector_v1.py"
 CORE_PATH = HERE / "frozen_loop_movement_shadow_core.py"
 BUNDLE_ROOT = HERE / "shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle"
+ATLAS_PACKAGE_ROOT = (
+    HERE.parents[3] / "packages/stocker_research/src/stocker_research/directional_signature_atlas"
+)
 DEFAULT_OUTPUT_ROOT = HERE / "artifacts/20260717-directional-signature-atlas-v1/primary"
 AS_OF = pd.Timestamp("2026-06-29T19:55:00Z")
 
@@ -126,6 +133,8 @@ def _snapshot_sources(
             / "tests/test_directional_signature_atlas_prospective.py",
         }
     )
+    for path in sorted(ATLAS_PACKAGE_ROOT.glob("*.py")):
+        sources[f"atlas_module_{path.stem}"] = path
     payload = {
         name: {
             "path": str(path),
@@ -1252,40 +1261,25 @@ def prospective_forecast_dry_run(output_root: Path, prospective_root: Path) -> d
     short_library = json.loads((output_root / "short_signature_library.json").read_text())
     ledger = ProspectiveLedger(prospective_root, opened_through="2026-06-26")
     opportunity_id = "atlas|2026|DRYRUN|2026-07-20|12"
-    record = {
-        "run_id": metadata["run_id"],
-        "git_sha": metadata["git_sha"],
-        "contract_hash": metadata["contract_sha256"],
-        "data_snapshot_hash": metadata["data_snapshot_sha256"],
-        "feature_schema_hash": metadata["feature_schema_sha256"],
-        "opportunity_id": opportunity_id,
-        "symbol": "DRYRUN",
-        "session": "2026-07-20",
-        "decision_clock": "clock_12",
-        "decision_timestamp": "2026-07-20T14:30:00+00:00",
-        "entry_timestamp": "2026-07-20T14:35:00+00:00",
-        "terminal_timestamp": "2026-07-20T16:30:00+00:00",
-        "causal_features": {"decision_clock": "clock_12", "movement_permission": False},
-        "feature_availability_timestamps": {
-            "decision_clock": "2026-07-20T14:30:00+00:00",
-            "movement_permission": "2026-07-20T14:30:00+00:00",
+    decision_timestamp = "2026-07-20T14:30:00+00:00"
+    record = build_forecast_record(
+        {
+            "opportunity_id": opportunity_id,
+            "symbol": "DRYRUN",
+            "session": "2026-07-20",
+            "decision_clock": "clock_12",
+            "decision_timestamp": decision_timestamp,
+            "movement_permission": False,
+            "decision_clock__available_at": decision_timestamp,
+            "movement_permission__available_at": decision_timestamp,
         },
-        "movement_permission": False,
-        "long_signature_decisions": {
-            entry["signature"]["signature_id"]: False for entry in long_library
-        },
-        "short_signature_decisions": {
-            entry["signature"]["signature_id"]: False for entry in short_library
-        },
-        "long_vote_count": 0,
-        "short_vote_count": 0,
-        "conflict_state": False,
-        "final_atlas_state": "NEUTRAL",
-        "reason_codes": ["movement_permission_failed", "dry_run"],
-        "forecast_freeze_timestamp": "2026-07-20T14:30:00+00:00",
-        "research_only": True,
-        "execution_enabled": False,
-    }
+        metadata=metadata,
+        long_library=long_library,
+        short_library=short_library,
+        causal_feature_names=["decision_clock", "movement_permission"],
+        forecast_freeze_timestamp=decision_timestamp,
+    )
+    record["reason_codes"] = sorted([*record["reason_codes"], "dry_run"])
     ledger.append_forecast(record)
     result = {
         "opportunity_id": opportunity_id,
@@ -1302,21 +1296,21 @@ def prospective_settlement_dry_run(output_root: Path, prospective_root: Path) ->
     ledger = ProspectiveLedger(prospective_root, opened_through="2026-06-26")
     opportunity_id = "atlas|2026|DRYRUN|2026-07-20|12"
     ledger.append_settlement(
-        {
-            "opportunity_id": opportunity_id,
-            "terminal_timestamp": "2026-07-20T16:30:00+00:00",
-            "gross_long_payoff_bps": 0.0,
-            "gross_short_payoff_bps": 0.0,
-            "costs_bps": 10.0,
-            "net_long_payoff_bps": -10.0,
-            "net_short_payoff_bps": -10.0,
-            "primary_target": "NEUTRAL",
-            "secondary_first_touch_target": "NEITHER",
-            "settlement_timestamp": "2026-07-20T16:31:00+00:00",
-            "settlement_code_version": _git_sha(),
-            "research_only": True,
-            "execution_enabled": False,
-        }
+        build_settlement_record(
+            {
+                "opportunity_id": opportunity_id,
+                "terminal_timestamp": "2026-07-20T16:30:00+00:00",
+                "gross_long_return_bps": 0.0,
+                "gross_short_return_bps": 0.0,
+                "round_trip_cost_bps": 10.0,
+                "net_long_return_bps": -10.0,
+                "net_short_return_bps": -10.0,
+                "target": "NEUTRAL",
+                "first_touch_target": "NEITHER",
+            },
+            settlement_timestamp="2026-07-20T16:31:00+00:00",
+            settlement_code_version=_git_sha(),
+        )
     )
     result = {
         "opportunity_id": opportunity_id,

@@ -19,7 +19,6 @@ WORK = Path(__file__).resolve().parent
 REPO = WORK.parents[3]
 CONTRACT_PATH = WORK / "contracts/20260717-directional-signature-atlas-v1.json"
 FEATURE_SCHEMA_PATH = WORK / "contracts/20260717-directional-signature-atlas-v1-feature-schema.json"
-RUNNER_PATH = WORK / "run_directional_signature_atlas_v1.py"
 DEFAULT_PRIMARY = WORK / "artifacts/20260717-directional-signature-atlas-v1/primary"
 DEFAULT_EXACT = WORK / "artifacts/20260717-directional-signature-atlas-v1/exact_rerun"
 IDENTITY_EXCLUSIONS = {
@@ -197,17 +196,31 @@ def verify_git_identity(
     metadata: Mapping[str, Any], identities: Mapping[str, Any]
 ) -> tuple[bool, str]:
     git_sha = str(metadata["git_sha"])
-    runner_relative = str(RUNNER_PATH.relative_to(REPO))
-    try:
-        committed = subprocess.check_output(
-            ["git", "show", f"{git_sha}:{runner_relative}"], cwd=REPO
-        )
-    except subprocess.CalledProcessError:
-        return False, f"recorded commit {git_sha} does not contain the runner"
     sources = cast(Mapping[str, Mapping[str, Any]], identities["sources"])
-    expected = str(sources["atlas_runner"]["sha256"])
-    actual = hashlib.sha256(committed).hexdigest()
-    return actual == expected, f"git={git_sha}; committed_runner_sha256={actual}"
+    failures: list[str] = []
+    checked = 0
+    for name, specification in sorted(sources.items()):
+        if not name.startswith("atlas_"):
+            continue
+        path = Path(str(specification["path"]))
+        try:
+            relative = str(path.relative_to(REPO))
+        except ValueError:
+            continue
+        try:
+            committed = subprocess.check_output(
+                ["git", "show", f"{git_sha}:{relative}"],
+                cwd=REPO,
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError:
+            failures.append(f"missing:{name}")
+            continue
+        actual = hashlib.sha256(committed).hexdigest()
+        if actual != str(specification["sha256"]):
+            failures.append(f"mismatch:{name}")
+        checked += 1
+    return not failures, f"git={git_sha}; committed_atlas_sources={checked}; failures={failures}"
 
 
 def verify_population(

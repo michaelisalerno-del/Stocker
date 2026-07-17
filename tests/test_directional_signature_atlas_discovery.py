@@ -4,6 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from stocker_research.directional_signature_atlas.analysis import (
+    evaluate_candidate_census,
+    freeze_discovery_library,
+    validate_discovery_library,
+)
 from stocker_research.directional_signature_atlas.evaluation import (
     baseline_predictions,
     evaluate_signature,
@@ -11,7 +16,10 @@ from stocker_research.directional_signature_atlas.evaluation import (
     survives_validation,
 )
 from stocker_research.directional_signature_atlas.models import apply_atlas_controller
-from stocker_research.directional_signature_atlas.robustness import null_test_results
+from stocker_research.directional_signature_atlas.robustness import (
+    _motif_length_variants,
+    null_test_results,
+)
 from stocker_research.directional_signature_atlas.signatures import (
     Condition,
     SearchCaps,
@@ -41,6 +49,7 @@ def _panel(rows: int = 120) -> pd.DataFrame:
             "target": np.where(index % 3, "LONG", "NEUTRAL"),
             "long_net_bps": np.where(index % 3, 12.0, -10.0),
             "short_net_bps": np.where(index % 3, -32.0, -10.0),
+            "round_trip_cost_bps": 10.0,
         }
     )
 
@@ -51,6 +60,90 @@ def _long_rule() -> Signature:
         "LONG",
         (Condition("state", "==", "supportive", "state"),),
     )
+
+
+def _production_stage(
+    year: int,
+    *,
+    adverse_signal: bool = False,
+    neutral_only: bool = False,
+    feature: str = "signal",
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for session_index in range(60):
+        month = 1 + session_index // 20
+        day = 1 + session_index % 20
+        session = f"{year}-{month:02d}-{day:02d}"
+        for stock_index in range(12):
+            fires = (session_index + stock_index) % 2 == 0
+            if neutral_only:
+                target, long_payoff, short_payoff = "NEUTRAL", -10.0, -10.0
+            elif fires and adverse_signal:
+                target, long_payoff, short_payoff = "SHORT", -50.0, 30.0
+            elif fires:
+                target, long_payoff, short_payoff = "LONG", 30.0, -50.0
+            else:
+                target, long_payoff, short_payoff = "NEUTRAL", -10.0, -10.0
+            rows.append(
+                {
+                    "opportunity_id": f"{year}-{session_index}-{stock_index}",
+                    "period": year,
+                    "chronology_stage": "discovery" if year == 2025 else "validation",
+                    "session": session,
+                    "symbol": f"S{stock_index:02d}",
+                    "decision_clock": "clock_12",
+                    "decision_timestamp": pd.Timestamp(f"{session} 15:30", tz="UTC"),
+                    feature: "1>3>1" if fires and feature.startswith("state_motif") else (
+                        "other" if feature.startswith("state_motif") else ("yes" if fires else "no")
+                    ),
+                    "target": target,
+                    "long_net_bps": long_payoff,
+                    "short_net_bps": short_payoff,
+                    "gross_long_return_bps": long_payoff + 10.0,
+                    "round_trip_cost_bps": 10.0,
+                    "movement_permission": True,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _production_discovery_and_validation(
+    discovery: pd.DataFrame,
+    validation: pd.DataFrame,
+    feature: str,
+) -> tuple[pd.DataFrame, list[dict[str, object]], pd.DataFrame, list[dict[str, object]]]:
+    candidates, registry = generate_bounded_candidates(
+        discovery,
+        {feature: "state_history" if feature.startswith("state_motif") else "test"},
+        SearchCaps(100, 20, 0, 20),
+        minimum_parent_support=80,
+    )
+    support = SupportRules(80, 30, 8, 0.25, 3, 15)
+    census = evaluate_candidate_census(
+        discovery,
+        candidates,
+        registry,
+        support_rules=support,
+        ordered_bins={},
+        fdr_q=0.10,
+    )
+    frozen = freeze_discovery_library(
+        census,
+        candidates,
+        discovery,
+        retained_stage_cap=20,
+        per_direction_cap=10,
+    )
+    validation_metrics, survivors = validate_discovery_library(
+        validation,
+        frozen,
+        support_rules=support,
+        holm_alpha=0.10,
+        per_direction_cap=5,
+        bootstrap_draws=20,
+        bootstrap_seed=20260717,
+    )
+    return census, frozen, validation_metrics, survivors
 
 
 def test_discovery_rules_use_discovery_data_only() -> None:
@@ -94,6 +187,22 @@ def test_search_caps_are_enforced() -> None:
         candidates, {candidate.signature_id: 1.0 for candidate in candidates}, cap=2
     )
     assert len(retained) <= 2
+
+
+def test_broad_cap_balances_univariate_and_pairwise_candidates() -> None:
+    frame = _panel().assign(
+        motif=[f"m{i}" for i in np.arange(len(_panel()))],
+        location=np.where(np.arange(len(_panel())) % 2, "high", "low"),
+    )
+    _, registry = generate_bounded_candidates(
+        frame,
+        {"motif": "state_history", "location": "price_location"},
+        SearchCaps(40, 20, 0, 20),
+        minimum_parent_support=80,
+    )
+    stages = pd.Series([row["stage"] for row in registry]).value_counts()
+    assert stages["univariate"] == 20
+    assert stages["pairwise"] == 20
 
 
 def test_support_rules_are_enforced() -> None:
@@ -180,6 +289,48 @@ def test_atlas_requires_positive_frozen_conservative_value() -> None:
     assert directional.iloc[0]["predicted_state"] == "LONG"
 
 
+def test_unavailable_opposite_library_feature_forces_neutral() -> None:
+    frame = (
+        _panel()
+        .iloc[:1]
+        .assign(
+            movement_permission=True,
+            available_signal="yes",
+            unavailable_signal=np.nan,
+        )
+    )
+    long = Signature(
+        "long_available",
+        "LONG",
+        (Condition("available_signal", "==", "yes", "test"),),
+    )
+    short = Signature(
+        "short_unavailable",
+        "SHORT",
+        (Condition("unavailable_signal", "==", "yes", "test"),),
+    )
+    library = [
+        {
+            "signature": long.to_dict(),
+            "conservative_value_bps": 1.0,
+            "frozen_class_probabilities": {"LONG": 0.6, "SHORT": 0.2, "NEUTRAL": 0.2},
+        },
+        {
+            "signature": short.to_dict(),
+            "conservative_value_bps": 1.0,
+            "frozen_class_probabilities": {"LONG": 0.2, "SHORT": 0.6, "NEUTRAL": 0.2},
+        },
+    ]
+    decisions = apply_atlas_controller(
+        frame,
+        library,
+        base_probabilities={"LONG": 0.4, "SHORT": 0.4, "NEUTRAL": 0.2},
+    )
+    assert decisions.iloc[0]["long_vote_count"] == 1
+    assert decisions.iloc[0]["predicted_state"] == "NEUTRAL"
+    assert decisions.iloc[0]["reason_code"] == "required_causal_feature_unavailable"
+
+
 def test_baselines_use_identical_opportunity_population_and_clocks() -> None:
     frame = _panel()
     predictions = baseline_predictions(frame)
@@ -219,11 +370,99 @@ def test_all_frozen_null_families_execute_with_validation_correction() -> None:
     assert nulls["persistent_positive_count"].ge(0).all()
 
 
+def test_null_families_score_only_rules_their_transform_changes() -> None:
+    frame = _panel(200).assign(
+        chronology_stage=np.where(np.arange(200) < 100, "discovery", "validation"),
+        clock_phase="middle",
+        state_motif_2="1>2",
+        state_motif_3=np.where(np.arange(200) % 2, "1>2>1", "2>1>2"),
+        state_motif_4="2>1>2>1",
+        same_orientation_repeat_bin=np.where(np.arange(200) % 3, "one", "two_plus"),
+        return_6_cross_sectional_rank_bin=np.where(
+            np.arange(200) % 2, "upper_quintile", "middle"
+        ),
+        universe_breadth_bin=np.where(np.arange(200) % 4, "positive", "negative"),
+        decision_timestamp=pd.date_range("2024-01-01", periods=200, freq="5min", tz="UTC"),
+        round_trip_cost_bps=10.0,
+    )
+    signatures = [
+        Signature(
+            "clock",
+            "LONG",
+            (Condition("decision_clock", "==", "clock_12", "clock"),),
+        ),
+        Signature(
+            "motif",
+            "LONG",
+            (Condition("state_motif_3", "==", "1>2>1", "state_history"),),
+        ),
+        Signature(
+            "repeat",
+            "LONG",
+            (
+                Condition(
+                    "same_orientation_repeat_bin",
+                    "==",
+                    "one",
+                    "state_history",
+                ),
+            ),
+        ),
+        Signature(
+            "stock_cross_section",
+            "LONG",
+            (
+                Condition(
+                    "return_6_cross_sectional_rank_bin",
+                    "==",
+                    "upper_quintile",
+                    "cross_sectional",
+                ),
+            ),
+        ),
+        Signature(
+            "breadth_environment",
+            "LONG",
+            (
+                Condition(
+                    "universe_breadth_bin",
+                    "==",
+                    "positive",
+                    "cross_sectional_environment",
+                ),
+            ),
+        ),
+    ]
+    library = [
+        {"signature": signature.to_dict(), "discovery_metrics": {}}
+        for signature in signatures
+    ]
+    atlas = frame[["period", "chronology_stage"]].assign(predicted_state="NEUTRAL")
+    nulls = null_test_results(frame, library, signatures, atlas, seed=20260717).set_index("null")
+    assert nulls.loc["feature_rows_wrong_session_lag", "tested_signatures"] == 4
+    assert nulls.loc["stock_identity_permuted_within_timestamp", "tested_signatures"] == 1
+    assert nulls.loc["state_history_permuted_within_clock_phase", "tested_signatures"] == 1
+
+
 def test_synthetic_persistent_long_signature_survives_validation() -> None:
     frame = _panel()
     discovery = evaluate_signature(frame.query("period == 2024"), _long_rule())
     validation = evaluate_signature(frame.query("period == 2025"), _long_rule())
     assert survives_validation(discovery, validation, require_double_cost=False)
+
+
+def test_production_census_persistent_long_survives_fdr_freeze_and_validation() -> None:
+    census, frozen, validation_metrics, survivors = _production_discovery_and_validation(
+        _production_stage(2025), _production_stage(2026), "signal"
+    )
+    assert census["discovery_eligible"].any()
+    assert any(
+        entry["signature"]["direction"] == "LONG"
+        and entry["signature"]["conditions"][0]["value"] == "yes"
+        for entry in frozen
+    )
+    assert validation_metrics["validation_survived"].any()
+    assert any(entry["signature"]["direction"] == "LONG" for entry in survivors)
 
 
 def test_synthetic_discovery_only_overfit_rule_fails_validation() -> None:
@@ -233,6 +472,17 @@ def test_synthetic_discovery_only_overfit_rule_fails_validation() -> None:
     discovery_metrics = evaluate_signature(frame.query("period == 2024"), _long_rule())
     validation_metrics = evaluate_signature(validation, _long_rule())
     assert not survives_validation(discovery_metrics, validation_metrics, False)
+
+
+def test_production_census_discovery_only_rule_freezes_then_fails_validation() -> None:
+    _, frozen, validation_metrics, survivors = _production_discovery_and_validation(
+        _production_stage(2025),
+        _production_stage(2026, adverse_signal=True),
+        "signal",
+    )
+    assert any(entry["signature"]["direction"] == "LONG" for entry in frozen)
+    assert not validation_metrics["validation_survived"].any()
+    assert survivors == []
 
 
 def test_synthetic_short_signature_is_not_inverse_long_automatically() -> None:
@@ -248,6 +498,17 @@ def test_synthetic_neutral_population_does_not_manufacture_directional_signature
     assert metrics["directional_lift"] <= 0
 
 
+def test_production_census_neutral_population_freezes_no_directional_rule() -> None:
+    census, frozen, _, survivors = _production_discovery_and_validation(
+        _production_stage(2025, neutral_only=True),
+        _production_stage(2026, neutral_only=True),
+        "signal",
+    )
+    assert not census["discovery_eligible"].any()
+    assert frozen == []
+    assert survivors == []
+
+
 def test_synthetic_state_motif_with_value_is_recovered() -> None:
     frame = _panel().assign(state_motif_3=np.where(np.arange(120) % 3, "1>3>1", "0>1>0"))
     candidates, _ = generate_bounded_candidates(
@@ -256,6 +517,64 @@ def test_synthetic_state_motif_with_value_is_recovered() -> None:
         SearchCaps(20, 20, 0, 20),
     )
     assert any(rule.conditions[0].value == "1>3>1" for rule in candidates)
+
+
+def test_production_census_recovers_causal_motif_through_validation() -> None:
+    census, frozen, _, survivors = _production_discovery_and_validation(
+        _production_stage(2025, feature="state_motif_3"),
+        _production_stage(2026, feature="state_motif_3"),
+        "state_motif_3",
+    )
+    assert census["discovery_eligible"].any()
+    assert any(
+        entry["signature"]["conditions"][0]["value"] == "1>3>1" for entry in frozen
+    )
+    assert any(
+        entry["signature"]["conditions"][0]["value"] == "1>3>1" for entry in survivors
+    )
+
+
+def test_rare_levels_remain_in_pre_support_candidate_census() -> None:
+    frame = _production_stage(2025)
+    frame.loc[frame.index[0], "signal"] = "rare"
+    candidates, registry = generate_bounded_candidates(
+        frame,
+        {"signal": "test"},
+        SearchCaps(100, 20, 0, 20),
+        minimum_parent_support=80,
+    )
+    support = SupportRules(80, 30, 8, 0.25, 3, 15)
+    census = evaluate_candidate_census(
+        frame,
+        candidates,
+        registry,
+        support_rules=support,
+        ordered_bins={},
+        fdr_q=0.10,
+    )
+    rare = census.loc[census["conditions_json"].str.contains('"value":"rare"', regex=False)]
+    assert len(rare) == 2
+    assert rare["rejection_reasons_json"].str.contains("insufficient_rows").all()
+
+
+def test_motif_length_stress_substitutes_causal_neighbouring_lengths() -> None:
+    frame = pd.DataFrame(
+        {
+            "state_motif_2": ["2>3"],
+            "state_motif_3": ["1>2>3"],
+            "state_motif_4": ["0>1>2>3"],
+        }
+    )
+    signature = Signature(
+        "motif",
+        "LONG",
+        (Condition("state_motif_3", "==", "1>2>3", "state_history"),),
+    )
+    variants = _motif_length_variants(frame, signature, 0)
+    assert {(length, token) for length, token, _ in variants} == {
+        (2, "2>3"),
+        (4, "0>1>2>3"),
+    }
 
 
 def test_future_leaking_motif_is_rejected() -> None:

@@ -26,10 +26,11 @@ def evaluate_signature(frame: pd.DataFrame, signature: Signature) -> dict[str, A
         pd.to_numeric(selected.get(payoff_column, pd.Series(dtype=float)), errors="coerce"),
         dtype=float,
     )
-    cost = (
-        pd.Series(pd.to_numeric(selected["round_trip_cost_bps"], errors="coerce"), dtype=float)
-        if "round_trip_cost_bps" in selected
-        else pd.Series(10.0, index=selected.index, dtype=float)
+    if "round_trip_cost_bps" not in selected:
+        raise ValueError("exact round_trip_cost_bps is required for economic evaluation")
+    cost = pd.Series(
+        pd.to_numeric(selected["round_trip_cost_bps"], errors="coerce"),
+        dtype=float,
     )
     return {
         "signature_id": signature.signature_id,

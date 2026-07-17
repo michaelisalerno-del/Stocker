@@ -30,26 +30,27 @@ def construct_relative_outcomes(
         np.where(percentile.le(0.20), "SHORT", "NEUTRAL"),
     )
     target = np.where(peer_count.ge(minimum_peers) & residual.notna(), target, "UNAVAILABLE")
-    return pd.DataFrame(
-        {
-            "opportunity_id": output["opportunity_id"],
-            "period": output["period"],
-            "session": output["session"],
-            "symbol": output["symbol"],
-            "decision_clock": output["decision_clock"],
-            "decision_timestamp": output["decision_timestamp"],
-            "peer_count": peer_count,
-            "future_equal_universe_return_bps": universe,
-            "future_residual_return_bps": residual,
-            "future_residual_percentile": percentile,
-            "target": target,
-            "long_net_bps": residual,
-            "short_net_bps": -residual,
-            "round_trip_cost_bps": 0.0,
-            "sector_relative_status": "unavailable_no_frozen_sector_membership",
-            "absolute_profitability_claim_allowed": False,
-        }
-    )
+    payload: dict[str, Any] = {
+        "opportunity_id": output["opportunity_id"],
+        "period": output["period"],
+        "session": output["session"],
+        "symbol": output["symbol"],
+        "decision_clock": output["decision_clock"],
+        "decision_timestamp": output["decision_timestamp"],
+        "peer_count": peer_count,
+        "future_equal_universe_return_bps": universe,
+        "future_residual_return_bps": residual,
+        "future_residual_percentile": percentile,
+        "target": target,
+        "long_net_bps": residual,
+        "short_net_bps": -residual,
+        "round_trip_cost_bps": 0.0,
+        "sector_relative_status": "unavailable_no_frozen_sector_membership",
+        "absolute_profitability_claim_allowed": False,
+    }
+    if "chronology_stage" in output:
+        payload["chronology_stage"] = output["chronology_stage"]
+    return pd.DataFrame(payload)
 
 
 def relative_strength_baseline(relative: pd.DataFrame, features: pd.DataFrame) -> pd.DataFrame:
@@ -62,7 +63,10 @@ def relative_strength_baseline(relative: pd.DataFrame, features: pd.DataFrame) -
     rank = pd.to_numeric(joined["return_6_bps_cross_sectional_rank"], errors="coerce")
     state = np.where(rank.ge(0.80), "LONG", np.where(rank.le(0.20), "SHORT", "NEUTRAL"))
     state = np.where(rank.notna(), state, "NEUTRAL")
-    return joined[["opportunity_id", "period", "session", "symbol", "decision_clock"]].assign(
+    columns = ["opportunity_id", "period", "session", "symbol", "decision_clock"]
+    if "chronology_stage" in joined:
+        columns.append("chronology_stage")
+    return joined[columns].assign(
         model_id="contemporaneous_relative_strength", predicted_state=state
     )
 
@@ -79,7 +83,9 @@ def relative_baseline_economic_metrics(
     )
     joined = joined.loc[joined["target"].ne("UNAVAILABLE")]
     rows: list[dict[str, Any]] = []
-    for period, group in joined.groupby("period", sort=True):
+    stage_column = "chronology_stage" if "chronology_stage" in joined else "period"
+    for stage, group in joined.groupby(stage_column, sort=True):
+        period = int(group["period"].iloc[0])
         state = group["predicted_state"].astype(str)
         directional = state.isin(["LONG", "SHORT"])
         payoff = np.where(
@@ -92,6 +98,7 @@ def relative_baseline_economic_metrics(
             {
                 "model_id": "contemporaneous_relative_strength",
                 "period": int(cast(Any, period)),
+                "chronology_stage": str(stage),
                 "rows": len(group),
                 "coverage": float(directional.mean()),
                 "mean_residual_bps_per_directional_output": float(payoff[directional].mean())

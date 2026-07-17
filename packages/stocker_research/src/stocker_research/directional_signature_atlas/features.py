@@ -16,21 +16,40 @@ _FORBIDDEN_EXACT = {
     "stock_identity",
     "future_state",
     "future_route",
+    "target",
+    "payoff",
+    "outcome",
+    "outcome_label",
+    "first_touch_target",
+    "net_long_return_bps",
+    "net_short_return_bps",
+    "gross_long_return_bps",
+    "gross_short_return_bps",
     "realised_child",
     "realized_child",
+    "realised_morph",
+    "realized_morph",
 }
 _FORBIDDEN_FRAGMENTS = (
     "future_return",
     "future_direction",
     "future_state",
+    "future_loop",
     "route_identity",
     "child_identity",
+    "morph_identity",
+    "realised_morph",
+    "realized_morph",
     "mfe",
     "mae",
     "hindsight_episode",
     "outcome_episode",
     "terminal_payoff",
     "actual_target",
+    "outcome_label",
+    "payoff",
+    "target",
+    "outcome",
 )
 
 
@@ -90,9 +109,9 @@ def reconstruct_state_motifs(
 ) -> pd.DataFrame:
     """Attach causal run-state motifs of lengths two, three, and four.
 
-    A state enters a motif only after the bar carrying that causal state has
-    completed.  A current run may be present, but no future transition or final
-    current-run duration is consulted.
+    Motifs contain completed runs only.  The active state is exported
+    separately and does not enter history until a later causal transition
+    completes that run.
     """
 
     required = {symbol_column, session_column, timestamp_column, state_column}
@@ -126,13 +145,14 @@ def reconstruct_state_motifs(
             if len(run_states) >= 2:
                 output.at[position, "previous_state"] = run_states[-2]
                 output.at[position, "prior_completed_state_dwell_bars"] = run_lengths[-2]
-                output.at[position, "prior_completed_transition_duration_bars"] = run_lengths[-2]
+                output.at[position, "prior_completed_transition_duration_bars"] = pd.NA
             if len(run_states) >= 3:
                 output.at[position, "previous_state_2"] = run_states[-3]
+            completed_states = run_states[:-1]
             for length in (2, 3, 4):
-                if len(run_states) >= length:
+                if len(completed_states) >= length:
                     output.at[position, f"state_motif_{length}"] = ">".join(
-                        str(value) for value in run_states[-length:]
+                        str(value) for value in completed_states[-length:]
                     )
             output.at[position, "same_orientation_repeat_count"] = _repeat_count(run_states)
     for column in (

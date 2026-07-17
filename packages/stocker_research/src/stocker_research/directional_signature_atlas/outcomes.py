@@ -45,11 +45,16 @@ def movement_permission(
     )
 
 
-def _unavailable(decision_ordinal: int, reason: str) -> dict[str, Any]:
+def _unavailable(
+    decision_ordinal: int, reason: str, *, first_touch_barrier_bps: float
+) -> dict[str, Any]:
     return {
         "decision_ordinal": decision_ordinal,
         "score_status": reason,
         "target": "UNAVAILABLE",
+        "first_touch_target": "UNAVAILABLE",
+        "first_touch_step": None,
+        "first_touch_barrier_bps": first_touch_barrier_bps,
     }
 
 
@@ -61,36 +66,57 @@ def build_economic_outcome(
     horizon_bars: int = 24,
     dead_band_cost_multiple: float = 2.0,
     entry_delay_bars: int = 1,
+    first_touch_barrier_bps: float | None = None,
 ) -> dict[str, Any]:
     """Reconstruct exact next-open entry and same-session fixed terminal."""
 
     by_ordinal = session.set_index("bar_ordinal", drop=False)
     if entry_delay_bars < 1 or entry_delay_bars >= horizon_bars:
         raise ValueError("entry delay must preserve a positive fixed-terminal horizon")
+    threshold = dead_band_cost_multiple * round_trip_cost_bps
+    touch_barrier = threshold if first_touch_barrier_bps is None else first_touch_barrier_bps
+    if not math.isfinite(touch_barrier) or touch_barrier <= 0.0:
+        raise ValueError("first-touch barrier must be finite and positive")
     path_ordinals = list(
         range(decision_ordinal + entry_delay_bars, decision_ordinal + horizon_bars + 1)
     )
     if any(ordinal not in by_ordinal.index for ordinal in path_ordinals):
-        return _unavailable(decision_ordinal, "missing_exact_24_bar_path")
+        return _unavailable(
+            decision_ordinal,
+            "missing_exact_24_bar_path",
+            first_touch_barrier_bps=touch_barrier,
+        )
     path = by_ordinal.loc[path_ordinals]
     entry_open = float(path.iloc[0]["open"])
     terminal_close = float(path.iloc[-1]["close"])
     required = path[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
     if required.isna().any().any() or entry_open <= 0.0 or terminal_close <= 0.0:
-        return _unavailable(decision_ordinal, "invalid_outcome_path")
+        return _unavailable(
+            decision_ordinal,
+            "invalid_outcome_path",
+            first_touch_barrier_bps=touch_barrier,
+        )
     gross_long = 10_000.0 * (terminal_close / entry_open - 1.0)
     gross_short = -gross_long
     long_net = gross_long - round_trip_cost_bps
     short_net = gross_short - round_trip_cost_bps
-    threshold = dead_band_cost_multiple * round_trip_cost_bps
     target = classify_terminal_move(gross_long, round_trip_cost_bps, dead_band_cost_multiple)
     highs = required["high"].to_numpy(float)
     lows = required["low"].to_numpy(float)
-    upper = entry_open * (1.0 + threshold / 10_000.0)
-    lower = entry_open * (1.0 - threshold / 10_000.0)
+    opens = required["open"].to_numpy(float)
+    upper = entry_open * (1.0 + touch_barrier / 10_000.0)
+    lower = entry_open * (1.0 - touch_barrier / 10_000.0)
     first_touch = "NEITHER"
     first_touch_step: int | None = None
-    for step, (high, low) in enumerate(zip(highs, lows, strict=True), start=1):
+    for step, (bar_open, high, low) in enumerate(zip(opens, highs, lows, strict=True), start=1):
+        if bar_open >= upper:
+            first_touch = "UPPER_FIRST"
+            first_touch_step = step
+            break
+        if bar_open <= lower:
+            first_touch = "LOWER_FIRST"
+            first_touch_step = step
+            break
         upper_touch = high >= upper
         lower_touch = low <= lower
         if upper_touch and lower_touch:
@@ -128,4 +154,5 @@ def build_economic_outcome(
         "target": target,
         "first_touch_target": first_touch,
         "first_touch_step": first_touch_step,
+        "first_touch_barrier_bps": touch_barrier,
     }

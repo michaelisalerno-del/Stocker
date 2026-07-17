@@ -55,10 +55,11 @@ def _state_anchor_rows(panel: pd.DataFrame, decision_ordinals: set[int]) -> pd.D
             if ordinal not in decision_ordinals:
                 continue
             motifs: dict[str, str | None] = {}
+            completed_states = run_states[:-1]
             for length in (2, 3, 4):
                 motifs[f"state_motif_{length}"] = (
-                    ">".join(str(value) for value in run_states[-length:])
-                    if len(run_states) >= length
+                    ">".join(str(value) for value in completed_states[-length:])
+                    if len(completed_states) >= length
                     else None
                 )
             repeat = 0
@@ -80,9 +81,9 @@ def _state_anchor_rows(panel: pd.DataFrame, decision_ordinals: set[int]) -> pd.D
                     "prior_completed_state_dwell_bars": run_lengths[-2]
                     if len(run_lengths) >= 2
                     else np.nan,
-                    "prior_completed_transition_duration_bars": run_lengths[-2]
-                    if len(run_lengths) >= 2
-                    else np.nan,
+                    # No exact transition-duration source exists at this fixed-clock
+                    # boundary.  Dwell is not a valid substitute, so fail closed.
+                    "prior_completed_transition_duration_bars": np.nan,
                     "same_orientation_repeat_count": repeat,
                     "state_run_entry_at_decision": int(row.age) == 1,
                     **motifs,
@@ -383,7 +384,13 @@ def build_feature_ledger(
         validate="one_to_one",
         suffixes=("", "_state"),
     )
-    missing_state_inputs = ~ledger["frozen_state_inputs_complete"].fillna(False).astype(bool)
+    # The reused state/path/movement bundle was fitted on the full 2024 period.
+    # It is therefore only a causally frozen transform from 2025 onward.  Keep
+    # 2024 in the fixed population, but fail every model-derived field closed.
+    before_parameter_freeze = pd.to_datetime(ledger["session"]).lt(pd.Timestamp("2025-01-01"))
+    missing_state_inputs = (
+        ~ledger["frozen_state_inputs_complete"].fillna(False).astype(bool) | before_parameter_freeze
+    )
     state_columns = [
         "current_state",
         "previous_state",
@@ -399,6 +406,21 @@ def build_feature_ledger(
     ]
     ledger.loc[missing_state_inputs, state_columns] = np.nan
     ledger.loc[missing_state_inputs, "state_run_entry_at_decision"] = False
+    model_derived_columns = [
+        "top_parent_loop",
+        "top_loop_orientation",
+        "parent_loop_family",
+        "top_loop_score",
+        "top_second_margin",
+        "compatibility_mass",
+        "compatibility_entropy",
+        "compatible_loop_count",
+        "predicted_future_range_bps",
+        "predicted_absolute_movement_bps",
+        "state_context_future_range_bps",
+        "state_context_absolute_movement_bps",
+    ]
+    ledger.loc[before_parameter_freeze, model_derived_columns] = np.nan
     if ledger.loc[~missing_state_inputs, "current_state"].isna().any():
         missing = (
             ledger.loc[~missing_state_inputs & ledger["current_state"].isna(), "opportunity_id"]
@@ -421,11 +443,17 @@ def build_feature_ledger(
     ledger["stock_vs_market_return_scale"] = (
         10_000.0 * ledger["stock_minus_vti_return_6"] / ledger["prior_scale_bps"]
     )
+    ledger["directional_displacement_scale"] = ledger["return_sum_6"] / ledger[
+        "return_std_12"
+    ].replace(0.0, np.nan)
     ledger["range_to_cost_ratio"] = ledger["predicted_future_range_bps"] / round_trip_cost_bps
-    ledger["movement_permission"] = [
-        movement_permission(float(value), round_trip_cost_bps) if pd.notna(value) else False
-        for value in ledger["predicted_future_range_bps"]
-    ]
+    ledger["movement_permission"] = pd.array(
+        [
+            movement_permission(float(value), round_trip_cost_bps) if pd.notna(value) else pd.NA
+            for value in ledger["predicted_future_range_bps"]
+        ],
+        dtype="boolean",
+    )
     ledger["scheduled_bars_remaining"] = 77 - ledger["decision_ordinal"].astype(int)
     ledger["minutes_since_open"] = ledger["decision_ordinal"].astype(int) * 5
     ledger["minutes_until_close"] = ledger["scheduled_bars_remaining"] * 5
@@ -481,8 +509,16 @@ def build_feature_ledger(
         ["below_range", "lower_half", "upper_half", "above_range"],
     )
     ledger["typical_price_distance_bin"] = _four_way_scale(ledger["session_mean_distance_scale"])
+    ledger["directional_displacement_bin"] = _four_way_scale(
+        ledger["directional_displacement_scale"]
+    )
     ledger["close_location_bin"] = _cut(
         ledger["current_close_location"], [-np.inf, 1 / 3, 2 / 3, np.inf], ["low", "middle", "high"]
+    )
+    ledger["current_range_bin"] = _cut(
+        ledger["current_range_scale"],
+        [-np.inf, 0.75, 1.25, np.inf],
+        ["low", "normal", "high"],
     )
     body_ratio = ledger["current_body_scale"] / ledger["current_range_scale"].replace(0.0, np.nan)
     ledger["body_to_range_bin"] = _cut(
@@ -494,6 +530,16 @@ def build_feature_ledger(
         [-np.inf, -0.20, 0.20, np.inf],
         ["upper_dominant", "balanced", "lower_dominant"],
     )
+    ledger["upper_wick_ratio_bin"] = _cut(
+        ledger["current_upper_wick_fraction"],
+        [-np.inf, 0.20, 0.50, np.inf],
+        ["low", "middle", "high"],
+    )
+    ledger["lower_wick_ratio_bin"] = _cut(
+        ledger["current_lower_wick_fraction"],
+        [-np.inf, 0.20, 0.50, np.inf],
+        ["low", "middle", "high"],
+    )
     ledger["compression_bin"] = _cut(
         ledger["compression_3_to_12"],
         [-np.inf, 0.75, 1.25, np.inf],
@@ -503,6 +549,16 @@ def build_feature_ledger(
         ledger["rolling_high_low_location"],
         [-np.inf, 1 / 3, 2 / 3, np.inf],
         ["low", "middle", "high"],
+    )
+    ledger["distance_from_rolling_low_bin"] = _cut(
+        ledger["rolling_high_low_location"],
+        [-np.inf, 1 / 3, 2 / 3, np.inf],
+        ["near", "middle", "far"],
+    )
+    ledger["distance_from_rolling_high_bin"] = _cut(
+        1.0 - ledger["rolling_high_low_location"],
+        [-np.inf, 1 / 3, 2 / 3, np.inf],
+        ["near", "middle", "far"],
     )
     ledger["realised_volatility_bin"] = _cut(
         10_000.0 * ledger["return_std_12"], [-np.inf, 15.0, 35.0, np.inf], ["low", "middle", "high"]
@@ -605,6 +661,9 @@ def build_outcome_ledgers(
                     "decision_ordinal": int(event.decision_ordinal),
                     "score_status": "missing_session",
                     "target": "UNAVAILABLE",
+                    "first_touch_target": "UNAVAILABLE",
+                    "first_touch_step": None,
+                    "first_touch_barrier_bps": float(event.barrier_bps),
                 }
             else:
                 outcome = build_economic_outcome(
@@ -613,6 +672,7 @@ def build_outcome_ledgers(
                     round_trip_cost_bps,
                     horizon_bars=horizon_bars,
                     entry_delay_bars=entry_delay_bars,
+                    first_touch_barrier_bps=float(event.barrier_bps),
                 )
             rows.append(
                 {
@@ -643,6 +703,7 @@ def build_outcome_ledgers(
             "score_status",
             "first_touch_target",
             "first_touch_step",
+            "first_touch_barrier_bps",
         ]
     ].copy()
     coverage = pd.concat(coverage_parts, ignore_index=True)
@@ -661,7 +722,11 @@ def recompute_cross_sectional_after_stock_deletion(
     frame: pd.DataFrame,
     deleted_symbol: str,
 ) -> pd.DataFrame:
-    """Delete one stock and recompute every peer-dependent condition."""
+    """Delete one stock and recompute direct contemporaneous peer features.
+
+    Frozen state/loop/movement context is intentionally not re-estimated here;
+    callers must label that downstream portion unavailable or frozen.
+    """
 
     output = frame.loc[frame["symbol"].ne(deleted_symbol)].copy()
     output = add_cross_sectional_features(

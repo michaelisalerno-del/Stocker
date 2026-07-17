@@ -18,11 +18,17 @@ import numpy as np
 import pandas as pd
 
 from stocker_research.directional_signature_atlas.analysis import (
+    atlas_concentration,
     evaluate_candidate_census,
     evaluate_neutral_veto_census,
     freeze_discovery_library,
+    paired_simple_baseline_metrics,
     score_frozen_library,
+    signature_attribution_rows,
     signature_breakdowns,
+    signature_from_dict,
+    signature_metrics,
+    signature_probability_metrics,
     validate_discovery_library,
     validate_neutral_veto_library,
 )
@@ -36,6 +42,7 @@ from stocker_research.directional_signature_atlas.historical import (
     build_outcome_ledgers,
     feature_family_map,
     load_frozen_movement_bundle,
+    recompute_cross_sectional_after_stock_deletion,
 )
 from stocker_research.directional_signature_atlas.io import (
     canonical_json_bytes,
@@ -54,14 +61,17 @@ from stocker_research.directional_signature_atlas.prospective import (
     ProspectiveLedger,
     build_forecast_record,
     build_settlement_record,
+    canonical_library_hash,
 )
 from stocker_research.directional_signature_atlas.robustness import (
     null_test_results,
+    stress_neutral_veto_library,
     stress_signature_library,
 )
 from stocker_research.directional_signature_atlas.signatures import (
     SearchCaps,
     SupportRules,
+    candidate_search_space_counts,
     extract_shallow_tree_candidates,
     generate_bounded_candidates,
 )
@@ -122,6 +132,7 @@ def _snapshot_sources(
             "path_parameters": BUNDLE_ROOT / "artifacts/path/model_parameters.npz",
             "movement_manifest": BUNDLE_ROOT / "artifacts/price/feature_manifest.json",
             "movement_parameters": BUNDLE_ROOT / "artifacts/price/outcome_model_parameters.npz",
+            "frozen_movement_core": CORE_PATH,
             "atlas_contract": CONTRACT_PATH,
             "atlas_feature_schema": FEATURE_SCHEMA_PATH,
             "atlas_runner": Path(__file__).resolve(),
@@ -152,6 +163,17 @@ def _feature_schema() -> dict[str, Any]:
     payload = json.loads(FEATURE_SCHEMA_PATH.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise TypeError("feature schema must be an object")
+    feature_rows = cast(list[dict[str, Any]], payload.get("features", []))
+    names = [str(row.get("name")) for row in feature_rows]
+    if len(names) != len(set(names)):
+        raise ValueError("feature schema contains duplicate names")
+    missing_order = [
+        str(row["name"])
+        for row in feature_rows
+        if row.get("type") == "ordered_categorical" and not row.get("bins")
+    ]
+    if missing_order:
+        raise ValueError(f"ordered feature bins are not frozen: {missing_order}")
     return payload
 
 
@@ -176,6 +198,7 @@ def _write_build_artifacts(
     anchors: pd.DataFrame,
     anchor_audit: dict[str, Any],
     feature_ledger: pd.DataFrame,
+    sealed_feature_hash: str,
     outcomes: pd.DataFrame,
     delayed_outcomes: pd.DataFrame,
     first_touch: pd.DataFrame,
@@ -210,24 +233,15 @@ def _write_build_artifacts(
         output_root / "outcome_data_coverage.csv",
         sort_by=["period", "symbol_norm"],
     )
-    write_deterministic_parquet(
-        feature_ledger,
-        output_root / "outcome_free_feature_ledger.parquet",
-        sort_by=["opportunity_id"],
-    )
-    feature_hash = sha256_file(output_root / "outcome_free_feature_ledger.parquet")
-    write_deterministic_json(
-        {
-            "run_id": run_id,
-            "contract_sha256": contract_sha256(CONTRACT_PATH),
-            "feature_schema_sha256": sha256_file(FEATURE_SCHEMA_PATH),
-            "data_snapshot_sha256": data_snapshot_hash,
-            "feature_ledger_sha256": feature_hash,
-            "feature_rows": len(feature_ledger),
-            "outcomes_joined_at_seal": false_value(),
-        },
-        output_root / "pre_outcome_feature_manifest.json",
-    )
+    feature_path = output_root / "outcome_free_feature_ledger.parquet"
+    manifest_path = output_root / "pre_outcome_feature_manifest.json"
+    if not feature_path.is_file() or not manifest_path.is_file():
+        raise AssertionError("pre-outcome feature seal disappeared before outcome write")
+    if sha256_file(feature_path) != sealed_feature_hash:
+        raise AssertionError("pre-outcome feature ledger changed after outcome read")
+    sealed_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if sealed_manifest.get("feature_ledger_sha256") != sealed_feature_hash:
+        raise AssertionError("pre-outcome feature manifest changed after outcome read")
     write_deterministic_parquet(
         outcomes,
         output_root / "primary_economic_outcome_ledger.parquet",
@@ -287,7 +301,7 @@ def _write_build_artifacts(
         "contract_sha256": contract_sha256(CONTRACT_PATH),
         "feature_schema_sha256": sha256_file(FEATURE_SCHEMA_PATH),
         "data_snapshot_sha256": data_snapshot_hash,
-        "feature_ledger_sha256": feature_hash,
+        "feature_ledger_sha256": sealed_feature_hash,
         "git_sha": _git_sha(),
         "population_rows": len(events),
         "feature_rows": len(feature_ledger),
@@ -305,7 +319,7 @@ def _write_build_artifacts(
 def write_prior_experiment_coverage(output_root: Path) -> None:
     """Freeze the prior-work distinction established before atlas scoring."""
 
-    rows = [
+    rows: list[dict[str, Any]] = [
         {
             "experiment": "Long/Short/Neutral Detector V1",
             "already_tested": (
@@ -367,6 +381,64 @@ def write_prior_experiment_coverage(output_root: Path) -> None:
             ),
         },
     ]
+    evidence_slugs: list[str | None] = [
+        "20260714-long-short-neutral-detector-v1",
+        "20260714-selective-payoff-equations-v1",
+        "20260711-regime-utility-ablation-v1",
+        "20260711-loop-burst-mechanism-v1",
+        "20260714-causal-loop-state-path-v1",
+        "20260713-dynamic-loop-context-edge-v1",
+        "20260714-dynamic-loop-edge-state-v2",
+        "20260715-sequential-loop-competitor-veto-v1",
+        "20260716-directed-economic-loop-regime-rotation-v1",
+        "20260716-fixed-one-bar-entry-latency-v1",
+    ]
+    runner_names = {
+        "20260714-long-short-neutral-detector-v1": "run_long_short_neutral_detector_v1.py",
+        "20260714-selective-payoff-equations-v1": "run_selective_payoff_equations_v1.py",
+        "20260711-regime-utility-ablation-v1": "run_regime_utility_ablation_v1.py",
+        "20260711-loop-burst-mechanism-v1": "run_loop_burst_mechanism_v1.py",
+        "20260714-causal-loop-state-path-v1": "run_causal_loop_state_path_v1.py",
+        "20260713-dynamic-loop-context-edge-v1": "run_dynamic_loop_context_edge_v1.py",
+        "20260714-dynamic-loop-edge-state-v2": "run_dynamic_loop_edge_state_v2.py",
+        "20260715-sequential-loop-competitor-veto-v1": "run_sequential_loop_competitor_veto_v1.py",
+        "20260716-directed-economic-loop-regime-rotation-v1": (
+            "run_directed_economic_loop_regime_rotation_v1.py"
+        ),
+        "20260716-fixed-one-bar-entry-latency-v1": "run_fixed_one_bar_entry_latency_v1.py",
+    }
+    auditor_names = {
+        slug: runner.replace("run_", "audit_", 1) for slug, runner in runner_names.items()
+    }
+    for row, slug in zip(rows, evidence_slugs, strict=True):
+        if slug is None:
+            row["evidence_status"] = "exact_named_experiment_not_found"
+            row["closest_repository_surface"] = (
+                "20260713-dynamic-loop-context-edge-v1; not silently treated as the exact title"
+            )
+            row["evidence"] = []
+            continue
+        candidates = {
+            "contract": HERE / f"contracts/{slug}.json",
+            "report": HERE / f"reports/{slug}.md",
+            "runner": HERE / runner_names[slug],
+            "auditor": HERE / auditor_names[slug],
+            "artifact_manifest": HERE / f"artifacts/{slug}/primary/artifact_manifest.json",
+        }
+        evidence: list[dict[str, Any]] = []
+        for role, path in candidates.items():
+            evidence.append(
+                {
+                    "role": role,
+                    "path": str(path),
+                    "available": path.is_file(),
+                    "sha256": sha256_file(path) if path.is_file() else None,
+                }
+            )
+        row["evidence_status"] = (
+            "complete" if all(item["available"] for item in evidence) else "partially_missing"
+        )
+        row["evidence"] = evidence
     write_deterministic_json(
         {
             "contract_id": "20260717-directional-signature-atlas-v1",
@@ -424,6 +496,26 @@ def build_ledgers(output_root: Path) -> dict[str, Any]:
     prior_runner = _load_module("atlas_prior_lsn", PRIOR_RUNNER_PATH)
     core = _load_module("atlas_frozen_movement_core", CORE_PATH)
     sources, data_snapshot_hash = _snapshot_sources(prior_runner, prior_contract)
+    frozen_source_mapping = {
+        "prior_fixed_clock_contract_sha256": "contract",
+        "prior_fixed_clock_runner_sha256": "runner",
+        "state_preprocessing_sha256": "state_preprocessing",
+        "state_parameters_sha256": "state_parameters",
+        "fixed_cycles_sha256": "fixed_cycles",
+        "loop_path_parameters_sha256": "path_parameters",
+        "movement_feature_manifest_sha256": "movement_manifest",
+        "movement_parameters_sha256": "movement_parameters",
+        "frozen_movement_core_sha256": "frozen_movement_core",
+        "vti_provider_sha256": "provider_VTI",
+    }
+    source_pins = contract["frozen_sources"]
+    drifted_pins = [
+        key
+        for key, source_name in frozen_source_mapping.items()
+        if str(source_pins[key]) != str(sources[source_name]["sha256"])
+    ]
+    if drifted_pins:
+        raise AssertionError(f"frozen source identity drifted: {drifted_pins}")
     run_id = (
         f"directional-signature-atlas-v1-{contract_sha256(CONTRACT_PATH)[:12]}-"
         f"{data_snapshot_hash[:12]}"
@@ -456,7 +548,7 @@ def build_ledgers(output_root: Path) -> dict[str, Any]:
     feature_ledger["feature_schema_hash"] = sha256_file(FEATURE_SCHEMA_PATH)
     if feature_ledger["opportunity_id"].duplicated().any() or len(feature_ledger) != len(events):
         raise AssertionError("feature ledger does not preserve the exact opportunity population")
-    seal_outcome_free_feature_ledger(
+    sealed_feature_hash = seal_outcome_free_feature_ledger(
         output_root,
         feature_ledger,
         run_id=run_id,
@@ -493,6 +585,7 @@ def build_ledgers(output_root: Path) -> dict[str, Any]:
         anchors=anchors,
         anchor_audit=anchor_audit,
         feature_ledger=feature_ledger,
+        sealed_feature_hash=sealed_feature_hash,
         outcomes=outcomes,
         delayed_outcomes=delayed_outcomes,
         first_touch=first_touch,
@@ -566,20 +659,441 @@ def _joined_scoring_frame(output_root: Path) -> tuple[pd.DataFrame, pd.DataFrame
     return joined, outcomes
 
 
+def _assign_chronology_stage(
+    frame: pd.DataFrame,
+    contract: dict[str, Any],
+) -> pd.DataFrame:
+    output = frame.copy()
+    session = pd.to_datetime(output["session"])
+    stage = np.full(len(output), "outside_frozen_chronology", dtype=object)
+    for name in (
+        "development_context",
+        "discovery",
+        "validation",
+        "final_opened_holdout",
+    ):
+        specification = contract["chronology"][name]
+        mask = session.ge(pd.Timestamp(specification["start"])) & session.lt(
+            pd.Timestamp(specification["end_exclusive"])
+        )
+        stage[mask] = name
+    output["chronology_stage"] = stage
+    if output["chronology_stage"].eq("outside_frozen_chronology").any():
+        raise AssertionError("opportunities fall outside the frozen chronology")
+    return output
+
+
+def _stage(frame: pd.DataFrame, name: str) -> pd.DataFrame:
+    return frame.loc[frame["chronology_stage"].eq(name)].copy()
+
+
+def _open_scoring_stage(
+    output_root: Path,
+    features: pd.DataFrame,
+    contract: dict[str, Any],
+    stage_name: str,
+) -> pd.DataFrame:
+    """Open only one registered outcome stage and join its causal features."""
+
+    specification = contract["chronology"][stage_name]
+    outcomes = pd.read_parquet(
+        output_root / "primary_economic_outcome_ledger.parquet",
+        filters=[
+            ("session", ">=", str(specification["start"])),
+            ("session", "<", str(specification["end_exclusive"])),
+        ],
+    )
+    stage_features = _stage(features, stage_name)
+    outcome_columns = [
+        "opportunity_id",
+        "target",
+        "gross_long_return_bps",
+        "net_long_return_bps",
+        "gross_short_return_bps",
+        "net_short_return_bps",
+        "absolute_terminal_move_bps",
+        "future_high_low_range_bps",
+        "mfe_long_bps",
+        "mae_long_bps",
+        "mfe_short_bps",
+        "mae_short_bps",
+        "entry_timestamp",
+        "entry_open",
+        "terminal_timestamp",
+        "terminal_close",
+        "score_status",
+    ]
+    joined = stage_features.merge(
+        outcomes[outcome_columns],
+        on="opportunity_id",
+        how="left",
+        validate="one_to_one",
+    )
+    if joined["target"].isna().any() or len(joined) != len(stage_features):
+        raise AssertionError(f"{stage_name} outcome join changed the frozen population")
+    joined["long_net_bps"] = joined["net_long_return_bps"]
+    joined["short_net_bps"] = joined["net_short_return_bps"]
+    return joined.loc[joined["target"].ne("UNAVAILABLE")].copy()
+
+
+def run_movement_permitted_surface(
+    scored: pd.DataFrame,
+    *,
+    output_root: Path,
+    contract: dict[str, Any],
+    feature_families: dict[str, str],
+    ordered_bins: dict[str, list[Any]],
+    caps: SearchCaps,
+    support_rules: SupportRules,
+) -> dict[str, Any]:
+    """Run a separately frozen search only where direction-neutral movement passes."""
+
+    output_root.mkdir(parents=True, exist_ok=True)
+    permitted = scored.loc[scored["movement_permission"].eq(True).fillna(False)].copy()
+    discovery = _stage(permitted, "discovery")
+    validation = _stage(permitted, "validation")
+    final = _stage(permitted, "final_opened_holdout")
+    candidates, registry = generate_bounded_candidates(
+        discovery,
+        feature_families,
+        caps,
+        minimum_parent_support=support_rules.minimum_rows,
+    )
+    tree_candidates, tree_registry = extract_shallow_tree_candidates(
+        discovery,
+        feature_families,
+        maximum_depth=int(contract["search"]["tree_maximum_depth"]),
+        minimum_leaf_rows=int(contract["search"]["tree_minimum_leaf_rows"]),
+        cap=int(contract["search"]["tree_candidate_cap"]),
+        seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 500,
+    )
+    candidate_map = {
+        candidate.signature_id: candidate for candidate in [*candidates, *tree_candidates]
+    }
+    candidates = [candidate_map[key] for key in sorted(candidate_map)]
+    registry_map = {str(row["signature_id"]): row for row in [*registry, *tree_registry]}
+    registry = [registry_map[key] for key in sorted(registry_map)]
+    census = evaluate_candidate_census(
+        discovery,
+        candidates,
+        registry,
+        support_rules=support_rules,
+        ordered_bins=ordered_bins,
+        fdr_q=float(contract["multiplicity"]["broad_discovery_q"]),
+    )
+    discovery_library = freeze_discovery_library(
+        census,
+        candidates,
+        discovery,
+        retained_stage_cap=int(contract["search"]["discovery_stage_retained_cap"]),
+        per_direction_cap=int(contract["search"]["frozen_discovery_long_cap"]),
+    )
+    validation_metrics, survivors = validate_discovery_library(
+        validation,
+        discovery_library,
+        support_rules=support_rules,
+        holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
+        per_direction_cap=int(contract["search"]["validation_survivor_long_cap"]),
+        bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
+        bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 500,
+    )
+    final_metrics = score_frozen_library(
+        final,
+        survivors,
+        bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
+        bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 500,
+    )
+    write_deterministic_parquet(
+        permitted,
+        output_root / "movement_permitted_scoring_population.parquet",
+        sort_by=["opportunity_id"],
+    )
+    _write_csv_allow_empty(
+        census,
+        output_root / "complete_candidate_registry.csv",
+        sort_by=["signature_id"],
+    )
+    write_deterministic_json(
+        _safe_json(discovery_library), output_root / "frozen_discovery_library.json"
+    )
+    _write_csv_allow_empty(
+        validation_metrics,
+        output_root / "validation_metrics.csv",
+        sort_by=["signature_id"],
+    )
+    write_deterministic_json(
+        _safe_json(survivors), output_root / "frozen_validation_survivors.json"
+    )
+    _write_csv_allow_empty(
+        final_metrics,
+        output_root / "final_opened_holdout_metrics.csv",
+        sort_by=["signature_id"],
+    )
+    population = (
+        permitted.groupby("chronology_stage", sort=True)
+        .agg(
+            rows=("opportunity_id", "size"),
+            sessions=("session", "nunique"),
+            stocks=("symbol", "nunique"),
+        )
+        .reset_index()
+    )
+    _write_csv_allow_empty(
+        population,
+        output_root / "population_summary.csv",
+        sort_by=["chronology_stage"],
+    )
+    summary = {
+        "surface": "movement_permitted_population",
+        "movement_rule": contract["movement_permission"]["rule"],
+        "rows": len(permitted),
+        "discovery_rows": len(discovery),
+        "candidate_signatures_examined": len(census),
+        "discovery_eligible": int(census["discovery_eligible"].sum()) if len(census) else 0,
+        "frozen_discovery_signatures": len(discovery_library),
+        "validation_survivors": len(survivors),
+        "final_scored_signatures": len(final_metrics),
+        "all_rows_permission_pass": bool(permitted["movement_permission"].eq(True).all()),
+    }
+    write_deterministic_json(summary, output_root / "summary.json")
+    return summary
+
+
+def secondary_structural_population_metrics(frame: pd.DataFrame) -> pd.DataFrame:
+    """Predeclared attribution surfaces; never a selected primary population."""
+
+    rows: list[dict[str, Any]] = []
+    surfaces = {
+        "named_loop_candidate": "top_parent_loop",
+        "control_orientation": "top_loop_orientation",
+        "loop_family": "parent_loop_family",
+        "regime_state": "current_state",
+    }
+    for surface, column in surfaces.items():
+        values = frame[column].astype(object).where(frame[column].notna(), "UNAVAILABLE")
+        working = frame.assign(_surface_value=values)
+        for (stage, value), group in working.groupby(
+            ["chronology_stage", "_surface_value"], dropna=False, sort=True
+        ):
+            rows.append(
+                {
+                    "surface": surface,
+                    "source_feature": column,
+                    "chronology_stage": str(stage),
+                    "value": str(value),
+                    "rows": len(group),
+                    "sessions": group["session"].nunique(),
+                    "stocks": group["symbol"].nunique(),
+                    "long_count": int(group["target"].eq("LONG").sum()),
+                    "short_count": int(group["target"].eq("SHORT").sum()),
+                    "neutral_count": int(group["target"].eq("NEUTRAL").sum()),
+                    "long_rate": float(group["target"].eq("LONG").mean()),
+                    "short_rate": float(group["target"].eq("SHORT").mean()),
+                    "neutral_rate": float(group["target"].eq("NEUTRAL").mean()),
+                    "mean_long_net_bps": float(group["long_net_bps"].mean()),
+                    "mean_short_net_bps": float(group["short_net_bps"].mean()),
+                    "selected_as_primary_population": False,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def secondary_structural_signature_metrics(
+    frame: pd.DataFrame,
+    library: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """Apply every frozen rule on every predeclared structural attribution cell."""
+
+    rows: list[dict[str, Any]] = []
+    surfaces = {
+        "named_loop_candidate": "top_parent_loop",
+        "control_orientation": "top_loop_orientation",
+        "loop_family": "parent_loop_family",
+        "regime_state": "current_state",
+    }
+    for surface, column in surfaces.items():
+        values = frame[column].astype(object).where(frame[column].notna(), "UNAVAILABLE")
+        working = frame.assign(_surface_value=values)
+        for (stage, value), group in working.groupby(
+            ["chronology_stage", "_surface_value"], dropna=False, sort=True
+        ):
+            for entry in library:
+                signature = signature_from_dict(entry["signature"])
+                metrics = signature_metrics(group, signature)
+                rows.append(
+                    {
+                        "surface": surface,
+                        "source_feature": column,
+                        "chronology_stage": str(stage),
+                        "value": str(value),
+                        "signature_id": signature.signature_id,
+                        "direction": signature.direction,
+                        "rows": metrics["rows"],
+                        "sessions": metrics["sessions"],
+                        "stocks": metrics["stocks"],
+                        "mean_directional_net_bps": metrics["mean_directional_net_bps"],
+                        "directional_lift": metrics["directional_lift"],
+                        "selected_as_primary_population": False,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def qualify_provisional_leads(
+    library: list[dict[str, Any]],
+    final_metrics: pd.DataFrame,
+    stress: pd.DataFrame,
+    calibration: pd.DataFrame,
+    comparators: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    """Apply every post-validation success criterion without replacing rules."""
+
+    final_by_id = final_metrics.set_index("signature_id") if len(final_metrics) else pd.DataFrame()
+    rows: list[dict[str, Any]] = []
+    qualified: list[dict[str, Any]] = []
+    for entry in library:
+        signature_id = str(entry["signature"]["signature_id"])
+        reasons: list[str] = []
+        if final_by_id.empty or signature_id not in final_by_id.index:
+            reasons.append("not_scored_in_final_opened_holdout")
+            rows.append(
+                {
+                    "signature_id": signature_id,
+                    "direction": entry["signature"]["direction"],
+                    "provisional_prospective_lead": False,
+                    "rejection_reasons_json": json.dumps(reasons, separators=(",", ":")),
+                }
+            )
+            continue
+        final_row = cast(pd.Series, final_by_id.loc[signature_id])
+        if float(final_row["mean_directional_net_bps"]) <= 0.0:
+            reasons.append("final_payoff_not_positive")
+        if float(final_row["directional_lift"]) <= 0.0:
+            reasons.append("final_lift_not_positive")
+        if float(final_row["twice_cost_mean_net_bps"]) <= 0.0:
+            reasons.append("final_twice_cost_not_positive")
+        if float(final_row["top_stock_absolute_contribution_share"]) > 0.25:
+            reasons.append("final_stock_concentration")
+        if float(final_row["maximum_single_stock_row_fraction"]) > 0.25:
+            reasons.append("final_stock_row_concentration")
+        if float(final_row["top_month_absolute_contribution_share"]) > 0.35:
+            reasons.append("final_month_concentration")
+        if float(final_row["positive_stock_fraction"]) <= 0.5:
+            reasons.append("final_stock_consistency")
+        if float(final_row["positive_month_fraction"]) <= 0.5:
+            reasons.append("final_month_consistency")
+        if int(final_row["rows"]) < 80:
+            reasons.append("final_insufficient_rows")
+        if int(final_row["sessions"]) < 30:
+            reasons.append("final_insufficient_sessions")
+        if int(final_row["stocks"]) < 8:
+            reasons.append("final_insufficient_stocks")
+        if int(final_row["months"]) < 3:
+            reasons.append("final_insufficient_months")
+        relevant_count = (
+            int(final_row["long_count"])
+            if entry["signature"]["direction"] == "LONG"
+            else int(final_row["short_count"])
+        )
+        if relevant_count < 15:
+            reasons.append("final_insufficient_directional_outcomes")
+        required_positive = {
+            "one_bar_execution_delay_same_terminal": "delay_not_positive",
+            "remove_best_stock": "best_stock_removal_not_positive",
+            "remove_top_five_stocks": "top_five_stock_removal_not_positive",
+        }
+        all_signature_stress = stress.loc[stress["signature_id"].eq(signature_id)]
+        for stage in ("validation", "final_opened_holdout"):
+            signature_stress = all_signature_stress.loc[
+                all_signature_stress["chronology_stage"].eq(stage)
+            ]
+            for stress_name, reason in required_positive.items():
+                values = signature_stress.loc[
+                    signature_stress["stress"].eq(stress_name), "mean_directional_net_bps"
+                ]
+                if values.empty or not values.gt(0.0).all():
+                    reasons.append(f"{stage}_{reason}")
+            for episode_name in ("remove_best_episode", "remove_top_five_episodes"):
+                episode = signature_stress.loc[signature_stress["stress"].eq(episode_name)]
+                if episode.empty or not episode["status"].eq("available").all():
+                    reasons.append(f"{stage}_{episode_name}_unavailable")
+                elif not episode["mean_directional_net_bps"].gt(0.0).all():
+                    reasons.append(f"{stage}_{episode_name}_not_positive")
+            neighbours = signature_stress.loc[
+                signature_stress["stress"].eq("adjacent_threshold_neighbour")
+            ]
+            if len(neighbours) and not neighbours["mean_directional_net_bps"].gt(0.0).all():
+                reasons.append(f"{stage}_adjacent_threshold_incompatible")
+        signature_calibration = calibration.loc[calibration["signature_id"].eq(signature_id)]
+        if signature_calibration.empty or not signature_calibration["reasonably_calibrated"].all():
+            reasons.append("probability_not_reasonably_calibrated")
+        signature_comparators = comparators.loc[comparators["signature_id"].eq(signature_id)]
+        if signature_comparators.empty or not (
+            signature_comparators["stronger_than_momentum"].all()
+            and signature_comparators["stronger_than_reversal"].all()
+        ):
+            reasons.append("not_stronger_than_momentum_and_reversal")
+        reasons = sorted(set(reasons))
+        row = {
+            "signature_id": signature_id,
+            "direction": entry["signature"]["direction"],
+            "provisional_prospective_lead": not reasons,
+            "rejection_reasons_json": json.dumps(reasons, separators=(",", ":")),
+        }
+        rows.append(row)
+        if not reasons:
+            qualified.append({**entry, "lead_qualification": row})
+    return pd.DataFrame(rows), qualified
+
+
+def scientific_decision_label(
+    track_a: dict[str, Any],
+    track_b: dict[str, Any] | None = None,
+) -> str:
+    """Derive one frozen label from strict, machine-readable survival fields."""
+
+    long_count = int(track_a.get("provisional_prospective_lead_long", 0))
+    short_count = int(track_a.get("provisional_prospective_lead_short", 0))
+    if long_count and short_count:
+        return "persistent_long_and_short_signatures_found_prospective_validation_required"
+    if long_count:
+        return "persistent_long_signatures_only"
+    if short_count:
+        return "persistent_short_signatures_only"
+    if int(track_a.get("neutral_validation_and_final_strict_stable", 0)):
+        return "neutral_veto_more_reliable_than_direction"
+    if track_b is not None and (
+        int(track_b.get("persistent_relative_final_signatures", 0))
+        and bool(track_b.get("atlas_beats_relative_strength_validation_and_final"))
+    ):
+        return "relative_direction_more_predictable_than_absolute"
+    movement = cast(dict[str, Any], track_a.get("movement_permitted_surface", {}))
+    if int(movement.get("validation_survivors", 0)) and int(
+        movement.get("positive_final_scored_signatures", 0)
+    ):
+        return "movement_permission_useful_direction_unresolved"
+    validation_survivors = int(track_a.get("validation_survivor_long", 0)) + int(
+        track_a.get("validation_survivor_short", 0)
+    )
+    if validation_survivors:
+        return "signature_effects_concentrated_or_unstable"
+    if int(track_a.get("frozen_discovery_long", 0)) + int(
+        track_a.get("frozen_discovery_short", 0)
+    ):
+        return "discovery_signatures_failed_validation"
+    return "no_persistent_directional_signatures"
+
+
 def score_experiment(output_root: Path) -> dict[str, Any]:
     """Run bounded Track A discovery, unchanged chronology, controller, and baselines."""
 
     contract = load_contract(CONTRACT_PATH)
     schema = _feature_schema()
-    joined, outcomes = _joined_scoring_frame(output_root)
-    scored = joined.loc[joined["target"].ne("UNAVAILABLE")].copy()
-    discovery = scored.loc[scored["period"].eq(contract["chronology"]["discovery"]["period"])]
-    validation = scored.loc[scored["period"].eq(contract["chronology"]["validation"]["period"])]
-    final = scored.loc[
-        scored["period"].eq(contract["chronology"]["final_opened_holdout"]["period"])
-    ]
-    if any(frame.empty for frame in (discovery, validation, final)):
-        raise AssertionError("chronological discovery/validation/final split is incomplete")
+    feature_ledger = pd.read_parquet(output_root / "outcome_free_feature_ledger.parquet")
+    feature_ledger = _assign_chronology_stage(feature_ledger, contract)
+    discovery = _open_scoring_stage(output_root, feature_ledger, contract, "discovery")
+    if discovery.empty:
+        raise AssertionError("chronological discovery stage is incomplete")
     feature_families = feature_family_map(schema)
     ordered_bins = {
         str(row["name"]): list(row["bins"]) for row in schema["features"] if row.get("bins")
@@ -626,24 +1140,34 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         ordered_bins=ordered_bins,
         fdr_q=float(contract["multiplicity"]["broad_discovery_q"]),
     )
+    search_space = candidate_search_space_counts(discovery, feature_families)
+    write_deterministic_json(
+        {
+            **search_space,
+            "balanced_directional_candidate_allocation": {
+                "univariate": int(census["stage"].eq("univariate").sum()),
+                "pairwise": int(census["stage"].eq("pairwise").sum()),
+            },
+            "broad_examined_directional_candidates": int(
+                census["stage"].isin(["univariate", "pairwise"]).sum()
+            ),
+            "broad_directional_cap": int(search["univariate_and_pairwise_cap"]),
+            "enumerated_but_not_examined_due_to_cap": int(
+                search_space["observed_univariate_directional_candidates"]
+                + search_space["observed_pairwise_directional_candidates"]
+                - census["stage"].isin(["univariate", "pairwise"]).sum()
+            ),
+            "selection": "outcome_free_feature_round_robin_with_hash_ordered_feature_pairs",
+        },
+        output_root / "candidate_search_space.json",
+    )
     neutral_census, neutral_discovery_library = evaluate_neutral_veto_census(
         discovery,
         candidates,
         support_rules=support_rules,
         fdr_q=float(contract["multiplicity"]["broad_discovery_q"]),
+        ordered_bins=ordered_bins,
         cap=5,
-    )
-    neutral_validation_metrics, neutral_survivor_library = validate_neutral_veto_library(
-        validation,
-        neutral_discovery_library,
-        support_rules=support_rules,
-        holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
-    )
-    neutral_final_metrics, _ = validate_neutral_veto_library(
-        final,
-        neutral_survivor_library,
-        support_rules=support_rules,
-        holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
     )
     discovery_library = freeze_discovery_library(
         census,
@@ -652,12 +1176,167 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         retained_stage_cap=int(search["discovery_stage_retained_cap"]),
         per_direction_cap=int(search["frozen_discovery_long_cap"]),
     )
+    discovery_library_path = output_root / "frozen_discovery_signature_library.json"
+    neutral_discovery_path = output_root / "frozen_neutral_discovery_library.json"
+    write_deterministic_json(_safe_json(discovery_library), discovery_library_path)
+    write_deterministic_json(_safe_json(neutral_discovery_library), neutral_discovery_path)
+    discovery_library_hash = sha256_file(discovery_library_path)
+    neutral_discovery_hash = sha256_file(neutral_discovery_path)
+    write_deterministic_json(
+        {
+            "stage": "discovery",
+            "outcome_start": contract["chronology"]["discovery"]["start"],
+            "outcome_end_exclusive": contract["chronology"]["discovery"]["end_exclusive"],
+            "frozen_discovery_library_sha256": discovery_library_hash,
+            "frozen_neutral_discovery_library_sha256": neutral_discovery_hash,
+            "validation_or_final_opened_before_seal": False,
+        },
+        output_root / "discovery_stage_seal.json",
+    )
+    movement_root = output_root / "movement_permitted"
+    movement_root.mkdir(parents=True, exist_ok=True)
+    movement_discovery = discovery.loc[
+        discovery["movement_permission"].eq(True).fillna(False)
+    ].copy()
+    movement_feature_families = {
+        feature: family
+        for feature, family in feature_families.items()
+        if feature != "movement_permission"
+        and feature in movement_discovery
+        and movement_discovery[feature].dropna().nunique() > 1
+    }
+    movement_candidates, movement_registry = generate_bounded_candidates(
+        movement_discovery,
+        movement_feature_families,
+        caps,
+        minimum_parent_support=support_rules.minimum_rows,
+    )
+    movement_trees, movement_tree_registry = extract_shallow_tree_candidates(
+        movement_discovery,
+        movement_feature_families,
+        maximum_depth=int(search["tree_maximum_depth"]),
+        minimum_leaf_rows=int(search["tree_minimum_leaf_rows"]),
+        cap=int(search["tree_candidate_cap"]),
+        seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 500,
+    )
+    movement_by_id = {
+        candidate.signature_id: candidate for candidate in [*movement_candidates, *movement_trees]
+    }
+    movement_candidates = [movement_by_id[key] for key in sorted(movement_by_id)]
+    movement_registry_by_id = {
+        str(row["signature_id"]): row for row in [*movement_registry, *movement_tree_registry]
+    }
+    movement_registry = [movement_registry_by_id[key] for key in sorted(movement_registry_by_id)]
+    movement_census = evaluate_candidate_census(
+        movement_discovery,
+        movement_candidates,
+        movement_registry,
+        support_rules=support_rules,
+        ordered_bins=ordered_bins,
+        fdr_q=float(contract["multiplicity"]["broad_discovery_q"]),
+    )
+    movement_search_space = candidate_search_space_counts(
+        movement_discovery, movement_feature_families
+    )
+    write_deterministic_json(
+        {
+            **movement_search_space,
+            "broad_examined_directional_candidates": int(
+                movement_census["stage"].isin(["univariate", "pairwise"]).sum()
+            ),
+            "broad_directional_cap": int(search["univariate_and_pairwise_cap"]),
+            "selection": "outcome_free_balanced_allocation_gate_feature_excluded",
+        },
+        movement_root / "candidate_search_space.json",
+    )
+    movement_discovery_library = freeze_discovery_library(
+        movement_census,
+        movement_candidates,
+        movement_discovery,
+        retained_stage_cap=int(search["discovery_stage_retained_cap"]),
+        per_direction_cap=int(search["frozen_discovery_long_cap"]),
+    )
+    movement_discovery_path = movement_root / "frozen_discovery_library.json"
+    write_deterministic_json(_safe_json(movement_discovery_library), movement_discovery_path)
+    movement_discovery_hash = sha256_file(movement_discovery_path)
+    write_deterministic_json(
+        {
+            "stage": "discovery",
+            "frozen_library_sha256": movement_discovery_hash,
+            "validation_or_final_opened_before_seal": False,
+        },
+        movement_root / "discovery_stage_seal.json",
+    )
+    validation = _open_scoring_stage(output_root, feature_ledger, contract, "validation")
+    if validation.empty:
+        raise AssertionError("chronological validation stage is incomplete")
+    neutral_validation_metrics, neutral_survivor_library = validate_neutral_veto_library(
+        validation,
+        neutral_discovery_library,
+        support_rules=support_rules,
+        holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
+    )
     validation_metrics, survivor_library = validate_discovery_library(
         validation,
         discovery_library,
         support_rules=support_rules,
         holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
         per_direction_cap=int(search["validation_survivor_long_cap"]),
+        bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
+        bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]),
+    )
+    survivor_path = output_root / "frozen_validation_survivor_library.json"
+    neutral_survivor_path = output_root / "neutral_veto_library.json"
+    write_deterministic_json(_safe_json(survivor_library), survivor_path)
+    write_deterministic_json(_safe_json(neutral_survivor_library), neutral_survivor_path)
+    survivor_hash = sha256_file(survivor_path)
+    neutral_survivor_hash = sha256_file(neutral_survivor_path)
+    write_deterministic_json(
+        {
+            "stage": "validation",
+            "outcome_start": contract["chronology"]["validation"]["start"],
+            "outcome_end_exclusive": contract["chronology"]["validation"]["end_exclusive"],
+            "frozen_validation_survivor_library_sha256": survivor_hash,
+            "frozen_neutral_survivor_library_sha256": neutral_survivor_hash,
+            "final_opened_before_seal": False,
+        },
+        output_root / "validation_stage_seal.json",
+    )
+    movement_validation = validation.loc[
+        validation["movement_permission"].eq(True).fillna(False)
+    ].copy()
+    movement_validation_metrics, movement_survivors = validate_discovery_library(
+        movement_validation,
+        movement_discovery_library,
+        support_rules=support_rules,
+        holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
+        per_direction_cap=int(search["validation_survivor_long_cap"]),
+        bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
+        bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 500,
+    )
+    movement_survivor_path = movement_root / "frozen_validation_survivors.json"
+    write_deterministic_json(_safe_json(movement_survivors), movement_survivor_path)
+    movement_survivor_hash = sha256_file(movement_survivor_path)
+    write_deterministic_json(
+        {
+            "stage": "validation",
+            "frozen_survivor_library_sha256": movement_survivor_hash,
+            "final_opened_before_seal": False,
+        },
+        movement_root / "validation_stage_seal.json",
+    )
+    final = _open_scoring_stage(output_root, feature_ledger, contract, "final_opened_holdout")
+    if final.empty:
+        raise AssertionError("chronological final opened-holdout stage is incomplete")
+    if sha256_file(discovery_library_path) != discovery_library_hash:
+        raise AssertionError("discovery library changed after validation was opened")
+    if sha256_file(survivor_path) != survivor_hash:
+        raise AssertionError("validation library changed after final was opened")
+    neutral_final_metrics, neutral_final_survivor_library = validate_neutral_veto_library(
+        final,
+        neutral_survivor_library,
+        support_rules=support_rules,
+        holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
     )
     final_metrics = score_frozen_library(
         final,
@@ -665,18 +1344,43 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
         bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]),
     )
+    movement_final = final.loc[final["movement_permission"].eq(True).fillna(False)].copy()
+    movement_final_metrics = score_frozen_library(
+        movement_final,
+        movement_survivors,
+        bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
+        bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 500,
+    )
+    if sha256_file(movement_discovery_path) != movement_discovery_hash:
+        raise AssertionError("movement discovery library changed after later stages opened")
+    if sha256_file(movement_survivor_path) != movement_survivor_hash:
+        raise AssertionError("movement validation library changed after final opened")
+    # Only after both library seals exist may reporting/baseline code open all
+    # retrospective outcomes together.
+    joined, outcomes = _joined_scoring_frame(output_root)
+    joined = _assign_chronology_stage(joined, contract)
+    scored = joined.loc[joined["target"].ne("UNAVAILABLE")].copy()
+    for name, opened in (
+        ("discovery", discovery),
+        ("validation", validation),
+        ("final_opened_holdout", final),
+    ):
+        expected_ids = set(_stage(scored, name)["opportunity_id"].astype(str))
+        if expected_ids != set(opened["opportunity_id"].astype(str)):
+            raise AssertionError(f"{name} stage identity changed after all outcomes opened")
     discovery_probabilities = {
         label: float((discovery["target"].eq(label).sum() + 1.0) / (len(discovery) + 3.0))
         for label in CLASSES
     }
     atlas_decisions = apply_atlas_controller(
-        scored,
+        joined,
         survivor_library,
         base_probabilities=discovery_probabilities,
     )
-    baselines = baseline_predictions(discovery, scored)
+    first_touch = pd.read_parquet(output_root / "secondary_first_touch_outcome_ledger.parquet")
+    baselines = baseline_predictions(discovery, joined, first_touch=first_touch)
     all_predictions = pd.concat([baselines, atlas_decisions], ignore_index=True)
-    metric_outcomes = scored[
+    metric_outcomes = joined[
         [
             "opportunity_id",
             "target",
@@ -686,13 +1390,44 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         ]
     ]
     predictive, economic = prediction_metrics(all_predictions, metric_outcomes)
-    breakdowns = signature_breakdowns(scored, discovery_library)
+    individual_concentration = signature_breakdowns(scored, discovery_library)
+    atlas_concentration_rows = atlas_concentration(scored, atlas_decisions)
+    breakdowns = pd.concat([individual_concentration, atlas_concentration_rows], ignore_index=True)
+    attribution_rows = signature_attribution_rows(scored, discovery_library)
     delayed_outcomes = pd.read_parquet(output_root / "one_bar_delay_outcome_ledger.parquet")
     stress_results, leave_one_out = stress_signature_library(
         scored,
         discovery_library,
         delayed_outcomes,
         ordered_bins=ordered_bins,
+        causal_population=joined,
+    )
+    neutral_stress_results = stress_neutral_veto_library(
+        scored,
+        neutral_survivor_library,
+        delayed_outcomes,
+        ordered_bins=ordered_bins,
+    )
+    probability_metrics = pd.concat(
+        [
+            signature_probability_metrics(validation, survivor_library),
+            signature_probability_metrics(final, survivor_library),
+        ],
+        ignore_index=True,
+    )
+    comparator_metrics = pd.concat(
+        [
+            paired_simple_baseline_metrics(validation, survivor_library),
+            paired_simple_baseline_metrics(final, survivor_library),
+        ],
+        ignore_index=True,
+    )
+    lead_qualification, prospective_leads = qualify_provisional_leads(
+        survivor_library,
+        final_metrics,
+        stress_results,
+        probability_metrics,
+        comparator_metrics,
     )
     random_generator = np.random.default_rng(
         int(contract["multiplicity"]["session_block_bootstrap_seed"])
@@ -812,24 +1547,40 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         output_root / "neutral_veto_final_opened_holdout_metrics.csv",
         sort_by=["neutral_veto_id"],
     )
-    write_deterministic_json(
-        _safe_json(neutral_survivor_library), output_root / "neutral_veto_library.json"
-    )
-    write_deterministic_json(
-        _safe_json(discovery_library), output_root / "frozen_discovery_signature_library.json"
-    )
+    if sha256_file(neutral_survivor_path) != neutral_survivor_hash:
+        raise AssertionError("frozen neutral survivor library changed after final open")
+    if sha256_file(discovery_library_path) != discovery_library_hash:
+        raise AssertionError("frozen discovery library changed after final open")
     _write_csv_allow_empty(
         validation_metrics,
         output_root / "validation_signature_metrics.csv",
         sort_by=["direction", "discovery_score", "signature_id"],
     )
-    write_deterministic_json(
-        _safe_json(survivor_library), output_root / "frozen_validation_survivor_library.json"
-    )
+    if sha256_file(survivor_path) != survivor_hash:
+        raise AssertionError("frozen validation library changed during final reporting")
     _write_csv_allow_empty(
         final_metrics,
         output_root / "final_opened_holdout_signature_metrics.csv",
         sort_by=["direction", "discovery_score", "signature_id"],
+    )
+    _write_csv_allow_empty(
+        probability_metrics,
+        output_root / "individual_signature_calibration_metrics.csv",
+        sort_by=["signature_id", "chronology_stage"],
+    )
+    _write_csv_allow_empty(
+        comparator_metrics,
+        output_root / "individual_signature_baseline_comparison.csv",
+        sort_by=["signature_id", "chronology_stage"],
+    )
+    _write_csv_allow_empty(
+        lead_qualification,
+        output_root / "provisional_prospective_lead_qualification.csv",
+        sort_by=["direction", "signature_id"],
+    )
+    write_deterministic_json(
+        _safe_json(prospective_leads),
+        output_root / "provisional_prospective_lead_library.json",
     )
     for direction, filename in (
         ("LONG", "long_signature_library.json"),
@@ -839,12 +1590,30 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
             _safe_json(
                 [
                     entry
-                    for entry in survivor_library
+                    for entry in prospective_leads
                     if entry["signature"]["direction"] == direction
                 ]
             ),
             output_root / filename,
         )
+    long_library = [
+        entry for entry in prospective_leads if entry["signature"]["direction"] == "LONG"
+    ]
+    short_library = [
+        entry for entry in prospective_leads if entry["signature"]["direction"] == "SHORT"
+    ]
+    metadata_path = output_root / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.update(
+        {
+            "long_library_sha256": canonical_library_hash(long_library),
+            "short_library_sha256": canonical_library_hash(short_library),
+            "neutral_library_sha256": canonical_library_hash(neutral_survivor_library),
+            "causal_feature_names": sorted(feature_families),
+            "prospective_lead_count": len(prospective_leads),
+        }
+    )
+    write_deterministic_json(metadata, metadata_path)
     write_deterministic_parquet(
         atlas_decisions,
         output_root / "atlas_level_decisions.parquet",
@@ -868,7 +1637,12 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
     _write_csv_allow_empty(
         breakdowns,
         output_root / "concentration_results.csv",
-        sort_by=["signature_id", "dimension", "value"],
+        sort_by=["signature_id", "dimension"],
+    )
+    _write_csv_allow_empty(
+        attribution_rows,
+        output_root / "signature_attribution_breakdowns.csv",
+        sort_by=["signature_id", "chronology_stage", "dimension", "value"],
     )
     _write_csv_allow_empty(
         stress_results,
@@ -881,12 +1655,93 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         sort_by=["signature_id", "period", "removed"],
     )
     _write_csv_allow_empty(
+        neutral_stress_results,
+        output_root / "neutral_veto_stability_results.csv",
+        sort_by=["neutral_veto_id", "chronology_stage", "stress", "removed"],
+    )
+    _write_csv_allow_empty(
         nulls,
         output_root / "null_test_results.csv",
         sort_by=["null"],
     )
+    structural_metrics = secondary_structural_population_metrics(scored)
+    structural_signature_metrics = secondary_structural_signature_metrics(scored, discovery_library)
+    _write_csv_allow_empty(
+        structural_metrics,
+        output_root / "secondary_structural_population_metrics.csv",
+        sort_by=["surface", "chronology_stage", "value"],
+    )
+    _write_csv_allow_empty(
+        structural_signature_metrics,
+        output_root / "secondary_structural_signature_metrics.csv",
+        sort_by=["surface", "chronology_stage", "value", "signature_id"],
+    )
+    permitted_scored = scored.loc[scored["movement_permission"].eq(True).fillna(False)].copy()
+    write_deterministic_parquet(
+        permitted_scored,
+        movement_root / "movement_permitted_scoring_population.parquet",
+        sort_by=["opportunity_id"],
+    )
+    _write_csv_allow_empty(
+        movement_census,
+        movement_root / "complete_candidate_registry.csv",
+        sort_by=["signature_id"],
+    )
+    _write_csv_allow_empty(
+        movement_validation_metrics,
+        movement_root / "validation_metrics.csv",
+        sort_by=["signature_id"],
+    )
+    _write_csv_allow_empty(
+        movement_final_metrics,
+        movement_root / "final_opened_holdout_metrics.csv",
+        sort_by=["signature_id"],
+    )
+    movement_population = (
+        permitted_scored.groupby("chronology_stage", sort=True)
+        .agg(
+            rows=("opportunity_id", "size"),
+            sessions=("session", "nunique"),
+            stocks=("symbol", "nunique"),
+        )
+        .reset_index()
+    )
+    _write_csv_allow_empty(
+        movement_population,
+        movement_root / "population_summary.csv",
+        sort_by=["chronology_stage"],
+    )
+    movement_surface_summary = {
+        "surface": "movement_permitted_population",
+        "movement_rule": contract["movement_permission"]["rule"],
+        "rows": len(permitted_scored),
+        "discovery_rows": len(movement_discovery),
+        "candidate_signatures_examined": len(movement_census),
+        "discovery_eligible": int(movement_census["discovery_eligible"].sum())
+        if len(movement_census)
+        else 0,
+        "frozen_discovery_signatures": len(movement_discovery_library),
+        "validation_survivors": len(movement_survivors),
+        "final_scored_signatures": len(movement_final_metrics),
+        "positive_final_scored_signatures": int(
+            (
+                movement_final_metrics.get(
+                    "mean_directional_net_bps", pd.Series(dtype=float)
+                ).gt(0.0)
+                & movement_final_metrics.get(
+                    "directional_lift", pd.Series(dtype=float)
+                ).gt(0.0)
+                & movement_final_metrics.get(
+                    "twice_cost_mean_net_bps", pd.Series(dtype=float)
+                ).gt(0.0)
+            ).sum()
+        ),
+        "all_rows_permission_pass": bool(permitted_scored["movement_permission"].eq(True).all()),
+        "stage_seals_verified": True,
+    }
+    write_deterministic_json(movement_surface_summary, movement_root / "summary.json")
     base_rates = (
-        scored.groupby("period", sort=True)["target"]
+        scored.groupby("chronology_stage", sort=True)["target"]
         .value_counts(normalize=True)
         .rename("rate")
         .reset_index()
@@ -894,8 +1749,41 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
     _write_csv_allow_empty(
         base_rates,
         output_root / "base_rates_by_period.csv",
-        sort_by=["period", "target"],
+        sort_by=["chronology_stage", "target"],
     )
+    neutral_final_survivor_ids = {
+        str(entry["neutral_veto_id"]) for entry in neutral_final_survivor_library
+    }
+    neutral_strict_stable_ids: set[str] = set()
+    for veto_id in neutral_final_survivor_ids:
+        stable = True
+        veto_stress = neutral_stress_results.loc[
+            neutral_stress_results["neutral_veto_id"].eq(veto_id)
+            & neutral_stress_results["chronology_stage"].isin(
+                ["validation", "final_opened_holdout"]
+            )
+        ]
+        for stage in ("validation", "final_opened_holdout"):
+            stage_stress = veto_stress.loc[veto_stress["chronology_stage"].eq(stage)]
+            for stress_name in (
+                "one_bar_execution_delay_same_terminal",
+                "remove_best_stock",
+                "remove_top_five_stocks",
+            ):
+                rows = stage_stress.loc[stage_stress["stress"].eq(stress_name)]
+                stable &= bool(len(rows) and rows["neutral_lift"].gt(0.0).all())
+            neighbours = stage_stress.loc[
+                stage_stress["stress"].eq("adjacent_threshold_neighbour")
+            ]
+            stable &= bool(neighbours.empty or neighbours["neutral_lift"].gt(0.0).all())
+            twice = stage_stress.loc[stage_stress["stress"].eq("twice_cost")]
+            stable &= bool(
+                len(twice)
+                and twice["mean_long_net_bps"].lt(0.0).all()
+                and twice["mean_short_net_bps"].lt(0.0).all()
+            )
+        if stable:
+            neutral_strict_stable_ids.add(veto_id)
     summary = {
         "candidate_signatures_examined": len(census),
         "univariate_candidates": int(census["stage"].eq("univariate").sum()),
@@ -916,35 +1804,40 @@ def score_experiment(output_root: Path) -> dict[str, Any]:
         "validation_survivor_short": sum(
             entry["signature"]["direction"] == "SHORT" for entry in survivor_library
         ),
+        "provisional_prospective_lead_long": sum(
+            entry["signature"]["direction"] == "LONG" for entry in prospective_leads
+        ),
+        "provisional_prospective_lead_short": sum(
+            entry["signature"]["direction"] == "SHORT" for entry in prospective_leads
+        ),
         "neutral_discovery_survivors": len(neutral_discovery_library),
         "neutral_validation_survivors": len(neutral_survivor_library),
-        "neutral_final_same_sign": int(
+        "neutral_final_same_sign_descriptive": int(
             neutral_final_metrics.get("neutral_lift", pd.Series(dtype=float)).gt(0.0).sum()
         ),
+        "neutral_final_strict_survivors": len(neutral_final_survivor_ids),
+        "neutral_validation_and_final_strict_stable": len(neutral_strict_stable_ids),
         "atlas_directional_outputs_validation": int(
-            atlas_decisions.loc[atlas_decisions["period"].eq(2025), "predicted_state"]
+            atlas_decisions.loc[
+                atlas_decisions["chronology_stage"].eq("validation"), "predicted_state"
+            ]
             .isin(["LONG", "SHORT"])
             .sum()
         ),
         "atlas_directional_outputs_final": int(
-            atlas_decisions.loc[atlas_decisions["period"].eq(2026), "predicted_state"]
+            atlas_decisions.loc[
+                atlas_decisions["chronology_stage"].eq("final_opened_holdout"),
+                "predicted_state",
+            ]
             .isin(["LONG", "SHORT"])
             .sum()
         ),
+        "movement_permitted_surface": movement_surface_summary,
         "research_only": True,
         "execution_enabled": False,
     }
+    summary["track_a_scientific_decision"] = scientific_decision_label(summary)
     write_deterministic_json(summary, output_root / "track_a_summary.json")
-    summary["track_b"] = run_track_b(
-        scored,
-        output_root=output_root / "track_b",
-        contract=contract,
-        feature_families=feature_families,
-        ordered_bins=ordered_bins,
-        caps=caps,
-        support_rules=support_rules,
-    )
-    write_deterministic_json(_safe_json(summary), output_root / "track_a_summary.json")
     generate_plots(
         output_root,
         scored=scored,
@@ -994,7 +1887,7 @@ def generate_plots(
         plt.close(fig)
 
     fig, axis = plt.subplots(figsize=(7.2, 4.2))
-    pivot = base_rates.pivot(index="period", columns="target", values="rate").fillna(0.0)
+    pivot = base_rates.pivot(index="chronology_stage", columns="target", values="rate").fillna(0.0)
     pivot[[label for label in ("LONG", "SHORT", "NEUTRAL") if label in pivot]].plot(
         kind="bar",
         ax=axis,
@@ -1083,7 +1976,10 @@ def generate_plots(
         + 10.0
     )
     movement_summary = (
-        movement.groupby(["period", "movement_permission"], sort=True)["absolute_terminal_move_bps"]
+        movement.loc[movement["movement_permission"].notna()]
+        .groupby(["chronology_stage", "movement_permission"], sort=True)[
+            "absolute_terminal_move_bps"
+        ]
         .mean()
         .unstack()
         .fillna(np.nan)
@@ -1107,12 +2003,15 @@ def generate_plots(
         "current_state_plus_history",
     ]
     comparison = economic.loc[
-        economic["model_id"].isin(selected_models) & economic["period"].isin([2025, 2026])
+        economic["model_id"].isin(selected_models)
+        & economic["chronology_stage"].isin(["discovery", "validation", "final_opened_holdout"])
     ]
     fig, axis = plt.subplots(figsize=(8.2, 4.6))
     if not comparison.empty:
         comparison.pivot(
-            index="model_id", columns="period", values="net_bps_per_full_opportunity"
+            index="model_id",
+            columns="chronology_stage",
+            values="net_bps_per_full_opportunity",
         ).plot.bar(ax=axis, color=["#4C72B0", "#DD8452"])
     axis.axhline(0.0, color="black", linewidth=0.8)
     axis.set(title="Atlas and simple baselines", xlabel="Model", ylabel="Net bps per opportunity")
@@ -1140,22 +2039,24 @@ def generate_plots(
     axis.tick_params(axis="x", labelrotation=65)
     save(fig, "neutral_veto_period_effects.png")
 
-    relative = pd.read_parquet(output_root / "track_b/relative_outcome_ledger.parquet")
-    relative_rates = (
-        relative.groupby("period", sort=True)["target"]
-        .value_counts(normalize=True)
-        .rename("rate")
-        .reset_index()
-        .pivot(index="period", columns="target", values="rate")
-        .fillna(0.0)
-    )
-    fig, axis = plt.subplots(figsize=(7.2, 4.2))
-    relative_rates.plot.bar(
-        ax=axis,
-        color=[colors.get(str(label), "#777777") for label in relative_rates.columns],
-    )
-    axis.set(title="Track B relative target rates", xlabel="Opened period", ylabel="Rate")
-    save(fig, "track_b_relative_target_rates.png")
+    relative_path = output_root / "track_b/relative_outcome_ledger.parquet"
+    if relative_path.is_file():
+        relative = pd.read_parquet(relative_path)
+        relative_rates = (
+            relative.groupby("chronology_stage", sort=True)["target"]
+            .value_counts(normalize=True)
+            .rename("rate")
+            .reset_index()
+            .pivot(index="chronology_stage", columns="target", values="rate")
+            .fillna(0.0)
+        )
+        fig, axis = plt.subplots(figsize=(7.2, 4.2))
+        relative_rates.plot.bar(
+            ax=axis,
+            color=[colors.get(str(label), "#777777") for label in relative_rates.columns],
+        )
+        axis.set(title="Track B relative target rates", xlabel="Opened stage", ylabel="Rate")
+        save(fig, "track_b_relative_target_rates.png")
 
 
 def write_prospective_schemas(output_root: Path) -> None:
@@ -1164,7 +2065,11 @@ def write_prospective_schemas(output_root: Path) -> None:
         "git_sha",
         "contract_hash",
         "data_snapshot_hash",
+        "training_data_snapshot_hash",
         "feature_schema_hash",
+        "long_library_hash",
+        "short_library_hash",
+        "neutral_library_hash",
         "opportunity_id",
         "symbol",
         "session",
@@ -1198,6 +2103,10 @@ def write_prospective_schemas(output_root: Path) -> None:
         "secondary_first_touch_target",
         "settlement_timestamp",
         "settlement_code_version",
+        "settlement_status",
+        "unavailable_reason",
+        "research_only",
+        "execution_enabled",
     ]
     write_deterministic_json(
         {
@@ -1225,12 +2134,48 @@ def write_prospective_schemas(output_root: Path) -> None:
     )
 
 
+def generate_track_b_plot(output_root: Path) -> None:
+    """Generate the secondary plot only after the audited Track B gate opens."""
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    relative = pd.read_parquet(output_root / "track_b/relative_outcome_ledger.parquet")
+    relative_rates = (
+        relative.groupby("chronology_stage", sort=True)["target"]
+        .value_counts(normalize=True)
+        .rename("rate")
+        .reset_index()
+        .pivot(index="chronology_stage", columns="target", values="rate")
+        .fillna(0.0)
+    )
+    colors = {"LONG": "#2878B5", "SHORT": "#C44E52", "NEUTRAL": "#8A8A8A"}
+    figure, axis = plt.subplots(figsize=(7.2, 4.2))
+    relative_rates.plot.bar(
+        ax=axis,
+        color=[colors.get(str(label), "#777777") for label in relative_rates.columns],
+    )
+    axis.set(title="Track B relative target rates", xlabel="Opened stage", ylabel="Rate")
+    figure.tight_layout()
+    plot_root = output_root / "plots"
+    plot_root.mkdir(parents=True, exist_ok=True)
+    figure.savefig(
+        plot_root / "track_b_relative_target_rates.png",
+        dpi=140,
+        metadata={"Software": "Stocker Directional Signature Atlas V1"},
+    )
+    plt.close(figure)
+
+
 def write_artifact_manifest(output_root: Path) -> None:
     excluded = {
         "artifact_manifest.json",
         "independent_audit.json",
         "prospective_forecast_dry_run.json",
         "prospective_settlement_dry_run.json",
+        "track_a_independent_audit.json",
     }
     files = []
     for path in sorted(output_root.rglob("*")):
@@ -1257,26 +2202,59 @@ def write_artifact_manifest(output_root: Path) -> None:
 
 def prospective_forecast_dry_run(output_root: Path, prospective_root: Path) -> dict[str, Any]:
     metadata = json.loads((output_root / "run_metadata.json").read_text(encoding="utf-8"))
+    contract = load_contract(CONTRACT_PATH)
     long_library = json.loads((output_root / "long_signature_library.json").read_text())
     short_library = json.loads((output_root / "short_signature_library.json").read_text())
-    ledger = ProspectiveLedger(prospective_root, opened_through="2026-06-26")
+    neutral_library = json.loads((output_root / "neutral_veto_library.json").read_text())
+    causal_feature_names = list(map(str, metadata["causal_feature_names"]))
+    expected_identity = {
+        "run_id": str(metadata["run_id"]),
+        "git_sha": str(metadata["git_sha"]),
+        "contract_hash": str(metadata["contract_sha256"]),
+        "training_data_snapshot_hash": str(metadata["data_snapshot_sha256"]),
+        "feature_schema_hash": str(metadata["feature_schema_sha256"]),
+        "long_library_hash": str(metadata["long_library_sha256"]),
+        "short_library_hash": str(metadata["short_library_sha256"]),
+        "neutral_library_hash": str(metadata["neutral_library_sha256"]),
+    }
+    completion = {
+        key: int(value)
+        for key, value in contract["prospective_completion"].items()
+        if key.startswith("minimum_")
+    }
+    ledger = ProspectiveLedger(
+        prospective_root,
+        opened_through=str(contract["prospective_completion"]["opened_historical_through"]),
+        required_causal_feature_names=causal_feature_names,
+        expected_identity=expected_identity,
+        completion_requirements=completion,
+    )
     opportunity_id = "atlas|2026|DRYRUN|2026-07-20|12"
     decision_timestamp = "2026-07-20T14:30:00+00:00"
+    feature_row: dict[str, Any] = {
+        "opportunity_id": opportunity_id,
+        "symbol": "DRYRUN",
+        "session": "2026-07-20",
+        "decision_clock": "clock_12",
+        "decision_timestamp": decision_timestamp,
+        "movement_permission": False,
+    }
+    for feature in causal_feature_names:
+        feature_row.setdefault(feature, None)
+        feature_row[f"{feature}__available_at"] = None
+    for feature in ("decision_clock", "movement_permission"):
+        if feature in causal_feature_names:
+            feature_row[f"{feature}__available_at"] = decision_timestamp
     record = build_forecast_record(
-        {
-            "opportunity_id": opportunity_id,
-            "symbol": "DRYRUN",
-            "session": "2026-07-20",
-            "decision_clock": "clock_12",
-            "decision_timestamp": decision_timestamp,
-            "movement_permission": False,
-            "decision_clock__available_at": decision_timestamp,
-            "movement_permission__available_at": decision_timestamp,
-        },
+        feature_row,
         metadata=metadata,
         long_library=long_library,
         short_library=short_library,
-        causal_feature_names=["decision_clock", "movement_permission"],
+        neutral_library=neutral_library,
+        causal_feature_names=causal_feature_names,
+        forecast_input_snapshot_hash=hashlib.sha256(
+            json.dumps(feature_row, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest(),
         forecast_freeze_timestamp=decision_timestamp,
     )
     record["reason_codes"] = sorted([*record["reason_codes"], "dry_run"])
@@ -1285,6 +2263,7 @@ def prospective_forecast_dry_run(output_root: Path, prospective_root: Path) -> d
         "opportunity_id": opportunity_id,
         "forecast_path": str(ledger.forecast_path),
         "forecast_record_count": 1,
+        "completion_status": ledger.completion_status(),
         "research_only": True,
         "execution_enabled": False,
     }
@@ -1293,7 +2272,30 @@ def prospective_forecast_dry_run(output_root: Path, prospective_root: Path) -> d
 
 
 def prospective_settlement_dry_run(output_root: Path, prospective_root: Path) -> dict[str, Any]:
-    ledger = ProspectiveLedger(prospective_root, opened_through="2026-06-26")
+    contract = load_contract(CONTRACT_PATH)
+    metadata = json.loads((output_root / "run_metadata.json").read_text(encoding="utf-8"))
+    expected_identity = {
+        "run_id": str(metadata["run_id"]),
+        "git_sha": str(metadata["git_sha"]),
+        "contract_hash": str(metadata["contract_sha256"]),
+        "training_data_snapshot_hash": str(metadata["data_snapshot_sha256"]),
+        "feature_schema_hash": str(metadata["feature_schema_sha256"]),
+        "long_library_hash": str(metadata["long_library_sha256"]),
+        "short_library_hash": str(metadata["short_library_sha256"]),
+        "neutral_library_hash": str(metadata["neutral_library_sha256"]),
+    }
+    completion = {
+        key: int(value)
+        for key, value in contract["prospective_completion"].items()
+        if key.startswith("minimum_")
+    }
+    ledger = ProspectiveLedger(
+        prospective_root,
+        opened_through=str(contract["prospective_completion"]["opened_historical_through"]),
+        required_causal_feature_names=list(map(str, metadata["causal_feature_names"])),
+        expected_identity=expected_identity,
+        completion_requirements=completion,
+    )
     opportunity_id = "atlas|2026|DRYRUN|2026-07-20|12"
     ledger.append_settlement(
         build_settlement_record(
@@ -1317,16 +2319,149 @@ def prospective_settlement_dry_run(output_root: Path, prospective_root: Path) ->
         "forecast_path_unchanged": True,
         "settlement_path": str(ledger.settlement_path),
         "settlement_record_count": 1,
+        "completion_status": ledger.completion_status(),
+        "economic_read_gate_blocked": False,
         "research_only": True,
         "execution_enabled": False,
     }
+    try:
+        ledger.read_settlements()
+    except PermissionError:
+        result["economic_read_gate_blocked"] = True
     write_deterministic_json(result, output_root / "prospective_settlement_dry_run.json")
     return result
 
 
+def qualify_relative_persistence(
+    library: list[dict[str, Any]],
+    validation_metrics: pd.DataFrame,
+    final_metrics: pd.DataFrame,
+    stress: pd.DataFrame,
+    nulls: pd.DataFrame,
+    contract: dict[str, Any],
+) -> pd.DataFrame:
+    """Apply the frozen absolute-signature stability standard to Track B."""
+
+    support = contract["support"]
+    validation = (
+        validation_metrics.set_index("signature_id")
+        if not validation_metrics.empty
+        else pd.DataFrame()
+    )
+    final = final_metrics.set_index("signature_id") if not final_metrics.empty else pd.DataFrame()
+    null_failed = bool(
+        not nulls.empty
+        and nulls["similar_persistent_validation_performance"].fillna(False).astype(bool).any()
+    )
+    rows: list[dict[str, Any]] = []
+    for entry in library:
+        signature_id = str(entry["signature"]["signature_id"])
+        direction = str(entry["signature"]["direction"])
+        reasons: list[str] = []
+        for stage, metrics in (
+            ("validation", validation),
+            ("final_opened_holdout", final),
+        ):
+            if metrics.empty or signature_id not in metrics.index:
+                reasons.append(f"{stage}_metrics_missing")
+                continue
+            metric = cast(pd.Series, metrics.loc[signature_id])
+            if float(metric["mean_directional_net_bps"]) <= 0.0:
+                reasons.append(f"{stage}_payoff_not_positive")
+            if float(metric["directional_lift"]) <= 0.0:
+                reasons.append(f"{stage}_lift_not_positive")
+            if float(metric["twice_cost_mean_net_bps"]) <= 0.0:
+                reasons.append(f"{stage}_twice_cost_not_positive")
+            if int(metric["rows"]) < int(support["minimum_rows"]):
+                reasons.append(f"{stage}_insufficient_rows")
+            if int(metric["sessions"]) < int(support["minimum_independent_sessions"]):
+                reasons.append(f"{stage}_insufficient_sessions")
+            if int(metric["stocks"]) < int(support["minimum_independent_stocks"]):
+                reasons.append(f"{stage}_insufficient_stocks")
+            if int(metric["months"]) < int(support["minimum_calendar_months"]):
+                reasons.append(f"{stage}_insufficient_months")
+            relevant_count = int(
+                metric["long_count"] if direction == "LONG" else metric["short_count"]
+            )
+            if relevant_count < int(support["minimum_relevant_direction_outcomes"]):
+                reasons.append(f"{stage}_insufficient_directional_outcomes")
+            if float(metric["maximum_single_stock_row_fraction"]) > float(
+                support["maximum_single_stock_row_fraction"]
+            ):
+                reasons.append(f"{stage}_stock_row_concentration")
+            if float(metric["top_stock_absolute_contribution_share"]) > float(
+                support["maximum_top_stock_absolute_payoff_share"]
+            ):
+                reasons.append(f"{stage}_stock_payoff_concentration")
+            if float(metric["top_month_absolute_contribution_share"]) > float(
+                support["maximum_top_month_absolute_payoff_share"]
+            ):
+                reasons.append(f"{stage}_month_payoff_concentration")
+            if float(metric["positive_stock_fraction"]) <= float(
+                support["minimum_positive_stock_fraction"]
+            ):
+                reasons.append(f"{stage}_stock_consistency")
+            if float(metric["positive_month_fraction"]) <= float(
+                contract["validation_survival"][
+                    "positive_month_fraction_strictly_greater_than"
+                ]
+            ):
+                reasons.append(f"{stage}_month_consistency")
+            if float(metric["opposite_direction_excess"]) > float(
+                support["maximum_opposite_direction_excess"]
+            ):
+                reasons.append(f"{stage}_opposite_direction_not_controlled")
+
+            stage_stress = stress.loc[
+                stress["signature_id"].eq(signature_id)
+                & stress["chronology_stage"].eq(stage)
+            ]
+            for stress_name in (
+                "one_bar_execution_delay_same_terminal",
+                "remove_best_stock",
+                "remove_top_five_stocks",
+                "remove_best_month",
+            ):
+                stress_rows = stage_stress.loc[stage_stress["stress"].eq(stress_name)]
+                if stress_rows.empty or not stress_rows["mean_directional_net_bps"].gt(0.0).all():
+                    reasons.append(f"{stage}_{stress_name}_not_positive")
+            neighbours = stage_stress.loc[
+                stage_stress["stress"].eq("adjacent_threshold_neighbour")
+            ]
+            if len(neighbours) and not neighbours["mean_directional_net_bps"].gt(0.0).all():
+                reasons.append(f"{stage}_adjacent_threshold_incompatible")
+            for episode_name in ("remove_best_episode", "remove_top_five_episodes"):
+                episode = stage_stress.loc[stage_stress["stress"].eq(episode_name)]
+                if episode.empty or not episode["status"].eq("available").all():
+                    reasons.append(f"{stage}_{episode_name}_unavailable")
+                elif not episode["mean_directional_net_bps"].gt(0.0).all():
+                    reasons.append(f"{stage}_{episode_name}_not_positive")
+        if null_failed:
+            reasons.append("null_family_similar_persistent_validation_performance")
+        reasons = sorted(set(reasons))
+        rows.append(
+            {
+                "signature_id": signature_id,
+                "direction": direction,
+                "strict_persistent_relative_signature": not reasons,
+                "rejection_reasons_json": json.dumps(reasons, separators=(",", ":")),
+            }
+        )
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "signature_id",
+            "direction",
+            "strict_persistent_relative_signature",
+            "rejection_reasons_json",
+        ],
+    )
+
+
 def run_track_b(
-    absolute_scored: pd.DataFrame,
+    absolute_features: pd.DataFrame,
     *,
+    historical_root: Path,
     output_root: Path,
     contract: dict[str, Any],
     feature_families: dict[str, str],
@@ -1337,31 +2472,38 @@ def run_track_b(
     """Run Track B only after Track A artifacts and conclusion are materialized."""
 
     output_root.mkdir(parents=True, exist_ok=True)
-    relative_outcomes = construct_relative_outcomes(absolute_scored)
-    relative = absolute_scored.copy()
-    relative = relative.drop(
-        columns=["target", "long_net_bps", "short_net_bps", "round_trip_cost_bps"]
-    ).merge(
-        relative_outcomes[
-            [
-                "opportunity_id",
-                "target",
-                "long_net_bps",
-                "short_net_bps",
-                "round_trip_cost_bps",
-                "future_residual_return_bps",
-                "future_residual_percentile",
-                "peer_count",
-            ]
-        ],
-        on="opportunity_id",
-        how="left",
-        validate="one_to_one",
+    minimum_peers = int(contract["track_b"]["minimum_contemporaneous_peers"])
+
+    def construct_stage(absolute: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+        outcomes = construct_relative_outcomes(absolute, minimum_peers=minimum_peers)
+        relative_stage = absolute.drop(
+            columns=["target", "long_net_bps", "short_net_bps", "round_trip_cost_bps"]
+        ).merge(
+            outcomes[
+                [
+                    "opportunity_id",
+                    "target",
+                    "long_net_bps",
+                    "short_net_bps",
+                    "round_trip_cost_bps",
+                    "future_residual_return_bps",
+                    "future_residual_percentile",
+                    "peer_count",
+                ]
+            ],
+            on="opportunity_id",
+            how="left",
+            validate="one_to_one",
+        )
+        return outcomes, relative_stage.loc[
+            relative_stage["target"].ne("UNAVAILABLE")
+        ].copy()
+
+    discovery_absolute = _open_scoring_stage(
+        historical_root, absolute_features, contract, "discovery"
     )
-    relative = relative.loc[relative["target"].ne("UNAVAILABLE")].copy()
-    discovery = relative.loc[relative["period"].eq(2024)]
-    validation = relative.loc[relative["period"].eq(2025)]
-    final = relative.loc[relative["period"].eq(2026)]
+    discovery_outcomes, discovery = construct_stage(discovery_absolute)
+    relative_search_space = candidate_search_space_counts(discovery, feature_families)
     candidates, registry = generate_bounded_candidates(
         discovery,
         feature_families,
@@ -1390,6 +2532,23 @@ def run_track_b(
         ordered_bins=ordered_bins,
         fdr_q=float(contract["multiplicity"]["broad_discovery_q"]),
     )
+    write_deterministic_json(
+        {
+            **relative_search_space,
+            "balanced_directional_candidate_allocation": {
+                "univariate": int(census["stage"].eq("univariate").sum()),
+                "pairwise": int(census["stage"].eq("pairwise").sum()),
+            },
+            "broad_examined_directional_candidates": int(
+                census["stage"].isin(["univariate", "pairwise"]).sum()
+            ),
+            "broad_directional_cap": int(
+                contract["search"]["univariate_and_pairwise_cap"]
+            ),
+            "selection": "outcome_free_balanced_allocation",
+        },
+        output_root / "candidate_search_space.json",
+    )
     discovery_library = freeze_discovery_library(
         census,
         candidates,
@@ -1397,18 +2556,108 @@ def run_track_b(
         retained_stage_cap=int(contract["search"]["discovery_stage_retained_cap"]),
         per_direction_cap=int(contract["search"]["frozen_discovery_long_cap"]),
     )
+    discovery_path = output_root / "relative_discovery_library.json"
+    write_deterministic_json(_safe_json(discovery_library), discovery_path)
+    discovery_hash = sha256_file(discovery_path)
+    write_deterministic_json(
+        {
+            "stage": "discovery",
+            "frozen_library_sha256": discovery_hash,
+            "validation_or_final_opened_before_seal": False,
+        },
+        output_root / "discovery_stage_seal.json",
+    )
+    validation_absolute = _open_scoring_stage(
+        historical_root, absolute_features, contract, "validation"
+    )
+    validation_outcomes, validation = construct_stage(validation_absolute)
     validation_metrics, survivor_library = validate_discovery_library(
         validation,
         discovery_library,
         support_rules=support_rules,
         holm_alpha=float(contract["multiplicity"]["retained_family_alpha"]),
         per_direction_cap=int(contract["search"]["validation_survivor_long_cap"]),
+        bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
+        bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 1000,
     )
+    survivor_path = output_root / "relative_survivor_library.json"
+    write_deterministic_json(_safe_json(survivor_library), survivor_path)
+    survivor_hash = sha256_file(survivor_path)
+    write_deterministic_json(
+        {
+            "stage": "validation",
+            "frozen_survivor_library_sha256": survivor_hash,
+            "final_opened_before_seal": False,
+        },
+        output_root / "validation_stage_seal.json",
+    )
+    final_absolute = _open_scoring_stage(
+        historical_root, absolute_features, contract, "final_opened_holdout"
+    )
+    final_outcomes, final = construct_stage(final_absolute)
+    if sha256_file(discovery_path) != discovery_hash or sha256_file(survivor_path) != survivor_hash:
+        raise AssertionError("Track B frozen library changed across chronological opens")
     final_metrics = score_frozen_library(
         final,
         survivor_library,
         bootstrap_draws=int(contract["multiplicity"]["session_block_bootstrap_draws"]),
         bootstrap_seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 1000,
+    )
+    # Full retrospective outcomes and delay diagnostics may be opened only after
+    # both Track B rule-library seals have been materialized and hash-checked.
+    absolute_joined, _ = _joined_scoring_frame(historical_root)
+    absolute_joined = _assign_chronology_stage(absolute_joined, contract)
+    absolute_scored = absolute_joined.loc[
+        absolute_joined["target"].ne("UNAVAILABLE")
+    ].copy()
+    delayed_outcomes = pd.read_parquet(
+        historical_root / "one_bar_delay_outcome_ledger.parquet"
+    )
+    absolute_delayed = absolute_joined.drop(
+        columns=[
+            "target",
+            "gross_long_return_bps",
+            "net_long_return_bps",
+            "gross_short_return_bps",
+            "net_short_return_bps",
+            "long_net_bps",
+            "short_net_bps",
+            "score_status",
+            "entry_timestamp",
+            "entry_open",
+            "terminal_timestamp",
+            "terminal_close",
+        ],
+        errors="ignore",
+    ).merge(
+        delayed_outcomes[
+            [
+                "opportunity_id",
+                "target",
+                "gross_long_return_bps",
+                "net_long_return_bps",
+                "gross_short_return_bps",
+                "net_short_return_bps",
+            ]
+        ],
+        on="opportunity_id",
+        how="left",
+        validate="one_to_one",
+    )
+    absolute_delayed["long_net_bps"] = absolute_delayed["net_long_return_bps"]
+    absolute_delayed["short_net_bps"] = absolute_delayed["net_short_return_bps"]
+    absolute_delayed = absolute_delayed.loc[
+        absolute_delayed["target"].ne("UNAVAILABLE")
+    ].copy()
+    development_outcomes, development = construct_stage(
+        _stage(absolute_scored, "development_context")
+    )
+    relative_outcomes = pd.concat(
+        [development_outcomes, discovery_outcomes, validation_outcomes, final_outcomes],
+        ignore_index=True,
+    )
+    relative = pd.concat(
+        [development, discovery, validation, final], ignore_index=True
     )
     base_probabilities = {
         label: float((discovery["target"].eq(label).sum() + 1.0) / (len(discovery) + 3.0))
@@ -1433,6 +2682,85 @@ def run_track_b(
     )
     strength = relative_strength_baseline(relative_outcomes, absolute_scored)
     strength_economic = relative_baseline_economic_metrics(strength, relative_outcomes)
+    relative_delayed_outcomes = construct_relative_outcomes(
+        absolute_delayed,
+        minimum_peers=minimum_peers,
+    )
+    delayed_for_stress = relative_delayed_outcomes.rename(
+        columns={
+            "long_net_bps": "net_long_return_bps",
+            "short_net_bps": "net_short_return_bps",
+            "future_residual_return_bps": "gross_long_return_bps",
+        }
+    )
+    relative_stress, _ = stress_signature_library(
+        relative.assign(gross_long_return_bps=relative["future_residual_return_bps"]),
+        discovery_library,
+        delayed_for_stress,
+        ordered_bins=ordered_bins,
+    )
+    relative_stress = relative_stress.loc[
+        ~relative_stress["stress"].eq(
+            "leave_one_stock_out_direct_cross_section_recomputed"
+        )
+    ].copy()
+    track_b_loso_rows: list[dict[str, Any]] = []
+    for stage in ("discovery", "validation", "final_opened_holdout"):
+        absolute_stage = _stage(absolute_joined, stage)
+        for removed_symbol in sorted(absolute_stage["symbol"].astype(str).unique()):
+            reduced_absolute = recompute_cross_sectional_after_stock_deletion(
+                absolute_stage, removed_symbol
+            )
+            _, reduced_relative = construct_stage(reduced_absolute)
+            for entry in discovery_library:
+                signature = signature_from_dict(entry["signature"])
+                track_b_loso_rows.append(
+                    {
+                        **signature_metrics(reduced_relative, signature),
+                        "chronology_stage": stage,
+                        "period": int(reduced_relative["period"].iloc[0])
+                        if len(reduced_relative)
+                        else int(absolute_stage["period"].iloc[0]),
+                        "stress": "leave_one_stock_out_recomputed",
+                        "removed": removed_symbol,
+                        "relative_outcomes_recomputed": True,
+                        "direct_cross_sectional_features_recomputed": True,
+                        "structural_state_loop_movement_context": (
+                            "frozen_from_original_causal_timestamp_not_reestimated"
+                        ),
+                    }
+                )
+    relative_leave_one_out = pd.DataFrame(track_b_loso_rows)
+    relative_stress = pd.concat(
+        [relative_stress, relative_leave_one_out], ignore_index=True, sort=False
+    )
+    relative_concentration = signature_breakdowns(relative, discovery_library)
+    rng = np.random.default_rng(
+        int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 1000
+    )
+    frozen_ids = {str(entry["signature"]["signature_id"]) for entry in discovery_library}
+    random_signatures = []
+    used: set[str] = set()
+    for entry in discovery_library:
+        count = len(entry["signature"]["conditions"])
+        rows = int(entry["discovery_metrics"]["rows"])
+        pool = census.loc[
+            census["condition_count"].eq(count) & ~census["signature_id"].isin(frozen_ids | used)
+        ].copy()
+        if pool.empty:
+            continue
+        pool["distance"] = (pool["rows"] - rows).abs()
+        nearest = pool.sort_values(["distance", "signature_id"], kind="mergesort").head(20)
+        chosen = str(nearest.iloc[int(rng.integers(0, len(nearest)))]["signature_id"])
+        used.add(chosen)
+        random_signatures.append(candidate_map[chosen])
+    relative_nulls = null_test_results(
+        relative,
+        discovery_library,
+        random_signatures,
+        relative_atlas,
+        seed=int(contract["multiplicity"]["session_block_bootstrap_seed"]) + 1000,
+    )
     write_deterministic_parquet(
         relative_outcomes,
         output_root / "relative_outcome_ledger.parquet",
@@ -1448,17 +2776,15 @@ def run_track_b(
         output_root / "relative_discovery_signature_metrics.csv",
         sort_by=["signature_id"],
     )
-    write_deterministic_json(
-        _safe_json(discovery_library), output_root / "relative_discovery_library.json"
-    )
+    if sha256_file(discovery_path) != discovery_hash:
+        raise AssertionError("Track B discovery library changed during reporting")
     _write_csv_allow_empty(
         validation_metrics,
         output_root / "relative_validation_metrics.csv",
         sort_by=["signature_id"],
     )
-    write_deterministic_json(
-        _safe_json(survivor_library), output_root / "relative_survivor_library.json"
-    )
+    if sha256_file(survivor_path) != survivor_hash:
+        raise AssertionError("Track B validation library changed during final reporting")
     _write_csv_allow_empty(
         final_metrics,
         output_root / "relative_final_opened_holdout_metrics.csv",
@@ -1488,8 +2814,61 @@ def run_track_b(
             ignore_index=True,
         ),
         output_root / "relative_economic_metrics.csv",
-        sort_by=["period", "metric_basis"],
+        sort_by=["chronology_stage", "metric_basis"],
     )
+    _write_csv_allow_empty(
+        relative_nulls,
+        output_root / "relative_null_test_results.csv",
+        sort_by=["null"],
+    )
+    _write_csv_allow_empty(
+        relative_stress,
+        output_root / "relative_stability_results.csv",
+        sort_by=["signature_id", "chronology_stage", "stress", "removed"],
+    )
+    _write_csv_allow_empty(
+        relative_leave_one_out,
+        output_root / "relative_leave_one_stock_out.csv",
+        sort_by=["signature_id", "chronology_stage", "removed"],
+    )
+    _write_csv_allow_empty(
+        relative_concentration,
+        output_root / "relative_concentration_results.csv",
+        sort_by=["signature_id", "dimension"],
+    )
+    relative_qualification = qualify_relative_persistence(
+        survivor_library,
+        validation_metrics,
+        final_metrics,
+        relative_stress,
+        relative_nulls,
+        contract,
+    )
+    _write_csv_allow_empty(
+        relative_qualification,
+        output_root / "relative_persistence_qualification.csv",
+        sort_by=["signature_id"],
+    )
+    persistent_relative_ids = set(
+        relative_qualification.loc[
+            relative_qualification["strict_persistent_relative_signature"].astype(bool),
+            "signature_id",
+        ].astype(str)
+    )
+    beats_relative_strength = True
+    for stage in ("validation", "final_opened_holdout"):
+        atlas_row = relative_economic.loc[
+            relative_economic["chronology_stage"].eq(stage)
+        ]
+        baseline_row = strength_economic.loc[
+            strength_economic["chronology_stage"].eq(stage)
+        ]
+        beats_relative_strength &= bool(
+            len(atlas_row)
+            and len(baseline_row)
+            and float(atlas_row.iloc[0]["net_bps_per_full_opportunity"])
+            > float(baseline_row.iloc[0]["mean_residual_bps_per_opportunity"])
+        )
     summary = {
         "status": "completed_secondary_equal_universe_only",
         "sector_relative_status": "unavailable_no_frozen_sector_membership",
@@ -1498,9 +2877,94 @@ def run_track_b(
         "frozen_exploratory_signatures": len(discovery_library),
         "validation_survivors": len(survivor_library),
         "final_scored_signatures": len(final_metrics),
+        "persistent_relative_final_signatures": len(persistent_relative_ids),
+        "persistent_relative_signature_ids": sorted(persistent_relative_ids),
+        "atlas_beats_relative_strength_validation_and_final": beats_relative_strength,
         "absolute_profitability_claim_allowed": False,
+        "portfolio_cost_translation_status": "not_implemented_absolute_profitability_forbidden",
+        "null_families": int(len(relative_nulls)),
+        "stability_rows": int(len(relative_stress)),
     }
     write_deterministic_json(summary, output_root / "track_b_summary.json")
+    return summary
+
+
+def run_track_b_phase(output_root: Path) -> dict[str, Any]:
+    """Run secondary Track B only after an independent Track A audit passes."""
+
+    audit_path = output_root / "track_a_independent_audit.json"
+    if not audit_path.is_file():
+        raise RuntimeError("Track B requires a passing independent Track A audit marker")
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    if audit.get("scope") != "track_a" or audit.get("passed") is not True:
+        raise RuntimeError("Track B requires a passing independent Track A audit")
+    metadata = json.loads((output_root / "run_metadata.json").read_text(encoding="utf-8"))
+    expected_audit_identity = {
+        "audit_id": "20260717-directional-signature-atlas-v1-independent-audit",
+        "run_id": metadata["run_id"],
+        "git_sha": metadata["git_sha"],
+        "contract_sha256": metadata["contract_sha256"],
+        "data_snapshot_sha256": metadata["data_snapshot_sha256"],
+        "feature_schema_sha256": metadata["feature_schema_sha256"],
+        "feature_ledger_sha256": metadata["feature_ledger_sha256"],
+    }
+    mismatches = [
+        field
+        for field, expected in expected_audit_identity.items()
+        if str(audit.get(field)) != str(expected)
+    ]
+    audit_complete = int(audit.get("passed_check_count", -1)) == int(
+        audit.get("check_count", -2)
+    )
+    audit_safe = audit.get("research_only") is True and audit.get("execution_enabled") is False
+    if mismatches or not audit_complete or not audit_safe:
+        raise RuntimeError(
+            "Track B audit marker identity/safety mismatch: "
+            f"fields={mismatches}; complete={audit_complete}; safe={audit_safe}"
+        )
+    contract = load_contract(CONTRACT_PATH)
+    schema = _feature_schema()
+    features = pd.read_parquet(output_root / "outcome_free_feature_ledger.parquet")
+    features = _assign_chronology_stage(features, contract)
+    search = contract["search"]
+    caps = SearchCaps(
+        univariate_and_pairwise=int(search["univariate_and_pairwise_cap"]),
+        triples=int(search["three_condition_cap"]),
+        tree=int(search["tree_candidate_cap"]),
+        retained=int(search["discovery_stage_retained_cap"]),
+    )
+    support = contract["support"]
+    support_rules = SupportRules(
+        minimum_rows=int(support["minimum_rows"]),
+        minimum_sessions=int(support["minimum_independent_sessions"]),
+        minimum_stocks=int(support["minimum_independent_stocks"]),
+        maximum_stock_fraction=float(support["maximum_single_stock_row_fraction"]),
+        minimum_months=int(support["minimum_calendar_months"]),
+        minimum_directional_outcomes=int(support["minimum_relevant_direction_outcomes"]),
+    )
+    feature_families = feature_family_map(schema)
+    ordered_bins = {
+        str(row["name"]): list(row["bins"]) for row in schema["features"] if row.get("bins")
+    }
+    summary = run_track_b(
+        features,
+        historical_root=output_root,
+        output_root=output_root / "track_b",
+        contract=contract,
+        feature_families=feature_families,
+        ordered_bins=ordered_bins,
+        caps=caps,
+        support_rules=support_rules,
+    )
+    track_a_summary_path = output_root / "track_a_summary.json"
+    track_a_summary = json.loads(track_a_summary_path.read_text(encoding="utf-8"))
+    track_a_summary["track_b"] = summary
+    track_a_summary["scientific_decision"] = scientific_decision_label(
+        track_a_summary, summary
+    )
+    write_deterministic_json(track_a_summary, track_a_summary_path)
+    generate_track_b_plot(output_root)
+    write_artifact_manifest(output_root)
     return summary
 
 
@@ -1512,6 +2976,7 @@ def parse_args() -> argparse.Namespace:
             "build",
             "score",
             "run",
+            "track-b",
             "prospective-dry-run",
             "settlement-dry-run",
         ),
@@ -1529,6 +2994,9 @@ def main() -> None:
         print(json.dumps(metadata, sort_keys=True, indent=2))
     if args.phase in {"score", "run"}:
         summary = score_experiment(args.output_root)
+        print(json.dumps(summary, sort_keys=True, indent=2))
+    if args.phase == "track-b":
+        summary = run_track_b_phase(args.output_root)
         print(json.dumps(summary, sort_keys=True, indent=2))
     if args.phase in {"prospective-dry-run", "settlement-dry-run"}:
         if args.prospective_root is None:

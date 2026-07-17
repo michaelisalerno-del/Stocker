@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+from types import ModuleType
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,6 +15,7 @@ from stocker_research.directional_signature_atlas.features import (
     fit_training_quantile_bins,
     reconstruct_state_motifs,
 )
+from stocker_research.directional_signature_atlas.historical import _state_anchor_rows
 from stocker_research.directional_signature_atlas.outcomes import (
     build_economic_outcome,
     classify_terminal_move,
@@ -39,6 +44,19 @@ def _session(rows: int = 61) -> pd.DataFrame:
     )
 
 
+def _auditor_module() -> ModuleType:
+    path = (
+        Path(__file__).parents[1]
+        / "research/slrno-v2/20260714-regime-loop-handoff/work"
+        / "audit_directional_signature_atlas_v1.py"
+    )
+    specification = importlib.util.spec_from_file_location("atlas_auditor_test_module", path)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
 def test_every_feature_timestamp_is_no_later_than_decision() -> None:
     decision = pd.Timestamp("2025-01-02 15:30:00+00:00")
     frame = pd.DataFrame(
@@ -60,13 +78,35 @@ def test_future_returns_cannot_enter_feature_ledger() -> None:
 
 
 def test_future_loop_or_route_identity_cannot_enter_features() -> None:
-    with pytest.raises(ValueError, match="forbidden causal feature"):
-        assert_outcome_free_feature_names(["realised_child_route_identity"])
+    for forbidden in (
+        "realised_child_route_identity",
+        "future_loop_identity",
+        "realised_morph_identity",
+    ):
+        with pytest.raises(ValueError, match="forbidden causal feature"):
+            assert_outcome_free_feature_names([forbidden])
 
 
 def test_mfe_and_mae_are_absent_from_causal_features() -> None:
     with pytest.raises(ValueError, match="forbidden causal feature"):
         assert_outcome_free_feature_names(["mfe_long_bps", "mae_long_bps"])
+
+
+def test_targets_and_payoffs_are_absent_from_causal_features() -> None:
+    for forbidden in (
+        "target",
+        "payoff",
+        "outcome_label",
+        "first_touch_target",
+        "net_long_return_bps",
+        "gross_short_return_bps",
+        "gross_long_payoff_bps",
+        "primary_target",
+        "target_label",
+        "economic_outcome",
+    ):
+        with pytest.raises(ValueError, match="forbidden causal feature"):
+            assert_outcome_free_feature_names([forbidden])
 
 
 def test_exact_next_provider_open_entry_is_used() -> None:
@@ -81,11 +121,47 @@ def test_fixed_24_bar_terminal_is_used() -> None:
     assert result["terminal_close"] == pytest.approx(_session().iloc[36]["close"])
 
 
+def test_secondary_first_touch_uses_separate_frozen_causal_barrier() -> None:
+    primary_barrier = build_economic_outcome(
+        _session(), decision_ordinal=12, round_trip_cost_bps=10.0
+    )
+    predecessor_barrier = build_economic_outcome(
+        _session(),
+        decision_ordinal=12,
+        round_trip_cost_bps=10.0,
+        first_touch_barrier_bps=100.0,
+    )
+    assert primary_barrier["first_touch_target"] == "UPPER_FIRST"
+    assert predecessor_barrier["first_touch_target"] == "NEITHER"
+    assert predecessor_barrier["first_touch_barrier_bps"] == 100.0
+
+
+def test_secondary_first_touch_checks_gap_open_before_dual_touch() -> None:
+    session = _session()
+    entry_open = float(session.loc[session["bar_ordinal"].eq(13), "open"].iloc[0])
+    upper = entry_open * 1.004
+    gap_index = session.index[session["bar_ordinal"].eq(14)][0]
+    session.loc[gap_index, "open"] = upper + 0.01
+    session.loc[gap_index, "high"] = upper + 0.02
+    session.loc[gap_index, "low"] = entry_open * 0.995
+    result = build_economic_outcome(
+        session,
+        decision_ordinal=12,
+        round_trip_cost_bps=10.0,
+        first_touch_barrier_bps=40.0,
+    )
+    assert result["first_touch_target"] == "UPPER_FIRST"
+    assert result["first_touch_step"] == 2
+
+
 def test_missing_entry_or_terminal_remains_unavailable() -> None:
     missing_entry = _session().query("bar_ordinal != 13")
     missing_terminal = _session().query("bar_ordinal != 36")
     assert build_economic_outcome(missing_entry, 12, 10.0)["target"] == "UNAVAILABLE"
-    assert build_economic_outcome(missing_terminal, 12, 10.0)["target"] == "UNAVAILABLE"
+    unavailable = build_economic_outcome(missing_terminal, 12, 10.0, first_touch_barrier_bps=80.0)
+    assert unavailable["target"] == "UNAVAILABLE"
+    assert unavailable["first_touch_target"] == "UNAVAILABLE"
+    assert unavailable["first_touch_barrier_bps"] == 80.0
 
 
 def test_row_cannot_be_both_long_and_short() -> None:
@@ -131,16 +207,18 @@ def _states() -> pd.DataFrame:
 
 def test_state_motifs_use_only_states_observed_by_current_bar() -> None:
     result = reconstruct_state_motifs(_states())
-    assert result.iloc[3]["state_motif_2"] == "1>3"
+    assert pd.isna(result.iloc[3]["state_motif_2"])
+    assert result.iloc[3]["previous_state"] == 1
     assert "2" not in str(result.iloc[3]["state_motif_4"])
 
 
 def test_motif_lengths_two_three_and_four_are_reconstructed() -> None:
     result = reconstruct_state_motifs(_states())
     last = result.iloc[-1]
-    assert last["state_motif_2"] == "2>1"
-    assert last["state_motif_3"] == "1>2>1"
-    assert last["state_motif_4"] == "3>1>2>1"
+    assert last["state_motif_2"] == "1>2"
+    assert last["state_motif_3"] == "3>1>2"
+    assert last["state_motif_4"] == "1>3>1>2"
+    assert not str(last["state_motif_4"]).endswith(f">{last['state']}")
 
 
 def test_future_state_cannot_enter_current_motif() -> None:
@@ -150,6 +228,21 @@ def test_future_state_cannot_enter_current_motif() -> None:
         full.iloc[:4]["state_motif_3"].reset_index(drop=True),
         prefix["state_motif_3"].reset_index(drop=True),
     )
+
+
+def test_ambiguous_transition_duration_is_not_aliased_from_state_dwell() -> None:
+    panel = pd.DataFrame(
+        {
+            "symbol_norm": ["AAA"] * 4,
+            "session_date": ["2025-01-02"] * 4,
+            "state": [1, 1, 2, 2],
+            "bar_index_in_session": [0, 1, 2, 3],
+            "age": [1, 2, 1, 2],
+        }
+    )
+    anchor = _state_anchor_rows(panel, {3}).iloc[0]
+    assert anchor["prior_completed_state_dwell_bars"] == 2
+    assert pd.isna(anchor["prior_completed_transition_duration_bars"])
 
 
 def test_full_raw_loop_score_vectors_are_rejected() -> None:
@@ -232,3 +325,47 @@ def test_leave_one_stock_out_recomputes_cross_sectional_features() -> None:
     )
     assert full.loc[full["symbol"] == "B", "return_6_cross_sectional_rank"].item() == 0.5
     assert dropped.loc[dropped["symbol"] == "B", "return_6_cross_sectional_rank"].item() == 1.0
+
+
+def test_track_b_auditor_rejects_summary_comparison_tamper() -> None:
+    auditor = _auditor_module()
+    relative = pd.DataFrame(
+        {
+            "opportunity_id": ["v1", "v2", "f1", "f2"],
+            "chronology_stage": [
+                "validation",
+                "validation",
+                "final_opened_holdout",
+                "final_opened_holdout",
+            ],
+            "long_net_bps": [10.0, 10.0, 8.0, 8.0],
+            "short_net_bps": [-10.0, -10.0, -8.0, -8.0],
+        }
+    )
+    atlas = pd.DataFrame(
+        {
+            "opportunity_id": relative["opportunity_id"],
+            "predicted_state": "LONG",
+        }
+    )
+    baseline = pd.DataFrame(
+        {
+            "opportunity_id": relative["opportunity_id"],
+            "predicted_state": "NEUTRAL",
+        }
+    )
+    valid, _ = auditor.verify_relative_atlas_baseline_comparison(
+        relative,
+        atlas,
+        baseline,
+        {"atlas_beats_relative_strength_validation_and_final": True},
+    )
+    tampered, detail = auditor.verify_relative_atlas_baseline_comparison(
+        relative,
+        atlas,
+        baseline,
+        {"atlas_beats_relative_strength_validation_and_final": False},
+    )
+    assert valid
+    assert not tampered
+    assert "summary_comparison_tamper" in detail

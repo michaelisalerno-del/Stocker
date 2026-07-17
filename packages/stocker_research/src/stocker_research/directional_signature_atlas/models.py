@@ -18,6 +18,24 @@ from stocker_research.directional_signature_atlas.analysis import signature_from
 from stocker_research.directional_signature_atlas.signatures import apply_signature
 
 CLASSES = ("LONG", "SHORT", "NEUTRAL")
+PRIOR_PRICE_NUMERIC = (
+    "barrier_bps",
+    "current_range_scale",
+    "current_body_scale",
+    "current_close_location",
+    "current_upper_wick_fraction",
+    "current_lower_wick_fraction",
+    "return_1_scale",
+    "return_3_scale",
+    "return_6_scale",
+    "return_12_scale",
+    "mean_abs_return_6_scale",
+    "compression_3_to_12",
+    "session_return_scale",
+    "session_mean_distance_scale",
+    "opening_range_position",
+    "opening_range_width_scale",
+)
 
 
 def _laplace_probabilities(group: pd.DataFrame) -> dict[str, float]:
@@ -100,18 +118,126 @@ def _fit_logistic(
     return aligned
 
 
-def baseline_predictions(discovery: pd.DataFrame, full: pd.DataFrame) -> pd.DataFrame:
+def _prior_price_context_prequential(
+    full: pd.DataFrame,
+    first_touch: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Reproduce the predecessor M1 equation and first-touch training target."""
+
+    target = first_touch[["opportunity_id", "first_touch_target", "score_status"]].copy()
+    target["actual_class"] = target["first_touch_target"].map(
+        {
+            "UPPER_FIRST": "long",
+            "LOWER_FIRST": "short",
+            "NEITHER": "neutral",
+            "SAME_BAR_DUAL_TOUCH": "neutral",
+        }
+    )
+    joined = full.merge(target, on="opportunity_id", how="left", validate="one_to_one")
+    usable = joined.loc[joined["score_status"].eq("scored") & joined["actual_class"].notna()].copy()
+    probabilities = np.full((len(full), 3), 1.0 / 3.0, dtype=float)
+    states = np.full(len(full), "NEUTRAL", dtype=object)
+    eligible = np.zeros(len(full), dtype=bool)
+    full_positions = pd.Series(np.arange(len(full)), index=full["opportunity_id"].astype(str))
+    score_dates = sorted(
+        usable.loc[usable["period"].isin([2025, 2026]), "session"].astype(str).unique()
+    )
+    for score_date in score_dates:
+        prior_dates = sorted(
+            usable.loc[usable["session"].astype(str).lt(score_date), "session"].astype(str).unique()
+        )
+        training_dates = prior_dates[-120:]
+        if len(training_dates) < 60:
+            continue
+        train = usable.loc[usable["session"].astype(str).isin(training_dates)].copy()
+        score = usable.loc[usable["session"].astype(str).eq(score_date)].copy()
+        if len(train) < 1500 or score.empty or train["actual_class"].nunique() < 3:
+            continue
+        numeric_pipeline = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scale", StandardScaler()),
+            ]
+        )
+        categorical_pipeline = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="most_frequent")),
+                ("one_hot", OneHotEncoder(handle_unknown="ignore")),
+            ]
+        )
+        model = Pipeline(
+            [
+                (
+                    "features",
+                    ColumnTransformer(
+                        [
+                            ("numeric", numeric_pipeline, list(PRIOR_PRICE_NUMERIC)),
+                            ("categorical", categorical_pipeline, ["decision_clock"]),
+                        ]
+                    ),
+                ),
+                (
+                    "model",
+                    LogisticRegression(
+                        C=0.1,
+                        max_iter=1000,
+                        random_state=20260714,
+                        solver="lbfgs",
+                    ),
+                ),
+            ]
+        )
+        columns = [*PRIOR_PRICE_NUMERIC, "decision_clock"]
+        model.fit(train[columns], train["actual_class"])
+        raw = model.predict_proba(score[columns])
+        classes = [str(value) for value in model.named_steps["model"].classes_]
+        aligned = np.column_stack(
+            [raw[:, classes.index(label)] for label in ("long", "short", "neutral")]
+        )
+        for offset, row in enumerate(score.itertuples(index=False)):
+            position = int(full_positions.loc[str(row.opportunity_id)])
+            probabilities[position] = aligned[offset]
+            barrier = float(cast(Any, row.barrier_bps))
+            frozen_cost = float(cast(Any, row.round_trip_cost_bps))
+            long_ev = (aligned[offset, 0] - aligned[offset, 1]) * barrier - frozen_cost
+            short_ev = (aligned[offset, 1] - aligned[offset, 0]) * barrier - frozen_cost
+            if long_ev > 0.0 and long_ev > short_ev:
+                states[position] = "LONG"
+            elif short_ev > 0.0 and short_ev > long_ev:
+                states[position] = "SHORT"
+            eligible[position] = True
+    return probabilities, states, eligible
+
+
+def baseline_predictions(
+    discovery: pd.DataFrame,
+    full: pd.DataFrame,
+    *,
+    first_touch: pd.DataFrame,
+) -> pd.DataFrame:
     """Fit every required baseline on discovery and score the identical population."""
 
     outputs: list[pd.DataFrame] = []
 
-    def add(model_id: str, probabilities: np.ndarray) -> None:
-        state = np.asarray(CLASSES, dtype=object)[np.argmax(probabilities, axis=1)]
+    def add(
+        model_id: str,
+        probabilities: np.ndarray,
+        *,
+        state: np.ndarray | None = None,
+        metric_eligible: np.ndarray | None = None,
+    ) -> None:
+        if state is None:
+            state = np.asarray(CLASSES, dtype=object)[np.argmax(probabilities, axis=1)]
+        if metric_eligible is None:
+            metric_eligible = np.ones(len(full), dtype=bool)
         outputs.append(
             pd.DataFrame(
                 {
                     "opportunity_id": full["opportunity_id"].to_numpy(),
                     "period": full["period"].to_numpy(),
+                    "chronology_stage": full.get(
+                        "chronology_stage", full["period"].astype(str)
+                    ).to_numpy(),
                     "session": full["session"].to_numpy(),
                     "symbol": full["symbol"].to_numpy(),
                     "decision_clock": full["decision_clock"].to_numpy(),
@@ -120,6 +246,7 @@ def baseline_predictions(discovery: pd.DataFrame, full: pd.DataFrame) -> pd.Data
                     "p_long": probabilities[:, 0],
                     "p_short": probabilities[:, 1],
                     "p_neutral": probabilities[:, 2],
+                    "metric_eligible": metric_eligible,
                 }
             )
         )
@@ -129,31 +256,14 @@ def baseline_predictions(discovery: pd.DataFrame, full: pd.DataFrame) -> pd.Data
     add("always_neutral", neutral)
     add("clock_only_base_rate", _conditional_probabilities(discovery, full, ["decision_clock"]))
 
-    static_numeric = [
-        "current_range_scale",
-        "current_body_scale",
-        "current_close_location",
-        "current_upper_wick_fraction",
-        "current_lower_wick_fraction",
-        "return_1_scale",
-        "return_3_scale",
-        "return_6_scale",
-        "return_12_scale",
-        "mean_abs_return_6_scale",
-        "compression_3_to_12",
-        "session_return_scale",
-        "session_mean_distance_scale",
-        "opening_range_position",
-        "opening_range_width_scale",
-    ]
+    prior_probabilities, prior_state, prior_eligible = _prior_price_context_prequential(
+        full, first_touch
+    )
     add(
         "prior_static_price_context_multinomial",
-        _fit_logistic(
-            discovery,
-            full,
-            numeric=static_numeric,
-            categorical=["decision_clock"],
-        ),
+        prior_probabilities,
+        state=prior_state,
+        metric_eligible=prior_eligible,
     )
     return_1 = pd.to_numeric(full["return_1_scale"], errors="coerce")
     momentum = np.where(return_1 > 0.0, "LONG", np.where(return_1 < 0.0, "SHORT", "NEUTRAL"))
@@ -168,7 +278,9 @@ def baseline_predictions(discovery: pd.DataFrame, full: pd.DataFrame) -> pd.Data
         "current_state_plus_history",
         _conditional_probabilities(discovery, full, ["current_state", "state_motif_3"]),
     )
-    permitted_momentum = np.where(full["movement_permission"].astype(bool), momentum, "NEUTRAL")
+    permitted_momentum = np.where(
+        full["movement_permission"].fillna(False).astype(bool), momentum, "NEUTRAL"
+    )
     add("movement_permission_plus_momentum", _hard_probabilities(permitted_momentum))
     compact_categorical = [
         "decision_clock",
@@ -206,6 +318,17 @@ def apply_atlas_controller(
     firing: list[list[str]] = [[] for _ in range(len(frame))]
     probability_sums = np.zeros((len(frame), 3), dtype=float)
     probability_counts = np.zeros(len(frame), dtype=int)
+    required_features = {
+        str(condition["feature"])
+        for entry in library
+        for condition in entry["signature"]["conditions"]
+    }
+    missing_required = np.zeros(len(frame), dtype=bool)
+    for feature in sorted(required_features):
+        if feature not in frame:
+            missing_required[:] = True
+        else:
+            missing_required |= frame[feature].isna().to_numpy()
     for entry in library:
         signature = signature_from_dict(entry["signature"])
         mask = apply_signature(frame, signature).to_numpy(bool)
@@ -221,33 +344,49 @@ def apply_atlas_controller(
         probability_counts[mask] += 1
         for position in np.flatnonzero(mask):
             firing[position].append(signature.signature_id)
-    movement = frame["movement_permission"].astype(bool).to_numpy()
+    movement_available = frame["movement_permission"].notna().to_numpy()
+    movement = frame["movement_permission"].fillna(False).astype(bool).to_numpy()
     conflict = (long_votes > 0) & (short_votes > 0)
     no_vote = (long_votes == 0) & (short_votes == 0)
     long_value_positive = (long_votes > 0) & (long_value_sums / np.maximum(long_votes, 1) > 0.0)
     short_value_positive = (short_votes > 0) & (short_value_sums / np.maximum(short_votes, 1) > 0.0)
     state = np.full(len(frame), "NEUTRAL", dtype=object)
-    state[movement & ~conflict & (long_votes > 0) & (short_votes == 0) & long_value_positive] = (
-        "LONG"
-    )
-    state[movement & ~conflict & (short_votes > 0) & (long_votes == 0) & short_value_positive] = (
-        "SHORT"
-    )
+    state[
+        movement
+        & ~missing_required
+        & ~conflict
+        & (long_votes > 0)
+        & (short_votes == 0)
+        & long_value_positive
+    ] = "LONG"
+    state[
+        movement
+        & ~missing_required
+        & ~conflict
+        & (short_votes > 0)
+        & (long_votes == 0)
+        & short_value_positive
+    ] = "SHORT"
     reason = np.full(len(frame), "no_directional_vote", dtype=object)
     reason[~movement] = "movement_permission_failed"
+    reason[~movement_available] = "required_causal_feature_unavailable"
     reason[movement & conflict] = "conflicting_votes"
     reason[movement & no_vote] = "no_directional_vote"
     reason[movement & ~conflict & ~no_vote & ~long_value_positive & ~short_value_positive] = (
         "non_positive_conservative_value"
     )
     reason[state != "NEUTRAL"] = "supported_directional_vote"
+    reason[missing_required] = "required_causal_feature_unavailable"
     base = np.asarray([base_probabilities[label] for label in CLASSES], dtype=float)
     probabilities = np.tile(base, (len(frame), 1))
     has_probability = probability_counts > 0
     probabilities[has_probability] = (
         probability_sums[has_probability] / probability_counts[has_probability, None]
     )
-    output = frame[["opportunity_id", "period", "session", "symbol", "decision_clock"]].copy()
+    output_columns = ["opportunity_id", "period", "session", "symbol", "decision_clock"]
+    if "chronology_stage" in frame:
+        output_columns.append("chronology_stage")
+    output = frame[output_columns].copy()
     output["model_id"] = "directional_signature_atlas_v1"
     output["predicted_state"] = state
     output["long_vote_count"] = long_votes
@@ -313,14 +452,26 @@ def prediction_metrics(
         validate="many_to_one",
     )
     joined = joined.loc[joined["target"].ne("UNAVAILABLE")].copy()
+    if "metric_eligible" in joined:
+        joined = joined.loc[joined["metric_eligible"].fillna(True).astype(bool)].copy()
     predictive_rows: list[dict[str, Any]] = []
     economic_rows: list[dict[str, Any]] = []
-    for (model_id, period), group in joined.groupby(["model_id", "period"], sort=True):
+    stage_column = "chronology_stage" if "chronology_stage" in joined else "period"
+    for (model_id, stage), group in joined.groupby(["model_id", stage_column], sort=True):
+        period = int(group["period"].iloc[0])
+        order_columns = [
+            column
+            for column in ("decision_timestamp", "session", "decision_clock", "symbol")
+            if column in group
+        ]
+        group = group.sort_values(order_columns, kind="mergesort")
         truth = group["target"].astype(str)
         long_target = truth.eq("LONG").to_numpy(float)
         short_target = truth.eq("SHORT").to_numpy(float)
+        neutral_target = truth.eq("NEUTRAL").to_numpy(float)
         p_long = group["p_long"].to_numpy(float)
         p_short = group["p_short"].to_numpy(float)
+        p_neutral = group["p_neutral"].to_numpy(float)
         probabilities = group[["p_long", "p_short", "p_neutral"]].to_numpy(float)
         probabilities = np.clip(probabilities, 1e-12, 1.0)
         probabilities /= probabilities.sum(axis=1, keepdims=True)
@@ -330,18 +481,44 @@ def prediction_metrics(
         false_direction = (predicted.eq("LONG") & truth.eq("SHORT")) | (
             predicted.eq("SHORT") & truth.eq("LONG")
         )
+        predicted_long = predicted.eq("LONG")
+        predicted_short = predicted.eq("SHORT")
+        base_long_rate = float(truth.eq("LONG").mean())
+        base_short_rate = float(truth.eq("SHORT").mean())
+        long_precision = (
+            float(truth.loc[predicted_long].eq("LONG").mean()) if predicted_long.any() else math.nan
+        )
+        short_precision = (
+            float(truth.loc[predicted_short].eq("SHORT").mean())
+            if predicted_short.any()
+            else math.nan
+        )
+        directional_base_precision = (
+            float(
+                (predicted_long.sum() * base_long_rate + predicted_short.sum() * base_short_rate)
+                / directional.sum()
+            )
+            if directional.any()
+            else math.nan
+        )
+        directional_precision = (
+            float(correct_direction.sum() / directional.sum()) if directional.any() else math.nan
+        )
         predictive_rows.append(
             {
                 "model_id": str(model_id),
-                "period": int(cast(Any, period)),
+                "period": period,
+                "chronology_stage": str(stage),
                 "rows": len(group),
                 "brier_long": float(np.mean(np.square(p_long - long_target))),
                 "brier_short": float(np.mean(np.square(p_short - short_target))),
+                "brier_neutral": float(np.mean(np.square(p_neutral - neutral_target))),
                 "macro_brier": float(
                     np.mean(
                         [
                             np.mean(np.square(p_long - long_target)),
                             np.mean(np.square(p_short - short_target)),
+                            np.mean(np.square(p_neutral - neutral_target)),
                         ]
                     )
                 ),
@@ -357,10 +534,24 @@ def prediction_metrics(
                 ),
                 "ece_long": _ece(p_long, long_target),
                 "ece_short": _ece(p_short, short_target),
+                "ece_neutral": _ece(p_neutral, neutral_target),
                 "calibration_slope_long": _calibration_slope(p_long, long_target),
                 "calibration_slope_short": _calibration_slope(p_short, short_target),
-                "directional_precision": float(correct_direction.sum() / directional.sum())
-                if directional.any()
+                "base_long_rate": base_long_rate,
+                "base_short_rate": base_short_rate,
+                "long_precision": long_precision,
+                "short_precision": short_precision,
+                "long_precision_lift": long_precision - base_long_rate
+                if math.isfinite(long_precision)
+                else math.nan,
+                "short_precision_lift": short_precision - base_short_rate
+                if math.isfinite(short_precision)
+                else math.nan,
+                "directional_base_precision": directional_base_precision,
+                "directional_precision": directional_precision,
+                "directional_precision_lift": directional_precision - directional_base_precision
+                if math.isfinite(directional_precision)
+                and math.isfinite(directional_base_precision)
                 else math.nan,
                 "directional_recall": float(
                     correct_direction.sum() / truth.isin(["LONG", "SHORT"]).sum()
@@ -381,7 +572,16 @@ def prediction_metrics(
             group["long_net_bps"],
             np.where(predicted.eq("SHORT"), group["short_net_bps"], 0.0),
         ).astype(float)
-        cumulative = np.cumsum(payoff)
+        payoff_frame = group.assign(_directional_payoff=payoff)
+        if "decision_timestamp" in payoff_frame:
+            batched_payoff = payoff_frame.groupby("decision_timestamp", sort=True)[
+                "_directional_payoff"
+            ].sum()
+        else:
+            batched_payoff = payoff_frame.groupby(
+                ["session", "decision_clock"], sort=True
+            )["_directional_payoff"].sum()
+        cumulative = np.cumsum(batched_payoff.to_numpy(float))
         peak = np.maximum.accumulate(np.concatenate(([0.0], cumulative)))[:-1]
         losses = abs(float(payoff[payoff < 0.0].sum()))
         profit_factor = (
@@ -392,7 +592,8 @@ def prediction_metrics(
         economic_rows.append(
             {
                 "model_id": str(model_id),
-                "period": int(cast(Any, period)),
+                "period": period,
+                "chronology_stage": str(stage),
                 "opportunities": len(group),
                 "directional_outputs": int(directional.sum()),
                 "directional_coverage": float(directional.mean()),

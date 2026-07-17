@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import deque
 from dataclasses import asdict, dataclass
 from itertools import combinations, product
 from typing import Any, Literal
@@ -140,6 +141,30 @@ def _make_signature(
     return Signature(f"{direction.lower()}__{body[:120]}__{digest}", direction, conditions, source)
 
 
+def candidate_search_space_counts(
+    discovery: pd.DataFrame,
+    feature_families: dict[str, str],
+) -> dict[str, int]:
+    """Count the outcome-free space before the frozen balanced search cap."""
+
+    levels = {
+        feature: len(_levels(discovery, feature, minimum_count=1))
+        for feature in sorted(feature_families)
+    }
+    univariate_rules = sum(levels.values())
+    pairwise_rules = sum(
+        levels[left] * levels[right]
+        for left, right in combinations(sorted(levels), 2)
+    )
+    return {
+        "features": len(levels),
+        "observed_univariate_condition_rules": univariate_rules,
+        "observed_pairwise_condition_rules": pairwise_rules,
+        "observed_univariate_directional_candidates": 2 * univariate_rules,
+        "observed_pairwise_directional_candidates": 2 * pairwise_rules,
+    }
+
+
 def generate_bounded_candidates(
     discovery: pd.DataFrame,
     feature_families: dict[str, str],
@@ -161,7 +186,7 @@ def generate_bounded_candidates(
             for value in _levels(
                 discovery,
                 feature,
-                minimum_count=minimum_parent_support,
+                minimum_count=1,
             )
         ]
         for feature in features
@@ -200,27 +225,56 @@ def generate_bounded_candidates(
             candidates.append(signature)
 
     broad_cap = caps.univariate_and_pairwise
+    broad_rule_cap = broad_cap // 2
+    univariate_rule_quota = min(
+        sum(len(values) for values in conditions_by_feature.values()),
+        broad_rule_cap // 2,
+    )
+    pairwise_rule_quota = broad_rule_cap - univariate_rule_quota
     broad_rows = 0
     selected_pairs: list[tuple[Condition, ...]] = []
-    for feature in features:
-        for condition in conditions_by_feature[feature]:
-            if broad_rows + 2 > broad_cap:
-                break
-            add((condition,), "univariate")
+    univariate_queues = {
+        feature: deque(conditions_by_feature[feature]) for feature in features
+    }
+    selected_univariate_rules = 0
+    while selected_univariate_rules < univariate_rule_quota:
+        made_progress = False
+        for feature in features:
+            queue = univariate_queues[feature]
+            if not queue or selected_univariate_rules >= univariate_rule_quota:
+                continue
+            add((queue.popleft(),), "univariate")
+            selected_univariate_rules += 1
             broad_rows += 2
-    pair_pool: list[tuple[Condition, ...]] = []
-    for left, right in combinations(features, 2):
-        if feature_families[left] == feature_families[right]:
-            continue
-        for pair in product(conditions_by_feature[left], conditions_by_feature[right]):
-            pair_pool.append(tuple(pair))
-    pair_pool.sort(key=rule_key)
-    for selected_pair in pair_pool:
-        if broad_rows + 2 > broad_cap:
+            made_progress = True
+        if not made_progress:
             break
+
+    pair_iterators: deque[Any] = deque()
+    feature_pairs = [
+        (left, right)
+        for left, right in combinations(features, 2)
+        if conditions_by_feature[left] and conditions_by_feature[right]
+    ]
+    feature_pairs.sort(
+        key=lambda pair: hashlib.sha256(f"{pair[0]}|{pair[1]}".encode()).hexdigest()
+    )
+    for left, right in feature_pairs:
+        pair_iterators.append(
+            iter(product(conditions_by_feature[left], conditions_by_feature[right]))
+        )
+    selected_pair_rules = 0
+    while pair_iterators and selected_pair_rules < pairwise_rule_quota:
+        iterator = pair_iterators.popleft()
+        try:
+            selected_pair = tuple(next(iterator))
+        except StopIteration:
+            continue
         add(selected_pair, "pairwise")
         selected_pairs.append(selected_pair)
+        selected_pair_rules += 1
         broad_rows += 2
+        pair_iterators.append(iterator)
 
     triple_pool: dict[str, tuple[Condition, ...]] = {}
     for selected_pair in selected_pairs:

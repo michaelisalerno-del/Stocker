@@ -6,6 +6,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pandas as pd
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "research/slrno-v2/20260714-regime-loop-handoff/work"
@@ -100,3 +101,49 @@ def test_safety_contract_prohibits_runtime_changes_and_replacement() -> None:
     assert contract["safety"]["deployment_enabled"] is False
     assert contract["populations"]["replacement_opportunities_allowed"] is False
     assert contract["populations"]["replacement_loop_selection_allowed"] is False
+
+
+def test_episode_deletion_never_treats_non_episode_rows_as_one_episode() -> None:
+    runner = _runner()
+    paired = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB", "CCC"],
+            "paired_difference_bps": [1_000.0, 30.0, 20.0],
+            "hindsight_episode_id": [pd.NA, "episode_1", "episode_2"],
+            "dollar_volume_proxy": [1.0, 2.0, 3.0],
+            "period": [2025, 2025, 2025],
+        }
+    )
+
+    deletion, _ = runner.build_deletion_stress(paired)
+    best = deletion.loc[deletion["stress"].eq("remove_best_episode")].iloc[0]
+
+    assert best["removed_contributors"] == "episode_1"
+    assert best["paired_total_difference_bps"] == pytest.approx(1_020.0)
+
+
+def test_prior_session_null_applies_unrelated_entry_displacement_not_prior_payoff() -> None:
+    runner = _runner()
+    paired = pd.DataFrame(
+        {
+            "opportunity_id": ["a", "b", "c"],
+            "period": [2025, 2025, 2025],
+            "symbol": ["AAA", "AAA", "AAA"],
+            "session_date": ["2025-01-02", "2025-01-03", "2025-01-06"],
+            "original_entry_timestamp": pd.to_datetime(
+                ["2025-01-02T15:00Z", "2025-01-03T15:00Z", "2025-01-06T15:00Z"]
+            ),
+            "direction": [1, 1, 1],
+            "t0_entry_price": [100.0, 100.0, 100.0],
+            "t1_entry_price": [99.0, 101.0, 98.0],
+            "terminal_price": [102.0, 102.0, 102.0],
+            "paired_difference_bps": [100.0, -100.0, 200.0],
+        }
+    )
+
+    nulls = runner.build_nulls(paired, paired.iloc[0:0], paired)
+    shifted = nulls.loc[nulls["null_test"].eq("prior_session_entry_displacement")].iloc[0]
+
+    assert shifted["opportunities"] == 2
+    assert shifted["status"] == "non_executable_prior_session_price_ratio_displacement"
+    assert pd.notna(shifted["shifted_increment_bps"])

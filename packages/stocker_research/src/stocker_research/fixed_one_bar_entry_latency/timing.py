@@ -251,16 +251,7 @@ def score_fixed_latency(
             expected=expected,
             terminal=terminal,
         )
-    expected_path = pd.date_range(expected, terminal_row_start, freq=BAR_DURATION, tz="UTC")
-    path = frame.loc[frame["timestamp"].isin(expected_path)]
-    if len(path) != len(expected_path) or path["timestamp"].duplicated().any():
-        return _unavailable(
-            "incomplete_constant_terminal_path",
-            t0=t0,
-            t0_price=t0_price,
-            expected=expected,
-            terminal=terminal,
-        )
+    exposure_bars_remaining = int((terminal - expected) / BAR_DURATION)
     t1_price = float(t1_row["open"])
     t1_gross = _gross_bps(direction, t1_price, terminal_price)
     t1_net = t1_gross - total_cost
@@ -277,10 +268,10 @@ def score_fixed_latency(
     signed_close = _gross_bps(direction, t0_price, close)
     if direction == 1:
         favourable = 10_000.0 * (high / t0_price - 1.0)
-        adverse = 10_000.0 * (low / t0_price - 1.0)
+        adverse = 10_000.0 * (1.0 - low / t0_price)
     else:
         favourable = 10_000.0 * (1.0 - low / t0_price)
-        adverse = 10_000.0 * (1.0 - high / t0_price)
+        adverse = 10_000.0 * (high / t0_price - 1.0)
 
     restarted_exit: pd.Timestamp | None = None
     restarted_price: float | None = None
@@ -322,7 +313,7 @@ def score_fixed_latency(
         direction_adjusted_entry_move_bps=entry_move,
         exact_entry_price_effect_bps=exact_effect,
         reconciliation_error_bps=delta - exact_effect,
-        exposure_bars_remaining=len(expected_path),
+        exposure_bars_remaining=exposure_bars_remaining,
         intervening_bar_open=float(t0_row["open"]),
         intervening_bar_high=high,
         intervening_bar_low=low,

@@ -31,6 +31,11 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def stable_hash(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def verify_hash(path: Path, expected: str) -> bool:
     return path.is_file() and sha256(path) == expected
 
@@ -206,6 +211,42 @@ def _check_population(root: Path, contract: Mapping[str, Any]) -> tuple[bool, st
         expected_controls["opportunity_id"].astype(str)
     ):
         return False, "control population differs from frozen policy"
+    for actual, expected, label in [
+        (named, expected_named, "named"),
+        (controls, expected_controls, "control"),
+    ]:
+        joined = actual.set_index("opportunity_id").join(
+            expected.set_index("opportunity_id")[
+                [
+                    "event_lineage_id",
+                    "period",
+                    "session_date",
+                    "stock",
+                    "target_loop",
+                    "orientation",
+                ]
+            ],
+            how="left",
+            rsuffix="_policy",
+            validate="one_to_one",
+        )
+        identity_checks = {
+            "event_lineage_id": joined["event_lineage_id"]
+            .astype(str)
+            .eq(joined["event_lineage_id_policy"].astype(str)),
+            "period": joined["period"].astype(str).eq(joined["period_policy"].astype(str)),
+            "session": joined["session_date"]
+            .astype(str)
+            .eq(joined["session_date_policy"].astype(str)),
+            "symbol": joined["symbol"].astype(str).eq(joined["stock"].astype(str)),
+            "loop": joined["loop_id"].astype(str).eq(joined["target_loop"].astype(str)),
+            "orientation": joined["orientation"]
+            .astype(str)
+            .eq(joined["orientation_policy"].astype(str)),
+        }
+        failed = [name for name, values in identity_checks.items() if not bool(values.all())]
+        if failed:
+            return False, f"{label} policy identity mismatch: {failed}"
     named_counts = named.groupby(["period", "loop_id", "orientation"]).size().to_dict()
     expected_named_counts = {
         (2023, "cycle_04", "state_4"): 132,
@@ -243,6 +284,48 @@ def _check_t0_against_v2(root: Path, contract: Mapping[str, Any]) -> tuple[bool,
         return False, "stored T0 or terminal timestamp differs from V2"
     if not np.allclose(t0["original_entry_price"], source["entry_price"], rtol=0.0, atol=1e-12):
         return False, "stored T0 price differs from V2"
+    field_checks = {
+        "anchor_id": t0["anchor_id"].astype(str).eq(source["anchor_id"].astype(str)),
+        "symbol": t0["symbol"].astype(str).eq(source["symbol_norm"].astype(str)),
+        "period": t0["period"].astype(str).eq(source["period"].astype(str)),
+        "session": t0["session_date"].astype(str).eq(source["session_date"].astype(str)),
+        "loop": t0["loop_id"].astype(str).eq(source["loop_id"].astype(str)),
+        "orientation": t0["orientation"].astype(str).eq(source["orientation"].astype(str)),
+        "direction": t0["direction"].astype(int).eq(source["direction"].astype(int)),
+    }
+    failed_fields = [name for name, values in field_checks.items() if not bool(values.all())]
+    if failed_fields:
+        return False, f"T0 identity differs from raw V2: {failed_fields}"
+    numeric_checks = [
+        np.allclose(t0["original_terminal_price"], source["exit_price"], rtol=0.0, atol=1e-12),
+        np.allclose(
+            t0["original_gross_payoff_bps"], source["gross_payoff_bps"], rtol=0.0, atol=1e-10
+        ),
+        np.allclose(
+            t0["original_total_cost_bps"], source["primary_total_cost_bps"], rtol=0.0, atol=1e-12
+        ),
+        np.allclose(
+            t0["original_net_payoff_bps"], source["primary_net_payoff_bps"], rtol=0.0, atol=1e-10
+        ),
+    ]
+    if not all(numeric_checks):
+        return False, "T0 terminal price, gross, cost, or net differs from raw V2"
+    expected_hashes = [
+        stable_hash(
+            {
+                "opportunity_id": opportunity_id,
+                "anchor_id": row["anchor_id"],
+                "direction": row["direction"],
+                "entry_timestamp": row["original_entry_timestamp"],
+                "entry_price": row["original_entry_price"],
+                "terminal_timestamp": row["original_terminal_timestamp"],
+                "terminal_price": row["original_terminal_price"],
+            }
+        )
+        for opportunity_id, row in t0.iterrows()
+    ]
+    if expected_hashes != t0["source_opportunity_hash"].astype(str).tolist():
+        return False, "source opportunity hashes do not independently reconstruct"
     expected_t0 = pd.to_datetime(source["start_timestamp"], utc=True) + pd.to_timedelta(
         5 * source["entry_step"].astype(int), unit="m"
     )
@@ -290,6 +373,8 @@ def _check_t1_and_returns(root: Path, contract: Mapping[str, Any]) -> tuple[bool
             return False, f"T0 fill lies outside trigger bar: {row.opportunity_id}"
         t1_price = float(t1_bar.iloc[0]["open"])
         terminal_price = float(terminal_bar.iloc[0]["close"])
+        if not math.isclose(_as_float(row.terminal_price), terminal_price, abs_tol=1e-12):
+            return False, f"stored terminal price mismatch: {row.opportunity_id}"
         expected = reconstruct_returns(
             direction=_as_int(row.direction),
             t0_entry_price=t0_price,
@@ -403,6 +488,125 @@ def _check_metrics(root: Path) -> tuple[bool, str]:
     return True, f"paired metrics and 2,000-draw block interval reconstruct for {len(paired)} rows"
 
 
+def _check_breakdowns(root: Path) -> tuple[bool, str]:
+    paired = pd.read_parquet(root / "exact_paired_t0_t1_ledger.parquet")
+    metrics = pd.read_csv(root / "primary_paired_metrics.csv")
+    checked = 0
+    for dimension in ["period", "loop_id", "direction_label"]:
+        for value, group in paired.groupby(dimension, dropna=False, sort=True):
+            observed = metrics.loc[
+                metrics["slice_type"].eq(dimension)
+                & metrics["slice_value"].astype(str).eq(str(value))
+            ]
+            if len(observed) != 1:
+                return False, f"missing or duplicate {dimension} breakdown: {value}"
+            row = observed.iloc[0]
+            expected = {
+                "paired_opportunities": len(group),
+                "t0_net_payoff_bps": float(group["t0_net_return_bps"].sum()),
+                "t1_net_payoff_bps": float(group["t1_net_return_bps"].sum()),
+                "paired_total_difference_bps": float(group["paired_difference_bps"].sum()),
+            }
+            for column, expected_value in expected.items():
+                if not math.isclose(float(row[column]), float(expected_value), abs_tol=1e-8):
+                    return False, f"{dimension} breakdown mismatch: {value}:{column}"
+            checked += 1
+    controls = pd.read_parquet(root / "control_exact_paired_t0_t1_ledger.parquet")
+    control_metrics = pd.read_csv(root / "control_breakdowns.csv")
+    for value, group in controls.groupby("orientation", sort=True):
+        observed = control_metrics.loc[
+            control_metrics["slice_type"].eq("orientation")
+            & control_metrics["slice_value"].astype(str).eq(str(value))
+        ]
+        if len(observed) != 1:
+            return False, f"missing control orientation breakdown: {value}"
+        if not math.isclose(
+            float(observed.iloc[0]["paired_total_difference_bps"]),
+            float(group["paired_difference_bps"].sum()),
+            abs_tol=1e-8,
+        ):
+            return False, f"control orientation breakdown mismatch: {value}"
+        checked += 1
+    return True, f"independently reconstructed {checked} period/loop/direction/control breakdowns"
+
+
+def _check_deletions_and_nulls(root: Path) -> tuple[bool, str]:
+    paired = pd.read_parquet(root / "exact_paired_t0_t1_ledger.parquet")
+    deletion = pd.read_csv(root / "deletion_stress_results.csv")
+    stock = paired.groupby("symbol")["paired_difference_bps"].sum().sort_values(ascending=False)
+    episodes = (
+        paired.loc[paired["hindsight_episode_id"].notna()]
+        .groupby("hindsight_episode_id")["paired_difference_bps"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+    removals = {
+        "remove_best_stock": ("symbol", list(stock.head(1).index.astype(str))),
+        "remove_top_five_stocks": ("symbol", list(stock.head(5).index.astype(str))),
+        "remove_best_episode": (
+            "hindsight_episode_id",
+            list(episodes.head(1).index.astype(str)),
+        ),
+        "remove_top_five_episodes": (
+            "hindsight_episode_id",
+            list(episodes.head(5).index.astype(str)),
+        ),
+    }
+    for name, (dimension, contributors) in removals.items():
+        observed = deletion.loc[deletion["stress"].eq(name)]
+        if len(observed) != 1:
+            return False, f"missing deletion stress: {name}"
+        expected_rows = paired.loc[~paired[dimension].astype("string").isin(contributors)]
+        row = observed.iloc[0]
+        if str(row["removed_contributors"]) != "|".join(contributors):
+            return False, f"deletion contributor mismatch: {name}"
+        if not math.isclose(
+            float(row["paired_total_difference_bps"]),
+            float(expected_rows["paired_difference_bps"].sum()),
+            abs_tol=1e-8,
+        ):
+            return False, f"deletion delta mismatch: {name}"
+
+    nulls = pd.read_csv(root / "null_test_results.csv")
+    actual = paired["paired_difference_bps"].to_numpy(float)
+    rng = np.random.default_rng(20260716)
+    draws = np.array(
+        [float((actual * rng.integers(0, 2, size=len(actual))).sum()) for _ in range(500)]
+    )
+    random_row = nulls.loc[nulls["null_test"].eq("random_T0_or_T1_timing_500_repetitions")]
+    if len(random_row) != 1 or not math.isclose(
+        float(random_row.iloc[0]["null_mean_increment_bps"]), float(draws.mean()), abs_tol=1e-8
+    ):
+        return False, "random timing null does not reconstruct"
+
+    shifted = paired.sort_values(
+        ["period", "symbol", "session_date", "opportunity_id"], kind="stable"
+    ).copy()
+    shifted["ratio"] = shifted["t1_entry_price"] / shifted["t0_entry_price"]
+    groups = shifted.groupby(["period", "symbol"], sort=False)
+    shifted["prior_ratio"] = groups["ratio"].shift(1)
+    shifted["prior_date"] = groups["session_date"].shift(1)
+    valid = shifted.loc[
+        shifted["prior_ratio"].notna()
+        & shifted["prior_date"].astype(str).ne(shifted["session_date"].astype(str))
+    ].copy()
+    null_price = valid["t0_entry_price"] * valid["prior_ratio"]
+    expected_shift = (
+        10_000.0
+        * valid["direction"]
+        * valid["terminal_price"]
+        * (1.0 / null_price - 1.0 / valid["t0_entry_price"])
+    )
+    shifted_row = nulls.loc[nulls["null_test"].eq("prior_session_entry_displacement")]
+    if len(shifted_row) != 1 or not math.isclose(
+        float(shifted_row.iloc[0]["shifted_increment_bps"]),
+        float(expected_shift.sum()),
+        abs_tol=1e-8,
+    ):
+        return False, "prior-session displacement null does not reconstruct"
+    return True, "deletion contributors and two predeclared nulls independently reconstruct"
+
+
 def _check_stress_and_concentration(root: Path) -> tuple[bool, str]:
     paired = pd.read_parquet(root / "exact_paired_t0_t1_ledger.parquet")
     costs = pd.read_csv(root / "cost_stress_results.csv")
@@ -430,10 +634,54 @@ def _check_stress_and_concentration(root: Path) -> tuple[bool, str]:
     t2 = pd.read_parquet(root / "t2_sensitivity_ledger.parquet")
     if "t1_net_return_bps" in t2.columns or "paired_difference_bps" in t2.columns:
         return False, "T2 table was not kept separate from T1 naming"
+    available_t2 = t2.loc[t2["t2_available"] & t2["population"].eq("named")].copy()
+    providers: dict[str, pd.DataFrame] = {}
+    for row in available_t2.itertuples(index=False):
+        symbol = str(row.symbol)
+        if symbol not in providers:
+            contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+            providers[symbol] = _provider(contract, symbol)
+        expected = _as_timestamp(row.original_entry_timestamp) + pd.Timedelta(minutes=10)
+        if _as_timestamp(row.t2_entry_timestamp) != expected:
+            return False, f"T2 clock mismatch: {row.opportunity_id}"
+        provider_row = providers[symbol].loc[providers[symbol]["timestamp"].eq(expected)]
+        if len(provider_row) != 1:
+            return False, f"T2 provider open missing: {row.opportunity_id}"
+        t2_price = float(provider_row.iloc[0]["open"])
+        if not math.isclose(_as_float(row.t2_entry_price), t2_price, abs_tol=1e-12):
+            return False, f"T2 price mismatch: {row.opportunity_id}"
+        t2_gross = (
+            10_000.0 * _as_int(row.direction) * (_as_float(row.terminal_price) / t2_price - 1.0)
+        )
+        if not math.isclose(_as_float(row.t2_net_return_bps), t2_gross - 10.0, abs_tol=1e-8):
+            return False, f"T2 net mismatch: {row.opportunity_id}"
+        if not math.isclose(
+            _as_float(row.t2_minus_t0_bps),
+            (t2_gross - 10.0) - _as_float(row.t0_net_return_bps),
+            abs_tol=1e-8,
+        ):
+            return False, f"T2 minus T0 mismatch: {row.opportunity_id}"
+    t2_metrics = pd.read_csv(root / "t2_sensitivity_metrics.csv").iloc[0]
+    if not math.isclose(
+        float(t2_metrics["t2_minus_t0_bps"]),
+        float(available_t2["t2_minus_t0_bps"].sum()),
+        abs_tol=1e-8,
+    ):
+        return False, "T2 summary mismatch"
+    if not math.isclose(
+        float(t2_metrics["mean_exposure_bars_remaining"]),
+        float(available_t2["exposure_bars_remaining"].mean()),
+        abs_tol=1e-10,
+    ):
+        return False, "T2 exposure summary mismatch"
     restarted = pd.read_parquet(root / "restarted_h24_diagnostic_ledger.parquet")
     if "paired_difference_bps" in restarted.columns:
         return False, "restarted h24 contaminated the primary paired table"
-    return True, "twice costs, concentration, T2, and restarted separation verified"
+    detail = (
+        f"twice costs, concentration, {len(available_t2)} T2 rows, "
+        "and restarted separation verified"
+    )
+    return True, detail
 
 
 def _check_episode_isolation_and_prospective_safety(root: Path) -> tuple[bool, str]:
@@ -512,6 +760,8 @@ def run_audit(primary: Path, exact: Path, output: Path) -> dict[str, object]:
         "exact_t1_clock_returns_and_costs": _check_t1_and_returns(primary, contract),
         "missing_data_pairing_and_no_replacement": _check_missing_and_pairing(primary),
         "paired_metrics_and_block_interval": _check_metrics(primary),
+        "period_loop_direction_and_control_breakdowns": _check_breakdowns(primary),
+        "deletion_and_null_reconstruction": _check_deletions_and_nulls(primary),
         "stress_concentration_and_horizon_separation": _check_stress_and_concentration(primary),
         "episode_isolation_and_prospective_safety": _check_episode_isolation_and_prospective_safety(
             primary

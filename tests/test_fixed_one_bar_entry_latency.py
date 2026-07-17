@@ -102,6 +102,17 @@ def test_missing_t1_bar_does_not_shift_later_open() -> None:
     assert result.t1_net_return_bps is None
 
 
+def test_missing_intermediate_bar_does_not_change_exact_entry_terminal_pair() -> None:
+    missing = T0 + pd.Timedelta(minutes=25)
+    bars = _bars().loc[lambda frame: frame["timestamp"].ne(missing)]
+
+    result = _score(bars)
+
+    assert result.status == "available"
+    assert result.t1_entry_timestamp == T0 + pd.Timedelta(minutes=5)
+    assert result.original_terminal_timestamp == TERMINAL
+
+
 def test_t1_at_terminal_is_unavailable_not_zero() -> None:
     result = _score(
         t0=ANCHOR + pd.Timedelta(minutes=120),
@@ -162,6 +173,20 @@ def test_short_payoff_and_entry_move_reconcile_exactly() -> None:
     assert result.direction_adjusted_entry_move_bps == pytest.approx(-4.9925112331497)
     assert result.paired_difference_bps == pytest.approx(5.067249425263)
     assert result.reconciliation_error_bps == pytest.approx(0.0, abs=1e-10)
+
+
+def test_first_bar_adverse_excursion_is_exported_as_positive_magnitude() -> None:
+    long_result = _score(direction=1)
+    short_result = _score(direction=-1)
+
+    assert long_result.first_bar_adverse_excursion_bps == pytest.approx(
+        10_000.0 * (1.0 - 99.15 / 100.15)
+    )
+    assert short_result.first_bar_adverse_excursion_bps == pytest.approx(
+        10_000.0 * (101.15 / 100.15 - 1.0)
+    )
+    assert long_result.first_bar_adverse_excursion_bps > 0.0  # type: ignore[operator]
+    assert short_result.first_bar_adverse_excursion_bps > 0.0  # type: ignore[operator]
 
 
 def test_adverse_first_bar_improves_delayed_long_entry() -> None:

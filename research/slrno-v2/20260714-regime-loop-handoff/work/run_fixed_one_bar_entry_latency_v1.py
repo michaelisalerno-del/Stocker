@@ -504,7 +504,8 @@ def attach_evaluation_context(frame: pd.DataFrame, contract: Mapping[str, Any]) 
         default="late",
     )
     result["anchor_regime"] = "state_" + result["state"].astype(int).astype(str)
-    result["hindsight_episode_id"] = "outside_hindsight_positive_episode"
+    result["hindsight_episode_id"] = pd.Series(pd.NA, index=result.index, dtype="string")
+    result["hindsight_episode_status"] = "outside_hindsight_positive_episode"
     episodes = pd.read_parquet(_resolved(contract["inputs"]["episode_diagnostics"]["path"]))
     episodes = episodes.copy()
     episodes["onset"] = pd.to_datetime(episodes["hindsight_estimated_onset"]).dt.date
@@ -520,8 +521,9 @@ def attach_evaluation_context(frame: pd.DataFrame, contract: Mapping[str, Any]) 
         ]
         if len(candidates) == 1:
             result.at[index, "hindsight_episode_id"] = str(candidates.iloc[0]["episode_id"])
+            result.at[index, "hindsight_episode_status"] = "matched_positive_episode"
         elif len(candidates) > 1:
-            result.at[index, "hindsight_episode_id"] = "ambiguous_hindsight_episode"
+            result.at[index, "hindsight_episode_status"] = "ambiguous_hindsight_episode"
     return result
 
 
@@ -644,6 +646,8 @@ def build_full_sample_levels(source: pd.DataFrame, all_pairs: pd.DataFrame) -> p
                 "slice_value": slice_value,
                 "timing": "T0_full_source",
                 "source_opportunities": int(len(group)),
+                "gross_payoff_bps": float(group["original_gross_payoff_bps"].sum()),
+                "total_costs_bps": float(group["original_total_cost_bps"].sum()),
                 **t0,
             }
         )
@@ -651,13 +655,16 @@ def build_full_sample_levels(source: pd.DataFrame, all_pairs: pd.DataFrame) -> p
         t1_group = all_pairs.loc[
             all_pairs["opportunity_id"].astype(str).isin(ids) & all_pairs["t1_available"]
         ].sort_values(["t1_entry_timestamp", "opportunity_id"], kind="stable")
+        t1_performance = _performance(t1_group["t1_net_return_bps"])
         records.append(
             {
                 "slice_type": slice_type,
                 "slice_value": slice_value,
                 "timing": "T1_available_unpaired_context",
                 "source_opportunities": int(len(group)),
-                **_performance(t1_group["t1_net_return_bps"]),
+                "gross_payoff_bps": float(t1_group["t1_gross_return_bps"].sum()),
+                "total_costs_bps": float(t1_group["t1_total_cost_bps"].sum()),
+                **t1_performance,
             }
         )
     return pd.DataFrame(records)
@@ -790,32 +797,44 @@ def build_concentration(paired: pd.DataFrame) -> pd.DataFrame:
 def build_deletion_stress(paired: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows: list[dict[str, object]] = []
     stock = paired.groupby("symbol")["paired_difference_bps"].sum().sort_values(ascending=False)
+    episode_rows = paired.loc[paired["hindsight_episode_id"].notna()].copy()
     episode = (
-        paired.groupby("hindsight_episode_id")["paired_difference_bps"]
+        episode_rows.groupby("hindsight_episode_id")["paired_difference_bps"]
         .sum()
         .sort_values(ascending=False)
     )
+    best_stock = [str(stock.index[0])] if len(stock) else []
+    top_stocks = list(stock.head(5).index.astype(str))
+    best_episode = [str(episode.index[0])] if len(episode) else []
+    top_episodes = list(episode.head(5).index.astype(str))
     deletions = {
-        "remove_best_stock": paired["symbol"].ne(str(stock.index[0]))
-        if len(stock)
-        else pd.Series(True, index=paired.index),
-        "remove_top_five_stocks": ~paired["symbol"].isin(set(stock.head(5).index.astype(str))),
-        "remove_best_episode": paired["hindsight_episode_id"].ne(str(episode.index[0]))
-        if len(episode)
-        else pd.Series(True, index=paired.index),
-        "remove_top_five_episodes": ~paired["hindsight_episode_id"].isin(
-            set(episode.head(5).index.astype(str))
+        "remove_best_stock": (best_stock, "available"),
+        "remove_top_five_stocks": (top_stocks, "available"),
+        "remove_best_episode": (
+            best_episode,
+            "available" if best_episode else "no_hindsight_positive_episode_available",
+        ),
+        "remove_top_five_episodes": (
+            top_episodes,
+            "available" if top_episodes else "no_hindsight_positive_episode_available",
         ),
     }
-    for name, mask in deletions.items():
+    for name, (contributors, availability) in deletions.items():
+        dimension = "symbol" if "stock" in name else "hindsight_episode_id"
+        mask = ~paired[dimension].astype("string").isin(contributors)
         group = paired.loc[mask]
         rows.append(
             {
                 "stress": name,
+                "removed_contributors": "|".join(contributors),
                 "paired_opportunities": int(len(group)),
                 "paired_total_difference_bps": float(group["paired_difference_bps"].sum()),
                 "paired_mean_difference_bps": float(group["paired_difference_bps"].mean()),
-                "status": "immutable_population_deletion_no_replacement",
+                "status": (
+                    "immutable_population_deletion_no_replacement"
+                    if availability == "available"
+                    else availability
+                ),
             }
         )
     threshold = paired.groupby("period")["dollar_volume_proxy"].transform("median")
@@ -823,6 +842,7 @@ def build_deletion_stress(paired: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
     rows.append(
         {
             "stress": "minimum_liquidity_within_period_median",
+            "removed_contributors": "",
             "paired_opportunities": int(len(liquid)),
             "paired_total_difference_bps": float(liquid["paired_difference_bps"].sum()),
             "paired_mean_difference_bps": float(liquid["paired_difference_bps"].mean()),
@@ -857,11 +877,26 @@ def build_nulls(
     shifted = paired.sort_values(
         ["period", "symbol", "session_date", "opportunity_id"], kind="stable"
     ).copy()
-    shifted["prior_opportunity_delta"] = shifted.groupby(["period", "symbol"])[
-        "paired_difference_bps"
-    ].shift(1)
-    valid = shifted[["prior_opportunity_delta", "paired_difference_bps"]].dropna()
-    shifted_corr = spearmanr(valid["prior_opportunity_delta"], valid["paired_difference_bps"])
+    shifted["entry_price_ratio"] = shifted["t1_entry_price"] / shifted["t0_entry_price"]
+    by_symbol = shifted.groupby(["period", "symbol"], sort=False)
+    shifted["prior_session_entry_price_ratio"] = by_symbol["entry_price_ratio"].shift(1)
+    shifted["prior_session_date"] = by_symbol["session_date"].shift(1)
+    valid = shifted.loc[
+        shifted["prior_session_entry_price_ratio"].notna()
+        & shifted["prior_session_date"].astype(str).ne(shifted["session_date"].astype(str))
+    ].copy()
+    valid["null_t1_entry_price"] = (
+        valid["t0_entry_price"] * valid["prior_session_entry_price_ratio"]
+    )
+    null_t0_gross = (
+        10_000.0 * valid["direction"] * (valid["terminal_price"] / valid["t0_entry_price"] - 1.0)
+    )
+    null_shifted_gross = (
+        10_000.0
+        * valid["direction"]
+        * (valid["terminal_price"] / valid["null_t1_entry_price"] - 1.0)
+    )
+    shifted_increment = null_shifted_gross - null_t0_gross
     return pd.DataFrame(
         [
             {
@@ -874,11 +909,11 @@ def build_nulls(
                 "actual_percentile_within_null": float(np.mean(draws <= delta.sum())),
             },
             {
-                "null_test": "prior_opportunity_time_shift",
+                "null_test": "prior_session_entry_displacement",
                 "opportunities": int(len(valid)),
-                "rank_association_with_current_delta": float(shifted_corr.statistic),
-                "pvalue": float(shifted_corr.pvalue),
-                "status": "non_executable_identity_preserving_time_shift_diagnostic",
+                "shifted_increment_bps": float(shifted_increment.sum()),
+                "shifted_mean_increment_bps": float(shifted_increment.mean()),
+                "status": "non_executable_prior_session_price_ratio_displacement",
             },
             {
                 "null_test": "timestamp_offset_falsification_T2",
@@ -1230,6 +1265,8 @@ def write_report(
         primary_metrics["slice_type"].eq("all") & primary_metrics["slice_value"].eq("all")
     ].iloc[0]
     loop_rows = primary_metrics.loc[primary_metrics["slice_type"].eq("loop_id")]
+    period_rows = primary_metrics.loc[primary_metrics["slice_type"].eq("period")]
+    direction_rows = primary_metrics.loc[primary_metrics["slice_type"].eq("direction_label")]
     control = control_metrics.loc[
         control_metrics["slice_type"].eq("all") & control_metrics["slice_value"].eq("all")
     ].iloc[0]
@@ -1257,6 +1294,14 @@ def write_report(
     loop_lines = "\n".join(
         f"| {row.slice_value} | {_as_int(row.paired_opportunities)} | {_as_float(row.t0_net_payoff_bps):.2f} | {_as_float(row.t1_net_payoff_bps):.2f} | {_as_float(row.paired_total_difference_bps):.2f} | {_as_float(row.paired_mean_difference_bps):.2f} |"
         for row in loop_rows.itertuples(index=False)
+    )
+    period_lines = "\n".join(
+        f"| {row.slice_value} | {_as_int(row.source_opportunities)} | {_as_int(row.paired_opportunities)} | {_as_float(row.t0_net_payoff_bps):.2f} | {_as_float(row.t1_net_payoff_bps):.2f} | {_as_float(row.paired_total_difference_bps):.2f} |"
+        for row in period_rows.itertuples(index=False)
+    )
+    direction_lines = "\n".join(
+        f"| {row.slice_value} | {_as_int(row.paired_opportunities)} | {_as_float(row.t0_net_payoff_bps):.2f} | {_as_float(row.t1_net_payoff_bps):.2f} | {_as_float(row.paired_total_difference_bps):.2f} |"
+        for row in direction_rows.itertuples(index=False)
     )
     control_rows = control_metrics.loc[control_metrics["slice_type"].eq("orientation")]
     control_lines = "\n".join(
@@ -1301,7 +1346,7 @@ The exact source and delayed rows are paired by opportunity, anchor, event linea
 
 The expired root `{missing_2023["expired_original_root"]}` does not exist. The pre-score archival search hashed {missing_2023["pre_score_candidate_files_hashed"]} candidate files and found {missing_2023["pre_score_exact_hash_matches"]} matches across {missing_2023["required_symbols"]} required symbols. No fresh download, approximate field, or imputation was used. All 854 named 2023 T1 outcomes remain missing.
 
-On 2025 there are {int(primary["source_opportunities"])} named source opportunities, {int(primary["exact_t0_opportunities"])} exact T0 rows, {int(primary["exact_t1_opportunities"])} exact T1 rows, and {int(primary["paired_opportunities"])} pairs ({float(primary["pairing_rate"]):.1%}).
+Across both frozen source periods there are {int(primary["source_opportunities"])} named opportunities and {int(primary["exact_t0_opportunities"])} exact stored T0 rows. The immutable provider evidence yields {int(primary["exact_t1_opportunities"])} exact T1 rows and {int(primary["paired_opportunities"])} pairs ({float(primary["pairing_rate"]):.1%}); every missing 2023 T1 remains explicit rather than becoming a zero.
 
 ## 5. Primary T0, T1, and paired result
 
@@ -1317,7 +1362,19 @@ On 2025 there are {int(primary["source_opportunities"])} named source opportunit
 |---|---:|---:|---:|---:|---:|
 {loop_lines}
 
-## 7. Frozen control results
+## 7. Period and direction results
+
+| period | source rows | exact pairs | T0 paired net bps | T1 net bps | delta bps |
+|---|---:|---:|---:|---:|---:|
+{period_lines}
+
+| direction | pairs | T0 net bps | T1 net bps | delta bps |
+|---|---:|---:|---:|---:|
+{direction_lines}
+
+The 2023 row is unavailable by construction and is never interpreted as no effect. The 2025 row is the complete exact archival result currently available.
+
+## 8. Frozen control results
 
 | control orientation | pairs | T0 net bps | T1 net bps | delta bps | mean delta |
 |---|---:|---:|---:|---:|---:|
@@ -1325,19 +1382,19 @@ On 2025 there are {int(primary["source_opportunities"])} named source opportunit
 
 The named-versus-control comparison determines whether latency is loop-specific or a general execution-clock effect; controls are never pooled into the primary endpoint.
 
-## 8. Entry-price decomposition
+## 9. Entry-price decomposition
 
 The mean direction-adjusted T0-to-T1 entry move is {float(entry["mean_direction_adjusted_entry_move_bps"]):.2f} bps and the median is {float(entry["median_direction_adjusted_entry_move_bps"]):.2f} bps. Negative values mean price moved against the frozen direction and offered a better delayed price. Such adverse moves occur in {int(adverse["opportunities"])} of {int(entry["opportunities"])} pairs ({int(adverse["opportunities"]) / max(1, int(entry["opportunities"])):.1%}). The entry-move/delta Spearman relationship is {float(entry["move_delta_spearman_rho"]):.3f}; the exact return-convention reconciliation error is checked row by row and audited independently.
 
 This decomposition is diagnostic only. It does not create an inverse acceptance rule or select a subset.
 
-## 9. Costs, T2, and restarted horizon
+## 10. Costs, T2, and restarted horizon
 
 At frozen costs, paired T0 and T1 levels are {float(cost_primary["t0_net_payoff_bps"]):.2f} and {float(cost_primary["t1_net_payoff_bps"]):.2f} bps, with delta {float(cost_primary["paired_difference_bps"]):.2f}. At twice costs they are {float(twice["t0_net_payoff_bps"]):.2f} and {float(twice["t1_net_payoff_bps"]):.2f}, with unchanged delta {float(twice["paired_difference_bps"]):.2f} because this frozen model charges identical fixed-bps entry and exit costs.
 
-T2 has {int(t2["paired_opportunities"])} exact pairs; T2 minus T0 is {float(t2["t2_minus_t0_bps"]):.2f} bps and T2 minus T1 on the common population is {float(t2["t2_minus_t1_bps"]):.2f} bps. T2 cannot replace the T1 endpoint. Restarted-h24 outcomes are exported separately and never enter the same-terminal conclusion.
+T2 has {int(t2["paired_opportunities"])} exact pairs and leaves a mean {float(t2["mean_exposure_bars_remaining"]):.2f} bars (minimum {int(t2["minimum_exposure_bars_remaining"])}) before the original terminal; T2 minus T0 is {float(t2["t2_minus_t0_bps"]):.2f} bps and T2 minus T1 on the common population is {float(t2["t2_minus_t1_bps"]):.2f} bps. T2 cannot replace the T1 endpoint. Restarted-h24 outcomes are exported separately and never enter the same-terminal conclusion.
 
-## 10. Concentration, deletions, and leave-one-stock-out
+## 11. Concentration, deletions, and leave-one-stock-out
 
 The largest stock contributes {float(stock_concentration["top_one_absolute_share"]):.1%} of absolute paired delta and the top five contribute {float(stock_concentration["top_five_absolute_share"]):.1%}; stock HHI is {float(stock_concentration["herfindahl"]):.3f}.
 
@@ -1345,13 +1402,13 @@ The largest stock contributes {float(stock_concentration["top_one_absolute_share
 
 Because the latency rule has no trained or stock-dependent state, a conventional model rebuild is not applicable. `leave_one_stock_out_results.csv` exactly recomputes every remaining deterministic pair after excluding each stock and labels this honestly rather than calling row deletion a trained-model rebuild.
 
-## 11. Failure cases and interpretation
+## 12. Failure cases and interpretation
 
 The main failure modes are missing exact T1 opens, T1 at or after the original terminal, absent 2023 provider evidence, period heterogeneity, control replication, and concentration. A positive standalone T1 level is not incremental evidence; only paired T1-minus-T0 counts. Hindsight episodes appear only in concentration and attribution outputs.
 
 The available evidence is classified as **{interpretation}**. The formal result remains **{metadata["scientific_decision"]}** because success required both 2023 and 2025 plus prospective confirmation.
 
-## 12. Exact recommendation
+## 13. Exact recommendation
 
 The single most valuable next step is an execution-free prospective cohort using the immutable T0 opportunity ledger, exact create-only T1 timing record, and later separate outcome settlement. Do not deploy or tune the delay. If an original 2023 tape matching the registered per-symbol hashes is recovered, rerun this unchanged contract to close the archival two-period question.
 
@@ -1487,6 +1544,14 @@ def run_historical(*, output: Path, report_path: Path, exact_rerun_of: Path | No
                 "t2_minus_t1_bps": float(
                     (t2_common["t1_net_return_bps_T2"] - t2_common["t1_net_return_bps_T1"]).sum()
                 ),
+                "mean_exposure_bars_remaining": float(
+                    named_t2_paired["exposure_bars_remaining"].mean()
+                ),
+                "minimum_exposure_bars_remaining": int(
+                    named_t2_paired["exposure_bars_remaining"].min()
+                )
+                if len(named_t2_paired)
+                else 0,
                 "common_T1_T2_opportunities": len(t2_common),
                 "primary_endpoint_changed": False,
             }

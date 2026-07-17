@@ -15,7 +15,10 @@ from stocker_research.directional_signature_atlas.evaluation import (
     null_permute_outcomes_within_period,
     survives_validation,
 )
-from stocker_research.directional_signature_atlas.models import apply_atlas_controller
+from stocker_research.directional_signature_atlas.models import (
+    _prior_price_context_prequential,
+    apply_atlas_controller,
+)
 from stocker_research.directional_signature_atlas.robustness import (
     _motif_length_variants,
     null_test_results,
@@ -336,6 +339,28 @@ def test_baselines_use_identical_opportunity_population_and_clocks() -> None:
     predictions = baseline_predictions(frame)
     assert set(predictions["opportunity_id"]) == set(frame["opportunity_id"])
     assert set(predictions["decision_clock"]) == set(frame["decision_clock"])
+
+
+def test_prior_static_baseline_keeps_full_population_score_status_unsuffixed() -> None:
+    full = pd.DataFrame(
+        {
+            "opportunity_id": ["o1"],
+            "score_status": ["scored"],
+            "period": [2025],
+            "session": ["2025-01-02"],
+        }
+    )
+    first_touch = pd.DataFrame(
+        {
+            "opportunity_id": ["o1"],
+            "score_status": ["scored"],
+            "first_touch_target": ["NEITHER"],
+        }
+    )
+    probabilities, states, eligible = _prior_price_context_prequential(full, first_touch)
+    assert probabilities.shape == (1, 3)
+    assert states.tolist() == ["NEUTRAL"]
+    assert not eligible.any()
 
 
 def test_one_bar_momentum_and_reversal_baselines_are_correct() -> None:

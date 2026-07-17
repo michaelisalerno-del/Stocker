@@ -124,7 +124,7 @@ def _prior_price_context_prequential(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Reproduce the predecessor M1 equation and first-touch training target."""
 
-    target = first_touch[["opportunity_id", "first_touch_target", "score_status"]].copy()
+    target = first_touch[["opportunity_id", "first_touch_target"]].copy()
     target["actual_class"] = target["first_touch_target"].map(
         {
             "UPPER_FIRST": "long",
@@ -345,7 +345,7 @@ def apply_atlas_controller(
         for position in np.flatnonzero(mask):
             firing[position].append(signature.signature_id)
     movement_available = frame["movement_permission"].notna().to_numpy()
-    movement = frame["movement_permission"].fillna(False).astype(bool).to_numpy()
+    movement = frame["movement_permission"].astype("boolean").fillna(False).to_numpy(dtype=bool)
     conflict = (long_votes > 0) & (short_votes > 0)
     no_vote = (long_votes == 0) & (short_votes == 0)
     long_value_positive = (long_votes > 0) & (long_value_sums / np.maximum(long_votes, 1) > 0.0)

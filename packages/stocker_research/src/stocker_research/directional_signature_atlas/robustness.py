@@ -25,6 +25,29 @@ from stocker_research.directional_signature_atlas.signatures import (
     apply_signature,
 )
 
+STRESS_RESULT_COLUMNS = [
+    "signature_id",
+    "direction",
+    "period",
+    "chronology_stage",
+    "stress",
+    "removed",
+    "status",
+    "rows",
+    "sessions",
+    "stocks",
+    "mean_directional_net_bps",
+    "median_directional_net_bps",
+    "directional_lift",
+    "positive_payoff_rate",
+    "profit_factor",
+    "maximum_drawdown_bps",
+    "positive_month_fraction",
+    "twice_cost_mean_net_bps",
+    "top_stock_absolute_contribution_share",
+    "top_month_absolute_contribution_share",
+]
+
 
 def _metric_row(
     frame: pd.DataFrame,
@@ -384,7 +407,17 @@ def stress_signature_library(
                 row["direct_cross_sectional_features_recomputed"] = True
                 row["downstream_state_loop_movement_recomputed"] = False
                 leave_one_out_rows.append(row)
-    return pd.DataFrame(stress_rows), pd.DataFrame(leave_one_out_rows)
+    return (
+        pd.DataFrame(stress_rows, columns=STRESS_RESULT_COLUMNS),
+        pd.DataFrame(
+            leave_one_out_rows,
+            columns=[
+                *STRESS_RESULT_COLUMNS,
+                "direct_cross_sectional_features_recomputed",
+                "downstream_state_loop_movement_recomputed",
+            ],
+        ),
+    )
 
 
 def _persistent_count(

@@ -279,7 +279,9 @@ def baseline_predictions(
         _conditional_probabilities(discovery, full, ["current_state", "state_motif_3"]),
     )
     permitted_momentum = np.where(
-        full["movement_permission"].fillna(False).astype(bool), momentum, "NEUTRAL"
+        full["movement_permission"].astype("boolean").fillna(False).to_numpy(dtype=bool),
+        momentum,
+        "NEUTRAL",
     )
     add("movement_permission_plus_momentum", _hard_probabilities(permitted_momentum))
     compact_categorical = [
@@ -453,7 +455,10 @@ def prediction_metrics(
     )
     joined = joined.loc[joined["target"].ne("UNAVAILABLE")].copy()
     if "metric_eligible" in joined:
-        joined = joined.loc[joined["metric_eligible"].fillna(True).astype(bool)].copy()
+        metric_eligible = (
+            joined["metric_eligible"].astype("boolean").fillna(True).to_numpy(dtype=bool)
+        )
+        joined = joined.loc[metric_eligible].copy()
     predictive_rows: list[dict[str, Any]] = []
     economic_rows: list[dict[str, Any]] = []
     stage_column = "chronology_stage" if "chronology_stage" in joined else "period"

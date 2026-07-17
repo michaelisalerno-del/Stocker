@@ -22,6 +22,7 @@ from stocker_research.directional_signature_atlas.models import (
 from stocker_research.directional_signature_atlas.robustness import (
     _motif_length_variants,
     null_test_results,
+    stress_signature_library,
 )
 from stocker_research.directional_signature_atlas.signatures import (
     Condition,
@@ -334,6 +335,16 @@ def test_unavailable_opposite_library_feature_forces_neutral() -> None:
     assert decisions.iloc[0]["reason_code"] == "required_causal_feature_unavailable"
 
 
+def test_not_equal_condition_does_not_fire_on_missing_causal_value() -> None:
+    frame = pd.DataFrame({"signal": ["other", "blocked", np.nan]})
+    signature = Signature(
+        "not_blocked",
+        "LONG",
+        (Condition("signal", "!=", "blocked", "test"),),
+    )
+    assert apply_signature(frame, signature).tolist() == [True, False, False]
+
+
 def test_baselines_use_identical_opportunity_population_and_clocks() -> None:
     frame = _panel()
     predictions = baseline_predictions(frame)
@@ -467,6 +478,27 @@ def test_null_families_score_only_rules_their_transform_changes() -> None:
     assert nulls.loc["feature_rows_wrong_session_lag", "tested_signatures"] == 4
     assert nulls.loc["stock_identity_permuted_within_timestamp", "tested_signatures"] == 1
     assert nulls.loc["state_history_permuted_within_clock_phase", "tested_signatures"] == 1
+
+
+def test_empty_stress_library_retains_machine_readable_schema() -> None:
+    frame = _production_stage(2025)
+    delayed = frame[
+        ["opportunity_id", "target", "gross_long_return_bps", "long_net_bps", "short_net_bps"]
+    ].rename(
+        columns={
+            "long_net_bps": "net_long_return_bps",
+            "short_net_bps": "net_short_return_bps",
+        }
+    )
+    stress, leave_one_out = stress_signature_library(
+        frame,
+        [],
+        delayed,
+        ordered_bins={},
+    )
+    assert stress.empty and leave_one_out.empty
+    assert "stress" in stress
+    assert "direct_cross_sectional_features_recomputed" in leave_one_out
 
 
 def test_synthetic_persistent_long_signature_survives_validation() -> None:

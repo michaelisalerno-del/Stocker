@@ -100,7 +100,7 @@ def _condition_mask(frame: pd.DataFrame, condition: Condition) -> pd.Series:
     if condition.operator == "==":
         return values.eq(condition.value)
     if condition.operator == "!=":
-        return values.ne(condition.value)
+        return values.ne(condition.value) & values.notna()
     numeric = pd.to_numeric(values, errors="coerce")
     threshold = float(condition.value)
     if condition.operator == ">":

@@ -1417,7 +1417,9 @@ def verify_atlas_controller(
             short_votes += mask.astype(int)
             short_values[mask] += value
     movement_available = features["movement_permission"].notna().to_numpy()
-    movement = features["movement_permission"].fillna(False).astype(bool).to_numpy()
+    movement = (
+        features["movement_permission"].astype("boolean").fillna(False).to_numpy(dtype=bool)
+    )
     conflict = (long_votes > 0) & (short_votes > 0)
     states = np.full(len(features), "NEUTRAL", dtype=object)
     states[

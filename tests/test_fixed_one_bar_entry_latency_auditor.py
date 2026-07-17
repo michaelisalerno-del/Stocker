@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,3 +83,10 @@ def test_auditor_exact_identity_includes_plots(tmp_path: Path) -> None:
 
     assert result["byte_identical"] is False
     assert result["hash_mismatches"] == ["plots/plot.png"]
+
+
+def test_auditor_normalises_missing_group_keys_across_parquet_and_csv() -> None:
+    auditor = _auditor()
+
+    assert auditor.normalise_group_key(pd.NA) == "<missing>"
+    assert auditor.normalise_group_key(float("nan")) == "<missing>"

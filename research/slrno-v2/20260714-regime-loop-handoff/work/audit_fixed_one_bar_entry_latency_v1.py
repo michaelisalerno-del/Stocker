@@ -80,6 +80,10 @@ def _as_float(value: object) -> float:
     return float(cast(Any, value))
 
 
+def normalise_group_key(value: object) -> str:
+    return "<missing>" if bool(pd.isna(cast(Any, value))) else str(value)
+
+
 def reconstruct_returns(
     *,
     direction: int,
@@ -148,6 +152,22 @@ def _check_contract_inputs(
     contract_hash = sha256(CONTRACT_PATH)
     if str(metadata["contract_hash"]) != contract_hash:
         return False, "metadata contract hash mismatch"
+    execution_sha = str(metadata["git_sha"])
+    try:
+        runner_at_execution = subprocess.check_output(
+            [
+                "git",
+                "show",
+                f"{execution_sha}:research/slrno-v2/20260714-regime-loop-handoff/work/"
+                "run_fixed_one_bar_entry_latency_v1.py",
+            ],
+            cwd=REPO,
+        )
+    except subprocess.CalledProcessError:
+        return False, "run metadata Git identity does not resolve"
+    current_runner = WORK / "run_fixed_one_bar_entry_latency_v1.py"
+    if hashlib.sha256(runner_at_execution).hexdigest() != sha256(current_runner):
+        return False, "current runner differs from recorded execution commit"
     checked = 0
     for name, specification in contract["inputs"].items():
         if not isinstance(specification, Mapping) or "path" not in specification:
@@ -672,7 +692,9 @@ def _check_stress_and_concentration(root: Path) -> tuple[bool, str]:
             return False, f"concentration row count mismatch: {dimension}"
         for contributor, value in contribution.items():
             observed = observed_dimension.loc[
-                observed_dimension["contributor"].astype(str).eq(str(contributor))
+                observed_dimension["contributor"]
+                .map(normalise_group_key)
+                .eq(normalise_group_key(contributor))
             ]
             if len(observed) != 1:
                 return False, f"concentration contributor missing: {dimension}:{contributor}"

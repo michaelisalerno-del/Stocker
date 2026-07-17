@@ -1,0 +1,49 @@
+{
+  "mapping_id": "20260717-frozen-named-loop-t0-execution-realism-v1-family-mapping",
+  "frozen": true,
+  "replacement_allowed": false,
+  "source_orientation_semantics": "current causal state at the anchor within the rotation-invariant parent loop",
+  "source_direction_semantics": "the first non-ambiguous side of the frozen anchor-high/anchor-low OCO breakout; direction is not inferred from payoff or later route completion",
+  "families": [
+    {
+      "classification": "named",
+      "family": "cycle_04|state_4",
+      "loop_id": "cycle_04",
+      "cycle": "2->4->2",
+      "orientation": "state_4",
+      "current_state": 4,
+      "alternate_state": 2,
+      "role": "named_candidate"
+    },
+    {
+      "classification": "control",
+      "family": "cycle_04|state_2",
+      "loop_id": "cycle_04",
+      "cycle": "2->4->2",
+      "orientation": "state_2",
+      "current_state": 2,
+      "alternate_state": 4,
+      "role": "neutral_control"
+    },
+    {
+      "classification": "named",
+      "family": "cycle_07|state_5",
+      "loop_id": "cycle_07",
+      "cycle": "5->6->5",
+      "orientation": "state_5",
+      "current_state": 5,
+      "alternate_state": 6,
+      "role": "named_candidate"
+    },
+    {
+      "classification": "control",
+      "family": "cycle_07|state_6",
+      "loop_id": "cycle_07",
+      "cycle": "5->6->5",
+      "orientation": "state_6",
+      "current_state": 6,
+      "alternate_state": 5,
+      "role": "negative_control"
+    }
+  ]
+}

@@ -1217,9 +1217,15 @@ def write_prospective_schemas(output_root: Path) -> None:
 
 
 def write_artifact_manifest(output_root: Path) -> None:
+    excluded = {
+        "artifact_manifest.json",
+        "independent_audit.json",
+        "prospective_forecast_dry_run.json",
+        "prospective_settlement_dry_run.json",
+    }
     files = []
     for path in sorted(output_root.rglob("*")):
-        if not path.is_file() or path.name == "artifact_manifest.json":
+        if not path.is_file() or path.name in excluded:
             continue
         files.append(
             {

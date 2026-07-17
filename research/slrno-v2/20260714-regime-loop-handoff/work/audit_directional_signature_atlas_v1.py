@@ -182,7 +182,10 @@ def verify_source_identity(
         hashes[name] = actual
         if actual != str(specification["sha256"]):
             failures.append(f"drift:{name}")
-    snapshot = canonical_hash(hashes)
+    snapshot_payload = (
+        json.dumps(hashes, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+    )
+    snapshot = hashlib.sha256(snapshot_payload.encode("utf-8")).hexdigest()
     if snapshot != str(identities["data_snapshot_sha256"]):
         failures.append("source_snapshot_hash")
     if snapshot != str(metadata["data_snapshot_sha256"]):

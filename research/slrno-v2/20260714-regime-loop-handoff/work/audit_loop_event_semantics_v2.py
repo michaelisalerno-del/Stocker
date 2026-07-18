@@ -1670,6 +1670,8 @@ def _render_report(primary: Path, audit: dict[str, Any]) -> None:
     metadata = json.loads((primary / "run_metadata.json").read_text(encoding="utf-8"))
     b0 = pd.read_csv(primary / "b0_start_end_difference_summary.csv")
     dictionary = pd.read_csv(primary / "semantic_loop_dictionary_v2.csv")
+    composite_count = int(dictionary["motif_type"].eq("composite").sum())
+    composite_label = "composite motif" if composite_count == 1 else "composite motifs"
     migration = pd.read_csv(primary / "legacy_to_v2_loop_mapping.csv")
     ambiguous_migrations = int(migration["migration_status"].ne("migrated").sum())
     comparison = pd.read_csv(primary / "legacy_v2_target_comparison.csv")
@@ -1758,7 +1760,7 @@ Across {int(aggregate.decisions):,} source-eligible decisions, {int(aggregate.se
 
 ## 10. Primitive/repeat/composite decomposition
 
-The selected dictionary contains {(dictionary.motif_type == "primitive").sum()} primitives, {(dictionary.motif_type == "repeat").sum()} repeated traversals, and {(dictionary.motif_type == "composite").sum()} composites. The legacy migration retains explicit component mappings rather than deleting its composite motif; {ambiguous_migrations} migrations are ambiguous.
+The selected dictionary contains {(dictionary.motif_type == "primitive").sum()} primitives, {(dictionary.motif_type == "repeat").sum()} repeated traversals, and {composite_count} {composite_label}. The legacy migration retains explicit component mappings rather than deleting its composite motif; {ambiguous_migrations} migrations are ambiguous.
 
 ## 11. Semantic ID design
 
@@ -1926,6 +1928,12 @@ def audit(primary: Path, exact: Path | None) -> dict[str, Any]:
         decision["scientific_decision"] = payload["scientific_decision"]
         decision["ready_for_next_loop_forecast"] = passed
         decision["independent_audit_pass"] = passed
+        if passed:
+            decision.pop("pending_requirement", None)
+            decision["completed_requirements"] = [
+                "independent_audit",
+                "exact_rerun_identity",
+            ]
         _write_json(decision_path, decision)
     _render_report(primary, payload)
     for destination in destinations:

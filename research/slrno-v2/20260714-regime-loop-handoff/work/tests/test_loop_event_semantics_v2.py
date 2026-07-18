@@ -397,10 +397,17 @@ def test_report_contains_all_required_sections_and_exact_next_experiment() -> No
 
 def test_independent_audit_passes() -> None:
     audit = json.loads((PRIMARY / "independent_audit.json").read_text(encoding="utf-8"))
+    decision = json.loads((PRIMARY / "decision.json").read_text(encoding="utf-8"))
 
     assert audit["production_v2_imported"] is False
     assert audit["overall_pass"] is True
     assert audit["failed_checks"] == []
+    assert decision["ready_for_next_loop_forecast"] is True
+    assert decision["completed_requirements"] == [
+        "independent_audit",
+        "exact_rerun_identity",
+    ]
+    assert "pending_requirement" not in decision
 
 
 def test_exact_rerun_is_byte_identical() -> None:

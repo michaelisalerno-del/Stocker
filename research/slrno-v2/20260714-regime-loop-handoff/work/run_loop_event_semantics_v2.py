@@ -67,6 +67,7 @@ from stocker_research.loop_duration_v2 import (  # noqa: E402
 from stocker_research.loop_events_v2 import safety_flags  # noqa: E402
 from stocker_research.loop_ledger_v2 import (  # noqa: E402
     build_loop_event_ledgers,
+    compare_legacy_targets_to_v2_outcomes,
     session_source_is_complete,
 )
 from stocker_research.loop_nulls_v2 import (  # noqa: E402
@@ -2198,6 +2199,11 @@ def run(output_dir: Path) -> None:
         soft_prefix_session_keys=soft_keys,
     )
     decisions = v2_bundle.decisions
+    legacy_v2_comparison = compare_legacy_targets_to_v2_outcomes(
+        legacy_bundle.legacy_targets,
+        v2_bundle.outcomes,
+        decisions,
+    )
 
     for frame in (
         decisions,
@@ -2216,10 +2222,7 @@ def run(output_dir: Path) -> None:
             if identity not in frame:
                 frame[identity] = value
 
-    for frame in (
-        legacy_bundle.legacy_targets,
-        legacy_bundle.target_comparison,
-    ):
+    for frame in (legacy_bundle.legacy_targets,):
         for identity, value in (
             ("run_id_v2", run_id),
             ("git_sha", git_sha),
@@ -2232,6 +2235,19 @@ def run(output_dir: Path) -> None:
         ):
             if identity not in frame:
                 frame[identity] = value
+
+    for identity, value in (
+        ("run_id_v2", run_id),
+        ("git_sha", git_sha),
+        ("contract_hash", contract_hash),
+        ("data_snapshot_hash", data_snapshot_hash),
+        ("dictionary_version", dictionary.version),
+        ("legacy_dictionary_version", legacy_dictionary.version),
+        ("comparison_dictionary_basis", "legacy_dictionary_v1_vs_semantic_dictionary_v2"),
+        ("state_model_version", STATE_MODEL_VERSION),
+    ):
+        if identity not in legacy_v2_comparison:
+            legacy_v2_comparison[identity] = value
 
     _write_state_posterior_ledger(
         output_dir / "state_posterior_ledger.parquet", decisions, state_export
@@ -2346,11 +2362,11 @@ def run(output_dir: Path) -> None:
     _write_frame(output_dir / "legacy_overlapping_targets.parquet", legacy_bundle.legacy_targets)
     _write_frame(
         output_dir / "legacy_v2_target_comparison_detail.parquet",
-        legacy_bundle.target_comparison,
+        legacy_v2_comparison,
     )
     _write_frame(
         output_dir / "legacy_v2_target_comparison.csv",
-        _target_comparison_summary(legacy_bundle.target_comparison),
+        _target_comparison_summary(legacy_v2_comparison),
     )
     _write_frame(output_dir / "duration_model_summary.csv", duration_summary)
     _write_frame(output_dir / "duration_tail_diagnostics.csv", duration_tail)

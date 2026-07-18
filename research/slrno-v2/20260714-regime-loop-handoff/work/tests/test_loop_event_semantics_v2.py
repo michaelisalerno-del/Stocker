@@ -246,7 +246,7 @@ def test_completion_ledger_exports_every_registered_event_not_only_the_first() -
     expected_ids = {
         str(row.decision_id): sorted(set(row.every_completion_within_horizon))
         for row in outcomes.itertuples(index=False)
-        if row.every_completion_within_horizon
+        if len(row.every_completion_within_horizon) > 0
     }
 
     assert exported_ids == expected_ids

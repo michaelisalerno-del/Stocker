@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -127,6 +127,119 @@ def adapt_legacy_overlapping_target_panel(
     ]
     output["target_semantics"] = "legacy_overlapping_compatible_cycle"
     return output
+
+
+def compare_legacy_targets_to_v2_outcomes(
+    legacy_targets: pd.DataFrame,
+    v2_outcomes: pd.DataFrame,
+    v2_decisions: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compare legacy overlapping labels with the V2 dictionary's first event.
+
+    The two target surfaces can be generated from different dictionaries.  In
+    particular, ``legacy_targets`` retains every migrated frozen cycle while
+    ``v2_outcomes`` must come from ``semantic_loop_dictionary_v2``.  Combining
+    the same-dictionary diagnostic emitted by ``build_loop_event_ledgers``
+    would silently substitute a legacy-dictionary first event for the V2
+    primary outcome.
+    """
+
+    required = {
+        "legacy_targets": {
+            "decision_id",
+            "legacy_positive_semantic_ids",
+            "source_available",
+        },
+        "v2_outcomes": {
+            "decision_id",
+            "primary_label",
+            "earliest_event_ids",
+            "source_available",
+        },
+        "v2_decisions": {
+            "decision_id",
+            "symbol",
+            "session",
+            "decision_timestamp",
+            "active_prefix_count",
+            "is_run_entry",
+            "structural_event_eligibility",
+        },
+    }
+    for name, columns in required.items():
+        frame = {
+            "legacy_targets": legacy_targets,
+            "v2_outcomes": v2_outcomes,
+            "v2_decisions": v2_decisions,
+        }[name]
+        missing = sorted(columns.difference(frame.columns))
+        if missing:
+            raise ValueError(f"{name} lacks columns: {missing}")
+        if frame["decision_id"].duplicated().any():
+            raise ValueError(f"{name} decision IDs are not unique")
+
+    merged = v2_decisions[
+        [
+            "decision_id",
+            "symbol",
+            "session",
+            "decision_timestamp",
+            "active_prefix_count",
+            "is_run_entry",
+            "structural_event_eligibility",
+        ]
+    ].merge(
+        legacy_targets[["decision_id", "legacy_positive_semantic_ids", "source_available"]].rename(
+            columns={"source_available": "legacy_source_available"}
+        ),
+        on="decision_id",
+        how="left",
+        validate="one_to_one",
+    )
+    merged = merged.merge(
+        v2_outcomes[
+            ["decision_id", "primary_label", "earliest_event_ids", "source_available"]
+        ].rename(columns={"source_available": "v2_source_available"}),
+        on="decision_id",
+        how="left",
+        validate="one_to_one",
+    )
+    if merged[["legacy_source_available", "v2_source_available"]].isna().any().any():
+        raise ValueError("legacy and V2 surfaces do not contain identical decision populations")
+
+    rows: list[dict[str, Any]] = []
+    records = cast(list[dict[str, Any]], merged.to_dict(orient="records"))
+    for row in records:
+        legacy_ids = tuple(str(value) for value in row["legacy_positive_semantic_ids"])
+        v2_ids = tuple(str(value) for value in row["earliest_event_ids"])
+        available = (
+            bool(row["structural_event_eligibility"])
+            and bool(row["legacy_source_available"])
+            and bool(row["v2_source_available"])
+        )
+        registered_differs = available and set(legacy_ids) != set(v2_ids)
+        primary_label = str(row["primary_label"])
+        v2_only = sorted(set(v2_ids).difference(legacy_ids)) if v2_ids else [primary_label]
+        rows.append(
+            {
+                "decision_id": str(row["decision_id"]),
+                "symbol": str(row["symbol"]),
+                "session": str(row["session"]),
+                "timestamp": row["decision_timestamp"],
+                "legacy_positive_labels": list(legacy_ids),
+                "v2_first_event": primary_label,
+                "legacy_only_labels": sorted(set(legacy_ids).difference(v2_ids)),
+                "v2_only_events": v2_only,
+                "legacy_positive_count": len(legacy_ids),
+                "active_prefix_count": int(row["active_prefix_count"]),
+                "registered_event_set_differs": registered_differs,
+                "semantics_differ": available and (registered_differs or not v2_ids),
+                "comparison_available": available,
+                "is_run_entry": bool(row["is_run_entry"]),
+                **safety_flags(),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _validate_decision_surface(frame: pd.DataFrame, state_column: str) -> None:
@@ -746,5 +859,6 @@ __all__ = [
     "adapt_legacy_overlapping_target_panel",
     "adapt_legacy_run_ledger",
     "build_loop_event_ledgers",
+    "compare_legacy_targets_to_v2_outcomes",
     "session_source_is_complete",
 ]

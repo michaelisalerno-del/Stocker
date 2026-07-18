@@ -10,6 +10,7 @@ from stocker_research.loop_ledger_v2 import (
     adapt_legacy_overlapping_target_panel,
     adapt_legacy_run_ledger,
     build_loop_event_ledgers,
+    compare_legacy_targets_to_v2_outcomes,
 )
 
 BASE = datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
@@ -193,6 +194,34 @@ def test_completion_ledger_retains_later_registered_event_after_unregistered_pri
     assert not bool(outcome["first_completion_same_as_previous_primitive_loop"])
     assert later["semantic_loop_id"].tolist() == ["loop_p_1-2-1"]
     assert later["bars_until_completion"].tolist() == [4]
+
+
+def test_cross_dictionary_comparison_uses_semantic_v2_primary_outcome() -> None:
+    decisions = _decisions([1, 3, 1, 2, 1])
+    legacy = build_loop_event_ledgers(
+        decisions,
+        dictionary=_dictionary((1, 3, 1)),
+        horizon_bars=4,
+        allowed_states=frozenset(range(8)),
+    )
+    semantic = build_loop_event_ledgers(
+        decisions,
+        dictionary=_dictionary((1, 2, 1)),
+        horizon_bars=4,
+        allowed_states=frozenset(range(8)),
+    )
+    comparison = compare_legacy_targets_to_v2_outcomes(
+        legacy.legacy_targets,
+        semantic.outcomes,
+        semantic.decisions,
+    ).set_index("decision_id")
+    first = comparison.loc["d2024-01-02-0"]
+
+    assert first["legacy_positive_labels"] == ["loop_p_1-3-1"]
+    assert first["v2_first_event"] == PrimaryOutcomeLabel.UNREGISTERED_LOOP
+    assert first["v2_only_events"] == [PrimaryOutcomeLabel.UNREGISTERED_LOOP]
+    assert bool(first["registered_event_set_differs"])
+    assert bool(first["semantics_differ"])
 
 
 def test_legacy_run_and_overlapping_target_adapters_fail_closed() -> None:

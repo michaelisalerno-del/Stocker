@@ -1,0 +1,34 @@
+{
+  "broker_connected": false,
+  "composite_is_auxiliary": true,
+  "contract_hash": "dfb2abfbd0d5b5431e372074ac76155f3b014339202325da0f365007267a4de8",
+  "data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "git_sha": "ee04e735b09f237a4a415c75cbf5c4569a921ed6",
+  "horizon_bars": 24,
+  "horizon_inclusive": true,
+  "order_placement": "disabled",
+  "other_class": "OTHER_PRIMITIVE_LOOP",
+  "payoff_selection_used": false,
+  "primary_non_loop_classes": [
+    "DISTINCT_PRIMITIVE_TIE",
+    "NO_LOOP_WITHIN_HORIZON",
+    "SESSION_END",
+    "UNAVAILABLE_SOURCE",
+    "UNAVAILABLE_STRUCTURAL_GAP"
+  ],
+  "production_runtime_modified": false,
+  "repeat_is_auxiliary": true,
+  "research_only": true,
+  "run_id": "fc05b0eb9dede535bf255bd8",
+  "selected_primitive_ids": [
+    "loop_p_4-6-4",
+    "loop_p_5-6-5"
+  ],
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false,
+  "target_version": "semantic_loop_dictionary_first_event_target_v2"
+}

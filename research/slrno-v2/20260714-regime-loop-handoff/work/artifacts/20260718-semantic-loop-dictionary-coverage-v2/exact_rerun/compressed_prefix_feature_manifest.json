@@ -1,0 +1,240 @@
+{
+  "broker_connected": false,
+  "contract_hash": "dfb2abfbd0d5b5431e372074ac76155f3b014339202325da0f365007267a4de8",
+  "data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "fields": [
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "active_prefix_count",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "active_primitive_prefix_count",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "active_repeat_prefix_count",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "active_composite_prefix_count",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "minimum_transitions_remaining",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "minimum_bars_remaining_estimate",
+      "source_artifact": "corrected duration_model_v2.npz plus completed-bar hard-state history",
+      "source_field": "state-by-duration hazard, hard_run_age, and active prefix route"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "prefixes_one_transition_away",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "prefixes_two_transitions_away",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "prefixes_three_or_more_transitions_away",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "distinct_required_next_state_count",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "required_next_state_entropy",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "dominant_required_next_state",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "fraction_of_prefixes_agreeing_on_dominant_next_state",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "highest_support_active_primitive",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "highest_structural_rate_ratio_active_primitive",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "highest_prefix_progress",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "computed no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "longest_active_prefix",
+      "source_artifact": "semantic dictionary plus completed-bar hard-state history",
+      "source_field": "causal state-event suffix and frozen motif registry"
+    },
+    {
+      "availability_rule": "prior completion available no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "previous_completed_primitive_loop",
+      "source_artifact": "uncapped first-event history ledger",
+      "source_field": "previous_completed_primitive_loop"
+    },
+    {
+      "availability_rule": "prior completion available no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "previous_two_completed_primitive_loops",
+      "source_artifact": "uncapped first-event history ledger",
+      "source_field": "previous_two_completed_primitive_loops"
+    },
+    {
+      "availability_rule": "prior completion available no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "same_primitive_repeat_depth",
+      "source_artifact": "uncapped first-event history ledger",
+      "source_field": "same_primitive_repeat_depth"
+    },
+    {
+      "availability_rule": "prior completion available no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "bars_since_previous_primitive_completion",
+      "source_artifact": "uncapped first-event history ledger",
+      "source_field": "bars_since_previous_primitive_completion"
+    },
+    {
+      "availability_rule": "prior completion available no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "state_events_since_previous_primitive_completion",
+      "source_artifact": "uncapped first-event history ledger",
+      "source_field": "state_events_since_previous_primitive_completion"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "hard_state_legacy",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "hard_state_legacy"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "hard_state_hysteretic",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "hard_state_hysteretic"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "posterior_entropy",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "posterior_entropy"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "top_second_state_margin",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "top_second_margin"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "expected_state_age",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "expected_state_age"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "probability_state_transition_next_bar",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "transition_probability_next_bar"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "bars_remaining_in_session",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "bars_remaining_in_session"
+    },
+    {
+      "availability_rule": "source availability no later than decision_timestamp",
+      "causal_only": true,
+      "feature_name": "clock_phase",
+      "source_artifact": "causal completed-bar decision/state-posterior ledger",
+      "source_field": "clock_phase"
+    }
+  ],
+  "forbidden_future_fields": [
+    "future_loop",
+    "future_state",
+    "bars_until_future_completion",
+    "payoff",
+    "return_after_decision",
+    "route_outcome",
+    "MFE",
+    "MAE"
+  ],
+  "git_sha": "ee04e735b09f237a4a415c75cbf5c4569a921ed6",
+  "manifest_version": "compressed_semantic_prefix_features_v2",
+  "order_placement": "disabled",
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "fc05b0eb9dede535bf255bd8",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false
+}

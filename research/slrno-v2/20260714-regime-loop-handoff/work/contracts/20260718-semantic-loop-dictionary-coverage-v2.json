@@ -1,0 +1,201 @@
+{
+  "contract_id": "20260718-semantic-loop-dictionary-coverage-v2",
+  "contract_version": "2.0.0",
+  "title": "Semantic Loop Dictionary and First-Event Coverage V2",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false,
+  "scope": {
+    "purpose": "structural semantic-loop dictionary, mutually exclusive first-event target, and unchanged retrospective structural coverage only",
+    "predictive_model_training": false,
+    "payoff_model_training": false,
+    "strategy_changes": false,
+    "forbidden_data_tokens": [
+      "payoff",
+      "pnl",
+      "profit",
+      "future_return",
+      "mfe",
+      "mae",
+      "execution",
+      "order",
+      "position",
+      "broker"
+    ]
+  },
+  "source_identity": {
+    "implementation_target_git_sha": "ee04e735b09f237a4a415c75cbf5c4569a921ed6",
+    "implementation_target_branch": "agent/slrno-research-handoff",
+    "audited_v2_contract_hash": "e193fb8979c231eebd1876b8e6390d837006a454fcc911a94cdc196ab015ecd6",
+    "audited_v2_data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+    "audited_v2_dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "audited_v2_artifact_manifest_hash": "1aca8026914996b914f690d2545d3bac34a26ddd689f559276a6aeae32550070",
+    "state_model_file_hash": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+    "state_source_artifact_hash": "954b2d9c19699321ce2d141234ecd6cf29ee70e10751a0c8469a47032f15631a",
+    "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+    "frozen_lineage_baseline_commit": "6d43807dbe3287afb1587f7ab4f5dafdeedad426",
+    "frozen_historical_tree_git_object": "7f524891ab4a51e98f44a933962b5294399a3312",
+    "required_frozen_blob_count": 1087,
+    "fail_closed_on_identity_mismatch": true
+  },
+  "periods": {
+    "development": {
+      "start": "2024-01-01T00:00:00Z",
+      "end": "2024-12-31T23:59:59Z",
+      "scientific_status": "development_and_dictionary_selection"
+    },
+    "validation": {
+      "start": "2025-01-01T00:00:00Z",
+      "end": "2025-12-31T23:59:59Z",
+      "scientific_status": "unchanged_retrospective_structural_validation",
+      "may_change_dictionary": false,
+      "may_change_thresholds": false,
+      "may_change_ids": false,
+      "may_change_target_precedence": false
+    },
+    "backward_portability": {
+      "year": 2023,
+      "enabled": false,
+      "scientific_status_if_enabled": "portability_falsification_only"
+    },
+    "protected_future": {
+      "starts": "2026-01-01T00:00:00Z",
+      "read_enabled": false,
+      "prospective_snapshots_enabled": false
+    }
+  },
+  "state_and_event_contract": {
+    "state_count": 8,
+    "hard_event_state_representation": "legacy_hard_map",
+    "decision_surface": "every completed regular-session five-minute bar",
+    "forecast_horizon_bars": 24,
+    "completion_exactly_at_horizon_included": true,
+    "session_reset": true,
+    "gap_reset": true,
+    "overnight_bridge": false,
+    "unregistered_extraction": "earliest_future_event_then_shortest_closed_suffix_without_transition_length_cap",
+    "nested_decomposition": "deterministic_stack_cycle_decomposition_with_final_primitive_root",
+    "primary_precedence": [
+      "UNAVAILABLE_SOURCE",
+      "UNAVAILABLE_STRUCTURAL_GAP",
+      "EARLIEST_CAUSAL_CLOSED_EVENT",
+      "ONE_PRIMITIVE_ROOT_AFTER_NESTED_REDUCTION",
+      "DISTINCT_PRIMITIVE_TIE",
+      "ONE_IRREDUCIBLE_COMPOSITE_IF_NO_PRIMITIVE_ROOT",
+      "DISTINCT_COMPOSITE_TIE",
+      "OTHER_PRIMITIVE_LOOP",
+      "NO_LOOP_WITHIN_HORIZON",
+      "SESSION_END"
+    ],
+    "lexical_tie_break": false,
+    "repeat_is_primary_class": false,
+    "composite_is_primary_class_after_dictionary_freeze": false
+  },
+  "candidate_universe": {
+    "primary_primitive_transition_lengths": [2, 3, 4, 5],
+    "primary_length_reason": "reuse the audited Loop Event Semantics V2 frozen supported primitive range",
+    "sensitivity_only_primitive_transition_lengths": [6, 7, 8],
+    "repeats_primary_eligible": false,
+    "composites_primary_eligible": false,
+    "minimum_first_event_occurrences": 100,
+    "minimum_independent_sessions": 50,
+    "minimum_stocks": 10,
+    "minimum_months": 6,
+    "minimum_clock_phases": 3,
+    "maximum_top_stock_share": 0.2,
+    "maximum_top_month_share": 0.3,
+    "support_may_be_weakened_after_scoring": false
+  },
+  "nulls": {
+    "primary": "fitted_semi_markov_first_event_completed_bar_grid",
+    "primary_draws": 2000,
+    "clock_conditioned_draws": 500,
+    "seed": 20260718,
+    "session_population": "all_source_complete_development_stock_sessions",
+    "preserve_original_session_lengths": true,
+    "same_completed_bar_decision_grid": true,
+    "clock_phases": {
+      "opening": [0, 12],
+      "middle": [12, 60],
+      "late": [60, 78]
+    },
+    "analytical_control": "first_order_expected_first_event_counts",
+    "circular_control": "whole_session_state_duration_block_rotation",
+    "maximum_bh_q": 0.1,
+    "minimum_rate_ratio": 1.2,
+    "minimum_positive_excess_quarters": 3,
+    "leave_one_stock_out_minimum_rate_ratio": 1.0,
+    "clock_failure_status": "CLOCK_DEPENDENT_STRUCTURAL_CANDIDATE"
+  },
+  "information_increment": {
+    "chronological_folds": 4,
+    "baselines": [
+      "B0_GLOBAL_FREQUENCY",
+      "B1_CURRENT_STATE",
+      "B2_CURRENT_AND_PREVIOUS_STATE",
+      "B3_CURRENT_AND_LAST_TWO_STATES",
+      "B4_CURRENT_AND_LAST_THREE_STATES",
+      "B5_DURATION_AWARE_SEMI_MARKOV_STATE"
+    ],
+    "model": "regularised_binary_logistic_for_attribution_only",
+    "minimum_oof_log_loss_improvement": 0.0,
+    "minimum_oof_brier_improvement": 0.0,
+    "minimum_conditional_information_gain": 0.0,
+    "required_positive_quarters": 3,
+    "final_multiclass_predictor": false
+  },
+  "dictionary_selection": {
+    "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+    "maximum_primary_entries": 32,
+    "minimum_marginal_development_event_coverage": 0.005,
+    "ordering": [
+      "oof_log_loss_increment_descending",
+      "semi_markov_rate_ratio_descending",
+      "marginal_coverage_descending",
+      "stock_and_month_breadth_descending",
+      "primitive_transition_length_ascending",
+      "semantic_loop_id_ascending"
+    ],
+    "rank_part_of_semantic_id": false,
+    "validation_can_change_membership": false
+  },
+  "primary_target_classes": [
+    "SELECTED_PRIMITIVE_LOOP_IDS",
+    "OTHER_PRIMITIVE_LOOP",
+    "NO_LOOP_WITHIN_HORIZON",
+    "SESSION_END",
+    "DISTINCT_PRIMITIVE_TIE",
+    "UNAVAILABLE_SOURCE",
+    "UNAVAILABLE_STRUCTURAL_GAP"
+  ],
+  "decision_gates": {
+    "exact_identity": {
+      "minimum_dictionary_size": 8,
+      "minimum_development_event_coverage": 0.5,
+      "minimum_validation_event_coverage": 0.45,
+      "maximum_validation_coverage_drop": 0.1,
+      "minimum_entries_rr_above_one": 0.75,
+      "minimum_entries_threshold_or_directional": 0.5,
+      "maximum_single_stock_share": 0.2,
+      "maximum_genuine_tie_rate": 0.05
+    },
+    "hybrid_minimum_validation_event_coverage": 0.3,
+    "family_preferred_below_validation_event_coverage": 0.3
+  },
+  "exact_rerun": {
+    "required": true,
+    "byte_identity_required": true,
+    "excluded_self_referential_files": [
+      "artifact_manifest.json",
+      "independent_audit.json",
+      "decision.json",
+      "post_run_tree_manifest.json"
+    ]
+  },
+  "exact_next_experiment_if_gate_passes": "A separately preregistered structural forecast of the mutually exclusive first primitive-loop event and arrival time using simple frequency, state-history, active-prefix, and duration-aware competing-risk baselines, with no payoff or economic target."
+}

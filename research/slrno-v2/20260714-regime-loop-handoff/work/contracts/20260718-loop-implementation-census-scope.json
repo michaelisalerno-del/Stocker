@@ -1,0 +1,32 @@
+{
+  "census_version": "loop_implementation_census_v2",
+  "roots": [
+    "packages/stocker_research/src/stocker_research",
+    "research/slrno-v2/20260714-regime-loop-handoff/work"
+  ],
+  "python_filename_tokens": [
+    "loop",
+    "cycle",
+    "semimarkov",
+    "state_pattern",
+    "state_path"
+  ],
+  "python_content_tokens": [
+    "compatible_cycle",
+    "loop_occurrence",
+    "loop_completion",
+    "build_online_runs",
+    "duration_hazard"
+  ],
+  "exclude_directory_tokens": [
+    "__pycache__",
+    ".pytest_cache"
+  ],
+  "frozen_baseline_commit": "6d43807dbe3287afb1587f7ab4f5dafdeedad426",
+  "classification_policy": "deterministic_ast_and_source_pattern_census_with_conservative_impact",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "strategy_promotion": false
+}

@@ -1,0 +1,53 @@
+{
+  "broker_connected": false,
+  "candidates": [
+    {
+      "family": "TRAILING_ROBUST_CENTRE",
+      "id": "ORIGIN_A_W3",
+      "window_bars": 3
+    },
+    {
+      "family": "TRAILING_ROBUST_CENTRE",
+      "id": "ORIGIN_A_W6",
+      "window_bars": 6
+    },
+    {
+      "family": "TRAILING_ROBUST_CENTRE",
+      "id": "ORIGIN_A_W12",
+      "window_bars": 12
+    },
+    {
+      "family": "LOCALLY_STABLE_TRAILING_CENTRE",
+      "id": "ORIGIN_B_STABLE_W6",
+      "maximum_path_length_quantile": 0.25,
+      "maximum_velocity_quantile": 0.25,
+      "minimum_completed_bars": 6,
+      "window_bars": 6
+    }
+  ],
+  "contract_hash": "0bc8ac397792a0b665e0e9b1972bf539bd5ab964a296a6dedd8648fcf7741a44",
+  "cross_session_or_gap_allowed": false,
+  "data_snapshot_hash": "2b2efafb8d7c0cebbd7b392493ecbc0a279f71ee1d4f74197e18d99ecd8c43a7",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "frozen_after_departure": true,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "7c8d4f606dc0e46e80d69390a4c1e6e30c3215b09ec2191a2b5fe7195f583a84",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "order_placement": "disabled",
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "registry_version": "cluster_invariant_origin_definitions_v1",
+  "research_only": true,
+  "run_id": "5592b30b8c4f3909d75c67cc",
+  "selected_origin_definition": "ORIGIN_A_W6",
+  "semantic_dictionary_promotion_enabled": false,
+  "stable_path_length_threshold_development_q25": 9.911388051029514,
+  "stable_velocity_threshold_development_q25": 1.7104826814066842,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "cluster_invariant_excursion_event_model_v1",
+  "strategy_promotion": false,
+  "strictly_trailing": true
+}

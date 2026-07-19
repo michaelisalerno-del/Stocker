@@ -1,0 +1,147 @@
+{
+  "broker_connected": false,
+  "contract_hash": "bdba55b4243a4bfe18cea04d89b2cacabe817322eb581e3ec4461a5f3c4e8737",
+  "data_snapshot_hash": "2b2efafb8d7c0cebbd7b392493ecbc0a279f71ee1d4f74197e18d99ecd8c43a7",
+  "development_only_selection": true,
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "final_configuration": {
+    "coefficient_hash": "d550ea509323b9ecea5c064fd2a2871c88cc90da0761560474ef801ac39d82a2",
+    "effective_estimator": {
+      "classes": [
+        "RETURN_TO_ORIGIN",
+        "PARTIAL_RETURN",
+        "CONTINUE_AWAY",
+        "ROTATE_TO_NEW_REGION",
+        "SESSION_END",
+        "UNAVAILABLE"
+      ],
+      "coefficients": [
+        [
+          -0.17540287285887454,
+          -0.1913753339760973
+        ],
+        [
+          -0.6608889072555715,
+          -0.027266860672356917
+        ],
+        [
+          -0.6739083717245957,
+          -0.2486563110102423
+        ],
+        [
+          0.5439120021589032,
+          0.11019313228191283
+        ],
+        [
+          0.4417028872504104,
+          0.11591186599169094
+        ],
+        [
+          0.5245852624297127,
+          0.24119350738509485
+        ]
+      ],
+      "fallback_probabilities": [
+        0.0013020141361534782,
+        0.0038263272572673646,
+        0.0031354626135940904,
+        0.1344528883456449,
+        0.7985066695009831,
+        0.058776638146357016
+      ],
+      "features": [
+        "current_distance",
+        "distance_velocity"
+      ],
+      "fitted_classes": [
+        "CONTINUE_AWAY",
+        "PARTIAL_RETURN",
+        "RETURN_TO_ORIGIN",
+        "ROTATE_TO_NEW_REGION",
+        "SESSION_END",
+        "UNAVAILABLE"
+      ],
+      "intercepts": [
+        -1.9559979592679038,
+        -2.450583354581953,
+        -2.748417906348941,
+        2.036865386930819,
+        3.833397731742084,
+        1.2847361015258885
+      ],
+      "means": [
+        12.907453665068418,
+        0.005354751653822803
+      ],
+      "medians": [
+        11.94834280492782,
+        0.003815160053511235
+      ],
+      "scales": [
+        3.2386120420875995,
+        0.4084177652235042
+      ]
+    },
+    "features": [
+      "current_distance",
+      "distance_velocity"
+    ],
+    "preprocessor_hash": "2a830a9528efb60fcedd18b301934374b6877f2502e0f4c7ff0b9abffc655d02",
+    "regularization_c": 0.1,
+    "training_rows": 37628,
+    "unique_training_events": 3142
+  },
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "e0bec27d320343054ccfc584b0ad10e3830babff9e6eceb2d8a1a7f2ea19a86a",
+  "model": "B3",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "oof_configuration": {
+    "features": [
+      "current_distance",
+      "distance_velocity"
+    ],
+    "fold_configurations": [
+      {
+        "coefficient_hash": "fa7b3b38bf435bbf0775b2358cb542e2c2df75d2f20e0828451a28a47a11054c",
+        "fold": 1,
+        "preprocessor_hash": "3f43bb1fcb0e55553eecc6aaf2b70ed6d399f71480fd76d664b2b3bad8a3d2dc",
+        "regularization_c": 0.1,
+        "training_rows": 636,
+        "validation_rows": 868
+      },
+      {
+        "coefficient_hash": "d67c0ce8fd032221a8c43930bd38969f489be92cf8770d936e13777ab4c13f53",
+        "fold": 2,
+        "preprocessor_hash": "ee795fcd32ffdf48d9692baf03160a61eb71d76154210a5b68fb32bf12918c76",
+        "regularization_c": 0.1,
+        "training_rows": 1504,
+        "validation_rows": 831
+      },
+      {
+        "coefficient_hash": "d9984297928af263cd5e7114a5dcdf6a1cc34dda4a9cf64a1e4108f1ea30df21",
+        "fold": 3,
+        "preprocessor_hash": "fb42bf937c3593f780773062bb45e56d7fee89da8766db0410bf33ab12646141",
+        "regularization_c": 0.1,
+        "training_rows": 2335,
+        "validation_rows": 807
+      }
+    ],
+    "kind": "multinomial_logistic",
+    "regularization_c": 0.1
+  },
+  "order_placement": "disabled",
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "da1131234856d62549b728d5",
+  "selected_candidate": false,
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "excursion_resolution_structural_forecast_v1",
+  "strategy_promotion": false,
+  "strongest_simple_baseline": false,
+  "unchanged_validation": true
+}

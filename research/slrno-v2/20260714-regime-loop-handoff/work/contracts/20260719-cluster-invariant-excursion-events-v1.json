@@ -1,0 +1,265 @@
+{
+  "contract_id": "20260719-cluster-invariant-excursion-events-v1",
+  "contract_version": "1.0.0",
+  "title": "Cluster-Invariant Excursion and Closure Events V1",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false,
+  "scope": {
+    "part_a": "define and validate continuous cluster-invariant excursion and closure events",
+    "part_b": "closed until a final hash-bound Part A decision passes exact rerun and independent audit",
+    "economic_testing_enabled": false,
+    "trading_strategy_construction_enabled": false,
+    "broker_or_runtime_access_enabled": false,
+    "protected_2026_or_prospective_data_enabled": false
+  },
+  "source_identity": {
+    "implementation_target_git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+    "implementation_target_branch": "agent/slrno-research-handoff",
+    "pre_run_source_identity": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-cluster-invariant-excursion-events-v1/primary/pre_run_source_identity.json",
+    "pre_run_source_identity_hash": "b339d9adf79238062203c4e53b911b340c52250483c5e3e70f6b97556c27f33e",
+    "pre_run_tree_manifest": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-cluster-invariant-excursion-events-v1/primary/pre_run_tree_manifest.json",
+    "pre_run_tree_manifest_hash": "17c8c2252f883cc3e332b198a6f9e952e1ef90860e06415d55f0ecd30960fdcf",
+    "development_2024_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+    "validation_2025_snapshot_hash": "29e82d6539810e5fcebc13e860d07474c38ee0349fe38aedce0378f9aefb67a4",
+    "development_panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+    "validation_panel_hash": "ad117a54fd1a249caadb8c35fd094378a562812f7e042e88d81badacc1188245",
+    "fourteen_emission_manifest_hash": "0c5d298db97ae972c416f421559131769ebfd01ddbad1596231a7f9710254c06",
+    "frozen_model_hash": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+    "duration_only_model_hash": "40d5b2c149856e2e2cdbf3df15adfe0c8108c1bb45ada73235a87bf67f87ce44",
+    "full_refit_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+    "right_censored_predecessor_manifest_hash": "e659f218942a48f5db0789c043e312b538edad2f1719e2f654738a7e1698e9cd",
+    "fail_closed_on_any_mismatch": true
+  },
+  "chronology": {
+    "development_and_definition_selection": "2024",
+    "unchanged_retrospective_validation": "2025",
+    "optional_backward_portability": "disabled",
+    "protected_2026": "forbidden",
+    "validation_may_change_definition_or_gate": false
+  },
+  "trajectory_representations": {
+    "E": {
+      "name": "EMISSION_SPACE",
+      "ordered_feature_count": 14,
+      "preprocessing": "full_refit_development_training_median_plus_RobustScaler_25_75",
+      "missingness": "retain_fourteen_raw_missing_flags_and_exclude_incomplete_origin_or_event_rows",
+      "stored_features": [
+        "z",
+        "first_difference",
+        "short_velocity",
+        "short_acceleration",
+        "local_path_length",
+        "local_directional_consistency"
+      ]
+    },
+    "P": {
+      "name": "POSTERIOR_SPACE",
+      "primary_lineage": "MODEL_FULL_REFIT",
+      "sensitivity_lineages": ["MODEL_FROZEN", "MODEL_DURATION_REPAIR"],
+      "distance": "sqrt_Jensen_Shannon_divergence_natural_log",
+      "cross_model_dimension_policy": "align_only_when_deterministic_mapping_exists_otherwise_compare_model_internal_event_family_and_time",
+      "stored_features": [
+        "state_posterior",
+        "origin_distance",
+        "posterior_velocity",
+        "posterior_entropy",
+        "expected_state_age",
+        "departure_probability"
+      ]
+    },
+    "H": {
+      "name": "HYBRID",
+      "score": "equal_weight_average_of_nonnegative_development_q90_normalised_emission_and_posterior_distances",
+      "arbitrary_weight_search_enabled": false,
+      "state_numeric_loop_identity_required": false
+    },
+    "short_trajectory_window_bars": 3
+  },
+  "origin_definitions": {
+    "candidates": [
+      {"id": "ORIGIN_A_W3", "family": "TRAILING_ROBUST_CENTRE", "window_bars": 3},
+      {"id": "ORIGIN_A_W6", "family": "TRAILING_ROBUST_CENTRE", "window_bars": 6},
+      {"id": "ORIGIN_A_W12", "family": "TRAILING_ROBUST_CENTRE", "window_bars": 12},
+      {
+        "id": "ORIGIN_B_STABLE_W6",
+        "family": "LOCALLY_STABLE_TRAILING_CENTRE",
+        "window_bars": 6,
+        "maximum_path_length_quantile": 0.25,
+        "maximum_velocity_quantile": 0.25,
+        "minimum_completed_bars": 6
+      }
+    ],
+    "centre": "coordinatewise_median_of_strictly_previous_completed_rows",
+    "event_start_anchor": "last_causal_candidate_centre_at_first_departure_crossing",
+    "origin_moves_after_onset": false,
+    "may_cross_session_or_segment": false,
+    "selection_data": "2024_chronological_folds_only"
+  },
+  "distance_definitions": {
+    "emission_primary": "robust_diagonally_scaled_Euclidean",
+    "emission_sensitivity": "Ledoit_Wolf_shrinkage_Mahalanobis_fitted_on_2024_only",
+    "posterior": "sqrt_Jensen_Shannon_divergence",
+    "hybrid_candidates": ["emission_only", "posterior_only", "equal_weight_hybrid"],
+    "continuous_weight_search_enabled": false
+  },
+  "departure": {
+    "threshold_quantiles": [0.8, 0.9, 0.95],
+    "confirmation_persistence_bars": [1, 2],
+    "minimum_velocity_condition": [false, true],
+    "velocity_threshold": "median_positive_development_distance_velocity",
+    "threshold_fit": "expanding_chronological_2024_folds_for_selection_then_full_2024_freeze_for_unchanged_2025",
+    "completed_bars_only": true
+  },
+  "candidate_registry": [
+    {"id": "E_A3_Q80_C1_R35_ROT2", "representation": "E", "origin": "ORIGIN_A_W3", "distance": "DIAGONAL", "threshold_quantile": 0.8, "confirmation": 1, "velocity_condition": false, "return_ratio": 0.35, "rotation_persistence": 2},
+    {"id": "E_A3_Q90_C2_R50_ROT3", "representation": "E", "origin": "ORIGIN_A_W3", "distance": "DIAGONAL", "threshold_quantile": 0.9, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 3},
+    {"id": "E_A6_Q80_C2_R50_ROT2", "representation": "E", "origin": "ORIGIN_A_W6", "distance": "DIAGONAL", "threshold_quantile": 0.8, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 2},
+    {"id": "E_A6_Q90_C1V_R35_ROT2", "representation": "E", "origin": "ORIGIN_A_W6", "distance": "DIAGONAL", "threshold_quantile": 0.9, "confirmation": 1, "velocity_condition": true, "return_ratio": 0.35, "rotation_persistence": 2},
+    {"id": "E_A6_Q90_C2_R50_ROT3", "representation": "E", "origin": "ORIGIN_A_W6", "distance": "DIAGONAL", "threshold_quantile": 0.9, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 3},
+    {"id": "E_A6_Q95_C2_R65_ROT3", "representation": "E", "origin": "ORIGIN_A_W6", "distance": "DIAGONAL", "threshold_quantile": 0.95, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.65, "rotation_persistence": 3},
+    {"id": "E_A12_Q80_C2_R50_ROT2", "representation": "E", "origin": "ORIGIN_A_W12", "distance": "DIAGONAL", "threshold_quantile": 0.8, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 2},
+    {"id": "E_A12_Q90_C2_R50_ROT3", "representation": "E", "origin": "ORIGIN_A_W12", "distance": "DIAGONAL", "threshold_quantile": 0.9, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 3},
+    {"id": "E_B6_Q90_C2_R50_ROT3", "representation": "E", "origin": "ORIGIN_B_STABLE_W6", "distance": "DIAGONAL", "threshold_quantile": 0.9, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 3},
+    {"id": "P_A6_Q90_C2_R50_ROT3", "representation": "P", "origin": "ORIGIN_A_W6", "distance": "JENSEN_SHANNON", "threshold_quantile": 0.9, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 3},
+    {"id": "H_A6_Q90_C2_R50_ROT3", "representation": "H", "origin": "ORIGIN_A_W6", "distance": "EQUAL_WEIGHT_HYBRID", "threshold_quantile": 0.9, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 3},
+    {"id": "E_A6_MAH_Q90_C2_R50_ROT3", "representation": "E", "origin": "ORIGIN_A_W6", "distance": "SHRINKAGE_MAHALANOBIS", "threshold_quantile": 0.9, "confirmation": 2, "velocity_condition": false, "return_ratio": 0.5, "rotation_persistence": 3}
+  ],
+  "resolution": {
+    "primary_horizon_completed_bars": 24,
+    "sensitivity_horizons_completed_bars": [12, 36],
+    "families": [
+      "RETURN_TO_ORIGIN",
+      "PARTIAL_RETURN",
+      "CONTINUE_AWAY",
+      "ROTATE_TO_NEW_REGION",
+      "REMAIN_LOCAL",
+      "SESSION_END",
+      "UNAVAILABLE_SOURCE",
+      "UNAVAILABLE_STRUCTURAL_GAP",
+      "UNRESOLVED_AT_HORIZON"
+    ],
+    "precedence": [
+      "UNAVAILABLE_SOURCE",
+      "UNAVAILABLE_STRUCTURAL_GAP",
+      "RETURN_TO_ORIGIN",
+      "ROTATE_TO_NEW_REGION",
+      "CONTINUE_AWAY",
+      "PARTIAL_RETURN_AT_HORIZON_OR_SESSION_TERMINATION",
+      "SESSION_END",
+      "UNRESOLVED_AT_HORIZON"
+    ],
+    "return_ratio_candidates": [0.35, 0.5, 0.65],
+    "rotation_separation_ratio": 1.0,
+    "rotation_maximum_local_velocity_quantile": 0.25,
+    "rotation_persistence_candidates": [2, 3],
+    "continuation_distance_ratio": 1.5,
+    "continuation_requires_outward_velocity": true,
+    "partial_return_minimum_retracement_fraction": 0.35,
+    "remain_local_onset_horizon_bars": 6,
+    "event_lockout_bars_after_resolution": 1,
+    "simultaneous_conditions_recorded": true
+  },
+  "event_identity": {
+    "natural_key": ["symbol", "session", "segment_id", "onset_timestamp", "frozen_origin_id"],
+    "id_algorithm": "sha256_canonical_key_first_24_hex",
+    "overlapping_primary_excursions_allowed": false,
+    "decision_mapping_retained": true
+  },
+  "selection": {
+    "uses_2025": false,
+    "uses_prediction_accuracy": false,
+    "uses_economic_outcomes": false,
+    "development_fold_month_boundaries": ["2024-04", "2024-07", "2024-10"],
+    "criteria": [
+      "cross_lineage_family_agreement",
+      "chronological_family_share_stability",
+      "event_time_stability",
+      "unique_event_support",
+      "missingness",
+      "stock_breadth",
+      "month_breadth",
+      "class_entropy",
+      "reproducibility"
+    ],
+    "deterministic_order": "pass_support_then_highest_minimum_structural_agreement_then_lowest_fold_share_drift_then_highest_class_entropy_then_candidate_id"
+  },
+  "cross_representation_matching": {
+    "same_symbol": true,
+    "same_session": true,
+    "overlapping_excursion_window": true,
+    "onset_tolerance_completed_bars": 2,
+    "resolution_tolerance_completed_bars": 2,
+    "same_family_required_for_family_match": true,
+    "classifications": ["EXACT_FAMILY_AND_TIME", "SAME_FAMILY_BOUNDED_SHIFT", "DIFFERENT_FAMILY", "MISSING_EVENT", "SPLIT_EVENT", "MERGED_EVENT"]
+  },
+  "part_a_gates": {
+    "full_refit_vs_frozen_and_duration_same_family_minimum": 0.7,
+    "median_k8_seed_same_family_minimum": 0.65,
+    "median_training_sample_same_family_minimum": 0.6,
+    "median_cross_k_same_family_minimum": 0.55,
+    "maximum_major_class_share_shift_percentage_points": 7.5,
+    "minimum_unique_development_events": 2000,
+    "minimum_unique_validation_events": 1000,
+    "minimum_stocks": 15,
+    "minimum_months": 8,
+    "maximum_single_stock_share": 0.2,
+    "maximum_single_month_share": 0.25,
+    "maximum_median_timing_disagreement_bars": 2,
+    "exact_rerun_required": true,
+    "independent_audit_required": true,
+    "decision_hierarchy": [
+      "cluster_invariant_excursion_events_validated",
+      "cluster_invariant_events_valid_with_required_sensitivity",
+      "emission_space_excursion_events_validated",
+      "cluster_invariant_excursion_events_not_stable",
+      "cluster_invariant_event_population_too_sparse",
+      "cluster_invariant_event_experiment_blocked"
+    ]
+  },
+  "structural_nulls": {
+    "balanced_stock_session_sample_count": 44,
+    "increment_block_draws": 2000,
+    "fitted_transition_draws": 500,
+    "circular_increment_draws": 500,
+    "increment_block_length_bars": 3,
+    "clock_phases": ["OPENING", "MIDDLE", "LATE"],
+    "fitted_transition": "phase_conditioned_ridge_VAR1_with_residual_block_resampling",
+    "posterior_sensitivity_null": "corrected_semi_Markov_model_when_posterior_only_is_reported",
+    "seed": 20260719,
+    "bh_method": "Benjamini_Hochberg",
+    "economic_interpretation_allowed": false
+  },
+  "part_b_gate": {
+    "allowed_part_a_decisions": [
+      "cluster_invariant_excursion_events_validated",
+      "cluster_invariant_events_valid_with_required_sensitivity",
+      "emission_space_excursion_events_validated"
+    ],
+    "part_a_decision_must_be_final": true,
+    "part_a_binding_hash_required": true,
+    "part_a_exact_rerun_required": true,
+    "part_a_independent_audit_required": true,
+    "final_part_b_metrics_before_gate": "forbidden"
+  },
+  "forbidden_inputs_or_tokens": [
+    "future_return",
+    "pnl",
+    "payoff",
+    "mfe",
+    "mae",
+    "profitable",
+    "execution",
+    "spread",
+    "slippage",
+    "broker",
+    "order",
+    "position",
+    "t0_payoff"
+  ]
+}

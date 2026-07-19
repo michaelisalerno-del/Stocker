@@ -1,0 +1,143 @@
+{
+  "manifest_version": "cluster_invariant_excursion_events_v1_pre_run_source_identity",
+  "experiment_id": "20260719-cluster-invariant-excursion-events-v1",
+  "generated_before_new_contract_or_implementation_code": true,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "git_tree": "2a8cba5f9ee4ad4eedb76787d4b4a9173c930d0f",
+  "branch": "agent/slrno-research-handoff",
+  "dirty_files_at_freeze": [
+    "packages/stocker_research/src/stocker_research/regime_gap_segmentation_v2.py",
+    "packages/stocker_research/src/stocker_research/regime_panel_v2.py",
+    "packages/stocker_research/src/stocker_research/regime_refit_v2.py",
+    "packages/stocker_research/src/stocker_research/regime_repair_comparison_v2.py",
+    "packages/stocker_research/src/stocker_research/right_censored_duration_v2.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/audit_right_censored_regime_refit_v2.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260719-right-censored-regime-refit-v2.json",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/regime_repair_artifacts_v2.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/regime_repair_pipeline_v2.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/regime_repair_validity_rerun_v2.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260719-regime-model-validity-v2-repaired-rerun.md",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260719-right-censored-regime-refit-v2.md",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/run_right_censored_regime_refit_v2.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/tests/test_right_censored_regime_refit_v2.py",
+    "tests/test_regime_gap_segmentation_v2.py",
+    "tests/test_regime_panel_v2.py",
+    "tests/test_regime_refit_v2.py",
+    "tests/test_regime_repair_comparison_v2.py",
+    "tests/test_right_censored_duration_v2.py"
+  ],
+  "dirty_state_classification": "pre_existing_right_censored_regime_refit_v2_lineage_copied_byte_for_byte_from_the_latest_predecessor_checkout",
+  "frozen_historical_tree": {
+    "tracked_baseline_index_sha256": "f751b34b631bbabaeb49ce69c82332cefe613ebfa013c4899f1bcde69a557ecf",
+    "work_frozen_git_tree": "6a1319e05627e190a53187edef6c0e0410e050c9",
+    "work_frozen_index_sha256": "628356aeeec1c9af2b14805adf4ac506585dd1a951bc7a92714ea8c6491627fc",
+    "frozen_bundle_git_tree": "96f8b1b383683b736156156fecbf7926700a4138",
+    "tracked_files_modified_before_experiment": [],
+    "verified_unchanged": true
+  },
+  "predecessor_lineage": {
+    "experiment_id": "20260719-right-censored-regime-refit-v2",
+    "artifact_manifest_file_hash": "2edc1cb6ff88d42b6c19d041322c850ef24b40c47a1eb1beceae99e43b88e838",
+    "declared_manifest_hash": "e659f218942a48f5db0789c043e312b538edad2f1719e2f654738a7e1698e9cd",
+    "artifact_manifest_entry_count": 83,
+    "artifact_manifest_mismatches": [],
+    "exact_rerun_byte_identical": true,
+    "independent_audit_passed": true,
+    "repair_decision": "right_censored_regime_repair_complete_with_known_limitations",
+    "repaired_validity_decision": "regime_representation_unstable_loop_dictionary_must_pause"
+  },
+  "panel_builder": {
+    "path": "packages/stocker_research/src/stocker_research/regime_panel_v2.py",
+    "sha256": "48d42b59ac51efd9e942c8d3921743e79db85fe37af331366d2293cf56f26466",
+    "fourteen_emissions_reconstructed": true,
+    "development_row_count": 424583,
+    "development_natural_key_hash": "2248079ba30c6fb7aa780f12ee50006391ffdac6a882a1aa9a04e1bebee12080",
+    "development_feature_table_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+    "validation_row_count": 424827,
+    "validation_natural_key_hash": "209b65178e0b79ddd81c20226f827cbbc5bdb38bdaa0e9226591d7969add74d5",
+    "validation_feature_table_hash": "ad117a54fd1a249caadb8c35fd094378a562812f7e042e88d81badacc1188245"
+  },
+  "data_snapshots": {
+    "development_2024_sha256": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+    "unchanged_retrospective_validation_2025_sha256": "29e82d6539810e5fcebc13e860d07474c38ee0349fe38aedce0378f9aefb67a4",
+    "protected_2026_opened": false
+  },
+  "fourteen_emission_feature_manifest": {
+    "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/panel_feature_manifest.json",
+    "sha256": "0c5d298db97ae972c416f421559131769ebfd01ddbad1596231a7f9710254c06",
+    "ordered_feature_count": 14
+  },
+  "model_lineages": {
+    "frozen": {
+      "logical_model_hash": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+      "parameter_file_hash": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251"
+    },
+    "duration_only_repair": {
+      "logical_model_hash": "40d5b2c149856e2e2cdbf3df15adfe0c8108c1bb45ada73235a87bf67f87ce44",
+      "parameter_file_hash": "a5b2226b125e03148926c941339c3ec63763309f41b3a877084f694feb4ba1b8"
+    },
+    "full_right_censored_refit": {
+      "logical_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+      "parameter_file_hash": "e267edc80298ff4d2915aa57b00f915cf34659b978ccdbc796d8103c8be4b9d2",
+      "training_row_hash": "6224fe722280312a7f3d11a953ea13ecdbc8edafac31206d776dc78e8b2e6b3a"
+    },
+    "lineage_identity_ambiguous": false
+  },
+  "sensitivity_registries": {
+    "k_seed_registry_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/repaired_k_seed_model_registry.csv",
+    "k_seed_registry_sha256": "4d202a6c9bd025753be011e974b0d65806e34d9774f3330c4524c057a4bbee62",
+    "training_sample_registry_sha256": "0b6f163ff8707a63ac3d16f5a91072ffab94dfd85f2ee052b514deea8839c43f",
+    "training_sample_policies": ["SAMPLE_A", "SAMPLE_B", "SAMPLE_C", "SAMPLE_D"]
+  },
+  "state_posterior_ledger_hashes": {
+    "posterior_comparison_sample.parquet": "2c5ba8b4f3854d16edf8c6a28be9461211e07408308e2b182a4671a439ba6ad7",
+    "posterior_audit_input.parquet": "3b623829e83d0a68b5b8a9018c4ce207d40f3e1e327e6f9d90768a951835534b",
+    "full_trajectory_status": "reconstruct_from_hash_bound_panels_and_models"
+  },
+  "dependency_lock": {
+    "path": "uv.lock",
+    "sha256": "580e90d995b5b9de48699670a7f31957a15557ddb6e4e276f62bb5b9efc1b401"
+  },
+  "environment": {
+    "python": "CPython 3.12.13",
+    "numpy": "2.4.6",
+    "pandas": "2.3.3",
+    "scipy": "1.18.0",
+    "scikit_learn": "1.9.0",
+    "pyarrow": "24.0.0",
+    "tzdata": "2026.2",
+    "blas": "Apple Accelerate; NumPy build clang 15.0.0; aarch64",
+    "thread_environment": {
+      "OMP_NUM_THREADS": null,
+      "MKL_NUM_THREADS": null,
+      "OPENBLAS_NUM_THREADS": null,
+      "VECLIB_MAXIMUM_THREADS": null,
+      "NUMEXPR_NUM_THREADS": null
+    }
+  },
+  "named_historical_sources": {
+    "loop_event_semantics_v2": "located_and_audited",
+    "semantic_loop_dictionary_v2": "located_and_audited",
+    "regime_model_validity_v2": "located_and_audited",
+    "right_censored_regime_refit_and_stability_rerun_v2": "located_and_audited",
+    "research_pipeline_correctness_audit_v1": "not_located_in_current_git_tree_or_nearby_checkout_search"
+  },
+  "fail_closed_checks": {
+    "repaired_regime_artifact_manifest_pass": true,
+    "fourteen_emissions_reconstructible": true,
+    "model_lineage_identities_unambiguous": true,
+    "development_panel_natural_key_hash_matches": true,
+    "validation_panel_natural_key_hash_matches": true,
+    "frozen_historical_tree_unchanged": true,
+    "source_identity_status": "verified_with_named_correctness_audit_missing_but_underlying_checks_present"
+  },
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false
+}

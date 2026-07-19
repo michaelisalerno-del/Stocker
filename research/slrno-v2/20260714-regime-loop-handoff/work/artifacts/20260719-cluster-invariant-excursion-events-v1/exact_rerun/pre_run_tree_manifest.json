@@ -1,0 +1,61 @@
+{
+  "manifest_version": "cluster_invariant_excursion_events_v1_pre_run_tree",
+  "experiment_id": "20260719-cluster-invariant-excursion-events-v1",
+  "generated_before_new_contract_or_implementation_code": true,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "git_tree": "2a8cba5f9ee4ad4eedb76787d4b4a9173c930d0f",
+  "branch": "agent/slrno-research-handoff",
+  "tracked_file_count": 1761,
+  "tracked_baseline_index_sha256": "f751b34b631bbabaeb49ce69c82332cefe613ebfa013c4899f1bcde69a557ecf",
+  "tracked_files_modified_at_freeze": [],
+  "pre_existing_untracked_root_count": 20,
+  "pre_existing_untracked_lineage": "20260719-right-censored-regime-refit-v2",
+  "pre_existing_untracked_lineage_artifact_count": 83,
+  "pre_existing_untracked_lineage_manifest_verified": true,
+  "protected_subtrees": {
+    "work_frozen": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen",
+      "git_tree": "6a1319e05627e190a53187edef6c0e0410e050c9",
+      "index_sha256": "628356aeeec1c9af2b14805adf4ac506585dd1a951bc7a92714ea8c6491627fc"
+    },
+    "frozen_loop_movement_bundle": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle",
+      "git_tree": "96f8b1b383683b736156156fecbf7926700a4138"
+    },
+    "tracked_historical_artifacts": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts",
+      "baseline_rule": "all_paths_tracked_at_91996a9_must_retain_their_blob_identity"
+    },
+    "historical_contracts_reports_runners_and_auditors": {
+      "baseline_rule": "no_pre_existing_file_may_be_modified"
+    }
+  },
+  "allowed_new_lineage_prefixes": [
+    "packages/stocker_research/src/stocker_research/continuous_trajectory_v1.py",
+    "packages/stocker_research/src/stocker_research/excursion_",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260719-cluster-invariant-excursion-events-v1.json",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260719-excursion-resolution-forecast-v1.json",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/run_cluster_invariant_excursion_events_v1.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/run_excursion_resolution_forecast_v1.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/audit_cluster_invariant_excursion_events_v1.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/audit_excursion_resolution_forecast_v1.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/tests/test_cluster_invariant_excursion_events_v1.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/tests/test_excursion_resolution_forecast_v1.py",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260719-cluster-invariant-excursion-events-v1.md",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260719-excursion-resolution-forecast-v1.md",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-cluster-invariant-excursion-events-v1/",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-excursion-resolution-forecast-v1/",
+    "tests/test_cluster_invariant_excursion_events_v1.py",
+    "tests/test_excursion_resolution_forecast_v1.py"
+  ],
+  "immutability_policy": "new_V1_lineage_only; no historical artifact contract report rerun auditor runner source bundle logger manifest model or dictionary overwrite",
+  "post_run_comparison_required": true,
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false
+}

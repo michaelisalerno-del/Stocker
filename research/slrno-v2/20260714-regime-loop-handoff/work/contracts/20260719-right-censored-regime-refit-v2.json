@@ -1,0 +1,275 @@
+{
+  "contract_id": "20260719-right-censored-regime-refit-v2",
+  "contract_version": "2.0.0",
+  "title": "Right-Censored Regime Refit and Stability Rerun V2",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false,
+  "part_b_interaction_scoring_enabled": false,
+  "semantic_dictionary_promotion_enabled": false,
+  "scope": {
+    "purpose": "repair terminal-duration censoring and source-gap semantics, archive a deterministic panel builder, perform duration-only isolation, complete a deterministic K=8 refit, and rerun Regime Model Validity V2 gates unchanged",
+    "predictor_training_enabled": false,
+    "loop_dictionary_finalization_enabled": false,
+    "loop_dictionary_expansion_enabled": false,
+    "loop_regime_interaction_scoring_enabled": false,
+    "economic_testing_enabled": false,
+    "production_runtime_changes_enabled": false,
+    "protected_2026_data_read_enabled": false
+  },
+  "source_identity": {
+    "implementation_target_git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+    "implementation_target_branch": "agent/slrno-research-handoff",
+    "pre_repair_source_identity": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/pre_repair_source_identity.json",
+    "pre_repair_source_identity_hash": "f979cecb37d94008ba3d9af563849daf2eb656c72e5c7997355d92505bdb3e5f",
+    "development_2024_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+    "frozen_state_model_path": "research/slrno-v2/20260714-regime-loop-handoff/work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state/frozen_semimarkov_parameters.npz",
+    "frozen_state_model_file_hash": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+    "frozen_preprocessing_path": "research/slrno-v2/20260714-regime-loop-handoff/work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state/frozen_emission_preprocessing.csv",
+    "frozen_preprocessing_file_hash": "453988be81e1dd54dd892316ab0da41423197c5aec4afb691e9010e97e05fc67",
+    "previous_regime_validity_contract": "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260718-regime-model-validity-v2.json",
+    "previous_regime_validity_contract_hash": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+    "previous_regime_validity_artifact_manifest_hash": "bf72ba7544ee7fa50ebfabfc495a4cacfa2fa3f5df6e854f39722461811125b2",
+    "previous_regime_validity_independent_audit_hash": "67116e22d29f839343b53c0d77414eab0ba4f1a019363227576e3b03c03c9f08",
+    "fail_closed_on_identity_mismatch": true
+  },
+  "panel_builder": {
+    "source_path": "packages/stocker_research/src/stocker_research/regime_panel_v2.py",
+    "source_hash": "48d42b59ac51efd9e942c8d3921743e79db85fe37af331366d2293cf56f26466",
+    "gap_segmentation_path": "packages/stocker_research/src/stocker_research/regime_gap_segmentation_v2.py",
+    "gap_segmentation_source_hash": "e5d0a0691061312217d4506528a6e388b225a99d83f84c42b83aec008bc60252",
+    "provider_timestamps": "UTC",
+    "session_calendar": "NYSE_regular_session",
+    "bar_duration_minutes": 5,
+    "maximum_regular_session_bars": 78,
+    "completed_bar_availability": "bar_start_plus_five_minutes",
+    "natural_order": [
+      "symbol",
+      "session",
+      "bar_start_timestamp",
+      "bar_ordinal"
+    ],
+    "natural_keys_unique_required": true,
+    "canonical_hash_serialization": "Arrow_IPC_full_precision_stable_column_order",
+    "rolling_crosses_session": false,
+    "rolling_crosses_source_gap": false,
+    "cross_sectional_peer_policy": "only rows present at the same completed-bar timestamp",
+    "missing_historical_dependency": "run_sealed_2025_sec_raw_activity_validation.py",
+    "historical_panel_byte_equivalence_required": false,
+    "new_lineage_required_if_historical_equivalence_unavailable": true
+  },
+  "emission_features": {
+    "combined_count": 14,
+    "ordered": [
+      "regime_log_activity_3",
+      "regime_log_activity_12",
+      "regime_activity_acceleration",
+      "signed_efficiency_6",
+      "signed_efficiency_12",
+      "regime_log_bar_range",
+      "close_location_value",
+      "regime_wick_balance",
+      "log_relative_historical_volume",
+      "log_relative_cumulative_historical_volume",
+      "regime_log_market_dispersion",
+      "regime_stock_minus_market_scaled",
+      "vti__signed_efficiency_12",
+      "regime_market_breadth_centered"
+    ],
+    "stock_only": [
+      "regime_log_activity_3",
+      "regime_log_activity_12",
+      "regime_activity_acceleration",
+      "signed_efficiency_6",
+      "signed_efficiency_12",
+      "regime_log_bar_range",
+      "close_location_value",
+      "regime_wick_balance",
+      "log_relative_historical_volume",
+      "log_relative_cumulative_historical_volume"
+    ],
+    "market_only": [
+      "regime_log_market_dispersion",
+      "vti__signed_efficiency_12",
+      "regime_market_breadth_centered"
+    ],
+    "stock_relative": [
+      "regime_stock_minus_market_scaled"
+    ],
+    "outcome_columns_allowed": false
+  },
+  "run_ending_policy": {
+    "statuses": [
+      "OBSERVED_STATE_EXIT",
+      "RIGHT_CENSORED_SESSION_END",
+      "INVALIDATED_BY_SOURCE_GAP",
+      "INCOMPLETE_OR_UNAVAILABLE_SESSION",
+      "DATA_ERROR"
+    ],
+    "observed_state_exit_contributes_at_risk": true,
+    "observed_state_exit_contributes_exit": true,
+    "right_censored_session_end_contributes_at_risk": true,
+    "right_censored_session_end_contributes_exit": false,
+    "gap_invalidated_primary_fit_eligible": false,
+    "incomplete_session_primary_fit_eligible": false,
+    "data_error_action": "fail_closed",
+    "bridge_source_gap": false
+  },
+  "duration_estimator": {
+    "source_path": "packages/stocker_research/src/stocker_research/right_censored_duration_v2.py",
+    "source_hash": "34f2b9703cfc91695aa39c41e42a12a26c9cbddd719db6d010b50ebdc124175b",
+    "support_ages": {
+      "minimum": 1,
+      "maximum": 78
+    },
+    "alpha": 0.5,
+    "beta": 0.5,
+    "minimum_state_at_risk_before_backoff": 5,
+    "tail_prior_hazard": 0.05,
+    "backoff": "deterministic_state_to_pooled_to_tail_prior",
+    "force_age_24_exit": false,
+    "force_final_age_exit": false,
+    "smoothing_selection_uses_loop_or_dictionary_results": false
+  },
+  "implementation_sources": {
+    "regime_refit_v2.py": "f4f9a5612c0f4667cfd3fa60b57a96ab15db64848732e14ba254ae5f83593de4",
+    "regime_repair_comparison_v2.py": "9575a1b5c55f9c37d960df6faeddfba00a1c32979de1e79accbc9bf01d79e8e8",
+    "regime_repair_artifacts_v2.py": "1fe2689c7acc44099416e3c31d8ea0ccda0809f1139dd79cda5e6e47be738016",
+    "regime_repair_validity_rerun_v2.py": "452a791b55801f6aa2309a783e4cf66d15ff4645e75ce6cabee083d5644350b3",
+    "regime_repair_pipeline_v2.py": "2788664d6a3b3db90ef36dff8ec5e82f979d6c1dbd7c111d705dd41b6b980cec",
+    "run_right_censored_regime_refit_v2.py": "bf4fbfab475dd1ab6b86acf5b2c633271da74c6f878bac6a80f3c173ebc48714",
+    "audit_right_censored_regime_refit_v2.py": "b8a179cde38001c621e9be098077c6dc1b98169e51cc10ae01bb24d1a9817a4b"
+  },
+  "repair_tracks": {
+    "duration_only": {
+      "model_id": "regime_model_v2_duration_only_repair",
+      "frozen_emission_parameters": true,
+      "frozen_transition_matrix": true,
+      "frozen_initial_distribution": true,
+      "frozen_occupancy": true,
+      "changed_fields": [
+        "duration_hazard",
+        "censoring_treatment",
+        "source_gap_groups"
+      ]
+    },
+    "full_refit": {
+      "model_id": "regime_model_v2_full_right_censored_refit",
+      "primary_state_count": 8,
+      "primary_seed": 20260710,
+      "imputation": "training_median",
+      "scaling": "RobustScaler_quantile_range_25_75",
+      "sampling_policy": "historical_deterministic_floor_stride",
+      "nominal_maximum_training_rows": 200000,
+      "clusterer": "MiniBatchKMeans",
+      "batch_size": 4096,
+      "n_init": 10,
+      "max_iter": 300,
+      "variance_floor": 0.05,
+      "transition_pseudocount": 0.5,
+      "initial_pseudocount": 0.5,
+      "cleanup_policy": "CLEANING_1_frozen_two_pass_neighbor_aware_minimum_run_2",
+      "cleanup_is_causal": false,
+      "semantic_remap": "ascending_mean_activity_then_direction",
+      "right_censored_duration_fit": true
+    }
+  },
+  "determinism": {
+    "training_row_keys_archived": true,
+    "sample_row_keys_archived": true,
+    "all_seeds_pinned": true,
+    "dependency_versions_recorded": true,
+    "thread_environment_recorded": true,
+    "clean_second_fit_required": true,
+    "parameter_hash_identity_required": true,
+    "posterior_hash_identity_required": true,
+    "state_assignment_hash_identity_required": true,
+    "artifact_byte_identity_required": true
+  },
+  "chronology": {
+    "development_fit": "2024",
+    "unchanged_retrospective_assessment": "2025",
+    "backward_2023_enabled": false,
+    "protected_2026_enabled": false,
+    "assessment_may_change_fit_or_thresholds": false
+  },
+  "unchanged_part_a_binding": {
+    "state_counts": [6, 8, 10, 12],
+    "seeds": [20260710, 20260711, 20260712, 20260713, 20260714],
+    "training_sample_variants": [
+      "SAMPLE_A",
+      "SAMPLE_B",
+      "SAMPLE_C",
+      "SAMPLE_D"
+    ],
+    "training_sample_rows": 200000,
+    "training_sample_seed": 20260718,
+    "alignment_method": "Hungarian_minimum_weighted_structural_distance",
+    "alignment_weights": {
+      "centroid_distance": 0.6,
+      "transition_profile_distance": 0.25,
+      "duration_profile_distance": 0.15
+    },
+    "frozen_structural_thresholds": {
+      "posterior_normalization_tolerance": 1e-10,
+      "state_age_normalization_tolerance": 1e-10,
+      "minimum_state_occupancy": 0.01,
+      "maximum_single_stock_share_per_state": 0.25,
+      "maximum_period_centroid_drift_scaled_rms": 3.0,
+      "maximum_median_period_centroid_drift_scaled_rms": 1.5,
+      "minimum_major_transition_cosine_similarity": 0.7,
+      "duration_median_ratio_lower": 0.5,
+      "duration_median_ratio_upper": 2.0,
+      "minimum_seed_bar_agreement_nmi": 0.5,
+      "minimum_training_sample_dictionary_coverage_ratio": 0.75,
+      "maximum_combined_stability_deficit": 0.1,
+      "hysteretic_same_primitive_minimum": 0.75,
+      "hysteretic_allowed_timestamp_shift_bars": 2,
+      "k8_positive_structural_excess_seed_count": 4,
+      "k8_positive_structural_excess_seed_denominator": 5,
+      "state_declared_stable_only_if_all_component_gates_pass": true
+    },
+    "gate_threshold_override_allowed": false,
+    "decision_hierarchy_override_allowed": false
+  },
+  "part_a_decisions": [
+    "regime_representation_validated_for_loop_dictionary",
+    "regime_representation_valid_with_required_sensitivity",
+    "regime_representation_requires_targeted_repair",
+    "regime_representation_unstable_loop_dictionary_must_pause",
+    "hierarchical_market_stock_regime_representation_preferred",
+    "regime_validity_audit_blocked"
+  ],
+  "repair_decisions": [
+    "right_censored_regime_repair_complete",
+    "right_censored_regime_repair_complete_with_known_limitations",
+    "right_censored_regime_repair_blocked",
+    "right_censored_regime_repair_failed"
+  ],
+  "part_b": {
+    "opened": false,
+    "scored": false,
+    "authorization_possible_only_in_later_separate_contract": true
+  },
+  "dictionary": {
+    "promotion_enabled": false,
+    "finalization_enabled": false,
+    "expansion_enabled": false,
+    "existing_dictionary_used_for_diagnostics_only": true
+  },
+  "exact_rerun": {
+    "required": true,
+    "byte_identity_required": true,
+    "excluded_self_referential_files": [
+      "artifact_manifest.json",
+      "independent_audit.json",
+      "exact_rerun_manifest.json",
+      "post_repair_tree_manifest.json"
+    ]
+  }
+}

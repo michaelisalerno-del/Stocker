@@ -1,0 +1,207 @@
+{
+  "broker_connected": false,
+  "contract_hash": "bdba55b4243a4bfe18cea04d89b2cacabe817322eb581e3ec4461a5f3c4e8737",
+  "data_snapshot_hash": "2b2efafb8d7c0cebbd7b392493ecbc0a279f71ee1d4f74197e18d99ecd8c43a7",
+  "development_only_selection": true,
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "final_configuration": {
+    "coefficient_hash": "c55b6d1c4cb584616cd21ad32b1837908bd3e6d20e0f8d0727c2a861e4e38f33",
+    "effective_estimator": {
+      "classes": [
+        "RETURN_TO_ORIGIN",
+        "PARTIAL_RETURN",
+        "CONTINUE_AWAY",
+        "ROTATE_TO_NEW_REGION",
+        "SESSION_END",
+        "UNAVAILABLE"
+      ],
+      "coefficients": [
+        [
+          0.0202451695811744,
+          -0.0008402599242838927,
+          -0.17440564754872706,
+          -0.08565480003156062,
+          0.06662177235340189,
+          0.01805207149558296,
+          0.10137652805401809
+        ],
+        [
+          0.049086695436737916,
+          -0.1241237791680956,
+          0.06476724549227399,
+          -0.005658962959453246,
+          0.09463179805733564,
+          -0.0528328370934,
+          -0.11316544392137558
+        ],
+        [
+          -0.05171762353439596,
+          0.12260953852986592,
+          -0.08159973605905023,
+          -0.05240732663523749,
+          0.21872886119640989,
+          0.07232448388725482,
+          0.22424192485463884
+        ],
+        [
+          0.026005246811288116,
+          -0.14027915098935048,
+          -0.06971336690666859,
+          0.06060166101843228,
+          -0.2883171668378476,
+          -0.01699271906117476,
+          -0.04945258195392242
+        ],
+        [
+          0.03299714652448271,
+          0.3925969822002389,
+          0.1538729957757052,
+          0.06760092034938972,
+          -0.08645969229163876,
+          0.0043385710986799724,
+          -0.15533303077129895
+        ],
+        [
+          -0.07661663481928875,
+          -0.24996333064837875,
+          0.10707850924646048,
+          0.015518508258428846,
+          -0.005205572477659844,
+          -0.02488957032694443,
+          -0.007667396262061293
+        ]
+      ],
+      "fallback_probabilities": [
+        0.0013020141361534782,
+        0.0038263272572673646,
+        0.0031354626135940904,
+        0.1344528883456449,
+        0.7985066695009831,
+        0.058776638146357016
+      ],
+      "features": [
+        "posterior_entropy",
+        "expected_state_age",
+        "departure_probability",
+        "hard_hysteretic_disagreement",
+        "posterior_velocity",
+        "posterior_max_probability",
+        "hard_state_persistence_bars"
+      ],
+      "fitted_classes": [
+        "CONTINUE_AWAY",
+        "PARTIAL_RETURN",
+        "RETURN_TO_ORIGIN",
+        "ROTATE_TO_NEW_REGION",
+        "SESSION_END",
+        "UNAVAILABLE"
+      ],
+      "intercepts": [
+        -1.9121397253009387,
+        -2.313319053747001,
+        -2.312911440495652,
+        1.8279323077136764,
+        3.6590732213868358,
+        1.0513646904430767
+      ],
+      "means": [
+        0.29164032344466573,
+        9.943564798580555,
+        0.1907719908989517,
+        0.03664824067184012,
+        0.22255541431927042,
+        0.8855777913100564,
+        7.997847347719783
+      ],
+      "medians": [
+        0.13882156955910968,
+        4.685454066588278,
+        0.18769791956701992,
+        0.0,
+        0.13682667906984977,
+        0.9721648519266208,
+        3.0
+      ],
+      "scales": [
+        0.3283685811825553,
+        14.051309617672173,
+        0.0816034180708995,
+        0.18789663947899388,
+        0.22728784858883416,
+        0.15785346763365216,
+        12.689631884016315
+      ]
+    },
+    "features": [
+      "posterior_entropy",
+      "expected_state_age",
+      "departure_probability",
+      "hard_hysteretic_disagreement",
+      "posterior_velocity",
+      "posterior_max_probability",
+      "hard_state_persistence_bars"
+    ],
+    "preprocessor_hash": "8e0621508b5a8f4a43b4b3553ded18f1dbf60dcf8d722ba985d69f63f0aebd02",
+    "regularization_c": 0.1,
+    "training_rows": 37628,
+    "unique_training_events": 3142
+  },
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "e0bec27d320343054ccfc584b0ad10e3830babff9e6eceb2d8a1a7f2ea19a86a",
+  "model": "B6",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "oof_configuration": {
+    "features": [
+      "posterior_entropy",
+      "expected_state_age",
+      "departure_probability",
+      "hard_hysteretic_disagreement",
+      "posterior_velocity",
+      "posterior_max_probability",
+      "hard_state_persistence_bars"
+    ],
+    "fold_configurations": [
+      {
+        "coefficient_hash": "28bc261555e05b00c2f6c8f0c4c621c04da6feb0e7c722fa28fbeb7a9c1c6f50",
+        "fold": 1,
+        "preprocessor_hash": "9f6660c413d84dfb73476be6725d4013d7b064153f03d8dde807788ee7b88eed",
+        "regularization_c": 0.1,
+        "training_rows": 636,
+        "validation_rows": 868
+      },
+      {
+        "coefficient_hash": "946aaa5d7e6ff9efa94327e87d88f6dfaa2fcc026a0429101c1e531e37ba23d6",
+        "fold": 2,
+        "preprocessor_hash": "30b60d282e6f48e85ec05243fea6f1476d001b2344e6e6116ab4e47eab9aee93",
+        "regularization_c": 0.1,
+        "training_rows": 1504,
+        "validation_rows": 831
+      },
+      {
+        "coefficient_hash": "74e24563793bf6244a7c30c8748d5a6cd0ec8a05b268bf8fbdefb386365e62d8",
+        "fold": 3,
+        "preprocessor_hash": "ba1823ddc2c7c5472dde1828d098fd1a6331757c3321b69e3f6565468cf20be5",
+        "regularization_c": 0.1,
+        "training_rows": 2335,
+        "validation_rows": 807
+      }
+    ],
+    "kind": "multinomial_logistic",
+    "regularization_c": 0.1
+  },
+  "order_placement": "disabled",
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "da1131234856d62549b728d5",
+  "selected_candidate": false,
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "excursion_resolution_structural_forecast_v1",
+  "strategy_promotion": false,
+  "strongest_simple_baseline": false,
+  "unchanged_validation": true
+}

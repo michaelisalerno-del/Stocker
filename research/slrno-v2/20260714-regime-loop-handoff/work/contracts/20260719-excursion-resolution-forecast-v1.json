@@ -1,0 +1,220 @@
+{
+  "experiment_id": "20260719-excursion-resolution-forecast-v1",
+  "contract_version": "excursion_resolution_forecast_v1",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "branch": "agent/slrno-research-handoff",
+  "part_a_binding": {
+    "decision": "emission_space_excursion_events_validated",
+    "part_a_binding_hash": "5384e344d33315c128fd690cb7cebe45beed3e694f2547fb7e3af23d55ca33aa",
+    "part_a_decision_file_hash": "7e9f5917539e08f7363846735e3a1345ea6e251075dd0b01a3c3719aec4712c2",
+    "part_a_artifact_manifest_hash": "7e66185229b6eab16cef528487f5aa09acf1c55e5f6f93eda86e86d626b56624",
+    "event_definition_hash": "3d18758a31681b77780fcb2c33646e3956daafb8b5d6789b069d665f9e05c80f",
+    "event_definition_selection_file_hash": "68397586a5ca99b7afe91047780a07dd1a01b10357b09c324a58fa86d5de951c",
+    "event_resolution_contract_file_hash": "c38fdd6ec7abc3f01ebced723f9f5e7cb4b9afcfaa79cba1e9b00a82b37a2ec5",
+    "trajectory_feature_manifest_file_hash": "a50a1a1e6e03e663651a9430fed96cf6e883c728026b1f6c83f6137fdd5933a1",
+    "trajectory_representation": "E",
+    "origin_definition": "ORIGIN_A_W6",
+    "distance_definition": "SHRINKAGE_MAHALANOBIS",
+    "departure_threshold": 9.58689417122241,
+    "confirmation_bars": 2,
+    "return_ratio": 0.5,
+    "rotation_persistence": 3,
+    "rotation_separation_ratio": 1.0,
+    "continuation_ratio": 1.5,
+    "partial_retracement_fraction": 0.35,
+    "primary_horizon_bars": 24,
+    "event_precedence": [
+      "UNAVAILABLE_SOURCE",
+      "UNAVAILABLE_STRUCTURAL_GAP",
+      "RETURN_TO_ORIGIN",
+      "ROTATE_TO_NEW_REGION",
+      "CONTINUE_AWAY",
+      "PARTIAL_RETURN",
+      "SESSION_END",
+      "UNRESOLVED_AT_HORIZON"
+    ]
+  },
+  "chronology": {
+    "development": "2024-01-01/2024-12-31",
+    "validation": "2025-01-01/2025-12-31",
+    "protected_period_forbidden": "2026_or_prospective",
+    "validation_may_change_settings": false
+  },
+  "population": {
+    "primary": "confirmed_active_excursions",
+    "first_eligible_bar_offset_from_confirmation": 1,
+    "last_eligible_bar": "strictly_before_resolution",
+    "remain_local_eligible": false,
+    "unresolved_at_horizon_treatment": "right_censored",
+    "unavailable_source_and_gap_target": "UNAVAILABLE",
+    "secondary_onset_population": "separate_diagnostic_only"
+  },
+  "targets": {
+    "multiclass_order": [
+      "RETURN_TO_ORIGIN",
+      "PARTIAL_RETURN",
+      "CONTINUE_AWAY",
+      "ROTATE_TO_NEW_REGION",
+      "SESSION_END",
+      "UNAVAILABLE"
+    ],
+    "binary_sensitivity": [
+      "RETURN_TO_ORIGIN",
+      "NON_RETURN"
+    ],
+    "timing": "bars_until_first_resolution_with_right_censoring",
+    "timing_horizons_bars": [3, 6, 12]
+  },
+  "forecast_features": {
+    "geometry": [
+      "current_distance",
+      "maximum_distance_so_far",
+      "distance_velocity",
+      "distance_acceleration",
+      "retracement_fraction_so_far",
+      "path_length_since_departure",
+      "directional_consistency_since_departure",
+      "angle_to_departure_vector",
+      "local_curvature",
+      "bars_since_departure",
+      "bars_remaining_in_session",
+      "short_trajectory_velocity",
+      "short_trajectory_acceleration",
+      "local_path_length",
+      "local_directional_consistency"
+    ],
+    "posterior_and_age": [
+      "posterior_entropy",
+      "expected_state_age",
+      "departure_probability",
+      "hard_hysteretic_disagreement",
+      "posterior_velocity",
+      "posterior_max_probability",
+      "hard_state_persistence_bars"
+    ],
+    "market_context": [
+      "market_dispersion_z",
+      "stock_minus_market_z",
+      "market_efficiency_z",
+      "market_breadth_z",
+      "market_trajectory_velocity"
+    ],
+    "event_history": [
+      "previous_is_return",
+      "previous_is_partial",
+      "previous_is_continue",
+      "previous_is_rotate",
+      "previous_is_session_end",
+      "previous_is_unavailable",
+      "bars_since_previous_excursion",
+      "consecutive_return_count",
+      "session_event_count_so_far"
+    ],
+    "clock_and_baseline": [
+      "clock_phase_early",
+      "clock_phase_middle",
+      "clock_phase_late",
+      "session_fraction",
+      "distance_bucket",
+      "distance_trend_inward",
+      "distance_trend_flat",
+      "distance_trend_outward"
+    ],
+    "availability_rule": "maximum_source_availability_timestamp_not_after_decision_timestamp",
+    "missingness": "explicit_flags_and_training_fold_median_only"
+  },
+  "development_folds": [
+    {
+      "fold": 1,
+      "train_end": "2024-03-31",
+      "validation_start": "2024-04-01",
+      "validation_end": "2024-06-30"
+    },
+    {
+      "fold": 2,
+      "train_end": "2024-06-30",
+      "validation_start": "2024-07-01",
+      "validation_end": "2024-09-30"
+    },
+    {
+      "fold": 3,
+      "train_end": "2024-09-30",
+      "validation_start": "2024-10-01",
+      "validation_end": "2024-12-31"
+    }
+  ],
+  "models": {
+    "regularization_grid_C": [0.1, 1.0, 10.0],
+    "maximum_iterations": 1000,
+    "B0": "global_class_frequency",
+    "B1": "broad_clock_phase_frequency",
+    "B2": "event_age_and_session_time_logistic",
+    "B3": "current_distance_and_velocity_logistic",
+    "B4": "distance_trend_persistence_frequency",
+    "B5": "distance_bucket_frequency",
+    "B6": "posterior_and_state_age_logistic",
+    "B7": "geometry_only_multinomial_logistic",
+    "B8": "geometry_plus_posterior_age_multinomial_logistic",
+    "B9": "geometry_plus_posterior_age_market_multinomial_logistic",
+    "B10": "cause_specific_discrete_time_multinomial_hazard",
+    "candidate_selection": "lowest_development_oof_mean_of_relative_log_loss_and_brier_ranks",
+    "strongest_simple_baseline_selection": "lowest_development_oof_mean_of_relative_log_loss_and_brier_ranks_among_B0_to_B6"
+  },
+  "metrics": {
+    "calibration_bins": 10,
+    "minimum_supported_calibration_bin": 25,
+    "major_class_minimum_validation_events": 50,
+    "paired_session_bootstrap_draws": 2000,
+    "bootstrap_seed": 20260719,
+    "confidence_level": 0.95,
+    "event_level_primary": "first_eligible_forecast_per_unique_excursion"
+  },
+  "part_b_gates": {
+    "relative_log_loss_improvement_minimum": 0.005,
+    "paired_log_loss_upper_bound_below_zero": true,
+    "paired_brier_upper_bound_below_zero": true,
+    "validation_quarters_favourable_minimum": 3,
+    "leave_one_stock_out_all_favourable": true,
+    "calibration_ece_maximum_worsening": 0.01,
+    "major_classes_improved_minimum": 2,
+    "return_cannot_be_only_improved_class": true,
+    "median_correct_prediction_lead_time_minimum_bars": 2,
+    "required_representation_sensitivity": false,
+    "binary_return_minimum_development_events": 100,
+    "binary_return_minimum_validation_events": 50,
+    "timing_relative_integrated_brier_improvement_minimum": 0.005,
+    "timing_paired_integrated_brier_upper_bound_below_zero": true,
+    "timing_validation_quarters_favourable_minimum": 3,
+    "timing_leave_one_stock_out_all_favourable": true
+  },
+  "decision_hierarchy": [
+    "cluster_invariant_excursion_forecast_validated",
+    "cluster_invariant_return_probability_validated",
+    "excursion_resolution_timing_validated",
+    "excursion_structural_forecast_weak",
+    "no_predictable_excursion_resolution_structure",
+    "excursion_forecast_experiment_blocked"
+  ],
+  "forbidden_inputs": [
+    "future_return",
+    "future_price",
+    "pnl",
+    "payoff",
+    "mfe",
+    "mae",
+    "execution",
+    "spread",
+    "slippage",
+    "broker",
+    "order",
+    "position"
+  ]
+}

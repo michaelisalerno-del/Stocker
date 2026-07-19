@@ -1,0 +1,30 @@
+{
+  "contract_version": "observable_event_ranking_v1_stage_dependencies",
+  "dependencies": {
+    "audit-events": ["build-events", "exact-rerun"],
+    "build-targets": ["support_decision.passed"],
+    "run-development": ["target_ledger.parquet"],
+    "audit-development": ["run-development", "exact-rerun"],
+    "freeze-prospective": ["development_decision.authorises_prospective_freeze"],
+    "score-prospective": ["prospective_freeze_manifest.json"],
+    "settle-prospective": ["prediction.outcome_available_at <= settlement_time"],
+    "economic-evaluation": [
+      "prospective_structural_gate.passed",
+      "complete_live_entry_and_exit_quotes",
+      "versioned_user_supplied_ibkr_fees",
+      "defined_currency_conversion",
+      "separately_frozen_economic_contract"
+    ]
+  },
+  "protected_data_bypass_available": false,
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "live_trading_enabled": false,
+  "paper_order_submission_enabled": false,
+  "account_data_requested": false,
+  "positions_requested": false,
+  "ibkr_orders_permitted": false
+}

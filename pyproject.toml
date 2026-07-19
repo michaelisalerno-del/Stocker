@@ -71,7 +71,10 @@ packages = [
 "stocker_launcher.py" = "stocker_launcher.py"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+  "tests",
+  "research/observable-event-ranking/20260719-observable-event-cross-sectional-ranking-v1/work/tests",
+]
 pythonpath = [
   "packages/stocker_core/src",
   "packages/stocker_data/src",
@@ -92,6 +95,7 @@ src = [
   "packages/stocker_execution/src",
   "apps",
   "tests",
+  "research/observable-event-ranking/20260719-observable-event-cross-sectional-ranking-v1/work",
 ]
 
 [tool.ruff.lint]

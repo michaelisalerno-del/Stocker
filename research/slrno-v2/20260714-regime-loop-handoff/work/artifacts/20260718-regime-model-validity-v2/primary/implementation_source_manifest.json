@@ -1,0 +1,32 @@
+{
+  "baseline_source_git_sha": "66cd706fa727ac5873b299d5c22388221203f451",
+  "broker_connected": false,
+  "contract_hash": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+  "data_snapshot_hash": "4b613ea262583ab77426813fc39b0210e2e737e0dbb042996feb5f4201c64349",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "files": {
+    "packages/stocker_research/src/stocker_research/loop_orientation_v2.py": "bf03c3afbb139d1c4d02b1bcda6194923db05d4c5c1058046530c0ec29896a5c",
+    "packages/stocker_research/src/stocker_research/loop_regime_interaction_v2.py": "58b9ff5d96d8d2d11d5499e3f6ee59e41941987b3675c78165d787fafd2e4050",
+    "packages/stocker_research/src/stocker_research/regime_validity_v2.py": "9a3747361299b748a0170c49f513ab0fd461582ce29a856a43a9a348be96e218",
+    "packages/stocker_research/src/stocker_research/state_alignment_v2.py": "900227ffbae7f2c4e57ca33c33caba31838b143f709976f0bd8c93818a3dcbf6",
+    "packages/stocker_research/src/stocker_research/state_representation_sensitivity_v2.py": "4fd1095f2aec5184b666936f689cfa2c1ce610ed389c4daab58b5e89c84f6511",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/audit_regime_model_validity_v2.py": "577f98f81c88485eab401d8bda6ddd6ac2047739ba936cab78abe0d87f170df3",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260718-regime-model-validity-v2.json": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/regime_validity_pipeline_v2.py": "d1d50e719bbb02461bc47146f62cc2baf19bf5b8d18653a2d42d90711557d4d2",
+    "research/slrno-v2/20260714-regime-loop-handoff/work/run_regime_model_validity_v2.py": "5a6543289e6ab9041d929acb164ae0141c94b78f58a18a2b9afb5f1108543d59"
+  },
+  "git_sha": "66cd706fa727ac5873b299d5c22388221203f451",
+  "implementation_source_hash": "eb12d895260f52d0b8e83a7aa90f5f86d9d27612f9b853237d4db645a89c4ec9",
+  "manifest_version": "regime_model_validity_v2_implementation_sources",
+  "order_placement": "disabled",
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "3b8fb195297cf76edbc309e6",
+  "state_model_hash": "d5fb65d1512f625c91e93564da9c5596ff84b02956a3b46faab65a7126f491c2",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false
+}

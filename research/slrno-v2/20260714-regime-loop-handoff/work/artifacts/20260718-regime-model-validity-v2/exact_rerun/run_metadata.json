@@ -1,0 +1,43 @@
+{
+  "assessment_snapshot_hash": "29e82d6539810e5fcebc13e860d07474c38ee0349fe38aedce0378f9aefb67a4",
+  "broker_connected": false,
+  "combined_opened_data_snapshot_hash": "4b613ea262583ab77426813fc39b0210e2e737e0dbb042996feb5f4201c64349",
+  "contract_hash": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+  "data_snapshot_hash": "4b613ea262583ab77426813fc39b0210e2e737e0dbb042996feb5f4201c64349",
+  "development_period": "2024",
+  "development_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "experiment_id": "20260718-regime-validity-loop-interaction-foundations-v2",
+  "git_sha": "66cd706fa727ac5873b299d5c22388221203f451",
+  "historical_stride_rows": 212292,
+  "implementation_source_hash": "eb12d895260f52d0b8e83a7aa90f5f86d9d27612f9b853237d4db645a89c4ec9",
+  "k_values": [
+    6,
+    8,
+    10,
+    12
+  ],
+  "order_placement": "disabled",
+  "part": "A",
+  "part_b_accessed": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "protected_2026_opened": false,
+  "research_only": true,
+  "run_id": "3b8fb195297cf76edbc309e6",
+  "seeds": [
+    20260710,
+    20260711,
+    20260712,
+    20260713,
+    20260714
+  ],
+  "sensitivity_sample_rows": 200000,
+  "state_model_hash": "d5fb65d1512f625c91e93564da9c5596ff84b02956a3b46faab65a7126f491c2",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false,
+  "unchanged_retrospective_assessment_period": "2025"
+}

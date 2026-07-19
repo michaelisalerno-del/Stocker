@@ -1,0 +1,170 @@
+{
+  "broker_connected": false,
+  "combined": [
+    "close_location_value",
+    "log_relative_cumulative_historical_volume",
+    "log_relative_historical_volume",
+    "regime_activity_acceleration",
+    "regime_log_activity_12",
+    "regime_log_activity_3",
+    "regime_log_bar_range",
+    "regime_log_market_dispersion",
+    "regime_market_breadth_centered",
+    "regime_stock_minus_market_scaled",
+    "regime_wick_balance",
+    "signed_efficiency_12",
+    "signed_efficiency_6",
+    "vti__signed_efficiency_12"
+  ],
+  "contract_hash": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+  "data_snapshot_hash": "4b613ea262583ab77426813fc39b0210e2e737e0dbb042996feb5f4201c64349",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "feature_provenance": {
+    "close_location_value": {
+      "availability_rule": "completed_bar",
+      "feature": "close_location_value",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "log_relative_cumulative_historical_volume": {
+      "availability_rule": "completed_bar",
+      "feature": "log_relative_cumulative_historical_volume",
+      "future_rows_required": false,
+      "history_requirement": "prior_sessions_plus_current_bar",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "log_relative_historical_volume": {
+      "availability_rule": "completed_bar",
+      "feature": "log_relative_historical_volume",
+      "future_rows_required": false,
+      "history_requirement": "prior_sessions_plus_current_bar",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "regime_activity_acceleration": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_activity_acceleration",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "regime_log_activity_12": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_log_activity_12",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "regime_log_activity_3": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_log_activity_3",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "regime_log_bar_range": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_log_bar_range",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "regime_log_market_dispersion": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_log_market_dispersion",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_cross_section_current_and_past"
+    },
+    "regime_market_breadth_centered": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_market_breadth_centered",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_cross_section_current_and_past"
+    },
+    "regime_stock_minus_market_scaled": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_stock_minus_market_scaled",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_and_market_current_and_past"
+    },
+    "regime_wick_balance": {
+      "availability_rule": "completed_bar",
+      "feature": "regime_wick_balance",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "signed_efficiency_12": {
+      "availability_rule": "completed_bar",
+      "feature": "signed_efficiency_12",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "signed_efficiency_6": {
+      "availability_rule": "completed_bar",
+      "feature": "signed_efficiency_6",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "stock_current_and_past"
+    },
+    "vti__signed_efficiency_12": {
+      "availability_rule": "completed_bar",
+      "feature": "vti__signed_efficiency_12",
+      "future_rows_required": false,
+      "history_requirement": "rolling_or_current_bar_history",
+      "latest_bar_offset": 0,
+      "source_family": "benchmark_current_and_past"
+    }
+  },
+  "git_sha": "66cd706fa727ac5873b299d5c22388221203f451",
+  "implementation_source_hash": "eb12d895260f52d0b8e83a7aa90f5f86d9d27612f9b853237d4db645a89c4ec9",
+  "market_only": [
+    "regime_log_market_dispersion",
+    "regime_market_breadth_centered",
+    "vti__signed_efficiency_12"
+  ],
+  "order_placement": "disabled",
+  "partitions_disjoint": true,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "relative": [
+    "regime_stock_minus_market_scaled"
+  ],
+  "research_only": true,
+  "run_id": "3b8fb195297cf76edbc309e6",
+  "state_model_hash": "d5fb65d1512f625c91e93564da9c5596ff84b02956a3b46faab65a7126f491c2",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "stock_only": [
+    "close_location_value",
+    "log_relative_cumulative_historical_volume",
+    "log_relative_historical_volume",
+    "regime_activity_acceleration",
+    "regime_log_activity_12",
+    "regime_log_activity_3",
+    "regime_log_bar_range",
+    "regime_wick_balance",
+    "signed_efficiency_12",
+    "signed_efficiency_6"
+  ],
+  "strategy_promotion": false
+}

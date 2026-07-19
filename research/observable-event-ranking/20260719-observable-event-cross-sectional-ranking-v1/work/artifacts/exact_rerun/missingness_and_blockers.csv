@@ -1,0 +1,5 @@
+stage,blocker,count,detail
+preflight,blocked_missing_point_in_time_sector_membership,1,No trusted effective-dated sector membership was found; current snapshots are not projected backward.
+preflight,insufficient_historical_source_universe,43,safe pre-cutoff source symbols; at least 50 are required per slate
+preflight,unproven_source_timestamp_convention,1,bar start/end semantics are not proven for the scientific source
+preflight,unresolved_corporate_action_handling,1,raw-close split and ticker handling is not resolved

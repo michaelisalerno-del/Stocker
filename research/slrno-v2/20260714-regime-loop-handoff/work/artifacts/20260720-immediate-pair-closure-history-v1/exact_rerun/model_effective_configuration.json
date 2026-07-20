@@ -1,0 +1,254 @@
+{
+  "bootstrap": {
+    "draws": 2000,
+    "seed": 20260720
+  },
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "experiment_id": "20260720-immediate-pair-closure-history-v1",
+  "frequency_model": {
+    "alpha": 0.5,
+    "beta": 0.5,
+    "tau": 64.0
+  },
+  "hysteresis": {
+    "switch_margin": 0.1,
+    "switch_probability": 0.55
+  },
+  "live_ordering_enabled": false,
+  "model_context_levels": {
+    "M0_GLOBAL": [],
+    "M1_CURRENT_STATE": [
+      [
+        "current_state"
+      ]
+    ],
+    "M2_IMMEDIATE_PAIR": [
+      [
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state"
+      ]
+    ],
+    "M3_LAST_THREE_STATES": [
+      [
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ]
+    ],
+    "M4_LAST_FOUR_STATES": [
+      [
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ]
+    ],
+    "M5_LAST_FIVE_STATES": [
+      [
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ]
+    ],
+    "M6_PAIR_PLUS_COMPLETED_DURATIONS": [
+      [
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket"
+      ],
+      [
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket",
+        "previous_duration_2_bucket"
+      ]
+    ],
+    "M7_PAIR_PLUS_PREVIOUS_CLOSURE_RECENCY": [
+      [
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state",
+        "previous_loop_pair"
+      ],
+      [
+        "previous_state_1",
+        "current_state",
+        "previous_loop_pair",
+        "previous_loop_recency_bucket"
+      ]
+    ],
+    "M8_FULL_CAUSAL_CONTEXT": [
+      [
+        "current_state"
+      ],
+      [
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket",
+        "previous_duration_2_bucket"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket",
+        "previous_duration_2_bucket",
+        "previous_loop_pair"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket",
+        "previous_duration_2_bucket",
+        "previous_loop_pair",
+        "previous_loop_recency_bucket"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket",
+        "previous_duration_2_bucket",
+        "previous_loop_pair",
+        "previous_loop_recency_bucket",
+        "posterior_margin_bucket"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket",
+        "previous_duration_2_bucket",
+        "previous_loop_pair",
+        "previous_loop_recency_bucket",
+        "posterior_margin_bucket",
+        "departure_probability_bucket"
+      ],
+      [
+        "previous_state_4",
+        "previous_state_3",
+        "previous_state_2",
+        "previous_state_1",
+        "current_state",
+        "previous_duration_1_bucket",
+        "previous_duration_2_bucket",
+        "previous_loop_pair",
+        "previous_loop_recency_bucket",
+        "posterior_margin_bucket",
+        "departure_probability_bucket",
+        "clock_phase"
+      ]
+    ]
+  },
+  "numeric_state_semantic_validity_claimed": false,
+  "order_placement": "disabled",
+  "payoff_selection_used": false,
+  "primary_baseline": "M2_IMMEDIATE_PAIR",
+  "primary_history_model": "M5_LAST_FIVE_STATES",
+  "primary_representation": "CAUSAL_HYSTERETIC_SEMANTIC",
+  "production_runtime_modified": false,
+  "promotable": false,
+  "protected_2026_opened": false,
+  "research_only": true,
+  "sensitivity_representation": "CAUSAL_HARD_SEMANTIC",
+  "strategy_promotion": false
+}

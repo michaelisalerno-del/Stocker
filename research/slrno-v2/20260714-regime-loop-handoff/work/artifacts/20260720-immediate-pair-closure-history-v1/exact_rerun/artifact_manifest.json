@@ -1,0 +1,101 @@
+{
+  "artifacts": [
+    {
+      "bytes": 1347,
+      "file": "run_metadata.json",
+      "sha256": "b5469692cf366231e43c0fca4b6560450936cf820f5c128e4e44e7a4381505d4"
+    },
+    {
+      "bytes": 6359,
+      "file": "source_identity_manifest.json",
+      "sha256": "10761df7f8f48f44c5f66e88c57a16fddf9d6a194b1403881d27da7c9a1e50f7"
+    },
+    {
+      "bytes": 5712,
+      "file": "model_effective_configuration.json",
+      "sha256": "c4f938ab60179dd908cfe23c9797cd2d47ae17dc6fe2e101960595a3129550de"
+    },
+    {
+      "bytes": 631,
+      "file": "state_assignment_summary.csv",
+      "sha256": "f138eb751bc7462aca71a99538898b27cc1964c3fe2bf5d631c909ae3f831c20"
+    },
+    {
+      "bytes": 23417523,
+      "file": "pair_closure_population.parquet",
+      "sha256": "1eb5c19f9169e4c2949ee006cbd3576e2021e9fd1b9a9b0b5586c3bb103c0a4f"
+    },
+    {
+      "bytes": 932,
+      "file": "censoring_summary.csv",
+      "sha256": "29e9b87bdba9f51e70d338f21503dd6d1eeef96d29116095be3dabda6e97c870"
+    },
+    {
+      "bytes": 8222222,
+      "file": "development_oof_predictions.parquet",
+      "sha256": "353d7c81a23ce69fe2ae6b5c314b04a659992e93bb87a5acce3419a33fb53519"
+    },
+    {
+      "bytes": 8613382,
+      "file": "assessment_predictions.parquet",
+      "sha256": "57fc2fec0fd459fc2327ff06328aa7922602e069bfbd36ab6df0650d200e7f9f"
+    },
+    {
+      "bytes": 5915,
+      "file": "model_metrics.csv",
+      "sha256": "99298011ee71cf8eceee0e3912fcd1ba05c9fcc0cef1aed628341c1d3b6f335d"
+    },
+    {
+      "bytes": 645819,
+      "file": "paired_session_bootstrap_draws.csv",
+      "sha256": "7bda5d91907600142c229a3e20dde5df50c9ad92216a1e013599ea299a9cfa03"
+    },
+    {
+      "bytes": 830,
+      "file": "paired_session_bootstrap_summary.csv",
+      "sha256": "e4f3aa893282d2c3930bf5d5edd0b713165c7896f1a7e34a165797d09d6ad15f"
+    },
+    {
+      "bytes": 701,
+      "file": "quarter_metrics.csv",
+      "sha256": "b86622aa8c81afad55e3236955a73be3c80730637d8c70feab5614cae70f740e"
+    },
+    {
+      "bytes": 3347,
+      "file": "leave_one_stock_out.csv",
+      "sha256": "a45571525b263ff03f85ff18be38496f027b8a1540c8a56608d6bf13de1e7c6b"
+    },
+    {
+      "bytes": 43147,
+      "file": "pair_orientation_metrics.csv",
+      "sha256": "5ec14e865f66364b7f81c99c7c5fb2c27feab069e5ce16fe03b34355d2b6918d"
+    },
+    {
+      "bytes": 26526,
+      "file": "pair_replication.csv",
+      "sha256": "5f3e4eda13bfe0a0020fe0d6ddec06fba5eee2877845c7567686164ab39aa09c"
+    },
+    {
+      "bytes": 493,
+      "file": "concentration.csv",
+      "sha256": "01998ad55a648fb7838eb34e4f3a48d55ac92afde20a75dac94bd0da7c107158"
+    },
+    {
+      "bytes": 1565,
+      "file": "decision_inputs.json",
+      "sha256": "26ca6d2e2a42fbccd842561c27f7bcb8c6d0c016f2018db158fc0f671c7570c2"
+    }
+  ],
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "experiment_id": "20260720-immediate-pair-closure-history-v1",
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "promotable": false,
+  "protected_2026_opened": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

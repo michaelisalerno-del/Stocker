@@ -1,0 +1,38 @@
+{
+  "assessment_evaluable_rows": 167847,
+  "assessment_population_rows": 180313,
+  "branch": "agent/slrno-regime-loop-history-test-v1",
+  "broker_connected": false,
+  "contract_hash": "db6267bd392c4b7ea25eac697dc0a6ca468730e0420b121609cf562ebb501ae6",
+  "dependencies": {
+    "numba": "0.65.1",
+    "numpy": "2.4.6",
+    "pandas": "2.3.3",
+    "pyarrow": "24.0.0",
+    "scipy": "1.18.0"
+  },
+  "development_evaluable_rows": 164017,
+  "development_population_rows": 177096,
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "experiment_id": "20260720-immediate-pair-closure-history-v1",
+  "git_sha": "04c6d45589e0c114dc0b03f6f98b4858bde7dffe",
+  "implementation_hash": "1d6b7a57ff37cf9b4f47e1c8dcfa555d4717ac9afcaccd0eefd4968f4d0c112b",
+  "live_ordering_enabled": false,
+  "numeric_state_semantic_validity_claimed": false,
+  "order_placement": "disabled",
+  "part_b_contract_reopened": false,
+  "payoff_selection_used": false,
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "production_runtime_modified": false,
+  "promotable": false,
+  "protected_2026_opened": false,
+  "python": "3.12.13",
+  "random_seeds": {
+    "bootstrap": 20260720
+  },
+  "research_only": true,
+  "run_id": "20407e328d4930182be5a6d6",
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "strategy_promotion": false
+}

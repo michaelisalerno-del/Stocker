@@ -1,2 +1,4 @@
 research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-*/**/*.parquet filter=lfs diff=lfs merge=lfs -text
 research/movement-regime-path/20260720-movement-conditioned-regime-path-probability-chain-v0/artifacts/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260720-immediate-pair-closure-history-v1/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+research/movement-regime-path/20260720-movement-closure-joint-increment-v0-1/artifacts/**/*.parquet filter=lfs diff=lfs merge=lfs -text

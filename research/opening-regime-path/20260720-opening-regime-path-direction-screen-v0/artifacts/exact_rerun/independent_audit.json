@@ -1,0 +1,176 @@
+{
+  "assessment_rows_reconstructed": 6288,
+  "audit_id": "opening-regime-path-direction-screen-v0-independent-audit",
+  "auditor_imports_runner": false,
+  "auditor_imports_screen_module": false,
+  "bootstrap_draws_reconstructed": 300,
+  "broker_integration_required": false,
+  "checks": [
+    {
+      "check": "safety_flags",
+      "detail": {
+        "broker_integration_required": false,
+        "execution_enabled": false,
+        "feasibility_screen": true,
+        "order_placement": "disabled",
+        "production_runtime_modified": false,
+        "representation_specific": true,
+        "research_only": true,
+        "strategy_promotion": false
+      },
+      "passed": true
+    },
+    {
+      "check": "input_hashes",
+      "detail": {
+        "artifact_count": 11
+      },
+      "passed": true
+    },
+    {
+      "check": "frozen_regime_and_posterior_reproduction",
+      "detail": {
+        "hard_state_agreement": 1.0,
+        "maximum_entropy_absolute_error": 1.1016594303470129e-09,
+        "maximum_expected_age_absolute_error": 5.360666577303164e-09,
+        "maximum_probability_absolute_error": 8.208774771034655e-10,
+        "rows": 624
+      },
+      "passed": true
+    },
+    {
+      "check": "bounded_source_hashes_and_protected_boundary",
+      "detail": {
+        "maximum_timestamp": "2025-08-22 20:00:00+00:00",
+        "minimum_timestamp": "2024-01-02 14:30:00+00:00",
+        "protected_rows_materialised": 0
+      },
+      "passed": true
+    },
+    {
+      "check": "source_gap_QA_and_corporate_action_ledger",
+      "detail": {
+        "qa_symbols": 23
+      },
+      "passed": true
+    },
+    {
+      "check": "checkpoints_bar_completion_and_t_plus_2_index",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "current_state_posterior_topology_and_frozen_interactions",
+      "detail": {
+        "rows_reconstructed": 15617
+      },
+      "passed": true
+    },
+    {
+      "check": "delayed_entry_session_close_terminal_and_raw_outcome",
+      "detail": {
+        "rows_reconstructed": 15617
+      },
+      "passed": true
+    },
+    {
+      "check": "cohort_relative_outcome_and_development_only_thresholds",
+      "detail": {
+        "12": 317.1336918845904,
+        "6": 360.8462844301763
+      },
+      "passed": true
+    },
+    {
+      "check": "2024_only_normalization_equal_slate_weight_and_manual_logistic_predictions",
+      "detail": {
+        "forbidden_model_features": [],
+        "models_reconstructed": 12
+      },
+      "passed": true
+    },
+    {
+      "check": "delayed_economic_movement_scale_and_signed_scores",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "brier_log_loss_auc_calibration_monthly_and_checkpoint_metrics",
+      "detail": {
+        "calibration_bins": "matched",
+        "checkpoint": "matched",
+        "direction": "matched",
+        "monthly": "matched",
+        "movement": "matched"
+      },
+      "passed": true
+    },
+    {
+      "check": "economic_reference_ranking_and_paired_M1_comparison",
+      "detail": "matched",
+      "passed": true
+    },
+    {
+      "check": "session_block_bootstrap_300_draws_preserving_complete_sessions",
+      "detail": "matched",
+      "passed": true
+    },
+    {
+      "check": "within_slate_complete_structural_bundle_permutation_100_draws",
+      "detail": "matched",
+      "passed": true
+    },
+    {
+      "check": "support_and_concentration_gates",
+      "detail": {
+        "actual_large_moves_by_checkpoint": {
+          "12": 681,
+          "6": 635
+        },
+        "actual_large_remaining_moves": 1316,
+        "assessment_rows": 6288,
+        "assessment_sessions": 158,
+        "assessment_stocks": 20,
+        "comparison": "matched",
+        "interaction_support_status": "sufficient",
+        "maximum_current_state_row_share": 0.37070610687022904,
+        "maximum_stock_row_share": 0.05025445292620865,
+        "opening_short_closure_rows": 1238,
+        "primary_support_passes": true,
+        "represented_months": 8
+      },
+      "passed": true
+    },
+    {
+      "check": "registered_decision_logic_and_no_economic_rescue",
+      "detail": {
+        "direction": false,
+        "interaction": false,
+        "movement": false,
+        "reconstructed_category": "opening_structure_no_increment_over_price"
+      },
+      "passed": true
+    },
+    {
+      "check": "no_local_absolute_paths_or_forbidden_future_payoff_loop_fields",
+      "detail": {
+        "forbidden_fields": [],
+        "local_path_hits": []
+      },
+      "passed": true
+    }
+  ],
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "null_draws_reconstructed": 100,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "reconstructed_decision": "opening_structure_no_increment_over_price",
+  "representation_specific": true,
+  "research_only": true,
+  "rows_reconstructed": 15617,
+  "status": "passed",
+  "strategy_promotion": false
+}

@@ -1,0 +1,15 @@
+{
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "method": "2024_checkpoint_specific_q75_absolute_cohort_relative_remaining_return",
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "representation_specific": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "thresholds_bps": {
+    "12": 317.1336918845904,
+    "6": 360.8462844301763
+  }
+}

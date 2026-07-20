@@ -1,0 +1,207 @@
+{
+  "benchmark": "VTI",
+  "broker_integration_required": false,
+  "decision_cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "frozen_development_panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "frozen_development_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "frozen_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "order_placement": "disabled",
+  "posterior_reproduction": {
+    "hard_state_agreement": 1.0,
+    "maximum_entropy_absolute_error": 1.1016594303470129e-09,
+    "maximum_expected_age_absolute_error": 5.360666577303164e-09,
+    "maximum_probability_absolute_error": 8.208774771034655e-10,
+    "rows": 624
+  },
+  "production_runtime_modified": false,
+  "provider_sources": {
+    "AAL": {
+      "bounded_2024_hash": "fc4c823f69a282c58ba256cfe412b1152d46e36288f1acb0d7794e27dc4fda2d",
+      "bounded_safe_hash": "2ac4ebceb5664606b872a628d5a74136c8cf74492b8df29c6cd5f73f4249cf01",
+      "bounded_safe_row_count": 32402,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet"
+    },
+    "AAOI": {
+      "bounded_2024_hash": "23d5239452a5c9dfdafca4977649b1e26b2424b47e6fa6332ffffca87bfb0fa5",
+      "bounded_safe_hash": "b6c167d0613e739c19bef5b890d4d7de66e5adfa0413154e19fa234629f10dfd",
+      "bounded_safe_row_count": 32403,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet"
+    },
+    "APLD": {
+      "bounded_2024_hash": "c45cb19ff7cb92c89ea060953ef36f831c659175d3f3a3624f460dfb83a3426b",
+      "bounded_safe_hash": "ad2171c9959edb2274bfaf10be08dd5154a2003e018640fcb74c4345a2bbff81",
+      "bounded_safe_row_count": 32402,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet"
+    },
+    "ASTS": {
+      "bounded_2024_hash": "bc9994ee861c8dcbb02be7fa45cd519d1abeef28abbb5013dbe0d34dfb88e397",
+      "bounded_safe_hash": "1900c2baaaed80a3fbf86f271f4fbfe41dc2d19c2617b568851d596d9feaa747",
+      "bounded_safe_row_count": 32400,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet"
+    },
+    "AXTI": {
+      "bounded_2024_hash": "5d3f8641f95a7937bd46a55e69a98ec9237e22befb8122e7c5ab202817d0c433",
+      "bounded_safe_hash": "105560c1a8bd6955a98724a16fd31d4a7ca703f4dbf8bde2aa44b81f9e617307",
+      "bounded_safe_row_count": 32401,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AXTI/timeframe=5m/data.parquet"
+    },
+    "CIFR": {
+      "bounded_2024_hash": "dab0144fc80f9f3498baee725f0f429cde814203dc086ec372834677997ebaf3",
+      "bounded_safe_hash": "055f9bced79ca9c3fb6e65254fc2229e95a9f1a07c147c1b60bcc2cdd75d693b",
+      "bounded_safe_row_count": 32400,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet"
+    },
+    "HIMS": {
+      "bounded_2024_hash": "41db4a5cb21e7f713ddf52495b7b6c0d5c9b53cf46cd66c2d7e6b07420ce3a38",
+      "bounded_safe_hash": "92fc9fb34c5c525f85c40147e37600ef0cf1670f1427797f741454eb73eddea7",
+      "bounded_safe_row_count": 32402,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet"
+    },
+    "IONQ": {
+      "bounded_2024_hash": "a922318e2636c63c1704b8735201cbcf116b9186eca201848c4d2585a5745f10",
+      "bounded_safe_hash": "4d9d6f75da9a9f2daadb9d81244343f94647dcbd90a426c03ad2b550e9a23b29",
+      "bounded_safe_row_count": 32401,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet"
+    },
+    "IREN": {
+      "bounded_2024_hash": "5b0ea2266fa1c350f334d41c41d7312d83b530868ce0c5bf8bdffc0c682bcf34",
+      "bounded_safe_hash": "a32fe0464ac2fff115db5db6cc744db591b304c0cbb08f330ed7c37dcebac50b",
+      "bounded_safe_row_count": 32401,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet"
+    },
+    "MARA": {
+      "bounded_2024_hash": "635745a34cd85fb5e9bec227f18161a8a462f2805a0c00d200e955111dac2dd7",
+      "bounded_safe_hash": "34d6a2385300e8d0c1eb3b890273943d50a8655b00293d028a19fd9b220ae013",
+      "bounded_safe_row_count": 32401,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet"
+    },
+    "MP": {
+      "bounded_2024_hash": "bc6b68e2b772b912eaa3627b1fbc615a451b01def10d1eca441f7386fa943a36",
+      "bounded_safe_hash": "62df3853fd345c658a8301add74fe802622cd9c70c24a94ecd486aee9359d1e7",
+      "bounded_safe_row_count": 32402,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet"
+    },
+    "MRNA": {
+      "bounded_2024_hash": "c29f7d1381e81f5cd6227e46dd42a78a6957c63901b2f2637c6139bb6ce51a40",
+      "bounded_safe_hash": "60487e33398b4ac48f69e0da402e5103f6f2798d8a1abc7c5d813c9cffafb400",
+      "bounded_safe_row_count": 32405,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet"
+    },
+    "MSTR": {
+      "bounded_2024_hash": "34bc5a47b706a7772d8d4211fa5105a2fef557213f7495892f4b875f4d64f7b4",
+      "bounded_safe_hash": "c8a13768c3b96156051426c79775103c8eb157f6da1b20a692934ad3b3bf4276",
+      "bounded_safe_row_count": 32402,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet"
+    },
+    "NVTS": {
+      "bounded_2024_hash": "fcdaffecc20342ce0ad38d240e6b0ba155d79858bf4b65f605685a944a243cf6",
+      "bounded_safe_hash": "03715f3f026a1c2e029c83a07625edd11b785bec63e4285b0b04c08db340222c",
+      "bounded_safe_row_count": 32403,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet"
+    },
+    "OKLO": {
+      "bounded_2024_hash": "561ca9857da506a3281b0569fe208c56f63b93032833e738b0678d740acd256d",
+      "bounded_safe_hash": "0e15f1d3ed63b358219fdb2a8363752b373a76ebc91e63028ab58fb1cbaa5749",
+      "bounded_safe_row_count": 32393,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=OKLO/timeframe=5m/data.parquet"
+    },
+    "QBTS": {
+      "bounded_2024_hash": "0b89191f2ad16f828c7a04c4db5abb560bc30a92119d12ef9773c7f2c5db23fc",
+      "bounded_safe_hash": "403a474b3a3b39365e74470852f48056bd0161d60caa26e883a7ab4e45022f81",
+      "bounded_safe_row_count": 32402,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet"
+    },
+    "RGTI": {
+      "bounded_2024_hash": "f70e9cc0dbf11f1e09eca57f4a0cccd32957c52fd092b080c9d499b6800d1ff3",
+      "bounded_safe_hash": "233088673f12790eadba650647c3d10f74f011e7baae69b10d52c02d8fbab042",
+      "bounded_safe_row_count": 32400,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet"
+    },
+    "RIOT": {
+      "bounded_2024_hash": "cb3b8c52daf18516261d89ed39fc6659bf6ff38c4be8734e9d2f893ecf4fd73e",
+      "bounded_safe_hash": "f217b7abb3404783e87320296d57b3148f26d0bb065d9640db0f4d346e6677d9",
+      "bounded_safe_row_count": 32401,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet"
+    },
+    "RIVN": {
+      "bounded_2024_hash": "4ccf030f3a92eda91242fed9fa28ff4bc7ef0690c9d09d53bb564662c4dbc666",
+      "bounded_safe_hash": "c7ab04d8a205be771320a8eccaaa88c1dfa4ff919fd469fe35e99c5cf03e15e6",
+      "bounded_safe_row_count": 32401,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet"
+    },
+    "SMCI": {
+      "bounded_2024_hash": "33c567b25f3d41281f6b8528672b368d495e0d4ea14a48ce167f099a38b4352f",
+      "bounded_safe_hash": "141b6f08c5d2b1840024493aef6b7059f3d41deb28cc2d6dcf609aa589818066",
+      "bounded_safe_row_count": 32385,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet"
+    },
+    "SOFI": {
+      "bounded_2024_hash": "c6ba702220863b7ae954c553c3081bca32da882e8ee5ba6ef266eb2e7c75aecb",
+      "bounded_safe_hash": "e3f6d0e05f3bf29a18b0cdb30ce3fe03312628705fa23e46bcb51ef135242353",
+      "bounded_safe_row_count": 32399,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet"
+    },
+    "VTI": {
+      "bounded_2024_hash": "b1c46d7e5efa9cd26e36ee656e0ecd0f19a0b3e20b698308f91e22994ef9e848",
+      "bounded_safe_hash": "4797ccc19ea22cf323e5e4286f0b3921fb686738fe100ed22faa76c53dddaa32",
+      "bounded_safe_row_count": 32402,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=VTI.US/timeframe=5m/data.parquet"
+    },
+    "WULF": {
+      "bounded_2024_hash": "8d76f04e6c3051161a91ef23bf88125acf13ee1026b578c510ed927a55408e7b",
+      "bounded_safe_hash": "cc5c3ad83d8af2d639a59986e65eea5513b658966be513e51628ab23970d54c2",
+      "bounded_safe_row_count": 32401,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet"
+    }
+  },
+  "provider_volume_interpretation": "historical_activity_proxy",
+  "regime_context_cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "AXTI",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "OKLO",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "research_only": true,
+  "strategy_promotion": false
+}

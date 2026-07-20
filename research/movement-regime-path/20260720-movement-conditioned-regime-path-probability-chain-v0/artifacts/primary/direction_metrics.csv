@@ -1,0 +1,13 @@
+scope,layer,model,rows,brier,log_loss,auc,balanced_accuracy_at_0_5_descriptive,quintile,mean_realised,mean_probability
+overall,direction,D0,1364,0.250817019151,0.695042499012,0.510414774447,0.502528004844,,,
+quintile,direction,D0,273,,,,,1,58.5548450066,0.4846964234
+quintile,direction,D0,273,,,,,2,19.3595777927,0.530582231744
+quintile,direction,D0,272,,,,,3,39.0889670002,0.555577693911
+quintile,direction,D0,273,,,,,4,27.7706249086,0.581802448265
+quintile,direction,D0,273,,,,,5,51.9745800923,0.629283914354
+overall,direction,D1,1364,0.252327487785,0.698166088212,0.495521387483,0.503070801436,,,
+quintile,direction,D1,273,,,,,1,68.4307186001,0.476298898033
+quintile,direction,D1,273,,,,,2,21.7026626553,0.52554088747
+quintile,direction,D1,272,,,,,3,32.6625068012,0.552573557689
+quintile,direction,D1,273,,,,,4,34.5129992504,0.581952292476
+quintile,direction,D1,273,,,,,5,39.4161673461,0.632792255527

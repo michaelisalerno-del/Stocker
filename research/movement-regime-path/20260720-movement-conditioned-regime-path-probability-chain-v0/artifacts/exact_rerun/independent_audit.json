@@ -1,0 +1,551 @@
+{
+  "auditor_imports_runner": false,
+  "broker_integration_required": false,
+  "check_count": 107,
+  "checks": [
+    {
+      "check": "contract_safety_flags",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "decision_safety_flags",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "feature_manifest_safety_flags",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_manifest_safety_flags",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "model_coefficients_safety_flags",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "input_artifact_hashes",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "fixed_decision_ordinals",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "maximum_25000_decision_rows",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "protected_compact_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "protected_scored_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_AAL_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_AAL_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_AAOI_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_AAOI_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_APLD_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_APLD_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_ASTS_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_ASTS_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_AXTI_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_AXTI_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_CIFR_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_CIFR_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_HIMS_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_HIMS_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_IONQ_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_IONQ_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_IREN_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_IREN_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MARA_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MARA_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MP_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MP_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MRNA_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MRNA_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MSTR_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_MSTR_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_NVTS_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_NVTS_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_OKLO_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_OKLO_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_QBTS_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_QBTS_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_RGTI_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_RGTI_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_RIOT_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_RIOT_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_RIVN_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_RIVN_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_SMCI_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_SMCI_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_SOFI_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_SOFI_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_VTI_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_VTI_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_WULF_protected_rows_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_WULF_bounded_hash",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "protected_boundary_minimum",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "protected_boundary_maximum",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "protected_boundary_month_counts",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "stock_return_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "cohort_relative_median_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "residual_return_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "delayed_residual_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "absolute_movement_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "training_only_movement_thresholds",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "large_move_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "direction_target_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "transition_counts_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "short_closure_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "source_gap_crossing_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "session_boundary_crossing_zero",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "oof_and_stacking_chronology",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "feature_matrices_forbidden_fields_absent",
+      "detail": [],
+      "passed": true
+    },
+    {
+      "check": "symbol_identity_absent",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "month_identity_absent",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_P0",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_P1",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_P0_SIZE",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_P1_SIZE",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_B0",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_B1",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_C0",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_C1",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_D0",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "manual_prediction_D1",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "ridge_absolute_movement_reconstruction",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_p_long_observable",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_p_short_observable",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_p_long_with_path",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_p_short_with_path",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_p_neutral",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_observable_chain_score",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_path_chain_score",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "movement_brier_logloss_auc",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "burst_brier_logloss_auc",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "closure_brier_logloss_auc",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "direction_brier_logloss_auc",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "chain_ranking_rows_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "concentration_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "delayed_entry_sensitivity_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "monthly_metrics_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "calibration_has_ten_bins_per_model",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "calibration_values_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "bootstrap_500_session_blocks_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "null_100_whole_session_shifts_recalculated",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "decision_logic",
+      "detail": null,
+      "passed": true
+    },
+    {
+      "check": "decision_metric_binding",
+      "detail": null,
+      "passed": true
+    }
+  ],
+  "execution_enabled": false,
+  "failed_checks": [],
+  "feasibility_screen": true,
+  "historical_regime_refit_performed": false,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

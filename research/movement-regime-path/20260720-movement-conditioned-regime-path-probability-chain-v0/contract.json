@@ -1,0 +1,153 @@
+{
+  "contract_id": "20260720-movement-conditioned-regime-path-probability-chain-v0",
+  "experiment": "Movement-Conditioned Regime-Path Probability Chain V0",
+  "registered_at": "2026-07-20T00:00:00Z",
+  "scientific_status": "representation_specific_feasibility_evidence",
+  "retrospective": true,
+  "prospective_validation": false,
+  "deployable_strategy_evidence": false,
+  "research_only": true,
+  "feasibility_screen": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "safety": {
+    "research_only": true,
+    "feasibility_screen": true,
+    "execution_enabled": false,
+    "order_placement": "disabled",
+    "broker_integration_required": false,
+    "strategy_promotion": false,
+    "production_runtime_modified": false
+  },
+  "separate_conclusions": [
+    "movement_predictability",
+    "structural_path_predictability",
+    "directional_predictability",
+    "gross_economic_association",
+    "executable_net_edge"
+  ],
+  "population": {
+    "decision_cohort_source": "Directional Signature Atlas V1 fixed 2024-2025 cohort",
+    "symbols": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "regime_context_symbols": [
+      "AAL", "AAOI", "APLD", "ASTS", "AXTI", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "OKLO", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "benchmark_symbol": "VTI",
+    "decision_ordinals": [12, 36],
+    "ordinal_base": 0,
+    "horizon_bars": 24,
+    "maximum_decision_rows": 25000,
+    "minimum_simultaneously_eligible_stocks": 15,
+    "canonical_timestamp_timezone": "UTC",
+    "session_timezone": "America/New_York",
+    "regular_session": "09:30 inclusive to 16:00 exclusive"
+  },
+  "protected_boundary": {
+    "development_start": "2024-01-01T00:00:00Z",
+    "development_end_exclusive": "2025-01-01T00:00:00Z",
+    "portability_start": "2025-01-01T00:00:00Z",
+    "portability_end_exclusive": "2025-08-23T00:00:00Z",
+    "sessions_on_or_after": "2025-08-23",
+    "years_forbidden": [2026],
+    "parquet_predicate_required": true,
+    "protected_rows_materialised": 0
+  },
+  "frozen_representation": {
+    "source_experiment": "20260719-right-censored-regime-refit-v2",
+    "model_id": "regime_model_v2_full_right_censored_refit",
+    "model_lineage": "MODEL_FULL_REFIT",
+    "state_count": 8,
+    "model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+    "parameter_hash": "4a5ef83f0508971743b0cb06c5cdeff2a47ba50d305e9ac41d3c7348931f90cc",
+    "development_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+    "refit_allowed": false,
+    "k_search_allowed": false,
+    "seed_search_allowed": false,
+    "state_alignment_experiment_allowed": false,
+    "cluster_invariant_claim_allowed": false
+  },
+  "targets": {
+    "stock_return": "close_t_plus_24 / close_t - 1",
+    "cohort_relative_definition": "stock return minus leave-one-stock-out median return of other eligible stocks in the simultaneous slate",
+    "residual_return_bps": "10000 * cohort-relative return",
+    "absolute_movement_bps": "abs(residual_return_bps)",
+    "meaningful_movement_quantile": 0.75,
+    "meaningful_movement_fit_period": 2024,
+    "movement_size": "log1p(absolute_movement_bps)",
+    "transition_burst": "at least two hard-state changes from origin through t+24",
+    "short_closure": "first post-departure return to origin by t+24, at least two transitions, and no more than three unique states through first return",
+    "direction_population": "actual large_move rows only",
+    "up_given_move": "residual_return_bps > 0"
+  },
+  "models": {
+    "binary": {
+      "class": "LogisticRegression",
+      "C": 1.0,
+      "penalty": "l2",
+      "solver": "liblinear",
+      "max_iter": 250,
+      "class_weight": null,
+      "n_jobs": 1,
+      "convergence_required": true
+    },
+    "movement_size": {
+      "class": "Ridge",
+      "alpha": 1.0
+    },
+    "sample_weight": "1 / model-population slate size",
+    "hyperparameter_search": false,
+    "feature_selection": false,
+    "interaction_search": false
+  },
+  "chronology": {
+    "oof_year": 2024,
+    "minimum_initial_training_months": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+    "scored_months": ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"],
+    "fold_type": "expanding_one_month",
+    "in_sample_upstream_predictions_allowed": false,
+    "final_score_period": "2025 sessions strictly before 2025-08-23"
+  },
+  "uncertainty": {
+    "session_block_bootstrap_draws": 500,
+    "bootstrap_seed": 20260720,
+    "whole_session_circular_null_draws": 100,
+    "null_seed": 20260721,
+    "bootstrap_preserves_all_stocks_and_both_clocks": true,
+    "null_preserves_within_session_cross_section": true
+  },
+  "compute": {
+    "processes": 1,
+    "n_jobs": 1,
+    "gpu": false,
+    "maximum_plots": 3,
+    "full_repository_test_suite_blocking": false
+  },
+  "minimum_support": {
+    "scored_2025_decision_rows": 3000,
+    "scored_2025_sessions": 100,
+    "stocks": 15,
+    "actual_large_move_rows": 500,
+    "transition_burst_rows": 300,
+    "short_closure_rows_secondary": 100,
+    "maximum_stock_decision_row_fraction": 0.125,
+    "maximum_stock_top_one_fraction": 0.20
+  },
+  "decisions": [
+    "promising_probability_chain_for_intensive_v1",
+    "movement_predictable_but_no_structural_increment",
+    "structural_increment_without_directional_value",
+    "no_incremental_probability_chain",
+    "blocked_missing_required_frozen_artifacts",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_insufficient_probability_chain_support",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "artifacts": {
+    "assessment_symbols.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "decision.json": "43aea377c78af2734b8b64d6fd62ead2bb60125151675ed722a6db57b4319d4a",
+    "development_symbols.txt": "af0571870e23cfbb15af3ef08b6a3ea536d750fbed16497a7250508b1f0f67ad",
+    "excluded_symbols.txt": "ee1fc7105537daf08724ed80ecf62bbc46dc1bf517f17d1fd26582196603aa57",
+    "exposure_evidence_manifest.json": "59e305f76c37ba2cb3ee5ac672645cbb960eb311fa77fe0dbd238d2f9035ea48",
+    "input_artifact_hashes.json": "fc368e04492efa62a1cbc4e99470db236ff2e3d77ae09b131853a98a4a405311",
+    "not_produced_artifacts.json": "618cd4a44c1406bd5627c7e9a95ccc9b9ff91ab2b5aa9eb5c77491f3bfcf7455",
+    "predecessor_reconstruction_metrics.json": "d976e789ad66d470288426cc2178021966d0f77d4b22eba3d573ea60a006bd7b",
+    "protected_boundary_audit.json": "398c2267db7615297872b7c8c806a1cc416c2348cf800d2dbcca472f99883f42",
+    "report.md": "d75bb52c1527b90fc1a9f0e4dcce74ad3c8dafd74ff09e90f5355cf61e453ac1",
+    "source_manifest.json": "58984398f94315383f00c9f6bbab4a5a77812060fc150a0c0fbed50abc059280",
+    "stock_outcome_exposure_ledger.csv": "4843e08567c36dbdc3ea7fcd7c222c1871f3de7fae8397336e92091a2524b3c1"
+  },
+  "assessment_outcomes_read_before_freeze": false,
+  "broker_integration_required": false,
+  "cohort_file_hashes": {
+    "assessment_symbols.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "development_symbols.txt": "af0571870e23cfbb15af3ef08b6a3ea536d750fbed16497a7250508b1f0f67ad",
+    "excluded_symbols.txt": "ee1fc7105537daf08724ed80ecf62bbc46dc1bf517f17d1fd26582196603aa57"
+  },
+  "contract_sha256": "44e027dcdae63bd398446ebe49f982d0492da6d1dc53c7cf4bda2500606abc33",
+  "cross_stock_holdout": true,
+  "decision": "blocked_no_clean_cross_stock_holdout_remaining",
+  "execution_enabled": false,
+  "forward_time_assessment": true,
+  "frozen_before_assessment_outcomes": true,
+  "loops_regimes_and_structural_paths_forbidden": true,
+  "non_scientific_smoke_test": false,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

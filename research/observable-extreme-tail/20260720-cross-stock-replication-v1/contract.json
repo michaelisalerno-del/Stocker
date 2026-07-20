@@ -1,0 +1,144 @@
+{
+  "assessment": {
+    "end_inclusive": "2025-08-22",
+    "forward_time": true,
+    "start_inclusive": "2025-01-01"
+  },
+  "broker_integration_required": false,
+  "baselines": {
+    "BL0": "slate_median",
+    "BL1": "highest_p_move",
+    "BL2": "highest_predicted_absolute_movement_bps",
+    "BL3": "highest_p_move_times_predicted_absolute_movement_bps",
+    "BL4": "highest_causal_12_bar_cohort_relative_return",
+    "BL5": "lowest_causal_6_bar_cohort_relative_return",
+    "BL6": "highest_causal_12_bar_realised_volatility",
+    "BL7": "500_fixed_seed_within_slate_random_selections"
+  },
+  "candidate": {
+    "admission_percentile": 75,
+    "admission_threshold": "max(0.0, 75th percentile of 2024 OOF development slate maxima)",
+    "direction_model": "Movement V0 observable-only D0",
+    "movement_model": "Movement V0 observable-only P1",
+    "movement_size_model": "Movement V0 observable-only P1_SIZE",
+    "score": "p_move * (2 * p_up_given_move_observable - 1) * predicted_absolute_movement_bps",
+    "stable_tie_break": "lexicographic_symbol",
+    "source_experiment": "research/movement-regime-path/20260720-movement-conditioned-regime-path-probability-chain-v0"
+  },
+  "compute": {
+    "gpu": false,
+    "maximum_assessment_rows": 15000,
+    "maximum_bootstrap_draws": 500,
+    "maximum_compact_model_rows": 30000,
+    "maximum_permutation_draws": 500,
+    "maximum_plots": 3,
+    "n_jobs": 1,
+    "processes": 1
+  },
+  "contract_id": "20260720-observable-extreme-tail-cross-stock-replication-v1",
+  "cross_stock_holdout": true,
+  "decision_clocks": {
+    "bar_ordinal_base": 0,
+    "decision_ordinals": [
+      12,
+      36
+    ],
+    "primary_horizon_five_minute_bars": 24
+  },
+  "decisions": [
+    "observable_extreme_tail_cross_stock_replication_passed",
+    "movement_opportunity_tail_only",
+    "observable_extreme_tail_failed_cross_stock_holdout",
+    "blocked_no_clean_cross_stock_holdout_remaining",
+    "blocked_frozen_observable_candidate_not_reconstructable",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_insufficient_clean_tail_replication_support",
+    "blocked_bounded_replication_resource_limit",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "development": {
+    "calendar_year": 2024,
+    "cohort_must_equal_predecessor": true,
+    "predictions": "predecessor expanding-chronology OOF"
+  },
+  "execution_enabled": false,
+  "experiment": "Observable Extreme-Tail Cross-Stock Replication V1",
+  "forward_time_assessment": true,
+  "friction_sensitivity_bps": [
+    0,
+    5,
+    10,
+    20
+  ],
+  "holdout_policy": {
+    "conservative_unknown_status": "unknown_assume_exposed",
+    "development_assessment_disjoint": true,
+    "minimum_clean_stocks": 15,
+    "minimum_simultaneously_eligible_stocks": 12,
+    "outcome_exposed_definition": "any future signed return, absolute movement, long/short outcome, target-before-invalidation, P&L, MFE, MAE, entry/exit performance, price-consequence threshold, profitable-tail, directional-feature, or future-price model-selection evidence",
+    "phase_a_stop_decision": "blocked_no_clean_cross_stock_holdout_remaining"
+  },
+  "loops_regimes_and_structural_paths_forbidden": true,
+  "minimum_support": {
+    "admitted_primary_slates": 60,
+    "clean_assessment_stocks": 15,
+    "delayed_outcomes": 50,
+    "eligible_stocks_per_admitted_slate": 10,
+    "represented_months": 6,
+    "valid_fixed_clock_slates": 180,
+    "valid_sessions": 100
+  },
+  "order_placement": "disabled",
+  "primary_delayed_reference": {
+    "entry": "open_t_plus_2",
+    "exit": "close_t_plus_24",
+    "primary_economic_metric": "raw_delayed_return_bps_minus_20_bps",
+    "return": "10000 * (exit / entry - 1)"
+  },
+  "production_runtime_modified": false,
+  "protected_boundary": {
+    "market_rows_on_or_after": "2025-08-23T00:00:00Z",
+    "protected_rows_materialised_required": 0,
+    "years_forbidden": [
+      2026
+    ]
+  },
+  "registered_at": "2026-07-20T00:00:00Z",
+  "research_only": true,
+  "retrospective": true,
+  "safety": {
+    "broker_integration_required": false,
+    "cross_stock_holdout": true,
+    "execution_enabled": false,
+    "forward_time_assessment": true,
+    "loops_regimes_and_structural_paths_forbidden": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "research_only": true,
+    "strategy_promotion": false
+  },
+  "separate_conclusions": [
+    "large_movement_probability",
+    "conditional_directional_probability",
+    "extreme_tail_ranking",
+    "delayed_reference_return",
+    "selection_value_beyond_simple_baselines",
+    "achievable_execution",
+    "deployable_net_edge"
+  ],
+  "strategy_promotion": false,
+  "timing_sensitivity": {
+    "faster_entry": "open_t_plus_1",
+    "slower_entry": "open_t_plus_3",
+    "terminal": "close_t_plus_24"
+  },
+  "uncertainty": {
+    "bootstrap_draws": 500,
+    "bootstrap_seed": 20260720,
+    "permutation_draws": 500,
+    "permutation_seed": 20260721,
+    "session_block_bootstrap": true,
+    "within_slate_score_permutation": true
+  }
+}

@@ -1,0 +1,215 @@
+{
+  "assessment_outcomes_read": false,
+  "auditor_imports_experiment_module": false,
+  "auditor_imports_runner": false,
+  "broker_integration_required": false,
+  "check_count": 39,
+  "checks": [
+    {
+      "check": "contract_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "decision_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "source_manifest_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "exposure_evidence_manifest_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "protected_boundary_audit_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "predecessor_reconstruction_metrics_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "freeze_manifest_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "not_produced_artifacts_safety_flags",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "freeze_artifact_hashes",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "contract_hash",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "input_artifact_hashes",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "safe_universe_unique_and_sorted",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "raw_manifest_union_complete",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "safe_universe_count",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "all_rows_present_in_safe_raw_manifest",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "safe_raw_filenames",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "source_manifest_matches_ledger",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "ledger_raw_hashes_match_source_manifest",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "clean_count_recalculated",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "unknown_count_recalculated",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "outcome_exposed_count_recalculated",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "unknown_assumed_exposed",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "report_corpus_manifest_recalculated",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "clean_symbols_absent_from_outcome_report_corpus",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "outcome_exposure_evidence_reconstructed",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "development_symbols_exact_predecessor",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "development_assessment_disjoint",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "assessment_symbols_recalculated",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "excluded_symbols_recalculated",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "clean_data_qa_gate_recalculated",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "phase_a_decision_logic",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "assessment_outcomes_unopened",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "protected_boundary",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "predecessor_reconstruction_not_reached",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "downstream_artifacts_absent",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "forbidden_candidate_structural_and_broker_fields_absent",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "no_local_absolute_paths",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "exact_rerun_manifest_passed",
+      "detail": "",
+      "passed": true
+    },
+    {
+      "check": "exact_rerun_implementation_hashes",
+      "detail": "",
+      "passed": true
+    }
+  ],
+  "cross_stock_holdout": true,
+  "execution_enabled": false,
+  "failed_checks": [],
+  "forward_time_assessment": true,
+  "loops_regimes_and_structural_paths_forbidden": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "research_only": true,
+  "strategy_promotion": false
+}

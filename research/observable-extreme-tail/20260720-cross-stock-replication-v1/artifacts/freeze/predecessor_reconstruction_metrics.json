@@ -1,0 +1,29 @@
+{
+  "artifacts_used_for_exposure_lineage_only": {
+    "research/movement-regime-path/20260720-movement-conditioned-regime-path-probability-chain-v0/artifacts/primary/chain_ranking_metrics.csv": "c770b04d99c1a0a517236a1a9aa8378e2c27cb476991f38e7b3f9aa2d8ae3329",
+    "research/movement-regime-path/20260720-movement-conditioned-regime-path-probability-chain-v0/artifacts/primary/direction_metrics.csv": "6aa954c7f08f8e616c685622872a3bd2eadbe3d51a14e9b0c9a73dcd19d81ab4",
+    "research/movement-regime-path/20260720-movement-conditioned-regime-path-probability-chain-v0/artifacts/primary/model_coefficients.json": "1ada568fde354513805b0f43b641fe4fea110b95dc17c311d15aaf6c53a8fb1a",
+    "research/movement-regime-path/20260720-movement-conditioned-regime-path-probability-chain-v0/artifacts/primary/movement_thresholds.json": "b407ffc744e46a056fa2c59c1b4ef52e599e4f301e49095e27e2129a604d458d"
+  },
+  "broker_integration_required": false,
+  "candidate_models": [
+    "P1",
+    "P1_SIZE",
+    "D0"
+  ],
+  "candidate_score": "p_move * (2 * p_up_given_move_observable - 1) * predicted_absolute_movement_bps",
+  "cross_stock_holdout": true,
+  "execution_enabled": false,
+  "forward_time_assessment": true,
+  "loops_regimes_and_structural_paths_forbidden": true,
+  "non_scientific_smoke_test": false,
+  "order_placement": "disabled",
+  "predictions_reconstructed": false,
+  "production_runtime_modified": false,
+  "reference_rows_scored": 0,
+  "required_tolerance": 1e-12,
+  "research_only": true,
+  "result": "not_attempted_phase_a_blocker_precedes_reconstruction",
+  "source_experiment": "research/movement-regime-path/20260720-movement-conditioned-regime-path-probability-chain-v0",
+  "strategy_promotion": false
+}

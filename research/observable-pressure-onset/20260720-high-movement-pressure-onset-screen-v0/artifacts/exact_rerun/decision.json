@@ -1,0 +1,61 @@
+{
+  "blocker": "frozen 2025 primary high-movement population failed support gates: high_movement_candidates_per_slate_at_least_10, maximum_stock_row_share_at_most_0_10",
+  "broker_integration_required": false,
+  "conclusions": {
+    "direction_conditional_on_onset": "not_evaluated_due_to_support_gate",
+    "executable_net_edge": "not_addressed",
+    "gross_delayed_economic_association": "not_evaluated_due_to_support_gate",
+    "increment_from_one_bar_confirmation": "not_evaluated_due_to_support_gate",
+    "increment_from_pressure_onset_variables": "not_evaluated_due_to_support_gate",
+    "remaining_movement_readiness": "frozen_observable_M1_reconstructed",
+    "short_horizon_directional_onset_probability": "not_evaluated_due_to_support_gate"
+  },
+  "decision": "blocked_insufficient_pressure_onset_support",
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "order_placement": "disabled",
+  "population_was_not_reduced_after_outcome_inspection": true,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "stopped_before": [
+    "A0_through_A3_model_fits",
+    "D0_through_D3_model_fits",
+    "bootstrap",
+    "permutation_null",
+    "economic_reference_selection"
+  ],
+  "strategy_promotion": false,
+  "support": {
+    "conditional_direction_support_passes": true,
+    "directional_onset_rows": 681,
+    "down_onsets": 336,
+    "eligible_stock_gate_interpretation": "eligible means admitted to the frozen high-movement population; the separate source-valid slate gate remains 15 stocks",
+    "failed_primary_support_gates": [
+      "high_movement_candidates_per_slate_at_least_10",
+      "maximum_stock_row_share_at_most_0_10"
+    ],
+    "maximum_stock_row_share": 0.10961538461538461,
+    "minimum_high_movement_candidates_per_slate": 1,
+    "minimum_valid_source_stocks_per_evaluated_slate": 15,
+    "months": 8,
+    "no_onsets": 879,
+    "primary_onset_support_passes": false,
+    "primary_support_gates": {
+      "high_movement_candidates_per_slate_at_least_10": false,
+      "maximum_stock_row_share_at_most_0_10": false,
+      "months_at_least_6": true,
+      "rows_at_least_1200": true,
+      "sessions_at_least_100": true,
+      "stocks_at_least_15": true,
+      "valid_source_stocks_per_slate_at_least_15": true
+    },
+    "rows": 1560,
+    "sessions": 153,
+    "slates": 299,
+    "stocks": 20,
+    "up_onsets": 345
+  },
+  "thresholds_or_barriers_were_not_changed": true
+}

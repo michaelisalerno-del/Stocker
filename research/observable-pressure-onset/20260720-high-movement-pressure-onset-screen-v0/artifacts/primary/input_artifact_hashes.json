@@ -1,0 +1,33 @@
+{
+  "artifacts": [
+    {
+      "logical_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/opening_decision_panel.parquet",
+      "sha256": "a6ab58f870a2b356ab2174011988d075b408612045c36e74017c772e5c8cd78a"
+    },
+    {
+      "logical_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/assessment_predictions.parquet",
+      "sha256": "f5db0db6540e2ea60270df04c36efd64a5cfe9af42058d799abcab954e089d65"
+    },
+    {
+      "logical_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/model_coefficients.json",
+      "sha256": "7c3a55a84d2caca53e7206bcfc5cb67c65627b3324f77833c039e12f02b983e0"
+    },
+    {
+      "logical_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/movement_metrics.csv",
+      "sha256": "2941ba9e34961032da12cf7e0a9dc4acd7a3a4ca1de30a59d9104640c56a3479"
+    },
+    {
+      "logical_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/source_manifest.json",
+      "sha256": "1f1c8b08038f866c96afef33a6754eb2825ac32d7e9909ce01aca1598d58c100"
+    }
+  ],
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

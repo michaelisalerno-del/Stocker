@@ -1,0 +1,159 @@
+{
+  "achieved_pnl": false,
+  "broker_integration_required": false,
+  "determinism_check_passed": true,
+  "economic_construction_diagnostic": {
+    "control_rows": 115850,
+    "economic_rows": 8634,
+    "excluded_insufficient_or_invalid_horizon": 0,
+    "excluded_zero_or_unavailable_opening_pressure": 0
+  },
+  "economic_gate": {
+    "assessment_events": 957,
+    "development_events": 1638,
+    "gate_checks": {
+      "assessment_cohort_relative_net_positive": false,
+      "assessment_primary_net_positive": false,
+      "at_least_five_positive_assessment_months": false,
+      "cohort_relative_80pct_lower_nonnegative": false,
+      "development_assessment_same_sign": true,
+      "matched_control_80pct_lower_nonnegative": false,
+      "matched_control_excess_positive": true,
+      "maximum_month_positive_return_share_at_most_30pct": true,
+      "maximum_stock_share_at_most_15pct": true,
+      "neither_checkpoint_materially_adverse": false,
+      "primary_net_80pct_lower_nonnegative": false
+    },
+    "maximum_month_positive_return_share": 0.22833201560549965,
+    "maximum_stock_share": 0.07314524555903866,
+    "rough_screen_positive": false,
+    "support_checks": {
+      "assessment_events_at_least_1000": false,
+      "matched_control_coverage_at_least_80pct": true,
+      "months_at_least_6": true,
+      "sessions_at_least_100": true,
+      "stocks_at_least_15": true
+    },
+    "support_passed": false
+  },
+  "economic_status": "insufficient_support",
+  "execution_enabled": false,
+  "family_gate_results": [
+    {
+      "assessment_events": 597,
+      "hidden_family_class": "unregistered_primitive_like__5-6-5",
+      "q_value": 1.0,
+      "rough_screen_positive": false
+    },
+    {
+      "assessment_events": 211,
+      "hidden_family_class": "unregistered_primitive_like__2-3-2",
+      "q_value": 1.0,
+      "rough_screen_positive": false
+    },
+    {
+      "assessment_events": 75,
+      "hidden_family_class": "unregistered_primitive_like__2-5-2",
+      "q_value": 1.0,
+      "rough_screen_positive": false
+    },
+    {
+      "assessment_events": 74,
+      "hidden_family_class": "unregistered_primitive_like__4-7-4",
+      "q_value": 1.0,
+      "rough_screen_positive": false
+    }
+  ],
+  "frozen_hidden_families": true,
+  "lightweight_audit_passed": true,
+  "order_placement": "disabled",
+  "permission_to_trade": false,
+  "plots": [
+    "/Users/michaelsalerno/Documents/Codex/2026-07-21-you-are-working-in-the-github-7/research/hidden-loop-economics/20260721-hidden-loop-economics-registered-bridge-v0/artifacts/primary/hidden_family_economics.png",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-21-you-are-working-in-the-github-7/research/hidden-loop-economics/20260721-hidden-loop-economics-registered-bridge-v0/artifacts/primary/hidden_probability_registered_completion.png"
+  ],
+  "post_completion_economic_diagnostic": true,
+  "predictive_bridge_gate": {
+    "assessment_rows": 6262,
+    "bridge_label": "insufficient_support",
+    "checkpoint_log_loss_improvements": {
+      "12": 6.3144047410257365e-06,
+      "6": 0.0002227383511889669
+    },
+    "development_fit_rows": 7426,
+    "gate_checks": {
+      "B1_does_not_reduce_auc": false,
+      "B1_improves_brier": true,
+      "B1_improves_log_loss": true,
+      "brier_90pct_lower_nonnegative": false,
+      "five_positive_assessment_months": true,
+      "log_loss_90pct_lower_nonnegative": false,
+      "maximum_stock_share_at_most_10pct": true,
+      "neither_checkpoint_materially_adverse": true,
+      "real_increment_exceeds_nine_nulls": true
+    },
+    "increments": {
+      "auc_improvement": -0.0002173071110144198,
+      "average_precision_improvement": 9.923934900374354e-05,
+      "brier_improvement": 3.36261461034576e-05,
+      "log_loss_improvement": 0.0001145263779653849
+    },
+    "maximum_stock_share": 0.05014372404982434,
+    "maximum_target_class_share": 0.8725646758224209,
+    "monthly_log_loss_improvements": {
+      "2025-01": 0.00014199322838498452,
+      "2025-02": 0.00017265170517299921,
+      "2025-03": -7.098274548195116e-05,
+      "2025-04": 0.00015756797044402804,
+      "2025-05": -9.84677313999871e-05,
+      "2025-06": 0.0005787528199289738,
+      "2025-07": 7.095006271501392e-05,
+      "2025-08": -5.599877917300544e-05
+    },
+    "null_draws_exceeded": {
+      "auc_improvement": 4,
+      "average_precision_improvement": 8,
+      "brier_improvement": 9,
+      "log_loss_improvement": 9
+    },
+    "predictive_conditions_passed": false,
+    "support_checks": {
+      "assessment_rows_at_least_5500": true,
+      "crossfit_coverage_at_least_90pct": true,
+      "eight_assessment_months": true,
+      "no_target_class_above_80pct": false,
+      "positive_targets_at_least_500": true,
+      "sessions_at_least_140": true,
+      "stocks_at_least_15": true
+    },
+    "support_passed": false
+  },
+  "predictive_bridge_status": "insufficient_support",
+  "primary_decision": "blocked_support_failure",
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_feasibility_screen": true,
+  "registered_lead_gate": {
+    "null_draws": 50,
+    "observed_assessment_events": 957,
+    "observed_exceeds_null_90th_percentile": false,
+    "observed_mean_bars_to_registered_within_12": 7.528455284552845,
+    "observed_registered_completion_rate_12": 0.12852664576802508,
+    "observed_registered_completion_rate_6": 0.04911180773249739,
+    "observed_six_bar_percentile": 0.0,
+    "six_bar_null_90th_percentile": 0.0836990595611285,
+    "structural_lead_gate_passed": false,
+    "support_checks": {
+      "assessment_events_at_least_1000": false,
+      "registered_completions_within_12_at_least_100": true,
+      "sessions_at_least_100": true,
+      "stocks_at_least_15": true
+    },
+    "support_passed": false
+  },
+  "registered_lead_status": "insufficient_support",
+  "registered_loop_bridge_test": true,
+  "research_only": true,
+  "retrospective_only": true,
+  "strategy_promotion": false
+}

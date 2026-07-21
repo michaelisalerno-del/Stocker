@@ -1,0 +1,23 @@
+{
+  "assessment_base_rate": 0.12743532417757905,
+  "assessment_positive_targets": 798,
+  "assessment_rows": 6262,
+  "broker_integration_required": false,
+  "development_rows": 9287,
+  "execution_enabled": false,
+  "frozen_hidden_families": true,
+  "horizon_completed_bars": 12,
+  "order_placement": "disabled",
+  "post_completion_economic_diagnostic": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_bridge_test": true,
+  "research_only": true,
+  "rows_after_source_availability": 15549,
+  "rows_before_source_availability": 15549,
+  "source_unavailable_rows": 0,
+  "strategy_promotion": false,
+  "strictly_after_opening_decision": true,
+  "target": "registered_completion_within_12_bars"
+}

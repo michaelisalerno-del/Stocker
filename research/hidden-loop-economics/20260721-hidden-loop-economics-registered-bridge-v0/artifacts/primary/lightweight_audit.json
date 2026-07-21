@@ -1,0 +1,284 @@
+{
+  "audit": "lightweight_independent_audit",
+  "broker_integration_required": false,
+  "check_count": 27,
+  "checks": [
+    {
+      "detail": {
+        "missing": []
+      },
+      "name": "required_artifacts",
+      "passed": true
+    },
+    {
+      "detail": {
+        "broker_integration_required": false,
+        "execution_enabled": false,
+        "frozen_hidden_families": true,
+        "order_placement": "disabled",
+        "post_completion_economic_diagnostic": true,
+        "production_runtime_modified": false,
+        "prospective_validation": false,
+        "quick_feasibility_screen": true,
+        "registered_loop_bridge_test": true,
+        "research_only": true,
+        "strategy_promotion": false
+      },
+      "name": "safety_flags",
+      "passed": true
+    },
+    {
+      "detail": {
+        "independently_materialised_rows": 648013,
+        "maximum": "2025-08-22 20:00:00+00:00",
+        "minimum": "2024-01-02 14:30:00+00:00",
+        "protected_rows": 0
+      },
+      "name": "dates_and_protected_boundary",
+      "passed": true
+    },
+    {
+      "detail": [
+        "unregistered_primitive_like__5-6-5",
+        "unregistered_primitive_like__2-3-2",
+        "unregistered_primitive_like__2-5-2",
+        "unregistered_primitive_like__4-7-4"
+      ],
+      "name": "frozen_hidden_family_identities",
+      "passed": true
+    },
+    {
+      "detail": {
+        "predecessor": 4317,
+        "unique": 4317
+      },
+      "name": "event_deduplication_and_latest_source_checkpoint",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 8634
+      },
+      "name": "next_bar_entry_and_fixed_exits",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 4317
+      },
+      "name": "opening_and_opposite_direction",
+      "passed": true
+    },
+    {
+      "detail": 0.0,
+      "name": "twenty_basis_point_friction",
+      "passed": true
+    },
+    {
+      "detail": {
+        "maximum_raw_difference": 0.0,
+        "maximum_relative_difference": 0.0,
+        "rows": 100
+      },
+      "name": "entry_exit_prices_and_cohort_relative_returns",
+      "passed": true
+    },
+    {
+      "detail": {
+        "mismatches": 0,
+        "rows": 100
+      },
+      "name": "completion_momentum_direction",
+      "passed": true
+    },
+    {
+      "detail": {
+        "control_rows": 115850,
+        "invalid_prior_event_controls": 0,
+        "matched_events": 8576
+      },
+      "name": "matched_control_eligibility_and_timing",
+      "passed": true
+    },
+    {
+      "detail": 4.973799150320701e-14,
+      "name": "whole_session_economic_bootstrap",
+      "passed": true
+    },
+    {
+      "detail": 0.0,
+      "name": "family_BH_correction",
+      "passed": true
+    },
+    {
+      "detail": {
+        "rows": 4317
+      },
+      "name": "strict_hidden_to_registered_horizons",
+      "passed": true
+    },
+    {
+      "detail": 0,
+      "name": "registered_timeline_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": {
+        "maximum_q_difference": 0.0,
+        "supported_pairs": 0
+      },
+      "name": "exact_transition_support_and_BH",
+      "passed": true
+    },
+    {
+      "detail": {
+        "first_draw_difference": 1.3877787807814457e-17
+      },
+      "name": "stock_clock_structural_lead_null",
+      "passed": true
+    },
+    {
+      "detail": 0,
+      "name": "twelve_bar_registered_bridge_target",
+      "passed": true
+    },
+    {
+      "detail": {
+        "fold_manifest": [
+          {
+            "fold": 1,
+            "positive_train_rows": 545,
+            "prediction_rows": 1863,
+            "prediction_session_end": "2024-06-06",
+            "prediction_session_start": "2024-03-28",
+            "train_rows": 1858,
+            "train_session_end": "2024-03-27",
+            "train_session_start": "2024-01-17"
+          },
+          {
+            "fold": 2,
+            "positive_train_rows": 1098,
+            "prediction_rows": 1861,
+            "prediction_session_end": "2024-08-15",
+            "prediction_session_start": "2024-06-07",
+            "train_rows": 3721,
+            "train_session_end": "2024-06-06",
+            "train_session_start": "2024-01-17"
+          },
+          {
+            "fold": 3,
+            "positive_train_rows": 1703,
+            "prediction_rows": 1869,
+            "prediction_session_end": "2024-10-22",
+            "prediction_session_start": "2024-08-16",
+            "train_rows": 5582,
+            "train_session_end": "2024-08-15",
+            "train_session_start": "2024-01-17"
+          },
+          {
+            "fold": 4,
+            "positive_train_rows": 2267,
+            "prediction_rows": 1833,
+            "prediction_session_end": "2024-12-31",
+            "prediction_session_start": "2024-10-23",
+            "train_rows": 7451,
+            "train_session_end": "2024-10-22",
+            "train_session_start": "2024-01-17"
+          }
+        ],
+        "maximum_probability_difference": 0.0
+      },
+      "name": "expanding_chronological_U1_crossfit",
+      "passed": true
+    },
+    {
+      "detail": 0.0,
+      "name": "frozen_U1_assessment_probability",
+      "passed": true
+    },
+    {
+      "detail": {
+        "B0": 48,
+        "B1": 49,
+        "maximum_scaler_difference": 0.0,
+        "maximum_weighted_L2_KKT_residual": 3.125987208830311e-05,
+        "null_refits": 10,
+        "primary_plus_determinism_fits": 4
+      },
+      "name": "B0_B1_features_coefficients_and_fit_budget",
+      "passed": true
+    },
+    {
+      "detail": 0.0,
+      "name": "manual_probability_reconstruction_100_rows",
+      "passed": true
+    },
+    {
+      "detail": 4.996003610813204e-16,
+      "name": "bridge_core_metrics",
+      "passed": true
+    },
+    {
+      "detail": 9.798477133837746e-17,
+      "name": "fixed_prediction_session_bridge_bootstrap",
+      "passed": true
+    },
+    {
+      "detail": {
+        "additional_null_refits": 0,
+        "draws": 10,
+        "permutation_fingerprints_match": true,
+        "reproduced_nulls_exceeded": {
+          "auc_improvement": 4,
+          "average_precision_improvement": 8,
+          "brier_improvement": 9,
+          "log_loss_improvement": 9
+        }
+      },
+      "name": "within_slate_bridge_null",
+      "passed": true
+    },
+    {
+      "detail": {
+        "actual": "blocked_support_failure",
+        "archived_statuses": {
+          "economic_status": "insufficient_support",
+          "predictive_bridge_status": "insufficient_support",
+          "registered_lead_status": "insufficient_support"
+        },
+        "expected": "blocked_support_failure",
+        "gate_inputs_match": true,
+        "reproduced_statuses": {
+          "economic_status": "insufficient_support",
+          "predictive_bridge_status": "insufficient_support",
+          "registered_lead_status": "insufficient_support"
+        }
+      },
+      "name": "decision_logic",
+      "passed": true
+    },
+    {
+      "detail": {
+        "final_decision_match": true,
+        "maximum_probability_difference": 0.0,
+        "maximum_refit_coefficient_difference": 0.0,
+        "maximum_return_difference_bps": 0.0,
+        "status_reconstruction_match": true
+      },
+      "name": "fast_determinism_check",
+      "passed": true
+    }
+  ],
+  "execution_enabled": false,
+  "failed_checks": [],
+  "frozen_hidden_families": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "post_completion_economic_diagnostic": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_bridge_test": true,
+  "research_only": true,
+  "strategy_promotion": false
+}

@@ -1,0 +1,11 @@
+period,hidden_family_class,first_registered_motif_type,transitions
+assessment,OTHER_UNREGISTERED_FAMILY,primitive,139
+assessment,unregistered_primitive_like__2-3-2,primitive,36
+assessment,unregistered_primitive_like__2-5-2,primitive,9
+assessment,unregistered_primitive_like__4-7-4,primitive,2
+assessment,unregistered_primitive_like__5-6-5,primitive,76
+development,OTHER_UNREGISTERED_FAMILY,primitive,216
+development,unregistered_primitive_like__2-3-2,primitive,81
+development,unregistered_primitive_like__2-5-2,primitive,17
+development,unregistered_primitive_like__4-7-4,primitive,8
+development,unregistered_primitive_like__5-6-5,primitive,114

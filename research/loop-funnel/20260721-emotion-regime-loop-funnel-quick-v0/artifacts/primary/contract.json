@@ -1,0 +1,99 @@
+{
+  "behavioural_regime_gating_test": true,
+  "broker_integration_required": false,
+  "decision_gates": {
+    "bootstrap_90_lower_required_non_negative": true,
+    "checkpoint_material_adversity_log_loss_improvement": -0.001,
+    "minimum_positive_months": 5,
+    "null_threshold_percentile": 0.9,
+    "proper_score_improvement_required": true,
+    "top_three_must_not_decline": true
+  },
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "experiment_id": "20260721-emotion-regime-loop-funnel-quick-v0",
+  "hypothesis": "A behavioural condition may increase the probability of several possible future loops, while the current soft regime mixture filters which loops are structurally likely to appear.",
+  "models": {
+    "C": 0.25,
+    "class_weight": null,
+    "fit_interval": "2024_only",
+    "max_iter": 300,
+    "maximum_primary_models": 3,
+    "multi_class": "multinomial",
+    "n_jobs": 1,
+    "penalty": "l2",
+    "random_state": 20260721,
+    "row_weight": "1/eligible_stocks_in_session_checkpoint",
+    "solver": "lbfgs"
+  },
+  "order_placement": "disabled",
+  "population": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "checkpoints": {
+      "12": "10:30 America/New_York",
+      "6": "10:00 America/New_York"
+    },
+    "decision_unit": "stock_x_session_x_checkpoint",
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "horizon_completed_five_minute_bars": 6,
+    "maximum_decision_rows": 20000,
+    "protected_start": "2025-08-23",
+    "requires_active_loop_prefix": false,
+    "stock_cohort": "existing_audited_20_stock_cohort"
+  },
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "resampling": {
+    "behavioural_null_draws": 10,
+    "behavioural_null_seed": 20260723,
+    "bootstrap_draws": 50,
+    "bootstrap_seed": 20260722,
+    "bootstrap_unit": "whole_session",
+    "refit_inside_bootstrap": false
+  },
+  "research_only": true,
+  "resource_limits": {
+    "feature_search": false,
+    "gpu": false,
+    "hyperparameter_tuning": false,
+    "loop_search_using_assessment_outcomes": false,
+    "maximum_plots": 1,
+    "one_minute_data": false,
+    "processes": 1,
+    "raw_data_download": false
+  },
+  "safety": {
+    "behavioural_regime_gating_test": true,
+    "broker_integration_required": false,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "order_placement": "disabled",
+    "pre_loop_prediction": true,
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "soft_regime_mixture": true,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true
+  },
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "supersedes_without_running": [
+    "Regime × Loop Prefix × Behavioural Context Quick Screen V0",
+    "Exact Loop × Behaviour Quick Screen V0"
+  ],
+  "target": {
+    "dictionary": "frozen_v2_semantic_loop_dictionary",
+    "event_semantics": "frozen_v2_first_event_semantics",
+    "maximum_selected_exact_oriented_loops": 6,
+    "minimum_selected_exact_oriented_loops": 4,
+    "selection_interval": "2024_only",
+    "selection_tie_break": "stable_lexicographic_oriented_loop_key",
+    "ties": "excluded_without_lexical_break",
+    "unavailable": "excluded_and_reported"
+  }
+}

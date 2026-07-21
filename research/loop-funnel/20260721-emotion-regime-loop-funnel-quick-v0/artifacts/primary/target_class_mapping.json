@@ -1,0 +1,51 @@
+{
+  "assessment_class_support": "not_calculated_because_development_vocabulary_gate_failed",
+  "behavioural_regime_gating_test": true,
+  "broker_integration_required": false,
+  "development_support_gate_blocker": "blocked_insufficient_loop_class_support",
+  "economic_outcomes_opened": false,
+  "eligible_oriented_loops": {
+    "loop_p_0-2-0|loop_p_0-2-0__o_2-0-2": {
+      "maximum_stock_share": 0.15384615384615385,
+      "months": 12,
+      "sessions": 47,
+      "stocks": 17,
+      "support": 52
+    },
+    "loop_p_2-6-2|loop_p_2-6-2__o_6-2-6": {
+      "maximum_stock_share": 0.10344827586206896,
+      "months": 12,
+      "sessions": 57,
+      "stocks": 19,
+      "support": 87
+    }
+  },
+  "execution_enabled": false,
+  "final_target_classes": [],
+  "minimum_required_selected_count": 4,
+  "order_placement": "disabled",
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "provisional_development_rank_mapping_not_frozen_for_scoring": true,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "selected_count": 2,
+  "selected_mapping": {
+    "loop_p_0-2-0|loop_p_0-2-0__o_2-0-2": "LOOP_2",
+    "loop_p_2-6-2|loop_p_2-6-2__o_6-2-6": "LOOP_1"
+  },
+  "selection_interval": "2024-01-01_through_2024-12-31_only",
+  "selection_rule": {
+    "maximum_selected": 6,
+    "maximum_stock_share": 0.3,
+    "minimum_months": 4,
+    "minimum_outcomes": 50,
+    "minimum_sessions": 20,
+    "minimum_stocks": 8,
+    "tie_break": "stable_lexicographic_oriented_loop_key"
+  },
+  "selection_support_passed": false,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

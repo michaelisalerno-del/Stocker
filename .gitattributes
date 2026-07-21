@@ -5,3 +5,4 @@ research/movement-regime-path/20260720-movement-closure-joint-increment-v0-1/art
 research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/**/*.parquet filter=lfs diff=lfs merge=lfs -text
 research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0/artifacts/**/*.parquet filter=lfs diff=lfs merge=lfs -text
 research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/**/*.parquet filter=lfs diff=lfs merge=lfs -text

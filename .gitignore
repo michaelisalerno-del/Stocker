@@ -31,6 +31,7 @@ data/reports/*
 !data/reports/.gitkeep
 
 *.parquet
+!research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/**/*.parquet
 *.feather
 *.duckdb
 *.db

@@ -1,0 +1,163 @@
+{
+  "broker_integration_required": false,
+  "conjunction_increment_passes": false,
+  "continuous_behavioural_dimensions": true,
+  "decision": "behavioural_descriptions_only_no_predictive_increment",
+  "descriptive_differences_gate": true,
+  "direction_conjunction_increment": {
+    "auc_change": -0.004555739008132997,
+    "bootstrap_90_lower_brier": -0.002621533661522865,
+    "bootstrap_90_lower_log_loss": null,
+    "brier_improvement": -0.0013928276662612538,
+    "brier_null_percentile": 0.2,
+    "brier_null_q90": 0.0002265824536364869,
+    "checkpoint_brier_improvements": {
+      "12": -0.001448482635770132,
+      "6": -0.0013330272394356246
+    },
+    "gates": {
+      "auc_not_reduced": false,
+      "bootstrap_90_lower_brier_non_negative": false,
+      "bootstrap_90_lower_log_loss_non_negative": true,
+      "brier_improvement_positive": false,
+      "concentration_gates_pass": true,
+      "log_loss_improvement_positive": false,
+      "neither_checkpoint_materially_adverse": false,
+      "positive_brier_months_at_least_five": false,
+      "real_brier_increment_exceeds_null_q90": false,
+      "real_log_loss_increment_exceeds_null_q90": true
+    },
+    "log_loss_improvement": -0.003267944391446398,
+    "log_loss_null_percentile": null,
+    "log_loss_null_q90": null,
+    "passes": false,
+    "positive_months": 2
+  },
+  "direction_increment": {
+    "auc_change": -0.0003951286284803457,
+    "bootstrap_90_lower_brier": -0.006871838671595623,
+    "bootstrap_90_lower_log_loss": -0.01605984130143264,
+    "brier_improvement": -0.003367255917685996,
+    "brier_null_percentile": 0.1,
+    "brier_null_q90": 4.988787035719867e-05,
+    "checkpoint_brier_improvements": {
+      "12": -0.003429670441915361,
+      "6": -0.0033001924510815406
+    },
+    "gates": {
+      "auc_not_reduced": false,
+      "bootstrap_90_lower_brier_non_negative": false,
+      "bootstrap_90_lower_log_loss_non_negative": false,
+      "brier_improvement_positive": false,
+      "concentration_gates_pass": true,
+      "log_loss_improvement_positive": false,
+      "neither_checkpoint_materially_adverse": false,
+      "positive_brier_months_at_least_five": false,
+      "real_brier_increment_exceeds_null_q90": false,
+      "real_log_loss_increment_exceeds_null_q90": false
+    },
+    "log_loss_improvement": -0.008205353748130806,
+    "log_loss_null_percentile": 0.06,
+    "log_loss_null_q90": -6.270230572333891e-05,
+    "passes": false,
+    "positive_months": 1
+  },
+  "economic_reference_can_override_predictive_gates": false,
+  "exact_rerun_passed": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "gate_constants": {
+    "bootstrap_interval": 0.9,
+    "checkpoint_material_adversity_brier": -0.001,
+    "minimum_positive_months": 5,
+    "null_percentile_threshold": 0.9,
+    "null_real_comparator": "strictly_greater_than_q90"
+  },
+  "independent_audit_passed": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "movement_conjunction_increment": {
+    "auc_change": -0.0013515895868837502,
+    "bootstrap_90_lower_brier": -0.0008060320842699891,
+    "bootstrap_90_lower_log_loss": null,
+    "brier_improvement": -0.0003851651747074636,
+    "brier_null_percentile": 0.0,
+    "brier_null_q90": 6.88769484084168e-05,
+    "checkpoint_brier_improvements": {
+      "12": -0.00044954077432238226,
+      "6": -0.00032078957509251715
+    },
+    "gates": {
+      "auc_not_reduced": false,
+      "bootstrap_90_lower_brier_non_negative": false,
+      "bootstrap_90_lower_log_loss_non_negative": true,
+      "brier_improvement_positive": false,
+      "concentration_gates_pass": true,
+      "log_loss_improvement_positive": false,
+      "neither_checkpoint_materially_adverse": true,
+      "positive_brier_months_at_least_five": false,
+      "real_brier_increment_exceeds_null_q90": false,
+      "real_log_loss_increment_exceeds_null_q90": true
+    },
+    "log_loss_improvement": -0.0006634614995760235,
+    "log_loss_null_percentile": null,
+    "log_loss_null_q90": null,
+    "passes": false,
+    "positive_months": 1
+  },
+  "movement_increment": {
+    "auc_change": 0.0011561697527423531,
+    "bootstrap_90_lower_brier": -3.665083313479227e-05,
+    "bootstrap_90_lower_log_loss": 0.0021310416237681957,
+    "brier_improvement": 0.001245144215554439,
+    "brier_null_percentile": 0.86,
+    "brier_null_q90": 0.0012779764029772684,
+    "checkpoint_brier_improvements": {
+      "12": 0.0018556494001611967,
+      "6": 0.0006346390309476257
+    },
+    "gates": {
+      "auc_not_reduced": true,
+      "bootstrap_90_lower_brier_non_negative": false,
+      "bootstrap_90_lower_log_loss_non_negative": true,
+      "brier_improvement_positive": true,
+      "concentration_gates_pass": true,
+      "log_loss_improvement_positive": true,
+      "neither_checkpoint_materially_adverse": true,
+      "positive_brier_months_at_least_five": true,
+      "real_brier_increment_exceeds_null_q90": false,
+      "real_log_loss_increment_exceeds_null_q90": true
+    },
+    "log_loss_improvement": 0.005838432156983042,
+    "log_loss_null_percentile": 1.0,
+    "log_loss_null_q90": 0.0038053202438248558,
+    "passes": false,
+    "positive_months": 6
+  },
+  "observable_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false,
+  "support": {
+    "actual_large_moves": 1309,
+    "actual_large_moves_by_checkpoint": {
+      "12": 678,
+      "6": 631
+    },
+    "assessment_rows": 6262,
+    "assessment_sessions": 157,
+    "assessment_stocks": 20,
+    "causal_feature_exclusion_count": 68,
+    "development_large_moves": 2310,
+    "development_rows": 9287,
+    "development_sessions": 234,
+    "development_stocks": 20,
+    "direction_support_passes": true,
+    "eligible_total_rows": 15549,
+    "maximum_stock_decision_row_share": 0.05014372404982434,
+    "maximum_stock_economic_selection_share": 0.12738853503184713,
+    "movement_support_passes": true,
+    "predecessor_total_rows": 15617,
+    "represented_months": 8
+  }
+}

@@ -1,0 +1,424 @@
+{
+  "activity_normalisation": "existing_same_stock_same_clock_expanding_prior_mean_minimum_10",
+  "activity_provider_label": "historical_activity_proxy",
+  "base_components": {
+    "12": {
+      "absolute_efficiency": {
+        "center": 0.2616450547881655,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.31248757136939187
+      },
+      "absolute_progress": {
+        "center": 164.33542839149607,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 234.97688534096557
+      },
+      "activity_acceleration": {
+        "center": 0.007118180790893436,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.21809480838177353
+      },
+      "activity_effort": {
+        "center": 0.6146772847316828,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.43173518985904896
+      },
+      "activity_gap": {
+        "center": 0.0,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.33960699298364927
+      },
+      "boundary_slope": {
+        "center": -0.002797835686724288,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.07372298004721396
+      },
+      "close_retention": {
+        "center": 0.1338049008628108,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.16233123493435214
+      },
+      "compression": {
+        "center": 0.011217654433753449,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.6022510338467735
+      },
+      "directional_persistence": {
+        "center": 0.5833333333333334,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.16666666666666663
+      },
+      "down_extreme_rejection": {
+        "center": 0.2702986938943249,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.20621947874568936
+      },
+      "effort_acceleration": {
+        "center": -23.86042916333689,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 26.709357123116934
+      },
+      "extreme_rejection": {
+        "center": 0.28665771865165107,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.17279936789574657
+      },
+      "mean_close_location": {
+        "center": 0.4998301716015148,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.12920032663420267
+      },
+      "new_high_fraction": {
+        "center": 0.16666666666666666,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.25
+      },
+      "new_low_fraction": {
+        "center": 0.16666666666666666,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.25
+      },
+      "normalised_high_slope": {
+        "center": -0.01623237515527634,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.07506353109744324
+      },
+      "normalised_low_slope": {
+        "center": 0.010853975413010792,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.072720332869644
+      },
+      "range_acceleration": {
+        "center": -47.759629690514544,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 53.4114182931412
+      },
+      "range_effort": {
+        "center": 7.343318787221294,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.648929919112204
+      },
+      "range_gap": {
+        "center": 0.0,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.5838527033119085
+      },
+      "return_gap": {
+        "center": 0.0,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 301.2555888746183
+      },
+      "signed_efficiency": {
+        "center": -0.017609454891735016,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.5242839730423595
+      },
+      "signed_progress": {
+        "center": -0.39428348480807074,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 330.5614499416198
+      },
+      "signed_progress_acceleration": {
+        "center": -0.5342146316961518,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 311.7027321392535
+      },
+      "travel_effort": {
+        "center": 6.677577636105317,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.7199528154344224
+      },
+      "up_extreme_rejection": {
+        "center": 0.27899434688325486,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.22577294487053418
+      }
+    },
+    "6": {
+      "absolute_efficiency": {
+        "center": 0.3677722485624735,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.4298085835799503
+      },
+      "absolute_progress": {
+        "center": 138.2054638677904,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 197.14422053875415
+      },
+      "activity_acceleration": {
+        "center": -0.0016992663281732434,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.21706267363275566
+      },
+      "activity_effort": {
+        "center": 0.5944100931056235,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.44188349656759074
+      },
+      "activity_gap": {
+        "center": 0.0,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.3540021052899526
+      },
+      "boundary_slope": {
+        "center": -0.004882389228418969,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.15137667513564107
+      },
+      "close_retention": {
+        "center": 0.18283478204567538,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.22059456983962425
+      },
+      "compression": {
+        "center": 0.022242734929574674,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.6111229648130108
+      },
+      "directional_persistence": {
+        "center": 0.6666666666666666,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.16666666666666663
+      },
+      "down_extreme_rejection": {
+        "center": 0.26391563115007083,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.23669478123832755
+      },
+      "effort_acceleration": {
+        "center": -27.759705138599053,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 35.376525577585724
+      },
+      "extreme_rejection": {
+        "center": 0.28256790770530466,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.18283179975243335
+      },
+      "mean_close_location": {
+        "center": 0.4969720319208653,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.1715147344489883
+      },
+      "new_high_fraction": {
+        "center": 0.3333333333333333,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.33333333333333337
+      },
+      "new_low_fraction": {
+        "center": 0.3333333333333333,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.33333333333333337
+      },
+      "normalised_high_slope": {
+        "center": -0.04133463084143377,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.1548300505402296
+      },
+      "normalised_low_slope": {
+        "center": 0.03249509033988236,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.15029777434216965
+      },
+      "range_acceleration": {
+        "center": -55.60532083911105,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 70.57522816705725
+      },
+      "range_effort": {
+        "center": 6.819689745703597,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.6485934754346392
+      },
+      "range_gap": {
+        "center": 0.0,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.5759916666909377
+      },
+      "return_gap": {
+        "center": 0.0,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 249.64109469270926
+      },
+      "signed_efficiency": {
+        "center": -0.0025902168556085777,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.733979226627567
+      },
+      "signed_progress": {
+        "center": -0.12675883658941345,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 275.972042196502
+      },
+      "signed_progress_acceleration": {
+        "center": 1.0305602165766525,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 259.6021791821582
+      },
+      "travel_effort": {
+        "center": 6.127862723851628,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.7855689088903919
+      },
+      "up_extreme_rejection": {
+        "center": 0.27267722723982,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.25238262807520817
+      }
+    }
+  },
+  "broker_integration_required": false,
+  "clip": [
+    -5.0,
+    5.0
+  ],
+  "continuous_behavioural_dimensions": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "fit_interval": "2024-01-01_through_2024-12-31_only",
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "method": "checkpoint_specific_median_iqr",
+  "observable_only": true,
+  "order_placement": "disabled",
+  "pressure_aligned_components": {
+    "12": {
+      "aligned_progress_acceleration": {
+        "center": -47.88864791196279,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 300.7546708985931
+      },
+      "directional_rejection": {
+        "center": 0.27135388582831393,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.1626627446967597
+      }
+    },
+    "6": {
+      "aligned_progress_acceleration": {
+        "center": -43.52185754821824,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 256.3551539848269
+      },
+      "directional_rejection": {
+        "center": 0.26603475033008195,
+        "clip_lower": -5.0,
+        "clip_upper": 5.0,
+        "method": "median_iqr",
+        "scale": 0.1852899168948006
+      }
+    }
+  },
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

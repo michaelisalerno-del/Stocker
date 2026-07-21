@@ -1,10 +1,10 @@
 {
   "barriers_bps": {
-    "12": null,
-    "6": null
+    "12": 125.57265282625129,
+    "6": 150.53290284531644
   },
   "broker_integration_required": false,
-  "development_rows_used": 0,
+  "development_rows_used": 1230,
   "execution_enabled": false,
   "feasibility_screen": true,
   "loops_regimes_states_and_structural_paths_forbidden": true,
@@ -14,7 +14,7 @@
   "production_runtime_modified": false,
   "quantile": 0.75,
   "research_only": true,
-  "status": "not_calculated_due_to_history_blocker",
+  "status": "frozen_from_2024_development",
   "strategy_promotion": false,
   "training_period": "2024"
 }

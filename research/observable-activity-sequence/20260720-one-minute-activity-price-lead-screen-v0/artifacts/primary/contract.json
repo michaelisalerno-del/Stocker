@@ -50,6 +50,14 @@
     "movement_model_commit": "5e80d972d1e003c8366a1ec6ca170d1077288ead",
     "movement_model_id": "large_remaining_move__M1"
   },
+  "input_acquisition": {
+    "authorized_by_user": true,
+    "credential_persisted": false,
+    "downloaded_data_committed": false,
+    "runner_network_access": false,
+    "source": "EODHD",
+    "timeframe": "1m"
+  },
   "loops_regimes_states_and_structural_paths_forbidden": true,
   "model_specification": {
     "C": 1.0,

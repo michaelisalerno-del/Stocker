@@ -1,7 +1,9 @@
 {
+  "assessment_baselines_frozen_from_2024": true,
   "assessment_outcomes_used": false,
   "broker_integration_required": false,
   "development_only": true,
+  "development_rows_use_strictly_prior_sessions": true,
   "execution_enabled": false,
   "feasibility_screen": true,
   "formula": "volume / trailing_same_stock_same_minute_median_volume",
@@ -9,13 +11,15 @@
   "log_score": "log1p(relative_activity)",
   "loops_regimes_states_and_structural_paths_forbidden": true,
   "minimum_prior_observations": 20,
-  "normalisation_rows_fitted": 0,
+  "normalisation_input_rows": 164198,
+  "normalisation_rows_fitted": 156198,
   "observable_only": true,
   "one_minute_sequence_test": true,
   "order_placement": "disabled",
   "production_runtime_modified": false,
   "provider_volume_label": "historical_activity_proxy",
   "research_only": true,
-  "status": "not_fitted_due_to_history_blocker",
+  "same_clock_p90_rule": "expanding_prior_2024_relative_activity_then_frozen_for_2025",
+  "status": "fitted",
   "strategy_promotion": false
 }

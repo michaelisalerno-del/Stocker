@@ -13,17 +13,21 @@
     "activity_lead_price_response",
     "activity_range_response"
   ],
+  "admitted_sequence_ledger_rows": 27880,
   "assessment_information_used_in_features": false,
   "broker_integration_required": false,
   "execution_enabled": false,
   "feasibility_screen": true,
-  "features_materialised": 0,
+  "feature_rows_materialised": 10484,
   "future_information_used_in_features": false,
   "loops_regimes_states_and_structural_paths_forbidden": true,
   "observable_only": true,
+  "one_minute_return_definition": "10000 * (bar_close / bar_open - 1)",
   "one_minute_sequence_test": true,
   "order_placement": "disabled",
   "predictor_window": "completed_minutes_minus_10_through_minus_1",
+  "price_preregistered_feature_family_count": 15,
+  "price_scalar_feature_count": 26,
   "price_sequence_features": [
     "one_minute_return_minus_1",
     "one_minute_return_minus_2",
@@ -53,6 +57,20 @@
     "maximum_retracement_from_favourable_ten_minute_extreme"
   ],
   "production_runtime_modified": false,
+  "progress_winsor_bounds": {
+    "absolute_progress_per_activity_3": [
+      0.06135718235999763,
+      39.4045789665893
+    ],
+    "signed_progress_per_activity_3": [
+      -28.766052192940705,
+      31.97679763503526
+    ]
+  },
+  "progress_winsor_quantiles": [
+    0.01,
+    0.99
+  ],
   "provider_volume_label": "historical_activity_proxy",
   "raw_activity_sequence_features": [
     "relative_activity_minus_1",
@@ -75,7 +93,8 @@
     "price_peak_index_minus_activity_peak_index"
   ],
   "research_only": true,
+  "return_and_range_units": "basis_points_except_dimensionless_ratios",
   "signed_activity_proxy_label": "bar_sign_weighted_activity_proxy",
-  "status": "not_materialised_due_to_history_blocker",
+  "status": "materialised",
   "strategy_promotion": false
 }

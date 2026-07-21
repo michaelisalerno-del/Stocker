@@ -1,34 +1,510 @@
 {
-  "bootstrap_draws_run": 0,
+  "bootstrap_draws_run": 200,
   "broker_integration_required": false,
-  "complete_symbol_sessions": 0,
-  "credentials_read": false,
-  "decision": "blocked_one_minute_history_unavailable",
-  "decision_gate": "one_minute_data_availability",
-  "economic_reference_evaluated": false,
+  "concentration": {
+    "all_selection_concentration_gates_pass": true,
+    "assessment_row_concentration_passes": true,
+    "maximum_assessment_row_share": 0.10975609756097561,
+    "maximum_selection_share_by_candidate": {
+      "activity_system": 0.13712374581939799,
+      "highest_one_minute_relative_momentum": 0.12374581939799331,
+      "interaction_system": 0.1505016722408027,
+      "price_system": 0.13377926421404682,
+      "random_admitted_stock": 0.14046822742474915,
+      "strongest_one_minute_reversal": 0.1505016722408027
+    }
+  },
+  "conditional_direction_status": "evaluated",
+  "decision": "no_one_minute_activity_increment",
+  "economic_reference_cannot_override_probability_gates": true,
   "execution_enabled": false,
-  "external_api_called": false,
-  "external_data_downloaded": false,
   "feasibility_screen": true,
-  "five_minute_substitution_used": false,
-  "frozen_assessment_rows": 1560,
-  "frozen_assessment_sessions": 153,
-  "frozen_assessment_stocks": 20,
-  "frozen_population_reconstructed": true,
+  "increments": {
+    "A1_minus_A0": {
+      "auc_change": -0.022565989264107578,
+      "bootstrap_lower_90": {
+        "brier": -0.006536014763819651,
+        "log_loss": -0.01651581235452422
+      },
+      "brier_improvement": -0.003768561529521347,
+      "checkpoint_improvements": {
+        "12": {
+          "brier_improvement": -0.004042301137493806,
+          "log_loss_improvement": -0.008838704830631705
+        },
+        "6": {
+          "brier_improvement": -0.0034840729840630857,
+          "log_loss_improvement": -0.010071462640493967
+        }
+      },
+      "comparison": "A1_minus_A0",
+      "gates": {
+        "auc_not_reduced": false,
+        "bootstrap_90_lower_brier_non_negative": false,
+        "bootstrap_90_lower_log_loss_non_negative": false,
+        "concentration_gates_pass": true,
+        "exceeds_activity_null_90th_percentile": true,
+        "improves_brier": false,
+        "improves_log_loss": false,
+        "neither_checkpoint_materially_adverse": false,
+        "positive_in_at_least_five_months": false
+      },
+      "log_loss_improvement": -0.009443215078856815,
+      "material_adversity_tolerance": -0.001,
+      "monthly_improvements": {
+        "2025-01": {
+          "brier_improvement": -0.0015678312975826725,
+          "log_loss_improvement": -0.0020209104192218663
+        },
+        "2025-02": {
+          "brier_improvement": -0.006160663847409958,
+          "log_loss_improvement": -0.014250132939472637
+        },
+        "2025-03": {
+          "brier_improvement": -0.012364015134354839,
+          "log_loss_improvement": -0.03620017168066275
+        },
+        "2025-04": {
+          "brier_improvement": -0.004784454597960577,
+          "log_loss_improvement": -0.01136292478543105
+        },
+        "2025-05": {
+          "brier_improvement": 0.003394995606909923,
+          "log_loss_improvement": 0.006364630269515392
+        },
+        "2025-06": {
+          "brier_improvement": -0.007318262941995474,
+          "log_loss_improvement": -0.018075275121114565
+        },
+        "2025-07": {
+          "brier_improvement": -0.0008332875455339811,
+          "log_loss_improvement": 0.0012482900051417611
+        },
+        "2025-08": {
+          "brier_improvement": 0.0062914011770822675,
+          "log_loss_improvement": 0.015133473656861296
+        }
+      },
+      "null_q90_brier": null,
+      "passes": false,
+      "positive_months": 2,
+      "real_null_percentile_brier": null
+    },
+    "A2_minus_A1": {
+      "auc_change": -0.005486881437372748,
+      "bootstrap_lower_90": {
+        "brier": -0.004314922251793053,
+        "log_loss": -0.012669694247756802
+      },
+      "brier_improvement": -0.002185954111691535,
+      "checkpoint_improvements": {
+        "12": {
+          "brier_improvement": -0.004307160918605474,
+          "log_loss_improvement": -0.013472476398867284
+        },
+        "6": {
+          "brier_improvement": 1.8546156226817434e-05,
+          "log_loss_improvement": 0.00026575934187211825
+        }
+      },
+      "comparison": "A2_minus_A1",
+      "gates": {
+        "auc_not_reduced": false,
+        "bootstrap_90_lower_brier_non_negative": false,
+        "bootstrap_90_lower_log_loss_non_negative": false,
+        "concentration_gates_pass": true,
+        "exceeds_activity_null_90th_percentile": false,
+        "improves_brier": false,
+        "improves_log_loss": false,
+        "neither_checkpoint_materially_adverse": false,
+        "positive_in_at_least_five_months": false
+      },
+      "log_loss_improvement": -0.006735626523434068,
+      "material_adversity_tolerance": -0.001,
+      "monthly_improvements": {
+        "2025-01": {
+          "brier_improvement": 0.000529195833993551,
+          "log_loss_improvement": 0.0015722941763626208
+        },
+        "2025-02": {
+          "brier_improvement": -0.0035173780272760857,
+          "log_loss_improvement": -0.010763232902080144
+        },
+        "2025-03": {
+          "brier_improvement": -0.003851432899666385,
+          "log_loss_improvement": -0.006120639315097487
+        },
+        "2025-04": {
+          "brier_improvement": 0.004477889358779505,
+          "log_loss_improvement": 0.012831101560650704
+        },
+        "2025-05": {
+          "brier_improvement": -0.0066184478003945,
+          "log_loss_improvement": -0.021682466594432737
+        },
+        "2025-06": {
+          "brier_improvement": -0.0018519153301179148,
+          "log_loss_improvement": -0.009479270850135557
+        },
+        "2025-07": {
+          "brier_improvement": -0.007586374714656133,
+          "log_loss_improvement": -0.024754199654620057
+        },
+        "2025-08": {
+          "brier_improvement": -0.002001481121109594,
+          "log_loss_improvement": -0.004486057945612465
+        }
+      },
+      "null_q90_brier": -0.0007629235490328206,
+      "passes": false,
+      "positive_months": 2,
+      "real_null_percentile_brier": 0.6
+    },
+    "A3_minus_A2": {
+      "auc_change": -0.008357186466749766,
+      "bootstrap_lower_90": {
+        "brier": -0.006623861268131625,
+        "log_loss": -0.02525785852064138
+      },
+      "brier_improvement": -0.003550798407480543,
+      "checkpoint_improvements": {
+        "12": {
+          "brier_improvement": -0.002870520884280525,
+          "log_loss_improvement": -0.01070530154529764
+        },
+        "6": {
+          "brier_improvement": -0.004257788398868978,
+          "log_loss_improvement": -0.019047675730144098
+        }
+      },
+      "comparison": "A3_minus_A2",
+      "gates": {
+        "auc_not_reduced": false,
+        "bootstrap_90_lower_brier_non_negative": false,
+        "bootstrap_90_lower_log_loss_non_negative": false,
+        "concentration_gates_pass": true,
+        "exceeds_activity_null_90th_percentile": false,
+        "improves_brier": false,
+        "improves_log_loss": false,
+        "neither_checkpoint_materially_adverse": false,
+        "positive_in_at_least_five_months": false
+      },
+      "log_loss_improvement": -0.014796170529394359,
+      "material_adversity_tolerance": -0.001,
+      "monthly_improvements": {
+        "2025-01": {
+          "brier_improvement": 0.0012344116043746245,
+          "log_loss_improvement": -0.00036267852677451806
+        },
+        "2025-02": {
+          "brier_improvement": -0.005727102455298366,
+          "log_loss_improvement": -0.012913629331871901
+        },
+        "2025-03": {
+          "brier_improvement": -0.006734952806676797,
+          "log_loss_improvement": -0.03192600146288538
+        },
+        "2025-04": {
+          "brier_improvement": -0.005801336395659218,
+          "log_loss_improvement": -0.017109466636240966
+        },
+        "2025-05": {
+          "brier_improvement": 0.00038711868317412024,
+          "log_loss_improvement": -0.007724902270530853
+        },
+        "2025-06": {
+          "brier_improvement": -0.00845591767327028,
+          "log_loss_improvement": -0.036800815365450046
+        },
+        "2025-07": {
+          "brier_improvement": -8.314593835367923e-05,
+          "log_loss_improvement": -0.005996175519011493
+        },
+        "2025-08": {
+          "brier_improvement": -0.0035141980131004613,
+          "log_loss_improvement": -0.005357364829753686
+        }
+      },
+      "null_q90_brier": 0.00012069367314942184,
+      "passes": false,
+      "positive_months": 0,
+      "real_null_percentile_brier": 0.06
+    },
+    "D1_minus_D0": {
+      "auc_change": -0.044935296742525666,
+      "bootstrap_lower_90": {
+        "brier": -0.040741526255137356,
+        "log_loss": -0.08784819603987828
+      },
+      "brier_improvement": -0.026195298742760276,
+      "checkpoint_improvements": {
+        "12": {
+          "brier_improvement": -0.033631993143267036,
+          "log_loss_improvement": -0.07559474682762468
+        },
+        "6": {
+          "brier_improvement": -0.020386756370766923,
+          "log_loss_improvement": -0.04261549728489522
+        }
+      },
+      "comparison": "D1_minus_D0",
+      "gates": {
+        "auc_not_reduced": false,
+        "bootstrap_90_lower_brier_non_negative": false,
+        "bootstrap_90_lower_log_loss_non_negative": false,
+        "concentration_gates_pass": true,
+        "exceeds_activity_null_90th_percentile": true,
+        "improves_brier": false,
+        "improves_log_loss": false,
+        "neither_checkpoint_materially_adverse": false,
+        "positive_in_at_least_five_months": false
+      },
+      "log_loss_improvement": -0.057078158213932584,
+      "material_adversity_tolerance": -0.001,
+      "monthly_improvements": {
+        "2025-01": {
+          "brier_improvement": -0.03412257039214678,
+          "log_loss_improvement": -0.07626883356177361
+        },
+        "2025-02": {
+          "brier_improvement": -0.010659373597550703,
+          "log_loss_improvement": -0.024234312611839726
+        },
+        "2025-03": {
+          "brier_improvement": -0.03394839142322437,
+          "log_loss_improvement": -0.07525471487879865
+        },
+        "2025-04": {
+          "brier_improvement": -0.03601613069805737,
+          "log_loss_improvement": -0.07365569819429063
+        },
+        "2025-05": {
+          "brier_improvement": -0.04645738343927969,
+          "log_loss_improvement": -0.09688836251109556
+        },
+        "2025-06": {
+          "brier_improvement": 0.0022069420523671,
+          "log_loss_improvement": 0.0035725697791808564
+        },
+        "2025-07": {
+          "brier_improvement": -0.03695228804526102,
+          "log_loss_improvement": -0.07501020314595008
+        },
+        "2025-08": {
+          "brier_improvement": 0.0012567919776267367,
+          "log_loss_improvement": -0.0017779573183858144
+        }
+      },
+      "null_q90_brier": null,
+      "passes": false,
+      "positive_months": 1,
+      "real_null_percentile_brier": null
+    },
+    "D2_minus_D1": {
+      "auc_change": -0.0011601963409192395,
+      "bootstrap_lower_90": {
+        "brier": -0.04041087723218677,
+        "log_loss": -0.10338531969604824
+      },
+      "brier_improvement": -0.02319683072882417,
+      "checkpoint_improvements": {
+        "12": {
+          "brier_improvement": -0.03402754969059085,
+          "log_loss_improvement": -0.08162650149983453
+        },
+        "6": {
+          "brier_improvement": -0.014737334261645474,
+          "log_loss_improvement": -0.04854785272310558
+        }
+      },
+      "comparison": "D2_minus_D1",
+      "gates": {
+        "auc_not_reduced": false,
+        "bootstrap_90_lower_brier_non_negative": false,
+        "bootstrap_90_lower_log_loss_non_negative": false,
+        "concentration_gates_pass": true,
+        "exceeds_activity_null_90th_percentile": false,
+        "improves_brier": false,
+        "improves_log_loss": false,
+        "neither_checkpoint_materially_adverse": false,
+        "positive_in_at_least_five_months": false
+      },
+      "log_loss_improvement": -0.06305410401389722,
+      "material_adversity_tolerance": -0.001,
+      "monthly_improvements": {
+        "2025-01": {
+          "brier_improvement": -0.03973131404455171,
+          "log_loss_improvement": -0.11491234073460288
+        },
+        "2025-02": {
+          "brier_improvement": 0.0076824879222564535,
+          "log_loss_improvement": 0.01380692691332075
+        },
+        "2025-03": {
+          "brier_improvement": 0.002549891922410452,
+          "log_loss_improvement": 0.004939843890912732
+        },
+        "2025-04": {
+          "brier_improvement": -0.057494875425949166,
+          "log_loss_improvement": -0.1412284788244934
+        },
+        "2025-05": {
+          "brier_improvement": -0.012505922189535557,
+          "log_loss_improvement": -0.037269171415354574
+        },
+        "2025-06": {
+          "brier_improvement": -0.029851204861648772,
+          "log_loss_improvement": -0.06379527824625053
+        },
+        "2025-07": {
+          "brier_improvement": -0.025628114992599982,
+          "log_loss_improvement": -0.069831668213586
+        },
+        "2025-08": {
+          "brier_improvement": -0.07505159643794251,
+          "log_loss_improvement": -0.1883288217773308
+        }
+      },
+      "null_q90_brier": 0.0024510573203745567,
+      "passes": false,
+      "positive_months": 2,
+      "real_null_percentile_brier": 0.1
+    },
+    "D3_minus_D2": {
+      "auc_change": 0.0016956715751896834,
+      "bootstrap_lower_90": {
+        "brier": -0.017063840622636682,
+        "log_loss": -0.05333415467701411
+      },
+      "brier_improvement": -0.008024742272641827,
+      "checkpoint_improvements": {
+        "12": {
+          "brier_improvement": -0.013671885459136446,
+          "log_loss_improvement": -0.04166754903806502
+        },
+        "6": {
+          "brier_improvement": -0.003613955878456643,
+          "log_loss_improvement": -0.01180995395400708
+        }
+      },
+      "comparison": "D3_minus_D2",
+      "gates": {
+        "auc_not_reduced": true,
+        "bootstrap_90_lower_brier_non_negative": false,
+        "bootstrap_90_lower_log_loss_non_negative": false,
+        "concentration_gates_pass": true,
+        "exceeds_activity_null_90th_percentile": false,
+        "improves_brier": false,
+        "improves_log_loss": false,
+        "neither_checkpoint_materially_adverse": false,
+        "positive_in_at_least_five_months": false
+      },
+      "log_loss_improvement": -0.02490365013704887,
+      "material_adversity_tolerance": -0.001,
+      "monthly_improvements": {
+        "2025-01": {
+          "brier_improvement": -0.004745667321361613,
+          "log_loss_improvement": 0.0008457348174291113
+        },
+        "2025-02": {
+          "brier_improvement": 0.007554186419542974,
+          "log_loss_improvement": 0.009450166255711823
+        },
+        "2025-03": {
+          "brier_improvement": -0.05071573647396177,
+          "log_loss_improvement": -0.15703995729980857
+        },
+        "2025-04": {
+          "brier_improvement": 0.015665255244470655,
+          "log_loss_improvement": 0.028296420706811043
+        },
+        "2025-05": {
+          "brier_improvement": -0.0072529983289036926,
+          "log_loss_improvement": -0.03474242091024915
+        },
+        "2025-06": {
+          "brier_improvement": -0.001635713734072064,
+          "log_loss_improvement": -0.0025528462170446575
+        },
+        "2025-07": {
+          "brier_improvement": -0.027257892258571337,
+          "log_loss_improvement": -0.06767819614648973
+        },
+        "2025-08": {
+          "brier_improvement": -0.0020827779127464696,
+          "log_loss_improvement": -0.007169581001188474
+        }
+      },
+      "null_q90_brier": -0.002612504745269805,
+      "passes": false,
+      "positive_months": 2,
+      "real_null_percentile_brier": 0.46
+    }
+  },
   "loops_regimes_states_and_structural_paths_forbidden": true,
-  "models_fitted": 0,
-  "null_draws_run": 0,
+  "models_fitted": 8,
+  "not_a_deployable_strategy": true,
+  "not_achieved_pnl": true,
+  "not_executable_edge_evidence": true,
+  "not_prospective_validation": true,
+  "null_draws_run": 50,
   "observable_only": true,
-  "one_minute_rows_materialised": 0,
   "one_minute_sequence_test": true,
   "order_placement": "disabled",
-  "plots_created": 0,
-  "probability_gates_evaluated": false,
+  "pass_flags": {
+    "interaction_direction": false,
+    "interaction_onset": false,
+    "price_direction": false,
+    "price_onset": false,
+    "raw_activity_direction": false,
+    "raw_activity_onset": false
+  },
+  "probability_gates_evaluated": true,
   "production_runtime_modified": false,
   "protected_rows_opened": 0,
-  "reason": "complete local one-minute history is unavailable for the frozen population",
-  "required_symbol_sessions": 8240,
   "research_only": true,
   "strategy_promotion": false,
-  "timestamp_semantics_proved": false
+  "support": {
+    "aggregate_gates": {
+      "assessment_rows_at_least_1200": true,
+      "assessment_sessions_at_least_100": true,
+      "assessment_stocks_at_least_15": true,
+      "each_parent_slate_has_at_least_15_valid_stocks": true,
+      "maximum_stock_row_share_at_most_12_5_pct": true,
+      "represented_months_at_least_6": true
+    },
+    "aggregate_support_passes": true,
+    "assessment_checkpoint_rows": {
+      "12": 794,
+      "6": 764
+    },
+    "assessment_months": 8,
+    "assessment_rows": 1558,
+    "assessment_sessions": 153,
+    "assessment_stocks": 20,
+    "broker_integration_required": false,
+    "conditional_direction_gates": {
+      "directional_onsets_at_least_250": true,
+      "down_onsets_at_least_100": true,
+      "up_onsets_at_least_100": true
+    },
+    "conditional_direction_support_passes": true,
+    "development_rows": 1230,
+    "development_sessions": 124,
+    "directional_onsets": 301,
+    "down_onsets": 135,
+    "execution_enabled": false,
+    "feasibility_screen": true,
+    "largest_row_contributor": "QBTS",
+    "loops_regimes_states_and_structural_paths_forbidden": true,
+    "maximum_stock_row_share": 0.10975609756097561,
+    "no_onsets": 1257,
+    "observable_only": true,
+    "one_minute_sequence_test": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "research_only": true,
+    "strategy_promotion": false,
+    "up_onsets": 166
+  }
 }

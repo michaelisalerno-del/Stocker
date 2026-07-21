@@ -3,33 +3,54 @@
   "auditor_imported_runner": false,
   "broker_integration_required": false,
   "checks": {
+    "activity_bundle_null": {
+      "activity_bundle_hashes_verified": 50,
+      "comparisons_verified": 5,
+      "draws_verified": 50,
+      "first_bundle_independently_permuted": true
+    },
     "availability": {
-      "bar_end_candidate_complete_symbol_sessions": 0,
-      "bar_start_candidate_complete_symbol_sessions": 0,
-      "complete_symbol_sessions": 0,
+      "bar_end_candidate_complete_symbol_sessions": 5944,
+      "bar_start_candidate_complete_symbol_sessions": 5941,
+      "complete_symbol_sessions": 5944,
       "early_close_sessions_210_minutes": 80,
-      "one_minute_rows_materialised": 0,
+      "one_minute_rows_materialised": 6180103,
       "regular_sessions_390_minutes": 8160,
       "rows_verified": 8240,
       "sessions_verified": 412,
-      "source_files_present": 0,
+      "source_files_present": 20,
       "symbols_verified": 20
     },
-    "decision_and_exact_rerun": {
-      "decision": "blocked_one_minute_history_unavailable",
-      "decision_reconstructed": true,
-      "pre_audit_exact_comparisons_verified": 29
+    "bootstrap": {
+      "draw_rows_verified": 2800,
+      "session_block_draws_independently_reconstructed": 200,
+      "summary_rows_verified": 14
     },
-    "downstream_not_opened": {
-      "assessment_prediction_rows": 0,
-      "bootstrap_draws": 0,
-      "economic_diagnostics": 0,
-      "models_fitted": 0,
-      "normalisation_rows_fitted": 0,
-      "null_draws": 0,
-      "onset_path_rows": 0,
-      "plots": 0,
-      "unperformed_formula_checks": "not_applicable_due_to_first_gate_history_blocker"
+    "decision_and_exact_rerun": {
+      "decision": "no_one_minute_activity_increment",
+      "exact_artifact_comparisons_verified": 32,
+      "increments_reconstructed": 6,
+      "plots_verified": [
+        "delayed_return_comparison.png",
+        "direction_calibration.png",
+        "onset_calibration.png"
+      ]
+    },
+    "economic_and_concentration": {
+      "concentration_rows_verified": 140,
+      "economic_bootstrap_draw_rows_verified": 400,
+      "economic_metric_rows_verified": 396,
+      "selection_rows_reconstructed": 1794
+    },
+    "feature_group_diagnostics": {
+      "groups_verified": [
+        "absorption_interactions",
+        "activity_timing",
+        "continuation_interactions",
+        "price_only_sequence",
+        "raw_activity"
+      ],
+      "rows_verified": 55
     },
     "frozen_population": {
       "assessment_rows": 1560,
@@ -44,24 +65,52 @@
       "rows_verified": 2799
     },
     "input_hashes": {
-      "hashes_verified": 6,
-      "one_minute_source_hashes": 0
+      "frozen_hashes_verified": 6,
+      "source_hashes_verified": 20
+    },
+    "models_and_metrics": {
+      "maximum_manual_probability_error": 0.0,
+      "metric_rows_verified": 104,
+      "models_verified": 8
+    },
+    "outcomes": {
+      "assessment_label_counts": {
+        "DOWN_ONSET": 135,
+        "NO_ONSET": 1257,
+        "UP_ONSET": 166
+      },
+      "barriers_bps": {
+        "12": 125.57265282625129,
+        "6": 150.53290284531644
+      },
+      "decision_paths_verified": 2788,
+      "delayed_terminals_verified": [
+        15,
+        30
+      ],
+      "path_rows_verified": 13940
     },
     "protected_boundary": {
       "maximum_frozen_timestamp": "2025-08-22T20:00:00+00:00",
-      "one_minute_source_files_opened": 0,
+      "one_minute_source_files_opened": 20,
       "protected_rows_opened": 0,
       "protected_start": "2025-08-23",
-      "safe_one_minute_rows_materialised": 0
+      "safe_one_minute_rows_materialised": 6180103
+    },
+    "sequences_normalisation_and_features": {
+      "causal_windows_verified": 2788,
+      "cohort_relative_features_verified_finite": 4,
+      "feature_formulas_verified": 48,
+      "normalisation_rows_independently_compared": 27880,
+      "sequence_rows_verified": 27880
     },
     "timestamp_semantics": {
-      "bar_start_or_end_proved": false,
-      "causal_window_materialised": false,
-      "decision_precedence": "blocked_one_minute_history_unavailable",
-      "status": "not_evaluated_history_unavailable"
+      "evidence_rows_verified": 40,
+      "symbols_independently_reaggregated": 20,
+      "timestamp_convention": "bar_start"
     }
   },
-  "decision": "blocked_one_minute_history_unavailable",
+  "decision": "no_one_minute_activity_increment",
   "execution_enabled": false,
   "feasibility_screen": true,
   "loops_regimes_states_and_structural_paths_forbidden": true,

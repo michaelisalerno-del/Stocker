@@ -2,7 +2,7 @@
   "artifacts": [
     {
       "logical_path": "research/observable-activity-sequence/20260720-one-minute-activity-price-lead-screen-v0/contract.json",
-      "sha256": "6e87e1f91adabc71125c06158108cd951097b67c1e63cab60e7be412753a2d78"
+      "sha256": "e0ffb0f325b6133e2f793d2115abfdd0f1a0b20e950599ab772eddd0006cf11f"
     },
     {
       "logical_path": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/primary/compact_decision_panel.parquet",
@@ -31,11 +31,193 @@
   "feasibility_screen": true,
   "loops_regimes_states_and_structural_paths_forbidden": true,
   "observable_only": true,
-  "one_minute_safe_timestamp_hashes": [],
   "one_minute_sequence_test": true,
-  "one_minute_source_artifacts_hashed": 0,
+  "one_minute_source_artifacts_hashed": 20,
   "order_placement": "disabled",
   "production_runtime_modified": false,
+  "protected_rows_hashed": 0,
   "research_only": true,
+  "scientifically_relevant_safe_source_hashes": [
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "f5c2206c55e64391dffa896a9419f49d0bbfdbf3ce9fced6ade866daa59855ad",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=AAL/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "88da11a777e512d6563088a549e50cd48c7de76185d2bd99702a6b9e1c8d4f7b",
+      "safe_relevant_rows": 12118,
+      "safe_timestamp_sha256": "4d0654124229260f0372dea981bed97882d3cd35a8a777116036a58afa1b9c9c",
+      "symbol": "AAL"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "3b7fdfbeaa5f5d880023c76850764587d186daee5c8c6e3c377c43ffc93f0901",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "0d151a3fdad09ec48d7e28b492445e58ffd8ef8b5b0045f007a1d2b44a46c623",
+      "safe_relevant_rows": 12046,
+      "safe_timestamp_sha256": "c91aa9b478611cc9628765fe93dadb51c1bc58d6a8cee0e147e1b82d1664c696",
+      "symbol": "AAOI"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "2f80ee3c3cb5f3720e9cfb29214212be4ee8087fa2d8a28ee097794c8c38ae73",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=APLD/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "659e5a6b807bab26adedc370c5728e10091a4fc6ccccc0b83fc422dd7cc16243",
+      "safe_relevant_rows": 12101,
+      "safe_timestamp_sha256": "6dd99cc847ae19bd8d5fded9fae69e760e7f7e352ba7a121b400500c6393534b",
+      "symbol": "APLD"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "70ba2866df310333253f5120c0c9eb07c5001cfd048bbe827d29516c983724fa",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "e349b0111f28f167d48416e0cfb5b9ff3539fbd857b918454ac5731b3262a2c6",
+      "safe_relevant_rows": 12084,
+      "safe_timestamp_sha256": "fbe4c6e40760c49b5f891072e31a39d2d6b7278910a620c20bf66ea1849bbc5f",
+      "symbol": "ASTS"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "6de8cb7378b322bcd41321d91eb69add6ee9aa72513b420f1579483d166010ef",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "9f94367ce249123b5cf0b24402b4012c208e1c6044ea1fec010996fc508a315c",
+      "safe_relevant_rows": 12114,
+      "safe_timestamp_sha256": "3df31538df852688fefc38b1c091751b8a8ec9e29ab5a95507f335686f57e219",
+      "symbol": "CIFR"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "92e40332d7416cf51da0905c4678a7ef24fca1d54b723db86fd2c7fa5c9c1032",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "197b78fe926388832318c837a7d91431ae956c1df9a0ac28c03ce942bc165a54",
+      "safe_relevant_rows": 12114,
+      "safe_timestamp_sha256": "f0f8cb2582b6807f61fd731fe1dfe8890de0bbb2155cc6710af3d2f6c5834147",
+      "symbol": "HIMS"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "5b7b6325e6e8de1b689dca5a21abef805ec9be3835cd11fb1dc2cefcef6494ce",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "1f9a34518dbe30c22fc42ffac3e577cfa6cea37246888b6c31617619f79e304f",
+      "safe_relevant_rows": 12100,
+      "safe_timestamp_sha256": "652c06dab46f6431ec41aa1ffee3819fb1be3b28ddc2815101f6a6ef6478a623",
+      "symbol": "IONQ"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "b10db5ee6fb5af776f0819a05417515025f362c26ae55f292bdc161403f81471",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=IREN/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "db587a39dd19d7f9e62184c3f10df6385ad1c21f86755f4ca3c6971def28f7d9",
+      "safe_relevant_rows": 12118,
+      "safe_timestamp_sha256": "7c7d5c94fb2b44e956902cd9dd55dbde375c2f4c90089164e42e4c9f48f43219",
+      "symbol": "IREN"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "bdc4c7b0a48d831a3296a969ed9f4864a953ae7e45da9741b1d04897b6928619",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=MARA/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "0e83d95dbf08445c19e00b1dee7058007fe0598c3bce0b5d32a9b8d81af244ec",
+      "safe_relevant_rows": 12118,
+      "safe_timestamp_sha256": "5f76cb636afc16410c71a6970f639f20ed085071d2fb7801c65a580e7f026cda",
+      "symbol": "MARA"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "433b6f30f5ef70f1461dc159a628291f56012dfc7f15e69fc26981de81315a25",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=MP/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "a0e3a902c35da3187e03ba1965d556ed899e7e3590083a5476e1228471049750",
+      "safe_relevant_rows": 12079,
+      "safe_timestamp_sha256": "b913c57ab34948a33224ebd1eddaed2183231dc68b1bd366845df262320d2433",
+      "symbol": "MP"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "c83a4b505ab3975c46f0898c2bf5f718fecedc6cdeb266c9c90805d4c70981ab",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "ff9d073932a06c00ab9f408455ac0c3c08f298f30921beb4d9f128f107331c14",
+      "safe_relevant_rows": 12117,
+      "safe_timestamp_sha256": "96ebb1a973a5f9564f014fe86bc3a6803076e078875fcb0901de20a1603819e8",
+      "symbol": "MRNA"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "103a3cc0e2697f5f7c91b52522177e13c3c208abc96d8b97471f35853f276ef4",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "8c67c10d36d6b1b3b90c838810b988799d8586d8636944027bb8a7b196da16a3",
+      "safe_relevant_rows": 12082,
+      "safe_timestamp_sha256": "e942683abf5d23f6a2ed5bf9395688c785e556f69e884c55843658dc48d633fa",
+      "symbol": "MSTR"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "fbb607e5c39b050952d2fdf0ca275e0057bc14462050826b5b8da5f44aef8718",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "ae3d121134c690492cd93e16580b1785ff60ba565590847a9bd3a013764acda2",
+      "safe_relevant_rows": 11996,
+      "safe_timestamp_sha256": "59688cd93ebfd436723d72d6064cde021c6acbb7580026f772e0aad05fcde955",
+      "symbol": "NVTS"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "244a42e18390e13380fb23993ae3beffbc3574b895526f5e1157843b7f8a394b",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "a12cdf37f937db9fff0f4cf84e6f4926e541f96644e46020557a703f16550e3a",
+      "safe_relevant_rows": 11884,
+      "safe_timestamp_sha256": "c053628823577d1f819101bb1a268001c32115d1b9c892ac362c02c054bb7d7b",
+      "symbol": "QBTS"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "9003303e270718e59b2edd768a45f7a1228a645b72d6d0e8b397064a928e60a4",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "6fddb4c1ed6baddad20009d8ad277a532a2b4a7a77942a1649a8dfa5715e638b",
+      "safe_relevant_rows": 11940,
+      "safe_timestamp_sha256": "e0c8f0fc3efeee2a67998413676a5def8f2a7abac5d5ddcc4770ab19480762e8",
+      "symbol": "RGTI"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "7886f7e13fff310362b803d3aaa40dabf9f6c17b94fd430dcebef267996e72e3",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "c713ebb08c5b4153405f76813a5932550850acc4f88c64225c4bc3d69051fc98",
+      "safe_relevant_rows": 12118,
+      "safe_timestamp_sha256": "e7b4570a88e5a86601fbbdcdfb037c8a81cc69e99ea1faab4a0705476fedc081",
+      "symbol": "RIOT"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "2ef6ef196aa9f22561a0b1bd0c4485767b4eb845d5b41ab7dff6cadf22ca1ac4",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "451ca0ef5bebd10279f8d1036e3c88f0296ef0a5205a103d3547ad0fc212be38",
+      "safe_relevant_rows": 12118,
+      "safe_timestamp_sha256": "bb3f03b1f27278e62e3c44e0af9d34979987550fa7ec6c4f7d5dc0600a85593f",
+      "symbol": "RIVN"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "95ecce4c8ccb760f558689107d0c0a0046f4e658294d3d5f0628124aa3a853da",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "54d941441a67eaee4cf3826bb9d2f701bcd5a789aa6814183958a4156786d731",
+      "safe_relevant_rows": 12114,
+      "safe_timestamp_sha256": "03ccc8e4ccb32c6a54327d6003a2774584b2f609c26b6694f2a8eb9967736dd8",
+      "symbol": "SMCI"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "a4d30109e6e9011f5c431d7f1e698af6864d4749a6399b719bce7de55b2ffc26",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "3dfb78bacf7c11186ab683d44ef67d21fa89c1388752dda3167cbbe7f207e8fb",
+      "safe_relevant_rows": 12118,
+      "safe_timestamp_sha256": "b5aaf7b633a799c327d099c6fcf5585708de3e55048218e227d5cd6c4fd6dfd8",
+      "symbol": "SOFI"
+    },
+    {
+      "five_minute_anchor_logical_path": "source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet",
+      "five_minute_anchor_sha256": "6ebf3e2552b1c12eceb21840f6707b5330a8b07888a0c39bce6410d7df182e29",
+      "one_minute_logical_path": "source=eodhd/instrument_type=stock/symbol=WULF/timeframe=1m/data.parquet",
+      "safe_relevant_ohlcv_sha256": "08b665da56698d282c9202bcd39a876ec59000c109a8dde2a4bd2aef47e8b70f",
+      "safe_relevant_rows": 12118,
+      "safe_timestamp_sha256": "b25f3ab43f266ee1f949b98b9970688fbb1998438fec899a4403001df25fbc16",
+      "symbol": "WULF"
+    }
+  ],
   "strategy_promotion": false
 }

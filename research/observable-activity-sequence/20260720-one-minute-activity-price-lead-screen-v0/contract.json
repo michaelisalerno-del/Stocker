@@ -36,6 +36,14 @@
     "blocked_reproducibility_or_audit_failure"
   ],
   "execution_enabled": false,
+  "input_acquisition": {
+    "authorized_by_user": true,
+    "credential_persisted": false,
+    "downloaded_data_committed": false,
+    "runner_network_access": false,
+    "source": "EODHD",
+    "timeframe": "1m"
+  },
   "feasibility_screen": true,
   "fixed_windows": {
     "continuation_exit": "close_minute_plus_16",

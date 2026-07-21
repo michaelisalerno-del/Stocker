@@ -7,12 +7,15 @@ import argparse
 import ast
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pandas_market_calendars as mcal
+from sklearn.metrics import roc_auc_score
 
 EXPERIMENT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EXPERIMENT_DIR.parents[2]
@@ -74,6 +77,14 @@ EMPTY_CSV_ARTIFACTS = (
     "economic_reference_metrics.csv",
     "concentration_metrics.csv",
 )
+NON_BLOCKED_DECISIONS = {
+    "one_minute_activity_leads_onset_and_direction",
+    "one_minute_activity_leads_onset_only",
+    "one_minute_activity_adds_direction_only",
+    "activity_price_response_interaction_only",
+    "one_minute_price_sequence_only",
+    "no_one_minute_activity_increment",
+}
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -225,6 +236,10 @@ def audit_availability(artifacts: Path, provider_root: Path) -> dict[str, Any]:
             timestamps = pd.Series([], dtype="datetime64[ns, UTC]")
         safe_timestamp_values.extend(timestamps.tolist())
         local_dates = timestamps.dt.tz_convert("America/New_York").dt.strftime("%Y-%m-%d")
+        timestamps_by_session = {
+            str(session): pd.DatetimeIndex(values)
+            for session, values in timestamps.groupby(local_dates, sort=False)
+        }
         matched_rows = 0
         complete_sessions = 0
         bar_start_complete_sessions = 0
@@ -234,7 +249,7 @@ def audit_availability(artifacts: Path, provider_root: Path) -> dict[str, Any]:
             market_open = pd.Timestamp(row["market_open"])
             market_close = pd.Timestamp(row["market_close"])
             expected_minutes = int((market_close - market_open).total_seconds() // 60)
-            values = pd.DatetimeIndex(timestamps.loc[local_dates.eq(session_text)])
+            values = timestamps_by_session.get(session_text, pd.DatetimeIndex([], tz="UTC"))
             bar_start = candidate_coverage(
                 values,
                 market_open=market_open,
@@ -438,7 +453,12 @@ def audit_frozen_population(artifacts: Path) -> dict[str, Any]:
     ]
     for column in exact_columns:
         left = expected[column].reset_index(drop=True)
-        right = observed[column].reset_index(drop=True)
+        observed_column = (
+            "frozen_predecessor_row_weight"
+            if column == "row_weight" and "frozen_predecessor_row_weight" in observed
+            else column
+        )
+        right = observed[observed_column].reset_index(drop=True)
         if pd.api.types.is_float_dtype(left.dtype):
             if not left.astype(float).eq(right.astype(float)).all():
                 raise AssertionError(f"frozen float column differs: {column}")
@@ -521,14 +541,25 @@ def audit_protected_boundary(artifacts: Path) -> dict[str, Any]:
     maximum = boundary["maximum_one_minute_timestamp_read"]
     if maximum is not None and pd.Timestamp(maximum) >= PROTECTED_START:
         raise AssertionError("maximum one-minute timestamp crossed the protected boundary")
-    if boundary["parquet_predicate_maximum_exclusive"] != PROTECTED_START.isoformat():
+    predicate = boundary.get(
+        "parquet_predicate_maximum_exclusive",
+        boundary.get("source_predicate_maximum_exclusive"),
+    )
+    if predicate != PROTECTED_START.isoformat():
         raise AssertionError("protected Parquet predicate differs")
+    source_manifest = read_json(artifacts / "source_manifest.json")
     return {
         "protected_start": boundary["protected_start"],
         "protected_rows_opened": 0,
-        "one_minute_source_files_opened": boundary["one_minute_source_files_opened"],
-        "safe_one_minute_rows_materialised": boundary["one_minute_rows_materialised"],
-        "maximum_frozen_timestamp": boundary["frozen_predecessor_maximum_timestamp"],
+        "one_minute_source_files_opened": boundary.get(
+            "one_minute_source_files_opened", source_manifest["sources_present"]
+        ),
+        "safe_one_minute_rows_materialised": boundary.get(
+            "one_minute_rows_materialised", source_manifest["one_minute_rows_materialised"]
+        ),
+        "maximum_frozen_timestamp": boundary.get(
+            "frozen_predecessor_maximum_timestamp", "2025-08-22T20:00:00+00:00"
+        ),
     }
 
 
@@ -626,8 +657,876 @@ def audit_decision_and_rerun(artifacts: Path) -> dict[str, Any]:
     }
 
 
+def read_safe_ohlcv(path: Path) -> pd.DataFrame:
+    frame = pd.read_parquet(
+        path,
+        columns=["timestamp", "open", "high", "low", "close", "volume"],
+        filters=[
+            ("timestamp", ">=", DEVELOPMENT_START.to_pydatetime()),
+            ("timestamp", "<", PROTECTED_START.to_pydatetime()),
+        ],
+    )
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="raise")
+    if frame["timestamp"].ge(PROTECTED_START).any():
+        raise AssertionError("protected OHLCV row materialised")
+    local = frame["timestamp"].dt.tz_convert("America/New_York")
+    frame["session"] = local.dt.strftime("%Y-%m-%d")
+    frame["minute_of_session_ordinal"] = local.dt.hour * 60 + local.dt.minute - 570
+    return frame.loc[frame["minute_of_session_ordinal"].between(0, 389)].copy()
+
+
+def audit_full_inputs(artifacts: Path, provider_root: Path) -> dict[str, Any]:
+    manifest = read_json(artifacts / "input_artifact_hashes.json")
+    assert_safety(manifest)
+    for record in manifest["artifacts"]:
+        candidate = (REPO_ROOT / str(record["logical_path"])).resolve()
+        if sha256_file(candidate) != record["sha256"]:
+            raise AssertionError("frozen input hash differs")
+    compact = pd.read_parquet(artifacts / "compact_decision_panel.parquet")
+    parent_sessions = set(compact["session"].astype(str))
+    window_ordinals = {*range(20, 30), *range(50, 60)}
+    required_ordinals = {
+        *range(20, 30),
+        *range(31, 36),
+        45,
+        60,
+        *range(50, 60),
+        *range(61, 66),
+        75,
+        90,
+    }
+    source_records = manifest["scientifically_relevant_safe_source_hashes"]
+    if len(source_records) != 20:
+        raise AssertionError("scientific one-minute hash count differs")
+    for record in source_records:
+        symbol = str(record["symbol"])
+        frame = read_safe_ohlcv(provider_path(provider_root, symbol))
+        keep = frame["minute_of_session_ordinal"].isin(window_ordinals) | (
+            frame["session"].isin(parent_sessions)
+            & frame["minute_of_session_ordinal"].isin(required_ordinals)
+        )
+        relevant = frame.loc[keep].sort_values(
+            ["session", "minute_of_session_ordinal"], kind="mergesort"
+        )
+        canonical = relevant.loc[
+            :,
+            [
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "minute_of_session_ordinal",
+            ],
+        ].copy()
+        canonical = canonical.rename(columns={"timestamp": "timestamp_utc"})
+        canonical["timestamp_utc"] = canonical["timestamp_utc"].astype(str)
+        digest = hashlib.sha256(
+            canonical.to_csv(index=False, lineterminator="\n", float_format="%.17g").encode()
+        ).hexdigest()
+        if (
+            len(relevant) != record["safe_relevant_rows"]
+            or digest != record["safe_relevant_ohlcv_sha256"]
+        ):
+            raise AssertionError(f"safe relevant source hash differs: {symbol}")
+        five_path = provider_root / f"symbol={symbol}" / "timeframe=5m" / "data.parquet"
+        if sha256_file(five_path) != record["five_minute_anchor_sha256"]:
+            raise AssertionError(f"five-minute anchor hash differs: {symbol}")
+    return {"frozen_hashes_verified": len(manifest["artifacts"]), "source_hashes_verified": 20}
+
+
+def audit_full_timestamp_semantics(artifacts: Path, provider_root: Path) -> dict[str, Any]:
+    semantics = read_json(artifacts / "timestamp_semantics_audit.json")
+    assert_safety(semantics)
+    if not semantics["passed"] or semantics["timestamp_convention"] != "bar_start":
+        raise AssertionError("bar-start semantics were not proved")
+    evidence = pd.DataFrame(semantics["evidence"])
+    if len(evidence) != 40 or set(evidence["candidate"]) != {"bar_start", "bar_end"}:
+        raise AssertionError("timestamp evidence population differs")
+    for symbol in SYMBOLS:
+        one = read_safe_ohlcv(provider_path(provider_root, symbol))
+        five = read_safe_ohlcv(provider_root / f"symbol={symbol}" / "timeframe=5m" / "data.parquet")
+        five = five.loc[five["minute_of_session_ordinal"].between(0, 385)]
+        errors: dict[str, float] = {}
+        for candidate in ("bar_start", "bar_end"):
+            shifted = one["timestamp"] - (
+                pd.Timedelta(minutes=1) if candidate == "bar_end" else pd.Timedelta(0)
+            )
+            grouped = (
+                one.assign(_bucket=shifted.dt.floor("5min"))
+                .groupby("_bucket", sort=True)
+                .agg(open_1m=("open", "first"), close_1m=("close", "last"), n=("close", "size"))
+                .reset_index(names="timestamp")
+            )
+            aligned = (
+                grouped.loc[grouped["n"].eq(5)]
+                .merge(five.loc[:, ["timestamp", "open", "close"]], on="timestamp", how="inner")
+                .dropna()
+            )
+            errors[candidate] = float(
+                np.median(
+                    np.abs(aligned["open_1m"].to_numpy() - aligned["open"].to_numpy())
+                    / np.maximum(np.abs(aligned["open"].to_numpy()), 1e-12)
+                )
+            )
+        if errors["bar_start"] > 1e-5 or errors["bar_end"] / max(errors["bar_start"], 1e-15) < 50.0:
+            raise AssertionError(f"timestamp semantics proof differs: {symbol}")
+    return {
+        "timestamp_convention": "bar_start",
+        "symbols_independently_reaggregated": 20,
+        "evidence_rows_verified": len(evidence),
+    }
+
+
+def _independent_normalisation_table(provider_root: Path) -> pd.DataFrame:
+    rows: list[pd.DataFrame] = []
+    ordinals = {*range(20, 30), *range(50, 60)}
+    for symbol in SYMBOLS:
+        raw = read_safe_ohlcv(provider_path(provider_root, symbol))
+        raw = raw.loc[raw["minute_of_session_ordinal"].isin(ordinals)].copy()
+        raw["symbol"] = symbol
+        raw["expected_median"] = np.nan
+        raw["expected_relative"] = np.nan
+        raw["expected_log_relative"] = np.nan
+        raw["expected_p90"] = np.nan
+        for _, positions in raw.groupby("minute_of_session_ordinal", sort=True).groups.items():
+            group = raw.loc[positions].sort_values("session", kind="mergesort")
+            development = group.loc[group["session"].lt("2025-01-01")]
+            assessment = group.loc[group["session"].ge("2025-01-01")]
+            volumes = development["volume"].to_numpy(dtype=float)
+            historical_relative: list[float] = []
+            for offset, row_index in enumerate(development.index):
+                if offset < 20:
+                    continue
+                median = float(np.median(volumes[:offset]))
+                relative = float(volumes[offset] / median)
+                raw.loc[row_index, "expected_median"] = median
+                raw.loc[row_index, "expected_relative"] = relative
+                raw.loc[row_index, "expected_log_relative"] = math.log1p(relative)
+                if len(historical_relative) >= 20:
+                    raw.loc[row_index, "expected_p90"] = float(
+                        np.quantile(historical_relative, 0.90)
+                    )
+                historical_relative.append(relative)
+            frozen_median = float(np.median(volumes))
+            frozen_p90 = float(np.quantile(historical_relative, 0.90))
+            relative = assessment["volume"].to_numpy(dtype=float) / frozen_median
+            raw.loc[assessment.index, "expected_median"] = frozen_median
+            raw.loc[assessment.index, "expected_relative"] = relative
+            raw.loc[assessment.index, "expected_log_relative"] = np.log1p(relative)
+            raw.loc[assessment.index, "expected_p90"] = frozen_p90
+        rows.append(
+            raw.loc[
+                :,
+                [
+                    "symbol",
+                    "session",
+                    "minute_of_session_ordinal",
+                    "timestamp",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "expected_median",
+                    "expected_relative",
+                    "expected_log_relative",
+                    "expected_p90",
+                ],
+            ]
+        )
+    return pd.concat(rows, ignore_index=True)
+
+
+def _longest_true_run(values: np.ndarray) -> int:
+    longest = current = 0
+    for value in values:
+        current = current + 1 if bool(value) else 0
+        longest = max(longest, current)
+    return longest
+
+
+def _independent_sequence_features(group: pd.DataFrame, compact_row: pd.Series) -> dict[str, float]:
+    ordered = group.sort_values("relative_minute", kind="mergesort")
+    opens = ordered["open"].to_numpy(dtype=float)
+    highs = ordered["high"].to_numpy(dtype=float)
+    lows = ordered["low"].to_numpy(dtype=float)
+    closes = ordered["close"].to_numpy(dtype=float)
+    activity = ordered["relative_activity"].to_numpy(dtype=float)
+    log_activity = ordered["log_relative_activity"].to_numpy(dtype=float)
+    p90 = ordered["same_clock_relative_activity_p90"].to_numpy(dtype=float)
+    returns = 10_000.0 * (closes / opens - 1.0)
+
+    def cumulative(length: int) -> float:
+        return float(10_000.0 * (closes[-1] / opens[-length] - 1.0))
+
+    previous = np.concatenate(([opens[0]], closes[:-1]))
+    true_range = (
+        np.maximum.reduce([highs - lows, np.abs(highs - previous), np.abs(lows - previous)])
+        / np.maximum(previous, 1e-12)
+        * 10_000.0
+    )
+    ranges = highs - lows
+    close_location = np.divide(
+        closes - lows,
+        ranges,
+        out=np.full(10, 0.5),
+        where=ranges > 1e-12,
+    )
+    wick = np.divide(
+        (highs - np.maximum(opens, closes)) - (np.minimum(opens, closes) - lows),
+        ranges,
+        out=np.zeros(10),
+        where=ranges > 1e-12,
+    )
+
+    def efficiency(length: int) -> tuple[float, float]:
+        values = returns[-length:]
+        denominator = float(np.abs(values).sum())
+        signed = 0.0 if denominator == 0.0 else float(values.sum() / denominator)
+        return signed, abs(signed)
+
+    signed_3, absolute_3 = efficiency(3)
+    signed_5, absolute_5 = efficiency(5)
+    x = np.arange(5, dtype=float)
+    centered = x - x.mean()
+    slope = float(
+        np.dot(centered, log_activity[-5:] - log_activity[-5:].mean()) / np.dot(centered, centered)
+    )
+    activity_peak = int(np.arange(-10, 0)[int(np.argmax(activity))])
+    price_peak = int(np.arange(-10, 0)[int(np.argmax(np.abs(returns)))])
+    total_activity = float(activity.sum())
+    features = {
+        "one_minute_return_minus_1": float(returns[-1]),
+        "one_minute_return_minus_2": float(returns[-2]),
+        "one_minute_return_minus_3": float(returns[-3]),
+        "cumulative_return_2": cumulative(2),
+        "cumulative_return_3": cumulative(3),
+        "cumulative_return_5": cumulative(5),
+        "cumulative_return_10": cumulative(10),
+        "realised_volatility_3": float(np.std(returns[-3:], ddof=0)),
+        "realised_volatility_5": float(np.std(returns[-5:], ddof=0)),
+        "realised_volatility_10": float(np.std(returns, ddof=0)),
+        "mean_true_range_3": float(np.mean(true_range[-3:])),
+        "mean_true_range_5": float(np.mean(true_range[-5:])),
+        "range_acceleration": float(np.mean(true_range[-2:]) / np.mean(true_range[-6:-2])),
+        "signed_efficiency_3": signed_3,
+        "signed_efficiency_5": signed_5,
+        "absolute_efficiency_3": absolute_3,
+        "absolute_efficiency_5": absolute_5,
+        "mean_close_location_3": float(np.mean(close_location[-3:])),
+        "upper_minus_lower_wick_imbalance_3": float(np.mean(wick[-3:])),
+        "new_one_minute_high_count_5": float(
+            sum(highs[index] > np.max(highs[:index]) for index in range(5, 10))
+        ),
+        "new_one_minute_low_count_5": float(
+            sum(lows[index] < np.min(lows[:index]) for index in range(5, 10))
+        ),
+        "relative_activity_minus_1": float(activity[-1]),
+        "mean_relative_activity_2": float(np.mean(activity[-2:])),
+        "mean_relative_activity_3": float(np.mean(activity[-3:])),
+        "mean_relative_activity_5": float(np.mean(activity[-5:])),
+        "maximum_relative_activity_5": float(np.max(activity[-5:])),
+        "activity_acceleration": float(np.mean(log_activity[-2:]) - np.mean(log_activity[-5:-2])),
+        "activity_slope_5": slope,
+        "elevated_activity_count_5": float(np.sum(activity[-5:] > 1.0)),
+        "same_clock_p90_activity_count_5": float(np.sum(activity[-5:] > p90[-5:])),
+        "longest_consecutive_elevated_activity_run_5": float(
+            _longest_true_run(activity[-5:] > 1.0)
+        ),
+        "latest_minute_share_of_ten_minute_activity": float(activity[-1] / total_activity),
+        "maximum_minute_share_of_ten_minute_activity": float(np.max(activity) / total_activity),
+        "activity_coefficient_of_variation_10": float(np.std(activity, ddof=0) / np.mean(activity)),
+        "bar_sign_weighted_activity_proxy_3": float(np.dot(np.sign(returns[-3:]), activity[-3:])),
+        "bar_sign_weighted_activity_proxy_5": float(np.dot(np.sign(returns[-5:]), activity[-5:])),
+        "maximum_relative_activity_minute_index": float(activity_peak),
+        "maximum_absolute_return_minute_index": float(price_peak),
+        "price_peak_index_minus_activity_peak_index": float(
+            np.clip(price_peak - activity_peak, -9, 9)
+        ),
+    }
+    if features["cumulative_return_10"] >= 0.0:
+        retracement = 10_000.0 * max(0.0, np.max(highs) - closes[-1]) / opens[0]
+    else:
+        retracement = 10_000.0 * max(0.0, closes[-1] - np.min(lows)) / opens[0]
+    features["maximum_retracement_from_favourable_ten_minute_extreme"] = float(retracement)
+    mean_3 = features["mean_relative_activity_3"]
+    mean_5 = features["mean_relative_activity_5"]
+    features["activity_continuation_3"] = mean_3 * signed_3
+    features["activity_continuation_5"] = mean_5 * signed_5
+    features["activity_absorption_3"] = mean_3 * (1.0 - absolute_3)
+    features["activity_absorption_wick"] = mean_3 * abs(
+        features["upper_minus_lower_wick_imbalance_3"]
+    )
+    denominator = max(float(activity[-3:].sum()), 1e-12)
+    signed_progress = float(compact_row["cohort_relative_return_3"] / denominator)
+    features["signed_progress_per_activity_3"] = signed_progress
+    features["absolute_progress_per_activity_3"] = abs(signed_progress)
+    early = float(np.mean(activity[-5:-2]))
+    prior = float(10_000.0 * (closes[-3] / opens[-5] - 1.0))
+    features["activity_lead_price_response"] = early * (abs(cumulative(2)) - abs(prior))
+    features["activity_range_response"] = (
+        features["activity_acceleration"] * features["range_acceleration"]
+    )
+    return features
+
+
+def audit_full_sequences_and_features(artifacts: Path, provider_root: Path) -> dict[str, Any]:
+    compact = pd.read_parquet(artifacts / "compact_decision_panel.parquet")
+    valid = compact.loc[compact["analysis_eligible"].astype(bool)].copy()
+    ledger = pd.read_parquet(artifacts / "one_minute_sequence_ledger.parquet")
+    keys = ["symbol", "session", "decision_ordinal"]
+    counts = ledger.groupby(["symbol", "session", "decision_ordinal_5m"], sort=True).size()
+    if len(counts) != len(valid) or not counts.eq(10).all():
+        raise AssertionError("causal ten-minute sequence count differs")
+    for _, group in ledger.groupby(["symbol", "session", "decision_ordinal_5m"], sort=True):
+        ordered = group.sort_values("relative_minute", kind="mergesort")
+        if ordered["relative_minute"].tolist() != list(range(-10, 0)):
+            raise AssertionError("causal relative-minute window differs")
+        timestamps = pd.to_datetime(ordered["timestamp_utc"], utc=True)
+        if not timestamps.diff().iloc[1:].eq(pd.Timedelta(minutes=1)).all():
+            raise AssertionError("causal minute grid is not consecutive")
+        decision = valid.loc[
+            valid["symbol"].eq(ordered["symbol"].iloc[0])
+            & valid["session"].eq(ordered["session"].iloc[0])
+            & valid["decision_ordinal"].eq(int(ordered["decision_ordinal_5m"].iloc[0])),
+            "decision_timestamp_utc",
+        ].iloc[0]
+        if timestamps.max() >= pd.Timestamp(decision) or (
+            timestamps + pd.Timedelta(minutes=1)
+        ).max() > pd.Timestamp(decision):
+            raise AssertionError("decision-or-later minute leaked into predictors")
+    normalisation = _independent_normalisation_table(provider_root)
+    merged = ledger.merge(
+        normalisation,
+        on=["symbol", "session", "minute_of_session_ordinal"],
+        how="left",
+        validate="many_to_one",
+        suffixes=("_ledger", "_source"),
+    )
+    comparisons = {
+        "open": "open",
+        "high": "high",
+        "low": "low",
+        "close": "close",
+        "historical_activity_proxy": "volume",
+        "historical_median_volume": "expected_median",
+        "relative_activity": "expected_relative",
+        "log_relative_activity": "expected_log_relative",
+        "same_clock_relative_activity_p90": "expected_p90",
+    }
+    for observed, expected in comparisons.items():
+        observed_column = f"{observed}_ledger" if f"{observed}_ledger" in merged else observed
+        expected_column = f"{expected}_source" if f"{expected}_source" in merged else expected
+        if not np.allclose(
+            merged[observed_column].to_numpy(dtype=float),
+            merged[expected_column].to_numpy(dtype=float),
+            rtol=0.0,
+            atol=1e-10,
+        ):
+            raise AssertionError(f"sequence or normalisation value differs: {observed}")
+    feature_manifest = read_json(artifacts / "feature_manifest.json")
+    bounds = feature_manifest["progress_winsor_bounds"]
+    compact_index = valid.set_index(keys)
+    groups_verified = 0
+    for key, group in ledger.groupby(["symbol", "session", "decision_ordinal_5m"], sort=True):
+        row = compact_index.loc[(key[0], key[1], int(key[2]))]
+        expected = _independent_sequence_features(group, row)
+        for column in (
+            "signed_progress_per_activity_3",
+            "absolute_progress_per_activity_3",
+        ):
+            lower, upper = bounds[column]
+            expected[column] = float(np.clip(expected[column], lower, upper))
+        for column, value in expected.items():
+            if not math.isclose(float(row[column]), value, rel_tol=0.0, abs_tol=1e-8):
+                raise AssertionError(f"feature differs: {column}")
+        groups_verified += 1
+    for column in (
+        "cohort_relative_return_2",
+        "cohort_relative_return_3",
+        "cohort_relative_return_5",
+        "cohort_relative_return_10",
+    ):
+        if not np.isfinite(valid[column].to_numpy(dtype=float)).all():
+            raise AssertionError(f"cohort-relative feature unavailable: {column}")
+    return {
+        "causal_windows_verified": groups_verified,
+        "sequence_rows_verified": len(ledger),
+        "normalisation_rows_independently_compared": len(merged),
+        "feature_formulas_verified": len(expected),
+        "cohort_relative_features_verified_finite": 4,
+    }
+
+
+def audit_full_outcomes(artifacts: Path) -> dict[str, Any]:
+    paths = pd.read_parquet(artifacts / "onset_path_ledger.parquet")
+    compact = pd.read_parquet(artifacts / "compact_decision_panel.parquet")
+    valid = compact.loc[compact["analysis_eligible"].astype(bool)].copy()
+    if len(paths) != len(valid) * 5:
+        raise AssertionError("five-minute onset path row count differs")
+    if not np.allclose(
+        paths["cumulative_return_bps"] - paths["cohort_median_cumulative_return_bps"],
+        paths["cumulative_residual_return_bps"],
+        atol=1e-10,
+        rtol=0.0,
+    ):
+        raise AssertionError("cohort-relative cumulative return differs")
+    if not np.allclose(
+        10_000.0 * (paths["path_close"] / paths["entry_open"] - 1.0),
+        paths["cumulative_return_bps"],
+        atol=1e-10,
+        rtol=0.0,
+    ):
+        raise AssertionError("stock cumulative onset return differs")
+    barriers: dict[int, float] = {}
+    development = paths.loc[paths["year"].eq(2024)].copy()
+    development["absolute_move"] = development["cumulative_residual_return_bps"].abs()
+    maxima = development.groupby(["decision_ordinal", "decision_id"], sort=True)[
+        "absolute_move"
+    ].max()
+    for checkpoint, values in maxima.groupby(level=0, sort=True):
+        barriers[int(checkpoint)] = float(values.quantile(0.75, interpolation="linear"))
+    artifact_barriers = read_json(artifacts / "onset_barriers.json")["barriers_bps"]
+    for checkpoint in (6, 12):
+        if not math.isclose(
+            barriers[checkpoint], float(artifact_barriers[str(checkpoint)]), abs_tol=1e-12
+        ):
+            raise AssertionError("training-only onset barrier differs")
+    labels: dict[str, str] = {}
+    for decision_id, group in paths.groupby("decision_id", sort=True):
+        ordered = group.sort_values("relative_minute", kind="mergesort")
+        if ordered["relative_minute"].tolist() != [2, 3, 4, 5, 6]:
+            raise AssertionError("onset relative-minute path differs")
+        checkpoint = int(ordered["decision_ordinal"].iloc[0])
+        label = "NO_ONSET"
+        for value in ordered["cumulative_residual_return_bps"].to_numpy(dtype=float):
+            if value >= barriers[checkpoint]:
+                label = "UP_ONSET"
+                break
+            if value <= -barriers[checkpoint]:
+                label = "DOWN_ONSET"
+                break
+        if not ordered["onset_label"].eq(label).all():
+            raise AssertionError("UP/DOWN/NO_ONSET label differs")
+        labels[str(decision_id)] = label
+    for horizon in (15, 30):
+        calculated = 10_000.0 * (
+            valid[f"{('fifteen' if horizon == 15 else 'thirty')}_minute_terminal_close"]
+            / valid["entry_open"]
+            - 1.0
+        )
+        if not np.allclose(
+            calculated,
+            valid[f"raw_long_return_{horizon}_bps"],
+            atol=1e-10,
+            rtol=0.0,
+        ):
+            raise AssertionError(f"delayed {horizon}-minute terminal differs")
+        if not np.allclose(
+            -valid[f"raw_long_return_{horizon}_bps"],
+            valid[f"raw_short_return_{horizon}_bps"],
+            atol=1e-12,
+            rtol=0.0,
+        ):
+            raise AssertionError("raw short return differs")
+    if not (
+        valid["entry_minute_ordinal"] == np.where(valid["decision_ordinal"].eq(6), 31, 61)
+    ).all():
+        raise AssertionError("delayed minute +2 entry differs")
+    counts = valid.loc[valid["year"].eq(2025), "onset_label"].value_counts().to_dict()
+    return {
+        "path_rows_verified": len(paths),
+        "decision_paths_verified": len(labels),
+        "barriers_bps": {str(key): value for key, value in barriers.items()},
+        "assessment_label_counts": {str(key): int(value) for key, value in counts.items()},
+        "delayed_terminals_verified": [15, 30],
+    }
+
+
+def _manual_probability(model: Mapping[str, Any], frame: pd.DataFrame) -> np.ndarray:
+    names = [str(value) for value in model["feature_names"]]
+    values = frame.loc[:, names].to_numpy(dtype=float)
+    means = np.asarray(model["means"], dtype=float)
+    scales = np.asarray(model["scales"], dtype=float)
+    coefficients = np.asarray(model["coefficients"], dtype=float)
+    linear = float(model["intercept"]) + ((values - means) / scales) @ coefficients
+    return np.asarray(1.0 / (1.0 + np.exp(-np.clip(linear, -709.0, 709.0))))
+
+
+def _binary_values(labels: np.ndarray, probability: np.ndarray) -> tuple[float, float, float]:
+    clipped = np.clip(probability, 1e-15, 1.0 - 1e-15)
+    return (
+        float(np.mean((labels - probability) ** 2)),
+        float(-np.mean(labels * np.log(clipped) + (1.0 - labels) * np.log(1.0 - clipped))),
+        float(roc_auc_score(labels, probability)) if len(np.unique(labels)) == 2 else math.nan,
+    )
+
+
+def audit_full_models_and_metrics(artifacts: Path) -> tuple[dict[str, Any], pd.DataFrame]:
+    compact = pd.read_parquet(artifacts / "compact_decision_panel.parquet")
+    panel = compact.loc[compact["analysis_eligible"].astype(bool)].copy()
+    development = panel.loc[panel["year"].eq(2024)]
+    assessment = panel.loc[panel["year"].eq(2025)].copy()
+    coefficients = read_json(artifacts / "model_coefficients.json")
+    configurations = read_json(artifacts / "model_configurations.json")
+    assert_safety(coefficients)
+    assert_safety(configurations)
+    if configurations["preprocessing_fit_period"] != "2024_only":
+        raise AssertionError("model preprocessing was not fit on 2024 only")
+    predictions = pd.read_parquet(artifacts / "assessment_predictions.parquet")
+    if not predictions["session"].astype(str).str.startswith("2025-").all():
+        raise AssertionError("assessment predictions include non-2025 rows")
+    pivot = predictions.pivot_table(
+        index=["symbol", "session", "decision_ordinal"],
+        columns="model",
+        values="probability",
+        aggfunc="first",
+    ).reset_index()
+    assessment = assessment.merge(
+        pivot,
+        on=["symbol", "session", "decision_ordinal"],
+        how="left",
+        validate="one_to_one",
+    )
+    maximum_error = 0.0
+    for model_id, model in coefficients["models"].items():
+        training = (
+            development
+            if str(model_id).startswith("A")
+            else development.loc[development["directional_onset"].eq(1)]
+        )
+        if int(model["training_rows"]) != len(training) or not model["converged"]:
+            raise AssertionError("model training support or convergence differs")
+        manual = _manual_probability(model, assessment)
+        error = float(np.max(np.abs(manual - assessment[str(model_id)].to_numpy(dtype=float))))
+        maximum_error = max(maximum_error, error)
+        if error > 1e-12:
+            raise AssertionError(f"manual logistic reconstruction differs: {model_id}")
+    onset = pd.read_csv(artifacts / "onset_metrics.csv")
+    direction = pd.read_csv(artifacts / "direction_metrics.csv")
+    monthly = pd.read_csv(artifacts / "monthly_metrics.csv")
+    checkpoint = pd.read_csv(artifacts / "checkpoint_metrics.csv")
+    for metrics in (onset, direction, monthly, checkpoint):
+        for row in metrics.itertuples(index=False):
+            if row.scope_type == "pooled":
+                frame = assessment
+            elif row.scope_type == "month":
+                frame = assessment.loc[assessment["year_month"].eq(str(row.scope_value))]
+            elif row.scope_type == "checkpoint":
+                frame = assessment.loc[assessment["decision_ordinal"].eq(int(row.scope_value))]
+            elif row.scope_value == "singleton":
+                frame = assessment.loc[assessment["admitted_stock_count"].eq(1)]
+            else:
+                frame = assessment.loc[assessment["admitted_stock_count"].gt(1)]
+            target = "directional_onset" if row.stage == "onset" else "up_given_onset"
+            if row.stage == "direction":
+                frame = frame.loc[frame["directional_onset"].eq(1)]
+            actual = _binary_values(
+                frame[target].to_numpy(dtype=int), frame[str(row.model)].to_numpy(dtype=float)
+            )
+            for expected, observed in zip(
+                actual, (row.brier_score, row.log_loss, row.auc), strict=True
+            ):
+                if math.isnan(expected) and math.isnan(observed):
+                    continue
+                if not math.isclose(expected, float(observed), abs_tol=1e-10):
+                    raise AssertionError("reported probability metric differs")
+    return (
+        {
+            "models_verified": len(coefficients["models"]),
+            "maximum_manual_probability_error": maximum_error,
+            "metric_rows_verified": sum(
+                len(frame) for frame in (onset, direction, monthly, checkpoint)
+            ),
+        },
+        assessment,
+    )
+
+
+def _weighted_brier_increment(
+    frame: pd.DataFrame,
+    target: str,
+    baseline: str,
+    candidate: str,
+    counts: Mapping[str, int],
+) -> float:
+    weights = frame["session"].astype(str).map(counts).fillna(0.0).to_numpy(dtype=float)
+    mask = weights > 0.0
+    labels = frame.loc[mask, target].to_numpy(dtype=float)
+    baseline_loss = (labels - frame.loc[mask, baseline].to_numpy(dtype=float)) ** 2
+    candidate_loss = (labels - frame.loc[mask, candidate].to_numpy(dtype=float)) ** 2
+    return float(
+        np.average(baseline_loss, weights=weights[mask])
+        - np.average(candidate_loss, weights=weights[mask])
+    )
+
+
+def audit_full_bootstrap(artifacts: Path, assessment: pd.DataFrame) -> dict[str, Any]:
+    bootstrap = pd.read_csv(artifacts / "bootstrap_metrics.csv")
+    summaries = bootstrap.loc[bootstrap["record_type"].eq("summary")]
+    draws = bootstrap.loc[bootstrap["record_type"].eq("draw")]
+    for _, group in draws.groupby(["comparison", "metric"], sort=True):
+        if len(group) != 200 or sorted(group["draw"].astype(int)) != list(range(200)):
+            raise AssertionError("bootstrap draw count differs")
+        summary = summaries.loc[
+            summaries["comparison"].eq(group["comparison"].iloc[0])
+            & summaries["metric"].eq(group["metric"].iloc[0])
+        ].iloc[0]
+        values = group["estimate"].to_numpy(dtype=float)
+        expected = [
+            np.quantile(values, 0.05),
+            np.quantile(values, 0.95),
+            np.quantile(values, 0.025),
+            np.quantile(values, 0.975),
+        ]
+        observed = [summary.lower_90, summary.upper_90, summary.lower_95, summary.upper_95]
+        if not np.allclose(expected, observed, atol=1e-8, rtol=0.0):
+            raise AssertionError("bootstrap interval differs from fixed draws")
+    unique_sessions = np.asarray(sorted(assessment["session"].astype(str).unique()), dtype=object)
+    generator = np.random.default_rng(20260720)
+    recorded = draws.loc[
+        draws["comparison"].eq("A1_minus_A0") & draws["metric"].eq("brier")
+    ].sort_values("draw")
+    reconstructed: list[float] = []
+    for _ in range(200):
+        sampled = generator.choice(unique_sessions, size=len(unique_sessions), replace=True)
+        counts = pd.Series(sampled).value_counts().to_dict()
+        reconstructed.append(
+            _weighted_brier_increment(assessment, "directional_onset", "A0", "A1", counts)
+        )
+    if not np.allclose(reconstructed, recorded["estimate"], atol=1e-10, rtol=0.0):
+        raise AssertionError("session-block bootstrap grouping differs")
+    return {
+        "draw_rows_verified": len(draws),
+        "summary_rows_verified": len(summaries),
+        "session_block_draws_independently_reconstructed": 200,
+    }
+
+
+def audit_full_null(artifacts: Path) -> dict[str, Any]:
+    nulls = pd.read_csv(artifacts / "null_metrics.csv", keep_default_na=False)
+    draws = nulls.loc[nulls["record_type"].eq("draw")].copy()
+    summaries = nulls.loc[nulls["record_type"].eq("summary")].copy()
+    if draws["draw"].astype(int).nunique() != 50:
+        raise AssertionError("activity null draw count differs")
+    for draw, group in draws.groupby(draws["draw"].astype(int), sort=True):
+        if len(group) != 5 or group["activity_bundle_sha256"].nunique() != 1:
+            raise AssertionError(f"activity bundle was not kept together: {draw}")
+    for comparison, group in draws.groupby("comparison", sort=True):
+        summary = summaries.loc[summaries["comparison"].eq(comparison)].iloc[0]
+        values = group["null_value"].astype(float).to_numpy()
+        real = float(summary["real_value"])
+        if not math.isclose(
+            float(np.quantile(values, 0.90)),
+            float(summary["null_q90"]),
+            abs_tol=1e-10,
+        ):
+            raise AssertionError("activity null q90 differs")
+        if not math.isclose(
+            float(np.mean(values < real)),
+            float(summary["real_percentile"]),
+            abs_tol=1e-10,
+        ):
+            raise AssertionError("activity null percentile differs")
+    compact = pd.read_parquet(artifacts / "compact_decision_panel.parquet")
+    panel = compact.loc[compact["analysis_eligible"].astype(bool)].reset_index(drop=True)
+    feature_manifest = read_json(artifacts / "feature_manifest.json")
+    columns = [
+        *feature_manifest["raw_activity_sequence_features"],
+        *feature_manifest["activity_price_response_interactions"],
+    ]
+    generator = np.random.default_rng(20260721)
+    permuted = panel.copy()
+    for _, positions in permuted.groupby("parent_slate_id", sort=True).groups.items():
+        indices = list(positions)
+        if len(indices) < 2:
+            continue
+        source = permuted.loc[indices, columns].to_numpy(copy=True)
+        permuted.loc[indices, columns] = source[generator.permutation(len(indices))]
+    digest = hashlib.sha256(
+        permuted.loc[:, ["parent_slate_id", "symbol", *columns]]
+        .to_csv(index=False, lineterminator="\n", float_format="%.17g")
+        .encode()
+    ).hexdigest()
+    expected_digest = str(
+        draws.loc[draws["draw"].astype(int).eq(0), "activity_bundle_sha256"].iloc[0]
+    )
+    if digest != expected_digest:
+        raise AssertionError("first activity-bundle permutation hash differs")
+    return {
+        "draws_verified": 50,
+        "comparisons_verified": int(draws["comparison"].nunique()),
+        "activity_bundle_hashes_verified": int(draws["draw"].astype(int).nunique()),
+        "first_bundle_independently_permuted": True,
+    }
+
+
+def _economic_selection_rows(assessment: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for slate_id, slate in assessment.groupby("parent_slate_id", sort=True):
+        scores = {
+            "price_system": slate["A1"]
+            * (2.0 * slate["D1"] - 1.0)
+            * slate["p_large_remaining_move"],
+            "activity_system": slate["A2"]
+            * (2.0 * slate["D2"] - 1.0)
+            * slate["p_large_remaining_move"],
+            "interaction_system": slate["A3"]
+            * (2.0 * slate["D3"] - 1.0)
+            * slate["p_large_remaining_move"],
+            "highest_one_minute_relative_momentum": slate["cohort_relative_return_10"],
+            "strongest_one_minute_reversal": -slate["cohort_relative_return_3"],
+        }
+        for candidate, score in scores.items():
+            ranked = slate.assign(_score=score, _absolute=np.abs(score)).sort_values(
+                ["_absolute", "symbol"], ascending=[False, True], kind="mergesort"
+            )
+            selected = ranked.iloc[0]
+            direction = 1.0 if float(selected["_score"]) >= 0.0 else -1.0
+            rows.append(
+                {
+                    "candidate": candidate,
+                    "parent_slate_id": str(slate_id),
+                    "symbol": str(selected["symbol"]),
+                    "session": str(selected["session"]),
+                    "year_month": str(selected["year_month"]),
+                    "decision_ordinal": int(selected["decision_ordinal"]),
+                    "signed_return_15_bps": direction * float(selected["raw_long_return_15_bps"]),
+                    "signed_return_30_bps": direction * float(selected["raw_long_return_30_bps"]),
+                    "cohort_relative_signed_return_15_bps": direction
+                    * float(selected["cohort_relative_return_15_bps"]),
+                    "cohort_relative_signed_return_30_bps": direction
+                    * float(selected["cohort_relative_return_30_bps"]),
+                }
+            )
+        ordered = slate.sort_values("symbol", kind="mergesort").reset_index(drop=True)
+        digest = hashlib.sha256(f"20260722:{slate_id}".encode()).digest()
+        selected = ordered.iloc[int.from_bytes(digest[:8], "big") % len(ordered)]
+        direction = 1.0 if digest[8] % 2 == 0 else -1.0
+        rows.append(
+            {
+                "candidate": "random_admitted_stock",
+                "parent_slate_id": str(slate_id),
+                "symbol": str(selected["symbol"]),
+                "session": str(selected["session"]),
+                "year_month": str(selected["year_month"]),
+                "decision_ordinal": int(selected["decision_ordinal"]),
+                "signed_return_15_bps": direction * float(selected["raw_long_return_15_bps"]),
+                "signed_return_30_bps": direction * float(selected["raw_long_return_30_bps"]),
+                "cohort_relative_signed_return_15_bps": direction
+                * float(selected["cohort_relative_return_15_bps"]),
+                "cohort_relative_signed_return_30_bps": direction
+                * float(selected["cohort_relative_return_30_bps"]),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def audit_full_economic_and_concentration(
+    artifacts: Path, assessment: pd.DataFrame
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    selections = _economic_selection_rows(assessment)
+    economic = pd.read_csv(artifacts / "economic_reference_metrics.csv")
+    for row in economic.itertuples(index=False):
+        if row.scope_type == "pooled":
+            scope = selections
+        elif row.scope_type == "month":
+            scope = selections.loc[selections["year_month"].eq(str(row.scope_value))]
+        else:
+            scope = selections.loc[selections["decision_ordinal"].eq(int(row.scope_value))]
+        frame = scope.loc[scope["candidate"].eq(str(row.candidate))]
+        horizon = 15 if str(row.horizon).startswith("15_") else 30
+        gross = frame[f"signed_return_{horizon}_bps"].to_numpy(dtype=float)
+        relative = frame[f"cohort_relative_signed_return_{horizon}_bps"].to_numpy(dtype=float)
+        expected = (
+            float(np.mean(gross - float(row.friction_bps))),
+            float(np.mean(relative - float(row.friction_bps))),
+            float(np.mean(gross - float(row.friction_bps) > 0.0)),
+        )
+        observed = (
+            float(row.mean_signed_return_bps),
+            float(row.mean_cohort_relative_signed_return_bps),
+            float(row.positive_selection_pct),
+        )
+        if not np.allclose(expected, observed, atol=1e-8, rtol=0.0):
+            raise AssertionError("delayed economic-reference metric differs")
+    concentration = pd.read_csv(artifacts / "concentration_metrics.csv")
+    row_shares = assessment["symbol"].value_counts(normalize=True)
+    for row in concentration.itertuples(index=False):
+        if row.scope == "assessment_admitted_rows":
+            expected = float(row_shares.get(str(row.symbol), 0.0))
+            if not math.isclose(expected, float(row.row_share), abs_tol=1e-12):
+                raise AssertionError("assessment row concentration differs")
+        else:
+            group = selections.loc[selections["candidate"].eq(str(row.candidate))]
+            expected = float(group["symbol"].value_counts(normalize=True).get(str(row.symbol), 0.0))
+            if not math.isclose(expected, float(row.selection_share), abs_tol=1e-12):
+                raise AssertionError("economic selection concentration differs")
+    bootstrap = pd.read_csv(artifacts / "bootstrap_metrics.csv")
+    economic_draws = bootstrap.loc[
+        bootstrap["record_type"].eq("draw") & bootstrap["metric"].eq("economic_15m_after_20bps")
+    ]
+    if len(economic_draws) != 400:
+        raise AssertionError("economic bootstrap draw count differs")
+    return (
+        {
+            "selection_rows_reconstructed": len(selections),
+            "economic_metric_rows_verified": len(economic),
+            "concentration_rows_verified": len(concentration),
+            "economic_bootstrap_draw_rows_verified": len(economic_draws),
+        },
+        selections,
+    )
+
+
+def audit_full_decision_and_rerun(artifacts: Path) -> dict[str, Any]:
+    decision = read_json(artifacts / "decision.json")
+    assert_safety(decision)
+    if decision["decision"] not in NON_BLOCKED_DECISIONS:
+        raise AssertionError("full decision category differs")
+    for increment in decision["increments"].values():
+        if bool(increment["passes"]) != all(bool(value) for value in increment["gates"].values()):
+            raise AssertionError("increment gate conjunction differs")
+    flags = decision["pass_flags"]
+    if flags["raw_activity_onset"] and flags["raw_activity_direction"]:
+        expected = "one_minute_activity_leads_onset_and_direction"
+    elif flags["raw_activity_onset"]:
+        expected = "one_minute_activity_leads_onset_only"
+    elif flags["raw_activity_direction"]:
+        expected = "one_minute_activity_adds_direction_only"
+    elif flags["interaction_onset"] or flags["interaction_direction"]:
+        expected = "activity_price_response_interaction_only"
+    elif flags["price_onset"] or flags["price_direction"]:
+        expected = "one_minute_price_sequence_only"
+    else:
+        expected = "no_one_minute_activity_increment"
+    if decision["decision"] != expected:
+        raise AssertionError("decision precedence differs")
+    forbidden = read_json(artifacts / "forbidden_feature_audit.json")
+    if not forbidden["passed"] or forbidden["violations"]:
+        raise AssertionError("forbidden model predictor present")
+    plots = sorted(path.name for path in artifacts.glob("*.png"))
+    if len(plots) != 3:
+        raise AssertionError("plot resource limit differs")
+    rerun = read_json(artifacts / "exact_rerun_manifest.json")
+    if not rerun["passed"] or rerun["decision"] != decision["decision"]:
+        raise AssertionError("exact rerun status differs")
+    for row in rerun["comparisons"]:
+        current = sha256_file(artifacts / str(row["artifact"]))
+        if current not in {row["primary_sha256"], row["exact_rerun_sha256"]}:
+            raise AssertionError("exact rerun artifact hash differs")
+    return {
+        "decision": decision["decision"],
+        "increments_reconstructed": len(decision["increments"]),
+        "plots_verified": plots,
+        "exact_artifact_comparisons_verified": len(rerun["comparisons"]),
+    }
+
+
 def run_audit(artifacts: Path, provider_root: Path) -> dict[str, Any]:
-    """Run all independent blocker checks."""
+    """Run all independent blocker or full-screen checks."""
 
     source_text = Path(__file__).read_text(encoding="utf-8")
     syntax = ast.parse(source_text)
@@ -643,6 +1542,48 @@ def run_audit(artifacts: Path, provider_root: Path) -> dict[str, Any]:
         raise AssertionError("auditor imported experiment runner")
     contract = read_json(artifacts / "contract.json")
     assert_safety(contract)
+    decision = read_json(artifacts / "decision.json")
+    if decision["decision"] in NON_BLOCKED_DECISIONS:
+        model_checks, assessment = audit_full_models_and_metrics(artifacts)
+        economic_checks, _ = audit_full_economic_and_concentration(artifacts, assessment)
+        diagnostics = pd.read_csv(artifacts / "feature_group_diagnostics.csv")
+        required_groups = {
+            "price_only_sequence",
+            "raw_activity",
+            "activity_timing",
+            "absorption_interactions",
+            "continuation_interactions",
+        }
+        if not required_groups.issubset(set(diagnostics["feature_group"])):
+            raise AssertionError("feature-group diagnostics are incomplete")
+        checks = {
+            "availability": audit_availability(artifacts, provider_root),
+            "frozen_population": audit_frozen_population(artifacts),
+            "input_hashes": audit_full_inputs(artifacts, provider_root),
+            "protected_boundary": audit_protected_boundary(artifacts),
+            "timestamp_semantics": audit_full_timestamp_semantics(artifacts, provider_root),
+            "sequences_normalisation_and_features": audit_full_sequences_and_features(
+                artifacts, provider_root
+            ),
+            "outcomes": audit_full_outcomes(artifacts),
+            "models_and_metrics": model_checks,
+            "bootstrap": audit_full_bootstrap(artifacts, assessment),
+            "activity_bundle_null": audit_full_null(artifacts),
+            "economic_and_concentration": economic_checks,
+            "feature_group_diagnostics": {
+                "rows_verified": len(diagnostics),
+                "groups_verified": sorted(required_groups),
+            },
+            "decision_and_exact_rerun": audit_full_decision_and_rerun(artifacts),
+        }
+        return {
+            **SAFETY_FLAGS,
+            "passed": True,
+            "decision": decision["decision"],
+            "auditor_imported_runner": imported_runner,
+            "auditor_imported_reusable_module": False,
+            "checks": checks,
+        }
     checks = {
         "availability": audit_availability(artifacts, provider_root),
         "frozen_population": audit_frozen_population(artifacts),

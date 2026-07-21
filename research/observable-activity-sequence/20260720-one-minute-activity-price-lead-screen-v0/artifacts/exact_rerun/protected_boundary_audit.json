@@ -1,0 +1,25 @@
+{
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "frozen_predecessor_maximum_timestamp": "2025-08-22T20:00:00+00:00",
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "maximum_one_minute_timestamp_read": null,
+  "minimum_one_minute_timestamp_read": null,
+  "observable_only": true,
+  "one_minute_rows_materialised": 0,
+  "one_minute_sequence_test": true,
+  "one_minute_source_files_opened": 0,
+  "order_placement": "disabled",
+  "parquet_predicate_maximum_exclusive": "2025-08-23T00:00:00+00:00",
+  "passed": true,
+  "production_runtime_modified": false,
+  "protected_files_touched": [],
+  "protected_rows_opened": 0,
+  "protected_start": "2025-08-23",
+  "research_only": true,
+  "source_columns_materialised": [
+    "timestamp"
+  ],
+  "strategy_promotion": false
+}

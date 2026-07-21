@@ -1,0 +1,41 @@
+{
+  "artifacts": [
+    {
+      "logical_path": "research/observable-activity-sequence/20260720-one-minute-activity-price-lead-screen-v0/contract.json",
+      "sha256": "6e87e1f91adabc71125c06158108cd951097b67c1e63cab60e7be412753a2d78"
+    },
+    {
+      "logical_path": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/primary/compact_decision_panel.parquet",
+      "sha256": "209494526d3a8abcd23a0329acd86b67248215ae9e2354295803169051dded15"
+    },
+    {
+      "logical_path": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/primary/source_manifest.json",
+      "sha256": "1cd7687dde51b27451b0e533bf62e39ea9e1d92d1519567bce151c54ea33b071"
+    },
+    {
+      "logical_path": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/primary/decision.json",
+      "sha256": "3d53080f86dc7869c9fa947ef572ec7d268cecffdd35a5d98a992c5268e75430"
+    },
+    {
+      "logical_path": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/primary/movement_admission_thresholds.json",
+      "sha256": "50de6d0c0aa8044408004d07d2c05f6922844ebaa01e5863bf3f80b6d39f9c33"
+    },
+    {
+      "logical_path": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/primary/protected_boundary_audit.json",
+      "sha256": "3bc7f480c4585b365acadebc83528a1926ea6b25fee1503704cf5eef5368929b"
+    }
+  ],
+  "broker_integration_required": false,
+  "contract_id": "20260720-one-minute-activity-price-lead-screen-v0",
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "one_minute_safe_timestamp_hashes": [],
+  "one_minute_sequence_test": true,
+  "one_minute_source_artifacts_hashed": 0,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

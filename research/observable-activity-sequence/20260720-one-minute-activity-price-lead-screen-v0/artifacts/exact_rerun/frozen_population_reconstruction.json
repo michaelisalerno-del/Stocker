@@ -1,0 +1,79 @@
+{
+  "admission_rule_recomputed": false,
+  "assessment_admitted_rows": 1560,
+  "assessment_checkpoint_rows": {
+    "12": 794,
+    "6": 766
+  },
+  "assessment_sessions": 153,
+  "assessment_stocks": 20,
+  "broker_integration_required": false,
+  "development_admitted_rows": 1239,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "frozen_admission_flag_reused": true,
+  "frozen_admitted_maximum_decision_timestamp": "2025-08-22 14:30:00+00:00",
+  "frozen_admitted_minimum_decision_timestamp": "2024-07-01 14:00:00+00:00",
+  "frozen_panel_rows_read": 15093,
+  "frozen_source_maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+  "frozen_source_minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+  "identity_columns": [
+    "symbol",
+    "session",
+    "decision_ordinal",
+    "decision_timestamp_utc",
+    "p_large_remaining_move",
+    "high_movement_admitted",
+    "parent_slate_id",
+    "movement_admission_threshold",
+    "qa_status"
+  ],
+  "identity_sha256": "3b6b5385e30ee66c30103cabc182f259f23b6aaf41a60d37f43c33a8effe4c6e",
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "one_minute_sequence_test": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "predecessor_corporate_action_checks_passed": true,
+  "predecessor_qa_status_by_symbol": {
+    "AAL": "pass",
+    "AAOI": "warning",
+    "APLD": "warning",
+    "ASTS": "warning",
+    "CIFR": "warning",
+    "HIMS": "warning",
+    "IONQ": "warning",
+    "IREN": "warning",
+    "MARA": "pass",
+    "MP": "warning",
+    "MRNA": "warning",
+    "MSTR": "warning",
+    "NVTS": "warning",
+    "QBTS": "warning",
+    "RGTI": "warning",
+    "RIOT": "pass",
+    "RIVN": "warning",
+    "SMCI": "warning",
+    "SOFI": "pass",
+    "WULF": "warning"
+  },
+  "predecessor_source_gap_ledger_rejected_session_records": 267,
+  "production_runtime_modified": false,
+  "required_thresholds_12dp": {
+    "12": 0.300349339178,
+    "6": 0.30288693685
+  },
+  "research_only": true,
+  "source_commit": "cda387c6e05abfd5f9c5cc7cd22ad78224185e03",
+  "source_experiment": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1",
+  "source_panel_sha256": "209494526d3a8abcd23a0329acd86b67248215ae9e2354295803169051dded15",
+  "strategy_promotion": false,
+  "threshold_absolute_errors_after_12dp_freeze": {
+    "12": 0.0,
+    "6": 0.0
+  },
+  "thresholds_from_frozen_artifact": {
+    "12": 0.3003493391782974,
+    "6": 0.30288693685048057
+  }
+}

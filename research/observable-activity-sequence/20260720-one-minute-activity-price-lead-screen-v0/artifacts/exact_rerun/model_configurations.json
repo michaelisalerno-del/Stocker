@@ -1,0 +1,34 @@
+{
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "feature_or_hyperparameter_search": false,
+  "fitted_model_count": 0,
+  "fitted_models": [],
+  "fixed_model": {
+    "C": 1.0,
+    "class_weight": null,
+    "max_iter": 250,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "one_minute_sequence_test": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "requested_models": [
+    "A0",
+    "A1",
+    "A2",
+    "A3",
+    "D0",
+    "D1",
+    "D2",
+    "D3"
+  ],
+  "research_only": true,
+  "status": "not_fitted_due_to_history_blocker",
+  "strategy_promotion": false
+}

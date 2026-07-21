@@ -1,0 +1,75 @@
+{
+  "auditor_imported_reusable_module": false,
+  "auditor_imported_runner": false,
+  "broker_integration_required": false,
+  "checks": {
+    "availability": {
+      "bar_end_candidate_complete_symbol_sessions": 0,
+      "bar_start_candidate_complete_symbol_sessions": 0,
+      "complete_symbol_sessions": 0,
+      "early_close_sessions_210_minutes": 80,
+      "one_minute_rows_materialised": 0,
+      "regular_sessions_390_minutes": 8160,
+      "rows_verified": 8240,
+      "sessions_verified": 412,
+      "source_files_present": 0,
+      "symbols_verified": 20
+    },
+    "decision_and_exact_rerun": {
+      "decision": "blocked_one_minute_history_unavailable",
+      "decision_reconstructed": true,
+      "pre_audit_exact_comparisons_verified": 29
+    },
+    "downstream_not_opened": {
+      "assessment_prediction_rows": 0,
+      "bootstrap_draws": 0,
+      "economic_diagnostics": 0,
+      "models_fitted": 0,
+      "normalisation_rows_fitted": 0,
+      "null_draws": 0,
+      "onset_path_rows": 0,
+      "plots": 0,
+      "unperformed_formula_checks": "not_applicable_due_to_first_gate_history_blocker"
+    },
+    "frozen_population": {
+      "assessment_rows": 1560,
+      "assessment_sessions": 153,
+      "assessment_stocks": 20,
+      "checkpoint_rows": {
+        "12": 794,
+        "6": 766
+      },
+      "development_rows": 1239,
+      "maximum_decision_timestamp": "2025-08-22 14:30:00+00:00",
+      "rows_verified": 2799
+    },
+    "input_hashes": {
+      "hashes_verified": 6,
+      "one_minute_source_hashes": 0
+    },
+    "protected_boundary": {
+      "maximum_frozen_timestamp": "2025-08-22T20:00:00+00:00",
+      "one_minute_source_files_opened": 0,
+      "protected_rows_opened": 0,
+      "protected_start": "2025-08-23",
+      "safe_one_minute_rows_materialised": 0
+    },
+    "timestamp_semantics": {
+      "bar_start_or_end_proved": false,
+      "causal_window_materialised": false,
+      "decision_precedence": "blocked_one_minute_history_unavailable",
+      "status": "not_evaluated_history_unavailable"
+    }
+  },
+  "decision": "blocked_one_minute_history_unavailable",
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "one_minute_sequence_test": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

@@ -1,0 +1,20 @@
+{
+  "barriers_bps": {
+    "12": null,
+    "6": null
+  },
+  "broker_integration_required": false,
+  "development_rows_used": 0,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "one_minute_sequence_test": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quantile": 0.75,
+  "research_only": true,
+  "status": "not_calculated_due_to_history_blocker",
+  "strategy_promotion": false,
+  "training_period": "2024"
+}

@@ -1,0 +1,115 @@
+{
+  "broker_integration_required": false,
+  "checkpoints": {
+    "12": {
+      "decision_time_america_new_york": "10:30",
+      "movement_threshold": 0.300349339178
+    },
+    "6": {
+      "decision_time_america_new_york": "10:00",
+      "movement_threshold": 0.30288693685
+    }
+  },
+  "contract_id": "20260720-one-minute-activity-price-lead-screen-v0",
+  "dates": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "protected_start": "2025-08-23"
+  },
+  "decision_categories": [
+    "one_minute_activity_leads_onset_and_direction",
+    "one_minute_activity_leads_onset_only",
+    "one_minute_activity_adds_direction_only",
+    "activity_price_response_interaction_only",
+    "one_minute_price_sequence_only",
+    "no_one_minute_activity_increment",
+    "blocked_one_minute_history_unavailable",
+    "blocked_one_minute_timestamp_semantics_unproven",
+    "blocked_frozen_high_movement_population_mismatch",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_insufficient_one_minute_support",
+    "blocked_quick_activity_screen_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "fixed_windows": {
+    "continuation_exit": "close_minute_plus_16",
+    "entry": "open_minute_plus_2",
+    "onset_path": "closes_minute_plus_2_through_plus_6",
+    "predictor": "ten_completed_minutes_minus_10_through_minus_1",
+    "secondary_exit": "close_minute_plus_31"
+  },
+  "frozen_predecessor": {
+    "commit": "cda387c6e05abfd5f9c5cc7cd22ad78224185e03",
+    "experiment": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1",
+    "movement_model_commit": "5e80d972d1e003c8366a1ec6ca170d1077288ead",
+    "movement_model_id": "large_remaining_move__M1"
+  },
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_specification": {
+    "C": 1.0,
+    "class_weight": null,
+    "ladders": [
+      "A0",
+      "A1",
+      "A2",
+      "A3",
+      "D0",
+      "D1",
+      "D2",
+      "D3"
+    ],
+    "max_iter": 250,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "observable_only": true,
+  "one_minute_sequence_test": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "provider_activity_label": "historical_activity_proxy",
+  "research_only": true,
+  "resource_limits": {
+    "bootstrap_draws": 200,
+    "compact_rows_maximum": 20000,
+    "gpu": false,
+    "model_fits_maximum": 8,
+    "null_draws": 50,
+    "plots_maximum": 3,
+    "processes": 1
+  },
+  "safety": {
+    "broker_integration_required": false,
+    "execution_enabled": false,
+    "feasibility_screen": true,
+    "loops_regimes_states_and_structural_paths_forbidden": true,
+    "observable_only": true,
+    "one_minute_sequence_test": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "research_only": true,
+    "strategy_promotion": false
+  },
+  "seeds": {
+    "bootstrap": 20260720,
+    "economic_random": 20260722,
+    "null": 20260721
+  },
+  "strategy_promotion": false,
+  "support_gates": {
+    "admitted_rows_minimum": 1200,
+    "assessment_sessions_minimum": 100,
+    "assessment_stocks_minimum": 15,
+    "directional_onsets_minimum": 250,
+    "down_onsets_minimum": 100,
+    "months_minimum": 6,
+    "parent_slate_valid_stocks_minimum": 15,
+    "up_onsets_minimum": 100
+  }
+}

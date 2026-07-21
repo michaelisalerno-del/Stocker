@@ -1,0 +1,21 @@
+{
+  "availability_timestamp_label_ordinals_mapped": true,
+  "bar_start_or_end_proved": false,
+  "broker_integration_required": false,
+  "causal_window_materialised": false,
+  "decision_precedence": "blocked_one_minute_history_unavailable",
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "one_minute_sequence_test": true,
+  "order_placement": "disabled",
+  "passed": false,
+  "production_runtime_modified": false,
+  "reason": "complete local one-minute history failed the availability gate",
+  "research_only": true,
+  "session_relative_ordinal_mapping_performed": false,
+  "status": "not_evaluated_history_unavailable",
+  "strategy_promotion": false,
+  "timestamp_convention": null
+}

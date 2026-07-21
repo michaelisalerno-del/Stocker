@@ -1,0 +1,166 @@
+{
+  "broker_integration_required": false,
+  "candidate_veto": {
+    "V0_features": [
+      "logit(B0 registered-loop probability)",
+      "checkpoint_12"
+    ],
+    "V1_increment": "logit(U1 hidden-event probability)",
+    "b0_development_folds": 4,
+    "b0_warmup_fraction": 0.2,
+    "bootstrap_draws": 25,
+    "bootstrap_seed": 20260722,
+    "candidate_threshold": "development_valid_oof_B0_probability_80th_percentile",
+    "hidden_probability_null_refits": 5,
+    "hidden_probability_null_seed": 20260723,
+    "hidden_risk_quartiles": [
+      0.25,
+      0.75
+    ],
+    "hidden_risk_quintiles": [
+      0.2,
+      0.4,
+      0.6,
+      0.8
+    ],
+    "materially_opposite_checkpoint_rate_difference": 0.02,
+    "model": {
+      "C": 0.25,
+      "class_weight": null,
+      "max_iter": 300,
+      "n_jobs": 1,
+      "penalty": "l2",
+      "random_state": 20260721,
+      "solver": "liblinear"
+    },
+    "probability_clip": [
+      1e-06,
+      0.999999
+    ],
+    "row_weight": "exact_predecessor_slate_weight"
+  },
+  "decision_categories": [
+    "hidden_diversion_veto_and_registered_precursor_supported",
+    "hidden_diversion_veto_supported_only",
+    "registered_precursor_structure_supported_only",
+    "descriptive_precursor_or_veto_structure_only",
+    "no_hidden_veto_or_precursor_enrichment",
+    "blocked_predecessor_panel_not_reconstructable",
+    "blocked_precursor_support_failure",
+    "blocked_candidate_veto_support_failure",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_quick_precursor_veto_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "experiment_id": "20260721-registered-loop-precursor-hidden-veto-v0",
+  "experiment_name": "Registered-Loop Precursors and Hidden-Diversion Veto Quick Screen V0",
+  "hard_limits": {
+    "feature_search": false,
+    "gpu": false,
+    "hidden_probability_null_refits": 5,
+    "maximum_expanding_development_folds": 4,
+    "maximum_new_assessment_models": 2,
+    "maximum_plots": 2,
+    "model_search": false,
+    "n_jobs": 1,
+    "new_emotion_discovery": false,
+    "new_loop_discovery": false,
+    "one_minute_data": false,
+    "one_process": true,
+    "precursor_null_draws": 25,
+    "repository_wide_test_suite": false,
+    "session_bootstrap_draws": 25,
+    "threshold_search": false
+  },
+  "hidden_route_diversion_veto_test": true,
+  "order_placement": "disabled",
+  "population": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "cohort": "exact_frozen_audited_20_stock_opening_cohort",
+    "decision_ordinals": [
+      6,
+      12
+    ],
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "hidden_horizon_completed_bars": 6,
+    "precursor_lookbacks_completed_bars": [
+      3,
+      6,
+      12
+    ],
+    "protected_start": "2025-08-23",
+    "registered_horizon_completed_bars": 12
+  },
+  "precursor": {
+    "clock_bin_minutes": 30,
+    "exact_support": {
+      "bh_q_maximum": 0.1,
+      "maximum_month_share": 0.3,
+      "maximum_stock_share": 0.3,
+      "minimum_assessment_occurrences": 20,
+      "minimum_assessment_sessions": 10,
+      "minimum_development_occurrences": 30,
+      "minimum_stocks": 8
+    },
+    "full_history": "all_prior_bar_ordinals_present_within_session",
+    "matched_null_draws": 25,
+    "matched_null_seed": 20260721,
+    "nearest_priority": [
+      "nearest_completed_loop_event",
+      "active_prefix_associated_with_eventual_registered_loop",
+      "other_active_prefix",
+      "regime_transition",
+      "no_identified_structural_precursor"
+    ],
+    "posterior_changes": "last_minus_first_available_bar_in_window",
+    "posterior_transition_probability": "last_completed_bar_before_completion",
+    "prefix_candidate_count": "distinct_bar_semantic_orientation_depth_snapshots",
+    "registered_broad_family": "motif_type_primitive_repeat_composite"
+  },
+  "predecessors": [
+    {
+      "commit": "52469a8b14f08d098fffe670625a4c55c9aaa4dd",
+      "decision": "opening_trajectories_predict_unregistered_events_only",
+      "experiment_id": "20260721-opening-trajectory-unregistered-families-v0"
+    },
+    {
+      "commit": "d7cc126f8a711c3aaef5b3eb5b40e3d360546111",
+      "decision": "blocked_support_failure",
+      "experiment_id": "20260721-hidden-loop-economics-registered-bridge-v0"
+    }
+  ],
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "retrospective_only": true,
+  "strategy_promotion": false,
+  "support": {
+    "candidate": {
+      "maximum_stock_share": 0.1,
+      "maximum_target_class_share": 0.85,
+      "minimum_actual_hidden_events": 150,
+      "minimum_assessment_rows": 1000,
+      "minimum_high_hidden_risk_rows": 200,
+      "minimum_low_hidden_risk_rows": 200,
+      "minimum_registered_completions": 150,
+      "minimum_sessions": 120,
+      "minimum_stocks": 15
+    },
+    "precursor": {
+      "minimum_complete_12_bar_history_rate": 0.9,
+      "minimum_months": 6,
+      "minimum_sessions": 120,
+      "minimum_stocks": 15,
+      "minimum_unique_assessment_completions": 500
+    }
+  }
+}

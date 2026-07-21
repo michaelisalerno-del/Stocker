@@ -1,0 +1,40 @@
+{
+  "V0": {
+    "features": [
+      "logit_B0_probability",
+      "checkpoint_12"
+    ]
+  },
+  "V1": {
+    "features": [
+      "logit_B0_probability",
+      "checkpoint_12",
+      "logit_U1_probability"
+    ]
+  },
+  "actual_hidden_event_excluded": true,
+  "broker_integration_required": false,
+  "determinism_refits": 2,
+  "development_B0_crossfit_fits": 4,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "hidden_probability_null_refits": 5,
+  "hidden_route_diversion_veto_test": true,
+  "model": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "random_state": 20260721,
+    "solver": "liblinear"
+  },
+  "order_placement": "disabled",
+  "primary_model_fits": 2,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "strategy_promotion": false
+}

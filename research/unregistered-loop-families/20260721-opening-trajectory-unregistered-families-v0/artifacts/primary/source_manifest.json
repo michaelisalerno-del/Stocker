@@ -1,0 +1,62 @@
+{
+  "broker_integration_required": false,
+  "development_frozen_unregistered_families": true,
+  "dictionary": {
+    "dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "dictionary_rows": 20,
+    "dictionary_version": "semantic_loop_dictionary_v2",
+    "registered_oriented_paths": 46,
+    "source_sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+  },
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "maximum_timestamp_read": "2025-08-22 15:00:00+00:00",
+  "minimum_timestamp_read": "2024-01-17 14:30:00+00:00",
+  "one_minute_data_opened": false,
+  "opening_phase_only": true,
+  "order_placement": "disabled",
+  "predecessor_commit": "8191bc7fa9dc689d2ca998e759bebab094bc1ade",
+  "predecessor_experiment": "Behavioural-Trajectory Funnel V0.1 — Corrected Anchors and Later Loops",
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "quick_feasibility_screen": true,
+  "raw_data_downloaded": false,
+  "research_only": true,
+  "sources": [
+    {
+      "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-late-loops-v01/artifacts/primary/decision_panel.parquet",
+      "sha256": "ed321ebafc07c1d9da30302d4cf07155d77e30da0ad536bac6271cc0e767bc81"
+    },
+    {
+      "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-late-loops-v01/artifacts/primary/trajectory_ledger.parquet",
+      "sha256": "ee2f9aa7ae611d6fe1080da06a49dbd02c9e22b3562c99be09fc963983809281"
+    },
+    {
+      "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-late-loops-v01/artifacts/primary/model_configurations.json",
+      "sha256": "5d9c3aca9a7aa75e70bc3fb44f3055ae5608e769076382cbf73f5920cb0218b6"
+    },
+    {
+      "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-late-loops-v01/artifacts/primary/assessment_predictions.parquet",
+      "sha256": "fd3ebdebf61a5990de626a74cb66122cfbcfebfa9592b24d0d1354870d849a5e"
+    },
+    {
+      "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-late-loops-v01/artifacts/primary/checkpoint_anchor_manifest.json",
+      "sha256": "b697b7dd33a65bcf8d22b5bdaee2074c278f541f8b31d28049f6e0837f34e3e1"
+    },
+    {
+      "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-late-loops-v01/artifacts/primary/determinism_check.json",
+      "sha256": "ec07b5f2d59e91caac697238f3695aedd82626b83b9e31e4202353b857fca3e9"
+    },
+    {
+      "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-late-loops-v01/artifacts/primary/lightweight_audit.json",
+      "sha256": "d7530dbb666e107ca3445596cc5d1dbb170ab3a1d7fe6fbba97c3cda5a2fe829"
+    },
+    {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/semantic_loop_dictionary_v2.csv",
+      "sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+    }
+  ],
+  "strategy_promotion": false,
+  "unregistered_structural_event_target": true
+}

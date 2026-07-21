@@ -1,0 +1,5 @@
+stage,population,gate,value,threshold,passed
+A,opening,maximum_stock_share,0.050151732950007986,0.1,True
+A,opening,maximum_binary_class_share,0.7379012937230475,0.75,True
+B,assessment_unregistered,maximum_stock_share,0.05728214503351615,0.15,True
+B,assessment_unregistered,maximum_family_share,0.41681901279707495,0.7,True

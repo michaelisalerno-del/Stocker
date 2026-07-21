@@ -1,0 +1,151 @@
+{
+  "experiment_id": "20260721-opening-trajectory-unregistered-families-v0",
+  "experiment_name": "Opening Behavioural Trajectory → Unregistered Loop Families Quick Screen V0",
+  "research_only": true,
+  "quick_feasibility_screen": true,
+  "opening_phase_only": true,
+  "unregistered_structural_event_target": true,
+  "development_frozen_unregistered_families": true,
+  "economic_outcomes_opened": false,
+  "directional_outcomes_opened": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "predecessor": {
+    "experiment": "Behavioural-Trajectory Funnel V0.1 — Corrected Anchors and Later Loops",
+    "commit": "8191bc7fa9dc689d2ca998e759bebab094bc1ade",
+    "decision": "trajectory_main_effects_only"
+  },
+  "population": {
+    "development_start": "2024-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "assessment_start": "2025-01-01",
+    "assessment_end_inclusive": "2025-08-22",
+    "protected_start": "2025-08-23",
+    "decision_ordinals": [6, 12],
+    "local_clocks_america_new_york": ["10:00", "10:30"],
+    "trajectory_anchors": {"6": [2, 4, 6], "12": [4, 8, 12]},
+    "future_horizon_completed_five_minute_bars": 6,
+    "one_row_per": "stock_x_session_x_checkpoint"
+  },
+  "stage_a": {
+    "primary_target": "UNREGISTERED_LOOP_vs_REGISTERED_COMPLETION_or_NO_REGISTERED_COMPLETION",
+    "diagnostic_target": "REGISTERED_COMPLETION_vs_NO_REGISTERED_COMPLETION",
+    "models": ["U0", "U1", "R0", "R1"],
+    "binary_model": {
+      "penalty": "l2",
+      "C": 0.25,
+      "solver": "liblinear",
+      "max_iter": 300,
+      "class_weight": null,
+      "n_jobs": 1,
+      "preprocessing_fit": "2024_only",
+      "row_weight": "1 / eligible_stocks_in_session_checkpoint"
+    },
+    "quantile_thresholds": {
+      "fit": "2024_predictions_only",
+      "weighted_quantile": true,
+      "top_decile": 0.9,
+      "top_quintile": 0.8,
+      "assessment_threshold_tuning": false
+    },
+    "material_checkpoint_adversity": {
+      "metric": "log_loss_improvement",
+      "minimum": -0.001,
+      "source": "frozen_predecessor_quick-screen_convention"
+    }
+  },
+  "trajectory_groups": {
+    "AROUSAL_TRAJECTORY": ["arousal_change", "arousal_acceleration", "arousal_reversal"],
+    "CONVICTION_TRAJECTORY": ["conviction_change", "conviction_acceleration", "conviction_reversal"],
+    "FRUSTRATION_TRAJECTORY": ["frustration_change", "frustration_acceleration", "frustration_reversal"],
+    "TENSION_TRAJECTORY": ["tension_change", "tension_acceleration", "tension_reversal"],
+    "SIGNED_PRESSURE_TRAJECTORY": ["signed_pressure_change", "signed_pressure_acceleration", "signed_pressure_reversal"],
+    "SIGNED_EXHAUSTION_TRAJECTORY": ["signed_exhaustion_change", "signed_exhaustion_acceleration", "signed_exhaustion_reversal"]
+  },
+  "canonicalisation": {
+    "frozen_before_assessment_family_support": true,
+    "input": "exact causal closed state-transition path of the first unregistered event",
+    "state_transition_order_preserved": true,
+    "rotation_invariance": "forward rotations only, matching V2 registered-loop semantics",
+    "reverse_orientation": "separate family unless reverse traversal is itself a forward rotation",
+    "orientation_metadata_retained": true,
+    "repeat_depth_retained": true,
+    "motif_types": ["primitive_like", "repeat_like", "composite_like"],
+    "v2_decompose_closed_path_used_when_supported": true,
+    "fallback": "stable canonical forward path plus structural motif, never discovery rank",
+    "family_id_format": "unregistered_<motif>__<canonical_closed_path>",
+    "maximum_transition_length": 8
+  },
+  "hidden_family_selection": {
+    "fit": "2024_only",
+    "minimum_outcomes": 30,
+    "minimum_sessions": 20,
+    "minimum_stocks": 8,
+    "minimum_months": 4,
+    "maximum_stock_share": 0.3,
+    "maximum_selected_families": 4,
+    "tie_break": "stable_canonical_family_id",
+    "fallback_class": "OTHER_UNREGISTERED_FAMILY",
+    "minimum_eligible_families": 2
+  },
+  "stage_b": {
+    "models": ["F0", "F1"],
+    "multinomial_model": {
+      "penalty": "l2",
+      "C": 0.25,
+      "solver": "lbfgs",
+      "max_iter": 300,
+      "multi_class": "multinomial",
+      "class_weight": null,
+      "n_jobs": 1,
+      "preprocessing_fit": "2024_only"
+    },
+    "material_checkpoint_adversity": {
+      "metric": "multiclass_log_loss_improvement",
+      "minimum": -0.001
+    }
+  },
+  "resampling": {
+    "session_bootstrap_draws": 25,
+    "bootstrap_refits": false,
+    "trajectory_null_draws": 5,
+    "trajectory_bundle_permuted_within_session_checkpoint": true,
+    "grouped_attribution_permutations_per_group": 20
+  },
+  "hard_limits": {
+    "one_process": true,
+    "maximum_primary_models": 6,
+    "gpu": false,
+    "raw_data_download": false,
+    "one_minute_data": false,
+    "feature_search": false,
+    "trajectory_window_search": false,
+    "clustering_search": false,
+    "model_search": false,
+    "hyperparameter_tuning": false,
+    "maximum_plots": 1
+  },
+  "primary_decision_categories": [
+    "opening_trajectories_predict_unregistered_events_and_families",
+    "opening_trajectories_predict_unregistered_events_only",
+    "opening_trajectories_predict_hidden_families_only",
+    "opening_trajectory_signal_descriptive_only",
+    "no_opening_trajectory_unregistered_increment",
+    "blocked_opening_population_not_reconstructable",
+    "blocked_trajectory_features_not_reconstructable",
+    "blocked_stage_a_support_failure",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_quick_unregistered_family_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "stage_b_status_categories": [
+    "hidden_family_prediction_supported",
+    "hidden_family_prediction_not_supported",
+    "hidden_family_support_insufficient"
+  ]
+}

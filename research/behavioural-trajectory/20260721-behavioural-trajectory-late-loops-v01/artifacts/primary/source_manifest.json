@@ -1,0 +1,467 @@
+{
+  "behavioural_source": {
+    "broker_integration_required": false,
+    "corrected_even_trajectory_anchors": true,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "late_no_open_loop_subgroup": true,
+    "maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+    "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+    "opening_and_later_session_checkpoints": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "protected_rows_materialised": 0,
+    "provider": "EODHD",
+    "quick_feasibility_screen": true,
+    "raw_data_downloaded": false,
+    "research_only": true,
+    "sources": [
+      {
+        "bounded_rows": 32402,
+        "complete_session_gaps": 12,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+        "symbol": "AAL"
+      },
+      {
+        "bounded_rows": 32403,
+        "complete_session_gaps": 12,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+        "symbol": "AAOI"
+      },
+      {
+        "bounded_rows": 32402,
+        "complete_session_gaps": 11,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+        "symbol": "APLD"
+      },
+      {
+        "bounded_rows": 32400,
+        "complete_session_gaps": 13,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+        "symbol": "ASTS"
+      },
+      {
+        "bounded_rows": 32400,
+        "complete_session_gaps": 11,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+        "symbol": "CIFR"
+      },
+      {
+        "bounded_rows": 32402,
+        "complete_session_gaps": 6,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+        "symbol": "HIMS"
+      },
+      {
+        "bounded_rows": 32401,
+        "complete_session_gaps": 9,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+        "symbol": "IONQ"
+      },
+      {
+        "bounded_rows": 32401,
+        "complete_session_gaps": 10,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+        "symbol": "IREN"
+      },
+      {
+        "bounded_rows": 32401,
+        "complete_session_gaps": 11,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+        "symbol": "MARA"
+      },
+      {
+        "bounded_rows": 32402,
+        "complete_session_gaps": 6,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+        "symbol": "MP"
+      },
+      {
+        "bounded_rows": 32405,
+        "complete_session_gaps": 10,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+        "symbol": "MRNA"
+      },
+      {
+        "bounded_rows": 32402,
+        "complete_session_gaps": 16,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+        "symbol": "MSTR"
+      },
+      {
+        "bounded_rows": 32403,
+        "complete_session_gaps": 13,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+        "symbol": "NVTS"
+      },
+      {
+        "bounded_rows": 32402,
+        "complete_session_gaps": 17,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+        "symbol": "QBTS"
+      },
+      {
+        "bounded_rows": 32400,
+        "complete_session_gaps": 19,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+        "symbol": "RGTI"
+      },
+      {
+        "bounded_rows": 32401,
+        "complete_session_gaps": 12,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+        "symbol": "RIOT"
+      },
+      {
+        "bounded_rows": 32401,
+        "complete_session_gaps": 11,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+        "symbol": "RIVN"
+      },
+      {
+        "bounded_rows": 32385,
+        "complete_session_gaps": 10,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+        "symbol": "SMCI"
+      },
+      {
+        "bounded_rows": 32399,
+        "complete_session_gaps": 11,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+        "symbol": "SOFI"
+      },
+      {
+        "bounded_rows": 32401,
+        "complete_session_gaps": 13,
+        "logical_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet",
+        "symbol": "WULF"
+      }
+    ],
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "timeframe": "5m"
+  },
+  "broker_integration_required": false,
+  "corrected_even_trajectory_anchors": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "frozen_behavioural_component_authority": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-21-you-are-working-in-the-github-2/research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/behavioural_component_ledger.parquet",
+    "purpose": "exact ordinal-6/12 final-anchor component and scaling authority, including the frozen causal cross-sectional signed-progress context",
+    "raw_data_downloaded": false,
+    "sha256": "96fad90eeeb6edf8b2f82ba809fb6939ad3ce5b7d5bf8193abacd90f471a91cb"
+  },
+  "late_no_open_loop_subgroup": true,
+  "loop_dictionary": {
+    "dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "dictionary_version": "semantic_loop_dictionary_v2",
+    "registered_definition_count": 20,
+    "semantic_loop_ids": [
+      "loop_c_929da7e5",
+      "loop_p_0-1-0",
+      "loop_p_0-2-0",
+      "loop_p_0-4-0",
+      "loop_p_1-2-1",
+      "loop_p_2-4-2",
+      "loop_p_2-5-6-2",
+      "loop_p_2-6-2",
+      "loop_p_2-6-5-2",
+      "loop_p_4-5-4",
+      "loop_p_4-6-4",
+      "loop_p_6-7-6",
+      "loop_r2_0-1-0",
+      "loop_r2_1-2-1",
+      "loop_r2_2-4-2",
+      "loop_r2_4-5-4",
+      "loop_r2_4-6-4",
+      "loop_r3_0-1-0",
+      "loop_r3_1-2-1",
+      "loop_r4_0-1-0"
+    ],
+    "source_sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+  },
+  "opening_and_later_session_checkpoints": true,
+  "order_placement": "disabled",
+  "population_reconstruction": {
+    "broker_integration_required": false,
+    "combined_rows_before_trajectory_availability": 31099,
+    "corrected_even_trajectory_anchors": true,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "late_no_open_loop_subgroup": true,
+    "maximum_session": "2025-08-22",
+    "minimum_session": "2024-01-17",
+    "opening_and_later_session_checkpoints": true,
+    "opening_population_sha256": "8e6919c03e207e3eee2f05a47271dbff0129c02a0cb0f04c0b6eb1410a65dca5",
+    "opening_rows_exact_predecessor": 15549,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "protected_rows_materialised": 0,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "rows_by_checkpoint": {
+      "12": 7774,
+      "24": 7775,
+      "36": 7775,
+      "6": 7775
+    },
+    "stocks": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "unique_stock_sessions": 7775
+  },
+  "predecessors": {
+    "blocked_v0_decision": "blocked_insufficient_trajectory_support",
+    "broker_integration_required": false,
+    "coarse_decision": "descriptive_coarse_funnel_only",
+    "corrected_even_trajectory_anchors": true,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "experiments": [
+      "Observable Behavioural-State Dimensions Screen V0",
+      "Emotion × Regime-Mix Coarse Loop-Family Funnel V0",
+      "Behavioural-Trajectory × Regime-Mix Funnel Quick Screen V0"
+    ],
+    "files": [
+      {
+        "path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/decision_panel.parquet",
+        "sha256": "8e6919c03e207e3eee2f05a47271dbff0129c02a0cb0f04c0b6eb1410a65dca5"
+      },
+      {
+        "path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/source_manifest.json",
+        "sha256": "747809c81edd82d837b85f318d67a125ebb036fddccb3b699e69b14180373a5c"
+      },
+      {
+        "path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/lightweight_audit.json",
+        "sha256": "cf7a2084819a71528d3e90627d3cd9a261bb266bf5e2e88d728b8316c465271b"
+      },
+      {
+        "path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/determinism_check.json",
+        "sha256": "b47563eb81740abebc1d9882203c93634ec8422cbea67946f1ee459450df497c"
+      },
+      {
+        "path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/decision.json",
+        "sha256": "71c97bd13f8893e4ccc17ffd6574592b616b005b41e1ded354d6c9b1bc085b24"
+      },
+      {
+        "path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/behavioural_component_scaling.json",
+        "sha256": "6b54a3ce150dcce054fed7a370e411d9d555f03d77f022dcb7feae52100b25ba"
+      },
+      {
+        "path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/independent_audit.json",
+        "sha256": "dbaf7375d00fe1b2c8b81c1f4998b2e7a5cfbaa50695ab43dcc68925d22874dd"
+      },
+      {
+        "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-regime-funnel-quick-v0/artifacts/primary/decision.json",
+        "sha256": "85bae849798e5920a4d48367a9f8a019161688c08119d8dd58e85b9929433503"
+      },
+      {
+        "path": "research/behavioural-trajectory/20260721-behavioural-trajectory-regime-funnel-quick-v0/artifacts/primary/trajectory_anchor_manifest.json",
+        "sha256": "3425940129e17f0f51c20b73488489280d3438265b28db4ea918291e9b7aa0e1"
+      }
+    ],
+    "late_no_open_loop_subgroup": true,
+    "opening_and_later_session_checkpoints": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true
+  },
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "quick_feasibility_screen": true,
+  "raw_data_downloaded": false,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "trajectory_support": {
+    "assessment": {
+      "late_after_open": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 135,
+          "REGISTERED_COMPLETION": 31,
+          "UNREGISTERED_LOOP": 131
+        },
+        "maximum_stock_share": 0.08754208754208755,
+        "maximum_target_class_share": 0.45454545454545453,
+        "months": 8,
+        "rows": 297,
+        "sessions": 93,
+        "stocks": 20
+      },
+      "late_no_open": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 2783,
+          "REGISTERED_COMPLETION": 460,
+          "UNREGISTERED_LOOP": 2672
+        },
+        "maximum_stock_share": 0.05156382079459002,
+        "maximum_target_class_share": 0.47049873203719356,
+        "months": 8,
+        "rows": 5915,
+        "sessions": 157,
+        "stocks": 20
+      },
+      "later": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 2918,
+          "REGISTERED_COMPLETION": 491,
+          "UNREGISTERED_LOOP": 2803
+        },
+        "maximum_stock_share": 0.05054732775273664,
+        "maximum_target_class_share": 0.46973599484867995,
+        "months": 8,
+        "rows": 6212,
+        "sessions": 157,
+        "stocks": 20
+      },
+      "opening": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 4308,
+          "REGISTERED_COMPLETION": 312,
+          "UNREGISTERED_LOOP": 1641
+        },
+        "maximum_stock_share": 0.050151732950007986,
+        "maximum_target_class_share": 0.6880689985625299,
+        "months": 8,
+        "rows": 6261,
+        "sessions": 157,
+        "stocks": 20
+      },
+      "pooled": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 7226,
+          "REGISTERED_COMPLETION": 803,
+          "UNREGISTERED_LOOP": 4444
+        },
+        "maximum_stock_share": 0.05034875330714343,
+        "maximum_target_class_share": 0.5793313557283732,
+        "months": 8,
+        "rows": 12473,
+        "sessions": 157,
+        "stocks": 20
+      }
+    },
+    "broker_integration_required": false,
+    "corrected_even_trajectory_anchors": true,
+    "economic_outcomes_opened": false,
+    "eligible_four_checkpoint_rows": 31099,
+    "execution_enabled": false,
+    "late_no_open_loop_subgroup": true,
+    "late_no_open_support_passed": true,
+    "later_support_passed": true,
+    "opening_and_later_session_checkpoints": true,
+    "order_placement": "disabled",
+    "pooled_support_passed": true,
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "retained_rows": 31070,
+    "screen_supported_populations": {
+      "late_no_open": true,
+      "later": true,
+      "opening": true,
+      "pooled": true
+    },
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "trajectory_retention": 0.9990674941316441
+  },
+  "v2_source": {
+    "broker_integration_required": false,
+    "coarse_loop_family_target": true,
+    "date_predicate_applied_before_materialisation": true,
+    "development_emission_panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "maximum_target_bar_ordinal": 41,
+    "maximum_timestamp_read": "2025-08-22 19:55:00+00:00",
+    "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+    "order_placement": "disabled",
+    "pre_loop_prediction": true,
+    "production_runtime_modified": false,
+    "protected_rows_materialised": 0,
+    "provider": "EODHD",
+    "quick_feasibility_screen": true,
+    "raw_data_downloaded": false,
+    "research_only": true,
+    "soft_regime_mixture": true,
+    "source_hashes": {
+      "AAL": "2ac4ebceb5664606b872a628d5a74136c8cf74492b8df29c6cd5f73f4249cf01",
+      "AAOI": "b6c167d0613e739c19bef5b890d4d7de66e5adfa0413154e19fa234629f10dfd",
+      "APLD": "ad2171c9959edb2274bfaf10be08dd5154a2003e018640fcb74c4345a2bbff81",
+      "ASTS": "1900c2baaaed80a3fbf86f271f4fbfe41dc2d19c2617b568851d596d9feaa747",
+      "AXTI": "105560c1a8bd6955a98724a16fd31d4a7ca703f4dbf8bde2aa44b81f9e617307",
+      "CIFR": "055f9bced79ca9c3fb6e65254fc2229e95a9f1a07c147c1b60bcc2cdd75d693b",
+      "HIMS": "92fc9fb34c5c525f85c40147e37600ef0cf1670f1427797f741454eb73eddea7",
+      "IONQ": "4d9d6f75da9a9f2daadb9d81244343f94647dcbd90a426c03ad2b550e9a23b29",
+      "IREN": "a32fe0464ac2fff115db5db6cc744db591b304c0cbb08f330ed7c37dcebac50b",
+      "MARA": "34d6a2385300e8d0c1eb3b890273943d50a8655b00293d028a19fd9b220ae013",
+      "MP": "62df3853fd345c658a8301add74fe802622cd9c70c24a94ecd486aee9359d1e7",
+      "MRNA": "60487e33398b4ac48f69e0da402e5103f6f2798d8a1abc7c5d813c9cffafb400",
+      "MSTR": "c8a13768c3b96156051426c79775103c8eb157f6da1b20a692934ad3b3bf4276",
+      "NVTS": "03715f3f026a1c2e029c83a07625edd11b785bec63e4285b0b04c08db340222c",
+      "OKLO": "0e15f1d3ed63b358219fdb2a8363752b373a76ebc91e63028ab58fb1cbaa5749",
+      "QBTS": "403a474b3a3b39365e74470852f48056bd0161d60caa26e883a7ab4e45022f81",
+      "RGTI": "233088673f12790eadba650647c3d10f74f011e7baae69b10d52c02d8fbab042",
+      "RIOT": "f217b7abb3404783e87320296d57b3148f26d0bb065d9640db0f4d346e6677d9",
+      "RIVN": "c7ab04d8a205be771320a8eccaaa88c1dfa4ff919fd469fe35e99c5cf03e15e6",
+      "SMCI": "141b6f08c5d2b1840024493aef6b7059f3d41deb28cc2d6dcf609aa589818066",
+      "SOFI": "e3f6d0e05f3bf29a18b0cdb30ce3fe03312628705fa23e46bcb51ef135242353",
+      "VTI": "4797ccc19ea22cf323e5e4286f0b3921fb686738fe100ed22faa76c53dddaa32",
+      "WULF": "cc5c3ad83d8af2d639a59986e65eea5513b658966be513e51628ab23970d54c2"
+    },
+    "source_row_counts": {
+      "AAL": 32402,
+      "AAOI": 32403,
+      "APLD": 32402,
+      "ASTS": 32400,
+      "AXTI": 32401,
+      "CIFR": 32400,
+      "HIMS": 32402,
+      "IONQ": 32401,
+      "IREN": 32401,
+      "MARA": 32401,
+      "MP": 32402,
+      "MRNA": 32405,
+      "MSTR": 32402,
+      "NVTS": 32403,
+      "OKLO": 32393,
+      "QBTS": 32402,
+      "RGTI": 32400,
+      "RIOT": 32401,
+      "RIVN": 32401,
+      "SMCI": 32385,
+      "SOFI": 32399,
+      "VTI": 32402,
+      "WULF": 32401
+    },
+    "state_rows_filtered": 345745,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "timeframe": "5m"
+  }
+}

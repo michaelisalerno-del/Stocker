@@ -1,0 +1,333 @@
+{
+  "T1_screen_positive": {
+    "late_no_open": false,
+    "later": false,
+    "opening": true,
+    "pooled": true
+  },
+  "T2_screen_positive": {
+    "late_no_open": false,
+    "later": false,
+    "opening": false,
+    "pooled": false
+  },
+  "assessment_rows": 12473,
+  "assessment_target_counts": {
+    "NO_REGISTERED_COMPLETION": 7226,
+    "REGISTERED_COMPLETION": 803,
+    "UNREGISTERED_LOOP": 4444
+  },
+  "binding_answers": {
+    "corrected_trajectories_improve_next_structural_event": true,
+    "increment_stronger_for_later_or_late_no_open": false
+  },
+  "broker_integration_required": false,
+  "corrected_even_trajectory_anchors": true,
+  "decision": "trajectory_main_effects_only",
+  "determinism_check_passed": true,
+  "development_rows": 18474,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "feasibility_only": true,
+  "gates": [
+    {
+      "bootstrap_80_brier_lower": 0.0003360341307135,
+      "bootstrap_80_log_loss_lower": 0.0001061792589234,
+      "brier_null_draws_exceeded": 5,
+      "comparison": "T1_minus_T0",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": true,
+        "bootstrap_80_log_loss_lower_non_negative": true,
+        "brier_improves": true,
+        "concentration_gates_pass": true,
+        "log_loss_improves": true,
+        "positive_month_count": true,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": true,
+        "supported": true,
+        "top_two_decline_within_0_002": true
+      },
+      "log_loss_null_draws_exceeded": 5,
+      "population": "pooled",
+      "positive_log_loss_months": 5,
+      "required_positive_months": 5,
+      "rough_screen_positive": true
+    },
+    {
+      "bootstrap_80_brier_lower": -7.006389528640967e-05,
+      "bootstrap_80_log_loss_lower": -0.0001321150592584,
+      "brier_null_draws_exceeded": 5,
+      "comparison": "T2_minus_T1",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": false,
+        "bootstrap_80_log_loss_lower_non_negative": false,
+        "brier_improves": true,
+        "concentration_gates_pass": true,
+        "log_loss_improves": true,
+        "positive_month_count": true,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": true,
+        "supported": true,
+        "top_two_decline_within_0_002": true
+      },
+      "log_loss_null_draws_exceeded": 5,
+      "population": "pooled",
+      "positive_log_loss_months": 6,
+      "required_positive_months": 5,
+      "rough_screen_positive": false
+    },
+    {
+      "bootstrap_80_brier_lower": 0.0023508692488495,
+      "bootstrap_80_log_loss_lower": 0.0032858470132075,
+      "brier_null_draws_exceeded": 5,
+      "comparison": "T1_minus_T0",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": true,
+        "bootstrap_80_log_loss_lower_non_negative": true,
+        "brier_improves": true,
+        "concentration_gates_pass": true,
+        "log_loss_improves": true,
+        "positive_month_count": true,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": true,
+        "supported": true,
+        "top_two_decline_within_0_002": true
+      },
+      "log_loss_null_draws_exceeded": 5,
+      "population": "opening",
+      "positive_log_loss_months": 7,
+      "required_positive_months": 5,
+      "rough_screen_positive": true
+    },
+    {
+      "bootstrap_80_brier_lower": -0.0001102200344447,
+      "bootstrap_80_log_loss_lower": -0.0001265034195968,
+      "brier_null_draws_exceeded": 5,
+      "comparison": "T2_minus_T1",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": false,
+        "bootstrap_80_log_loss_lower_non_negative": false,
+        "brier_improves": true,
+        "concentration_gates_pass": true,
+        "log_loss_improves": true,
+        "positive_month_count": true,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": true,
+        "supported": true,
+        "top_two_decline_within_0_002": true
+      },
+      "log_loss_null_draws_exceeded": 4,
+      "population": "opening",
+      "positive_log_loss_months": 5,
+      "required_positive_months": 5,
+      "rough_screen_positive": false
+    },
+    {
+      "bootstrap_80_brier_lower": -0.0022289479975534,
+      "bootstrap_80_log_loss_lower": -0.0041917222676515,
+      "brier_null_draws_exceeded": 0,
+      "comparison": "T1_minus_T0",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": false,
+        "bootstrap_80_log_loss_lower_non_negative": false,
+        "brier_improves": false,
+        "concentration_gates_pass": true,
+        "log_loss_improves": false,
+        "positive_month_count": false,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": false,
+        "supported": true,
+        "top_two_decline_within_0_002": false
+      },
+      "log_loss_null_draws_exceeded": 0,
+      "population": "later",
+      "positive_log_loss_months": 0,
+      "required_positive_months": 4,
+      "rough_screen_positive": false
+    },
+    {
+      "bootstrap_80_brier_lower": -0.0001289799857461,
+      "bootstrap_80_log_loss_lower": -0.0002410077907306,
+      "brier_null_draws_exceeded": 5,
+      "comparison": "T2_minus_T1",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": false,
+        "bootstrap_80_log_loss_lower_non_negative": false,
+        "brier_improves": true,
+        "concentration_gates_pass": true,
+        "log_loss_improves": true,
+        "positive_month_count": true,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": true,
+        "supported": true,
+        "top_two_decline_within_0_002": true
+      },
+      "log_loss_null_draws_exceeded": 5,
+      "population": "later",
+      "positive_log_loss_months": 4,
+      "required_positive_months": 4,
+      "rough_screen_positive": false
+    },
+    {
+      "bootstrap_80_brier_lower": -0.0021281085655701,
+      "bootstrap_80_log_loss_lower": -0.0038240455713003,
+      "brier_null_draws_exceeded": 0,
+      "comparison": "T1_minus_T0",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": false,
+        "bootstrap_80_log_loss_lower_non_negative": false,
+        "brier_improves": false,
+        "concentration_gates_pass": true,
+        "log_loss_improves": false,
+        "positive_month_count": false,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": false,
+        "supported": true,
+        "top_two_decline_within_0_002": false
+      },
+      "log_loss_null_draws_exceeded": 0,
+      "population": "late_no_open",
+      "positive_log_loss_months": 0,
+      "required_positive_months": 4,
+      "rough_screen_positive": false
+    },
+    {
+      "bootstrap_80_brier_lower": -0.0002084297513186,
+      "bootstrap_80_log_loss_lower": -0.0003356095710143,
+      "brier_null_draws_exceeded": 4,
+      "comparison": "T2_minus_T1",
+      "conditions": {
+        "bootstrap_80_brier_lower_non_negative": false,
+        "bootstrap_80_log_loss_lower_non_negative": false,
+        "brier_improves": true,
+        "concentration_gates_pass": true,
+        "log_loss_improves": false,
+        "positive_month_count": true,
+        "real_log_loss_or_brier_exceeds_four_of_five_nulls": true,
+        "supported": true,
+        "top_two_decline_within_0_002": true
+      },
+      "log_loss_null_draws_exceeded": 3,
+      "population": "late_no_open",
+      "positive_log_loss_months": 4,
+      "required_positive_months": 4,
+      "rough_screen_positive": false
+    }
+  ],
+  "late_no_open_loop_subgroup": true,
+  "lightweight_audit_passed": true,
+  "monthly_positive_log_loss_counts": {
+    "late_no_open": {
+      "T1_minus_T0": 0,
+      "T2_minus_T1": 4
+    },
+    "later": {
+      "T1_minus_T0": 0,
+      "T2_minus_T1": 4
+    },
+    "opening": {
+      "T1_minus_T0": 7,
+      "T2_minus_T1": 5
+    },
+    "pooled": {
+      "T1_minus_T0": 5,
+      "T2_minus_T1": 6
+    }
+  },
+  "opening_and_later_session_checkpoints": true,
+  "order_placement": "disabled",
+  "point_estimate_improves_somewhere": true,
+  "primary_decision": "trajectory_main_effects_only",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "support": {
+    "assessment": {
+      "late_after_open": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 135,
+          "REGISTERED_COMPLETION": 31,
+          "UNREGISTERED_LOOP": 131
+        },
+        "maximum_stock_share": 0.08754208754208755,
+        "maximum_target_class_share": 0.45454545454545453,
+        "months": 8,
+        "rows": 297,
+        "sessions": 93,
+        "stocks": 20
+      },
+      "late_no_open": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 2783,
+          "REGISTERED_COMPLETION": 460,
+          "UNREGISTERED_LOOP": 2672
+        },
+        "maximum_stock_share": 0.05156382079459002,
+        "maximum_target_class_share": 0.47049873203719356,
+        "months": 8,
+        "rows": 5915,
+        "sessions": 157,
+        "stocks": 20
+      },
+      "later": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 2918,
+          "REGISTERED_COMPLETION": 491,
+          "UNREGISTERED_LOOP": 2803
+        },
+        "maximum_stock_share": 0.05054732775273664,
+        "maximum_target_class_share": 0.46973599484867995,
+        "months": 8,
+        "rows": 6212,
+        "sessions": 157,
+        "stocks": 20
+      },
+      "opening": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 4308,
+          "REGISTERED_COMPLETION": 312,
+          "UNREGISTERED_LOOP": 1641
+        },
+        "maximum_stock_share": 0.050151732950007986,
+        "maximum_target_class_share": 0.6880689985625299,
+        "months": 8,
+        "rows": 6261,
+        "sessions": 157,
+        "stocks": 20
+      },
+      "pooled": {
+        "class_support": {
+          "NO_REGISTERED_COMPLETION": 7226,
+          "REGISTERED_COMPLETION": 803,
+          "UNREGISTERED_LOOP": 4444
+        },
+        "maximum_stock_share": 0.05034875330714343,
+        "maximum_target_class_share": 0.5793313557283732,
+        "months": 8,
+        "rows": 12473,
+        "sessions": 157,
+        "stocks": 20
+      }
+    },
+    "broker_integration_required": false,
+    "corrected_even_trajectory_anchors": true,
+    "economic_outcomes_opened": false,
+    "eligible_four_checkpoint_rows": 31099,
+    "execution_enabled": false,
+    "late_no_open_loop_subgroup": true,
+    "late_no_open_support_passed": true,
+    "later_support_passed": true,
+    "opening_and_later_session_checkpoints": true,
+    "order_placement": "disabled",
+    "pooled_support_passed": true,
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "retained_rows": 31070,
+    "screen_supported_populations": {
+      "late_no_open": true,
+      "later": true,
+      "opening": true,
+      "pooled": true
+    },
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "trajectory_retention": 0.9990674941316441
+  },
+  "validation_or_promotion": false
+}

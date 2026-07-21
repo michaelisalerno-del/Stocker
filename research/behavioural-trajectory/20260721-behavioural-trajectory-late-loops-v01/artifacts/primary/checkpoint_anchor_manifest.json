@@ -1,0 +1,191 @@
+{
+  "anchor_triplets": {
+    "12": [
+      4,
+      8,
+      12
+    ],
+    "24": [
+      8,
+      16,
+      24
+    ],
+    "36": [
+      12,
+      24,
+      36
+    ],
+    "6": [
+      2,
+      4,
+      6
+    ]
+  },
+  "broker_integration_required": false,
+  "completed_bar_convention": "ordinal N uses bars 0 through N-1 and is available at the completion of bar N-1",
+  "corrected_even_trajectory_anchors": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "final_anchor_reproduction": {
+    "maximum_behavioural_level_difference": 0.0,
+    "maximum_scaling_parameter_difference": 0.0,
+    "passed": true,
+    "rows_compared": 15549,
+    "tolerance": 1e-12
+  },
+  "late_no_open_loop_subgroup": true,
+  "opening_and_later_session_checkpoints": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "records": [
+    {
+      "anchor_ordinal": 2,
+      "anchor_role": "E0",
+      "causal": true,
+      "decision_ordinal": 6,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 13:40:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 14:40:00+00:00",
+      "rows": 7775
+    },
+    {
+      "anchor_ordinal": 4,
+      "anchor_role": "E1",
+      "causal": true,
+      "decision_ordinal": 6,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 13:50:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 14:50:00+00:00",
+      "rows": 7775
+    },
+    {
+      "anchor_ordinal": 6,
+      "anchor_role": "E2",
+      "causal": true,
+      "decision_ordinal": 6,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 14:00:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 15:00:00+00:00",
+      "rows": 7775
+    },
+    {
+      "anchor_ordinal": 4,
+      "anchor_role": "E0",
+      "causal": true,
+      "decision_ordinal": 12,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 13:50:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 14:50:00+00:00",
+      "rows": 7774
+    },
+    {
+      "anchor_ordinal": 8,
+      "anchor_role": "E1",
+      "causal": true,
+      "decision_ordinal": 12,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 14:10:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 15:10:00+00:00",
+      "rows": 7774
+    },
+    {
+      "anchor_ordinal": 12,
+      "anchor_role": "E2",
+      "causal": true,
+      "decision_ordinal": 12,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 14:30:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 15:30:00+00:00",
+      "rows": 7774
+    },
+    {
+      "anchor_ordinal": 8,
+      "anchor_role": "E0",
+      "causal": true,
+      "decision_ordinal": 24,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 14:10:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 15:10:00+00:00",
+      "rows": 7775
+    },
+    {
+      "anchor_ordinal": 16,
+      "anchor_role": "E1",
+      "causal": true,
+      "decision_ordinal": 24,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 14:50:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 15:50:00+00:00",
+      "rows": 7774
+    },
+    {
+      "anchor_ordinal": 24,
+      "anchor_role": "E2",
+      "causal": true,
+      "decision_ordinal": 24,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 15:30:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 16:30:00+00:00",
+      "rows": 7763
+    },
+    {
+      "anchor_ordinal": 12,
+      "anchor_role": "E0",
+      "causal": true,
+      "decision_ordinal": 36,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 14:30:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 15:30:00+00:00",
+      "rows": 7774
+    },
+    {
+      "anchor_ordinal": 24,
+      "anchor_role": "E1",
+      "causal": true,
+      "decision_ordinal": 36,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 15:30:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 16:30:00+00:00",
+      "rows": 7763
+    },
+    {
+      "anchor_ordinal": 36,
+      "anchor_role": "E2",
+      "causal": true,
+      "decision_ordinal": 36,
+      "even_completed_bar_count": true,
+      "future_input_rows": 0,
+      "maximum_available_timestamp_utc": "2025-08-22 16:30:00+00:00",
+      "maximum_latest_input_minus_anchor_availability_seconds": 0.0,
+      "minimum_available_timestamp_utc": "2024-01-17 17:30:00+00:00",
+      "rows": 7758
+    }
+  ],
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

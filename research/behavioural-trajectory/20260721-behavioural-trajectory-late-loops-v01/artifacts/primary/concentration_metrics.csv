@@ -1,0 +1,11 @@
+population,gate,value,threshold,passed
+pooled,maximum_stock_share,0.05034875330714343,0.1,True
+pooled,maximum_target_class_share,0.5793313557283732,0.75,True
+opening,maximum_stock_share,0.050151732950007986,0.1,True
+opening,maximum_target_class_share,0.6880689985625299,0.75,True
+later,maximum_stock_share,0.05054732775273664,0.1,True
+later,maximum_target_class_share,0.46973599484867995,0.75,True
+late_no_open,maximum_stock_share,0.05156382079459002,0.1,True
+late_no_open,maximum_target_class_share,0.47049873203719356,0.75,True
+late_after_open,maximum_stock_share,0.08754208754208755,0.1,True
+late_after_open,maximum_target_class_share,0.45454545454545453,0.75,True

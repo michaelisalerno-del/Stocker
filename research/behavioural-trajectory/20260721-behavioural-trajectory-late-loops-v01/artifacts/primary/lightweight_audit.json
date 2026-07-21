@@ -1,0 +1,112 @@
+{
+  "broker_integration_required": false,
+  "checks": {
+    "chronology_and_anchors": {
+      "anchor_triplets": {
+        "12": [
+          4,
+          8,
+          12
+        ],
+        "24": [
+          8,
+          16,
+          24
+        ],
+        "36": [
+          12,
+          24,
+          36
+        ],
+        "6": [
+          2,
+          4,
+          6
+        ]
+      },
+      "checkpoints": [
+        6,
+        12,
+        24,
+        36
+      ],
+      "maximum_future_input_seconds": 0.0,
+      "passed": true,
+      "protected_rows_materialised": 0
+    },
+    "decision_logic": {
+      "expected_decision": "trajectory_main_effects_only",
+      "gate_mismatches": 0,
+      "gates_checked": 8,
+      "passed": true,
+      "stored_decision": "trajectory_main_effects_only"
+    },
+    "models_and_metrics": {
+      "coefficients_and_class_order_checked": true,
+      "manual_probability_rows": 12473,
+      "maximum_development_preprocessing_difference": 0.0,
+      "maximum_development_reporting_median_difference": 0.0,
+      "maximum_metric_difference": 1.1102230246251565e-16,
+      "maximum_probability_difference": 0.0,
+      "passed": true
+    },
+    "safety": {
+      "files_checked": 11,
+      "passed": true
+    },
+    "scaling_and_dimensions": {
+      "frozen_final_rows_compared": 15549,
+      "maximum_behavioural_dimension_difference": 0.0,
+      "maximum_frozen_final_level_difference": 0.0,
+      "maximum_frozen_final_scaling_difference": 0.0,
+      "maximum_scaled_component_difference": 0.0,
+      "maximum_scaling_parameter_difference": 0.0,
+      "new_final_scaling_groups_present": true,
+      "passed": true
+    },
+    "session_block_bootstrap": {
+      "comparison_rows_checked": 200,
+      "draws": 25,
+      "interval_rows_checked": 72,
+      "maximum_difference": 9.958396954279358e-17,
+      "paired_all_checkpoints_and_stocks": true,
+      "passed": true
+    },
+    "structural_target_and_controls": {
+      "mismatches": 0,
+      "passed": true,
+      "rows_checked": 31070
+    },
+    "trajectories_and_interactions": {
+      "interactions_checked": 26,
+      "maximum_interaction_difference": 0.0,
+      "maximum_trajectory_difference": 0.0,
+      "passed": true,
+      "trajectory_features_checked": 36
+    },
+    "trajectory_bundle_null": {
+      "comparison_rows_checked": 40,
+      "complete_bundle_permuted_within_slate": true,
+      "draws": 5,
+      "maximum_difference": 9.8879238130678e-17,
+      "passed": true,
+      "summary_mismatches": 0,
+      "summary_rows_checked": 24
+    }
+  },
+  "corrected_even_trajectory_anchors": true,
+  "determinism_check_passed": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "fail_closed": true,
+  "independent_of_new_reusable_module": true,
+  "late_no_open_loop_subgroup": true,
+  "opening_and_later_session_checkpoints": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

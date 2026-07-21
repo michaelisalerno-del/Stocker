@@ -1,0 +1,128 @@
+{
+  "behavioural_level_regime_interactions": {
+    "posterior_entropy_x_frustration": {
+      "q01": -0.9835882774260851,
+      "q99": 0.7374709201600974
+    },
+    "posterior_entropy_x_tension": {
+      "q01": -1.4339762067788737,
+      "q99": 0.845222450132515
+    },
+    "state_p_0_x_signed_exhaustion": {
+      "q01": -0.903566280580994,
+      "q99": 1.0374098194273733
+    },
+    "state_p_0_x_signed_pressure": {
+      "q01": -0.4491401385596488,
+      "q99": 0.3025394482832926
+    },
+    "state_p_1_x_signed_exhaustion": {
+      "q01": -1.5713928671740027,
+      "q99": 1.6853041652024328
+    },
+    "state_p_1_x_signed_pressure": {
+      "q01": -0.4618376252896708,
+      "q99": 0.8242646370052924
+    },
+    "state_p_2_x_signed_exhaustion": {
+      "q01": -1.3217427516997011,
+      "q99": 1.2796046508533763
+    },
+    "state_p_2_x_signed_pressure": {
+      "q01": -0.5954966942476391,
+      "q99": 0.37792652641319774
+    },
+    "state_p_3_x_signed_exhaustion": {
+      "q01": -1.3921707113388202,
+      "q99": 1.7427924710547322
+    },
+    "state_p_3_x_signed_pressure": {
+      "q01": -0.8779255576522921,
+      "q99": 0.4308681961547364
+    },
+    "state_p_4_x_signed_exhaustion": {
+      "q01": -1.7013449021369518,
+      "q99": 1.5394235130170024
+    },
+    "state_p_4_x_signed_pressure": {
+      "q01": -0.5947364404412202,
+      "q99": 1.0344621744548657
+    },
+    "state_p_5_x_signed_exhaustion": {
+      "q01": -2.4001838806461433,
+      "q99": 2.1940015679852967
+    },
+    "state_p_5_x_signed_pressure": {
+      "q01": -0.4735072011803653,
+      "q99": 1.2636539084508343
+    },
+    "state_p_6_x_signed_exhaustion": {
+      "q01": -1.6269835697751713,
+      "q99": 2.272225535437987
+    },
+    "state_p_6_x_signed_pressure": {
+      "q01": -1.170389897798079,
+      "q99": 0.2053575917248665
+    },
+    "state_p_7_x_signed_exhaustion": {
+      "q01": -2.277864991489999,
+      "q99": 2.2087273678258734
+    },
+    "state_p_7_x_signed_pressure": {
+      "q01": -0.7168664186307,
+      "q99": 1.3097439628179848
+    },
+    "top_second_margin_x_conviction": {
+      "q01": -1.0239396464916188,
+      "q99": 1.6657022962530827
+    },
+    "transition_probability_x_arousal": {
+      "q01": -0.3591316618956088,
+      "q99": 0.2408554381597325
+    }
+  },
+  "broker_integration_required": false,
+  "clip_quantiles": [
+    0.01,
+    0.99
+  ],
+  "corrected_even_trajectory_anchors": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "fit_interval": "2024_only",
+  "late_no_open_loop_subgroup": true,
+  "opening_and_later_session_checkpoints": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "trajectory_interaction_count": 6,
+  "trajectory_regime_interactions": {
+    "posterior_entropy_x_frustration_change": {
+      "q01": -0.6942912974840046,
+      "q99": 0.77867629710662
+    },
+    "posterior_entropy_x_tension_acceleration": {
+      "q01": -1.0239386462873392,
+      "q99": 1.1137072767308982
+    },
+    "top_second_margin_x_conviction_change": {
+      "q01": -1.4205486910940077,
+      "q99": 1.5330753240162054
+    },
+    "top_state_probability_x_signed_exhaustion_change": {
+      "q01": -4.295113421830019,
+      "q99": 4.23242305040643
+    },
+    "transition_probability_x_arousal_change": {
+      "q01": -0.12121303951390161,
+      "q99": 0.13087215127413904
+    },
+    "transition_probability_x_signed_pressure_acceleration": {
+      "q01": -0.24203757561395867,
+      "q99": 0.23168737233909856
+    }
+  }
+}

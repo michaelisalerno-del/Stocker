@@ -1,0 +1,146 @@
+{
+  "broker_integration_required": false,
+  "contract_id": "20260720-high-movement-pressure-onset-screen-v0-1",
+  "dates": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "protected_start": "2025-08-23"
+  },
+  "decision_categories": [
+    "pressure_onset_and_direction_increment_observed",
+    "pressure_onset_occurrence_only",
+    "directional_pressure_only",
+    "one_bar_confirmation_required",
+    "movement_readiness_but_direction_unresolved",
+    "no_pressure_onset_increment",
+    "pressure_signal_observed_but_concentration_gate_failed",
+    "blocked_parent_slate_support_failure",
+    "blocked_null_semantics_failure",
+    "blocked_observable_movement_model_not_reconstructable",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_insufficient_pressure_onset_support",
+    "blocked_quick_pressure_screen_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "frozen_boundary": {
+    "bar_grid_changed": false,
+    "bootstrap_changed": false,
+    "checkpoints_changed": false,
+    "cohort_changed": false,
+    "dates_changed": false,
+    "economic_horizon_changed": false,
+    "features_changed": false,
+    "friction_changed": false,
+    "labels_changed": false,
+    "models_changed": false,
+    "movement_predecessor_changed": false,
+    "null_draw_count_changed": false,
+    "onset_horizon_changed": false,
+    "probability_equations_changed": false,
+    "random_seeds_changed": false,
+    "thresholds_or_barriers_changed": false
+  },
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_results_previously_opened": false,
+  "model_specification": {
+    "C": 1.0,
+    "class_weight": null,
+    "ladders": ["A0", "A1", "A2", "A3", "D0", "D1", "D2", "D3"],
+    "max_iter": 250,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "movement_admission_thresholds": {
+    "12": 0.3003493391782974,
+    "6": 0.30288693685048057
+  },
+  "null_interpretation": {
+    "admission_membership_preserved": true,
+    "outcomes_preserved": true,
+    "parent_slate_identity_preserved": true,
+    "pressure_bundle_permuted_together": true,
+    "scope": "among_admitted_rows_within_each_valid_parent_slate",
+    "why": "least-invasive interpretation of the frozen V0 contract because the admission predictor is not in the permuted pressure bundle"
+  },
+  "observable_only": true,
+  "onset_barriers_bps": {
+    "12": 114.06303345896207,
+    "6": 137.38384537217985
+  },
+  "opened_support_counts_only": true,
+  "order_placement": "disabled",
+  "parent_slate": {
+    "minimum_valid_stocks": 15,
+    "support_gate_applied": "before_movement_admission"
+  },
+  "production_runtime_modified": false,
+  "research_only": true,
+  "resource_limits": {
+    "bootstrap_draws": 200,
+    "compact_rows_maximum": 20000,
+    "gpu": false,
+    "model_specifications": 8,
+    "null_draws": 50,
+    "plots_maximum": 2,
+    "processes": 1
+  },
+  "safety": {
+    "broker_integration_required": false,
+    "execution_enabled": false,
+    "feasibility_screen": true,
+    "loops_regimes_states_and_structural_paths_forbidden": true,
+    "model_results_previously_opened": false,
+    "observable_only": true,
+    "opened_support_counts_only": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "research_only": true,
+    "strategy_promotion": false,
+    "support_contract_repair": true
+  },
+  "scientific_status": "opened_support_contract_repair_retrospective_feasibility_evidence",
+  "seeds": {
+    "bootstrap": 20260720,
+    "economic_random": 20260722,
+    "null": 20260721
+  },
+  "strategy_promotion": false,
+  "support_contract_repair": true,
+  "support_gates": {
+    "admitted_rows_minimum": 1200,
+    "assessment_sessions_minimum": 100,
+    "assessment_stocks_minimum": 15,
+    "directional_onset_rows_minimum": 250,
+    "down_onsets_minimum": 100,
+    "represented_months_minimum": 6,
+    "up_onsets_minimum": 100,
+    "valid_parent_stocks_minimum": 15
+  },
+  "v0_source": {
+    "commit": "8f3954fdcd1db480bff1a0c535b1ea6fa5f71f13",
+    "experiment": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0",
+    "immutable_sha256": {
+      "artifacts/exact_rerun/exact_rerun_manifest.json": "18647bfa3cc63eb15c8a3e16219a894e7b1bfd9b1703dc4452e0b3c1af5a539c",
+      "artifacts/primary/exact_rerun_manifest.json": "18647bfa3cc63eb15c8a3e16219a894e7b1bfd9b1703dc4452e0b3c1af5a539c",
+      "audit_screen_v0.py": "f1385ffdd01d9787f48624fcbc12794c245d99015b7804063a1f567cb7e5069a",
+      "contract.json": "fca26a226b3c1f38bbe19815f49c9d948a55724221a2bf94976bc82c6a1f6f08",
+      "git:8f3954fdcd1db480bff1a0c535b1ea6fa5f71f13:packages/stocker_research/src/stocker_research/pressure_onset_screen_v0.py": "4ca273edd426716b1917c875efbc56cc32d80ba7880b6585dde8bed3591be10f",
+      "run_screen_v0.py": "01f7535f659e1dc03f982199371be243e46647667ac22c8a3972d3f1f498a058"
+    },
+    "model_results_previously_opened": false,
+    "opened_decision": "blocked_insufficient_pressure_onset_support"
+  },
+  "weighting": {
+    "denominator": "admitted_stock_count_in_valid_parent_slate",
+    "formula": "1 / admitted_stock_count",
+    "singleton_weight": 1.0,
+    "slate_total": 1.0
+  }
+}

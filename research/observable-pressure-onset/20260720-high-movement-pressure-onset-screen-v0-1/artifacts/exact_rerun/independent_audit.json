@@ -1,0 +1,209 @@
+{
+  "auditor_imported_experiment_runner": false,
+  "auditor_imported_reusable_module": false,
+  "broker_integration_required": false,
+  "checks": {
+    "absence_of_forbidden_columns": true,
+    "chronology_thresholds_barriers_and_labels": {
+      "barrier_errors": {
+        "12": 0.0,
+        "6": 0.0
+      },
+      "onset_label_counts": {
+        "DOWN_ONSET": 1714,
+        "NO_ONSET": 11580,
+        "UP_ONSET": 1799
+      },
+      "oof_prediction_errors": {
+        "2024-07": 0.0,
+        "2024-08": 0.0,
+        "2024-09": 0.0,
+        "2024-10": 0.0,
+        "2024-11": 0.0,
+        "2024-12": 0.0
+      },
+      "oof_rows_reconstructed": 4979,
+      "threshold_errors": {
+        "12": 0.0,
+        "6": 0.0
+      }
+    },
+    "concentration": {
+      "economic_not_dominated_by_largest_stock": true,
+      "largest_stock": "QBTS",
+      "largest_stock_model_contribution_share": 0.18972250260094609,
+      "largest_stock_model_selection_share": 0.15384615384615385,
+      "largest_stock_rows": 171,
+      "ledger_rows_verified": 493,
+      "maximum_absolute_contribution_bps_error": 4.804314812645316e-08,
+      "maximum_share_error": 4.80337991604074e-13,
+      "maximum_stock_row_share": 0.10961538461538461,
+      "primary_row_concentration_passes": false,
+      "selected_concentration_passes": true
+    },
+    "economic_reference_and_singleton_semantics": {
+      "maximum_economic_error": 4.397122665977804e-10,
+      "multi_candidate_selections": 1596,
+      "selections_verified": 1794,
+      "singleton_selections": 198
+    },
+    "exact_rerun_manifest": true,
+    "feature_formulas_and_confirmation": {
+      "confirmation_features_verified": 11,
+      "confirmation_finalized": true,
+      "formula_errors": {
+        "absolute_efficiency_3": 0.0,
+        "absolute_efficiency_6": 0.0,
+        "activity_acceleration": 0.0,
+        "change_activity_shock": 0.0,
+        "change_close_location": 0.0,
+        "change_cohort_relative_return_bps": 0.0,
+        "change_range_acceleration": 0.0,
+        "change_relative_strength_acceleration": 0.0,
+        "change_signed_efficiency_3": 0.0,
+        "new_high_at_t_plus_1": 0.0,
+        "new_low_at_t_plus_1": 0.0,
+        "opening_range_acceptance_persisted": 0.0,
+        "progress_per_activity_unwinsorized": 0.0,
+        "progress_per_activity_winsorized": 0.0,
+        "range_acceleration": 0.0,
+        "relative_strength_acceleration": 0.0,
+        "signed_efficiency_3": 0.0,
+        "signed_efficiency_6": 0.0
+      },
+      "maximum_formula_error": 0.0,
+      "pressure_features_verified": 27,
+      "readiness_features_verified": 18
+    },
+    "fixed_windows_and_cohort_paths": {
+      "checkpoints": [
+        6,
+        12
+      ],
+      "ledger_rows_verified": 45279,
+      "maximum_cohort_path_error": 0.0,
+      "rows_verified": 15093
+    },
+    "immutable_v0_lineage": {
+      "frozen_columns_verified": 237,
+      "frozen_rows_verified": 15093,
+      "immutable_lineage_hashes_verified": 6,
+      "thresholds_barriers_admissions_labels_and_features_unchanged": true,
+      "v0_artifact_hashes_verified": 62
+    },
+    "largest_stock_deletion_and_leave_one_out": {
+      "assessment_primary_rows_after_deletion": 1389,
+      "deleted_symbol": "QBTS",
+      "deletion_increments": {
+        "A2_minus_A1_brier": 0.0019305169961104929,
+        "A2_minus_A1_log_loss": 0.004794207198046907,
+        "A3_minus_A2_brier": -0.003118975751697922,
+        "A3_minus_A2_log_loss": -0.008876187421669957,
+        "D2_minus_D1_brier": -0.013668040720808794,
+        "D2_minus_D1_log_loss": -0.0351646864794799,
+        "D3_minus_D2_brier": -0.012007991678002705,
+        "D3_minus_D2_log_loss": -0.03156028875079353
+      },
+      "development_rows_after_deletion": 1104,
+      "leave_one_stock_out_rows_verified": 160,
+      "main_increments": {
+        "A2_minus_A1_brier": 0.0012293962799493074,
+        "A2_minus_A1_log_loss": 0.00483774443215268,
+        "A3_minus_A2_brier": -0.0018928269319696545,
+        "A3_minus_A2_log_loss": -0.006252735438418755,
+        "D2_minus_D1_brier": -0.017350428787472838,
+        "D2_minus_D1_log_loss": -0.04230655709393227,
+        "D3_minus_D2_brier": -0.009598450709517703,
+        "D3_minus_D2_log_loss": -0.025288154559101272
+      },
+      "maximum_deletion_increment_error": 0.0,
+      "maximum_leave_one_out_error": 4.9519416345233935e-14,
+      "no_materially_adverse_checkpoint": false,
+      "principal_increments_non_negative": false,
+      "same_signed_predictive_conclusions": true
+    },
+    "local_absolute_paths_absent": true,
+    "parent_and_admitted_support_hierarchy": {
+      "assessment_invalid_parent_slates": 2,
+      "assessment_invalid_parent_stock_distribution": {
+        "13": 2
+      },
+      "assessment_multi_candidate_slates": 266,
+      "assessment_singleton_slates": 33,
+      "assessment_valid_parent_slates": 314,
+      "assessment_zero_admission_valid_slates": 15,
+      "parent_slates": 794,
+      "primary_rows": 1560,
+      "weight_rows_verified": 2799
+    },
+    "probability_metrics_and_calibration": {
+      "maximum_metric_error": 4.6062709202487895e-11,
+      "metric_rows_verified": 176
+    },
+    "protected_boundary": true,
+    "readiness_from_bounded_causal_bars": {
+      "feature_errors": {
+        "cross_sectional_dispersion_bps": 0.0,
+        "current_true_range_bps": 0.0,
+        "distance_from_opening_high_bps": 0.0,
+        "distance_from_opening_low_bps": 0.0,
+        "historical_activity_proxy_shock": 0.0,
+        "latest_one_bar_return_bps": 0.0,
+        "latest_six_bar_return_bps": 0.0,
+        "latest_three_bar_return_bps": 4.462208380573429e-12,
+        "open_to_decision_cohort_relative_return_bps": 0.0,
+        "open_to_decision_raw_return_bps": 0.0,
+        "opening_gap_bps": 0.0,
+        "opening_high_low_range_bps": 0.0,
+        "opening_range_to_trailing_same_checkpoint_median": 0.0,
+        "realized_volatility_3_bps": 0.0,
+        "realized_volatility_6_bps": 0.0,
+        "short_realized_volatility_ratio": 0.0,
+        "short_true_range_to_longer_true_range": 0.0
+      },
+      "maximum_readiness_error": 4.462208380573429e-12,
+      "movement_probability_verified_separately": true,
+      "readiness_features_reconstructed": 18
+    },
+    "safety_and_repair_declaration": true,
+    "session_block_bootstrap": {
+      "draws_verified": 200,
+      "maximum_bootstrap_error": 4.9816151204140624e-11
+    },
+    "source_hashes_and_counts": {
+      "maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+      "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+      "sources_verified": 20,
+      "year_months_verified": 20
+    },
+    "support_and_decision_logic": {
+      "decision_reconstructed_from_verified_artifacts": true,
+      "final_decision": "no_pressure_onset_increment",
+      "predictive_decision": "no_pressure_onset_increment"
+    },
+    "weighted_models_and_manual_predictions": {
+      "development_rows": 1239,
+      "eight_models_refit": true,
+      "maximum_model_or_prediction_error": 0.0
+    },
+    "within_parent_slate_bundle_permutation": {
+      "admission_preserved": true,
+      "bundle_feature_count": 27,
+      "draws_verified": 50,
+      "maximum_null_error": 4.922640073345974e-11
+    }
+  },
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_results_previously_opened": false,
+  "observable_only": true,
+  "opened_support_counts_only": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "scientific_status": "opened_support_contract_repair_retrospective_feasibility_evidence",
+  "strategy_promotion": false,
+  "support_contract_repair": true
+}

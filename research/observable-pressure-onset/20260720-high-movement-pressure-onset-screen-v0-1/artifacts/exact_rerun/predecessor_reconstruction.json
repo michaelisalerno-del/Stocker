@@ -1,0 +1,35 @@
+{
+  "actual_metrics": {
+    "auc": 0.667605307044678,
+    "brier": 0.15791066938446538,
+    "log_loss": 0.4943966815613037
+  },
+  "aggregate_metric_equality_passed": true,
+  "archived_metrics": {
+    "auc": 0.667605307045,
+    "brier": 0.157910669384,
+    "log_loss": 0.494396681561
+  },
+  "assessment_rows": 6288,
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "maximum_prediction_absolute_error": 0.0,
+  "metric_absolute_errors": {
+    "auc": 3.219646771412954e-13,
+    "brier": 4.6537773634725e-13,
+    "log_loss": 3.0370150838621157e-13
+  },
+  "model_id": "large_remaining_move__M1",
+  "observable_only": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "prediction_equality_passed": true,
+  "production_runtime_modified": false,
+  "required_tolerance": 1e-12,
+  "research_only": true,
+  "source_commit": "5e80d972d1e003c8366a1ec6ca170d1077288ead",
+  "source_experiment": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0",
+  "strategy_promotion": false
+}

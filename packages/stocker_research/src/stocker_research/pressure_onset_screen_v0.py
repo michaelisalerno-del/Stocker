@@ -38,6 +38,9 @@ DECISIONS = (
     "one_bar_confirmation_required",
     "movement_readiness_but_direction_unresolved",
     "no_pressure_onset_increment",
+    "pressure_signal_observed_but_concentration_gate_failed",
+    "blocked_parent_slate_support_failure",
+    "blocked_null_semantics_failure",
     "blocked_observable_movement_model_not_reconstructable",
     "blocked_protected_boundary_failure",
     "blocked_chronology_or_leakage_failure",
@@ -443,6 +446,199 @@ def confirmation_deltas(
     return output
 
 
+@dataclass(frozen=True, slots=True)
+class SupportContractRepair:
+    """Parent/admitted population hierarchy produced by the V0.1 repair."""
+
+    annotated_rows: pd.DataFrame
+    primary_rows: pd.DataFrame
+    parent_slates: pd.DataFrame
+    admitted_slates: pd.DataFrame
+
+
+@dataclass(frozen=True, slots=True)
+class ConcentrationLeader:
+    """The stock selected solely by admitted-row concentration."""
+
+    symbol: str
+    rows: int
+    share: float
+
+
+def apply_support_contract_repair(
+    frame: pd.DataFrame,
+    *,
+    minimum_parent_stocks: int = 15,
+    slate_column: str = "slate_id",
+    symbol_column: str = "symbol",
+    admission_column: str = "high_movement_admitted",
+) -> SupportContractRepair:
+    """Validate parent slates before admission and retain singleton admissions."""
+
+    required = {slate_column, symbol_column, admission_column}
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"support-repair columns missing: {missing}")
+    if frame.empty or minimum_parent_stocks <= 0:
+        raise ValueError("support repair requires rows and a positive parent minimum")
+    rows = frame.copy()
+    rows["parent_slate_id"] = rows[slate_column].astype(str)
+    if rows[["parent_slate_id", symbol_column]].duplicated().any():
+        raise ValueError("parent slate contains a duplicate stock")
+    rows[admission_column] = rows[admission_column].astype(bool)
+    grouped = rows.groupby("parent_slate_id", sort=True)
+    rows["parent_valid_stock_count"] = grouped[symbol_column].transform("nunique").astype(int)
+    rows["admitted_stock_count"] = grouped[admission_column].transform("sum").astype(int)
+    rows["parent_slate_eligible"] = rows["parent_valid_stock_count"].ge(minimum_parent_stocks)
+    rows["support_status"] = np.select(
+        [
+            ~rows["parent_slate_eligible"],
+            rows["admitted_stock_count"].eq(0),
+            rows["admitted_stock_count"].eq(1),
+        ],
+        [
+            "parent_slate_insufficient_valid_stocks",
+            "no_high_movement_admission",
+            "valid_singleton_admission",
+        ],
+        default="valid_multi_candidate_admission",
+    )
+    rows["primary_eligible"] = rows["parent_slate_eligible"] & rows[admission_column]
+    rows["row_weight"] = np.nan
+    primary_mask = rows["primary_eligible"]
+    rows.loc[primary_mask, "row_weight"] = 1.0 / rows.loc[
+        primary_mask, "admitted_stock_count"
+    ].to_numpy(dtype=np.float64)
+    primary = rows.loc[rows["primary_eligible"]].copy()
+    totals = primary.groupby("parent_slate_id", sort=True)["row_weight"].sum()
+    if not np.allclose(totals.to_numpy(dtype=np.float64), 1.0, atol=1e-12):
+        raise AssertionError("admitted-slate row weights do not sum to one")
+    accounting_columns = [
+        "parent_slate_id",
+        "parent_valid_stock_count",
+        "admitted_stock_count",
+        "parent_slate_eligible",
+        "support_status",
+    ]
+    for optional in ("session", "year", "year_month", "decision_ordinal"):
+        if optional in rows.columns:
+            accounting_columns.insert(-4, optional)
+    accounting = (
+        rows.loc[:, accounting_columns]
+        .drop_duplicates("parent_slate_id", keep="first")
+        .sort_values("parent_slate_id", kind="mergesort")
+        .reset_index(drop=True)
+    )
+    parent_columns = [
+        column for column in accounting.columns if column not in {"admitted_stock_count"}
+    ]
+    parent_slates = accounting.loc[:, parent_columns].copy()
+    admitted_slates = accounting.copy()
+    admitted_slates["primary_row_count"] = np.where(
+        admitted_slates["parent_slate_eligible"],
+        admitted_slates["admitted_stock_count"],
+        0,
+    ).astype(int)
+    admitted_slates["singleton_admitted_slate"] = admitted_slates[
+        "parent_slate_eligible"
+    ] & admitted_slates["admitted_stock_count"].eq(1)
+    admitted_slates["multi_candidate_admitted_slate"] = admitted_slates[
+        "parent_slate_eligible"
+    ] & admitted_slates["admitted_stock_count"].ge(2)
+    return SupportContractRepair(
+        annotated_rows=rows,
+        primary_rows=primary,
+        parent_slates=parent_slates,
+        admitted_slates=admitted_slates,
+    )
+
+
+def annotate_economic_selection_semantics(
+    selections: pd.DataFrame,
+    admitted_counts: Mapping[str, int],
+    *,
+    slate_column: str = "slate_id",
+) -> pd.DataFrame:
+    """Label singleton selections without removing their realised result."""
+
+    if slate_column not in selections:
+        raise ValueError("economic selections lack parent-slate identity")
+    output = selections.copy()
+    output["admitted_stock_count"] = output[slate_column].astype(str).map(admitted_counts)
+    if output["admitted_stock_count"].isna().any():
+        raise ValueError("economic selection lacks admitted-stock accounting")
+    output["admitted_stock_count"] = output["admitted_stock_count"].astype(int)
+    if output["admitted_stock_count"].lt(1).any():
+        raise ValueError("economic selection requires at least one admitted stock")
+    output["admitted_slate_type"] = np.where(
+        output["admitted_stock_count"].eq(1), "singleton", "multi_candidate"
+    )
+    output["within_admitted_comparison_status"] = np.where(
+        output["admitted_stock_count"].eq(1),
+        "degenerate_singleton",
+        "competitive_multi_candidate",
+    )
+    return output
+
+
+def largest_admitted_stock(
+    frame: pd.DataFrame, *, symbol_column: str = "symbol"
+) -> ConcentrationLeader:
+    """Select the fixed deletion stock from admitted-row share only."""
+
+    if frame.empty or symbol_column not in frame:
+        raise ValueError("largest-stock selection requires admitted rows and symbols")
+    counts = frame[symbol_column].astype(str).value_counts(sort=False)
+    ordered = (
+        counts.rename_axis("symbol")
+        .reset_index(name="rows")
+        .sort_values(["rows", "symbol"], ascending=[False, True], kind="mergesort")
+    )
+    leader = ordered.iloc[0]
+    return ConcentrationLeader(
+        symbol=str(leader["symbol"]),
+        rows=int(leader["rows"]),
+        share=float(int(leader["rows"]) / len(frame)),
+    )
+
+
+def concentration_aware_decision(
+    base_decision: str,
+    *,
+    maximum_admitted_row_share: float,
+    deletion_same_signed_conclusions: bool,
+    principal_increments_non_negative: bool,
+    no_material_adversity: bool,
+    economic_not_dominated: bool,
+) -> str:
+    """Apply the repaired post-fit concentration rule without blocking fitting."""
+
+    if base_decision not in DECISIONS:
+        raise ValueError("unknown pressure-screen decision")
+    share = float(maximum_admitted_row_share)
+    if not np.isfinite(share) or not 0.0 <= share <= 1.0:
+        raise ValueError("maximum admitted-row share must lie in [0, 1]")
+    positive = {
+        "pressure_onset_and_direction_increment_observed",
+        "pressure_onset_occurrence_only",
+        "directional_pressure_only",
+        "one_bar_confirmation_required",
+    }
+    if base_decision not in positive or share <= 0.10 + 1e-15:
+        return base_decision
+    stress_passes = all(
+        (
+            deletion_same_signed_conclusions,
+            principal_increments_non_negative,
+            no_material_adversity,
+            economic_not_dominated,
+        )
+    )
+    return (
+        base_decision if stress_passes else "pressure_signal_observed_but_concentration_gate_failed"
+    )
+
+
 def equal_slate_weights(slate_ids: pd.Series) -> FloatArray:
     """Give every represented simultaneous slate total model weight one."""
 
@@ -508,6 +704,7 @@ def fit_fixed_logistic(
     features: Sequence[str],
     slate_column: str,
     model_id: str,
+    sample_weight_column: str | None = None,
 ) -> FrozenLogisticModel:
     """Fit the preregistered fixed logistic model with equal-slate weights."""
 
@@ -518,6 +715,14 @@ def fit_fixed_logistic(
         raise ValueError(f"{model_id} training features are not finite")
     if labels.shape != (len(frame),) or set(np.unique(labels)) != {0, 1}:
         raise ValueError(f"{model_id} requires both aligned binary classes")
+    if sample_weight_column is None:
+        sample_weights = equal_slate_weights(frame[slate_column])
+    else:
+        if sample_weight_column not in frame:
+            raise ValueError(f"{model_id} sample-weight column is missing")
+        sample_weights = frame[sample_weight_column].to_numpy(dtype=np.float64)
+        if not np.isfinite(sample_weights).all() or bool((sample_weights <= 0.0).any()):
+            raise ValueError(f"{model_id} sample weights must be positive and finite")
     means = np.asarray(values.mean(axis=0), dtype=np.float64)
     scales = np.asarray(values.std(axis=0, ddof=0), dtype=np.float64)
     scales = np.where(np.isfinite(scales) & (scales >= 1e-12), scales, 1.0)
@@ -533,7 +738,7 @@ def fit_fixed_logistic(
     estimator.fit(
         (values - means) / scales,
         labels,
-        sample_weight=equal_slate_weights(frame[slate_column]),
+        sample_weight=sample_weights,
     )
     iterations = int(np.max(estimator.n_iter_))
     if iterations >= 250:

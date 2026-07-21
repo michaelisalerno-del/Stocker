@@ -1,0 +1,48 @@
+{
+  "admission_flag_differences": 0,
+  "assessment_rows": 6241,
+  "barrier_errors": {
+    "12": 0.0,
+    "6": 0.0
+  },
+  "broker_integration_required": false,
+  "comparison_mode": "exact_frame_identity_before_model_dependent_confirmation",
+  "confirmation_feature_definitions_changed": false,
+  "development_rows": 8852,
+  "down_onsets": 336,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "feature_value_differences": 0,
+  "frozen_columns_compared": 239,
+  "frozen_rows_compared": 15093,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_dependent_confirmation_previously_unavailable": [
+    "favourable_retracement_bps",
+    "predicted_direction_remained_same"
+  ],
+  "model_results_previously_opened": false,
+  "movement_probability_maximum_error": 0.0,
+  "no_onsets": 879,
+  "observable_only": true,
+  "onset_label_differences": 0,
+  "opened_support_counts_only": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "primary_rows": 1560,
+  "primary_sessions": 153,
+  "primary_stocks": 20,
+  "production_runtime_modified": false,
+  "qa_exclusion_differences": 0,
+  "research_only": true,
+  "rows_added_from_new_market_data": false,
+  "static_confirmation_feature_values_changed": false,
+  "strategy_promotion": false,
+  "support_contract_repair": true,
+  "threshold_errors": {
+    "12": 0.0,
+    "6": 0.0
+  },
+  "timestamp_differences": 0,
+  "up_onsets": 345,
+  "v0_compact_panel_sha256": "4cbcc0ae594165487845212ce1a2adec2205fe698c13b5cb72cd0e62e7817806"
+}

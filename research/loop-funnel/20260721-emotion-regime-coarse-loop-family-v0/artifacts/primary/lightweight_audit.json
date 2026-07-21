@@ -1,0 +1,167 @@
+{
+  "audit": "independent_lightweight_audit_v0",
+  "broker_integration_required": false,
+  "check_count": 25,
+  "checks": [
+    {
+      "check": "required_artifacts",
+      "missing": [],
+      "passed": true
+    },
+    {
+      "check": "safety_flags",
+      "passed": true
+    },
+    {
+      "check": "dates_and_protected_boundary",
+      "maximum_session": "2025-08-22",
+      "minimum_session": "2024-01-17",
+      "passed": true
+    },
+    {
+      "check": "frozen_behavioural_values",
+      "frozen_source_rows": 15549,
+      "joined_panel_rows": 15549,
+      "maximum_formula_reconstruction_error": 0.0,
+      "maximum_frozen_source_error": 0.0,
+      "passed": true
+    },
+    {
+      "check": "v2_posterior_values",
+      "frozen_source_rows": 15617,
+      "hard_state_matches": true,
+      "joined_panel_rows": 15549,
+      "maximum_derived_error": 6.661338147750939e-16,
+      "maximum_frozen_source_error": 2.220446049250313e-16,
+      "passed": true
+    },
+    {
+      "check": "checkpoint_timestamps",
+      "passed": true
+    },
+    {
+      "check": "six_bar_first_event_target",
+      "horizon_mismatches": 0,
+      "passed": true,
+      "rows_checked": 15549,
+      "target_mismatches": 0
+    },
+    {
+      "check": "tie_and_unavailable_exclusions",
+      "passed": true,
+      "tied_rows": 4,
+      "unavailable_rows": 0
+    },
+    {
+      "check": "development_only_target_pooling_and_fallback",
+      "independent_mapping": {
+        "NO_REGISTERED_COMPLETION": "NO_REGISTERED_COMPLETION",
+        "REGISTERED_COMPOSITE": "REGISTERED_COMPLETION",
+        "REGISTERED_PRIMITIVE": "REGISTERED_COMPLETION",
+        "REGISTERED_REPEAT": "REGISTERED_COMPLETION",
+        "UNREGISTERED_LOOP": "UNREGISTERED_LOOP"
+      },
+      "independent_variant": "three_class_fallback",
+      "passed": true
+    },
+    {
+      "check": "frozen_final_target_mapping",
+      "passed": true
+    },
+    {
+      "check": "raw_subtype_census_support",
+      "passed": true
+    },
+    {
+      "check": "model_feature_ladder",
+      "passed": true
+    },
+    {
+      "check": "fixed_model_configuration",
+      "passed": true
+    },
+    {
+      "bound_error": 0.0,
+      "check": "all_20_interactions_and_development_clipping",
+      "development_rows": 9284,
+      "finite_bounds": true,
+      "interaction_error": 0.0,
+      "passed": true
+    },
+    {
+      "check": "assessment_support_and_concentration",
+      "maximum_class_share": 0.6880689985625299,
+      "maximum_stock_share": 0.050151732950007986,
+      "passed": true,
+      "rows": 6261
+    },
+    {
+      "check": "development_only_preprocessing_fit_and_coefficients",
+      "coefficient_error": 0.0,
+      "passed": true,
+      "preprocessing_error": 0.0
+    },
+    {
+      "check": "2024_fit_2025_assessment",
+      "passed": true
+    },
+    {
+      "check": "manual_probability_reconstruction",
+      "maximum_probability_error": 0.0,
+      "passed": true,
+      "rows_checked": 6261
+    },
+    {
+      "check": "raw_subtype_census_probabilities",
+      "maximum_probability_error": 4.440892098500626e-16,
+      "passed": true
+    },
+    {
+      "check": "primary_multiclass_metrics",
+      "maximum_metric_error": 3.552713678800501e-15,
+      "passed": true
+    },
+    {
+      "check": "monthly_and_checkpoint_metrics",
+      "maximum_metric_error": 4.884981308350689e-15,
+      "passed": true
+    },
+    {
+      "check": "paired_session_block_bootstrap",
+      "draws_checked": 50,
+      "maximum_draw_or_summary_error": 2.203098814490545e-16,
+      "passed": true
+    },
+    {
+      "check": "within_slate_behavioural_null",
+      "independently_refitted_draws": 1,
+      "maximum_first_draw_or_summary_error": 9.703609443745265e-17,
+      "passed": true,
+      "permutation_draws_checked": 10
+    },
+    {
+      "check": "fast_determinism_refit",
+      "passed": true
+    },
+    {
+      "actual": "descriptive_coarse_funnel_only",
+      "check": "decision_logic",
+      "expected": "descriptive_coarse_funnel_only",
+      "maximum_decision_input_error": 0.0,
+      "passed": true,
+      "stored_gate_payloads_match": true
+    }
+  ],
+  "coarse_loop_family_target": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "passed": true,
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

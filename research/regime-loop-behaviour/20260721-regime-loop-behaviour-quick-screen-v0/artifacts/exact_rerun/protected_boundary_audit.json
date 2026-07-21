@@ -1,0 +1,18 @@
+{
+  "assessment_rows_after_end": 0,
+  "broker_integration_required": false,
+  "candidate_rows_on_or_after_protected_start": 0,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "maximum_timestamp_read": "2025-08-22 19:55:00+00:00",
+  "order_placement": "disabled",
+  "passed": true,
+  "pre_completion_context_only": true,
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "protected_start": "2025-08-23 00:00:00+00:00",
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_prediction_only": true
+}

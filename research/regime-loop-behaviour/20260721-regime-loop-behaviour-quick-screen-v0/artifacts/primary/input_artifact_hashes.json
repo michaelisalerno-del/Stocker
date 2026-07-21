@@ -1,0 +1,94 @@
+{
+  "broker_integration_required": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "inputs": [
+    {
+      "logical_path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/exact_rerun/behavioural_component_scaling.json",
+      "sha256": "6b54a3ce150dcce054fed7a370e411d9d555f03d77f022dcb7feae52100b25ba",
+      "size_bytes": 11894
+    },
+    {
+      "logical_path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/exact_rerun/behavioural_dimension_ledger.parquet",
+      "sha256": "cd5e7cee343952638bb17d4e4ea5d58918cdd1b13477275c312ea21e37d2dee0",
+      "size_bytes": 5889670
+    },
+    {
+      "logical_path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/exact_rerun/compact_decision_panel.parquet",
+      "sha256": "589edb9b3dcbe5ea9dd91d1330054c03c5fee4b3baff0ea030559dd754bec479",
+      "size_bytes": 8147216
+    },
+    {
+      "logical_path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/behavioural_component_scaling.json",
+      "sha256": "6b54a3ce150dcce054fed7a370e411d9d555f03d77f022dcb7feae52100b25ba",
+      "size_bytes": 11894
+    },
+    {
+      "logical_path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/behavioural_dimension_ledger.parquet",
+      "sha256": "cd5e7cee343952638bb17d4e4ea5d58918cdd1b13477275c312ea21e37d2dee0",
+      "size_bytes": 5889670
+    },
+    {
+      "logical_path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/compact_decision_panel.parquet",
+      "sha256": "589edb9b3dcbe5ea9dd91d1330054c03c5fee4b3baff0ea030559dd754bec479",
+      "size_bytes": 8147216
+    },
+    {
+      "logical_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/opening_state_path_ledger.parquet",
+      "sha256": "2c672ceb339c1d630d6835950d0c31fa822cbca0d49b1cb9ad600e59762f525d",
+      "size_bytes": 1403993
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/decision.json",
+      "sha256": "00498c7bc06014c22f63838fab54e9683b5e7b17b220854603427904538b3db1",
+      "size_bytes": 1558
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/independent_audit.json",
+      "sha256": "2f0336857da3fe2161763e5c497967a4a1e559028a8f745c6c330907ad37c865",
+      "size_bytes": 8075
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/semantic_loop_dictionary_v2.csv",
+      "sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a",
+      "size_bytes": 18582
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_cluster_centroids.csv",
+      "sha256": "c8022ce1336693fe509dc1e41b3d9185dff35214d8b5b77e19508c5ce6553979",
+      "size_bytes": 76627
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_parameters.npz",
+      "sha256": "e267edc80298ff4d2915aa57b00f915cf34659b978ccdbc796d8103c8be4b9d2",
+      "size_bytes": 13489
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_preprocessing.csv",
+      "sha256": "b03681a1ef94e2118d0ff873334c7bb489730f784557bc7d742921feafb2b0db",
+      "size_bytes": 9934
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/independent_audit.json",
+      "sha256": "d23cb6d36bb3a0c245a924a89c192439f1998a43e9f2411c6c6b2b7f3cf52ed8",
+      "size_bytes": 5907
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/panel_hashes.json",
+      "sha256": "b188bc987294f7f85a8f726ba3ce6da561756981e336dbeb0c0472545fe53084",
+      "size_bytes": 1806
+    },
+    {
+      "logical_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/repair_decision.json",
+      "sha256": "671ace468f12c4cb9b86aaa3874446a69c6b57aff2dd0eb3ff1cb2e4eb10ab3e",
+      "size_bytes": 1951
+    }
+  ],
+  "order_placement": "disabled",
+  "pre_completion_context_only": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_prediction_only": true
+}

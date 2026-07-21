@@ -1,0 +1,14 @@
+{
+  "broker_integration_required": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "models": {},
+  "order_placement": "disabled",
+  "pre_completion_context_only": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "status": "not_fit_due_insufficient_active_prefix_support",
+  "strategy_promotion": false,
+  "structural_prediction_only": true
+}

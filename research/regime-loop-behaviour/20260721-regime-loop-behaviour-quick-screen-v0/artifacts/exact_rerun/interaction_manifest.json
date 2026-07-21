@@ -1,0 +1,48 @@
+{
+  "additional_interactions_created": false,
+  "broker_integration_required": false,
+  "clipping_bounds": {
+    "next_leg_exhaustion_alignment": {
+      "p01": -0.4610365196801701,
+      "p99": 0.4771859996053487
+    },
+    "orientation_pressure_alignment": {
+      "p01": -1.0437938051006572,
+      "p99": 1.1077782687403122
+    },
+    "prefix_conviction": {
+      "p01": -0.5112095925818887,
+      "p99": 0.5153909717689844
+    },
+    "repeat_tension": {
+      "p01": -1.9231517143183527,
+      "p99": 3.307041794927812
+    },
+    "transition_arousal": {
+      "p01": -0.43376030257793996,
+      "p99": 0.2067790052766831
+    }
+  },
+  "clipping_fit_period": "2024_development_only",
+  "clipping_percentiles": [
+    0.01,
+    0.99
+  ],
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "formulas": {
+    "next_leg_exhaustion_alignment": "probability_of_next_required_state * candidate_orientation_sign * signed_exhaustion",
+    "orientation_pressure_alignment": "candidate_orientation_sign * signed_pressure",
+    "prefix_conviction": "prefix_completion_fraction * conviction",
+    "repeat_tension": "repeat_depth * tension",
+    "transition_arousal": "current_transition_probability * arousal"
+  },
+  "interaction_count": 5,
+  "order_placement": "disabled",
+  "pre_completion_context_only": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_prediction_only": true
+}

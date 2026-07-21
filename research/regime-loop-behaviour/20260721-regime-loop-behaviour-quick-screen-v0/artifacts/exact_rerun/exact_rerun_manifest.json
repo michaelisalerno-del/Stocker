@@ -1,0 +1,170 @@
+{
+  "all_scientific_artifacts_identical": true,
+  "artifact_comparisons": [
+    {
+      "artifact": "contract.json",
+      "exact_rerun_sha256": "4db6a055f157249fba67a5652c3b20b6749716eb8f1147a6bfd5cb784e5bc3f1",
+      "identical": true,
+      "primary_sha256": "4db6a055f157249fba67a5652c3b20b6749716eb8f1147a6bfd5cb784e5bc3f1"
+    },
+    {
+      "artifact": "source_manifest.json",
+      "exact_rerun_sha256": "91b3323988703f40e143f092dea68696c0c04399184a87a200792ec00fa86cf8",
+      "identical": true,
+      "primary_sha256": "91b3323988703f40e143f092dea68696c0c04399184a87a200792ec00fa86cf8"
+    },
+    {
+      "artifact": "input_artifact_hashes.json",
+      "exact_rerun_sha256": "620a0ca082347be66059ed4ed2b60a0e9851980f16fd94cf9c03cff711c02bc9",
+      "identical": true,
+      "primary_sha256": "620a0ca082347be66059ed4ed2b60a0e9851980f16fd94cf9c03cff711c02bc9"
+    },
+    {
+      "artifact": "protected_boundary_audit.json",
+      "exact_rerun_sha256": "35bc621a8725c66bf83c58c60f326900308548e8c8083ad5316230a6be0e662c",
+      "identical": true,
+      "primary_sha256": "35bc621a8725c66bf83c58c60f326900308548e8c8083ad5316230a6be0e662c"
+    },
+    {
+      "artifact": "behavioural_ledger_reconstruction.json",
+      "exact_rerun_sha256": "cee4c2f92eab8659fe72e0eeb0c0dc243e077dbb33e7abee87e3719c050d6bdf",
+      "identical": true,
+      "primary_sha256": "cee4c2f92eab8659fe72e0eeb0c0dc243e077dbb33e7abee87e3719c050d6bdf"
+    },
+    {
+      "artifact": "v2_prefix_population_reconstruction.json",
+      "exact_rerun_sha256": "3f6d3448902cf966c2f6a9478c24c49b7e0a1e4c0d6ad374b66255ac238defac",
+      "identical": true,
+      "primary_sha256": "3f6d3448902cf966c2f6a9478c24c49b7e0a1e4c0d6ad374b66255ac238defac"
+    },
+    {
+      "artifact": "candidate_feature_manifest.json",
+      "exact_rerun_sha256": "706296e98478bb77dd5463f762bc1195df1e871b89e9d4acdcf63eb0a2cc3e7e",
+      "identical": true,
+      "primary_sha256": "706296e98478bb77dd5463f762bc1195df1e871b89e9d4acdcf63eb0a2cc3e7e"
+    },
+    {
+      "artifact": "interaction_manifest.json",
+      "exact_rerun_sha256": "3328779e90a389a293562d0cdd48356a4914e699399a93adfee420c5be3f1897",
+      "identical": true,
+      "primary_sha256": "3328779e90a389a293562d0cdd48356a4914e699399a93adfee420c5be3f1897"
+    },
+    {
+      "artifact": "candidate_population.parquet",
+      "exact_rerun_sha256": "9ab57561c258457e7f2e51886ee98ac99e2d2f09533142eeaa8a9669335a0910",
+      "identical": true,
+      "primary_sha256": "9ab57561c258457e7f2e51886ee98ac99e2d2f09533142eeaa8a9669335a0910"
+    },
+    {
+      "artifact": "candidate_outcomes.parquet",
+      "exact_rerun_sha256": "f06fff1a2c2f4e67b4e0db8f0620e7715f432b7b02f2f0dc3265f128c5fd394a",
+      "identical": true,
+      "primary_sha256": "f06fff1a2c2f4e67b4e0db8f0620e7715f432b7b02f2f0dc3265f128c5fd394a"
+    },
+    {
+      "artifact": "model_configurations.json",
+      "exact_rerun_sha256": "b210e1643fdc7321f360881a98e6951bbbe6445d529535e9b4b8d34b2e902e66",
+      "identical": true,
+      "primary_sha256": "b210e1643fdc7321f360881a98e6951bbbe6445d529535e9b4b8d34b2e902e66"
+    },
+    {
+      "artifact": "model_coefficients.json",
+      "exact_rerun_sha256": "4871b8ec0ae8611e8e8d48eaf38939d41f867600474980aecd58781daf45fdde",
+      "identical": true,
+      "primary_sha256": "4871b8ec0ae8611e8e8d48eaf38939d41f867600474980aecd58781daf45fdde"
+    },
+    {
+      "artifact": "assessment_predictions.parquet",
+      "exact_rerun_sha256": "5c40a4555bee9f0625db04dc48c53a0fa9930d25517638272ea6ba57bed78dab",
+      "identical": true,
+      "primary_sha256": "5c40a4555bee9f0625db04dc48c53a0fa9930d25517638272ea6ba57bed78dab"
+    },
+    {
+      "artifact": "candidate_metrics.csv",
+      "exact_rerun_sha256": "30777954bf9ee6939b7a0047d470f61d0a769ac90ef67494ccdfb5f80046ec17",
+      "identical": true,
+      "primary_sha256": "30777954bf9ee6939b7a0047d470f61d0a769ac90ef67494ccdfb5f80046ec17"
+    },
+    {
+      "artifact": "decision_ranking_metrics.csv",
+      "exact_rerun_sha256": "9d33c495953ec0c97d2e5f8b3e8b98a646194289dcaae58d13692c2612e7b3df",
+      "identical": true,
+      "primary_sha256": "9d33c495953ec0c97d2e5f8b3e8b98a646194289dcaae58d13692c2612e7b3df"
+    },
+    {
+      "artifact": "monthly_metrics.csv",
+      "exact_rerun_sha256": "74c757528ac78d7a09cc624dc19541bbc34d931bd9b1108177053e260983b740",
+      "identical": true,
+      "primary_sha256": "74c757528ac78d7a09cc624dc19541bbc34d931bd9b1108177053e260983b740"
+    },
+    {
+      "artifact": "checkpoint_metrics.csv",
+      "exact_rerun_sha256": "03e5b568bc86c3ff2cb8c2edfdcfe85fb14f7e930ea828e3380596696d5ac372",
+      "identical": true,
+      "primary_sha256": "03e5b568bc86c3ff2cb8c2edfdcfe85fb14f7e930ea828e3380596696d5ac372"
+    },
+    {
+      "artifact": "candidate_family_metrics.csv",
+      "exact_rerun_sha256": "78b5f21a29b9a6f25fc85c9bd7b4d08cf04753288938ca0917322507712bd299",
+      "identical": true,
+      "primary_sha256": "78b5f21a29b9a6f25fc85c9bd7b4d08cf04753288938ca0917322507712bd299"
+    },
+    {
+      "artifact": "prefix_maturity_metrics.csv",
+      "exact_rerun_sha256": "ec8f0234e08b2ad6b9a72cae8052df7d21f7bbfd3c825fb4e9129893360c3866",
+      "identical": true,
+      "primary_sha256": "ec8f0234e08b2ad6b9a72cae8052df7d21f7bbfd3c825fb4e9129893360c3866"
+    },
+    {
+      "artifact": "bootstrap_metrics.csv",
+      "exact_rerun_sha256": "ac1ee8292a7bc3a6a35dfec102cfb1b9ede1b410aae491a79390d82eae08e680",
+      "identical": true,
+      "primary_sha256": "ac1ee8292a7bc3a6a35dfec102cfb1b9ede1b410aae491a79390d82eae08e680"
+    },
+    {
+      "artifact": "null_metrics.csv",
+      "exact_rerun_sha256": "f1ea2e3ba564932f4a74b0e22ad6afa0c21381243ef6caee21902469f328a1b6",
+      "identical": true,
+      "primary_sha256": "f1ea2e3ba564932f4a74b0e22ad6afa0c21381243ef6caee21902469f328a1b6"
+    },
+    {
+      "artifact": "concentration_metrics.csv",
+      "exact_rerun_sha256": "4b2ee578d8e8890b2032734a504250f8947fde72af32418d4139b952d67a41a1",
+      "identical": true,
+      "primary_sha256": "4b2ee578d8e8890b2032734a504250f8947fde72af32418d4139b952d67a41a1"
+    },
+    {
+      "artifact": "decision.json",
+      "exact_rerun_sha256": "d6cfb5cac6082a758418db93ea5652733564a128fb0c06138bcc0860b17e2aff",
+      "identical": true,
+      "primary_sha256": "d6cfb5cac6082a758418db93ea5652733564a128fb0c06138bcc0860b17e2aff"
+    },
+    {
+      "artifact": "independent_audit.json",
+      "exact_rerun_sha256": "9598d37581010593e98059c5964dc6d7a7d7ed93f27dca5aaf1dbef86d1214a0",
+      "identical": true,
+      "primary_sha256": "9598d37581010593e98059c5964dc6d7a7d7ed93f27dca5aaf1dbef86d1214a0"
+    },
+    {
+      "artifact": "report.md",
+      "exact_rerun_sha256": "b6a5df7c27cae9351521295e321c9973e1c40a60ed139bc80801a7f2d79bb303",
+      "identical": true,
+      "primary_sha256": "b6a5df7c27cae9351521295e321c9973e1c40a60ed139bc80801a7f2d79bb303"
+    }
+  ],
+  "broker_integration_required": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "fixed_seeds": {
+    "bootstrap": 20260721,
+    "null": 20260722
+  },
+  "order_placement": "disabled",
+  "passed": true,
+  "pre_completion_context_only": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_prediction_only": true
+}

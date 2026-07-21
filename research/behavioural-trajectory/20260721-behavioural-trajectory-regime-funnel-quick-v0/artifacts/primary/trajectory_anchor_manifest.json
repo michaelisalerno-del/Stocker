@@ -1,0 +1,103 @@
+{
+  "activity_normalisation": [
+    "same_stock_same_clock_expanding_prior_mean_minimum_10"
+  ],
+  "anchors": {
+    "12": {
+      "completed_bar_counts": [
+        6,
+        9,
+        12
+      ],
+      "local_clocks": [
+        "10:00",
+        "10:15",
+        "10:30"
+      ]
+    },
+    "6": {
+      "completed_bar_counts": [
+        2,
+        4,
+        6
+      ],
+      "local_clocks": [
+        "09:40",
+        "09:50",
+        "10:00"
+      ]
+    }
+  },
+  "bar_9_formula_available": false,
+  "bar_9_unavailable_reason": "frozen_opening_raw_components_requires_even_completed_bar_count",
+  "behavioural_trajectory_test": true,
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "completed_bar_convention": "bar_ordinal_is_zero_based_start; anchor_count_includes bars_0_through_anchor_minus_1; features_available_at_last_bar_start_plus_5_minutes",
+  "component_ledger_rows": 15549,
+  "component_ledger_sha256": "96fad90eeeb6edf8b2f82ba809fb6939ad3ce5b7d5bf8193abacd90f471a91cb",
+  "earlier_anchor_future_bars_used": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "frozen_formula_precondition": "opening_raw_components requires count >= 2 and count % 2 == 0",
+  "maximum_anchor_timestamp_after_final_decision_seconds": 0.0,
+  "order_placement": "disabled",
+  "passed_causality": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "substitution_or_alternative_split_used": false,
+  "support": {
+    "assessment_class_support": {
+      "NO_REGISTERED_COMPLETION": 2291,
+      "REGISTERED_COMPLETION": 118,
+      "UNREGISTERED_LOOP": 722
+    },
+    "assessment_complete_trajectory_retention": 0.5000798594473727,
+    "assessment_complete_trajectory_rows": 3131,
+    "assessment_months": 8,
+    "assessment_predecessor_rows": 6261,
+    "assessment_rows": 3131,
+    "assessment_sessions": 157,
+    "assessment_stocks": 20,
+    "behavioural_trajectory_test": true,
+    "broker_integration_required": false,
+    "coarse_loop_family_target": true,
+    "complete_trajectory_retention": 0.5000321564087723,
+    "complete_trajectory_rows": 7775,
+    "development_complete_trajectory_rows": 4644,
+    "development_predecessor_rows": 9284,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "failed_gates": [
+      "assessment_rows_at_least_5500",
+      "complete_trajectory_retention_at_least_95_percent"
+    ],
+    "gates": {
+      "all_20_stocks": true,
+      "assessment_rows_at_least_5500": false,
+      "assessment_sessions_at_least_140": true,
+      "complete_trajectory_retention_at_least_95_percent": false,
+      "eight_assessment_months": true,
+      "every_assessment_target_class_at_least_50": true,
+      "maximum_stock_share_at_most_10_percent": true,
+      "maximum_target_class_share_at_most_75_percent": true
+    },
+    "maximum_assessment_class_share": 0.7317151069945704,
+    "maximum_assessment_stock_share": 0.05014372404982434,
+    "order_placement": "disabled",
+    "passed": false,
+    "predecessor_rows": 15549,
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "scoring_complete_trajectory_retention": 0.5001608234158893,
+    "scoring_complete_trajectory_rows": 7775,
+    "soft_regime_mixture": true,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true
+  }
+}

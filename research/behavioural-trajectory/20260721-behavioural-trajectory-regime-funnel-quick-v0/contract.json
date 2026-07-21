@@ -1,0 +1,137 @@
+{
+  "behavioural_trajectory_test": true,
+  "binding_question": "Do causal behavioural trajectories improve prediction of REGISTERED_COMPLETION, UNREGISTERED_LOOP or NO_REGISTERED_COMPLETION beyond the frozen M2 behavioural-level and regime-mixture model?",
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "decision_categories": [
+    "behavioural_trajectories_improve_coarse_structural_forecast",
+    "regime_mix_filters_behavioural_trajectories",
+    "trajectory_main_effects_only",
+    "descriptive_trajectory_structure_only",
+    "no_behavioural_trajectory_increment",
+    "blocked_predecessor_population_not_reconstructable",
+    "blocked_frozen_m2_not_reconstructable",
+    "blocked_behavioural_trajectory_not_causal",
+    "blocked_insufficient_trajectory_support",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_quick_trajectory_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "decision_gates": {
+    "bootstrap_90_lower_proper_score_improvements_non_negative": true,
+    "checkpoint_material_adversity_log_loss_improvement": -0.001,
+    "minimum_positive_assessment_months": 5,
+    "null_threshold_percentile": 0.9,
+    "proper_score_improvement_required": true,
+    "top_two_must_not_decline": true
+  },
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "experiment_id": "20260721-behavioural-trajectory-regime-funnel-quick-v0",
+  "experiment_name": "Behavioural-Trajectory × Regime-Mix Funnel Quick Screen V0",
+  "hypothesis": "The direction, persistence and acceleration of causal behavioural change may contain information about the next broad structural event beyond the current behavioural level.",
+  "interactions": [
+    "transition_probability_x_arousal_change",
+    "posterior_entropy_x_frustration_change",
+    "top_second_margin_x_conviction_change",
+    "transition_probability_x_signed_pressure_acceleration",
+    "posterior_entropy_x_tension_acceleration",
+    "top_state_probability_x_signed_exhaustion_change"
+  ],
+  "models": {
+    "C": 0.25,
+    "class_weight": null,
+    "fit_interval": "2024_only",
+    "max_iter": 300,
+    "maximum_primary_models": 3,
+    "multi_class": "multinomial",
+    "n_jobs": 1,
+    "penalty": "l2",
+    "random_state": 20260721,
+    "row_weight": "frozen_predecessor_slate_weight",
+    "solver": "lbfgs"
+  },
+  "order_placement": "disabled",
+  "population": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "checkpoints": {
+      "12": "10:30 America/New_York",
+      "6": "10:00 America/New_York"
+    },
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "horizon_completed_five_minute_bars": 6,
+    "minimum_complete_trajectory_retention": 0.95,
+    "protected_start": "2025-08-23",
+    "trajectory_anchors": {
+      "12": [6, 9, 12],
+      "6": [2, 4, 6]
+    }
+  },
+  "predecessor": {
+    "commit": "29c61bbe74f45d0a00c5f2a12cdcd5d996131a23",
+    "decision": "descriptive_coarse_funnel_only",
+    "experiment": "Emotion × Regime-Mix Coarse Loop-Family Funnel V0",
+    "model": "M2"
+  },
+  "primary_trajectory_forms": [
+    "change",
+    "acceleration",
+    "reversal"
+  ],
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "reporting_only_trajectory_forms": [
+    "recent_change",
+    "persistence",
+    "peak_displacement"
+  ],
+  "resampling": {
+    "bootstrap_draws": 50,
+    "bootstrap_seed": 20260722,
+    "bootstrap_unit": "whole_session",
+    "null_draws": 10,
+    "null_seed": 20260723,
+    "null_unit": "complete_trajectory_bundle_within_session_checkpoint_slate",
+    "refit_inside_bootstrap": false
+  },
+  "research_only": true,
+  "resource_limits": {
+    "feature_search": false,
+    "full_duplicate_rerun": false,
+    "gpu": false,
+    "hyperparameter_tuning": false,
+    "maximum_plots": 1,
+    "model_search": false,
+    "n_jobs": 1,
+    "one_minute_data": false,
+    "processes": 1,
+    "raw_data_download": false,
+    "trajectory_window_search": false
+  },
+  "safety": {
+    "behavioural_trajectory_test": true,
+    "broker_integration_required": false,
+    "coarse_loop_family_target": true,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "soft_regime_mixture": true,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true
+  },
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "target_classes": [
+    "REGISTERED_COMPLETION",
+    "UNREGISTERED_LOOP",
+    "NO_REGISTERED_COMPLETION"
+  ]
+}

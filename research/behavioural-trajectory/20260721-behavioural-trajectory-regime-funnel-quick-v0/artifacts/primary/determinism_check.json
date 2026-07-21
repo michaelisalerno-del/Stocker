@@ -1,0 +1,30 @@
+{
+  "behavioural_trajectory_test": true,
+  "broker_integration_required": false,
+  "class_order_equal": true,
+  "coarse_loop_family_target": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "final_decision_equal": true,
+  "maximum_coefficient_difference": 0.0,
+  "maximum_permitted_probability_difference": 1e-12,
+  "maximum_pooled_metric_difference": 0.0,
+  "maximum_probability_difference": 0.0,
+  "maximum_scaler_difference": 0.0,
+  "method": "reload_frozen_panel_refit_T0_and_reproduce_binding_support_blocker",
+  "not_fitted_models": [
+    "T1",
+    "T2"
+  ],
+  "not_fitted_reason": "blocked_insufficient_trajectory_support_before_model_fitting",
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "requested_three_model_refit_not_applicable": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "trajectory_retention_difference": 0.0
+}

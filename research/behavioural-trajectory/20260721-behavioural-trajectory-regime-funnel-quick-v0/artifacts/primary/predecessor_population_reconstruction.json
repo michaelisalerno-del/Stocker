@@ -1,0 +1,65 @@
+{
+  "assessment_assignment": "2025-01-01_through_2025-08-22",
+  "assessment_class_support": {
+    "NO_REGISTERED_COMPLETION": 4308,
+    "REGISTERED_COMPLETION": 312,
+    "UNREGISTERED_LOOP": 1641
+  },
+  "assessment_months": 8,
+  "assessment_predictions_sha256": "7336e25c4ad619e77672030d8203293028a9355c6d727ac6f07e4d1378d498f1",
+  "assessment_rows": 6261,
+  "assessment_sessions": 157,
+  "assessment_stocks": 20,
+  "behavioural_trajectory_test": true,
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "decision_ordinals": [
+    6,
+    12
+  ],
+  "decision_panel_sha256": "8e6919c03e207e3eee2f05a47271dbff0129c02a0cb0f04c0b6eb1410a65dca5",
+  "development_assignment": "2024-01-01_through_2024-12-31",
+  "development_class_support": {
+    "NO_REGISTERED_COMPLETION": 6083,
+    "REGISTERED_COMPLETION": 525,
+    "UNREGISTERED_LOOP": 2676
+  },
+  "development_rows": 9284,
+  "development_sessions": 234,
+  "development_stocks": 20,
+  "economic_outcomes_opened": false,
+  "exact_population_reconstructed": true,
+  "execution_enabled": false,
+  "feature_counts": {
+    "M0": 16,
+    "M1": 22,
+    "M2": 42
+  },
+  "local_clocks": [
+    "10:00",
+    "10:30"
+  ],
+  "maximum_assessment_archive_difference": 0.0,
+  "maximum_slate_weight_error": 0.0,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "row_weight": "1/eligible_stocks_in_session_checkpoint",
+  "rows": 15549,
+  "scoring_rows": 15545,
+  "soft_regime_mixture": true,
+  "source_commit": "29c61bbe74f45d0a00c5f2a12cdcd5d996131a23",
+  "source_experiment": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0",
+  "source_unavailable_exclusions": 0,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "target_classes": [
+    "REGISTERED_COMPLETION",
+    "UNREGISTERED_LOOP",
+    "NO_REGISTERED_COMPLETION"
+  ],
+  "target_horizon_completed_five_minute_bars": 6,
+  "tied_exclusions": 4
+}

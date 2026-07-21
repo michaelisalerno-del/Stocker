@@ -1,0 +1,6 @@
+metric,real_value,null_mean,null_q90,real_percentile,draw_count,planned_draw_count,seed_base,status
+t1_minus_t0_log_loss_improvement,,,,,0,10,20260723,not_run_pre_model_support_blocker
+t1_minus_t0_brier_improvement,,,,,0,10,20260723,not_run_pre_model_support_blocker
+t2_minus_t1_log_loss_improvement,,,,,0,10,20260723,not_run_pre_model_support_blocker
+t2_minus_t1_brier_improvement,,,,,0,10,20260723,not_run_pre_model_support_blocker
+t2_minus_t1_top_two_improvement,,,,,0,10,20260723,not_run_pre_model_support_blocker

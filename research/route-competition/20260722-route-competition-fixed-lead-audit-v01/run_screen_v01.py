@@ -25,12 +25,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-import matplotlib
 import numpy as np
 import pandas as pd
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 EXPERIMENT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EXPERIMENT_DIR.parents[2]
@@ -66,6 +62,49 @@ PREDECESSOR_DIR = (
     REPO_ROOT / "research" / "route-competition" / "20260722-route-competition-hazard-quick-v0"
 )
 PREDECESSOR = PREDECESSOR_DIR / "artifacts" / "primary"
+DICTIONARY_PATH = (
+    REPO_ROOT
+    / "research"
+    / "slrno-v2"
+    / "20260714-regime-loop-handoff"
+    / "work"
+    / "artifacts"
+    / "20260718-loop-event-semantics-v2"
+    / "primary"
+    / "semantic_loop_dictionary_v2.csv"
+)
+EXPECTED_PREDECESSOR_COMMIT = "1001693c70e99f92ae77777b0d6b3633777bf7af"
+EXPECTED_DICTIONARY_SHA256 = "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+EXPECTED_DICTIONARY_HASH = "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3"
+EXPECTED_PREDECESSOR_SHA256 = {
+    "assessment_predictions.parquet": (
+        "2d212cc21991f0c1a92b9c5cb34cf9e324cbd92d56c9de9c6d0fc002ddd46463"
+    ),
+    "baseline_feature_manifest.json": (
+        "cc89c5dbd159ea724a05fc33b461d638e399d32ea90fda5ddd0c6623f1b54b38"
+    ),
+    "checkpoint_manifest.json": (
+        "91781bd4a330734576f113b1b58a4a7d125e119c95c41706eb84bfdfabbdcb0f"
+    ),
+    "decision_panel.parquet": ("aeec77229470165cf4b547ea19eb72db82ff8f377936a0694a68265222e36083"),
+    "determinism_check.json": ("460d691fb9d857cc2ab737c5f40ffe15f6f7066d5a7f0e71111de2e9fb9d8850"),
+    "lightweight_audit.json": ("44e29438769bed453fb164e8f3d4e93a177c2905de9601f720f61b2a8b87ef28"),
+    "model_coefficients.json": ("5b5af4a454e6ecf5f4aa8e28ccfa894dfaa361550354bee93ecb96b4781613e3"),
+    "model_configurations.json": (
+        "5cd3bab546aa7484118c595e7d562cea5407c0fa227360d868654c99b15b7014"
+    ),
+    "pooled_metrics.csv": "bd096bbbb42f15669d1a193ace78c3c840d4ed324700ecb58f3224c4e1d2d206",
+    "protected_boundary_audit.json": (
+        "07d89d7ae1d084255a053f6d1ab8e9a08c14a220c3804af3985d2e9545957794"
+    ),
+    "route_competition_feature_manifest.json": (
+        "edcb2ab127be6e9f5bc6f248cf68390447485f3c53952a83b73f81a379386e5c"
+    ),
+    "route_competition_ledger.parquet": (
+        "b3eab7d5b699719220bd8fd084ca0b25a8b2b56851211a093fe04a3cb22f124a"
+    ),
+    "source_manifest.json": "64cd179d36d9b3a8b9c5869f176e965f43b6faeabf53d013d29b7736698e03a5",
+}
 
 SAFETY_FLAGS: dict[str, bool] = {
     "research_only": True,
@@ -254,6 +293,12 @@ def load_predecessor() -> dict[str, Any]:
             "blocked_predecessor_reconstruction_failure",
             f"predecessor artifacts missing: {missing}",
         )
+    hashes = {name: sha256_file(PREDECESSOR / name) for name in required}
+    if hashes != EXPECTED_PREDECESSOR_SHA256:
+        raise ScreenBlocker(
+            "blocked_predecessor_reconstruction_failure",
+            "predecessor artifacts differ from the commit-pinned manifest",
+        )
     return {
         "panel": pd.read_parquet(PREDECESSOR / "decision_panel.parquet"),
         "assessment": pd.read_parquet(PREDECESSOR / "assessment_predictions.parquet"),
@@ -268,8 +313,78 @@ def load_predecessor() -> dict[str, Any]:
         "determinism": read_json(PREDECESSOR / "determinism_check.json"),
         "audit": read_json(PREDECESSOR / "lightweight_audit.json"),
         "source": read_json(PREDECESSOR / "source_manifest.json"),
-        "hashes": {name: sha256_file(PREDECESSOR / name) for name in required},
+        "hashes": hashes,
     }
+
+
+def load_canonical_route_metadata(source: Mapping[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Load and verify registered orientations independently of the prefix ledger."""
+
+    if not DICTIONARY_PATH.is_file() or sha256_file(DICTIONARY_PATH) != EXPECTED_DICTIONARY_SHA256:
+        raise ScreenBlocker(
+            "blocked_prefix_proximity_reconstruction_failure",
+            "frozen semantic-loop dictionary source differs",
+        )
+    table = pd.read_csv(DICTIONARY_PATH)
+    if set(table["dictionary_hash"].astype(str)) != {EXPECTED_DICTIONARY_HASH}:
+        raise ScreenBlocker(
+            "blocked_prefix_proximity_reconstruction_failure",
+            "frozen semantic-loop dictionary hash differs",
+        )
+    predecessor_manifest = cast(Mapping[str, Any], source["source"])
+    predecessor_dictionary = cast(
+        Mapping[str, Any], predecessor_manifest["loop_dictionary_manifest"]
+    )
+    if (
+        predecessor_dictionary.get("dictionary_hash") != EXPECTED_DICTIONARY_HASH
+        or predecessor_dictionary.get("source_sha256") != EXPECTED_DICTIONARY_SHA256
+    ):
+        raise ScreenBlocker(
+            "blocked_predecessor_reconstruction_failure",
+            "predecessor dictionary provenance differs",
+        )
+    rows: list[dict[str, Any]] = []
+    for row in table.itertuples(index=False):
+        semantic_loop_id = str(row.semantic_loop_id)
+        motif_type = str(row.motif_type)
+        canonical = tuple(int(value) for value in json.loads(str(row.canonical_orientation)))
+        valid_paths = [
+            tuple(int(value) for value in path)
+            for path in json.loads(str(row.all_valid_oriented_paths))
+        ]
+        if canonical not in valid_paths or any(
+            len(path) < 3 or path[0] != path[-1] or len(path) != len(canonical)
+            for path in valid_paths
+        ):
+            raise ScreenBlocker(
+                "blocked_prefix_proximity_reconstruction_failure",
+                f"canonical orientation metadata differs for {semantic_loop_id}",
+            )
+        for path in valid_paths:
+            rows.append(
+                {
+                    "semantic_loop_id": semantic_loop_id,
+                    "orientation_id": (
+                        f"{semantic_loop_id}__o_{'-'.join(str(value) for value in path)}"
+                    ),
+                    "dictionary_motif_type": motif_type,
+                    "canonical_total_transitions": len(path) - 1,
+                }
+            )
+    metadata = pd.DataFrame(rows)
+    if metadata.duplicated(["semantic_loop_id", "orientation_id"]).any():
+        raise ScreenBlocker(
+            "blocked_prefix_proximity_reconstruction_failure",
+            "canonical orientation identities are not unique",
+        )
+    manifest = {
+        "path": str(DICTIONARY_PATH.relative_to(REPO_ROOT)),
+        "source_sha256": EXPECTED_DICTIONARY_SHA256,
+        "dictionary_hash": EXPECTED_DICTIONARY_HASH,
+        "registered_definition_count": int(table["semantic_loop_id"].nunique()),
+        "registered_orientation_count": len(metadata),
+    }
+    return metadata, manifest
 
 
 def _top_precision(
@@ -334,8 +449,8 @@ def verify_predecessor(source: Mapping[str, Any], panel: pd.DataFrame) -> dict[s
     assessment_source = cast(pd.DataFrame, source["assessment"])
     assessment_panel = panel.loc[panel["period"].eq("assessment")].reset_index(drop=True)
     surface = predecessor_surface_differences(
-        cast(pd.DataFrame, source["panel"]),
-        panel,
+        assessment_source,
+        assessment_panel,
         feature_columns=(*BASELINE_FEATURES, *ROUTE_FEATURES),
     )
     assessment_row_mismatches = abs(len(assessment_source) - len(assessment_panel)) + sum(
@@ -431,7 +546,11 @@ def verify_predecessor(source: Mapping[str, Any], panel: pd.DataFrame) -> dict[s
     return result
 
 
-def build_fixed_lead_panel(panel: pd.DataFrame, ledger: pd.DataFrame) -> pd.DataFrame:
+def build_fixed_lead_panel(
+    panel: pd.DataFrame,
+    ledger: pd.DataFrame,
+    canonical_routes: pd.DataFrame,
+) -> pd.DataFrame:
     registered = ledger.loc[ledger["ledger_kind"].eq("registered_completion")].copy()
     prefixes = ledger.loc[
         ledger["ledger_kind"].eq("active_prefix")
@@ -447,18 +566,41 @@ def build_fixed_lead_panel(panel: pd.DataFrame, ledger: pd.DataFrame) -> pd.Data
     prefixes = prefixes.drop_duplicates(
         ["symbol", "session", "bar_ordinal", "semantic_loop_id", "orientation_id"]
     )
-    progress = prefixes["progress_states"].astype(int)
-    remaining = prefixes["transitions_remaining"].astype(int)
-    total_required = progress - 1 + remaining
-    prefixes["remaining_required_transitions"] = total_required - (progress - 1)
+    prefixes = prefixes.merge(
+        canonical_routes,
+        on=["semantic_loop_id", "orientation_id"],
+        how="left",
+        validate="many_to_one",
+    )
+    if prefixes["canonical_total_transitions"].isna().any():
+        raise ScreenBlocker(
+            "blocked_prefix_proximity_reconstruction_failure",
+            "active prefix orientation is absent from the frozen dictionary",
+        )
     if (
-        (progress < 1).any()
-        or (remaining < 0).any()
-        or not prefixes["remaining_required_transitions"].eq(remaining).all()
+        not prefixes["motif_type"]
+        .astype(str)
+        .eq(prefixes["dictionary_motif_type"].astype(str))
+        .all()
     ):
         raise ScreenBlocker(
             "blocked_prefix_proximity_reconstruction_failure",
-            "canonical prefix remaining-transition calculation differs",
+            "active prefix motif differs from the frozen dictionary",
+        )
+    progress = prefixes["progress_states"].astype(int)
+    declared_remaining = prefixes["transitions_remaining"].astype(int)
+    prefixes["remaining_required_transitions"] = prefixes["canonical_total_transitions"].astype(
+        int
+    ) - (progress - 1)
+    if (
+        (progress < 1).any()
+        or (declared_remaining < 0).any()
+        or (prefixes["remaining_required_transitions"] < 0).any()
+        or not prefixes["remaining_required_transitions"].eq(declared_remaining).all()
+    ):
+        raise ScreenBlocker(
+            "blocked_prefix_proximity_reconstruction_failure",
+            "declared prefix remainder differs from canonical route length",
         )
     prefixes["one_transition_away"] = prefixes["remaining_required_transitions"].eq(1)
     proximity = (
@@ -1084,7 +1226,10 @@ def run_route_nulls(
                 seed=seed,
             )
             development = permuted.loc[permuted["period"].eq("development")]
-            fitted = fit_hazard_model(development, features=H1_FEATURES, target=target)
+            try:
+                fitted = fit_hazard_model(development, features=H1_FEATURES, target=target)
+            except ValueError as error:
+                raise ScreenBlocker("blocked_model_convergence_failure", str(error)) from error
             permuted_assessment = permuted.loc[permuted["period"].eq("assessment")]
             probability = fitted.predict_probability(permuted_assessment)
             column = f"{comparison}_route_null_{draw}_probability"
@@ -1159,10 +1304,11 @@ def blocked_determinism_check(
     output: Path,
     predecessor_panel: pd.DataFrame,
     ledger: pd.DataFrame,
+    canonical_routes: pd.DataFrame,
     decision: Mapping[str, Any],
 ) -> dict[str, Any]:
     stored = pd.read_parquet(output / "fixed_lead_panel.parquet")
-    regenerated = build_fixed_lead_panel(predecessor_panel, ledger)
+    regenerated = build_fixed_lead_panel(predecessor_panel, ledger, canonical_routes)
     ids_left = stored["row_id"].astype(str).tolist()
     ids_right = regenerated["row_id"].astype(str).tolist()
     row_mismatches = abs(len(ids_left) - len(ids_right)) + sum(
@@ -1195,13 +1341,24 @@ def blocked_determinism_check(
         )
     )
     stored_decision = read_json(output / "decision.json")
+    _, _, regenerated_blocker = support_and_concentration(regenerated)
+    regenerated_decision = choose_fixed_lead_decision(
+        blocker=regenerated_blocker,
+        immediate_passed=False,
+        advance_passed=False,
+        descriptive_lead_structure=False,
+        baseline_meaningful=False,
+    )
+    final_decision_match = (
+        stored_decision["primary_decision"] == decision["primary_decision"] == regenerated_decision
+    )
     passed = bool(
         row_mismatches == 0
         and lead_mismatches == 0
         and eligibility_mismatches == 0
         and proximity_mismatches == 0
         and maximum_feature_difference <= 1e-12
-        and stored_decision["primary_decision"] == decision["primary_decision"]
+        and final_decision_match
     )
     return {
         **SAFETY_FLAGS,
@@ -1214,9 +1371,11 @@ def blocked_determinism_check(
         "advance_eligibility_mismatches": eligibility_mismatches,
         "prefix_proximity_mismatches": proximity_mismatches,
         "maximum_feature_difference": maximum_feature_difference,
-        "maximum_probability_difference": 0.0,
+        "maximum_probability_difference": None,
+        "probability_check_status": "not_applicable_pre_model_support_stop",
         "probability_comparison_rows": 0,
-        "final_decision_match": stored_decision["primary_decision"] == decision["primary_decision"],
+        "regenerated_primary_decision": regenerated_decision,
+        "final_decision_match": final_decision_match,
         "passed": passed,
     }
 
@@ -1225,6 +1384,8 @@ def build_report(
     decision: Mapping[str, Any],
     lead_support: pd.DataFrame,
     route_states: pd.DataFrame,
+    immediate_metrics: pd.DataFrame,
+    advance_metrics: pd.DataFrame,
     *,
     audit: Mapping[str, Any] | None = None,
 ) -> str:
@@ -1269,16 +1430,49 @@ def build_report(
             f"{float(row.clean_bars_two_to_three_completion_rate):.6f}; advance rows "
             f"{int(row.advance_rows)}; positives {int(row.bars_two_to_three_positive_outcomes)}."
         )
-    lines.extend(
-        [
-            "",
-            (
-                "The preregistered minimum was 250 clean advance positives. The observed support "
-                "was lower, so the experiment stopped before fitting N0/N1/A0/A1, bootstrapping, "
-                "or route-null refitting."
-            ),
-        ]
-    )
+    if decision.get("blocker") is not None:
+        lines.extend(
+            [
+                "",
+                (
+                    "The preregistered minimum was 250 clean advance positives. The observed "
+                    "support was lower, so the experiment stopped before fitting N0/N1/A0/A1, "
+                    "bootstrapping, or route-null refitting."
+                ),
+            ]
+        )
+    else:
+        lines.extend(["", "## Fixed-lead model results", ""])
+        for population, metrics in (
+            ("Immediate", immediate_metrics),
+            ("Clean advance", advance_metrics),
+        ):
+            for row in metrics.itertuples(index=False):
+                lines.append(
+                    f"- {population} {row.model}: log loss {float(row.log_loss):.8f}; "
+                    f"Brier {float(row.brier_score):.8f}; AUC {float(row.auc):.8f}; "
+                    f"average precision {float(row.average_precision):.8f}."
+                )
+        immediate_increment = cast(Mapping[str, Any], decision["immediate_increments"])
+        advance_increment = cast(Mapping[str, Any], decision["advance_increments"])
+        lines.extend(
+            [
+                "",
+                (
+                    "N1-minus-N0 improvements: log loss "
+                    f"{float(immediate_increment['log_loss_improvement']):.8f}; Brier "
+                    f"{float(immediate_increment['brier_improvement']):.8f}; AUC "
+                    f"{float(immediate_increment['auc_improvement']):.8f}."
+                ),
+                (
+                    "A1-minus-A0 improvements: log loss "
+                    f"{float(advance_increment['log_loss_improvement']):.8f}; Brier "
+                    f"{float(advance_increment['brier_improvement']):.8f}; AUC "
+                    f"{float(advance_increment['auc_improvement']):.8f}; average precision "
+                    f"{float(advance_increment['average_precision_improvement']):.8f}."
+                ),
+            ]
+        )
     if audit is not None:
         lines.append(f"Independent audit passed={bool(audit['passed'])}.")
     lines.extend(
@@ -1300,6 +1494,8 @@ def finalize_report(output: Path, *, audit: Mapping[str, Any] | None = None) -> 
         decision,
         pd.read_csv(output / "lead_support.csv"),
         pd.read_csv(output / "route_resolution_state_metrics.csv"),
+        pd.read_csv(output / "immediate_metrics.csv"),
+        pd.read_csv(output / "advance_metrics.csv"),
         audit=audit,
     )
     primary = output / "report.md"
@@ -1474,6 +1670,11 @@ def plot_supported_screen(
     advance: pd.DataFrame,
     output: Path,
 ) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     values: list[float] = []
     labels: list[str] = []
     for metrics, baseline, route, prefix in (
@@ -1505,11 +1706,17 @@ def supported_determinism_check(
     output: Path,
     predecessor_panel: pd.DataFrame,
     ledger: pd.DataFrame,
+    canonical_routes: pd.DataFrame,
     coefficients: Mapping[str, Any],
     stored_decision: Mapping[str, Any],
 ) -> dict[str, Any]:
     stored = pd.read_parquet(output / "fixed_lead_panel.parquet")
-    labels = build_fixed_lead_panel(predecessor_panel, ledger)
+    labels = build_fixed_lead_panel(predecessor_panel, ledger, canonical_routes)
+    stored_ids = stored["row_id"].astype(str).tolist()
+    regenerated_ids = labels["row_id"].astype(str).tolist()
+    row_mismatches = abs(len(stored_ids) - len(regenerated_ids)) + sum(
+        left != right for left, right in zip(stored_ids, regenerated_ids, strict=False)
+    )
     lead_mismatches = int(
         (
             stored["first_completion_lead"].to_numpy(int)
@@ -1518,6 +1725,20 @@ def supported_determinism_check(
     )
     eligibility_mismatches = int(
         (stored["advance_eligible"].to_numpy(int) != labels["advance_eligible"].to_numpy(int)).sum()
+    )
+    proximity_mismatches = int(
+        (
+            stored["number_of_one_transition_away_prefixes"].to_numpy(int)
+            != labels["number_of_one_transition_away_prefixes"].to_numpy(int)
+        ).sum()
+    )
+    maximum_feature_difference = float(
+        np.max(
+            np.abs(
+                stored.loc[:, [*BASELINE_FEATURES, *ROUTE_FEATURES]].to_numpy(float)
+                - labels.loc[:, [*BASELINE_FEATURES, *ROUTE_FEATURES]].to_numpy(float)
+            )
+        )
     )
     maximum_probability_difference = 0.0
     maximum_coefficient_difference = 0.0
@@ -1549,15 +1770,159 @@ def supported_determinism_check(
             ),
             abs(float(refit.as_dict()["intercept"]) - float(serialized["intercept"])),
         )
-    final_decision_match = (
-        read_json(output / "decision.json")["primary_decision"]
-        == stored_decision["primary_decision"]
+    configurations = read_json(output / "model_configurations.json")
+    boundaries = cast(
+        Mapping[str, Mapping[str, float]], configurations["probability_quantile_boundaries"]
     )
+    assessment = stored.loc[stored["period"].eq("assessment")]
+    assessment_advance = assessment.loc[assessment["advance_eligible"].eq(1)]
+    regenerated_immediate = pd.DataFrame(
+        [
+            model_metrics(
+                assessment,
+                model=model,
+                target="completion_next_1_bar",
+                boundaries=boundaries[model],
+            )
+            for model in ("N0", "N1")
+        ]
+    )
+    regenerated_advance = pd.DataFrame(
+        [
+            model_metrics(
+                assessment_advance,
+                model=model,
+                target="completion_in_bars_2_or_3",
+                boundaries=boundaries[model],
+            )
+            for model in ("A0", "A1")
+        ]
+    )
+    metric_columns = (
+        "log_loss",
+        "brier_score",
+        "auc",
+        "average_precision",
+        "expected_calibration_error",
+        "calibration_intercept",
+        "calibration_slope",
+        "base_rate",
+        "mean_probability_realised_class",
+        "top_decile_precision",
+        "top_decile_lift",
+        "top_quintile_precision",
+        "top_quintile_lift",
+    )
+    maximum_metric_difference = 0.0
+    for regenerated, stored_path in (
+        (regenerated_immediate, output / "immediate_metrics.csv"),
+        (regenerated_advance, output / "advance_metrics.csv"),
+    ):
+        archived = pd.read_csv(stored_path).set_index("model")
+        for row in regenerated.itertuples(index=False):
+            for column in metric_columns:
+                left = float(getattr(row, column))
+                right = float(archived.loc[str(row.model), column])
+                difference = 0.0 if np.isnan(left) and np.isnan(right) else abs(left - right)
+                maximum_metric_difference = max(maximum_metric_difference, difference)
+
+    bootstrap = pd.read_csv(output / "bootstrap_metrics.csv")
+    monthly = pd.read_csv(output / "monthly_metrics.csv")
+    checkpoint = pd.read_csv(output / "checkpoint_metrics.csv")
+    route_null = pd.read_csv(output / "route_null_metrics.csv")
+    immediate_increments = pair_increments(
+        assessment,
+        baseline_model="N0",
+        route_model="N1",
+        target="completion_next_1_bar",
+        boundaries=boundaries,
+    )
+    advance_increments = pair_increments(
+        assessment_advance,
+        baseline_model="A0",
+        route_model="A1",
+        target="completion_in_bars_2_or_3",
+        boundaries=boundaries,
+    )
+    immediate_positive_months, _ = stability_gate_values(
+        monthly, population="immediate", baseline="N0", route="N1"
+    )
+    advance_positive_months, _ = stability_gate_values(
+        monthly, population="advance", baseline="A0", route="A1"
+    )
+    _, immediate_adverse = stability_gate_values(
+        checkpoint, population="immediate", baseline="N0", route="N1"
+    )
+    _, advance_adverse = stability_gate_values(
+        checkpoint, population="advance", baseline="A0", route="A1"
+    )
+    immediate_gates: dict[str, object] = {
+        **immediate_increments,
+        "bootstrap_80_log_loss_lower": _bootstrap_lower(
+            bootstrap, "immediate", "log_loss_improvement", 0.80
+        ),
+        "bootstrap_80_brier_lower": _bootstrap_lower(
+            bootstrap, "immediate", "brier_improvement", 0.80
+        ),
+        "positive_months": immediate_positive_months,
+        "materially_adverse_checkpoints": immediate_adverse,
+        "real_exceeds_all_nulls": null_exceeds_all(route_null, "immediate"),
+        "support_and_concentration_passed": True,
+    }
+    advance_gates: dict[str, object] = {
+        **advance_increments,
+        "bootstrap_80_log_loss_lower": _bootstrap_lower(
+            bootstrap, "advance", "log_loss_improvement", 0.80
+        ),
+        "bootstrap_80_brier_lower": _bootstrap_lower(
+            bootstrap, "advance", "brier_improvement", 0.80
+        ),
+        "bootstrap_80_average_precision_lower": _bootstrap_lower(
+            bootstrap, "advance", "average_precision_improvement", 0.80
+        ),
+        "positive_months": advance_positive_months,
+        "materially_adverse_checkpoints": advance_adverse,
+        "real_exceeds_all_nulls": null_exceeds_all(route_null, "advance"),
+        "support_and_concentration_passed": True,
+    }
+    immediate_passed = fixed_lead_increment_passes(immediate_gates, require_average_precision=False)
+    advance_passed = fixed_lead_increment_passes(advance_gates, require_average_precision=True)
+    route_states = pd.read_csv(output / "route_resolution_state_metrics.csv")
+    supported_state_rates = route_states.loc[
+        route_states["inference_supported"], "clean_bars_two_to_three_completion_rate"
+    ].dropna()
+    descriptive = bool(
+        len(supported_state_rates) >= 2
+        and float(supported_state_rates.max()) > float(supported_state_rates.min())
+    )
+    a0 = regenerated_advance.set_index("model").loc["A0"]
+    base = float(a0["base_rate"])
+    constant_log_loss = float(
+        -np.average(
+            assessment_advance["completion_in_bars_2_or_3"] * math.log(max(base, 1e-12))
+            + (1 - assessment_advance["completion_in_bars_2_or_3"])
+            * math.log(max(1.0 - base, 1e-12)),
+            weights=assessment_advance["row_weight"],
+        )
+    )
+    baseline_meaningful = bool(float(a0["auc"]) > 0.5 and float(a0["log_loss"]) < constant_log_loss)
+    regenerated_decision = choose_fixed_lead_decision(
+        blocker=None,
+        immediate_passed=immediate_passed,
+        advance_passed=advance_passed,
+        descriptive_lead_structure=descriptive,
+        baseline_meaningful=baseline_meaningful,
+    )
+    final_decision_match = regenerated_decision == stored_decision["primary_decision"]
     passed = bool(
         maximum_probability_difference <= 1e-12
         and maximum_coefficient_difference <= 1e-12
+        and maximum_feature_difference <= 1e-12
+        and maximum_metric_difference <= 1e-12
+        and row_mismatches == 0
         and lead_mismatches == 0
         and eligibility_mismatches == 0
+        and proximity_mismatches == 0
         and final_decision_match
     )
     return {
@@ -1565,10 +1930,15 @@ def supported_determinism_check(
         "models_refit": ["N0", "N1", "A0", "A1"],
         "bootstrap_repeated": False,
         "route_null_refits_repeated": False,
+        "row_identity_mismatches": row_mismatches,
         "lead_label_mismatches": lead_mismatches,
         "advance_eligibility_mismatches": eligibility_mismatches,
+        "prefix_proximity_mismatches": proximity_mismatches,
+        "maximum_feature_difference": maximum_feature_difference,
         "maximum_probability_difference": maximum_probability_difference,
         "maximum_coefficient_difference": maximum_coefficient_difference,
+        "maximum_metric_difference": maximum_metric_difference,
+        "regenerated_primary_decision": regenerated_decision,
         "final_decision_match": final_decision_match,
         "passed": passed,
     }
@@ -1581,8 +1951,9 @@ def execute_screen(output: Path) -> dict[str, Any]:
     source = load_predecessor()
     predecessor_panel = cast(pd.DataFrame, source["panel"])
     ledger = cast(pd.DataFrame, source["ledger"])
+    canonical_routes, dictionary_manifest = load_canonical_route_metadata(source)
     predecessor = verify_predecessor(source, predecessor_panel.copy())
-    panel = build_fixed_lead_panel(predecessor_panel, ledger)
+    panel = build_fixed_lead_panel(predecessor_panel, ledger, canonical_routes)
     surface_after_augmentation = predecessor_surface_differences(
         predecessor_panel,
         panel,
@@ -1611,33 +1982,44 @@ def execute_screen(output: Path) -> dict[str, Any]:
     support, concentration, blocker = support_and_concentration(panel)
     lead_support, lead_diagnostics = build_lead_tables(panel)
     route_states = build_route_state_metrics(panel)
+    protected_start = pd.Timestamp("2025-08-23T00:00:00Z")
+    panel_timestamps = pd.to_datetime(panel["checkpoint_timestamp_utc"], utc=True, errors="raise")
+    structural_timestamps = pd.to_datetime(
+        ledger["available_timestamp_utc"], utc=True, errors="raise"
+    )
+    protected_decision_rows = int(panel_timestamps.ge(protected_start).sum())
+    protected_structural_rows = int(structural_timestamps.ge(protected_start).sum())
+    protected_rows_materialised = protected_decision_rows + protected_structural_rows
     protected = {
         **SAFETY_FLAGS,
         "development_start": DEVELOPMENT_START,
         "development_end_inclusive": "2024-12-31",
         "assessment_start": ASSESSMENT_START,
         "assessment_end_inclusive": READ_END,
-        "protected_start": "2025-08-23",
+        "protected_start": str(protected_start),
         "minimum_decision_session": str(panel["session"].min()),
         "maximum_decision_session": str(panel["session"].max()),
-        "maximum_structural_available_timestamp": str(
-            pd.to_datetime(ledger["available_timestamp_utc"], utc=True).max()
-        ),
-        "protected_rows_materialised": 0,
-        "passed": bool(panel["session"].astype(str).lt("2025-08-23").all()),
+        "maximum_decision_timestamp": str(panel_timestamps.max()),
+        "maximum_structural_available_timestamp": str(structural_timestamps.max()),
+        "protected_decision_rows_materialised": protected_decision_rows,
+        "protected_structural_rows_materialised": protected_structural_rows,
+        "protected_rows_materialised": protected_rows_materialised,
+        "passed": protected_rows_materialised == 0,
     }
     if not protected["passed"]:
         raise ScreenBlocker("blocked_protected_boundary_failure", "protected row materialised")
     source_manifest = {
         **SAFETY_FLAGS,
         "predecessor_experiment": str(PREDECESSOR_DIR.relative_to(REPO_ROOT)),
+        "predecessor_commit": EXPECTED_PREDECESSOR_COMMIT,
         "predecessor_artifact_hashes": source["hashes"],
+        "semantic_loop_dictionary": dictionary_manifest,
         "dates_read": {"start": DEVELOPMENT_START, "end_inclusive": READ_END},
         "frozen_audited_cohort": list(FROZEN_COHORT),
         "checkpoints": list(CHECKPOINTS),
         "raw_data_downloaded": False,
         "market_rows_materialised_from_predecessor_only": True,
-        "protected_rows_materialised": 0,
+        "protected_rows_materialised": protected_rows_materialised,
     }
     lead_manifest = {
         **SAFETY_FLAGS,
@@ -1655,9 +2037,11 @@ def execute_screen(output: Path) -> dict[str, Any]:
         "definition": (
             "total canonical transitions required minus transitions completed by active prefix"
         ),
-        "canonical_equivalence": (
-            "(progress_states - 1 + transitions_remaining) - (progress_states - 1)"
+        "canonical_calculation": (
+            "len(frozen registered oriented path) - 1 - (progress_states - 1)"
         ),
+        "declared_ledger_remainder_used_only_as_cross_check": True,
+        "semantic_loop_dictionary": dictionary_manifest,
         "motif_types": ["primitive", "repeat", "composite"],
         "orientation_preserved": True,
         "semantic_loop_identity_preserved": True,
@@ -1717,7 +2101,13 @@ def execute_screen(output: Path) -> dict[str, Any]:
         }
         write_json(output / "decision.json", decision)
         write_blocked_model_artifacts(output, panel.copy(), blocker)
-        determinism = blocked_determinism_check(output, predecessor_panel, ledger, decision)
+        determinism = blocked_determinism_check(
+            output,
+            predecessor_panel,
+            ledger,
+            canonical_routes,
+            decision,
+        )
         write_json(output / "determinism_check.json", determinism)
         if not determinism["passed"]:
             raise ScreenBlocker(
@@ -1888,6 +2278,7 @@ def execute_screen(output: Path) -> dict[str, Any]:
         output,
         predecessor_panel,
         ledger,
+        canonical_routes,
         coefficient_artifact,
         decision,
     )

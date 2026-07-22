@@ -23,22 +23,39 @@ def earliest_completion_lead(checkpoint: int, completion_ordinals: Sequence[int]
 
 
 def remaining_required_transitions(
-    *, progress_states: int, transitions_remaining: int, motif_type: str
+    *,
+    progress_states: int,
+    canonical_oriented_path: Sequence[int],
+    motif_type: str,
+    declared_transitions_remaining: int | None = None,
 ) -> int:
-    """Resolve remaining transitions from the canonical active-prefix semantics."""
+    """Derive remaining transitions from an independently supplied canonical route."""
 
     if motif_type not in {"primitive", "repeat", "composite"}:
         raise ValueError(f"unknown registered motif type: {motif_type}")
     progress = int(progress_states)
-    remaining = int(transitions_remaining)
-    if progress < 1 or remaining < 0:
-        raise ValueError("canonical prefix progress and remaining transitions are invalid")
-    total_required = (progress - 1) + remaining
+    route = tuple(int(state) for state in canonical_oriented_path)
+    if len(route) < 3 or route[0] != route[-1]:
+        raise ValueError("canonical registered route must be a closed path")
+    total_required = len(route) - 1
     completed = progress - 1
-    return total_required - completed
+    remaining = total_required - completed
+    if progress < 1 or remaining < 0:
+        raise ValueError("canonical prefix progress is outside the registered route")
+    if (
+        declared_transitions_remaining is not None
+        and int(declared_transitions_remaining) != remaining
+    ):
+        raise ValueError("declared prefix remainder differs from canonical route length")
+    return remaining
 
 
-def prefix_proximity(prefix_ledger: pd.DataFrame, *, checkpoint: int) -> dict[str, int | float]:
+def prefix_proximity(
+    prefix_ledger: pd.DataFrame,
+    *,
+    checkpoint: int,
+    canonical_oriented_paths: Mapping[tuple[str, str], Sequence[int]],
+) -> dict[str, int | float]:
     """Summarise canonical registered-prefix proximity at one completed-bar checkpoint."""
 
     required = {
@@ -60,8 +77,11 @@ def prefix_proximity(prefix_ledger: pd.DataFrame, *, checkpoint: int) -> dict[st
     remaining = [
         remaining_required_transitions(
             progress_states=int(cast(Any, row.progress_states)),
-            transitions_remaining=int(cast(Any, row.transitions_remaining)),
+            canonical_oriented_path=canonical_oriented_paths[
+                (str(row.semantic_loop_id), str(row.orientation_id))
+            ],
             motif_type=str(row.motif_type),
+            declared_transitions_remaining=int(cast(Any, row.transitions_remaining)),
         )
         for row in current.itertuples(index=False)
     ]

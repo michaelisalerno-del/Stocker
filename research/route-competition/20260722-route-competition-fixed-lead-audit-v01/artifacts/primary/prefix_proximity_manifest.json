@@ -3,7 +3,8 @@
   "advance_definition": "first_completion_lead != 1 and no active prefix exactly one transition away",
   "assessment_one_transition_away_prevalence": 0.2723567677717689,
   "broker_integration_required": false,
-  "canonical_equivalence": "(progress_states - 1 + transitions_remaining) - (progress_states - 1)",
+  "canonical_calculation": "len(frozen registered oriented path) - 1 - (progress_states - 1)",
+  "declared_ledger_remainder_used_only_as_cross_check": true,
   "definition": "total canonical transitions required minus transitions completed by active prefix",
   "directional_outcomes_opened": false,
   "economic_outcomes_opened": false,
@@ -22,6 +23,13 @@
   "production_runtime_modified": false,
   "quick_feasibility_screen": true,
   "research_only": true,
+  "semantic_loop_dictionary": {
+    "dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/semantic_loop_dictionary_v2.csv",
+    "registered_definition_count": 20,
+    "registered_orientation_count": 46,
+    "source_sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+  },
   "semantic_loop_identity_preserved": true,
   "strategy_promotion": false,
   "two_to_three_bar_advance_test": true

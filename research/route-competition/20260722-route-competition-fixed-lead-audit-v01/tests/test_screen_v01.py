@@ -40,16 +40,40 @@ def test_earliest_completion_lead(completion_ordinals: list[int], expected: int)
     assert earliest_completion_lead(10, completion_ordinals) == expected
 
 
-@pytest.mark.parametrize("motif_type", ["primitive", "repeat", "composite"])
-def test_canonical_prefix_remaining_transitions(motif_type: str) -> None:
+@pytest.mark.parametrize(
+    ("motif_type", "path", "progress", "declared", "expected"),
+    [
+        ("primitive", [0, 1, 0], 2, 1, 1),
+        ("repeat", [0, 1, 0, 1, 0], 3, 2, 2),
+        ("composite", [1, 0, 1, 0, 1, 2, 1], 4, 3, 3),
+    ],
+)
+def test_canonical_prefix_remaining_transitions(
+    motif_type: str,
+    path: list[int],
+    progress: int,
+    declared: int,
+    expected: int,
+) -> None:
     assert (
         remaining_required_transitions(
-            progress_states=4,
-            transitions_remaining=2,
+            progress_states=progress,
+            canonical_oriented_path=path,
             motif_type=motif_type,
+            declared_transitions_remaining=declared,
         )
-        == 2
+        == expected
     )
+
+
+def test_canonical_prefix_rejects_incorrect_declared_remainder() -> None:
+    with pytest.raises(ValueError, match="differs"):
+        remaining_required_transitions(
+            progress_states=2,
+            canonical_oriented_path=[0, 1, 0],
+            motif_type="primitive",
+            declared_transitions_remaining=2,
+        )
 
 
 def test_one_transition_away_prefix_detection() -> None:
@@ -63,7 +87,16 @@ def test_one_transition_away_prefix_detection() -> None:
             "transitions_remaining": [1, 3, 1, 1],
         }
     )
-    assert prefix_proximity(prefixes, checkpoint=10) == {
+    paths = {
+        ("P", "p"): [0, 1, 2, 0],
+        ("R", "r"): [0, 1, 0, 1, 0, 1, 0],
+        ("C", "c"): [1, 0, 1, 2, 0, 1],
+    }
+    assert prefix_proximity(
+        prefixes,
+        checkpoint=10,
+        canonical_oriented_paths=paths,
+    ) == {
         "any_prefix_one_transition_from_completion": 1,
         "minimum_remaining_transitions": 1.0,
         "number_of_one_transition_away_prefixes": 2,

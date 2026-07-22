@@ -60,12 +60,20 @@
     "route_competition_ledger.parquet": "b3eab7d5b699719220bd8fd084ca0b25a8b2b56851211a093fe04a3cb22f124a",
     "source_manifest.json": "64cd179d36d9b3a8b9c5869f176e965f43b6faeabf53d013d29b7736698e03a5"
   },
+  "predecessor_commit": "1001693c70e99f92ae77777b0d6b3633777bf7af",
   "predecessor_experiment": "research/route-competition/20260722-route-competition-hazard-quick-v0",
   "production_runtime_modified": false,
   "protected_rows_materialised": 0,
   "quick_feasibility_screen": true,
   "raw_data_downloaded": false,
   "research_only": true,
+  "semantic_loop_dictionary": {
+    "dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/semantic_loop_dictionary_v2.csv",
+    "registered_definition_count": 20,
+    "registered_orientation_count": 46,
+    "source_sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+  },
   "strategy_promotion": false,
   "two_to_three_bar_advance_test": true
 }

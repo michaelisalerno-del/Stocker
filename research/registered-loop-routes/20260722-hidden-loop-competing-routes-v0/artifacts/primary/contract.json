@@ -1,0 +1,97 @@
+{
+  "broker_integration_required": false,
+  "candidate_support": {
+    "maximum_stock_share": 0.1,
+    "maximum_target_class_share": 0.85,
+    "minimum_registered_candidates": 180,
+    "minimum_rows": 850,
+    "minimum_sessions": 140,
+    "minimum_stocks": 15
+  },
+  "dates": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "protected_start": "2025-08-23"
+  },
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "frozen_b0_threshold": 0.22125611521102,
+  "hard_limits": {
+    "feature_search": false,
+    "gpu": false,
+    "hidden_history_null_refits": 5,
+    "hyperparameter_tuning": false,
+    "maximum_elapsed_bars": 6,
+    "maximum_plots": 2,
+    "maximum_primary_model_fits": 3,
+    "model_search": false,
+    "n_jobs": 1,
+    "new_emotion_discovery": false,
+    "new_hidden_family_discovery": false,
+    "new_loop_discovery": false,
+    "one_minute_data": false,
+    "opening_checkpoints": [
+      6,
+      12
+    ],
+    "processes": 1,
+    "session_bootstrap_draws": 25,
+    "threshold_search": false,
+    "transition_null_draws": 25
+  },
+  "hidden_families": [
+    "unregistered_primitive_like__5-6-5",
+    "unregistered_primitive_like__2-3-2",
+    "unregistered_primitive_like__2-5-2",
+    "unregistered_primitive_like__4-7-4",
+    "OTHER_UNREGISTERED_FAMILY"
+  ],
+  "hidden_family_competing_route_test": true,
+  "model": {
+    "C": 0.25,
+    "class_weight": null,
+    "family": "weighted_multinomial_logistic_regression",
+    "max_iter": 300,
+    "multi_class": "multinomial",
+    "n_jobs": 1,
+    "penalty": "l2",
+    "random_state": 20260722,
+    "solver": "lbfgs"
+  },
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_recurrence_test": true,
+  "registered_targets": [
+    "loop_p_2-5-6-2",
+    "loop_p_2-6-2",
+    "loop_p_4-6-4"
+  ],
+  "research_only": true,
+  "sequential_causal_updates": true,
+  "sequential_support": {
+    "minimum_exact_target_assessment_outcomes": 100,
+    "minimum_rows": 4000,
+    "minimum_rows_after_hidden_event": 150
+  },
+  "strategy_promotion": false,
+  "target_specific_registered_routes": true,
+  "title": "Hidden-Loop Competing Routes and Registered-Loop Recurrence Quick Screen V0",
+  "transition_support": {
+    "maximum_precursor_month_share": 0.3,
+    "maximum_precursor_stock_share": 0.3,
+    "minimum_assessment_precursor_occurrences": 20,
+    "minimum_development_precursor_occurrences": 30,
+    "minimum_eligible_assessment_completions": 500,
+    "minimum_matched_null_coverage": 0.9,
+    "minimum_months": 6,
+    "minimum_precursor_months": 4,
+    "minimum_precursor_sessions": 10,
+    "minimum_precursor_stocks": 8,
+    "minimum_sessions": 120,
+    "minimum_stocks": 15
+  }
+}

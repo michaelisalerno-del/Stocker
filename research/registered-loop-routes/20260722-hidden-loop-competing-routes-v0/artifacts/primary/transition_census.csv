@@ -1,0 +1,11 @@
+period,hypothesis_id,lookback_bars,precursor_kind,precursor_identity,target_identity,expected_sign,eligible_events,ineligible_events,precursor_events,observed_prevalence,sessions,stocks,months,maximum_stock_share,maximum_month_share
+development,H3,6,registered,loop_p_4-6-4,loop_p_4-6-4,positive,203,7,61,0.300492610837438,42,16,12,0.114754098360656,0.229508196721311
+development,H4,6,hidden,unregistered_primitive_like__2-3-2,ANY_REGISTERED_COMPLETION,negative,2468,87,104,0.0421393841166937,74,16,12,0.240384615384615,0.163461538461538
+assessment,H3,6,registered,loop_p_4-6-4,loop_p_4-6-4,positive,239,3,70,0.292887029288703,40,16,8,0.128571428571429,0.257142857142857
+assessment,H4,6,hidden,unregistered_primitive_like__2-3-2,ANY_REGISTERED_COMPLETION,negative,1327,29,50,0.0376789751318764,33,15,8,0.16,0.28
+development,H1,12,hidden,unregistered_primitive_like__5-6-5,loop_p_2-5-6-2,positive,108,27,53,0.490740740740741,37,16,11,0.188679245283019,0.169811320754717
+development,H2,12,hidden,unregistered_primitive_like__5-6-5,loop_p_2-6-2,positive,125,95,38,0.304,26,15,11,0.184210526315789,0.157894736842105
+development,H3,12,registered,loop_p_4-6-4,loop_p_4-6-4,positive,191,19,67,0.350785340314136,42,17,11,0.104477611940299,0.238805970149254
+assessment,H1,12,hidden,unregistered_primitive_like__5-6-5,loop_p_2-5-6-2,positive,52,21,22,0.423076923076923,18,13,7,0.181818181818182,0.318181818181818
+assessment,H2,12,hidden,unregistered_primitive_like__5-6-5,loop_p_2-6-2,positive,85,44,30,0.352941176470588,17,14,6,0.166666666666667,0.3
+assessment,H3,12,registered,loop_p_4-6-4,loop_p_4-6-4,positive,210,32,82,0.39047619047619,41,16,8,0.121951219512195,0.25609756097561

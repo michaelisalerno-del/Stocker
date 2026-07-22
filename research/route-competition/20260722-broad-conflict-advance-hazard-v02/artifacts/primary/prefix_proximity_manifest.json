@@ -1,0 +1,52 @@
+{
+  "advance_definition": "first_completion_lead != 1 and no active prefix exactly one transition away",
+  "assessment_one_transition_away_prevalence": 0.27734236211256713,
+  "broad_route_conflict_test": true,
+  "broker_integration_required": false,
+  "canonical_calculation": "len(frozen registered oriented path) - 1 - (progress_states - 1)",
+  "clean_two_to_three_bar_advance_target": true,
+  "declared_ledger_remainder_used_only_as_cross_check": true,
+  "definition": "canonical route transitions minus completed prefix transitions",
+  "dense_even_checkpoints": true,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "frozen_deduplication_key": [
+    "symbol",
+    "session",
+    "bar_ordinal",
+    "semantic_loop_id",
+    "orientation_id"
+  ],
+  "motif_types": [
+    "primitive",
+    "repeat",
+    "composite"
+  ],
+  "next_bar_completions_excluded": true,
+  "one_transition_away_prefixes_excluded": true,
+  "one_transition_away_prevalence_by_lead": {
+    "0": 0.2528843838255577,
+    "1": 1.0,
+    "2": 0.7161016949152542,
+    "3": 0.6376811594202898
+  },
+  "options_outcomes_opened": false,
+  "order_placement": "disabled",
+  "orientation_preserved": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "raw_active_prefix_rows_checked": 828355,
+  "research_only": true,
+  "semantic_loop_dictionary": {
+    "dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/semantic_loop_dictionary_v2.csv",
+    "registered_definition_count": 20,
+    "registered_orientation_count": 46,
+    "source_sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+  },
+  "semantic_loop_identity_preserved": true,
+  "strategy_promotion": false,
+  "unique_prefix_candidates_after_frozen_deduplication": 805397
+}

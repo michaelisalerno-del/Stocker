@@ -1,0 +1,6 @@
+population,metric,value,threshold,passed
+raw,retention,0.9968125,0.95,True
+advance,rows,34577,30000,True
+advance,positive_outcomes,451,400,True
+advance,route_feature_retention,1,0.95,True
+advance,maximum_weighted_stock_share,0.0509104102167183,0.1,True

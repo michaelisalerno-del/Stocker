@@ -1,0 +1,219 @@
+{
+  "advance_eligibility_mismatches": 0,
+  "advance_gate_artifact_audit": {
+    "maximum_difference": 0.0,
+    "mismatches": 0,
+    "passed": true
+  },
+  "advance_model_gates_reconstructed": {
+    "auc_improvement": 0.046491150518817026,
+    "average_precision_improvement": 0.013805501741469939,
+    "bootstrap_80_average_precision_lower": 0.0120807843434219,
+    "bootstrap_80_brier_lower": 6.866163559791569e-05,
+    "bootstrap_80_log_loss_lower": 0.0009465580225447,
+    "brier_improvement": 9.526979491010154e-05,
+    "log_loss_improvement": 0.0011521961541919312,
+    "materially_adverse_checkpoint_groups": 0,
+    "positive_months": 8,
+    "real_exceeds_all_nulls": true,
+    "support_and_concentration_passed": true,
+    "top_decile_precision_improvement": 0.0202479761771207
+  },
+  "advance_positive_outcomes": 451,
+  "advance_rows": 34577,
+  "bootstrap_audit": {
+    "draw_rows": 120,
+    "draws": 15,
+    "interval_rows": 24,
+    "maximum_difference": 9.383769802862041e-17,
+    "passed": true
+  },
+  "broad_conflict_gate_artifact_audit": {
+    "maximum_difference": 0.0,
+    "mismatches": 0,
+    "passed": true
+  },
+  "broad_conflict_gates_reconstructed": {
+    "assessment_minus_low_route_support": 0.03872986226844083,
+    "assessment_minus_pooled": 0.026822305555198035,
+    "assessment_positives": 221,
+    "assessment_rows": 6261,
+    "assessment_sessions": 159,
+    "assessment_stocks": 20,
+    "bootstrap_80_low_route_difference_lower": 0.03434051468635844,
+    "bootstrap_80_pooled_difference_lower": 0.02301970155282208,
+    "development_minus_pooled": 0.031258777195993584,
+    "materially_adverse_checkpoint_groups": 0,
+    "positive_assessment_months": 8
+  },
+  "broad_route_conflict_test": true,
+  "broker_integration_required": false,
+  "causal_feature_surface_sha256": "e018a48465e8e47a3ea9c4fab383b1c103eae6bc56eefef8b7a18b61841efdd8",
+  "checkpoint_group_metric_artifact_audit": {
+    "maximum_difference": 4.0245584642661925e-16,
+    "mismatches": 0,
+    "passed": true
+  },
+  "checks": {
+    "advance_eligibility": true,
+    "candidate_normalized_weights": true,
+    "checkpoint_group_metric_artifact": true,
+    "chronology_and_group_labels": true,
+    "concentration_artifact": true,
+    "dates_and_protected_boundary": true,
+    "decision_logic": true,
+    "decision_statuses": true,
+    "development_only_preprocessing": true,
+    "earliest_completion_lead": true,
+    "fast_determinism": true,
+    "frozen_cohort_and_dense_checkpoints": true,
+    "frozen_feature_surfaces": true,
+    "frozen_route_resolution_states": true,
+    "independently_reconstructed_decision_gates": true,
+    "independently_reconstructed_support": true,
+    "manual_probability_reconstruction": true,
+    "monthly_metric_artifact": true,
+    "pinned_dense_identity_and_feature_surface": true,
+    "prefix_remaining_transitions": true,
+    "proper_scores_and_discrimination": true,
+    "required_artifacts": true,
+    "route_bundle_null": true,
+    "route_state_metric_artifact": true,
+    "safety_flags": true,
+    "session_bootstrap": true,
+    "shared_predecessor_reconstruction": true
+  },
+  "chronology_label_audit": {
+    "checkpoint_group_mismatches": 0,
+    "invalid_checkpoint_rows": 0,
+    "invalid_session_rows": 0,
+    "passed": true,
+    "period_mismatches": 0,
+    "year_month_mismatches": 0
+  },
+  "clean_two_to_three_bar_advance_target": true,
+  "concentration_artifact_audit": {
+    "maximum_difference": 2.7755575615628914e-17,
+    "mismatches": 0,
+    "passed": true
+  },
+  "dates": {
+    "maximum": "2025-08-22 00:00:00",
+    "minimum": "2024-01-17 00:00:00"
+  },
+  "decision_reconstructed": "broad_route_conflict_adds_clean_advance_warning",
+  "dense_even_checkpoints": true,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "increment_artifact_audit": {
+    "maximum_difference": 0.0,
+    "mismatches": 0,
+    "passed": true
+  },
+  "independent_protected_boundary_audit": {
+    "maximum_timestamp_by_surface": {
+      "causal_state_session": "2025-08-22 00:00:00+00:00",
+      "causal_state_trace": "2025-08-22 16:40:00+00:00",
+      "checkpoint_timestamp": "2025-08-22 16:15:00+00:00",
+      "decision_panel_session": "2025-08-22 00:00:00+00:00",
+      "feature_available_timestamp": "2025-08-22 16:20:00+00:00",
+      "structural_ledger": "2025-08-22 16:40:00+00:00",
+      "structural_ledger_session": "2025-08-22 00:00:00+00:00"
+    },
+    "minimum_timestamp_by_surface": {
+      "causal_state_session": "2024-01-02 00:00:00+00:00",
+      "causal_state_trace": "2024-01-02 14:35:00+00:00",
+      "checkpoint_timestamp": "2024-01-17 14:55:00+00:00",
+      "decision_panel_session": "2024-01-17 00:00:00+00:00",
+      "feature_available_timestamp": "2024-01-17 15:00:00+00:00",
+      "structural_ledger": "2024-01-02 14:35:00+00:00",
+      "structural_ledger_session": "2024-01-02 00:00:00+00:00"
+    },
+    "passed": true,
+    "protected_rows_by_independently_read_surface": {
+      "causal_state_session": 0,
+      "causal_state_trace": 0,
+      "checkpoint_timestamp": 0,
+      "decision_panel_session": 0,
+      "feature_available_timestamp": 0,
+      "structural_ledger": 0,
+      "structural_ledger_session": 0
+    },
+    "reported_counts_match": true,
+    "reported_timestamps_match": true
+  },
+  "lead_label_mismatches": 0,
+  "manifest_surface_passed": true,
+  "manual_probability_rows_by_model": {
+    "A0": 100,
+    "A1": 100
+  },
+  "maximum_manual_probability_difference": 0.0,
+  "maximum_primary_metric_difference": 1.8041124150158794e-16,
+  "maximum_scaler_difference": 0.0,
+  "maximum_weight_difference": 0.0,
+  "monthly_metric_artifact_audit": {
+    "maximum_difference": 4.718447854656915e-16,
+    "mismatches": 0,
+    "passed": true
+  },
+  "next_bar_completions_excluded": true,
+  "one_transition_away_prefixes_excluded": true,
+  "options_outcomes_opened": false,
+  "order_placement": "disabled",
+  "passed": true,
+  "prefix_audit": {
+    "dictionary_orientation_rows": 46,
+    "duplicate_prefix_rows": 22958,
+    "minimum_remaining_transition_mismatches": 0,
+    "missing_dictionary_orientations": 0,
+    "motif_mismatches": 0,
+    "one_away_count_mismatches": 0,
+    "passed": true,
+    "raw_active_prefix_rows_checked": 828355,
+    "remaining_transition_mismatches": 0,
+    "unique_prefix_candidates_after_frozen_deduplication": 805397
+  },
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "quick_feasibility_screen": true,
+  "reconstructed_raw_assessment_rows": 47847,
+  "research_only": true,
+  "route_null_audit": {
+    "maximum_increment_difference": 9.768661574094395e-17,
+    "maximum_probability_difference": 0.0,
+    "null_refits": 3,
+    "passed": true,
+    "route_bundle_hash_mismatches": 0
+  },
+  "route_resolution_label_mismatches": 0,
+  "route_state_metric_artifact_audit": {
+    "maximum_difference": 8.326672684688674e-17,
+    "mismatches": 0,
+    "passed": true
+  },
+  "row_identity_sha256": "81be380b6762d9e11f14362607aeb838455479e03edb55a165d6dc218b7c6b81",
+  "shared_surface_audit": {
+    "checkpoint_timestamp_mismatches": 0,
+    "maximum_feature_difference": 0.0,
+    "passed": true,
+    "route_resolution_label_mismatches": 0,
+    "row_identity_mismatches": 0,
+    "target_mismatches": 0
+  },
+  "status_values_reconstructed": {
+    "advance_model_status": "supported",
+    "broad_conflict_status": "supported",
+    "lead_three_status": "supported",
+    "lead_two_status": "supported"
+  },
+  "strategy_promotion": false,
+  "support_artifact_audit": {
+    "maximum_difference": 0.0,
+    "mismatches": 0,
+    "passed": true
+  },
+  "theoretical_raw_assessment_rows": 48000
+}

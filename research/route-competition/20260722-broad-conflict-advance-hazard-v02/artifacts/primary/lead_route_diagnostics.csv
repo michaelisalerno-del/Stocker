@@ -1,0 +1,11 @@
+record_type,first_completion_lead,route_resolution_state,outcomes,sessions,stocks,A0_mean_predicted_probability,A1_mean_predicted_probability,A1_top_decile_capture_rate,mean_active_prefix_count,mean_active_prefix_family_count,mean_top_prefix_depth_fraction,mean_second_prefix_depth_fraction,mean_top_minus_second_prefix_depth,mean_prefix_family_entropy,mean_orientation_disagreement_fraction,mean_active_prefix_count_change_last_3_bars,mean_recent_loop_memory_weighted_top_depth,state_share
+lead_summary,2,ALL,201,116,20,0.0774039927665169,0.0876523443679862,0.441863781336019,8.37313432835821,2.5771144278607,0.0945273631840796,0,0.0945273631840796,0.762443595110061,0.042243328810493,2.62686567164179,0.0945273631840796,
+route_state_distribution,2,BROAD_CONFLICT,108,79,18,,,,,,,,,,,,,0.537313432835821
+route_state_distribution,2,LOW_ROUTE_SUPPORT,4,4,4,,,,,,,,,,,,,0.0199004975124378
+route_state_distribution,2,NARROWING,3,3,3,,,,,,,,,,,,,0.0149253731343284
+route_state_distribution,2,OTHER,86,63,19,,,,,,,,,,,,,0.427860696517413
+lead_summary,3,ALL,250,122,20,0.0746026166238037,0.0797964822547397,0.315091701164812,7.06,2.2,0.0853333333333333,0,0.0853333333333333,0.646710122612661,0.0402909090909091,1.12,0.0853333333333333,
+route_state_distribution,3,BROAD_CONFLICT,113,77,20,,,,,,,,,,,,,0.452
+route_state_distribution,3,LOW_ROUTE_SUPPORT,36,32,15,,,,,,,,,,,,,0.144
+route_state_distribution,3,NARROWING,4,4,3,,,,,,,,,,,,,0.016
+route_state_distribution,3,OTHER,97,64,20,,,,,,,,,,,,,0.388

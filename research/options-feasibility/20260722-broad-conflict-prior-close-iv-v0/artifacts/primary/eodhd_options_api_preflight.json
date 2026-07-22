@@ -1,0 +1,11 @@
+{
+  "authentication_redacted": true,
+  "endpoint": "/mp/unicornbay/options/eod",
+  "historical_session_dates_confirmed_from_response": false,
+  "planned_symbol": "AAL",
+  "record_limit": 10,
+  "records_received": 0,
+  "requests_completed": 0,
+  "schema_verified": true,
+  "status": "blocked_missing_eodhd_api_token"
+}

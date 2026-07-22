@@ -1,0 +1,60 @@
+{
+  "audit_scope": "independent_fail_closed_options_screen_audit",
+  "cache_path_ignored_by_git": true,
+  "chronology_and_protected_boundary": true,
+  "credential_redaction": {
+    "exposure_files": [],
+    "passed": true
+  },
+  "decision_logic": true,
+  "exact_required_prior_close_dates": true,
+  "official_endpoint_schema_mapping": true,
+  "passed": true,
+  "request_plan": {
+    "chunk_hashes_and_strike_bounds_valid": true,
+    "chunks": 400,
+    "passed": true,
+    "required_dates": 402
+  },
+  "run_specific": {
+    "blocker_verified": true,
+    "downstream_checks": {
+      "25-draw session bootstrap": "not_applicable_blocked_missing_eodhd_api_token",
+      "ATM IV, straddle midpoint, spreads and DTE": "not_applicable_blocked_missing_eodhd_api_token",
+      "O0/O1 development-only preprocessing and coefficients": "not_applicable_blocked_missing_eodhd_api_token",
+      "binary and continuous metrics": "not_applicable_blocked_missing_eodhd_api_token",
+      "canonical field mapping": "not_applicable_blocked_missing_eodhd_api_token",
+      "causal options join": "not_applicable_blocked_missing_eodhd_api_token",
+      "five route-bundle null refits": "not_applicable_blocked_missing_eodhd_api_token",
+      "full-data determinism comparison": "not_applicable_blocked_missing_eodhd_api_token",
+      "manual probability reconstruction on 100 rows": "not_applicable_blocked_missing_eodhd_api_token",
+      "matched controls": "not_applicable_blocked_missing_eodhd_api_token",
+      "pagination and raw-response hashes": "not_applicable_blocked_missing_eodhd_api_token",
+      "primary expiry/common-strike selection and tie-breaks": "not_applicable_blocked_missing_eodhd_api_token",
+      "provider moneyness consistency": "not_applicable_blocked_missing_eodhd_api_token",
+      "symbol coverage from provider response": "not_applicable_blocked_missing_eodhd_api_token",
+      "underlying movement outcomes": "not_applicable_blocked_missing_eodhd_api_token"
+    },
+    "exact_previous_session_date_mapping": true,
+    "no_fabricated_pairs_or_movement": true,
+    "no_provider_requests": true,
+    "passed": true
+  },
+  "safety_flags": true,
+  "structural_panel_reconstruction": {
+    "A0_A1_predictions_finite": true,
+    "frozen_feature_surfaces_match": true,
+    "maximum_shared_field_difference": 0.0,
+    "passed": true,
+    "route_state_mismatches": 0,
+    "row_identity_mismatches": 0,
+    "rows": 87443,
+    "slate_and_dense_checkpoint_weights_valid": true
+  },
+  "unadjusted_underlying_prices": {
+    "maximum_unadjusted_close_difference": 0.0,
+    "passed": true,
+    "protected_rows_materialised": 0,
+    "rows": 8040
+  }
+}

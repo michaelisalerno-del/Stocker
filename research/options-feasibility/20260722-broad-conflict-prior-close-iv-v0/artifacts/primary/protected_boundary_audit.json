@@ -1,0 +1,11 @@
+{
+  "future_options_joins": 0,
+  "maximum_required_options_date": "2025-08-21",
+  "maximum_signal_date": "2025-08-22",
+  "maximum_underlying_price_date": "2025-08-22",
+  "passed": true,
+  "protected_rows_materialised": 0,
+  "protected_start": "2025-08-23",
+  "same_day_options_joins": 0,
+  "underlying_source_read_filter": "timestamp < 2025-08-23T00:00:00Z"
+}

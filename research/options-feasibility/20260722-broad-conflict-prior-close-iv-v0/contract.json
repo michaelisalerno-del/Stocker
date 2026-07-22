@@ -1,0 +1,84 @@
+{
+  "experiment": "Broad-Conflict Excess Movement vs Prior-Close Options IV Screen V0",
+  "research_only": true,
+  "options_feasibility_screen": true,
+  "options_data_granularity": "end_of_day",
+  "options_information_time": "previous_trading_day_close",
+  "intraday_option_fill_simulated": false,
+  "option_pnl_calculated": false,
+  "underlying_movement_outcomes_opened": true,
+  "directional_outcomes_primary": false,
+  "economic_strategy_outcomes_opened": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "development": {
+    "start": "2024-01-01",
+    "end_inclusive": "2024-12-31"
+  },
+  "assessment": {
+    "start": "2025-01-01",
+    "end_inclusive": "2025-08-22"
+  },
+  "protected_start": "2025-08-23",
+  "primary_horizon_minutes": 15,
+  "primary_target": "movement_exceeds_iv_expected_absolute",
+  "primary_continuous_diagnostic": "iv_absolute_residual_15m",
+  "materially_adverse_checkpoint_thresholds": {
+    "O1_log_loss_improvement_below": -0.005,
+    "O1_brier_improvement_below": -0.002,
+    "broad_minus_low_iv_residual_below": -0.0005
+  },
+  "option_pair": {
+    "information_date": "exact_previous_us_trading_session",
+    "expiry_dte_minimum": 7,
+    "expiry_dte_maximum": 45,
+    "nearest_eligible_expiry_only": true,
+    "common_atm_strike": true,
+    "minimum_open_interest_each_contract": 10,
+    "maximum_relative_spread_each_contract": 1.0,
+    "liquidity_fallback": false
+  },
+  "models": {
+    "binary": {
+      "count": 2,
+      "penalty": "l2",
+      "C": 0.25,
+      "solver": "liblinear",
+      "max_iter": 300,
+      "class_weight": null,
+      "n_jobs": 1
+    },
+    "continuous": {
+      "count": 2,
+      "kind": "Ridge",
+      "alpha": 10.0
+    }
+  },
+  "hard_limits": {
+    "processes": 1,
+    "n_jobs": 1,
+    "gpu": false,
+    "stocks": 20,
+    "primary_option_pair_rules": 1,
+    "primary_horizons": 1,
+    "primary_binary_models": 2,
+    "session_bootstrap_draws": 25,
+    "route_bundle_null_refits": 5,
+    "plots": 2,
+    "maximum_raw_option_records": 3000000,
+    "maximum_options_bytes": 20000000000
+  },
+  "forbidden_claims": [
+    "intraday option fill",
+    "option P&L",
+    "executable option return",
+    "profitable straddle",
+    "options strategy",
+    "prospective validation",
+    "trading utility"
+  ]
+}

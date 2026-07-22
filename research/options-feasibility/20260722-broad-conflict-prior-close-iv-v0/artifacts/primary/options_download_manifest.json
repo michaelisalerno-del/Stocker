@@ -1,0 +1,10 @@
+{
+  "credential_exposures": 0,
+  "download_bytes": 0,
+  "manifest_rows": [],
+  "pagination_complete": false,
+  "raw_records": 0,
+  "requests_completed": 0,
+  "status": "blocked_missing_eodhd_api_token",
+  "unexplained_truncations": 0
+}

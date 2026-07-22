@@ -1,9 +1,7 @@
 {
-  "blocker": "EODHD_API_TOKEN unavailable; no public demo-token substitution",
-  "bootstrap_draws_executed": 0,
   "broad_conflict_movement_status": "blocked",
   "broker_integration_required": false,
-  "decision": "blocked_missing_eodhd_api_token",
+  "decision": "blocked_historical_options_date_unavailable",
   "directional_outcomes_primary": false,
   "economic_strategy_outcomes_opened": false,
   "execution_enabled": false,
@@ -19,9 +17,9 @@
   "order_placement": "disabled",
   "production_runtime_modified": false,
   "prospective_validation": false,
-  "provider_requests_completed": 0,
+  "provider_setup_requests_completed": 2,
   "research_only": true,
-  "route_null_refits_executed": 0,
+  "status": "blocked_historical_options_date_unavailable",
   "strategy_promotion": false,
   "underlying_movement_outcomes_opened": true
 }

@@ -427,7 +427,15 @@ def schema_mapping() -> dict[str, Any]:
         "type": "option_type",
         "exp_date": "expiration_date",
         "strike": "strike",
-        "tradetime": "trade_date and trade_timestamp in America/New_York",
+        "tradetime": (
+            "last-trade activity date/time; not assumed to be the historical EOD observation date"
+        ),
+        "resource.id": (
+            "JSON:API resource identity; the official EOD example includes an "
+            "observation-date suffix"
+        ),
+        "bid_date": "documented bid observation timestamp in America/New_York",
+        "ask_date": "documented ask observation timestamp in America/New_York",
         "last": "last",
         "bid": "bid",
         "ask": "ask",
@@ -467,17 +475,21 @@ def schema_mapping() -> dict[str, Any]:
             "pagination": {"offset_minimum": 0, "offset_maximum": 10000, "limit_maximum": 1000},
             "filters": [
                 "underlying_symbol",
-                "tradetime",
+                "tradetime_eq",
                 "tradetime_from",
                 "tradetime_to",
-                "exp_date",
+                "exp_date_eq",
                 "exp_date_from",
                 "exp_date_to",
-                "strike",
+                "strike_eq",
                 "strike_from",
                 "strike_to",
                 "type",
             ],
+            "tradetime_filter_semantics": "last-trade activity window",
+            "historical_observation_date_filter": (
+                "not present in the official OpenAPI 2.0.0 endpoint schema"
+            ),
             "field_selection": "fields[options-eod]",
             "compact_mode": "compact=1 with meta.fields",
             "rate_limit_response": 429,

@@ -1,11 +1,60 @@
 {
+  "america_new_york_mapping_confirmed": true,
+  "ask_observation_dates": [
+    "2025-09-03",
+    "2025-09-04",
+    "2025-09-05",
+    "2025-09-08",
+    "2025-09-09",
+    "2025-09-10",
+    "2025-09-11",
+    "2025-09-12",
+    "2025-09-15",
+    "2025-09-16"
+  ],
   "authentication_redacted": true,
+  "bid_observation_dates": [
+    "2025-09-03",
+    "2025-09-04",
+    "2025-09-05",
+    "2025-09-08",
+    "2025-09-09",
+    "2025-09-10",
+    "2025-09-11",
+    "2025-09-12",
+    "2025-09-15",
+    "2025-09-16"
+  ],
+  "blocker_reason": "the documented tradetime filter selects last-trade activity, while the returned EOD resource observation dates differ from the requested prior-close session",
   "endpoint": "/mp/unicornbay/options/eod",
-  "historical_session_dates_confirmed_from_response": false,
-  "planned_symbol": "AAL",
+  "exact_requested_observation_date_confirmed": false,
+  "official_observation_date_filter_available": false,
+  "pagination": {
+    "limit": 10,
+    "next_present": true,
+    "offset": 0,
+    "total": null
+  },
   "record_limit": 10,
-  "records_received": 0,
-  "requests_completed": 0,
-  "schema_verified": true,
-  "status": "blocked_missing_eodhd_api_token"
+  "records_received": 10,
+  "requested_session_date": "2025-08-21",
+  "resource_observation_dates": [
+    "2025-09-03",
+    "2025-09-04",
+    "2025-09-05",
+    "2025-09-08",
+    "2025-09-09",
+    "2025-09-10",
+    "2025-09-11",
+    "2025-09-12",
+    "2025-09-15",
+    "2025-09-16"
+  ],
+  "setup_requests_completed": 2,
+  "status": "blocked_historical_options_date_unavailable",
+  "symbol": "WULF",
+  "tradetime_dates": [
+    "2025-08-21"
+  ],
+  "tradetime_is_eod_observation_date": false
 }

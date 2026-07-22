@@ -5,6 +5,7 @@
   "pagination_complete": false,
   "raw_records": 0,
   "requests_completed": 0,
-  "status": "blocked_missing_eodhd_api_token",
+  "setup_requests_completed": 2,
+  "status": "blocked_historical_options_date_unavailable",
   "unexplained_truncations": 0
 }

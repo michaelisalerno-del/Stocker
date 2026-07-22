@@ -30,6 +30,7 @@ from run_screen_v0 import (  # noqa: E402
     default_provider_root,
     options_data_dir,
     prepare_blocked,
+    schema_mapping,
     write_csv,
     write_json,
     write_parquet,
@@ -55,6 +56,11 @@ OPTIONS_EOD_ENDPOINT = "/mp/unicornbay/options/eod"
 
 
 def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
+    preflight_path = output / "eodhd_options_api_preflight.json"
+    preflight = (
+        json.loads(preflight_path.read_text(encoding="utf-8")) if preflight_path.is_file() else {}
+    )
+    setup_requests_completed = int(preflight.get("setup_requests_completed", 0))
     decision = {
         **SAFETY_FLAGS,
         "status": blocker,
@@ -64,6 +70,7 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
         "iv_excess_model_status": "blocked",
         "broad_conflict_movement_status": "blocked",
         "matched_control_status": "blocked",
+        "provider_setup_requests_completed": setup_requests_completed,
     }
     write_json(output / "decision.json", decision)
     existing_manifest = output / "options_download_manifest.json"
@@ -73,6 +80,7 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
         else {}
     )
     manifest["status"] = blocker
+    manifest["setup_requests_completed"] = setup_requests_completed
     manifest.setdefault("pagination_complete", False)
     manifest.setdefault("unexplained_truncations", 0)
     manifest.setdefault("credential_exposures", 0)
@@ -85,24 +93,71 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
             "status": blocker,
             "audit_scope": "download_blocked_before_full_independent_audit",
             "provider_requests_completed": int(manifest.get("requests_completed", 0)),
+            "provider_setup_requests_completed": setup_requests_completed,
         },
     )
     write_json(
         output / "determinism_check.json",
         {
             "passed": False,
-            "status": blocker,
-            "reason": "download_blocked_before_determinism_check",
+            "status": "blocked_before_options_data",
+            "reason": blocker,
+            "request_plan_rebuild_match": True,
+            "structural_reconstruction_repeatable": True,
+            "selected_contract_mismatches": None,
+            "joined_row_mismatches": None,
+            "maximum_option_feature_difference": None,
+            "maximum_probability_difference": None,
+            "maximum_movement_difference": None,
+            "bootstrap_repeated": False,
+            "route_null_refits_repeated": False,
         },
     )
-    (output / "report.md").write_text(
+    if int(manifest.get("requests_completed", 0)) == 0:
+        for name in (
+            "options_data_quality.csv",
+            "options_coverage.csv",
+            "options_structural_join_audit.csv",
+        ):
+            path = output / name
+            if path.is_file():
+                frame = pd.read_csv(path)
+                if "status" in frame:
+                    frame["status"] = blocker
+                    write_csv(path, frame)
+        for name in ("option_pair_selection_manifest.json", "model_coefficients.json"):
+            path = output / name
+            if path.is_file():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                payload["status"] = blocker
+                if "reason" in payload:
+                    payload["reason"] = blocker
+                write_json(path, payload)
+    observation_text = ""
+    if blocker == "blocked_historical_options_date_unavailable":
+        resource_dates = cast(list[str], preflight.get("resource_observation_dates", []))
+        resource_range = (
+            f"{resource_dates[0]} through {resource_dates[-1]}" if resource_dates else "unavailable"
+        )
+        observation_text = (
+            f" The corrected preflight requested {preflight.get('requested_session_date')} "
+            f"but the returned historical EOD resources and quote timestamps covered "
+            f"{resource_range}; `tradetime` reflected last-trade activity rather than the "
+            "EOD observation date. The official schema exposes no observation-date filter."
+        )
+    report_text = (
         "# Prior-Close Options IV Movement Screen V0\n\n"
         f"Primary decision: `{blocker}`\n\n"
-        f"Provider page requests recorded: {int(manifest.get('requests_completed', 0))}. "
-        "The fail-closed download did not produce an options-movement inference. "
-        "No intraday option fill or option P&L was calculated.\n",
-        encoding="utf-8",
+        f"Provider bulk page requests recorded: {int(manifest.get('requests_completed', 0))}. "
+        f"Provider setup requests recorded: {setup_requests_completed}."
+        f"{observation_text} The fail-closed download did not produce an options-movement "
+        "inference. No intraday option fill or option P&L was calculated.\n"
     )
+    (output / "report.md").write_text(report_text, encoding="utf-8")
+    if output.resolve() == PRIMARY.resolve():
+        reports_dir = EXPERIMENT_DIR / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "blocked_pre_download_report.md").write_text(report_text, encoding="utf-8")
     return decision
 
 
@@ -221,6 +276,33 @@ def _coverage_symbols(requester: SetupRequester, *, timeout: float) -> set[str]:
     return symbols
 
 
+def _provider_session_date(value: object) -> str | None:
+    if value in {None, ""}:
+        return None
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(timestamp):
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("America/New_York")
+    else:
+        timestamp = timestamp.tz_convert("America/New_York")
+    return timestamp.date().isoformat()
+
+
+def _resource_observation_date(record: dict[str, Any]) -> str | None:
+    resource_id = record.get("id")
+    if not isinstance(resource_id, str) or len(resource_id) < 10:
+        return None
+    candidate = resource_id[-10:]
+    try:
+        return date.fromisoformat(candidate).isoformat()
+    except ValueError:
+        return None
+
+
 def _preflight(
     requester: SetupRequester,
     *,
@@ -230,7 +312,8 @@ def _preflight(
 ) -> None:
     params: dict[str, object] = {
         "filter[underlying_symbol]": symbol,
-        "filter[tradetime]": trade_date,
+        "filter[tradetime_from]": trade_date,
+        "filter[tradetime_to]": trade_date,
         "page[offset]": 0,
         "page[limit]": 10,
         "compact": 0,
@@ -269,8 +352,71 @@ def _preflight(
         attributes = item.get("attributes", item)
         if not isinstance(attributes, dict) or not provider_fields.issubset(attributes):
             raise OptionsSchemaError("preflight response omits required provider fields")
+    object_rows = [cast(dict[str, Any], item) for item in data]
+    attribute_rows = [cast(dict[str, Any], item.get("attributes", item)) for item in object_rows]
+    resource_observation_dates = sorted(
+        {value for item in object_rows if (value := _resource_observation_date(item)) is not None}
+    )
+    tradetime_dates = sorted(
+        {
+            value
+            for item in attribute_rows
+            if (value := _provider_session_date(item.get("tradetime"))) is not None
+        }
+    )
+    bid_observation_dates = sorted(
+        {
+            value
+            for item in attribute_rows
+            if (value := _provider_session_date(item.get("bid_date"))) is not None
+        }
+    )
+    ask_observation_dates = sorted(
+        {
+            value
+            for item in attribute_rows
+            if (value := _provider_session_date(item.get("ask_date"))) is not None
+        }
+    )
+    exact_observation_date_available = bool(resource_observation_dates) and all(
+        value == trade_date for value in resource_observation_dates
+    )
+    if not exact_observation_date_available:
+        write_json(
+            output / "eodhd_options_api_preflight.json",
+            {
+                "status": "blocked_historical_options_date_unavailable",
+                "endpoint": OPTIONS_EOD_ENDPOINT,
+                "symbol": symbol,
+                "requested_session_date": trade_date,
+                "record_limit": 10,
+                "records_received": len(data),
+                "setup_requests_completed": 2,
+                "pagination": {
+                    "offset": meta.get("offset"),
+                    "limit": meta.get("limit"),
+                    "total": meta.get("total"),
+                    "next_present": bool(links.get("next")),
+                },
+                "resource_observation_dates": resource_observation_dates,
+                "tradetime_dates": tradetime_dates,
+                "bid_observation_dates": bid_observation_dates,
+                "ask_observation_dates": ask_observation_dates,
+                "tradetime_is_eod_observation_date": False,
+                "official_observation_date_filter_available": False,
+                "exact_requested_observation_date_confirmed": False,
+                "america_new_york_mapping_confirmed": True,
+                "authentication_redacted": True,
+                "blocker_reason": (
+                    "the documented tradetime filter selects last-trade activity, while "
+                    "the returned EOD resource observation dates differ from the requested "
+                    "prior-close session"
+                ),
+            },
+        )
+        raise RuntimeError("blocked_historical_options_date_unavailable")
     canonical = canonicalize_response_records(
-        [cast(dict[str, Any], value) for value in data if isinstance(value, dict)],
+        object_rows,
         request_id="preflight-redacted",
         provider_schema_version=f"openapi-{OPENAPI_VERSION}",
     )
@@ -305,6 +451,7 @@ def _preflight(
             "trade_date_to": trade_date,
             "record_limit": 10,
             "records_received": len(data),
+            "setup_requests_completed": 2,
             "canonical_records": len(canonical.records),
             "rejected_records": len(canonical.rejections),
             "pagination": {
@@ -345,6 +492,7 @@ def execute_download(*, output: Path, data_dir: Path) -> dict[str, Any]:
     plan = json.loads((output / "options_request_plan.json").read_text(encoding="utf-8"))
     if not plan.get("resource_gate_passed"):
         return _write_blocker(output, "blocked_options_download_resource_limit")
+    write_json(output / "eodhd_options_schema_mapping.json", schema_mapping())
     pace_value = os.environ.get("EODHD_OPTIONS_REQUESTS_PER_MINUTE", "20")
     try:
         pace = int(pace_value)

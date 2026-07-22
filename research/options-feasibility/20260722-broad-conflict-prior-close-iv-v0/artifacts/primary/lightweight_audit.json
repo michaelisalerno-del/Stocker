@@ -18,27 +18,29 @@
   },
   "run_specific": {
     "blocker_verified": true,
-    "downstream_checks": {
-      "25-draw session bootstrap": "not_applicable_blocked_missing_eodhd_api_token",
-      "ATM IV, straddle midpoint, spreads and DTE": "not_applicable_blocked_missing_eodhd_api_token",
-      "O0/O1 development-only preprocessing and coefficients": "not_applicable_blocked_missing_eodhd_api_token",
-      "binary and continuous metrics": "not_applicable_blocked_missing_eodhd_api_token",
-      "canonical field mapping": "not_applicable_blocked_missing_eodhd_api_token",
-      "causal options join": "not_applicable_blocked_missing_eodhd_api_token",
-      "five route-bundle null refits": "not_applicable_blocked_missing_eodhd_api_token",
-      "full-data determinism comparison": "not_applicable_blocked_missing_eodhd_api_token",
-      "manual probability reconstruction on 100 rows": "not_applicable_blocked_missing_eodhd_api_token",
-      "matched controls": "not_applicable_blocked_missing_eodhd_api_token",
-      "pagination and raw-response hashes": "not_applicable_blocked_missing_eodhd_api_token",
-      "primary expiry/common-strike selection and tie-breaks": "not_applicable_blocked_missing_eodhd_api_token",
-      "provider moneyness consistency": "not_applicable_blocked_missing_eodhd_api_token",
-      "symbol coverage from provider response": "not_applicable_blocked_missing_eodhd_api_token",
-      "underlying movement outcomes": "not_applicable_blocked_missing_eodhd_api_token"
-    },
-    "exact_previous_session_date_mapping": true,
-    "no_fabricated_pairs_or_movement": true,
-    "no_provider_requests": true,
-    "passed": true
+    "bulk_page_requests_completed": 0,
+    "covered_symbols": 20,
+    "no_raw_cache_or_downstream_materialisation": true,
+    "official_observation_date_filter_absent": true,
+    "passed": true,
+    "provider_setup_requests_completed": 2,
+    "quote_observation_dates_match_resources": true,
+    "requested_session_date": "2025-08-21",
+    "returned_resource_observation_dates": [
+      "2025-09-03",
+      "2025-09-04",
+      "2025-09-05",
+      "2025-09-08",
+      "2025-09-09",
+      "2025-09-10",
+      "2025-09-11",
+      "2025-09-12",
+      "2025-09-15",
+      "2025-09-16"
+    ],
+    "tradetime_dates": [
+      "2025-08-21"
+    ]
   },
   "safety_flags": true,
   "structural_panel_reconstruction": {

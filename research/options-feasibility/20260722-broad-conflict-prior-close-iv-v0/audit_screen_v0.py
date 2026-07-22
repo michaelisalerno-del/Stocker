@@ -390,6 +390,83 @@ def _audit_blocked_run(
     }
 
 
+def _audit_historical_date_blocked_run(
+    output: Path, *, clean: pd.DataFrame, required: pd.DataFrame
+) -> dict[str, Any]:
+    """Verify the live provider proved no exact EOD observation-date filter."""
+
+    decision = _read_json(output / "decision.json")
+    download = _read_json(output / "options_download_manifest.json")
+    preflight = _read_json(output / "eodhd_options_api_preflight.json")
+    schema = _read_json(output / "eodhd_options_schema_mapping.json")
+    mapping = pd.read_csv(output / "underlying_symbol_mapping.csv")
+    pairs = pd.read_parquet(output / "selected_option_pairs.parquet")
+    movement = pd.read_parquet(output / "options_movement_panel.parquet")
+    predictions = pd.read_parquet(output / "assessment_predictions.parquet")
+    requested = str(preflight.get("requested_session_date", ""))
+    resource_dates = set(cast(list[str], preflight.get("resource_observation_dates", [])))
+    bid_dates = set(cast(list[str], preflight.get("bid_observation_dates", [])))
+    ask_dates = set(cast(list[str], preflight.get("ask_observation_dates", [])))
+    tradetime_dates = set(cast(list[str], preflight.get("tradetime_dates", [])))
+    required_dates = {value.isoformat() for value in required["required_options_date"]}
+    mapping_supported = mapping["coverage_available"].astype(str).str.casefold().eq("true")
+    cache_root = Path(str(_read_json(output / "source_manifest.json")["options_cache_path"]))
+    cached_raw_responses = list((cache_root / "raw").glob("*.json"))
+    evidence_passed = bool(
+        preflight.get("status") == "blocked_historical_options_date_unavailable"
+        and preflight.get("endpoint") == "/mp/unicornbay/options/eod"
+        and 1 <= int(preflight.get("records_received", 0)) <= 10
+        and int(preflight.get("setup_requests_completed", 0)) == 2
+        and requested in required_dates
+        and resource_dates
+        and resource_dates == bid_dates == ask_dates
+        and requested not in resource_dates
+        and tradetime_dates == {requested}
+        and preflight.get("tradetime_is_eod_observation_date") is False
+        and preflight.get("official_observation_date_filter_available") is False
+        and preflight.get("exact_requested_observation_date_confirmed") is False
+        and preflight.get("america_new_york_mapping_confirmed") is True
+        and preflight.get("authentication_redacted") is True
+    )
+    schema_passed = bool(
+        schema["historical_eod"]["tradetime_filter_semantics"] == "last-trade activity window"
+        and "not present" in schema["historical_eod"]["historical_observation_date_filter"]
+        and "not assumed" in schema["canonical_mapping"]["tradetime"]
+    )
+    no_downstream_materialisation = bool(
+        int(download.get("requests_completed", -1)) == 0
+        and int(download.get("setup_requests_completed", -1)) == 2
+        and int(download.get("raw_records", -1)) == 0
+        and download.get("manifest_rows") == []
+        and not cached_raw_responses
+        and pairs.empty
+        and movement.empty
+        and predictions.empty
+    )
+    passed = bool(
+        decision["decision"] == "blocked_historical_options_date_unavailable"
+        and int(decision.get("provider_setup_requests_completed", -1)) == 2
+        and evidence_passed
+        and schema_passed
+        and mapping_supported.sum() == len(FROZEN_COHORT)
+        and len(clean) == 87_443
+        and no_downstream_materialisation
+    )
+    return {
+        "passed": passed,
+        "blocker_verified": evidence_passed,
+        "provider_setup_requests_completed": int(preflight.get("setup_requests_completed", 0)),
+        "bulk_page_requests_completed": int(download.get("requests_completed", 0)),
+        "requested_session_date": requested,
+        "tradetime_dates": sorted(tradetime_dates),
+        "returned_resource_observation_dates": sorted(resource_dates),
+        "quote_observation_dates_match_resources": resource_dates == bid_dates == ask_dates,
+        "official_observation_date_filter_absent": schema_passed,
+        "covered_symbols": int(mapping_supported.sum()),
+        "no_raw_cache_or_downstream_materialisation": no_downstream_materialisation,
+    }
+
+
 def _audit_coverage_blocked_run(output: Path, *, clean: pd.DataFrame) -> dict[str, Any]:
     """Independently verify the frozen coverage blocker before any fitted model."""
 
@@ -1729,6 +1806,8 @@ def run_audit(output: Path) -> dict[str, Any]:
     cache_ignored = "data/vendor/eodhd/options/" in ignore_text
     if decision["decision"] == "blocked_missing_eodhd_api_token":
         run_specific = _audit_blocked_run(output, clean=clean, required=required)
+    elif decision["decision"] == "blocked_historical_options_date_unavailable":
+        run_specific = _audit_historical_date_blocked_run(output, clean=clean, required=required)
     elif decision["decision"] == "blocked_insufficient_options_chain_coverage":
         run_specific = _audit_coverage_blocked_run(output, clean=clean)
     else:

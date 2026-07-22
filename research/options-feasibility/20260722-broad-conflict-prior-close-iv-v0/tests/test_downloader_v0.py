@@ -333,6 +333,78 @@ def valid_provider_record(**overrides: object) -> dict[str, Any]:
     }
 
 
+def test_preflight_uses_historical_date_range_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    from download_options import _preflight
+
+    class CapturingRequester:
+        params: dict[str, object] | None = None
+
+        def get_json(self, endpoint: str, *, params: dict[str, object], timeout: float) -> object:
+            self.params = params
+            return {
+                "meta": {"offset": 0, "limit": 10, "total": 1},
+                "data": [valid_provider_record()],
+                "links": {"next": None},
+            }
+
+    requester = CapturingRequester()
+
+    _preflight(
+        requester,  # type: ignore[arg-type]
+        symbol="AAPL",
+        trade_date="2025-01-02",
+        output=tmp_path,
+    )
+
+    assert requester.params is not None
+    assert requester.params["filter[tradetime_from]"] == "2025-01-02"
+    assert requester.params["filter[tradetime_to]"] == "2025-01-02"
+    assert "filter[tradetime]" not in requester.params
+
+
+def test_preflight_records_observation_date_mismatch_before_blocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    from download_options import _preflight
+
+    provider_record = valid_provider_record(
+        dte=14,
+        bid_date="2025-01-03 19:59:59",
+        ask_date="2025-01-03 19:59:59",
+    )
+    provider_record["id"] = "AAPL250117C00200000-2025-01-03"
+
+    class MismatchedRequester:
+        def get_json(self, endpoint: str, *, params: dict[str, object], timeout: float) -> object:
+            return {
+                "meta": {"offset": 0, "limit": 10, "total": 1},
+                "data": [provider_record],
+                "links": {"next": None},
+            }
+
+    with pytest.raises(RuntimeError, match="blocked_historical_options_date_unavailable"):
+        _preflight(
+            MismatchedRequester(),  # type: ignore[arg-type]
+            symbol="AAPL",
+            trade_date="2025-01-02",
+            output=tmp_path,
+        )
+
+    artifact = json.loads(
+        (tmp_path / "eodhd_options_api_preflight.json").read_text(encoding="utf-8")
+    )
+    assert artifact["status"] == "blocked_historical_options_date_unavailable"
+    assert artifact["records_received"] == 1
+    assert artifact["requested_session_date"] == "2025-01-02"
+    assert artifact["resource_observation_dates"] == ["2025-01-03"]
+    assert artifact["tradetime_dates"] == ["2025-01-02"]
+    assert artifact["authentication_redacted"] is True
+
+
 def test_canonical_options_schema_maps_documented_eod_fields() -> None:
     result = canonicalize_response_records(
         [valid_provider_record()],

@@ -8,7 +8,7 @@ import json
 import os
 import sys
 import time
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -49,6 +49,8 @@ from stocker_research.eodhd_options_downloader_v0 import (  # noqa: E402
     deterministic_symbol_mapping,
     redact_secrets,
     resolve_canonical_duplicates,
+    sha256_bytes,
+    stable_request_id,
 )
 
 UNDERLYING_SYMBOLS_ENDPOINT = "/mp/unicornbay/options/underlying-symbols"
@@ -60,7 +62,12 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
     preflight = (
         json.loads(preflight_path.read_text(encoding="utf-8")) if preflight_path.is_file() else {}
     )
-    setup_requests_completed = int(preflight.get("setup_requests_completed", 0))
+    setup_http_requests_attempted = int(preflight.get("setup_http_requests_attempted", 0))
+    setup_logical_requests_completed = int(preflight.get("setup_logical_requests_completed", 0))
+    setup_manifest_rows = cast(list[dict[str, Any]], preflight.get("setup_manifest_rows", []))
+    setup_response_bytes = sum(int(row.get("response_bytes", 0)) for row in setup_manifest_rows)
+    setup_records_received = sum(int(row.get("record_count", 0)) for row in setup_manifest_rows)
+    preflight_option_records = int(preflight.get("records_received", 0))
     decision = {
         **SAFETY_FLAGS,
         "status": blocker,
@@ -70,7 +77,9 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
         "iv_excess_model_status": "blocked",
         "broad_conflict_movement_status": "blocked",
         "matched_control_status": "blocked",
-        "provider_setup_requests_completed": setup_requests_completed,
+        "provider_setup_http_requests_attempted": setup_http_requests_attempted,
+        "provider_setup_logical_requests_completed": setup_logical_requests_completed,
+        "provider_preflight_option_records": preflight_option_records,
     }
     write_json(output / "decision.json", decision)
     existing_manifest = output / "options_download_manifest.json"
@@ -80,7 +89,23 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
         else {}
     )
     manifest["status"] = blocker
-    manifest["setup_requests_completed"] = setup_requests_completed
+    manifest.pop("setup_requests_completed", None)
+    bulk_manifest_rows = cast(list[dict[str, Any]], manifest.get("manifest_rows", []))
+    bulk_http_requests_attempted = sum(int(row.get("attempts", 0)) for row in bulk_manifest_rows)
+    manifest["setup_http_requests_attempted"] = setup_http_requests_attempted
+    manifest["setup_logical_requests_completed"] = setup_logical_requests_completed
+    manifest["setup_manifest_rows"] = setup_manifest_rows
+    manifest["setup_response_bytes"] = setup_response_bytes
+    manifest["setup_records_received"] = setup_records_received
+    manifest["preflight_option_records"] = preflight_option_records
+    manifest["bulk_http_requests_attempted"] = bulk_http_requests_attempted
+    manifest["total_http_requests_attempted"] = (
+        setup_http_requests_attempted + bulk_http_requests_attempted
+    )
+    manifest["total_provider_records_received"] = setup_records_received + int(
+        manifest.get("raw_records", 0)
+    )
+    manifest["total_download_bytes"] = setup_response_bytes + int(manifest.get("download_bytes", 0))
     manifest.setdefault("pagination_complete", False)
     manifest.setdefault("unexplained_truncations", 0)
     manifest.setdefault("credential_exposures", 0)
@@ -93,7 +118,8 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
             "status": blocker,
             "audit_scope": "download_blocked_before_full_independent_audit",
             "provider_requests_completed": int(manifest.get("requests_completed", 0)),
-            "provider_setup_requests_completed": setup_requests_completed,
+            "provider_setup_http_requests_attempted": setup_http_requests_attempted,
+            "provider_setup_logical_requests_completed": setup_logical_requests_completed,
         },
     )
     write_json(
@@ -149,7 +175,9 @@ def _write_blocker(output: Path, blocker: str) -> dict[str, Any]:
         "# Prior-Close Options IV Movement Screen V0\n\n"
         f"Primary decision: `{blocker}`\n\n"
         f"Provider bulk page requests recorded: {int(manifest.get('requests_completed', 0))}. "
-        f"Provider setup requests recorded: {setup_requests_completed}."
+        f"Provider setup HTTP attempts recorded: {setup_http_requests_attempted}; "
+        f"successful logical setup requests: {setup_logical_requests_completed}; "
+        f"preflight option records: {preflight_option_records}."
         f"{observation_text} The fail-closed download did not produce an options-movement "
         "inference. No intraday option fill or option P&L was calculated.\n"
     )
@@ -180,13 +208,73 @@ class SetupRequester:
         *,
         token: str,
         requests_per_minute: int,
+        cache_dir: Path,
         max_attempts: int = 4,
     ) -> None:
         self.transport = transport
         self.token = token
         self.minimum_interval = 60.0 / float(requests_per_minute)
         self.max_attempts = max_attempts
+        self.cache_dir = cache_dir
         self.last_request_monotonic: float | None = None
+        self.http_requests_attempted = 0
+        self.logical_requests_completed = 0
+        self.manifest_rows: list[dict[str, object]] = []
+        self.last_response_sha256: str | None = None
+
+    def _cache_response(self, content: bytes) -> tuple[str, Path]:
+        response_hash = sha256_bytes(content)
+        destination = self.cache_dir / f"{response_hash}.json"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not destination.exists():
+            temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+            temporary.write_bytes(content)
+            os.replace(temporary, destination)
+        return response_hash, destination
+
+    @staticmethod
+    def _record_count(payload: object) -> int:
+        if isinstance(payload, dict):
+            data = payload.get("data")
+            return len(data) if isinstance(data, list) else 0
+        return len(payload) if isinstance(payload, list) else 0
+
+    def _record_success(
+        self,
+        *,
+        endpoint: str,
+        params: dict[str, object],
+        payload: object,
+        content: bytes,
+        attempts: int,
+        started_at: str,
+    ) -> None:
+        response_hash, cache_path = self._cache_response(content)
+        self.last_response_sha256 = response_hash
+        self.logical_requests_completed += 1
+        self.manifest_rows.append(
+            {
+                "request_id": stable_request_id(endpoint, params),
+                "endpoint": endpoint,
+                "underlying_symbol": str(params.get("filter[underlying_symbol]", "")),
+                "trade_date_from": str(params.get("filter[tradetime_from]", "")),
+                "trade_date_to": str(params.get("filter[tradetime_to]", "")),
+                "strike_from": str(params.get("filter[strike_from]", "")),
+                "strike_to": str(params.get("filter[strike_to]", "")),
+                "expiration_from": str(params.get("filter[exp_date_from]", "")),
+                "expiration_to": str(params.get("filter[exp_date_to]", "")),
+                "offset": int(params.get("page[offset]", 0)),
+                "limit": int(params.get("page[limit]", 0)),
+                "response_status": 200,
+                "record_count": self._record_count(payload),
+                "response_hash": response_hash,
+                "response_bytes": len(content),
+                "attempts": attempts,
+                "started_at": started_at,
+                "completed_at": datetime.now(UTC).isoformat(),
+                "cache_path": str(cache_path.resolve()),
+            }
+        )
 
     def wait_before_next_request(self) -> None:
         if self.last_request_monotonic is None:
@@ -207,10 +295,12 @@ class SetupRequester:
     def get_json(self, endpoint: str, *, params: dict[str, object], timeout: float) -> object:
         authenticated = {**params, "api_token": self.token}
         url = "https://eodhd.com/api" + endpoint
+        started_at = datetime.now(UTC).isoformat()
         for attempt in range(1, self.max_attempts + 1):
             self.wait_before_next_request()
             self.last_request_monotonic = time.monotonic()
             try:
+                self.http_requests_attempted += 1
                 response = self.transport.get(url, params=authenticated, timeout=timeout)
             except Exception as exc:
                 if attempt >= self.max_attempts:
@@ -220,7 +310,7 @@ class SetupRequester:
                 continue
             if response.status_code == 200:
                 try:
-                    payload = response.json()
+                    content = response.content
                 except (
                     requests.ConnectionError,
                     requests.Timeout,
@@ -235,9 +325,23 @@ class SetupRequester:
                         ) from None
                     time.sleep(float(2 ** (attempt - 1)))
                     continue
-                except ValueError as exc:
+                token_bytes = self.token.encode("utf-8")
+                if token_bytes and token_bytes in content:
+                    response.close()
+                    raise RuntimeError("EODHD setup response contains credential material")
+                try:
+                    payload = json.loads(content)
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                     response.close()
                     raise OptionsSchemaError("EODHD setup response is not valid JSON") from exc
+                self._record_success(
+                    endpoint=endpoint,
+                    params=params,
+                    payload=payload,
+                    content=content,
+                    attempts=attempt,
+                    started_at=started_at,
+                )
                 response.close()
                 return payload
             if response.status_code in {401, 403}:
@@ -354,6 +458,34 @@ def _preflight(
             raise OptionsSchemaError("preflight response omits required provider fields")
     object_rows = [cast(dict[str, Any], item) for item in data]
     attribute_rows = [cast(dict[str, Any], item.get("attributes", item)) for item in object_rows]
+    record_evidence: list[dict[str, object]] = []
+    for index, (resource, attributes) in enumerate(zip(object_rows, attribute_rows, strict=True)):
+        resource_id = resource.get("id")
+        record_evidence.append(
+            {
+                "record_index": index,
+                "resource_id_sha256": (
+                    sha256_bytes(resource_id.encode("utf-8"))
+                    if isinstance(resource_id, str)
+                    else None
+                ),
+                "resource_observation_date": _resource_observation_date(resource),
+                "tradetime_date": _provider_session_date(attributes.get("tradetime")),
+                "bid_observation_date": _provider_session_date(attributes.get("bid_date")),
+                "ask_observation_date": _provider_session_date(attributes.get("ask_date")),
+                "expiration_date": _provider_session_date(attributes.get("exp_date")),
+                "provider_dte": attributes.get("dte"),
+            }
+        )
+    evidence_projection_sha256 = sha256_bytes(
+        json.dumps(
+            record_evidence,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    )
     resource_observation_dates = sorted(
         {value for item in object_rows if (value := _resource_observation_date(item)) is not None}
     )
@@ -378,94 +510,81 @@ def _preflight(
             if (value := _provider_session_date(item.get("ask_date"))) is not None
         }
     )
-    exact_observation_date_available = bool(resource_observation_dates) and all(
-        value == trade_date for value in resource_observation_dates
+    all_returned_rows_observation_date_verified = bool(record_evidence) and all(
+        row["resource_observation_date"] is not None
+        and row["resource_observation_date"]
+        == row["bid_observation_date"]
+        == row["ask_observation_date"]
+        for row in record_evidence
     )
-    if not exact_observation_date_available:
-        write_json(
-            output / "eodhd_options_api_preflight.json",
-            {
-                "status": "blocked_historical_options_date_unavailable",
-                "endpoint": OPTIONS_EOD_ENDPOINT,
-                "symbol": symbol,
-                "requested_session_date": trade_date,
-                "record_limit": 10,
-                "records_received": len(data),
-                "setup_requests_completed": 2,
-                "pagination": {
-                    "offset": meta.get("offset"),
-                    "limit": meta.get("limit"),
-                    "total": meta.get("total"),
-                    "next_present": bool(links.get("next")),
-                },
-                "resource_observation_dates": resource_observation_dates,
-                "tradetime_dates": tradetime_dates,
-                "bid_observation_dates": bid_observation_dates,
-                "ask_observation_dates": ask_observation_dates,
-                "tradetime_is_eod_observation_date": False,
-                "official_observation_date_filter_available": False,
-                "exact_requested_observation_date_confirmed": False,
-                "america_new_york_mapping_confirmed": True,
-                "authentication_redacted": True,
-                "blocker_reason": (
-                    "the documented tradetime filter selects last-trade activity, while "
-                    "the returned EOD resource observation dates differ from the requested "
-                    "prior-close session"
-                ),
-            },
-        )
-        raise RuntimeError("blocked_historical_options_date_unavailable")
-    canonical = canonicalize_response_records(
-        object_rows,
-        request_id="preflight-redacted",
-        provider_schema_version=f"openapi-{OPENAPI_VERSION}",
+    sample_rows_match_requested_observation_date = bool(
+        all_returned_rows_observation_date_verified
+        and all(row["resource_observation_date"] == trade_date for row in record_evidence)
     )
-    historical_dates = sorted({record["trade_date"].isoformat() for record in canonical.records})
-    if not historical_dates or any(value != trade_date for value in historical_dates):
-        raise RuntimeError("blocked_historical_options_date_unavailable")
-    required_fields = {
-        "contract_id",
-        "option_type",
-        "expiration_date",
-        "strike",
-        "trade_date",
-        "bid",
-        "ask",
-        "implied_volatility",
-        "open_interest",
-        "dte",
-    }
-    if not canonical.records:
-        raise OptionsSchemaError("preflight produced no valid canonical records")
-    available_fields = set(canonical.records[0])
-    missing = sorted(required_fields.difference(available_fields))
-    if missing:
-        raise OptionsSchemaError(f"preflight canonical fields unavailable: {missing}")
+    setup_manifest_rows = [dict(row) for row in requester.manifest_rows]
+    preflight_manifest = next(
+        (
+            row
+            for row in reversed(setup_manifest_rows)
+            if row.get("endpoint") == OPTIONS_EOD_ENDPOINT
+        ),
+        {},
+    )
+    america_new_york_mapping_confirmed = bool(record_evidence) and all(
+        row["tradetime_date"] is not None
+        and row["bid_observation_date"] is not None
+        and row["ask_observation_date"] is not None
+        for row in record_evidence
+    )
+    blocker_reason = (
+        "the official historical EOD schema exposes no EOD observation-date filter; "
+        "matching sample rows cannot establish exact historical chain retrieval"
+        if sample_rows_match_requested_observation_date
+        else "the documented tradetime filter selects last-trade activity, while returned "
+        "EOD resource observations cannot establish the requested prior-close session"
+    )
     write_json(
         output / "eodhd_options_api_preflight.json",
         {
-            "status": "supported",
+            "status": "blocked_historical_options_date_unavailable",
             "endpoint": OPTIONS_EOD_ENDPOINT,
             "symbol": symbol,
-            "trade_date_from": trade_date,
-            "trade_date_to": trade_date,
+            "requested_session_date": trade_date,
             "record_limit": 10,
             "records_received": len(data),
-            "setup_requests_completed": 2,
-            "canonical_records": len(canonical.records),
-            "rejected_records": len(canonical.rejections),
+            "setup_http_requests_attempted": requester.http_requests_attempted,
+            "setup_logical_requests_completed": requester.logical_requests_completed,
+            "setup_manifest_rows": setup_manifest_rows,
+            "response_sha256": preflight_manifest.get("response_hash"),
+            "response_bytes": preflight_manifest.get("response_bytes", 0),
+            "response_cache_path": preflight_manifest.get("cache_path", ""),
             "pagination": {
                 "offset": meta.get("offset"),
                 "limit": meta.get("limit"),
                 "total": meta.get("total"),
                 "next_present": bool(links.get("next")),
             },
-            "historical_session_dates": historical_dates,
-            "historical_eod_confirmed": True,
-            "america_new_york_mapping_confirmed": True,
+            "resource_observation_dates": resource_observation_dates,
+            "tradetime_dates": tradetime_dates,
+            "bid_observation_dates": bid_observation_dates,
+            "ask_observation_dates": ask_observation_dates,
+            "record_evidence": record_evidence,
+            "evidence_projection_sha256": evidence_projection_sha256,
+            "all_returned_rows_observation_date_verified": (
+                all_returned_rows_observation_date_verified
+            ),
+            "sample_rows_match_requested_observation_date": (
+                sample_rows_match_requested_observation_date
+            ),
+            "tradetime_is_eod_observation_date": False,
+            "official_observation_date_filter_available": False,
+            "exact_requested_observation_date_confirmed": False,
+            "america_new_york_mapping_confirmed": america_new_york_mapping_confirmed,
             "authentication_redacted": True,
+            "blocker_reason": blocker_reason,
         },
     )
+    raise RuntimeError("blocked_historical_options_date_unavailable")
 
 
 def _request_from_chunk(chunk: dict[str, Any]) -> OptionsRequest:
@@ -501,7 +620,12 @@ def execute_download(*, output: Path, data_dir: Path) -> dict[str, Any]:
     if pace <= 0:
         raise ValueError("EODHD_OPTIONS_REQUESTS_PER_MINUTE must be positive")
     transport = RequestsTransport()
-    setup_requester = SetupRequester(transport, token=token, requests_per_minute=pace)
+    setup_requester = SetupRequester(
+        transport,
+        token=token,
+        requests_per_minute=pace,
+        cache_dir=data_dir / "raw" / "setup",
+    )
     coverage = _coverage_symbols(setup_requester, timeout=30.0)
     mapping_result = deterministic_symbol_mapping(FROZEN_COHORT, provider_coverage=coverage)
     mapping_frame = pd.DataFrame(

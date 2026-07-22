@@ -344,6 +344,26 @@ def _parse_trade_time(value: object) -> tuple[date, datetime]:
     return local.date(), local.astimezone(UTC)
 
 
+def provider_eod_observation_date(record: Mapping[str, Any]) -> date:
+    """Read the documented EOD resource's observation-date identity suffix."""
+
+    resource_id = record.get("id")
+    if not isinstance(resource_id, str) or len(resource_id) < 10:
+        raise ValueError("invalid_eod_observation_date")
+    try:
+        return date.fromisoformat(resource_id[-10:])
+    except ValueError as exc:
+        raise ValueError("invalid_eod_observation_date") from exc
+
+
+def _quote_observation_date(value: object, side: str) -> date:
+    try:
+        quote_date, _ = _parse_trade_time(value)
+    except ValueError as exc:
+        raise ValueError(f"invalid_{side}_observation_timestamp") from exc
+    return quote_date
+
+
 def _reason_from_error(error: ValueError) -> str:
     message = str(error)
     if message.startswith("invalid_numeric_field:"):
@@ -357,7 +377,7 @@ def canonicalize_response_records(
     request_id: str,
     provider_schema_version: str,
 ) -> CanonicalizationResult:
-    """Map documented EODHD EOD fields without silently repairing invalid rows."""
+    """Map documented EODHD EOD fields without treating last trade as chain date."""
 
     accepted: list[dict[str, Any]] = []
     rejected: list[CanonicalRejection] = []
@@ -385,7 +405,13 @@ def canonicalize_response_records(
             if strike is None or strike <= 0.0:
                 raise ValueError("invalid_strike")
             expiration = _parse_expiration(attributes.get("exp_date"))
-            trade_day, trade_timestamp = _parse_trade_time(attributes.get("tradetime"))
+            observation_day = provider_eod_observation_date(item)
+            bid_observation_day = _quote_observation_date(attributes.get("bid_date"), "bid")
+            ask_observation_day = _quote_observation_date(attributes.get("ask_date"), "ask")
+            if not (observation_day == bid_observation_day == ask_observation_day):
+                raise ValueError("eod_observation_date_mismatch")
+            _, trade_timestamp = _parse_trade_time(attributes.get("tradetime"))
+            trade_day = observation_day
             if expiration < trade_day:
                 raise ValueError("expiration_before_trade_date")
             calculated_dte = (expiration - trade_day).days
@@ -768,6 +794,11 @@ class EODHDOptionsDownloader:
                         ) from None
                     self.sleep(self.config.exponential_backoff_seconds * (2.0 ** (attempt - 1)))
                     continue
+                token_bytes = self.config.token.encode("utf-8")
+                if token_bytes and token_bytes in content:
+                    raise OptionsAuthenticationError(
+                        "EODHD options response contains credential material"
+                    )
                 return _MaterializedResponse(response, content), attempt
             if response.status_code in {401, 403}:
                 self._close_response(response)
@@ -1108,6 +1139,7 @@ __all__ = [
     "UnderlyingSymbolMapping",
     "canonicalize_response_records",
     "deterministic_symbol_mapping",
+    "provider_eod_observation_date",
     "redact_secrets",
     "resolve_canonical_duplicates",
     "safe_parameters",

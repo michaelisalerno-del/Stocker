@@ -12,6 +12,7 @@ import pytest
 from stocker_research.eodhd_options_downloader_v0 import (
     DownloadConfig,
     EODHDOptionsDownloader,
+    OptionsAuthenticationError,
     OptionsRequest,
     OptionsResourceLimitExceeded,
     canonicalize_response_records,
@@ -148,6 +149,22 @@ def test_completed_download_resumes_from_verified_content_cache(tmp_path: Path) 
     assert resumed.records == first.records
     assert resumed.manifest_rows == first.manifest_rows
     assert second_transport.calls == []
+
+
+def test_bulk_downloader_rejects_echoed_token_before_cache(tmp_path: Path) -> None:
+    token = "bulk-response-echo-secret"
+    response = response_page(offset=0, limit=10, total=1, ids=[token])
+    downloader = EODHDOptionsDownloader(
+        DownloadConfig(token=token, data_dir=tmp_path, page_limit=10),
+        transport=FakeTransport([response]),
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(OptionsAuthenticationError, match="credential material"):
+        downloader.download(OptionsRequest(underlying_symbol="AAPL"))
+
+    assert response.closed is True
+    assert not list((tmp_path / "raw").glob("*.json"))
 
 
 def test_oversized_request_splits_and_retains_attempt_manifest(tmp_path: Path) -> None:
@@ -308,6 +325,8 @@ def valid_provider_record(**overrides: object) -> dict[str, Any]:
         "exp_date": "2025-01-17",
         "strike": 200.0,
         "tradetime": "2025-01-02",
+        "bid_date": "2025-01-02 15:59:58-05:00",
+        "ask_date": "2025-01-02 15:59:59-05:00",
         "last": 1.1,
         "bid": 1.0,
         "ask": 1.2,
@@ -327,13 +346,13 @@ def valid_provider_record(**overrides: object) -> dict[str, Any]:
     }
     attributes.update(overrides)
     return {
-        "id": f"{attributes['contract']}-{attributes['tradetime']}",
+        "id": f"{attributes['contract']}-{str(attributes['bid_date'])[:10]}",
         "type": "options-eod",
         "attributes": attributes,
     }
 
 
-def test_preflight_uses_historical_date_range_filters(
+def test_preflight_uses_activity_date_filters_but_fails_without_observation_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
@@ -341,6 +360,9 @@ def test_preflight_uses_historical_date_range_filters(
 
     class CapturingRequester:
         params: dict[str, object] | None = None
+        http_requests_attempted = 2
+        logical_requests_completed = 2
+        manifest_rows: list[dict[str, object]] = []
 
         def get_json(self, endpoint: str, *, params: dict[str, object], timeout: float) -> object:
             self.params = params
@@ -352,17 +374,24 @@ def test_preflight_uses_historical_date_range_filters(
 
     requester = CapturingRequester()
 
-    _preflight(
-        requester,  # type: ignore[arg-type]
-        symbol="AAPL",
-        trade_date="2025-01-02",
-        output=tmp_path,
-    )
+    with pytest.raises(RuntimeError, match="blocked_historical_options_date_unavailable"):
+        _preflight(
+            requester,  # type: ignore[arg-type]
+            symbol="AAPL",
+            trade_date="2025-01-02",
+            output=tmp_path,
+        )
 
     assert requester.params is not None
     assert requester.params["filter[tradetime_from]"] == "2025-01-02"
     assert requester.params["filter[tradetime_to]"] == "2025-01-02"
     assert "filter[tradetime]" not in requester.params
+    artifact = json.loads(
+        (tmp_path / "eodhd_options_api_preflight.json").read_text(encoding="utf-8")
+    )
+    assert artifact["sample_rows_match_requested_observation_date"] is True
+    assert artifact["official_observation_date_filter_available"] is False
+    assert artifact["exact_requested_observation_date_confirmed"] is False
 
 
 def test_preflight_records_observation_date_mismatch_before_blocking(
@@ -379,6 +408,10 @@ def test_preflight_records_observation_date_mismatch_before_blocking(
     provider_record["id"] = "AAPL250117C00200000-2025-01-03"
 
     class MismatchedRequester:
+        http_requests_attempted = 2
+        logical_requests_completed = 2
+        manifest_rows: list[dict[str, object]] = []
+
         def get_json(self, endpoint: str, *, params: dict[str, object], timeout: float) -> object:
             return {
                 "meta": {"offset": 0, "limit": 10, "total": 1},
@@ -402,12 +435,127 @@ def test_preflight_records_observation_date_mismatch_before_blocking(
     assert artifact["requested_session_date"] == "2025-01-02"
     assert artifact["resource_observation_dates"] == ["2025-01-03"]
     assert artifact["tradetime_dates"] == ["2025-01-02"]
+    assert artifact["sample_rows_match_requested_observation_date"] is False
+    assert len(artifact["evidence_projection_sha256"]) == 64
     assert artifact["authentication_redacted"] is True
 
 
+def test_preflight_fails_closed_when_any_observation_date_is_unverifiable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    from download_options import _preflight
+
+    unverifiable = valid_provider_record()
+    unverifiable["id"] = "resource-without-observation-date"
+    del unverifiable["attributes"]["ask_date"]
+
+    class PartiallyVerifiableRequester:
+        http_requests_attempted = 2
+        logical_requests_completed = 2
+        manifest_rows: list[dict[str, object]] = []
+
+        def get_json(self, endpoint: str, *, params: dict[str, object], timeout: float) -> object:
+            return {
+                "meta": {"offset": 0, "limit": 10, "total": 2},
+                "data": [valid_provider_record(), unverifiable],
+                "links": {"next": None},
+            }
+
+    with pytest.raises(RuntimeError, match="blocked_historical_options_date_unavailable"):
+        _preflight(
+            PartiallyVerifiableRequester(),  # type: ignore[arg-type]
+            symbol="AAPL",
+            trade_date="2025-01-02",
+            output=tmp_path,
+        )
+
+    artifact = json.loads(
+        (tmp_path / "eodhd_options_api_preflight.json").read_text(encoding="utf-8")
+    )
+    assert len(artifact["record_evidence"]) == 2
+    assert artifact["all_returned_rows_observation_date_verified"] is False
+    assert artifact["sample_rows_match_requested_observation_date"] is False
+
+
+def test_setup_requester_counts_retries_hashes_and_caches_responses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    import download_options
+
+    monkeypatch.setattr(download_options.time, "sleep", lambda _seconds: None)
+    success = FakeResponse(200, {"data": ["AAPL.US"]})
+    transport = FakeTransport([FakeResponse(429, {"error": "slow"}, {"Retry-After": "0"}), success])
+    requester = download_options.SetupRequester(
+        transport,  # type: ignore[arg-type]
+        token="ephemeral-secret",
+        requests_per_minute=60,
+        cache_dir=tmp_path / "raw" / "setup",
+    )
+
+    payload = requester.get_json(
+        "/mp/unicornbay/options/underlying-symbols",
+        params={"fmt": "json"},
+        timeout=30.0,
+    )
+
+    assert payload == {"data": ["AAPL.US"]}
+    assert requester.http_requests_attempted == 2
+    assert requester.logical_requests_completed == 1
+    assert len(requester.manifest_rows) == 1
+    row = requester.manifest_rows[0]
+    assert row["attempts"] == 2
+    assert row["response_hash"] == sha256_bytes(success.content)
+    assert Path(str(row["cache_path"])).read_bytes() == success.content
+    assert "ephemeral-secret" not in json.dumps(row, sort_keys=True)
+
+
+def test_setup_requester_rejects_echoed_token_before_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    import download_options
+
+    token = "response-echo-secret"
+    response = FakeResponse(200, {"message": token})
+    requester = download_options.SetupRequester(
+        FakeTransport([response]),  # type: ignore[arg-type]
+        token=token,
+        requests_per_minute=60,
+        cache_dir=tmp_path / "raw" / "setup",
+    )
+
+    with pytest.raises(RuntimeError, match="credential material"):
+        requester.get_json(
+            "/mp/unicornbay/options/underlying-symbols",
+            params={"fmt": "json"},
+            timeout=30.0,
+        )
+
+    assert response.closed is True
+    assert requester.http_requests_attempted == 1
+    assert requester.logical_requests_completed == 0
+    assert requester.manifest_rows == []
+    assert not list((tmp_path / "raw" / "setup").glob("*.json"))
+
+
+def test_request_plan_includes_quote_dates_required_for_canonical_trade_date() -> None:
+    experiment = Path(__file__).resolve().parents[1]
+    plan = json.loads(
+        (experiment / "artifacts" / "primary" / "options_request_plan.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert plan["chunks"]
+    assert all({"bid_date", "ask_date"}.issubset(chunk["fields"]) for chunk in plan["chunks"])
+
+
 def test_canonical_options_schema_maps_documented_eod_fields() -> None:
+    provider_record = valid_provider_record(tradetime="2025-01-01")
     result = canonicalize_response_records(
-        [valid_provider_record()],
+        [provider_record],
         request_id="request-1",
         provider_schema_version="openapi-2.0.0",
     )
@@ -418,10 +566,29 @@ def test_canonical_options_schema_maps_documented_eod_fields() -> None:
     assert record["contract_id"] == "AAPL250117C00200000"
     assert record["option_type"] == "call"
     assert record["trade_date"] == date(2025, 1, 2)
-    assert record["trade_timestamp"].isoformat() == "2025-01-02T21:00:00+00:00"
+    assert record["trade_timestamp"].isoformat() == "2025-01-01T21:00:00+00:00"
     assert record["midpoint"] == 1.1
     assert record["implied_volatility"] == 0.4
     assert record["raw_record_hash"]
+
+
+def test_canonical_options_schema_rejects_inconsistent_eod_observation_dates() -> None:
+    mismatched_resource = valid_provider_record()
+    mismatched_resource["id"] = "AAPL250117C00200000-2025-01-03"
+    missing_quote_date = valid_provider_record()
+    del missing_quote_date["attributes"]["bid_date"]
+
+    result = canonicalize_response_records(
+        [mismatched_resource, missing_quote_date],
+        request_id="request-observation-dates",
+        provider_schema_version="openapi-2.0.0",
+    )
+
+    assert result.records == []
+    assert [item.reason_code for item in result.rejections] == [
+        "eod_observation_date_mismatch",
+        "invalid_bid_observation_timestamp",
+    ]
 
 
 def test_invalid_canonical_records_are_rejected_without_coercion() -> None:

@@ -19,12 +19,20 @@
   "run_specific": {
     "blocker_verified": true,
     "bulk_page_requests_completed": 0,
+    "cached_response_hashes_verified": true,
+    "cached_response_token_scan_performed": true,
+    "cached_response_token_value_absent": true,
     "covered_symbols": 20,
-    "no_raw_cache_or_downstream_materialisation": true,
+    "evidence_projection_verified": true,
+    "no_bulk_or_downstream_materialisation": true,
     "official_observation_date_filter_absent": true,
+    "pagination_metadata_verified": true,
     "passed": true,
-    "provider_setup_requests_completed": 2,
+    "preflight_option_records": 10,
+    "provider_setup_http_requests_attempted": 2,
+    "provider_setup_logical_requests_completed": 2,
     "quote_observation_dates_match_resources": true,
+    "request_accounting_verified": true,
     "requested_session_date": "2025-08-21",
     "returned_resource_observation_dates": [
       "2025-09-03",
@@ -38,6 +46,8 @@
       "2025-09-15",
       "2025-09-16"
     ],
+    "setup_request_identities_verified": true,
+    "setup_response_bytes": 55135,
     "tradetime_dates": [
       "2025-08-21"
     ]

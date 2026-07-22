@@ -393,7 +393,7 @@ def _audit_blocked_run(
 def _audit_historical_date_blocked_run(
     output: Path, *, clean: pd.DataFrame, required: pd.DataFrame
 ) -> dict[str, Any]:
-    """Verify the live provider proved no exact EOD observation-date filter."""
+    """Independently verify cached live evidence for the historical-date blocker."""
 
     decision = _read_json(output / "decision.json")
     download = _read_json(output / "options_download_manifest.json")
@@ -404,48 +404,254 @@ def _audit_historical_date_blocked_run(
     movement = pd.read_parquet(output / "options_movement_panel.parquet")
     predictions = pd.read_parquet(output / "assessment_predictions.parquet")
     requested = str(preflight.get("requested_session_date", ""))
-    resource_dates = set(cast(list[str], preflight.get("resource_observation_dates", [])))
-    bid_dates = set(cast(list[str], preflight.get("bid_observation_dates", [])))
-    ask_dates = set(cast(list[str], preflight.get("ask_observation_dates", [])))
-    tradetime_dates = set(cast(list[str], preflight.get("tradetime_dates", [])))
     required_dates = {value.isoformat() for value in required["required_options_date"]}
     mapping_supported = mapping["coverage_available"].astype(str).str.casefold().eq("true")
-    cache_root = Path(str(_read_json(output / "source_manifest.json")["options_cache_path"]))
-    cached_raw_responses = list((cache_root / "raw").glob("*.json"))
+    setup_rows = cast(list[dict[str, Any]], preflight.get("setup_manifest_rows", []))
+
+    required_manifest_fields = {
+        "request_id",
+        "endpoint",
+        "underlying_symbol",
+        "trade_date_from",
+        "trade_date_to",
+        "strike_from",
+        "strike_to",
+        "expiration_from",
+        "expiration_to",
+        "offset",
+        "limit",
+        "response_status",
+        "record_count",
+        "response_hash",
+        "response_bytes",
+        "attempts",
+        "started_at",
+        "completed_at",
+        "cache_path",
+    }
+    cached_responses: dict[str, bytes] = {}
+    manifest_hashes_passed = len(setup_rows) == 2
+    query_identity_passed = len(setup_rows) == 2
+    audit_token = os.environ.get("EODHD_API_TOKEN", "").encode("utf-8")
+    cached_token_value_absent = True
+    for row in setup_rows:
+        cache_path = Path(str(row.get("cache_path", "")))
+        response_hash = str(row.get("response_hash", ""))
+        endpoint = str(row.get("endpoint", ""))
+        if endpoint == "/mp/unicornbay/options/underlying-symbols":
+            expected_params: dict[str, object] | None = {"fmt": "json"}
+            expected_query_fields = {
+                "underlying_symbol": "",
+                "trade_date_from": "",
+                "trade_date_to": "",
+                "offset": 0,
+                "limit": 0,
+            }
+        elif endpoint == "/mp/unicornbay/options/eod":
+            expected_params = {
+                "filter[underlying_symbol]": str(preflight.get("symbol", "")),
+                "filter[tradetime_from]": requested,
+                "filter[tradetime_to]": requested,
+                "page[offset]": 0,
+                "page[limit]": 10,
+                "compact": 0,
+                "fmt": "json",
+            }
+            expected_query_fields = {
+                "underlying_symbol": str(preflight.get("symbol", "")),
+                "trade_date_from": requested,
+                "trade_date_to": requested,
+                "offset": 0,
+                "limit": 10,
+            }
+        else:
+            expected_params = None
+            expected_query_fields = {}
+        expected_request_id = ""
+        if expected_params is not None:
+            request_identity = json.dumps(
+                {"endpoint": endpoint, "params": expected_params},
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("utf-8")
+            expected_request_id = hashlib.sha256(request_identity).hexdigest()
+        row_query_identity_passed = bool(
+            expected_params is not None
+            and str(row.get("request_id", "")) == expected_request_id
+            and all(row.get(key) == value for key, value in expected_query_fields.items())
+        )
+        row_valid = bool(
+            required_manifest_fields.issubset(row)
+            and re.fullmatch(r"[0-9a-f]{64}", response_hash)
+            and row_query_identity_passed
+            and int(row.get("response_status", 0)) == 200
+            and int(row.get("attempts", 0)) >= 1
+            and cache_path.is_file()
+        )
+        if row_valid:
+            content = cache_path.read_bytes()
+            token_value_absent = not audit_token or audit_token not in content
+            row_valid = bool(
+                hashlib.sha256(content).hexdigest() == response_hash
+                and len(content) == int(row.get("response_bytes", -1))
+                and b"api_token" not in content.lower()
+                and token_value_absent
+            )
+            cached_token_value_absent = cached_token_value_absent and token_value_absent
+            if row_valid:
+                cached_responses[endpoint] = content
+        manifest_hashes_passed = manifest_hashes_passed and row_valid
+        query_identity_passed = query_identity_passed and row_query_identity_passed
+
+    eod_content = cached_responses.get("/mp/unicornbay/options/eod", b"")
+    try:
+        eod_payload = json.loads(eod_content)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        eod_payload = {}
+    raw_data = eod_payload.get("data", []) if isinstance(eod_payload, dict) else []
+    raw_meta = eod_payload.get("meta", {}) if isinstance(eod_payload, dict) else {}
+    raw_links = eod_payload.get("links", {}) if isinstance(eod_payload, dict) else {}
+    independently_reconstructed_pagination = {
+        "offset": raw_meta.get("offset") if isinstance(raw_meta, dict) else None,
+        "limit": raw_meta.get("limit") if isinstance(raw_meta, dict) else None,
+        "total": raw_meta.get("total") if isinstance(raw_meta, dict) else None,
+        "next_present": bool(raw_links.get("next")) if isinstance(raw_links, dict) else False,
+    }
+    independent_evidence: list[dict[str, object]] = []
+
+    def local_session_date(value: object) -> str | None:
+        if value in {None, ""}:
+            return None
+        try:
+            timestamp = pd.Timestamp(value)
+        except (TypeError, ValueError):
+            return None
+        if pd.isna(timestamp):
+            return None
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("America/New_York")
+        else:
+            timestamp = timestamp.tz_convert("America/New_York")
+        return timestamp.date().isoformat()
+
+    if isinstance(raw_data, list):
+        for index, item in enumerate(raw_data):
+            if not isinstance(item, dict):
+                continue
+            attributes_value = item.get("attributes", item)
+            attributes = attributes_value if isinstance(attributes_value, dict) else {}
+            resource_id = item.get("id")
+            resource_date: str | None = None
+            if isinstance(resource_id, str) and len(resource_id) >= 10:
+                try:
+                    resource_date = date.fromisoformat(resource_id[-10:]).isoformat()
+                except ValueError:
+                    resource_date = None
+            independent_evidence.append(
+                {
+                    "record_index": index,
+                    "resource_id_sha256": (
+                        hashlib.sha256(resource_id.encode("utf-8")).hexdigest()
+                        if isinstance(resource_id, str)
+                        else None
+                    ),
+                    "resource_observation_date": resource_date,
+                    "tradetime_date": local_session_date(attributes.get("tradetime")),
+                    "bid_observation_date": local_session_date(attributes.get("bid_date")),
+                    "ask_observation_date": local_session_date(attributes.get("ask_date")),
+                    "expiration_date": local_session_date(attributes.get("exp_date")),
+                    "provider_dte": attributes.get("dte"),
+                }
+            )
+    projection_bytes = json.dumps(
+        independent_evidence,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    projection_hash = hashlib.sha256(projection_bytes).hexdigest()
+    projection_passed = bool(
+        independent_evidence == preflight.get("record_evidence")
+        and projection_hash == preflight.get("evidence_projection_sha256")
+        and len(independent_evidence) == int(preflight.get("records_received", -1))
+        and hashlib.sha256(eod_content).hexdigest() == preflight.get("response_sha256")
+        and independently_reconstructed_pagination == preflight.get("pagination")
+    )
+    resource_dates = {
+        str(row["resource_observation_date"])
+        for row in independent_evidence
+        if row["resource_observation_date"] is not None
+    }
+    bid_dates = {
+        str(row["bid_observation_date"])
+        for row in independent_evidence
+        if row["bid_observation_date"] is not None
+    }
+    ask_dates = {
+        str(row["ask_observation_date"])
+        for row in independent_evidence
+        if row["ask_observation_date"] is not None
+    }
+    tradetime_dates = {
+        str(row["tradetime_date"])
+        for row in independent_evidence
+        if row["tradetime_date"] is not None
+    }
+    setup_http_attempts = sum(int(row.get("attempts", 0)) for row in setup_rows)
+    setup_response_bytes = sum(int(row.get("response_bytes", 0)) for row in setup_rows)
+    setup_records_received = sum(int(row.get("record_count", 0)) for row in setup_rows)
+    accounting_passed = bool(
+        setup_http_attempts == int(preflight.get("setup_http_requests_attempted", -1))
+        and len(setup_rows) == int(preflight.get("setup_logical_requests_completed", -1))
+        and setup_rows == download.get("setup_manifest_rows")
+        and setup_http_attempts == int(download.get("setup_http_requests_attempted", -1))
+        and setup_response_bytes == int(download.get("setup_response_bytes", -1))
+        and setup_records_received == int(download.get("setup_records_received", -1))
+        and int(preflight.get("records_received", -1))
+        == int(download.get("preflight_option_records", -2))
+    )
     evidence_passed = bool(
         preflight.get("status") == "blocked_historical_options_date_unavailable"
         and preflight.get("endpoint") == "/mp/unicornbay/options/eod"
         and 1 <= int(preflight.get("records_received", 0)) <= 10
-        and int(preflight.get("setup_requests_completed", 0)) == 2
         and requested in required_dates
         and resource_dates
         and resource_dates == bid_dates == ask_dates
         and requested not in resource_dates
         and tradetime_dates == {requested}
+        and preflight.get("all_returned_rows_observation_date_verified") is True
+        and preflight.get("sample_rows_match_requested_observation_date") is False
         and preflight.get("tradetime_is_eod_observation_date") is False
         and preflight.get("official_observation_date_filter_available") is False
         and preflight.get("exact_requested_observation_date_confirmed") is False
         and preflight.get("america_new_york_mapping_confirmed") is True
         and preflight.get("authentication_redacted") is True
+        and manifest_hashes_passed
+        and query_identity_passed
+        and projection_passed
+        and accounting_passed
     )
     schema_passed = bool(
         schema["historical_eod"]["tradetime_filter_semantics"] == "last-trade activity window"
         and "not present" in schema["historical_eod"]["historical_observation_date_filter"]
-        and "not assumed" in schema["canonical_mapping"]["tradetime"]
+        and "never to trade_date" in schema["canonical_mapping"]["tradetime"]
+        and "maps to trade_date" in schema["canonical_mapping"]["resource.id"]
     )
     no_downstream_materialisation = bool(
         int(download.get("requests_completed", -1)) == 0
-        and int(download.get("setup_requests_completed", -1)) == 2
         and int(download.get("raw_records", -1)) == 0
         and download.get("manifest_rows") == []
-        and not cached_raw_responses
         and pairs.empty
         and movement.empty
         and predictions.empty
     )
     passed = bool(
         decision["decision"] == "blocked_historical_options_date_unavailable"
-        and int(decision.get("provider_setup_requests_completed", -1)) == 2
+        and int(decision.get("provider_setup_http_requests_attempted", -1)) == setup_http_attempts
+        and int(decision.get("provider_setup_logical_requests_completed", -1)) == len(setup_rows)
         and evidence_passed
         and schema_passed
         and mapping_supported.sum() == len(FROZEN_COHORT)
@@ -455,15 +661,27 @@ def _audit_historical_date_blocked_run(
     return {
         "passed": passed,
         "blocker_verified": evidence_passed,
-        "provider_setup_requests_completed": int(preflight.get("setup_requests_completed", 0)),
+        "provider_setup_http_requests_attempted": setup_http_attempts,
+        "provider_setup_logical_requests_completed": len(setup_rows),
         "bulk_page_requests_completed": int(download.get("requests_completed", 0)),
+        "preflight_option_records": int(preflight.get("records_received", 0)),
+        "setup_response_bytes": setup_response_bytes,
+        "cached_response_hashes_verified": manifest_hashes_passed,
+        "cached_response_token_scan_performed": bool(audit_token),
+        "cached_response_token_value_absent": cached_token_value_absent,
+        "setup_request_identities_verified": query_identity_passed,
+        "evidence_projection_verified": projection_passed,
+        "request_accounting_verified": accounting_passed,
+        "pagination_metadata_verified": (
+            independently_reconstructed_pagination == preflight.get("pagination")
+        ),
         "requested_session_date": requested,
         "tradetime_dates": sorted(tradetime_dates),
         "returned_resource_observation_dates": sorted(resource_dates),
         "quote_observation_dates_match_resources": resource_dates == bid_dates == ask_dates,
         "official_observation_date_filter_absent": schema_passed,
         "covered_symbols": int(mapping_supported.sum()),
-        "no_raw_cache_or_downstream_materialisation": no_downstream_materialisation,
+        "no_bulk_or_downstream_materialisation": no_downstream_materialisation,
     }
 
 

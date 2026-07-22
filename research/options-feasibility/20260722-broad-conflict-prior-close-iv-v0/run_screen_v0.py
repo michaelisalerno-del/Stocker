@@ -68,6 +68,8 @@ OPTIONS_FIELDS = (
     "last",
     "bid",
     "ask",
+    "bid_date",
+    "ask_date",
     "bid_size",
     "ask_size",
     "moneyness",
@@ -428,14 +430,17 @@ def schema_mapping() -> dict[str, Any]:
         "exp_date": "expiration_date",
         "strike": "strike",
         "tradetime": (
-            "last-trade activity date/time; not assumed to be the historical EOD observation date"
+            "last-trade activity date/time mapped only to trade_timestamp; never to trade_date"
         ),
         "resource.id": (
-            "JSON:API resource identity; the official EOD example includes an "
-            "observation-date suffix"
+            "JSON:API resource identity; its official observation-date suffix maps to trade_date"
         ),
-        "bid_date": "documented bid observation timestamp in America/New_York",
-        "ask_date": "documented ask observation timestamp in America/New_York",
+        "bid_date": (
+            "documented bid observation timestamp in America/New_York; must match trade_date"
+        ),
+        "ask_date": (
+            "documented ask observation timestamp in America/New_York; must match trade_date"
+        ),
         "last": "last",
         "bid": "bid",
         "ask": "ask",

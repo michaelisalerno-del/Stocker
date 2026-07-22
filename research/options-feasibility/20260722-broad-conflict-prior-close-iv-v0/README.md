@@ -9,6 +9,15 @@ The options observations are end-of-day context only. The experiment does not re
 intraday option fill, calculate option P&L, test an executable return or straddle, promote an
 options strategy, or establish prospective/trading utility.
 
+## Current bounded result
+
+The verified `/mp/unicornbay/options/eod` schema filters `tradetime`, which is last-trade
+activity, but exposes no historical EOD observation-date filter. A live ten-record preflight for
+2025-08-21 returned resource and quote observation dates from 2025-09-03 through 2025-09-16.
+The experiment therefore stopped before bulk retrieval with
+`blocked_historical_options_date_unavailable`. The two setup responses are content-addressed in
+the ignored cache and independently rehashed; no options-movement inference was run.
+
 ## Frozen flow
 
 1. `run_screen_v0.py --prepare` reconstructs the frozen clean-advance identities, derives exact

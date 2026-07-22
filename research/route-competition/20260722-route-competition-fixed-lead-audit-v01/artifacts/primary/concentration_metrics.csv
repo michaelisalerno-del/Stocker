@@ -1,0 +1,9 @@
+population,metric,value,threshold,passed
+predecessor,retained_rows,25518,24000,True
+predecessor,theoretical_population_retention,0.996796875,0.95,True
+immediate,positive_outcomes,447,300,True
+immediate,maximum_weighted_stock_share,0.0501807101889339,0.1,True
+advance,rows,18568,18000,True
+advance,positive_outcomes,238,250,False
+advance,feature_retention,1,0.9,True
+advance,maximum_weighted_stock_share,0.0552204107524188,0.1,True

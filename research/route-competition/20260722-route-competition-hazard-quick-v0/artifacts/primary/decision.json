@@ -1,0 +1,61 @@
+{
+  "H0_meaningful": true,
+  "H1_passed_before_support_blocker": false,
+  "binding_question": "Does causal route competition and candidate-set narrowing improve three-bar registered-completion hazard beyond H0?",
+  "blocker": "blocked_insufficient_support",
+  "broker_integration_required": false,
+  "constant_probability_log_loss": 0.18249684129550553,
+  "decision_gates": {
+    "auc_improvement": 0.10924313925454687,
+    "average_precision_improvement": 0.11529093025785406,
+    "bootstrap_80_brier_lower": 0.0030703623080753904,
+    "bootstrap_80_log_loss_lower": 0.021990685307177626,
+    "brier_improvement": 0.003467920831258721,
+    "concentration_passed": false,
+    "log_loss_improvement": 0.02311779382408824,
+    "materially_adverse_checkpoints": 0,
+    "positive_months": 8,
+    "real_exceeds_all_nulls": true,
+    "top_decile_precision_improvement": 0.10199471734658608
+  },
+  "descriptive_order_definition": "both NARROWING and DOMINANT_ROUTE rates exceed both BROAD_CONFLICT and LOW_ROUTE_SUPPORT, with >=100 rows each",
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "increments": {
+    "auc_improvement": 0.10924313925454687,
+    "average_precision_improvement": 0.11529093025785406,
+    "brier_improvement": 0.003467920831258721,
+    "log_loss_improvement": 0.02311779382408824,
+    "top_decile_precision_improvement": 0.10199471734658608
+  },
+  "material_adversity_definition": {
+    "checkpoint_brier_deterioration_above": 0.002,
+    "checkpoint_log_loss_deterioration_above": 0.005
+  },
+  "null_real_exceeds_counts": {
+    "auc_improvement": 3,
+    "brier_improvement": 3,
+    "log_loss_improvement": 3
+  },
+  "primary_decision": "blocked_insufficient_support",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_completion_hazard": true,
+  "research_only": true,
+  "route_competition_features": true,
+  "route_narrowing_ordered": true,
+  "strategy_promotion": false,
+  "support": {
+    "assessment_months": 8,
+    "assessment_rows": 25518,
+    "assessment_sessions": 160,
+    "assessment_stocks": 20,
+    "feature_retention": 0.9661780772032047,
+    "maximum_target_class_share": 0.9553348515519569,
+    "maximum_weighted_stock_share": 0.05018071018893387,
+    "positive_outcomes": 1139,
+    "support_passed": false
+  }
+}

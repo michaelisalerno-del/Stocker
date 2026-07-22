@@ -1,0 +1,68 @@
+{
+  "research_only": true,
+  "quick_feasibility_screen": true,
+  "registered_completion_hazard": true,
+  "route_competition_features": true,
+  "exact_route_identity_modelled": false,
+  "economic_outcomes_opened": false,
+  "directional_outcomes_opened": false,
+  "execution_enabled": false,
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "title": "Route-Competition Completion-Hazard Quick Screen V0",
+  "dates": {
+    "development_start": "2024-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "assessment_start": "2025-01-01",
+    "assessment_end_inclusive": "2025-08-22",
+    "protected_start": "2025-08-23"
+  },
+  "cohort": {
+    "frozen_audited_stock_count": 20
+  },
+  "checkpoints": [6, 10, 14, 18, 22, 26, 30, 34],
+  "targets": {
+    "primary": "registered_completion_next_3_bars",
+    "primary_horizon_bars": 3,
+    "secondary_descriptive": "registered_completion_next_1_bar"
+  },
+  "hard_limits": {
+    "processes": 1,
+    "n_jobs": 1,
+    "gpu": false,
+    "checkpoints": 8,
+    "primary_horizons": 1,
+    "primary_model_fits": 2,
+    "session_bootstrap_draws": 15,
+    "route_feature_null_refits": 3,
+    "maximum_plots": 1,
+    "feature_search": false,
+    "checkpoint_search": false,
+    "model_search": false,
+    "hyperparameter_tuning": false,
+    "exact_loop_classifier": false,
+    "one_minute_data": false
+  },
+  "model": {
+    "family": "weighted_binary_logistic_regression",
+    "penalty": "l2",
+    "C": 0.25,
+    "solver": "liblinear",
+    "max_iter": 300,
+    "class_weight": null,
+    "random_state": 20260722,
+    "n_jobs": 1
+  },
+  "support": {
+    "minimum_assessment_rows": 30000,
+    "minimum_assessment_sessions": 140,
+    "minimum_assessment_stocks": 15,
+    "minimum_assessment_months": 8,
+    "minimum_assessment_positive_outcomes": 500,
+    "minimum_feature_retention": 0.95,
+    "maximum_weighted_stock_share": 0.1,
+    "maximum_target_class_share": 0.9,
+    "minimum_route_resolution_state_rows": 100
+  }
+}

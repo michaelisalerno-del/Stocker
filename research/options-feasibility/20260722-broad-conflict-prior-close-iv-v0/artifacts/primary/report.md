@@ -6,7 +6,8 @@ The frozen V0.2 clean-advance population reconstructed exactly (87,443 rows;
 34,577 assessment rows). The request plan contains 400 symbol-month chunks for
 20 frozen symbols and 402 exact prior trading sessions
 from 2024-01-16 through 2025-08-21. It estimates
-2,141 EOD page requests and 2,009,250 raw records, totalling approximately
+2,141 total requests (2 setup and 2,139
+EOD pages) and 2,009,250 raw records, totalling approximately
 1,406,475,000 bytes within the frozen resource caps. 3 symbol-date joins cross an
 inferred unadjusted-price corporate-action boundary and are preregistered as unavailable.
 

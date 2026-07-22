@@ -671,6 +671,8 @@ def blocked_report(
     assessment_rows = f"{int(reconstruction['assessment_clean_rows']):,}"
     chunk_count = f"{int(plan['symbol_month_chunks']):,}"
     estimated_requests = f"{int(plan['estimated_requests']):,}"
+    estimated_setup_requests = f"{int(plan['estimated_setup_requests']):,}"
+    estimated_eod_requests = f"{int(plan['estimated_eod_page_requests']):,}"
     estimated_records = f"{int(plan['estimated_records']):,}"
     estimated_bytes = f"{int(plan['estimated_storage_bytes']):,}"
     return f"""# Prior-Close Options IV Movement Screen V0 — blocked pre-download
@@ -681,7 +683,8 @@ The frozen V0.2 clean-advance population reconstructed exactly ({clean_rows} row
 {assessment_rows} assessment rows). The request plan contains {chunk_count} symbol-month chunks for
 {plan["symbol_count"]} frozen symbols and {plan["required_date_count"]} exact prior trading sessions
 from {plan["required_date_start"]} through {plan["required_date_end"]}. It estimates
-{estimated_requests} EOD page requests and {estimated_records} raw records, totalling approximately
+{estimated_requests} total requests ({estimated_setup_requests} setup and {estimated_eod_requests}
+EOD pages) and {estimated_records} raw records, totalling approximately
 {estimated_bytes} bytes within the frozen resource caps. {ambiguous} symbol-date joins cross an
 inferred unadjusted-price corporate-action boundary and are preregistered as unavailable.
 

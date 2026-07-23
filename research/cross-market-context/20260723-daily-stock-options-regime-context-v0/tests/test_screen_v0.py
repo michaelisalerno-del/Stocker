@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from datetime import date
 from pathlib import Path
 from types import ModuleType
@@ -51,6 +52,7 @@ def load_runner() -> ModuleType:
     assert specification is not None
     assert specification.loader is not None
     module = importlib.util.module_from_spec(specification)
+    sys.modules[specification.name] = module
     specification.loader.exec_module(module)
     return module
 
@@ -420,6 +422,98 @@ def test_iv_horizon_outcomes_cover_15m_same_next_and_third_close_without_option_
         abs(np.log(1.04)) - 0.50 * np.sqrt((3.0 + 300.0 / 390.0) / 252.0) * np.sqrt(2.0 / np.pi)
     )
     assert "option_pnl" not in outcomes
+
+
+def test_full_regular_session_daily_aggregation_excludes_incomplete_days() -> None:
+    runner = load_runner()
+    bars = pd.DataFrame(
+        {
+            "symbol": ["AAL"] * 4,
+            "session": ["2025-01-02", "2025-01-02", "2025-01-03", "2025-01-03"],
+            "bar_ordinal": [0, 1, 0, 1],
+            "open": [100.0, 101.0, 102.0, np.nan],
+            "high": [102.0, 103.0, 104.0, np.nan],
+            "low": [99.0, 100.0, 101.0, np.nan],
+            "close": [101.0, 102.0, 103.0, np.nan],
+            "volume": [10.0, 20.0, 30.0, np.nan],
+        }
+    )
+
+    daily = runner.aggregate_daily_bars(bars)
+
+    assert daily["session"].tolist() == ["2025-01-02"]
+    assert daily.iloc[0]["open"] == pytest.approx(100.0)
+    assert daily.iloc[0]["high"] == pytest.approx(103.0)
+    assert daily.iloc[0]["low"] == pytest.approx(99.0)
+    assert daily.iloc[0]["close"] == pytest.approx(102.0)
+    assert daily.iloc[0]["activity"] == pytest.approx(30.0)
+
+
+def test_daily_activity_is_missing_when_any_intraday_activity_observation_is_missing() -> None:
+    runner = load_runner()
+    bars = pd.DataFrame(
+        {
+            "symbol": ["AAL", "AAL"],
+            "session": ["2025-01-02", "2025-01-02"],
+            "bar_ordinal": [0, 1],
+            "open": [100.0, 101.0],
+            "high": [102.0, 103.0],
+            "low": [99.0, 100.0],
+            "close": [101.0, 102.0],
+            "volume": [10.0, np.nan],
+        }
+    )
+
+    daily = runner.aggregate_daily_bars(bars)
+
+    assert len(daily) == 1
+    assert pd.isna(daily.iloc[0]["activity"])
+
+
+def test_persistence_horizons_use_exact_exchange_calendar_successors() -> None:
+    runner = load_runner()
+    rows: list[dict[str, object]] = []
+    for session, close in (
+        ("2025-01-03", 103.0),
+        ("2025-01-06", 104.0),
+        ("2025-01-07", 105.0),
+        ("2025-01-08", 106.0),
+    ):
+        ordinals = (5, 6, 8, 77) if session == "2025-01-03" else (77,)
+        for ordinal in ordinals:
+            rows.append(
+                {
+                    "symbol": "AAL",
+                    "session": session,
+                    "bar_ordinal": ordinal,
+                    "open": 100.0 if ordinal == 6 else close,
+                    "close": 101.0 if ordinal == 8 else close,
+                }
+            )
+    panel = pd.DataFrame(
+        {
+            "row_id": ["AAL|2025-01-03|6"],
+            "symbol": ["AAL"],
+            "session": ["2025-01-03"],
+            "checkpoint_bar_ordinal_zero_based": [5],
+            "atm_iv": [0.50],
+        }
+    )
+    daily_raw = pd.DataFrame(
+        {
+            "symbol": ["AAL"] * 4,
+            "session": ["2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08"],
+            "inferred_corporate_action_boundary": [0, 0, 0, 0],
+        }
+    )
+
+    result = runner.attach_movement_horizons(panel, pd.DataFrame(rows), daily_raw).iloc[0]
+
+    assert result["next_close_session"] == "2025-01-06"
+    assert result["third_close_session"] == "2025-01-08"
+    assert result["remaining_regular_session_minutes"] == 360
+    assert result["absolute_log_return_next_close"] == pytest.approx(abs(np.log(104.0 / 100.0)))
+    assert result["absolute_log_return_third_close"] == pytest.approx(abs(np.log(106.0 / 100.0)))
 
 
 def test_bundle_permutation_preserves_complete_bundle_and_nonbundle_columns() -> None:

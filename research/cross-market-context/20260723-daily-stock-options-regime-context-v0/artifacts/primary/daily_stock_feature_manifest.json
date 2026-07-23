@@ -60,52 +60,52 @@
   "research_only": true,
   "scales": {
     "abs_daily_extension_20": {
-      "center": 1.059846786217566,
-      "scale": 1.3494971580091217
+      "center": 0.9993136157770333,
+      "scale": 1.27283458822658
     },
     "daily_activity_5_to_20": {
-      "center": 0.948332085431095,
-      "scale": 0.40685902044160227
+      "center": 0.9648066848774944,
+      "scale": 0.383553404343963
     },
     "daily_close_location_5": {
-      "center": 0.4629120999146598,
-      "scale": 0.5563689123058185
+      "center": 0.4484140352731907,
+      "scale": 0.5683499153907259
     },
     "daily_directional_efficiency": {
-      "center": -0.0023125535659170027,
-      "scale": 0.7535368902725537
+      "center": 0.001784227856006789,
+      "scale": 0.765297799431508
     },
     "daily_efficiency_10": {
-      "center": 0.3131957950763317,
-      "scale": 0.3693072165707839
+      "center": 0.304507191803956,
+      "scale": 0.35028636503179655
     },
     "daily_efficiency_5": {
-      "center": 0.44894844038031445,
-      "scale": 0.5042881507438277
+      "center": 0.4407183169585998,
+      "scale": 0.49534253100336056
     },
     "daily_extension_20": {
-      "center": -0.037689094769156634,
-      "scale": 2.1825083900674063
+      "center": -0.04240903525123395,
+      "scale": 2.049467490689837
     },
     "daily_extreme_wick_3": {
-      "center": 0.3907128835440077,
-      "scale": 0.15059729887608125
+      "center": 0.3920213217285571,
+      "scale": 0.1597943887059216
     },
     "daily_range_5_to_20": {
-      "center": 0.9787935080441573,
-      "scale": 0.35942533495317286
+      "center": 0.9777984767502901,
+      "scale": 0.34864426325838316
     },
     "daily_range_overlap_5": {
-      "center": 0.5498877912713956,
-      "scale": 0.26534899922964544
+      "center": 0.6419251029426283,
+      "scale": 0.23063592523202991
     },
     "daily_relative_return_5": {
-      "center": -0.0005046410007702798,
-      "scale": 0.13487054934274043
+      "center": -0.0005954711866138739,
+      "scale": 0.13799200475841178
     },
     "daily_rv_5_to_20": {
-      "center": 0.9028761814113793,
-      "scale": 0.540793411535833
+      "center": 0.9187211751336558,
+      "scale": 0.5137119553480561
     },
     "daily_sign_persistence_5": {
       "center": 0.2,
@@ -117,9 +117,9 @@
   "strategy_promotion": false,
   "support": {
     "assessment_months": 8,
-    "assessment_sessions": 160,
+    "assessment_sessions": 159,
     "assessment_stocks": 20,
-    "daily_stock_feature_retention": 1.0,
+    "daily_stock_feature_retention": 0.9764780673871583,
     "passed": true
   },
   "underlying_movement_outcomes_opened": true

@@ -9,7 +9,7 @@ import json
 import math
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
@@ -17,6 +17,7 @@ from typing import Any, cast
 import matplotlib
 import numpy as np
 import pandas as pd
+from sklearn.exceptions import ConvergenceWarning
 
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt  # noqa: E402
@@ -59,6 +60,7 @@ FINAL_BRANCH = "agent/daily-stock-options-regime-context-quick-v0"
 for package in ("stocker_research", "stocker_data"):
     sys.path.insert(0, str(REPO_ROOT / "packages" / package / "src"))
 
+from stocker_data.calendars import get_market_calendar  # noqa: E402
 from stocker_research.broad_conflict_advance_hazard_v02 import (  # noqa: E402
     DENSE_CHECKPOINTS,
     DENSE_H0_FEATURES,
@@ -145,6 +147,23 @@ R0_FEATURES = O0_FEATURES
 R1_FEATURES = O2_FEATURES
 OPTIONS_NULL_SEEDS = (20260723, 20260724, 20260725)
 ROUTE_NULL_SEEDS = (20260726, 20260727, 20260728)
+DAILY_HISTORY_START = date(2023, 10, 1)
+DEFAULT_PROVIDER_ROOT = (
+    Path.home() / "StockerLocal" / "data" / "processed" / "source=eodhd" / "instrument_type=stock"
+)
+DOWNLOAD_RECEIPT = PRIMARY / "download_gap_receipt.json"
+
+
+@dataclass(frozen=True)
+class DevelopmentCutoffs:
+    """Development-frozen subgroup thresholds used unchanged in assessment."""
+
+    mismatch_compression_vs_iv: float
+    mismatch_complacent_conflict: float
+    options_implied_tension: float
+    options_front_urgency: float
+    mismatch_route_vs_premium: float
+
 
 REQUIRED_ARTIFACTS = (
     "contract.json",
@@ -250,19 +269,51 @@ def contract() -> dict[str, Any]:
     return value
 
 
-def discover_options_cache(explicit: Path | None) -> Path:
+def completed_download_receipt() -> dict[str, Any] | None:
+    """Return a credential-free completed recovery receipt, if one is reusable."""
+
+    if not DOWNLOAD_RECEIPT.is_file():
+        return None
+    receipt = read_json(DOWNLOAD_RECEIPT)
+    if receipt.get("status") != "completed":
+        return None
+    records = int(receipt.get("newly_downloaded_records", 0))
+    raw_bytes = int(receipt.get("newly_downloaded_bytes", 0))
+    if records > 500_000 or raw_bytes > 5 * 1024**3:
+        raise ScreenBlocker(
+            "blocked_quick_resource_limit",
+            "completed recovery receipt exceeds the preregistered download cap",
+        )
+    output_cache = receipt.get("output_cache")
+    if not isinstance(output_cache, str) or not Path(output_cache).is_file():
+        return None
+    return receipt
+
+
+def discover_options_cache(explicit: Path | None) -> tuple[Path, dict[str, Any] | None]:
     if explicit is not None:
         path = explicit.resolve()
+        candidate_receipt = completed_download_receipt()
+        receipt = (
+            candidate_receipt
+            if candidate_receipt is not None
+            and Path(str(candidate_receipt["output_cache"])).resolve() == path
+            else None
+        )
     else:
-        source = read_json(OPTIONS_V01_SOURCE)
-        cache = cast(Mapping[str, Any], source["options_cache"])
-        path = Path(str(cache["canonical_cache_path"])).resolve()
+        receipt = completed_download_receipt()
+        if receipt is not None:
+            path = Path(str(receipt["output_cache"])).resolve()
+        else:
+            source = read_json(OPTIONS_V01_SOURCE)
+            cache = cast(Mapping[str, Any], source["options_cache"])
+            path = Path(str(cache["canonical_cache_path"])).resolve()
     if not path.is_file():
         raise ScreenBlocker(
             "blocked_insufficient_daily_options_coverage",
             f"repaired exact-date canonical cache is unavailable: {path}",
         )
-    return path
+    return path, receipt
 
 
 def load_structural_panel() -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -305,8 +356,180 @@ def load_trace() -> pd.DataFrame:
     return trace
 
 
-def aggregate_daily_bars(trace: pd.DataFrame) -> pd.DataFrame:
-    ordered = trace.sort_values(["symbol", "session", "bar_ordinal"], kind="mergesort")
+def load_full_regular_session_bars(
+    provider_root: Path,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Load only complete, exchange-calendar regular-session five-minute bars."""
+
+    calendar = get_market_calendar("XNYS")
+    schedule = (
+        calendar.schedule(
+            start_date=DAILY_HISTORY_START.isoformat(),
+            end_date=ASSESSMENT_END.isoformat(),
+        )
+        .rename_axis("session")
+        .reset_index()
+    )
+    schedule["session"] = pd.to_datetime(schedule["session"], errors="raise").dt.date
+    pieces: list[pd.DataFrame] = []
+    source_hashes: dict[str, str] = {}
+    off_grid_rows_discarded = 0
+    protected_rows_materialised = 0
+    for symbol in FROZEN_COHORT:
+        path = provider_root / f"symbol={symbol}" / "timeframe=5m" / "data.parquet"
+        if not path.is_file():
+            raise ScreenBlocker(
+                "blocked_daily_stock_feature_failure",
+                f"full five-minute underlying source is unavailable for {symbol}: {path}",
+            )
+        source_hashes[symbol] = sha256_file(path)
+        raw = pd.read_parquet(
+            path,
+            columns=["timestamp", "open", "high", "low", "close", "volume"],
+            filters=[
+                ("timestamp", ">=", pd.Timestamp(DAILY_HISTORY_START, tz="UTC")),
+                ("timestamp", "<", pd.Timestamp(PROTECTED_START, tz="UTC")),
+            ],
+        )
+        timestamps = pd.to_datetime(raw["timestamp"], utc=True, errors="raise")
+        protected_rows_materialised += int(
+            timestamps.ge(pd.Timestamp(PROTECTED_START, tz="UTC")).sum()
+        )
+        working = raw.assign(
+            timestamp=timestamps,
+            symbol=symbol,
+            session=timestamps.dt.tz_convert("America/New_York").dt.date,
+        ).merge(schedule, on="session", how="inner", validate="many_to_one")
+        working = working.loc[
+            working["timestamp"].ge(working["market_open"])
+            & working["timestamp"].lt(working["market_close"])
+        ].copy()
+        elapsed_seconds = (working["timestamp"] - working["market_open"]).dt.total_seconds()
+        on_grid = elapsed_seconds.mod(300.0).eq(0.0)
+        off_grid_rows_discarded += int((~on_grid).sum())
+        working = working.loc[on_grid].copy()
+        working["bar_ordinal"] = (elapsed_seconds.loc[on_grid] / 300.0).astype(int)
+        expected_bars = (
+            (working["market_close"] - working["market_open"]).dt.total_seconds() / 300.0
+        ).astype(int)
+        working["expected_session_bars"] = expected_bars
+        pieces.append(working)
+    if protected_rows_materialised:
+        raise ScreenBlocker(
+            "blocked_protected_boundary_failure",
+            f"full-bar loader materialised {protected_rows_materialised} protected rows",
+        )
+    bars = (
+        pd.concat(pieces, ignore_index=True)
+        .sort_values(["symbol", "session", "bar_ordinal"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+    if bars.duplicated(["symbol", "session", "bar_ordinal"]).any():
+        raise ScreenBlocker(
+            "blocked_daily_stock_feature_failure",
+            "full regular-session source has duplicate stock-session bar ordinals",
+        )
+    observed_counts = bars.groupby(["symbol", "session"], observed=True)["bar_ordinal"].size()
+    expected_counts = bars.groupby(["symbol", "session"], observed=True)[
+        "expected_session_bars"
+    ].first()
+    incomplete = observed_counts.ne(expected_counts)
+    if bool(incomplete.any()):
+        raise ScreenBlocker(
+            "blocked_daily_stock_feature_failure",
+            f"full regular-session source has {int(incomplete.sum())} incomplete stock-sessions",
+        )
+    nonfinite_ohlc_rows = int(
+        (~np.isfinite(bars[["open", "high", "low", "close"]].to_numpy(float)).all(axis=1)).sum()
+    )
+    complete_daily_groups = int(
+        bars.assign(
+            _valid=np.isfinite(bars[["open", "high", "low", "close"]].to_numpy(float)).all(axis=1)
+        )
+        .groupby(["symbol", "session"], observed=True)["_valid"]
+        .all()
+        .sum()
+    )
+    manifest = {
+        "provider_root": str(provider_root),
+        "timeframe": "5m",
+        "calendar": "XNYS",
+        "history_read_start": DAILY_HISTORY_START.isoformat(),
+        "maximum_observation_date": str(bars["session"].max()),
+        "regular_session_rows": len(bars),
+        "stock_sessions": int(observed_counts.size),
+        "off_grid_rows_discarded": off_grid_rows_discarded,
+        "regular_session_activity_missing_rows": int(bars["volume"].isna().sum()),
+        "regular_session_ohlc_missing_rows": nonfinite_ohlc_rows,
+        "complete_daily_stock_sessions": complete_daily_groups,
+        "minimum_session_bars": int(observed_counts.min()),
+        "maximum_session_bars": int(observed_counts.max()),
+        "source_sha256_by_stock": source_hashes,
+        "protected_rows_materialised": protected_rows_materialised,
+    }
+    bars["session"] = bars["session"].astype(str)
+    return bars, manifest
+
+
+def audit_full_bar_overlap(trace: pd.DataFrame, full_bars: pd.DataFrame) -> dict[str, Any]:
+    """Verify the full-session source exactly matches the frozen causal trace."""
+
+    columns = ["symbol", "session", "bar_ordinal", "open", "high", "low", "close", "volume"]
+    left = trace.loc[:, columns].copy()
+    right = full_bars.loc[:, columns].copy()
+    joined = left.merge(
+        right,
+        on=["symbol", "session", "bar_ordinal"],
+        how="left",
+        validate="one_to_one",
+        suffixes=("_trace", "_full"),
+        indicator=True,
+    )
+    missing = int(joined["_merge"].ne("both").sum())
+    differences: list[float] = []
+    for column in ("open", "high", "low", "close", "volume"):
+        trace_values = pd.to_numeric(joined[f"{column}_trace"], errors="coerce").to_numpy(float)
+        full_values = pd.to_numeric(joined[f"{column}_full"], errors="coerce").to_numpy(float)
+        both_nan = np.isnan(trace_values) & np.isnan(full_values)
+        finite = np.isfinite(trace_values) & np.isfinite(full_values)
+        if bool((~both_nan & ~finite).any()):
+            differences.append(math.inf)
+        elif bool(finite.any()):
+            differences.append(float(np.max(np.abs(trace_values[finite] - full_values[finite]))))
+    maximum_difference = max(differences, default=0.0)
+    result = {
+        "trace_rows": len(trace),
+        "matched_rows": int(joined["_merge"].eq("both").sum()),
+        "missing_rows": missing,
+        "maximum_ohlcv_difference": maximum_difference,
+    }
+    if missing or maximum_difference > 1e-12:
+        raise ScreenBlocker(
+            "blocked_daily_stock_feature_failure",
+            f"full-bar source differs from frozen causal trace: {result}",
+        )
+    return result
+
+
+def aggregate_daily_bars(full_bars: pd.DataFrame) -> pd.DataFrame:
+    ordered = full_bars.sort_values(["symbol", "session", "bar_ordinal"], kind="mergesort")
+    ordered["_ohlc_valid"] = np.isfinite(
+        ordered[["open", "high", "low", "close"]].to_numpy(float)
+    ).all(axis=1)
+    ordered["_activity_valid"] = np.isfinite(
+        pd.to_numeric(ordered["volume"], errors="coerce").to_numpy(float)
+    )
+    complete = (
+        ordered.groupby(["symbol", "session"], observed=True)["_ohlc_valid"]
+        .transform("all")
+        .astype(bool)
+    )
+    ordered = ordered.loc[complete].copy()
+    if ordered.empty:
+        raise ScreenBlocker(
+            "blocked_daily_stock_feature_failure",
+            "no complete regular-session daily bars are available",
+        )
     daily = (
         ordered.groupby(["symbol", "session"], sort=True, observed=True)
         .agg(
@@ -315,10 +538,13 @@ def aggregate_daily_bars(trace: pd.DataFrame) -> pd.DataFrame:
             low=("low", "min"),
             close=("close", "last"),
             activity=("volume", "sum"),
+            activity_complete=("_activity_valid", "all"),
             bars=("bar_ordinal", "size"),
         )
         .reset_index()
     )
+    daily.loc[~daily["activity_complete"].astype(bool), "activity"] = np.nan
+    daily = daily.drop(columns="activity_complete")
     return daily
 
 
@@ -358,21 +584,27 @@ def build_stock_context(
         dimensions.loc[:, list(DAILY_STOCK_DIMENSIONS)].notna().all(axis=1)
     ].copy()
     fit_rows = complete.loc[complete["period"].eq("development")].copy()
-    regime = fit_soft_regime(
-        fit_rows,
-        dimensions=DAILY_STOCK_DIMENSIONS,
-        missing_indicators=(),
-        canonical_dimensions=(
-            "daily_compression",
-            "daily_volatility_acceleration",
-            "daily_directional_efficiency",
-            "daily_extension",
-            "daily_rejection",
-            "daily_relative_strength",
-        ),
-        prefix="daily_stock_regime",
-    )
-    assigned = apply_soft_regime(complete, regime)
+    try:
+        regime = fit_soft_regime(
+            fit_rows,
+            dimensions=DAILY_STOCK_DIMENSIONS,
+            missing_indicators=(),
+            canonical_dimensions=(
+                "daily_compression",
+                "daily_volatility_acceleration",
+                "daily_directional_efficiency",
+                "daily_extension",
+                "daily_rejection",
+                "daily_relative_strength",
+            ),
+            prefix="daily_stock_regime",
+        )
+        assigned = apply_soft_regime(complete, regime)
+    except (RuntimeError, ValueError) as error:
+        raise ScreenBlocker(
+            "blocked_daily_stock_regime_failure",
+            f"daily stock regime fit failed: {type(error).__name__}: {error}",
+        ) from error
     retention = float(
         dimensions.loc[dimensions["period"].eq("assessment"), list(DAILY_STOCK_RAW_FEATURES)]
         .notna()
@@ -542,21 +774,27 @@ def fit_options_context(
         available.loc[available["period"].eq("development")]
     )
     dimensions = apply_options_dimensions(available, parameters)
-    regime = fit_soft_regime(
-        dimensions.loc[dimensions["period"].eq("development")],
-        dimensions=DAILY_OPTIONS_DIMENSIONS,
-        missing_indicators=DAILY_OPTIONS_MISSING_INDICATORS,
-        canonical_dimensions=(
-            "options_implied_tension",
-            "options_premium_richness",
-            "options_front_urgency",
-            "options_downside_asymmetry",
-            "options_liquidity_stress",
-            "options_positioning_concentration",
-        ),
-        prefix="daily_options_regime",
-    )
-    assigned = apply_soft_regime(dimensions, regime)
+    try:
+        regime = fit_soft_regime(
+            dimensions.loc[dimensions["period"].eq("development")],
+            dimensions=DAILY_OPTIONS_DIMENSIONS,
+            missing_indicators=DAILY_OPTIONS_MISSING_INDICATORS,
+            canonical_dimensions=(
+                "options_implied_tension",
+                "options_premium_richness",
+                "options_front_urgency",
+                "options_downside_asymmetry",
+                "options_liquidity_stress",
+                "options_positioning_concentration",
+            ),
+            prefix="daily_options_regime",
+        )
+        assigned = apply_soft_regime(dimensions, regime)
+    except (RuntimeError, ValueError) as error:
+        raise ScreenBlocker(
+            "blocked_daily_options_regime_failure",
+            f"daily options regime fit failed: {type(error).__name__}: {error}",
+        ) from error
     return assigned, parameters, regime
 
 
@@ -578,6 +816,8 @@ def regime_mapping(fitted: FrozenSoftRegime) -> dict[str, Any]:
         "canonical_to_original": fitted.canonical_to_original,
         "original_to_canonical": fitted.original_to_canonical,
         "canonical_centroids": fitted.canonical_centroids,
+        "canonical_input_means": fitted.estimator.means_[list(fitted.canonical_to_original)],
+        "input_medians": fitted.input_medians,
         "canonical_weights": weights,
         "canonical_covariances": covariances,
         "iterations": int(fitted.estimator.n_iter_),
@@ -713,7 +953,7 @@ def regime_support(frame: pd.DataFrame, prefix: str) -> tuple[bool, dict[int, di
 
 
 def attach_movement_horizons(
-    panel: pd.DataFrame, trace: pd.DataFrame, daily_raw: pd.DataFrame
+    panel: pd.DataFrame, full_bars: pd.DataFrame, daily_raw: pd.DataFrame
 ) -> pd.DataFrame:
     """Attach exact post-checkpoint movements through the third following close."""
 
@@ -721,16 +961,17 @@ def attach_movement_horizons(
         (str(symbol), str(session)): group.sort_values("bar_ordinal", kind="mergesort").set_index(
             "bar_ordinal", drop=False
         )
-        for (symbol, session), group in trace.groupby(["symbol", "session"], sort=False)
+        for (symbol, session), group in full_bars.groupby(["symbol", "session"], sort=False)
     }
-    sessions_by_symbol = {
-        str(symbol): sorted(set(group["session"].astype(str)))
-        for symbol, group in trace.groupby("symbol", sort=False, observed=True)
-    }
-    session_positions = {
-        symbol: {session: index for index, session in enumerate(sessions)}
-        for symbol, sessions in sessions_by_symbol.items()
-    }
+    calendar = get_market_calendar("XNYS")
+    schedule = calendar.schedule(
+        start_date=str(full_bars["session"].min()),
+        end_date=ASSESSMENT_END.isoformat(),
+    )
+    market_sessions = [
+        value.date().isoformat() for value in pd.to_datetime(schedule.index, errors="raise")
+    ]
+    session_positions = {session: index for index, session in enumerate(market_sessions)}
     split_map = {
         (str(row.symbol), str(row.session)): bool(row.inferred_corporate_action_boundary)
         for row in daily_raw.itertuples(index=False)
@@ -750,25 +991,36 @@ def attach_movement_horizons(
             )
         entry_price = float(bars.loc[entry_ordinal, "open"])
         close_15m = float(bars.loc[third_future_ordinal, "close"])
-        same_close = float(bars.iloc[-1]["close"])
+        same_close_value = float(bars.iloc[-1]["close"])
+        same_close = same_close_value if math.isfinite(same_close_value) else None
         remaining_minutes = (int(bars["bar_ordinal"].max()) - checkpoint) * 5
-        sessions = sessions_by_symbol[symbol]
-        position = session_positions[symbol][session]
-        next_session = sessions[position + 1] if position + 1 < len(sessions) else None
-        third_session = sessions[position + 3] if position + 3 < len(sessions) else None
+        if session not in session_positions:
+            raise ScreenBlocker(
+                "blocked_chronology_or_leakage_failure",
+                f"signal session is not an XNYS session: {session}",
+            )
+        position = session_positions[session]
+        next_session = (
+            market_sessions[position + 1] if position + 1 < len(market_sessions) else None
+        )
+        third_session = (
+            market_sessions[position + 3] if position + 3 < len(market_sessions) else None
+        )
         next_close: float | None = None
         third_close: float | None = None
         next_split = False
         third_split = False
         if next_session is not None:
             next_split = bool(split_map.get((symbol, next_session), False))
-            if not next_split:
-                next_close = float(groups[(symbol, next_session)].iloc[-1]["close"])
+            if not next_split and (symbol, next_session) in groups:
+                value = float(groups[(symbol, next_session)].iloc[-1]["close"])
+                next_close = value if math.isfinite(value) else None
         if third_session is not None:
-            intervening = sessions[position + 1 : position + 4]
+            intervening = market_sessions[position + 1 : position + 4]
             third_split = any(bool(split_map.get((symbol, value), False)) for value in intervening)
-            if not third_split:
-                third_close = float(groups[(symbol, third_session)].iloc[-1]["close"])
+            if not third_split and (symbol, third_session) in groups:
+                value = float(groups[(symbol, third_session)].iloc[-1]["close"])
+                third_close = value if math.isfinite(value) else None
         outcomes = iv_horizon_outcomes(
             entry_price=entry_price,
             atm_iv=float(source["atm_iv"]),
@@ -795,7 +1047,7 @@ def join_cross_market_panel(
     structural: pd.DataFrame,
     stock_dimensions: pd.DataFrame,
     options_dimensions: pd.DataFrame,
-    trace: pd.DataFrame,
+    full_bars: pd.DataFrame,
     daily_raw_information: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, MeanStandardization]]:
     stock_columns = [
@@ -859,7 +1111,7 @@ def join_cross_market_panel(
         )
     standardization = fit_mismatch_standardization(joined.loc[joined["period"].eq("development")])
     joined = add_mismatch_features(joined, standardization)
-    joined = attach_movement_horizons(joined, trace, daily_raw_information)
+    joined = attach_movement_horizons(joined, full_bars, daily_raw_information)
     joined["checkpoint_group"] = pd.cut(
         joined["checkpoint"],
         bins=[5, 14, 24, 34],
@@ -1067,6 +1319,7 @@ def _metric_row(
 def model_metric_tables(
     assessment: pd.DataFrame,
     boundaries: Mapping[str, Mapping[str, float]],
+    cutoffs: DevelopmentCutoffs,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     test_a_target = "registered_completion_clean_bars_2_or_3"
     test_b_target = "movement_exceeds_prior_close_iv_15m"
@@ -1113,21 +1366,11 @@ def model_metric_tables(
         return pd.DataFrame(rows)
 
     development_medians = {
-        "mismatch_compression_vs_iv": float(
-            assessment.attrs.get("development_mismatch_compression_median", 0.0)
-        ),
-        "mismatch_complacent_conflict": float(
-            assessment.attrs.get("development_mismatch_complacent_median", 0.0)
-        ),
-        "options_implied_tension": float(
-            assessment.attrs.get("development_implied_tension_median", 0.0)
-        ),
-        "options_front_urgency": float(
-            assessment.attrs.get("development_front_urgency_median", 0.0)
-        ),
-        "mismatch_route_vs_premium": float(
-            assessment.attrs.get("development_mismatch_route_median", 0.0)
-        ),
+        "mismatch_compression_vs_iv": cutoffs.mismatch_compression_vs_iv,
+        "mismatch_complacent_conflict": cutoffs.mismatch_complacent_conflict,
+        "options_implied_tension": cutoffs.options_implied_tension,
+        "options_front_urgency": cutoffs.options_front_urgency,
+        "mismatch_route_vs_premium": cutoffs.mismatch_route_vs_premium,
     }
 
     def subgroup(
@@ -1408,6 +1651,7 @@ def _improvement(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, fl
 def bootstrap_intervals(
     assessment: pd.DataFrame,
     boundaries: Mapping[str, Mapping[str, float]],
+    cutoffs: DevelopmentCutoffs,
 ) -> pd.DataFrame:
     draws = fixed_session_bootstrap_multiplicities(assessment["session"], draws=10, seed=20260723)
     statistics: dict[str, list[float]] = {
@@ -1431,7 +1675,7 @@ def bootstrap_intervals(
             "high_minus_low_mismatch_compression_vs_iv_next_close_iv_residual",
         )
     }
-    compression_median = float(assessment.attrs["development_mismatch_compression_median"])
+    compression_median = cutoffs.mismatch_compression_vs_iv
     for multiplicity in draws:
         sampled = assessment.copy()
         sampled["row_weight"] = sampled["row_weight"].to_numpy(float) * multiplicity
@@ -1499,7 +1743,6 @@ def bootstrap_intervals(
 
 def null_refits(
     panel: pd.DataFrame,
-    models: Mapping[str, FrozenCrossMarketModel],
     boundaries: Mapping[str, Mapping[str, float]],
     standardization: Mapping[str, MeanStandardization],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -1831,13 +2074,18 @@ def concentration_metrics(panel: pd.DataFrame) -> pd.DataFrame:
 def determinism_rebuild(
     *,
     structural: pd.DataFrame,
-    trace: pd.DataFrame,
+    full_bars: pd.DataFrame,
     daily_bars: pd.DataFrame,
     cache: pd.DataFrame,
     first_panel: pd.DataFrame,
     first_models: Mapping[str, FrozenCrossMarketModel],
     first_stock_regime: FrozenSoftRegime,
     first_options_regime: FrozenSoftRegime,
+    first_persistence: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+    first_decision: Mapping[str, Any],
+    frozen_bootstrap: pd.DataFrame,
+    frozen_options_null: pd.DataFrame,
+    frozen_route_null: pd.DataFrame,
 ) -> dict[str, Any]:
     daily_raw = calculate_daily_stock_raw_features(daily_bars)
     stock_raw, stock_dimensions, _stock_parameters, stock_regime, _support = build_stock_context(
@@ -1846,9 +2094,11 @@ def determinism_rebuild(
     options_raw, _gap, _records = build_options_context(stock_raw, cache)
     options_dimensions, _options_parameters, options_regime = fit_options_context(options_raw)
     second_panel, _standardization = join_cross_market_panel(
-        structural, stock_dimensions, options_dimensions, trace, daily_raw
+        structural, stock_dimensions, options_dimensions, full_bars, daily_raw
     )
-    second_models, _boundaries, _development, second_assessment = fit_all_models(second_panel)
+    second_models, second_boundaries, second_development, second_assessment = fit_all_models(
+        second_panel
+    )
     first_assessment = first_panel.loc[first_panel["period"].eq("assessment")].copy()
     for model_id in first_models:
         first_assessment[f"{model_id}_prediction"] = first_models[model_id].predict(
@@ -1900,6 +2150,104 @@ def determinism_rebuild(
         first_options_regime.canonical_to_original != options_regime.canonical_to_original
         or first_options_regime.original_to_canonical != options_regime.original_to_canonical
     )
+    second_persistence = persistence_tables(second_development, second_assessment)
+
+    def frame_difference(left: pd.DataFrame, right: pd.DataFrame) -> tuple[int, float]:
+        if set(left.columns) != set(right.columns) or len(left) != len(right):
+            return 1, math.inf
+        columns = sorted(left.columns)
+        left_sorted = (
+            left.loc[:, columns].sort_values(columns, kind="mergesort").reset_index(drop=True)
+        )
+        right_sorted = (
+            right.loc[:, columns].sort_values(columns, kind="mergesort").reset_index(drop=True)
+        )
+        numeric = [
+            column
+            for column in columns
+            if pd.api.types.is_numeric_dtype(left_sorted[column])
+            and pd.api.types.is_numeric_dtype(right_sorted[column])
+        ]
+        nonnumeric = [column for column in columns if column not in numeric]
+        mismatches = int(
+            any(
+                not left_sorted[column]
+                .fillna("<NA>")
+                .astype(str)
+                .equals(right_sorted[column].fillna("<NA>").astype(str))
+                for column in nonnumeric
+            )
+        )
+        maximum = 0.0
+        for column in numeric:
+            left_values = pd.to_numeric(left_sorted[column], errors="coerce").to_numpy(float)
+            right_values = pd.to_numeric(right_sorted[column], errors="coerce").to_numpy(float)
+            both_nan = np.isnan(left_values) & np.isnan(right_values)
+            finite = np.isfinite(left_values) & np.isfinite(right_values)
+            mismatches += int(bool((~both_nan & ~finite).any()))
+            if bool(finite.any()):
+                maximum = max(
+                    maximum,
+                    float(np.max(np.abs(left_values[finite] - right_values[finite]))),
+                )
+        return mismatches, maximum
+
+    persistence_mismatches = 0
+    maximum_persistence_difference = 0.0
+    for first_frame, second_frame in zip(first_persistence, second_persistence, strict=True):
+        mismatches, difference = frame_difference(first_frame, second_frame)
+        persistence_mismatches += mismatches
+        maximum_persistence_difference = max(maximum_persistence_difference, difference)
+
+    second_cutoffs = DevelopmentCutoffs(
+        mismatch_compression_vs_iv=float(second_development["mismatch_compression_vs_iv"].median()),
+        mismatch_complacent_conflict=float(
+            second_development["mismatch_complacent_conflict"].median()
+        ),
+        options_implied_tension=float(second_development["options_implied_tension"].median()),
+        options_front_urgency=float(second_development["options_front_urgency"].median()),
+        mismatch_route_vs_premium=float(second_development["mismatch_route_vs_premium"].median()),
+    )
+    (
+        second_test_a,
+        second_test_a_monthly,
+        second_test_a_subgroup,
+        second_test_b,
+        second_test_b_monthly,
+        _second_test_b_subgroup,
+    ) = model_metric_tables(second_assessment, second_boundaries, second_cutoffs)
+    second_stock_supported, _ = regime_support(stock_dimensions, "daily_stock_regime")
+    second_options_supported, _ = regime_support(options_dimensions, "daily_options_regime")
+    second_statuses, _second_gates = component_decision(
+        panel=second_panel,
+        test_a=second_test_a,
+        test_a_monthly=second_test_a_monthly,
+        test_a_subgroup=second_test_a_subgroup,
+        test_b=second_test_b,
+        test_b_monthly=second_test_b_monthly,
+        bootstrap=frozen_bootstrap,
+        options_null=frozen_options_null,
+        route_null=frozen_route_null,
+        stock_regime_supported=second_stock_supported,
+        options_regime_supported=second_options_supported,
+    )
+    second_overall = choose_daily_context_decision(
+        blocker=None,
+        test_a_daily_stock_supported=second_statuses["test_a_daily_stock_increment_status"]
+        == "supported",
+        test_a_daily_options_supported=second_statuses["test_a_daily_options_increment_status"]
+        == "supported",
+        test_b_daily_stock_supported=second_statuses["test_b_daily_stock_increment_status"]
+        == "supported",
+        test_b_intraday_route_supported=second_statuses["test_b_intraday_route_increment_status"]
+        == "supported",
+        mismatch_supported=second_statuses["mismatch_status"] == "supported",
+        descriptive=any(value == "descriptive_only" for value in second_statuses.values()),
+    )
+    decision_mismatches = int(
+        second_overall != first_decision.get("overall_decision")
+        or any(first_decision.get(key) != value for key, value in second_statuses.items())
+    )
     result = {
         **SAFETY_FLAGS,
         "stock_regime_mapping_mismatches": stock_mapping_mismatches,
@@ -1907,6 +2255,9 @@ def determinism_rebuild(
         "joined_row_mismatches": int(row_mismatches),
         "maximum_feature_difference": maximum_feature_difference,
         "maximum_probability_difference": maximum_probability_difference,
+        "persistence_result_mismatches": persistence_mismatches,
+        "maximum_persistence_difference": maximum_persistence_difference,
+        "decision_mismatches": decision_mismatches,
         "bootstrap_repeated": False,
         "null_draws_repeated": False,
     }
@@ -1916,6 +2267,9 @@ def determinism_rebuild(
         and row_mismatches == 0
         and maximum_feature_difference <= 1e-12
         and maximum_probability_difference <= 1e-12
+        and persistence_mismatches == 0
+        and maximum_persistence_difference <= 1e-12
+        and decision_mismatches == 0
     )
     return result
 
@@ -2007,6 +2361,8 @@ def render_report(
     stock_support: Mapping[str, Any],
     options_coverage_value: Mapping[str, Any],
     reused_records: int,
+    newly_downloaded_records: int,
+    newly_downloaded_bytes: int,
     panel: pd.DataFrame,
     test_a: pd.DataFrame,
     test_b: pd.DataFrame,
@@ -2049,7 +2405,8 @@ option P&L, did not search strategies or DTE rules, and did not access execution
 - Daily stock assessment retention: {float(stock_support["daily_stock_feature_retention"]):.4%};
   stocks {int(stock_support["assessment_stocks"])}; sessions
   {int(stock_support["assessment_sessions"])}; months {int(stock_support["assessment_months"])}.
-- Reused exact-date option records: {reused_records:,}; newly downloaded records: 0.
+- Reused exact-date option records: {reused_records:,}; newly downloaded records:
+  {newly_downloaded_records:,}; newly downloaded raw bytes: {newly_downloaded_bytes:,}.
 - Valid-pair assessment clean rows:
   {int(options_coverage_value["assessment_clean_checkpoint_rows"]):,}; sessions
   {int(options_coverage_value["assessment_sessions"])}; stocks
@@ -2120,15 +2477,19 @@ def _empty_artifact(path: Path) -> None:
         path.write_text("# Not produced\n", encoding="utf-8")
 
 
-def finalize_blocker(blocker: ScreenBlocker, *, contract_value: Mapping[str, Any]) -> None:
+def finalize_blocker(
+    blocker: ScreenBlocker,
+    *,
+    contract_value: Mapping[str, Any],
+    daily_stock_regime_status: str = "blocked",
+    daily_options_regime_status: str = "blocked",
+) -> None:
     PRIMARY.mkdir(parents=True, exist_ok=True)
     REPORTS.mkdir(parents=True, exist_ok=True)
     write_json(PRIMARY / "contract.json", contract_value)
     statuses = {
-        "daily_stock_regime_status": (
-            "supported" if (PRIMARY / "daily_stock_regime_mapping.json").exists() else "blocked"
-        ),
-        "daily_options_regime_status": "blocked",
+        "daily_stock_regime_status": daily_stock_regime_status,
+        "daily_options_regime_status": daily_options_regime_status,
         "test_a_daily_stock_increment_status": "blocked",
         "test_a_daily_options_increment_status": "blocked",
         "test_b_daily_stock_increment_status": "blocked",
@@ -2170,16 +2531,24 @@ def finalize_blocker(blocker: ScreenBlocker, *, contract_value: Mapping[str, Any
         _empty_artifact(PRIMARY / name)
 
 
-def run(*, options_cache_path: Path | None = None) -> str:
+def run(
+    *,
+    provider_root: Path = DEFAULT_PROVIDER_ROOT,
+    options_cache_path: Path | None = None,
+) -> str:
     PRIMARY.mkdir(parents=True, exist_ok=True)
     REPORTS.mkdir(parents=True, exist_ok=True)
     contract_value = contract()
     write_json(PRIMARY / "contract.json", contract_value)
+    daily_stock_regime_status = "blocked"
+    daily_options_regime_status = "blocked"
     try:
         structural, reconstruction = load_structural_panel()
         write_json(PRIMARY / "structural_panel_reconstruction.json", reconstruction)
         trace = load_trace()
-        daily_bars = aggregate_daily_bars(trace)
+        full_bars, full_bar_source = load_full_regular_session_bars(provider_root.resolve())
+        full_bar_overlap = audit_full_bar_overlap(trace, full_bars)
+        daily_bars = aggregate_daily_bars(full_bars)
         daily_raw_information = calculate_daily_stock_raw_features(daily_bars)
         (
             stock_raw,
@@ -2211,8 +2580,14 @@ def run(*, options_cache_path: Path | None = None) -> str:
         write_json(PRIMARY / "daily_stock_regime_mapping.json", regime_mapping(stock_regime))
         stock_diagnostics = regime_diagnostics(stock_dimensions, stock_regime)
         write_csv(PRIMARY / "daily_stock_regime_diagnostics.csv", stock_diagnostics)
+        stock_regime_supported_at_blocker, _stock_regime_evidence_at_blocker = regime_support(
+            stock_dimensions, "daily_stock_regime"
+        )
+        daily_stock_regime_status = (
+            "supported" if stock_regime_supported_at_blocker else "descriptive_only"
+        )
 
-        cache_path = discover_options_cache(options_cache_path)
+        cache_path, recovery_receipt = discover_options_cache(options_cache_path)
         options_cache = load_options_cache(cache_path)
         options_raw, coverage_gap, reused_records = build_options_context(stock_raw, options_cache)
         options_raw.to_parquet(PRIMARY / "daily_options_raw_features.parquet", index=False)
@@ -2225,7 +2600,7 @@ def run(*, options_cache_path: Path | None = None) -> str:
             "protected_start": PROTECTED_START.isoformat(),
             "protected_market_rows_materialised": 0,
             "protected_option_observations_materialised": 0,
-            "maximum_market_observation_date": str(trace["session"].max()),
+            "maximum_market_observation_date": str(full_bars["session"].max()),
             "maximum_option_observation_date": str(options_cache["trade_date"].max()),
             "maximum_contract_expiration_metadata": str(
                 pd.to_datetime(options_cache["expiration_date"]).dt.date.max()
@@ -2249,9 +2624,12 @@ def run(*, options_cache_path: Path | None = None) -> str:
                 "dense_panel_sha256": sha256_file(DENSE_PANEL),
                 "trace_panel": str(TRACE_PANEL),
                 "trace_panel_sha256": sha256_file(TRACE_PANEL),
+                "full_regular_session_underlying_root": str(provider_root.resolve()),
                 "repaired_exact_date_options_cache": str(cache_path),
                 "repaired_exact_date_options_cache_sha256": sha256_file(cache_path),
             },
+            "full_regular_session_underlying": full_bar_source,
+            "full_bar_overlap_with_frozen_trace": full_bar_overlap,
             "options_cache_reprocessing": {
                 "source_experiment": "EODHD Fixed Overnight Options Strategy Quick Screen V0.1",
                 "repaired_exact_observation_date_filtering": True,
@@ -2270,9 +2648,54 @@ def run(*, options_cache_path: Path | None = None) -> str:
                 "maximum_cached_dte": int(options_cache["dte"].max()),
             },
             "options_records_reused": reused_records,
-            "newly_downloaded_records": 0,
-            "newly_downloaded_bytes": 0,
-            "network_requests_made": 0,
+            "newly_downloaded_records": (
+                int(recovery_receipt["newly_downloaded_records"])
+                if recovery_receipt is not None
+                else 0
+            ),
+            "newly_downloaded_bytes": (
+                int(recovery_receipt["newly_downloaded_bytes"])
+                if recovery_receipt is not None
+                else 0
+            ),
+            "network_requests_made": (
+                int(recovery_receipt["network_requests_made"])
+                if recovery_receipt is not None
+                else 0
+            ),
+            "bounded_download": (
+                {
+                    key: recovery_receipt.get(key)
+                    for key in (
+                        "status",
+                        "planned_exact_stock_date_requests",
+                        "planned_gap_rows",
+                        "network_requests_made",
+                        "newly_downloaded_records",
+                        "newly_downloaded_bytes",
+                        "protected_option_observations_materialised",
+                        "output_cache",
+                    )
+                }
+                if recovery_receipt is not None
+                else (
+                    {
+                        key: read_json(DOWNLOAD_RECEIPT).get(key)
+                        for key in (
+                            "status",
+                            "planned_exact_stock_date_requests",
+                            "planned_gap_rows",
+                            "network_requests_made",
+                            "newly_downloaded_records",
+                            "newly_downloaded_bytes",
+                            "protected_option_observations_materialised",
+                            "output_cache",
+                        )
+                    }
+                    if DOWNLOAD_RECEIPT.is_file()
+                    else {"status": "not_run"}
+                )
+            ),
             "options_coverage": coverage,
             "options_gap_rows": len(coverage_gap),
             "bounded_download_required_gap_rows": int(
@@ -2289,8 +2712,8 @@ def run(*, options_cache_path: Path | None = None) -> str:
             "front_pair_rule": "nearest 7-45 DTE common call/put strike by abs(log(strike/close))",
             "back_pair_rule": "nearest 46-90 DTE common call/put strike",
             "skew_delta_targets": {"put": -0.25, "call": 0.25, "maximum_error": 0.10},
-            "newly_downloaded_records": 0,
-            "newly_downloaded_bytes": 0,
+            "newly_downloaded_records": preliminary_source_manifest["newly_downloaded_records"],
+            "newly_downloaded_bytes": preliminary_source_manifest["newly_downloaded_bytes"],
             "support": coverage,
         }
         if not bool(coverage["passed"]):
@@ -2342,11 +2765,17 @@ def run(*, options_cache_path: Path | None = None) -> str:
         write_json(PRIMARY / "daily_options_regime_mapping.json", regime_mapping(options_regime))
         options_diagnostics = regime_diagnostics(options_dimensions, options_regime)
         write_csv(PRIMARY / "daily_options_regime_diagnostics.csv", options_diagnostics)
+        options_regime_supported_at_blocker, _options_regime_evidence_at_blocker = regime_support(
+            options_dimensions, "daily_options_regime"
+        )
+        daily_options_regime_status = (
+            "supported" if options_regime_supported_at_blocker else "descriptive_only"
+        )
         panel, mismatch_standardization = join_cross_market_panel(
             structural,
             stock_dimensions,
             options_dimensions,
-            trace,
+            full_bars,
             daily_raw_information,
         )
         panel.to_parquet(PRIMARY / "daily_cross_market_panel.parquet", index=False)
@@ -2369,26 +2798,33 @@ def run(*, options_cache_path: Path | None = None) -> str:
             options_dimensions, "daily_options_regime"
         )
 
-        models, boundaries, development_predictions, assessment_predictions = fit_all_models(panel)
-        median_attributes = {
-            "development_mismatch_compression_median": float(
+        try:
+            (
+                models,
+                boundaries,
+                development_predictions,
+                assessment_predictions,
+            ) = fit_all_models(panel)
+        except (RuntimeError, ConvergenceWarning) as error:
+            raise ScreenBlocker(
+                "blocked_model_convergence_failure",
+                f"primary model convergence failed: {error}",
+            ) from error
+        development_cutoffs = DevelopmentCutoffs(
+            mismatch_compression_vs_iv=float(
                 development_predictions["mismatch_compression_vs_iv"].median()
             ),
-            "development_mismatch_complacent_median": float(
+            mismatch_complacent_conflict=float(
                 development_predictions["mismatch_complacent_conflict"].median()
             ),
-            "development_implied_tension_median": float(
+            options_implied_tension=float(
                 development_predictions["options_implied_tension"].median()
             ),
-            "development_front_urgency_median": float(
-                development_predictions["options_front_urgency"].median()
-            ),
-            "development_mismatch_route_median": float(
+            options_front_urgency=float(development_predictions["options_front_urgency"].median()),
+            mismatch_route_vs_premium=float(
                 development_predictions["mismatch_route_vs_premium"].median()
             ),
-        }
-        assessment_predictions.attrs.update(median_attributes)
-        panel.attrs.update(median_attributes)
+        )
         assessment_predictions.to_parquet(PRIMARY / "assessment_predictions.parquet", index=False)
         write_json(
             PRIMARY / "model_configurations.json",
@@ -2398,6 +2834,7 @@ def run(*, options_cache_path: Path | None = None) -> str:
                 "ridge_fit_count": 2,
                 "models": {name: model.as_dict() for name, model in models.items()},
                 "development_prediction_boundaries": boundaries,
+                "development_subgroup_cutoffs": asdict(development_cutoffs),
             },
         )
         write_json(
@@ -2421,7 +2858,11 @@ def run(*, options_cache_path: Path | None = None) -> str:
             test_b,
             test_b_monthly,
             test_b_regime,
-        ) = model_metric_tables(assessment_predictions, boundaries)
+        ) = model_metric_tables(
+            assessment_predictions,
+            boundaries,
+            development_cutoffs,
+        )
         write_csv(PRIMARY / "test_a_metrics.csv", test_a)
         write_csv(PRIMARY / "test_a_monthly_metrics.csv", test_a_monthly)
         write_csv(PRIMARY / "test_a_regime_metrics.csv", test_a_regime)
@@ -2462,17 +2903,26 @@ def run(*, options_cache_path: Path | None = None) -> str:
         write_csv(PRIMARY / "persistence_horizon_metrics.csv", persistence)
         write_csv(PRIMARY / "regime_pair_persistence_metrics.csv", regime_pairs)
         write_csv(PRIMARY / "dte_horizon_mapping.csv", horizon_mapping)
-        bootstrap = bootstrap_intervals(assessment_predictions, boundaries)
+        bootstrap = bootstrap_intervals(
+            assessment_predictions,
+            boundaries,
+            development_cutoffs,
+        )
         write_csv(PRIMARY / "bootstrap_metrics.csv", bootstrap)
         panel_with_predictions = pd.concat(
             [development_predictions, assessment_predictions], ignore_index=True
         )
-        options_null, route_null = null_refits(
-            panel_with_predictions,
-            models,
-            boundaries,
-            mismatch_standardization,
-        )
+        try:
+            options_null, route_null = null_refits(
+                panel_with_predictions,
+                boundaries,
+                mismatch_standardization,
+            )
+        except (RuntimeError, ConvergenceWarning) as error:
+            raise ScreenBlocker(
+                "blocked_model_convergence_failure",
+                f"null-refit model convergence failed: {error}",
+            ) from error
         write_csv(PRIMARY / "options_null_metrics.csv", options_null)
         write_csv(PRIMARY / "route_null_metrics.csv", route_null)
         concentration = concentration_metrics(panel)
@@ -2516,13 +2966,18 @@ def run(*, options_cache_path: Path | None = None) -> str:
 
         determinism = determinism_rebuild(
             structural=structural,
-            trace=trace,
+            full_bars=full_bars,
             daily_bars=daily_bars,
             cache=options_cache,
             first_panel=panel,
             first_models=models,
             first_stock_regime=stock_regime,
             first_options_regime=options_regime,
+            first_persistence=(persistence, regime_pairs, horizon_mapping),
+            first_decision=decision,
+            frozen_bootstrap=bootstrap,
+            frozen_options_null=options_null,
+            frozen_route_null=route_null,
         )
         if not bool(determinism["passed"]):
             raise ScreenBlocker(
@@ -2548,43 +3003,8 @@ def run(*, options_cache_path: Path | None = None) -> str:
             "independent_auditor_pending": True,
         }
         write_json(PRIMARY / "lightweight_audit.json", lightweight)
-        protected = {
-            **SAFETY_FLAGS,
-            "protected_start": PROTECTED_START.isoformat(),
-            "protected_market_rows_materialised": 0,
-            "protected_option_observations_materialised": 0,
-            "maximum_market_observation_date": str(trace["session"].max()),
-            "maximum_option_observation_date": str(options_cache["trade_date"].max()),
-            "maximum_contract_expiration_metadata": str(
-                pd.to_datetime(options_cache["expiration_date"]).dt.date.max()
-            ),
-            "expiration_metadata_may_cross_boundary": True,
-        }
-        write_json(PRIMARY / "protected_boundary_audit.json", protected)
         source_manifest = {
-            **SAFETY_FLAGS,
-            "starting_branch": STARTING_BRANCH,
-            "starting_sha": STARTING_SHA,
-            "final_branch": FINAL_BRANCH,
-            "dates": {
-                "development_start": DEVELOPMENT_START.isoformat(),
-                "assessment_end": ASSESSMENT_END.isoformat(),
-                "protected_start": PROTECTED_START.isoformat(),
-            },
-            "cohort": FROZEN_COHORT,
-            "sources": {
-                "dense_panel": str(DENSE_PANEL),
-                "dense_panel_sha256": sha256_file(DENSE_PANEL),
-                "trace_panel": str(TRACE_PANEL),
-                "trace_panel_sha256": sha256_file(TRACE_PANEL),
-                "repaired_exact_date_options_cache": str(cache_path),
-                "repaired_exact_date_options_cache_sha256": sha256_file(cache_path),
-            },
-            "options_records_reused": reused_records,
-            "newly_downloaded_records": 0,
-            "newly_downloaded_bytes": 0,
-            "options_coverage": coverage,
-            "stock_support": stock_support,
+            **preliminary_source_manifest,
             "joined_rows": len(panel),
             "joined_assessment_rows": int(panel["period"].eq("assessment").sum()),
         }
@@ -2602,6 +3022,8 @@ def run(*, options_cache_path: Path | None = None) -> str:
             stock_support=stock_support,
             options_coverage_value=coverage,
             reused_records=reused_records,
+            newly_downloaded_records=int(preliminary_source_manifest["newly_downloaded_records"]),
+            newly_downloaded_bytes=int(preliminary_source_manifest["newly_downloaded_bytes"]),
             panel=panel,
             test_a=test_a,
             test_b=test_b,
@@ -2616,19 +3038,35 @@ def run(*, options_cache_path: Path | None = None) -> str:
         (REPORTS / "report.md").write_text(report, encoding="utf-8")
         return overall
     except ScreenBlocker as blocker:
-        finalize_blocker(blocker, contract_value=contract_value)
+        finalize_blocker(
+            blocker,
+            contract_value=contract_value,
+            daily_stock_regime_status=daily_stock_regime_status,
+            daily_options_regime_status=daily_options_regime_status,
+        )
         return blocker.decision
     except Exception as error:
         blocker = ScreenBlocker(
             "blocked_reproducibility_or_audit_failure",
             f"unexplained runner failure: {type(error).__name__}: {error}",
         )
-        finalize_blocker(blocker, contract_value=contract_value)
+        finalize_blocker(
+            blocker,
+            contract_value=contract_value,
+            daily_stock_regime_status=daily_stock_regime_status,
+            daily_options_regime_status=daily_options_regime_status,
+        )
         raise
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--provider-root",
+        type=Path,
+        default=DEFAULT_PROVIDER_ROOT,
+        help="Existing EODHD processed-stock root containing full regular sessions.",
+    )
     parser.add_argument(
         "--options-cache",
         type=Path,
@@ -2640,7 +3078,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     arguments = parse_args()
-    print(run(options_cache_path=arguments.options_cache))
+    print(
+        run(
+            provider_root=arguments.provider_root,
+            options_cache_path=arguments.options_cache,
+        )
+    )
 
 
 if __name__ == "__main__":

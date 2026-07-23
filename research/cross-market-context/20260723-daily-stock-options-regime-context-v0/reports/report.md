@@ -27,18 +27,19 @@ preregistered design. The run stopped before all cross-market model fitting.
 
 ## Daily stock context
 
-- Raw stock-session rows: 7,903; complete dimension rows: 7,782.
+- Raw stock-session rows: 7,903; complete dimension rows:
+  7,519.
 - Assessment support: 20 stocks,
-  160 sessions,
+  159 sessions,
   8 months; feature retention
-  100.0%.
+  97.6%.
 - Scaling and the four-component diagonal GMM were fitted on 2024 only. All four assessment
   regimes exceeded the 5% posterior-mass, eight-stock, four-month inference gates.
 
-- Regime 0: posterior mass 0.141; hard support 439 rows, 20 stocks, 126 sessions, 8 months. Centroid: compression -0.532, volatility acceleration +0.250, directional efficiency +0.572, extension +1.289, rejection -0.425, relative strength +1.404.
-- Regime 1: posterior mass 0.265; hard support 821 rows, 20 stocks, 155 sessions, 8 months. Centroid: compression -0.462, volatility acceleration +0.678, directional efficiency -0.329, extension +0.079, rejection +0.211, relative strength +0.015.
-- Regime 2: posterior mass 0.119; hard support 374 rows, 20 stocks, 105 sessions, 8 months. Centroid: compression +0.000, volatility acceleration -0.034, directional efficiency +0.640, extension -0.916, rejection -0.482, relative strength -0.830.
-- Regime 3: posterior mass 0.474; hard support 1512 rows, 20 stocks, 159 sessions, 8 months. Centroid: compression +0.313, volatility acceleration -0.337, directional efficiency -0.102, extension -0.026, rejection +0.148, relative strength -0.087.
+- Regime 0: posterior mass 0.147; hard support 445 rows, 20 stocks, 123 sessions, 8 months. Centroid: compression -0.569, volatility acceleration +0.283, directional efficiency +0.577, extension +1.288, rejection -0.421, relative strength +1.376.
+- Regime 1: posterior mass 0.274; hard support 835 rows, 20 stocks, 155 sessions, 8 months. Centroid: compression -0.424, volatility acceleration +0.613, directional efficiency -0.304, extension +0.083, rejection +0.179, relative strength +0.006.
+- Regime 2: posterior mass 0.123; hard support 370 rows, 20 stocks, 102 sessions, 8 months. Centroid: compression +0.008, volatility acceleration -0.121, directional efficiency +0.652, extension -0.896, rejection -0.486, relative strength -0.802.
+- Regime 3: posterior mass 0.456; hard support 1422 rows, 20 stocks, 158 sessions, 8 months. Centroid: compression +0.323, volatility acceleration -0.375, directional efficiency -0.128, extension -0.033, rejection +0.157, relative strength -0.098.
 
 ## Previous-close options context and bounded recovery
 
@@ -46,18 +47,18 @@ preregistered design. The run stopped before all cross-market model fitting.
   rows across 2,551
   stock-dates; maximum cached DTE
   16.
-- Cache records reused across requested stock-dates: 141,351.
-- Valid front pairs: 1,260 development
-  and 941 assessment stock-sessions.
-- Front-pair assessment census: 10,595 clean
-  checkpoint rows, 155 sessions,
+- Cache records reused across requested stock-dates: 139,622.
+- Valid front pairs: 1,250 development
+  and 929 assessment stock-sessions.
+- Front-pair assessment census: 10,422 clean
+  checkpoint rows, 154 sessions,
   20 stocks, 8 months,
-  2,180 BROAD_CONFLICT rows, and
-  2,943 LOW_ROUTE_SUPPORT rows.
+  2,159 BROAD_CONFLICT rows, and
+  2,915 LOW_ROUTE_SUPPORT rows.
 - Back-pair stock-sessions: 0.
-- Exact gap manifest: 8,147 component rows;
-  7,822 require bounded acquisition.
-- Bounded plan: 7,578 exact
+- Exact gap manifest: 8,145 component rows;
+  7,798 require bounded acquisition.
+- Bounded plan: 7,556 exact
   stock-date requests. Status `token_unavailable`; network requests
   0; new records
   0; new bytes
@@ -85,7 +86,8 @@ produced. This is a coverage blocker, not evidence for or against any increment.
 ## Audit and reproducibility
 
 - Independent fail-closed audit: `passed`.
-- Stock posterior reconstruction: 100 rows, maximum difference 1.11e-15.
+- Stock posterior reconstruction: 100 rows, maximum difference
+  1.55e-15.
 - Determinism rebuild: not applicable after the options-coverage stop; recorded as blocked,
   with no redownload, bootstrap, or null repetition.
 

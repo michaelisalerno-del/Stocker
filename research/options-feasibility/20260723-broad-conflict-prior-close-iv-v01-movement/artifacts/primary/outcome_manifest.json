@@ -1,0 +1,15 @@
+{
+  "annual_trading_minutes": 98280,
+  "entry_price": "open of first completed five-minute bar after checkpoint",
+  "iv_information_time": "exact previous trading day close",
+  "option_pnl_calculated": false,
+  "primary_binary": "movement_exceeds_iv_expected_absolute",
+  "primary_continuous": "iv_absolute_residual_15m",
+  "primary_future_bars": 3,
+  "primary_horizon_minutes": 15,
+  "secondary_horizons_minutes": [
+    10,
+    30,
+    60
+  ]
+}

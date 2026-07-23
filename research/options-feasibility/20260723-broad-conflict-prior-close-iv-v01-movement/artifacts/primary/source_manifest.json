@@ -1,0 +1,12 @@
+{
+  "frozen_dense_panel": "research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/dense_advance_panel.parquet",
+  "frozen_dense_panel_sha256": "a916b792e15e8630dadc09bed64d71be5533ce9f3b2bd93af06605d0faaa0cc3",
+  "frozen_trace_panel": "research/route-competition/20260722-route-competition-hazard-quick-v0/artifacts/primary/causal_state_trace.parquet",
+  "frozen_trace_panel_sha256": "b58ad2f824ed1a81d0d8846864bb1127330a46b4bd93d5d762ccff1f60857f1d",
+  "network_requests_made": 0,
+  "protected_rows_materialised": 0,
+  "sampled_pair_audit": "research/options-feasibility/20260722-broad-conflict-prior-close-iv-v01-probe/artifacts/primary/lightweight_audit.json",
+  "sampled_pair_audit_sha256": "d8d30b8d93586167c539d044e2de7e4eb75389f6b1ec0804243dda183490b593",
+  "sampled_pair_results": "research/options-feasibility/20260722-broad-conflict-prior-close-iv-v01-probe/artifacts/primary/contract_history_probe_results.csv",
+  "sampled_pair_results_sha256": "e18b9fbbe9fbe853208f26d3a599826288eaa747a3c45ee2aa521796bd5d2124"
+}

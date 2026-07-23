@@ -1,0 +1,15 @@
+{
+  "cached_inputs_reloaded": true,
+  "iv_field_mismatches": 0,
+  "iv_row_mismatches": 0,
+  "joined_row_mismatches": 0,
+  "maximum_iv_relative_difference": 0.0,
+  "maximum_movement_difference": 0.0,
+  "models_refit": false,
+  "movement_field_mismatches": 0,
+  "network_requests_made": 0,
+  "output_panels_reloaded": true,
+  "passed": true,
+  "redownloaded": false,
+  "selected_contract_mismatches": 0
+}

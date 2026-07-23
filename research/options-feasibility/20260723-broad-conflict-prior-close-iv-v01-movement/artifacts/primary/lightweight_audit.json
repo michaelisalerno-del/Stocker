@@ -1,0 +1,22 @@
+{
+  "chronology_mismatches": 0,
+  "decision_logic_verified": true,
+  "iv_relative_rows_verified": 86,
+  "iv_row_mismatches": 0,
+  "maximum_iv_relative_difference": 0.0,
+  "maximum_metric_difference": 1.249000902703301e-16,
+  "maximum_movement_difference": 0.0,
+  "models_verified_absent": true,
+  "network_requests_made": 0,
+  "option_join_field_mismatches": 0,
+  "passed": true,
+  "primary_horizon_future_bars": 3,
+  "protected_boundary_mismatches": 0,
+  "row_identity_mismatches": 0,
+  "safety_flags_verified": true,
+  "source_hash_mismatches": 0,
+  "status": "three_stock_movement_outcomes_audited",
+  "structural_field_mismatches": 0,
+  "timestamp_mismatches": 0,
+  "underlying_rows_verified": 96
+}

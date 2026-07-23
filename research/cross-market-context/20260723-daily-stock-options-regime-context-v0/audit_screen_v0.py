@@ -25,6 +25,9 @@ from stocker_data.calendars import get_market_calendar  # noqa: E402
 
 PROTECTED_START = pd.Timestamp("2025-08-23")
 EXPECTED_BLOCKER = "blocked_insufficient_daily_options_coverage"
+RESOURCE_BLOCKER = "blocked_quick_resource_limit"
+MAXIMUM_ADDITIONAL_RECORDS = 500_000
+MAXIMUM_ADDITIONAL_BYTES = 5 * 1024**3
 DAILY_HISTORY_START = pd.Timestamp("2023-10-01")
 DAILY_STOCK_RAW_FEATURES = (
     "daily_range_5_to_20",
@@ -1067,6 +1070,58 @@ def audit_blocker_and_artifacts() -> dict[str, Any]:
     }
 
 
+def audit_resource_limit_and_artifacts() -> dict[str, Any]:
+    common = audit_common_artifacts()
+    decision = read_json(PRIMARY / "decision.json")
+    source = read_json(PRIMARY / "source_manifest.json")
+    receipt = read_json(PRIMARY / "download_gap_receipt.json")
+    if decision["overall_decision"] != RESOURCE_BLOCKER:
+        raise AssertionError("quick-resource blocker was not preserved")
+    if receipt["status"] != RESOURCE_BLOCKER:
+        raise AssertionError("bounded receipt does not record the quick-resource blocker")
+    records = int(receipt["newly_downloaded_records"])
+    raw_bytes = int(receipt["newly_downloaded_bytes"])
+    requests = int(receipt["network_requests_made"])
+    if not (0 < records <= MAXIMUM_ADDITIONAL_RECORDS):
+        raise AssertionError("downloaded record count escaped the frozen limit")
+    if not (0 < raw_bytes <= MAXIMUM_ADDITIONAL_BYTES):
+        raise AssertionError("downloaded byte count escaped the frozen limit")
+    if (
+        bool(receipt["credential_recorded"])
+        or int(receipt["completed_request_count"]) != requests
+        or int(receipt["completed_provider_records"]) != records
+        or int(receipt["completed_exact_canonical_records"]) != 0
+        or receipt.get("output_cache") is not None
+    ):
+        raise AssertionError("resource-limit receipt accounting differs")
+    bounded = cast(Mapping[str, Any], source["bounded_download"])
+    for field, expected in (
+        ("status", RESOURCE_BLOCKER),
+        ("network_requests_made", requests),
+        ("newly_downloaded_records", records),
+        ("newly_downloaded_bytes", raw_bytes),
+    ):
+        if bounded[field] != expected:
+            raise AssertionError(f"source bounded-download field differs: {field}")
+    if (
+        int(source["network_requests_made"]) != requests
+        or int(source["newly_downloaded_records"]) != records
+        or int(source["newly_downloaded_bytes"]) != raw_bytes
+    ):
+        raise AssertionError("source top-level download accounting differs")
+    model_configuration = read_json(PRIMARY / "model_configurations.json")
+    if model_configuration.get("status") != "not_produced":
+        raise AssertionError("cross-market models were fitted after the resource blocker")
+    return {
+        **common,
+        "network_requests_made": requests,
+        "newly_downloaded_records": records,
+        "newly_downloaded_bytes": raw_bytes,
+        "completed_exact_canonical_records": 0,
+        "credential_recorded": False,
+    }
+
+
 def independent_model_prediction(
     frame: pd.DataFrame, specification: Mapping[str, Any]
 ) -> np.ndarray:
@@ -1333,6 +1388,7 @@ def render_blocked_report(*, audit_passed: bool) -> str:
         )
     coverage = cast(Mapping[str, Any], options_manifest["support"])
     download = cast(Mapping[str, Any], source.get("bounded_download", {}))
+    receipt = read_json(PRIMARY / "download_gap_receipt.json")
     cache_reprocessing = cast(Mapping[str, Any], source["options_cache_reprocessing"])
     statuses = "\n".join(
         f"- `{key}`: `{decision[key]}`"
@@ -1356,17 +1412,34 @@ def render_blocked_report(*, audit_passed: bool) -> str:
     posterior_difference = float(
         stock_regime_check.get("maximum_manual_posterior_difference", math.nan)
     )
+    if decision["overall_decision"] == RESOURCE_BLOCKER:
+        blocker_explanation = (
+            "The bounded recovery stopped before exceeding the frozen 500,000-record ceiling: "
+            f"{int(receipt['newly_downloaded_records']):,} provider records across "
+            f"{int(receipt['network_requests_made']):,} completed requests and "
+            f"{int(receipt['newly_downloaded_bytes']):,} raw bytes. The compact provider "
+            "responses omitted the authoritative EOD observation identity required by the "
+            "repaired exact-date filter, so zero records were canonicalised and no recovered "
+            "cache was admitted. No second download was attempted."
+        )
+        blocker_label = "quick-resource"
+    else:
+        blocker_explanation = (
+            "The repaired previous-close cache passed the front-pair row gate but contained "
+            "no 46–90 DTE back-expiry observation in either period. Consequently "
+            "`front_term_urgency` had zero finite development values, its required development "
+            "median did not exist, and the frozen eight-dimension options surface and four-state "
+            "options GMM could not be fitted without changing the preregistered design. The run "
+            "stopped before all cross-market model fitting."
+        )
+        blocker_label = "coverage"
     return f"""# Daily Stock × Options Regime Context Quick Screen V0
 
 ## Decision
 
 Overall decision: `{decision["overall_decision"]}`.
 
-The repaired previous-close cache passed the front-pair row gate but contained no 46–90 DTE
-back-expiry observation in either period. Consequently `front_term_urgency` had zero finite
-development values, its required development median did not exist, and the frozen eight-
-dimension options surface and four-state options GMM could not be fitted without changing the
-preregistered design. The run stopped before all cross-market model fitting.
+{blocker_explanation}
 
 ## Frozen scope and reconstruction
 
@@ -1425,7 +1498,7 @@ The daily options dimensions/regimes, joined cross-market panel, six mismatch di
 S0/S1/S2, O0/O1/O2, both Ridge diagnostics, monthly/checkpoint comparisons, persistence
 horizons, regime-pair census, DTE-horizon mapping, ten session-bootstrap draws, three
 options-null refits, three route-null refits, concentration analysis, and both plots were not
-produced. This is a coverage blocker, not evidence for or against any increment.
+produced. This is a {blocker_label} blocker, not evidence for or against any increment.
 
 ## Component statuses
 
@@ -1436,7 +1509,7 @@ produced. This is a coverage blocker, not evidence for or against any increment.
 - Independent fail-closed audit: `{"passed" if audit_passed else "failed"}`.
 - Stock posterior reconstruction: 100 rows, maximum difference
   {posterior_difference:.2e}.
-- Determinism rebuild: not applicable after the options-coverage stop; recorded as blocked,
+- Determinism rebuild: not applicable after the terminal stop; recorded as blocked,
   with no redownload, bootstrap, or null repetition.
 
 No result here establishes option profitability, intraday option fills, economic or
@@ -1448,6 +1521,7 @@ def run() -> dict[str, Any]:
     decision = read_json(PRIMARY / "decision.json")
     overall_decision = str(decision["overall_decision"])
     coverage_blocked = overall_decision == EXPECTED_BLOCKER
+    resource_blocked = overall_decision == RESOURCE_BLOCKER
     any_blocker = overall_decision.startswith("blocked_")
     checks: dict[str, Any] = {}
     errors: list[str] = []
@@ -1474,6 +1548,16 @@ def run() -> dict[str, Any]:
                 ("blocker_and_artifacts", audit_blocker_and_artifacts),
             ]
         )
+    elif resource_blocked:
+        audits.extend(
+            [
+                (
+                    "options_and_chronology",
+                    lambda: audit_options_and_chronology(expect_coverage_blocker=True),
+                ),
+                ("resource_limit_and_artifacts", audit_resource_limit_and_artifacts),
+            ]
+        )
     elif not any_blocker:
         audits.extend(
             [
@@ -1498,16 +1582,20 @@ def run() -> dict[str, Any]:
             "independent_fail_closed_audit_at_daily_options_coverage_blocker"
             if coverage_blocked
             else (
-                "independent_fail_closed_success_audit"
-                if not any_blocker
-                else "independent_fail_closed_stage_blocker_audit"
+                "independent_fail_closed_audit_at_quick_resource_limit"
+                if resource_blocked
+                else (
+                    "independent_fail_closed_success_audit"
+                    if not any_blocker
+                    else "independent_fail_closed_stage_blocker_audit"
+                )
             )
         ),
         "checks": checks,
         "errors": errors,
         "downstream_model_audits": (
-            "not_run_due_to_preregistered_coverage_blocker"
-            if coverage_blocked
+            "not_run_due_to_preregistered_coverage_or_resource_blocker"
+            if coverage_blocked or resource_blocked
             else ("completed" if not any_blocker else "not_run_due_to_stage_blocker")
         ),
         "artifact_hashes": {
@@ -1534,7 +1622,7 @@ def run() -> dict[str, Any]:
             decision[key] = "blocked"
         write_json(PRIMARY / "decision.json", decision)
     report_path = PRIMARY / "report.md"
-    if coverage_blocked:
+    if coverage_blocked or resource_blocked:
         report = render_blocked_report(audit_passed=passed)
         report_path.write_text(report, encoding="utf-8")
         (REPORTS / "report.md").write_text(report, encoding="utf-8")

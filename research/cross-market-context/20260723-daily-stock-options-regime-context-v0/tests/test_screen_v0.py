@@ -57,6 +57,17 @@ def load_runner() -> ModuleType:
     return module
 
 
+def load_gap_downloader() -> ModuleType:
+    path = Path(__file__).resolve().parents[1] / "download_gap.py"
+    specification = importlib.util.spec_from_file_location("daily_context_gap_test", path)
+    assert specification is not None
+    assert specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[specification.name] = module
+    specification.loader.exec_module(module)
+    return module
+
+
 def test_daily_context_uses_exact_previous_trading_session_and_rejects_same_day_options() -> None:
     signal_date = date(2025, 1, 6)
     previous_session = previous_us_trading_session(signal_date)
@@ -72,6 +83,37 @@ def test_daily_context_uses_exact_previous_trading_session_and_rejects_same_day_
             signal_date=signal_date,
             stock_information_date=previous_session,
             options_observation_date=signal_date,
+        )
+
+
+def test_gap_download_requires_noncompact_exact_date_resource_identities() -> None:
+    downloader = load_gap_downloader()
+    gaps = pd.DataFrame(
+        {
+            "symbol": ["AAL"],
+            "required_options_date": ["2025-01-03"],
+            "gap_component": ["back_atm_pair"],
+            "bounded_download_required": [True],
+        }
+    )
+
+    plans = downloader.build_plans(gaps)
+
+    assert len(plans) == 1
+    assert plans[0]["request"].compact is False
+    with pytest.raises(ValueError, match="non-compact provider resource identities"):
+        downloader._normalise_exact_records(
+            [
+                {
+                    "type": "options-eod",
+                    "attributes": {
+                        "contract": "AAL250117C00100000",
+                        "underlying_symbol": "AAL",
+                    },
+                }
+            ],
+            observation_date=date(2025, 1, 3),
+            request_id="test",
         )
 
 

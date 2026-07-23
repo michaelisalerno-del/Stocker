@@ -2,13 +2,9 @@
 
 ## Decision
 
-Overall decision: `blocked_insufficient_daily_options_coverage`.
+Overall decision: `blocked_quick_resource_limit`.
 
-The repaired previous-close cache passed the front-pair row gate but contained no 46–90 DTE
-back-expiry observation in either period. Consequently `front_term_urgency` had zero finite
-development values, its required development median did not exist, and the frozen eight-
-dimension options surface and four-state options GMM could not be fitted without changing the
-preregistered design. The run stopped before all cross-market model fitting.
+The bounded recovery stopped before exceeding the frozen 500,000-record ceiling: 499,969 provider records across 2,193 completed requests and 154,465,109 raw bytes. The compact provider responses omitted the authoritative EOD observation identity required by the repaired exact-date filter, so zero records were canonicalised and no recovered cache was admitted. No second download was attempted.
 
 ## Frozen scope and reconstruction
 
@@ -59,10 +55,10 @@ preregistered design. The run stopped before all cross-market model fitting.
 - Exact gap manifest: 8,145 component rows;
   7,798 require bounded acquisition.
 - Bounded plan: 7,556 exact
-  stock-date requests. Status `token_unavailable`; network requests
-  0; new records
-  0; new bytes
-  0.
+  stock-date requests. Status `blocked_quick_resource_limit`; network requests
+  2193; new records
+  499969; new bytes
+  154465109.
 
 ## Downstream results
 
@@ -70,7 +66,7 @@ The daily options dimensions/regimes, joined cross-market panel, six mismatch di
 S0/S1/S2, O0/O1/O2, both Ridge diagnostics, monthly/checkpoint comparisons, persistence
 horizons, regime-pair census, DTE-horizon mapping, ten session-bootstrap draws, three
 options-null refits, three route-null refits, concentration analysis, and both plots were not
-produced. This is a coverage blocker, not evidence for or against any increment.
+produced. This is a quick-resource blocker, not evidence for or against any increment.
 
 ## Component statuses
 
@@ -88,7 +84,7 @@ produced. This is a coverage blocker, not evidence for or against any increment.
 - Independent fail-closed audit: `passed`.
 - Stock posterior reconstruction: 100 rows, maximum difference
   1.55e-15.
-- Determinism rebuild: not applicable after the options-coverage stop; recorded as blocked,
+- Determinism rebuild: not applicable after the terminal stop; recorded as blocked,
   with no redownload, bootstrap, or null repetition.
 
 No result here establishes option profitability, intraday option fills, economic or

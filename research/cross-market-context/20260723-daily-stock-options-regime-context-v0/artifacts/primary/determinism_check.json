@@ -1,5 +1,5 @@
 {
-  "blocker": "blocked_insufficient_daily_options_coverage",
+  "blocker": "blocked_quick_resource_limit",
   "broker_integration_required": false,
   "cross_market_mismatch_test": true,
   "daily_options_dimensions": true,

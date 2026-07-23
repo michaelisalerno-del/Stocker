@@ -1,12 +1,12 @@
 {
   "bounded_download": {
     "credential_recorded": false,
-    "network_requests_made": 0,
-    "newly_downloaded_bytes": 0,
-    "newly_downloaded_records": 0,
+    "network_requests_made": 2193,
+    "newly_downloaded_bytes": 154465109,
+    "newly_downloaded_records": 499969,
     "planned_exact_stock_date_requests": 7556,
     "planned_gap_rows": 7798,
-    "status": "token_unavailable"
+    "status": "blocked_quick_resource_limit"
   },
   "bounded_download_required_gap_rows": 7798,
   "broker_integration_required": false,
@@ -89,9 +89,9 @@
     "timeframe": "5m"
   },
   "intraday_option_quotes_used": false,
-  "network_requests_made": 0,
-  "newly_downloaded_bytes": 0,
-  "newly_downloaded_records": 0,
+  "network_requests_made": 2193,
+  "newly_downloaded_bytes": 154465109,
+  "newly_downloaded_records": 499969,
   "option_pnl_calculated": false,
   "options_cache_reprocessing": {
     "cache_rows_loaded": 144283,

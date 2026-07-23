@@ -112,7 +112,7 @@ def build_plans(gaps: pd.DataFrame) -> list[dict[str, Any]]:
                     trade_date_to=observation_date,
                     expiration_from=observation_date + timedelta(days=minimum_dte),
                     expiration_to=observation_date + timedelta(days=90),
-                    compact=True,
+                    compact=False,
                 ),
             }
         )
@@ -123,7 +123,21 @@ def record_receipt(receipt: Mapping[str, Any]) -> None:
     """Persist a credential-free receipt beside both ignored cache and artifacts."""
 
     write_json(RECEIPT_PATH, receipt)
-    write_json(PRIMARY / "download_gap_receipt.json", receipt)
+    completed_value = receipt.get("completed_requests", [])
+    completed = (
+        [cast(Mapping[str, Any], row) for row in completed_value]
+        if isinstance(completed_value, list)
+        else []
+    )
+    artifact_receipt = {
+        **{key: value for key, value in receipt.items() if key != "completed_requests"},
+        "completed_request_count": len(completed),
+        "completed_provider_records": sum(int(row.get("provider_records", 0)) for row in completed),
+        "completed_exact_canonical_records": sum(
+            int(row.get("exact_canonical_records", 0)) for row in completed
+        ),
+    }
+    write_json(PRIMARY / "download_gap_receipt.json", artifact_receipt)
     if SOURCE_MANIFEST_PATH.is_file():
         source = json.loads(SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
         if isinstance(source, dict):
@@ -136,6 +150,9 @@ def record_receipt(receipt: Mapping[str, Any]) -> None:
                 "newly_downloaded_bytes": receipt["newly_downloaded_bytes"],
                 "credential_recorded": False,
             }
+            source["network_requests_made"] = receipt["network_requests_made"]
+            source["newly_downloaded_records"] = receipt["newly_downloaded_records"]
+            source["newly_downloaded_bytes"] = receipt["newly_downloaded_bytes"]
             write_json(SOURCE_MANIFEST_PATH, source)
 
 
@@ -146,9 +163,13 @@ def _normalise_exact_records(
     request_id: str,
 ) -> list[dict[str, Any]]:
     exact: list[dict[str, Any]] = []
+    identifiable_records = 0
     for record in records:
         resource_id = record.get("id")
-        if not isinstance(resource_id, str) or resource_id[-10:] != observation_date.isoformat():
+        if not isinstance(resource_id, str):
+            continue
+        identifiable_records += 1
+        if resource_id[-10:] != observation_date.isoformat():
             continue
         attributes_value = record.get("attributes")
         if not isinstance(attributes_value, Mapping):
@@ -171,6 +192,8 @@ def _normalise_exact_records(
             ):
                 attributes["dte"] = None
         exact.append({**record, "attributes": attributes})
+    if records and identifiable_records == 0:
+        raise ValueError("exact-date filtering requires non-compact provider resource identities")
     canonical = canonicalize_response_records(
         exact,
         request_id=request_id,

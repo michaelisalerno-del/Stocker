@@ -1,5 +1,5 @@
 {
-  "blocker_detail": "previous-close front-pair coverage or frozen options-dimension support is inadequate: {'assessment_clean_checkpoint_rows': 10422, 'assessment_sessions': 154, 'assessment_stocks': 20, 'assessment_months': 8, 'broad_conflict_rows': 2159, 'low_route_support_rows': 2915, 'passed': False, 'required_stock_sessions': 7903, 'development_front_pair_stock_sessions': 1250, 'assessment_front_pair_stock_sessions': 929, 'development_finite_raw_feature_counts': {'atm_iv': 1250, 'straddle_mid_pct': 1250, 'call_put_iv_gap': 1250, 'skew_25d': 1059, 'front_term_urgency': 0, 'combined_relative_spread': 1250, 'iv_minus_realised_20d': 1250, 'near_spot_oi_concentration': 1250, 'call_put_oi_imbalance': 1250}, 'unsupported_development_raw_features': ['front_term_urgency'], 'dimension_fit_supported': False, 'back_pair_stock_sessions': 0, 'skew_stock_sessions': 1937, 'open_interest_surface_stock_sessions': 2179}",
+  "blocker_detail": "bounded exact-date recovery stopped before exceeding the 500,000-record ceiling after 2,193 completed requests and 499,969 provider records; compact responses lacked authoritative EOD observation identities, so zero recovered records were canonicalised and no second download was attempted.",
   "broker_integration_required": false,
   "cross_market_mismatch_test": true,
   "daily_options_dimensions": true,
@@ -14,7 +14,7 @@
   "option_pnl_calculated": false,
   "options_loop_discovery_enabled": false,
   "order_placement": "disabled",
-  "overall_decision": "blocked_insufficient_daily_options_coverage",
+  "overall_decision": "blocked_quick_resource_limit",
   "persistence_horizon_status": "blocked",
   "previous_close_options_only": true,
   "production_runtime_modified": false,

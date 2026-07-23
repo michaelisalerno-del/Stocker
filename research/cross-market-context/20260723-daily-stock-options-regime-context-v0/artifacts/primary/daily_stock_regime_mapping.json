@@ -1,0 +1,152 @@
+{
+  "broker_integration_required": false,
+  "canonical_centroids": [
+    {
+      "daily_activity_acceleration": 1.0634686280012984,
+      "daily_compression": -0.5319052267472251,
+      "daily_directional_efficiency": 0.5719318285645522,
+      "daily_extension": 1.2886355921297754,
+      "daily_rejection": -0.4245879215522797,
+      "daily_relative_strength": 1.4044026567374204,
+      "daily_trend_persistence": 1.0385368651040552,
+      "daily_volatility_acceleration": 0.24963349938666587
+    },
+    {
+      "daily_activity_acceleration": 0.4942144758733823,
+      "daily_compression": -0.4621373489083512,
+      "daily_directional_efficiency": -0.3289727715200994,
+      "daily_extension": 0.07881975852382976,
+      "daily_rejection": 0.2108422688867307,
+      "daily_relative_strength": 0.015370798395962311,
+      "daily_trend_persistence": -0.013706193449093606,
+      "daily_volatility_acceleration": 0.6783222209298659
+    },
+    {
+      "daily_activity_acceleration": 0.29890830981553906,
+      "daily_compression": 2.8207442447420308e-05,
+      "daily_directional_efficiency": 0.6398606524200383,
+      "daily_extension": -0.9163255116725599,
+      "daily_rejection": -0.48200961381233737,
+      "daily_relative_strength": -0.8300052719367068,
+      "daily_trend_persistence": 0.8455385088867292,
+      "daily_volatility_acceleration": -0.034460731089872666
+    },
+    {
+      "daily_activity_acceleration": -0.307097110159446,
+      "daily_compression": 0.313228640105318,
+      "daily_directional_efficiency": -0.10237937867062816,
+      "daily_extension": -0.0255098259061108,
+      "daily_rejection": 0.14789395272026207,
+      "daily_relative_strength": -0.08731238116939107,
+      "daily_trend_persistence": 0.0589234011517392,
+      "daily_volatility_acceleration": -0.3369835663620947
+    }
+  ],
+  "canonical_covariances": [
+    [
+      0.32526558305731257,
+      0.1201283151774911,
+      0.27805447372821107,
+      0.24226720463521473,
+      0.158646889496268,
+      0.5143475694875927,
+      1.2489421586073177,
+      1.5338489542236882
+    ],
+    [
+      0.14220379887557666,
+      0.0720004196399597,
+      0.07371229543975327,
+      0.20228739278750393,
+      0.14358669207799668,
+      0.20477450356677052,
+      0.47081116332636297,
+      0.6866117652911515
+    ],
+    [
+      0.3362365454105837,
+      0.16095305040861319,
+      0.2032314730851627,
+      0.16374271993793882,
+      0.19623413395932393,
+      0.6138591174180443,
+      0.5594117755002657,
+      0.9117677106487448
+    ],
+    [
+      0.09882001089566013,
+      0.12961482378723532,
+      0.09497393040085142,
+      0.20574471616671056,
+      0.1792005918676379,
+      0.15809486530773934,
+      0.2950846078874171,
+      0.19993150539305932
+    ]
+  ],
+  "canonical_dimensions": [
+    "daily_compression",
+    "daily_volatility_acceleration",
+    "daily_directional_efficiency",
+    "daily_extension",
+    "daily_rejection",
+    "daily_relative_strength"
+  ],
+  "canonical_to_original": [
+    1,
+    2,
+    3,
+    0
+  ],
+  "canonical_weights": [
+    0.16360966670295576,
+    0.2568726660979266,
+    0.14242875481460385,
+    0.43708891238451386
+  ],
+  "converged": true,
+  "covariance_type": "diag",
+  "cross_market_mismatch_test": true,
+  "daily_options_dimensions": true,
+  "daily_stock_dimensions": true,
+  "directional_outcomes_primary": false,
+  "economic_strategy_outcomes_opened": false,
+  "execution_enabled": false,
+  "fitted_period": "development_2024_only",
+  "input_columns": [
+    "daily_compression",
+    "daily_directional_efficiency",
+    "daily_trend_persistence",
+    "daily_extension",
+    "daily_rejection",
+    "daily_volatility_acceleration",
+    "daily_relative_strength",
+    "daily_activity_acceleration"
+  ],
+  "intraday_option_quotes_used": false,
+  "iterations": 5,
+  "max_iter": 300,
+  "n_components": 4,
+  "n_init": 5,
+  "option_pnl_calculated": false,
+  "options_loop_discovery_enabled": false,
+  "order_placement": "disabled",
+  "original_to_canonical": [
+    3,
+    0,
+    1,
+    2
+  ],
+  "prefix": "daily_stock_regime",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_daily_context_screen": true,
+  "random_state": 20260723,
+  "reg_covar": 1e-05,
+  "research_only": true,
+  "soft_daily_options_regimes": true,
+  "soft_daily_stock_regimes": true,
+  "strategy_promotion": false,
+  "underlying_movement_outcomes_opened": true
+}

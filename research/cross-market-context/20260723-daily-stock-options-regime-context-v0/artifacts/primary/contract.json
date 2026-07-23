@@ -1,0 +1,129 @@
+{
+  "assessment": {
+    "end_inclusive": "2025-08-22",
+    "start": "2025-01-01"
+  },
+  "broker_integration_required": false,
+  "checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "classifier": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "cross_market_mismatch_test": true,
+  "daily_options_dimensions": true,
+  "daily_stock_dimensions": true,
+  "development": {
+    "end_inclusive": "2024-12-31",
+    "start": "2024-01-01"
+  },
+  "directional_outcomes_primary": false,
+  "economic_strategy_outcomes_opened": false,
+  "execution_enabled": false,
+  "experiment": "Daily Stock x Options Regime Context Quick Screen V0",
+  "forbidden_searches": [
+    "option strategies",
+    "DTE optimisation",
+    "strike optimisation",
+    "expiry optimisation",
+    "options-loop discovery",
+    "stock-loop rediscovery",
+    "feature search",
+    "interaction search",
+    "model search",
+    "hyperparameter search"
+  ],
+  "hard_limits": {
+    "additional_eodhd_records": 500000,
+    "additional_raw_bytes": 5368709120,
+    "daily_options_regimes": 4,
+    "daily_stock_regimes": 4,
+    "gpu": false,
+    "n_jobs": 1,
+    "options_bundle_null_refits": 3,
+    "plots": 2,
+    "primary_classifier_fits": 6,
+    "processes": 1,
+    "ridge_diagnostic_fits": 2,
+    "route_bundle_null_refits": 3,
+    "session_bootstrap_draws": 10
+  },
+  "intraday_option_quotes_used": false,
+  "option_pnl_calculated": false,
+  "options_gmm": {
+    "covariance_type": "diag",
+    "max_iter": 300,
+    "n_components": 4,
+    "n_init": 5,
+    "random_state": 20260723,
+    "reg_covar": 1e-05
+  },
+  "options_loop_discovery_enabled": false,
+  "order_placement": "disabled",
+  "predecessors": [
+    "research/route-competition/20260722-broad-conflict-advance-hazard-v02",
+    "research/options-feasibility/20260722-stock-options-cross-market-quick-v0",
+    "research/options-strategies/20260723-eodhd-fixed-overnight-options-v01"
+  ],
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "protected_start": "2025-08-23",
+  "quick_daily_context_screen": true,
+  "research_only": true,
+  "ridge": {
+    "alpha": 10.0
+  },
+  "soft_daily_options_regimes": true,
+  "soft_daily_stock_regimes": true,
+  "stock_gmm": {
+    "covariance_type": "diag",
+    "max_iter": 300,
+    "n_components": 4,
+    "n_init": 5,
+    "random_state": 20260723,
+    "reg_covar": 1e-05
+  },
+  "strategy_promotion": false,
+  "underlying_movement_outcomes_opened": true
+}

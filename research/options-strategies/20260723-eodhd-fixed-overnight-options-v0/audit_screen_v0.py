@@ -361,7 +361,90 @@ def _complete_strategy_coverage(cache_root: Path) -> set[tuple[str, str, str]]:
         ):
             if str(strategy) in {"S1", "S3"} and group["chain_complete"].all():
                 coverage.add((str(symbol), str(option_date)[:10], str(strategy)))
+    receipt_path = cache_root / "fixed-overnight-options-v0" / "bounded_download_manifest.json"
+    if receipt_path.is_file():
+        receipt = _json(receipt_path)
+        queries = receipt.get("queries", [])
+        if not isinstance(queries, list):
+            raise ValueError("bounded download receipt queries are invalid")
+        for row in queries:
+            if not isinstance(row, dict) or row.get("status") != "complete":
+                continue
+            option_date = date.fromisoformat(str(row["option_date"]))
+            strategy = str(row["strategy"])
+            if option_date >= date(2025, 8, 23) or strategy not in {"S1", "S3"}:
+                raise ValueError("bounded download receipt escaped the frozen scope")
+            coverage.add((str(row["symbol"]), option_date.isoformat(), strategy))
     return coverage
+
+
+def _provider_timestamp_date(value: object) -> date:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("America/New_York")
+    else:
+        timestamp = timestamp.tz_convert("America/New_York")
+    return timestamp.date()
+
+
+def _bounded_raw_chronology_evidence(cache_root: Path) -> dict[str, object]:
+    """Independently verify exact-date failures from raw response identities."""
+
+    data_dir = (cache_root / "fixed-overnight-options-v0").resolve()
+    manifest_dir = data_dir / "manifests" / "completed"
+    manifest_paths = sorted(manifest_dir.glob("*.json")) if manifest_dir.is_dir() else []
+    raw_records_checked = 0
+    mismatch_records = 0
+    last_trade_filter_mismatch_records = 0
+    protected_observation_rows = 0
+    requested_dates: set[str] = set()
+    observed_dates: set[str] = set()
+    for manifest_path in manifest_paths:
+        payload = _json(manifest_path)
+        rows = payload.get("manifest_rows", [])
+        if not isinstance(rows, list):
+            raise ValueError("bounded request manifest rows are invalid")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("bounded request manifest row is invalid")
+            requested = date.fromisoformat(str(row["trade_date_from"]))
+            cache_path = Path(str(row["cache_path"])).resolve()
+            response_hash = str(row["response_hash"])
+            if not cache_path.is_relative_to(data_dir) or not cache_path.is_file():
+                raise ValueError("bounded raw response path is missing or outside cache")
+            if sha256_file(cache_path) != response_hash:
+                raise ValueError("bounded raw response hash differs")
+            response = _json(cache_path)
+            records = response.get("data", [])
+            if not isinstance(records, list):
+                raise ValueError("bounded raw response data are invalid")
+            for item in records:
+                if not isinstance(item, dict) or not isinstance(item.get("attributes"), dict):
+                    raise ValueError("bounded raw option record is invalid")
+                attributes = cast(dict[str, object], item["attributes"])
+                resource_id = item.get("id")
+                if not isinstance(resource_id, str):
+                    raise ValueError("bounded raw option identity is invalid")
+                observation = date.fromisoformat(resource_id[-10:])
+                bid_date = _provider_timestamp_date(attributes.get("bid_date"))
+                ask_date = _provider_timestamp_date(attributes.get("ask_date"))
+                trade_date = _provider_timestamp_date(attributes.get("tradetime"))
+                raw_records_checked += 1
+                protected_observation_rows += int(observation >= date(2025, 8, 23))
+                if observation == bid_date == ask_date and observation != requested:
+                    mismatch_records += 1
+                    last_trade_filter_mismatch_records += int(trade_date == requested)
+                    requested_dates.add(requested.isoformat())
+                    observed_dates.add(observation.isoformat())
+    return {
+        "manifest_rows": len(manifest_paths),
+        "raw_records_checked": raw_records_checked,
+        "accepted_observation_date_mismatch_records": mismatch_records,
+        "last_trade_filter_mismatch_records": last_trade_filter_mismatch_records,
+        "protected_observation_rows": protected_observation_rows,
+        "requested_dates": sorted(requested_dates),
+        "observed_dates": sorted(observed_dates),
+    }
 
 
 def _independent_atm_identity(
@@ -703,6 +786,21 @@ def audit(output: Path) -> tuple[bool, dict[str, Any]]:
     veto = pd.read_csv(output / "veto_metrics.csv")
     bootstrap = pd.read_csv(output / "bootstrap_metrics.csv")
     concentration = pd.read_csv(output / "concentration_metrics.csv")
+    bounded_raw_error: str | None = None
+    try:
+        source_cache_root = Path(str(source["options_cache"]["cache_root"]))
+        bounded_raw_evidence = _bounded_raw_chronology_evidence(source_cache_root)
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        bounded_raw_error = str(error)
+        bounded_raw_evidence = {
+            "manifest_rows": 0,
+            "raw_records_checked": 0,
+            "accepted_observation_date_mismatch_records": 0,
+            "last_trade_filter_mismatch_records": 0,
+            "protected_observation_rows": -1,
+            "requested_dates": [],
+            "observed_dates": [],
+        }
 
     safety_passed = True
     try:
@@ -761,13 +859,17 @@ def audit(output: Path) -> tuple[bool, dict[str, Any]]:
     protected_passed &= (
         int(source.get("protected_rows_materialised", -1)) == 0
         and int(protected.get("protected_rows_materialised", -1)) == 0
+        and int(bounded_raw_evidence["protected_observation_rows"]) == 0
         and bool(protected.get("passed", False))
     )
     _record(
         checks,
         "protected_boundary",
         protected_passed,
-        "no market or option record dated 2025-08-23 or later",
+        (
+            "no market or option record dated 2025-08-23 or later; "
+            f"bounded_raw_records_checked={bounded_raw_evidence['raw_records_checked']}"
+        ),
     )
 
     available = signals.loc[signals["ordinal_72_structural_available"].astype(bool)].copy()
@@ -973,6 +1075,41 @@ def audit(output: Path) -> tuple[bool, dict[str, Any]]:
             blocker_shape_passed,
             f"primary_blocker={primary_blocker}",
         )
+        if primary_blocker == "blocked_chronology_or_leakage_failure":
+            outcome = cast(Mapping[str, object], source.get("option_download_outcome", {}))
+            source_evidence = cast(Mapping[str, object], outcome.get("evidence", {}))
+            source_requested = str(source_evidence.get("requested_option_observation_date", ""))
+            source_observed_value = source_evidence.get("observed_option_observation_dates", [])
+            source_observed = (
+                {str(value) for value in source_observed_value}
+                if isinstance(source_observed_value, list)
+                else set()
+            )
+            independent_requested = {
+                str(value) for value in bounded_raw_evidence["requested_dates"]
+            }
+            independent_observed = {str(value) for value in bounded_raw_evidence["observed_dates"]}
+            chronology_evidence_passed = bool(
+                bounded_raw_error is None
+                and int(bounded_raw_evidence["accepted_observation_date_mismatch_records"]) > 0
+                and int(bounded_raw_evidence["last_trade_filter_mismatch_records"]) > 0
+                and source_requested in independent_requested
+                and independent_observed.issubset(source_observed)
+            )
+            _record(
+                checks,
+                "provider_observation_date_chronology_blocker",
+                chronology_evidence_passed,
+                canonical_json(bounded_raw_evidence).strip(),
+            )
+        else:
+            _record(
+                checks,
+                "provider_observation_date_chronology_blocker",
+                True,
+                f"not applicable under {primary_blocker}",
+                applicability="not_applicable_other_primary_blocker",
+            )
         for name in (
             "dte_calculation",
             "atm_strike_selection",

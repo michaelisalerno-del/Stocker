@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -381,6 +383,59 @@ def _load_experiment_runner() -> ModuleType:
     sys.modules[specification.name] = module
     specification.loader.exec_module(module)
     return module
+
+
+def test_bounded_cache_summary_accounts_partial_exact_date_download(
+    tmp_path: Path,
+) -> None:
+    runner = _load_experiment_runner()
+    options_cache = tmp_path / "options"
+    data_dir = options_cache / "fixed-overnight-options-v0"
+    raw_dir = data_dir / "raw"
+    manifest_dir = data_dir / "manifests" / "completed"
+    raw_dir.mkdir(parents=True)
+    manifest_dir.mkdir(parents=True)
+    raw_content = b'{"data":[],"links":{},"meta":{"limit":1000,"offset":0,"total":0}}'
+    response_hash = hashlib.sha256(raw_content).hexdigest()
+    raw_path = raw_dir / f"{response_hash}.json"
+    raw_path.write_bytes(raw_content)
+    (manifest_dir / "request.json").write_text(
+        json.dumps(
+            {
+                "manifest_rows": [
+                    {
+                        "response_hash": response_hash,
+                        "cache_path": str(raw_path.resolve()),
+                        "record_count": 0,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (data_dir / "bounded_download_manifest.json").write_text(
+        json.dumps(
+            {
+                "queries": [
+                    {
+                        "request_id": "request",
+                        "symbol": "AAL",
+                        "option_date": "2025-01-02",
+                        "strategy": "S1",
+                        "status": "complete",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary, coverage = runner.bounded_download_cache_summary(options_cache)
+
+    assert summary["bounded_request_manifests"] == 1
+    assert summary["bounded_cached_provider_records"] == 0
+    assert summary["bounded_unique_raw_bytes"] == len(raw_content)
+    assert coverage == {("AAL", "2025-01-02", "S1")}
 
 
 def test_complete_cache_pipeline_constructs_causal_s1_and_s3_trades() -> None:

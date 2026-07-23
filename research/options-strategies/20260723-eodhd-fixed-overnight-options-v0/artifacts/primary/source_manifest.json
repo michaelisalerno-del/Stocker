@@ -1,6 +1,6 @@
 {
   "achieved_pnl_claimed": false,
-  "api_token_present": false,
+  "api_token_present": true,
   "api_token_value_recorded": false,
   "broker_integration_required": false,
   "corporate_action_handling": {
@@ -40,10 +40,10 @@
   ],
   "gpu": false,
   "implementation_sha256": {
-    "audit_screen_v0.py": "f7a16195891f181bea750576b186def584c614e7b647b20d00df69e01c0cc9f1",
+    "audit_screen_v0.py": "a879b92f48c1bea5dc24d81b6b6fc20a6478da9c0e0d2248994d082dce6466d6",
     "contract.json": "8aa22dd47a34ef15842c465fc359ae7f58b390c8b56cef725bbbd1a377bd89fa",
     "eodhd_fixed_options_strategy_v0.py": "aee727c373736002617b069cf89397cb5710b92c532f20df898ffd78ec28a6bb",
-    "run_screen_v0.py": "7ee0aafaa912a2f7538dc574e89d8e65e94db1b41821ba83ab259bdc725bb091"
+    "run_screen_v0.py": "75fe35a8ffadff00383d011a8a7bb8146f57f64b062a4fddd81eb1d68bcf4457"
   },
   "intraday_option_fill_simulated": false,
   "loop_dictionary": {
@@ -75,28 +75,765 @@
     "source_sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
   },
   "n_jobs": 1,
-  "option_download_attempted": false,
+  "option_download_attempted": true,
   "option_download_outcome": {
-    "attempted": false,
-    "blocker": null,
-    "detail": null,
-    "status": "not_attempted"
+    "attempted": true,
+    "blocker": "blocked_chronology_or_leakage_failure",
+    "detail": "requested option observation date 2024-10-08 but provider returned 2024-10-08,2024-10-10",
+    "evidence": {
+      "current_invocation_network_bytes": 0,
+      "current_invocation_network_records": 0,
+      "mismatched_records": 1,
+      "observed_option_observation_dates": [
+        "2024-10-08",
+        "2024-10-10"
+      ],
+      "processed_logical_response_bytes": 3228447,
+      "processed_provider_records": 3530,
+      "provider_filter": "filter[tradetime_from/to]",
+      "provider_filter_is_exact_observation_date": false,
+      "requested_option_observation_date": "2024-10-08",
+      "strategy": "S1",
+      "symbol": "AAL"
+    },
+    "status": "blocked"
   },
   "option_entry_time_proxy": "same_session_end_of_day_quote",
   "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
   "options_cache": {
-    "cache_bytes": 1101756,
-    "cache_json_files": 47,
-    "cache_parquet_files": 0,
+    "bounded_blocked_queries": 1,
+    "bounded_cached_logical_response_bytes": 3228447,
+    "bounded_cached_provider_records": 3530,
+    "bounded_complete_queries": 142,
+    "bounded_manifest_rows": 143,
+    "bounded_request_manifests": 143,
+    "bounded_unique_raw_bytes": 3224859,
+    "bounded_unique_raw_responses": 97,
+    "cache_bytes": 7107104,
+    "cache_json_files": 288,
+    "cache_parquet_files": 142,
     "cache_root": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-2/data/vendor/eodhd/options",
     "cached_raw_provider_records": 3624,
     "canonical_conflicting_duplicate_groups": 0,
     "canonical_duplicate_records": 0,
-    "canonical_parquet_rows": 0,
-    "canonical_pre_boundary_records": 291,
+    "canonical_parquet_rows": 3504,
+    "canonical_pre_boundary_records": 3795,
     "canonical_rejections": 53,
     "canonical_safe_history_rows": 291,
-    "complete_strategy_date_coverage": [],
+    "complete_strategy_date_coverage": [
+      {
+        "option_date": "2024-01-31",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-01-31",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-01",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-01",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-02",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-02",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-05",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-05",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-06",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-06",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-07",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-07",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-13",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-13",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-14",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-14",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-15",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-15",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-26",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-26",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-27",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-27",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-28",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-02-28",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-06",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-06",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-07",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-07",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-08",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-08",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-21",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-21",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-22",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-22",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-25",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-03-25",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-04",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-04",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-05",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-05",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-08",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-08",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-11",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-11",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-12",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-12",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-15",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-15",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-18",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-18",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-19",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-19",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-22",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-22",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-23",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-23",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-26",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-26",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-29",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-29",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-30",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-04-30",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-01",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-01",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-02",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-02",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-03",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-03",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-10",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-10",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-13",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-13",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-14",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-14",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-22",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-22",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-23",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-23",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-24",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-24",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-28",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-28",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-29",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-29",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-30",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-30",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-31",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-05-31",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-18",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-18",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-20",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-20",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-21",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-21",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-24",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-24",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-25",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-25",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-26",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-26",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-27",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-27",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-28",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-06-28",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-01",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-01",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-02",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-02",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-05",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-05",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-08",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-08",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-09",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-09",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-26",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-26",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-29",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-29",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-30",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-30",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-31",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-07-31",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-01",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-01",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-02",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-02",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-21",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-21",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-22",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-22",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-23",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-23",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-26",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-08-26",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-09-10",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-09-10",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-09-11",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-09-11",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-09-12",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-09-12",
+        "strategy": "S3",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-10-07",
+        "strategy": "S1",
+        "symbol": "AAL"
+      },
+      {
+        "option_date": "2024-10-07",
+        "strategy": "S3",
+        "symbol": "AAL"
+      }
+    ],
+    "experiment_downloaded_bytes": 3228447,
+    "experiment_downloaded_records": 3530,
     "newly_downloaded_bytes": 0,
     "newly_downloaded_records": 0,
     "protected_option_rows_materialised": 0,

@@ -2,10 +2,10 @@
 
 ## Decision
 
-`blocked_missing_eodhd_api_token`
+`blocked_chronology_or_leakage_failure`
 
 S1, S2, the frozen S2 `2→3→2` veto, and S3 are all marked `blocked`.
-The exact option cache is incomplete and no EODHD API token was available.
+The run failed closed before contract construction: requested option observation date 2024-10-08 but provider returned 2024-10-08,2024-10-10.
 Independently, S2 cannot start because the repository has no audited
 orientation-to-price-direction mapping.
 
@@ -28,11 +28,14 @@ late bar are retained as unavailable rows.
 ## Options coverage
 
 - Required option date rows: 6864.
-- Missing/incomplete strategy-date chains: 5786.
-- Existing cached raw provider records (metadata only): 3624.
-- Safe canonical pre-boundary option observations: 291.
-- Newly downloaded records: 0.
-- Newly downloaded bytes: 0.
+- Missing/incomplete strategy-date chains: 5644.
+- Prior cached contract-history provider records: 3624.
+- Experiment-specific bounded provider records acquired: 3530.
+- Experiment-specific complete exact-date query receipts: 142.
+- Safe canonical pre-boundary option observations: 3795.
+- Current invocation network records: 0.
+- Current invocation network bytes: 0.
+- Cumulative bounded logical response bytes: 3228447.
 
 Contract histories whose OCC expiry could cross the protected boundary were
 not opened. No contract was reselected, replaced, or forward-filled.

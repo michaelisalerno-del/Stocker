@@ -75,6 +75,7 @@ from stocker_research.eodhd_options_downloader_v0 import (
     OptionsResourceLimitExceeded,
     canonicalize_response_records,
     resolve_canonical_duplicates,
+    stable_request_id,
 )
 
 CONTRACT_PATH = EXPERIMENT_DIR / "contract.json"
@@ -166,10 +167,17 @@ BOOTSTRAP_STATISTICS = (
 class ScreenBlocker(RuntimeError):
     """A fail-closed experiment-level blocker."""
 
-    def __init__(self, decision: str, detail: str) -> None:
+    def __init__(
+        self,
+        decision: str,
+        detail: str,
+        *,
+        evidence: Mapping[str, object] | None = None,
+    ) -> None:
         super().__init__(detail)
         self.decision = decision
         self.detail = detail
+        self.evidence = dict(evidence or {})
 
 
 def canonical_json(value: Any) -> str:
@@ -951,6 +959,109 @@ def _contract_expiration(contract_id: str) -> date | None:
         return None
 
 
+def bounded_download_cache_summary(
+    options_cache: Path,
+) -> tuple[dict[str, int], set[tuple[str, str, str]]]:
+    """Audit the experiment-specific raw cache and exact-chain receipts."""
+
+    data_dir = options_cache / "fixed-overnight-options-v0"
+    completed_dir = data_dir / "manifests" / "completed"
+    manifest_paths = sorted(completed_dir.glob("*.json")) if completed_dir.is_dir() else []
+    manifest_rows: list[Mapping[str, object]] = []
+    for path in manifest_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            rows = payload["manifest_rows"]
+        except (KeyError, json.JSONDecodeError, OSError) as error:
+            raise ScreenBlocker(
+                "blocked_reproducibility_or_audit_failure",
+                f"bounded option request manifest is unreadable: {path}",
+            ) from error
+        if not isinstance(rows, list):
+            raise ScreenBlocker(
+                "blocked_reproducibility_or_audit_failure",
+                f"bounded option request manifest rows are invalid: {path}",
+            )
+        manifest_rows.extend(
+            cast(list[Mapping[str, object]], [row for row in rows if isinstance(row, Mapping)])
+        )
+
+    logical_records = 0
+    logical_bytes = 0
+    unique_raw: dict[str, Path] = {}
+    data_root = data_dir.resolve()
+    for row in manifest_rows:
+        response_hash = str(row.get("response_hash", ""))
+        cache_path_value = row.get("cache_path")
+        if not response_hash or not isinstance(cache_path_value, str):
+            raise ScreenBlocker(
+                "blocked_reproducibility_or_audit_failure",
+                "bounded option request manifest lacks raw-cache identity",
+            )
+        cache_path = Path(cache_path_value).resolve()
+        if not cache_path.is_relative_to(data_root) or not cache_path.is_file():
+            raise ScreenBlocker(
+                "blocked_reproducibility_or_audit_failure",
+                "bounded option raw-cache path is missing or outside the experiment cache",
+            )
+        if sha256_file(cache_path) != response_hash:
+            raise ScreenBlocker(
+                "blocked_reproducibility_or_audit_failure",
+                f"bounded option raw-cache hash differs: {cache_path}",
+            )
+        logical_records += int(row.get("record_count", 0))
+        logical_bytes += cache_path.stat().st_size
+        unique_raw.setdefault(response_hash, cache_path)
+
+    receipt_path = data_dir / "bounded_download_manifest.json"
+    queries: list[Mapping[str, object]] = []
+    if receipt_path.is_file():
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            query_value = receipt.get("queries", [])
+        except (json.JSONDecodeError, OSError) as error:
+            raise ScreenBlocker(
+                "blocked_reproducibility_or_audit_failure",
+                "bounded option download receipt is unreadable",
+            ) from error
+        if not isinstance(query_value, list):
+            raise ScreenBlocker(
+                "blocked_reproducibility_or_audit_failure",
+                "bounded option download receipt query rows are invalid",
+            )
+        queries = cast(
+            list[Mapping[str, object]],
+            [row for row in query_value if isinstance(row, Mapping)],
+        )
+
+    complete_coverage: set[tuple[str, str, str]] = set()
+    for row in queries:
+        if row.get("status") != "complete":
+            continue
+        option_date = date.fromisoformat(str(row["option_date"]))
+        strategy = str(row["strategy"])
+        if option_date >= PROTECTED_START or strategy not in {"S1", "S3"}:
+            raise ScreenBlocker(
+                "blocked_protected_boundary_failure",
+                "bounded option receipt escaped the protected date or frozen strategies",
+            )
+        complete_coverage.add((str(row["symbol"]), option_date.isoformat(), strategy))
+
+    return (
+        {
+            "bounded_request_manifests": len(manifest_paths),
+            "bounded_manifest_rows": len(manifest_rows),
+            "bounded_cached_provider_records": logical_records,
+            "bounded_cached_logical_response_bytes": logical_bytes,
+            "bounded_unique_raw_responses": len(unique_raw),
+            "bounded_unique_raw_bytes": sum(path.stat().st_size for path in unique_raw.values()),
+            "bounded_complete_queries": len(complete_coverage),
+            "bounded_blocked_queries": sum(row.get("status") == "blocked" for row in queries),
+        },
+        complete_coverage,
+    )
+
+
 def load_canonical_option_cache(
     options_cache: Path,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -975,6 +1086,8 @@ def load_canonical_option_cache(
     ]
     parquet_rows = 0
     complete_strategy_date_coverage: set[tuple[str, str, str]] = set()
+    bounded_summary, bounded_receipt_coverage = bounded_download_cache_summary(options_cache)
+    complete_strategy_date_coverage.update(bounded_receipt_coverage)
     for path in parquet_files:
         try:
             schema_frame = pd.read_parquet(path, columns=[])
@@ -1167,6 +1280,9 @@ def load_canonical_option_cache(
         "newly_downloaded_bytes": 0,
         "protected_option_rows_materialised": 0,
         "raw_option_payloads_opened": raw_payloads_opened,
+        **bounded_summary,
+        "experiment_downloaded_records": bounded_summary["bounded_cached_provider_records"],
+        "experiment_downloaded_bytes": bounded_summary["bounded_cached_logical_response_bytes"],
         "complete_strategy_date_coverage": [
             {
                 "symbol": symbol,
@@ -1289,9 +1405,50 @@ def download_bounded_option_gaps(
     }
     canonical_dir = options_cache / "canonical" / "fixed-overnight-options-v0"
     canonical_dir.mkdir(parents=True, exist_ok=True)
-    downloaded_records = 0
-    downloaded_bytes = 0
-    query_rows: list[dict[str, object]] = []
+    processed_records = 0
+    processed_bytes = 0
+    network_records = 0
+    network_bytes = 0
+    receipt_path = data_dir / "bounded_download_manifest.json"
+    query_by_id: dict[str, dict[str, object]] = {}
+    if receipt_path.is_file():
+        prior_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        prior_queries = prior_receipt.get("queries", [])
+        if isinstance(prior_queries, list):
+            query_by_id = {
+                str(row["request_id"]): cast(dict[str, object], row)
+                for row in prior_queries
+                if isinstance(row, dict) and isinstance(row.get("request_id"), str)
+            }
+
+    def accounting_evidence() -> dict[str, object]:
+        return {
+            "processed_provider_records": processed_records,
+            "processed_logical_response_bytes": processed_bytes,
+            "current_invocation_network_records": network_records,
+            "current_invocation_network_bytes": network_bytes,
+        }
+
+    def write_receipt(status: str) -> None:
+        write_json(
+            receipt_path,
+            {
+                **SAFETY_FLAGS,
+                "status": status,
+                **accounting_evidence(),
+                "queries": sorted(
+                    query_by_id.values(),
+                    key=lambda row: (
+                        str(row.get("option_date", "")),
+                        str(row.get("symbol", "")),
+                        str(row.get("strategy", "")),
+                        str(row.get("request_id", "")),
+                    ),
+                ),
+                "credential_recorded": False,
+            },
+        )
+
     groups = required.groupby(["symbol", "option_date", "strategy"], sort=True)
     for (symbol, option_date_value, strategy), group in groups:
         target_date = date.fromisoformat(str(option_date_value))
@@ -1326,18 +1483,34 @@ def download_bounded_option_gaps(
             expiration_to=cast(date, expiration_to),
             compact=False,
         )
+        resume_id = stable_request_id(
+            request.endpoint,
+            request.parameters(offset=0, limit=downloader.config.page_limit),
+        )
+        request_was_cached = (data_dir / "manifests" / "completed" / f"{resume_id}.json").is_file()
         try:
             result = downloader.download(request)
         except OptionsResourceLimitExceeded as error:
+            write_receipt("blocked")
             raise ScreenBlocker(
-                "blocked_quick_options_strategy_resource_limit", str(error)
+                "blocked_quick_options_strategy_resource_limit",
+                str(error),
+                evidence=accounting_evidence(),
             ) from error
         except OptionsDownloadError as error:
+            write_receipt("blocked")
             raise ScreenBlocker(
-                "blocked_options_contract_reconstruction_failure", str(error)
+                "blocked_options_contract_reconstruction_failure",
+                str(error),
+                evidence=accounting_evidence(),
             ) from error
-        downloaded_records += len(result.records)
-        downloaded_bytes += sum(Path(row.cache_path).stat().st_size for row in result.manifest_rows)
+        result_records = len(result.records)
+        result_bytes = sum(Path(row.cache_path).stat().st_size for row in result.manifest_rows)
+        processed_records += result_records
+        processed_bytes += result_bytes
+        if not request_was_cached:
+            network_records += result_records
+            network_bytes += result_bytes
         request_identity = hashlib.sha256(
             canonical_json(
                 {
@@ -1351,20 +1524,70 @@ def download_bounded_option_gaps(
                 }
             ).encode("utf-8")
         ).hexdigest()
+        query_row: dict[str, object] = {
+            "request_id": request_identity,
+            "symbol": str(symbol),
+            "option_date": target_date.isoformat(),
+            "strategy": str(strategy),
+            "records": result_records,
+            "bytes": result_bytes,
+            "request_was_cached": request_was_cached,
+        }
         canonical = canonicalize_response_records(
             result.records,
             request_id=request_identity,
             provider_schema_version="openapi-2.0.0-exact-bounded-chain",
         )
         if canonical.rejections:
+            query_by_id[request_identity] = {
+                **query_row,
+                "status": "blocked",
+                "blocker": "blocked_options_quote_integrity_failure",
+                "canonical_rejections": len(canonical.rejections),
+            }
+            write_receipt("blocked")
             raise ScreenBlocker(
                 "blocked_options_quote_integrity_failure",
                 f"canonical option rejections in bounded request: {len(canonical.rejections)}",
+                evidence={
+                    **accounting_evidence(),
+                    "symbol": str(symbol),
+                    "requested_option_observation_date": target_date.isoformat(),
+                    "strategy": str(strategy),
+                    "canonical_rejections": len(canonical.rejections),
+                },
             )
-        if any(cast(date, row["trade_date"]) != target_date for row in canonical.records):
+        observed_dates = sorted(
+            {cast(date, row["trade_date"]).isoformat() for row in canonical.records}
+        )
+        mismatched_records = sum(
+            cast(date, row["trade_date"]) != target_date for row in canonical.records
+        )
+        if mismatched_records:
+            mismatch_evidence = {
+                **accounting_evidence(),
+                "symbol": str(symbol),
+                "strategy": str(strategy),
+                "requested_option_observation_date": target_date.isoformat(),
+                "observed_option_observation_dates": observed_dates,
+                "mismatched_records": mismatched_records,
+                "provider_filter": "filter[tradetime_from/to]",
+                "provider_filter_is_exact_observation_date": False,
+            }
+            query_by_id[request_identity] = {
+                **query_row,
+                "status": "blocked",
+                "blocker": "blocked_chronology_or_leakage_failure",
+                **mismatch_evidence,
+            }
+            write_receipt("blocked")
             raise ScreenBlocker(
                 "blocked_chronology_or_leakage_failure",
-                "provider did not honor exact option observation date",
+                (
+                    f"requested option observation date {target_date.isoformat()} but "
+                    f"provider returned {','.join(observed_dates)}"
+                ),
+                evidence=mismatch_evidence,
             )
         stored: list[dict[str, Any]] = []
         for row in canonical.records:
@@ -1396,35 +1619,28 @@ def download_bounded_option_gaps(
                 }
             )
         destination = canonical_dir / f"{request_identity}.parquet"
-        write_parquet(destination, pd.DataFrame(stored))
-        query_rows.append(
-            {
-                "request_id": request_identity,
-                "symbol": str(symbol),
-                "option_date": target_date.isoformat(),
-                "strategy": str(strategy),
-                "records": len(stored),
-                "bytes": sum(Path(row.cache_path).stat().st_size for row in result.manifest_rows),
-            }
-        )
-    if downloaded_records > 500_000 or downloaded_bytes > 5 * 1024**3:
+        if stored:
+            write_parquet(destination, pd.DataFrame(stored))
+        query_by_id[request_identity] = {
+            **query_row,
+            "records": len(stored),
+            "status": "complete",
+            "observed_option_observation_dates": observed_dates,
+        }
+        write_receipt("in_progress")
+    if processed_records > 500_000 or processed_bytes > 5 * 1024**3:
+        write_receipt("blocked")
         raise ScreenBlocker(
             "blocked_quick_options_strategy_resource_limit",
             "bounded option download exceeded frozen records or bytes",
+            evidence=accounting_evidence(),
         )
-    write_json(
-        data_dir / "bounded_download_manifest.json",
-        {
-            **SAFETY_FLAGS,
-            "records": downloaded_records,
-            "bytes": downloaded_bytes,
-            "queries": query_rows,
-            "credential_recorded": False,
-        },
-    )
+    write_receipt("completed")
     return {
-        "newly_downloaded_records": downloaded_records,
-        "newly_downloaded_bytes": downloaded_bytes,
+        "processed_provider_records": processed_records,
+        "processed_logical_response_bytes": processed_bytes,
+        "newly_downloaded_records": network_records,
+        "newly_downloaded_bytes": network_bytes,
     }
 
 
@@ -2646,9 +2862,10 @@ def report_text(
         .to_dict()
     )
     blocked = decision.get("primary_blocker") is not None
+    blocker_detail = str(decision.get("blocker_detail") or "unspecified fail-closed blocker")
     decision_summary = (
         "S1, S2, the frozen S2 `2→3→2` veto, and S3 are all marked `blocked`.\n"
-        "The exact option cache is incomplete and no EODHD API token was available.\n"
+        f"The run failed closed before contract construction: {blocker_detail}.\n"
         "Independently, S2 cannot start because the repository has no audited\n"
         "orientation-to-price-direction mapping."
         if blocked
@@ -2671,6 +2888,8 @@ def report_text(
             "All option entries/exits use the prescribed bid/ask sides."
         )
     )
+    experiment_records = int(cache.get("experiment_downloaded_records", 0))
+    complete_receipts = int(cache.get("bounded_complete_queries", 0))
     return f"""# EODHD Fixed Overnight Options Strategy Quick Screen V0
 
 ## Decision
@@ -2699,10 +2918,13 @@ late bar are retained as unavailable rows.
 
 - Required option date rows: {len(required)}.
 - Missing/incomplete strategy-date chains: {len(gaps)}.
-- Existing cached raw provider records (metadata only): {cache["cached_raw_provider_records"]}.
+- Prior cached contract-history provider records: {cache["cached_raw_provider_records"]}.
+- Experiment-specific bounded provider records acquired: {experiment_records}.
+- Experiment-specific complete exact-date query receipts: {complete_receipts}.
 - Safe canonical pre-boundary option observations: {cache["canonical_pre_boundary_records"]}.
-- Newly downloaded records: {cache["newly_downloaded_records"]}.
-- Newly downloaded bytes: {cache["newly_downloaded_bytes"]}.
+- Current invocation network records: {cache["newly_downloaded_records"]}.
+- Current invocation network bytes: {cache["newly_downloaded_bytes"]}.
+- Cumulative bounded logical response bytes: {cache.get("experiment_downloaded_bytes", 0)}.
 
 Contract histories whose OCC expiry could cross the protected boundary were
 not opened. No contract was reselected, replaced, or forward-filled.
@@ -2876,12 +3098,25 @@ def run(
             download_outcome["status"] = "completed"
         except ScreenBlocker as error:
             safe_detail = error.detail.replace(token, "[REDACTED]") if token else error.detail
+            safe_evidence = json.loads(
+                json.dumps(error.evidence, default=str).replace(token, "[REDACTED]")
+            )
             forced_blocker = (error.decision, safe_detail)
+            gaps, cache_summary, quote_integrity, canonical_options = inspect_existing_option_cache(
+                required, options_cache
+            )
+            cache_summary["newly_downloaded_records"] = int(
+                safe_evidence.get("current_invocation_network_records", 0)
+            )
+            cache_summary["newly_downloaded_bytes"] = int(
+                safe_evidence.get("current_invocation_network_bytes", 0)
+            )
             download_outcome.update(
                 {
                     "status": "blocked",
                     "blocker": error.decision,
                     "detail": safe_detail,
+                    "evidence": safe_evidence,
                 }
             )
     (

@@ -3,7 +3,7 @@
   "additional_blockers": [
     "blocked_direction_mapping_unavailable"
   ],
-  "blocker_detail": "exact bounded option chains are missing and EODHD_API_TOKEN is unavailable",
+  "blocker_detail": "requested option observation date 2024-10-08 but provider returned 2024-10-08,2024-10-10",
   "broker_integration_required": false,
   "daily_option_high_low_used": false,
   "execution_enabled": false,
@@ -12,8 +12,8 @@
   "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
   "options_data_granularity": "end_of_day",
   "order_placement": "disabled",
-  "overall_decision": "blocked_missing_eodhd_api_token",
-  "primary_blocker": "blocked_missing_eodhd_api_token",
+  "overall_decision": "blocked_chronology_or_leakage_failure",
+  "primary_blocker": "blocked_chronology_or_leakage_failure",
   "prospective_validation": false,
   "research_only": true,
   "retrospective_options_strategy_screen": true,
@@ -30,9 +30,9 @@
   "stock_signal_time": "15:30 America/New_York",
   "strategy_promotion": false,
   "strategy_status_reasons": {
-    "S1": "blocked_missing_eodhd_api_token",
+    "S1": "blocked_chronology_or_leakage_failure",
     "S2": "blocked_direction_mapping_unavailable",
     "S2_hidden_veto": "blocked_direction_mapping_unavailable",
-    "S3": "blocked_missing_eodhd_api_token"
+    "S3": "blocked_chronology_or_leakage_failure"
   }
 }

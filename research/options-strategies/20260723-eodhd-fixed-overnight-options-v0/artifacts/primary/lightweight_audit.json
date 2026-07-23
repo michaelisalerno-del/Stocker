@@ -6,17 +6,17 @@
   "checks": {
     "atm_strike_selection": {
       "applicability": "not_applicable_blocked_before_contract_selection",
-      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "commissions": {
       "applicability": "not_applicable_blocked_before_contract_selection",
-      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "contract_multipliers": {
       "applicability": "not_applicable_blocked_before_contract_selection",
-      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "corporate_action_exclusions": {
@@ -31,12 +31,12 @@
     },
     "decision_logic": {
       "applicability": "applicable",
-      "detail": "expected=blocked_missing_eodhd_api_token, observed=blocked_missing_eodhd_api_token",
+      "detail": "expected=blocked_chronology_or_leakage_failure, observed=blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "delta_spread_leg_selection": {
       "applicability": "not_applicable_blocked_before_contract_selection",
-      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "determinism": {
@@ -51,22 +51,22 @@
     },
     "dte_calculation": {
       "applicability": "not_applicable_blocked_before_contract_selection",
-      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "entry_exit_bid_ask_sides": {
       "applicability": "not_applicable_blocked_before_contract_selection",
-      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "expiry_intrinsic_values": {
       "applicability": "not_applicable_blocked_before_contract_selection",
-      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "fail_closed_primary_blocker": {
       "applicability": "applicable",
-      "detail": "primary_blocker=blocked_missing_eodhd_api_token",
+      "detail": "primary_blocker=blocked_chronology_or_leakage_failure",
       "passed": true
     },
     "frozen_route_state_reconstruction": {
@@ -101,7 +101,12 @@
     },
     "protected_boundary": {
       "applicability": "applicable",
-      "detail": "no market or option record dated 2025-08-23 or later",
+      "detail": "no market or option record dated 2025-08-23 or later; bounded_raw_records_checked=3530",
+      "passed": true
+    },
+    "provider_observation_date_chronology_blocker": {
+      "applicability": "applicable",
+      "detail": "{\n  \"accepted_observation_date_mismatch_records\": 1,\n  \"last_trade_filter_mismatch_records\": 1,\n  \"manifest_rows\": 143,\n  \"observed_dates\": [\n    \"2024-10-10\"\n  ],\n  \"protected_observation_rows\": 0,\n  \"raw_records_checked\": 3530,\n  \"requested_dates\": [\n    \"2024-10-08\"\n  ]\n}",
       "passed": true
     },
     "required_artifacts": {
@@ -116,7 +121,7 @@
     },
     "strategy_specific_chain_coverage": {
       "applicability": "applicable",
-      "detail": "expected_missing=5786, observed_missing=5786",
+      "detail": "expected_missing=5644, observed_missing=5644",
       "passed": true
     },
     "whole_session_bootstrap": {

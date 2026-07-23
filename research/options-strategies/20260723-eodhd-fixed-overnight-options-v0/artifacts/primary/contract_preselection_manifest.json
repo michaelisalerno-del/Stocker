@@ -42,12 +42,12 @@
     "strike_rule": "same_frozen_atm_rule_as_S1"
   },
   "achieved_pnl_claimed": false,
-  "blocker": "blocked_missing_eodhd_api_token",
+  "blocker": "blocked_chronology_or_leakage_failure",
   "broker_integration_required": false,
   "contract_selection_date_rule": "exact_previous_us_trading_session_D_minus_1",
   "daily_option_high_low_used": false,
   "execution_enabled": false,
-  "incomplete_strategy_date_chains": 5786,
+  "incomplete_strategy_date_chains": 5644,
   "intraday_option_fill_simulated": false,
   "older_chain_forward_filled": false,
   "option_entry_time_proxy": "same_session_end_of_day_quote",
@@ -64,5 +64,5 @@
   "selected_contracts": 0,
   "stock_signal_time": "15:30 America/New_York",
   "strategy_promotion": false,
-  "unique_incomplete_symbol_dates": 2893
+  "unique_incomplete_symbol_dates": 2822
 }

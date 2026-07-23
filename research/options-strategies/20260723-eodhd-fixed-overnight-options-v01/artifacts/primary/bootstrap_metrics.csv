@@ -1,0 +1,7 @@
+statistic,level,lower,upper,draws,seed
+s1_mean_return_on_debit,0.8,-0.127287917766306,-0.0945253373107262,10,20260723
+s1_mean_return_on_debit,0.9,-0.1287738781318,-0.0927707114912802,10,20260723
+s1_mean_return_on_debit,0.95,-0.129516858314547,-0.0918933985815571,10,20260723
+s1_matched_control_excess,0.8,,,10,20260723
+s1_matched_control_excess,0.9,,,10,20260723
+s1_matched_control_excess,0.95,,,10,20260723

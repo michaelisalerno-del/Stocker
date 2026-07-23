@@ -1,0 +1,5 @@
+strategy,period,trades,matched_trades,coverage,claim_coverage_passed,matched_control_excess,status,blocker
+S1,assessment,196,0,0,False,,not_supported,
+S2_ALL,assessment,,,,False,,blocked_direction_mapping_unavailable,blocked_direction_mapping_unavailable
+S2_VETO,assessment,,,,False,,blocked_direction_mapping_unavailable,blocked_direction_mapping_unavailable
+S3,assessment,0,0,0,False,,insufficient_support,

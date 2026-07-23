@@ -1,0 +1,195 @@
+{
+  "achieved_pnl_claimed": false,
+  "audit_stage": "independent",
+  "auditor_reused_runner_decision_logic": false,
+  "broker_integration_required": false,
+  "checks": {
+    "atm_strike_selection": {
+      "applicability": "applicable",
+      "detail": "nearest common D-1 ATM pair and frozen tie-break independently rebuilt",
+      "passed": true
+    },
+    "cached_response_recovery_and_no_redundant_download": {
+      "applicability": "applicable",
+      "detail": "cached_examined=5786, network_considered=0",
+      "passed": true
+    },
+    "commission_sensitivity": {
+      "applicability": "applicable",
+      "detail": "four contract-sides at $1.00 independently recomputed",
+      "passed": true
+    },
+    "commissions": {
+      "applicability": "applicable",
+      "detail": "four contract-sides at $0.75 independently recomputed",
+      "passed": true
+    },
+    "concentration_gates": {
+      "applicability": "applicable",
+      "detail": "stock, 30% month, and top-5%-P&L gates independently recomputed",
+      "passed": true
+    },
+    "contract_multipliers": {
+      "applicability": "applicable",
+      "detail": "all constructed contracts use independently parsed standard multiplier 100",
+      "passed": true
+    },
+    "corporate_action_exclusions": {
+      "applicability": "applicable",
+      "detail": "signal- or exit-session split-boundary rows cannot enter option requirements",
+      "passed": true
+    },
+    "dates_cohort_and_one_row_per_regular_session": {
+      "applicability": "applicable",
+      "detail": "observed_rows=8240, expected_rows=8240",
+      "passed": true
+    },
+    "decision_logic": {
+      "applicability": "applicable",
+      "detail": "expected=no_eodhd_options_strategy_feasibility, observed=no_eodhd_options_strategy_feasibility",
+      "passed": true
+    },
+    "delta_spread_leg_selection": {
+      "applicability": "not_applicable_direction_mapping_unavailable",
+      "detail": "not applicable: S2 was rejected before contract selection by the direction map gate",
+      "passed": true
+    },
+    "determinism": {
+      "applicability": "applicable",
+      "detail": "signals, selections, trade identities, quotes, P&L, and decision agree",
+      "passed": true
+    },
+    "direction_eligibility_and_mapping_rejection": {
+      "applicability": "applicable",
+      "detail": "no audited orientation-to-price direction mapping; S2 rejected",
+      "passed": true
+    },
+    "dte_calculation": {
+      "applicability": "applicable",
+      "detail": "recomputed from entry/expiry dates",
+      "passed": true
+    },
+    "eligible_trade_population": {
+      "applicability": "applicable",
+      "detail": "expected_trade_ids=395, observed_trade_ids=395",
+      "passed": true
+    },
+    "entry_exit_bid_ask_sides": {
+      "applicability": "applicable",
+      "detail": "recomputed from reloaded source entry asks and exit bids",
+      "passed": true
+    },
+    "exact_requested_date_filtering_and_cached_recovery": {
+      "applicability": "applicable",
+      "detail": "requests=5786, extra_discarded=8594",
+      "passed": true
+    },
+    "expiration_metadata_not_observation_date": {
+      "applicability": "applicable",
+      "detail": "post-boundary expiration metadata allowed; observation maximum=2025-08-22",
+      "passed": true
+    },
+    "expiry_intrinsic_values": {
+      "applicability": "applicable",
+      "detail": "S3 call/put settlement and secondary intrinsic independently recomputed",
+      "passed": true
+    },
+    "frozen_route_state_reconstruction": {
+      "applicability": "applicable",
+      "detail": "label_mismatches=0",
+      "passed": true
+    },
+    "implementation_identity": {
+      "applicability": "applicable",
+      "detail": "runner, auditor, contract, and reusable module hashes agree",
+      "passed": true
+    },
+    "matched_controls_and_veto": {
+      "applicability": "applicable",
+      "detail": "matching keys, no-signal pool, control identities, returns, and S2 veto verified; discrepancies=0",
+      "passed": true
+    },
+    "no_daily_option_high_low": {
+      "applicability": "applicable",
+      "detail": "analytical option artifacts contain no option high/low fields",
+      "passed": true
+    },
+    "ordinal_72_signal_timing": {
+      "applicability": "applicable",
+      "detail": "available_rows=7786",
+      "passed": true
+    },
+    "previous_close_state_and_development_iv_filter": {
+      "applicability": "applicable",
+      "detail": "D-1 state, 2024 stock medians/quartiles, cheap-IV, and construction rebuilt",
+      "passed": true
+    },
+    "previous_session_contract_preselection_and_no_same_close_selection": {
+      "applicability": "applicable",
+      "detail": "required_option_date_rows=6864",
+      "passed": true
+    },
+    "protected_boundary": {
+      "applicability": "applicable",
+      "detail": "no market or option observation dated 2025-08-23 or later",
+      "passed": true
+    },
+    "quote_integrity_rejection_provenance": {
+      "applicability": "applicable",
+      "detail": "every selected pair has a source-linked construction or rejection summary; discrepancies=0",
+      "passed": true
+    },
+    "required_artifacts": {
+      "applicability": "applicable",
+      "detail": "missing=[]",
+      "passed": true
+    },
+    "scientific_and_execution_boundary": {
+      "applicability": "applicable",
+      "detail": "exact frozen flags",
+      "passed": true
+    },
+    "selection_population_and_signal_lineage": {
+      "applicability": "applicable",
+      "detail": "expected_selections=15520, observed_selections=15520",
+      "passed": true
+    },
+    "source_option_quote_lineage": {
+      "applicability": "applicable",
+      "detail": "complete_source_option_rows=144283",
+      "passed": true
+    },
+    "strategy_specific_chain_coverage": {
+      "applicability": "applicable",
+      "detail": "expected_missing=2781, observed_missing=2781",
+      "passed": true
+    },
+    "whole_session_bootstrap": {
+      "applicability": "applicable",
+      "detail": "all ten fixed-seed session-bootstrap intervals independently rebuilt",
+      "passed": true
+    }
+  },
+  "contract_expiration_may_cross_protected_boundary": true,
+  "daily_option_high_low_used": false,
+  "directional_strategy_requires_audited_mapping": true,
+  "exact_observation_date_filtering": true,
+  "execution_enabled": false,
+  "extra_provider_dates_discarded_before_materialisation": true,
+  "failures": [],
+  "intraday_option_fill_simulated": false,
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "passed": true,
+  "prospective_validation": false,
+  "protected_boundary_applied_to_observation_date": true,
+  "repair_version": "v0.1",
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "stock_signal_time": "15:30 America/New_York",
+  "strategies_evaluated_independently": true,
+  "strategy_promotion": false,
+  "trade_dependent_checks_explained_as_not_applicable": false
+}

@@ -1,0 +1,40 @@
+{
+  "achieved_pnl_claimed": false,
+  "broker_integration_required": false,
+  "contract_expiration_may_cross_protected_boundary": true,
+  "credentials_recorded": false,
+  "daily_option_high_low_used": false,
+  "directional_strategy_requires_audited_mapping": true,
+  "exact_observation_date_filtering": true,
+  "execution_enabled": false,
+  "extra_provider_dates_discarded_before_materialisation": true,
+  "frozen_strategy_rules_changed": false,
+  "intraday_option_fill_simulated": false,
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "predecessor": {
+    "experiment": "EODHD Fixed Overnight Options Strategy Quick Screen V0",
+    "lineage_sha": "bb7b0a5d13a7b711008f3a7598cf5e4d3a579a09",
+    "overall_decision": "blocked_chronology_or_leakage_failure",
+    "path": "research/options-strategies/20260723-eodhd-fixed-overnight-options-v0",
+    "trade_or_pnl_calculated": false
+  },
+  "prospective_validation": false,
+  "protected_boundary_applied_to_observation_date": true,
+  "repair_version": "v0.1",
+  "repairs": [
+    "filter each raw provider response to the exact requested observation date before canonical materialisation",
+    "audit rather than globally block harmless additional provider dates",
+    "audit provider DTE disagreements and retain the frozen calendar-date DTE calculation",
+    "discard individual rows without verifiable bid/ask timestamps before canonicalisation",
+    "apply the protected boundary to quote observations rather than contract-expiration metadata",
+    "evaluate S1 and S3 independently while S2 remains blocked without an audited direction mapping"
+  ],
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "stock_signal_time": "15:30 America/New_York",
+  "strategies_evaluated_independently": true,
+  "strategy_promotion": false
+}

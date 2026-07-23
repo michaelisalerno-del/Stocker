@@ -1,0 +1,2 @@
+period,s2_all_trades,s2_veto_trades,mean_return_increment,win_rate_increment,positive_assessment_months,veto_passed,status,blocker
+assessment,,,,,,False,blocked_direction_mapping_unavailable,blocked_direction_mapping_unavailable

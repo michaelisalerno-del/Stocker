@@ -1,0 +1,5 @@
+strategy,period,maximum_stock_share,maximum_month_share,top_5pct_positive_pnl_contribution,concentration_gate_passed,status,blocker
+S1,assessment,0.127551020408163,0.193877551020408,0.905527456647399,True,not_supported,
+S2_ALL,assessment,,,,False,blocked_direction_mapping_unavailable,blocked_direction_mapping_unavailable
+S2_VETO,assessment,,,,False,blocked_direction_mapping_unavailable,blocked_direction_mapping_unavailable
+S3,assessment,,,,False,insufficient_support,

@@ -1,0 +1,49 @@
+{
+  "achieved_pnl_claimed": false,
+  "additional_blockers": [
+    "blocked_direction_mapping_unavailable"
+  ],
+  "blocker_detail": null,
+  "broker_integration_required": false,
+  "contract_expiration_may_cross_protected_boundary": true,
+  "daily_option_high_low_used": false,
+  "directional_strategy_requires_audited_mapping": true,
+  "exact_observation_date_filtering": true,
+  "execution_enabled": false,
+  "extra_provider_dates_discarded_before_materialisation": true,
+  "intraday_option_fill_simulated": false,
+  "matched_controls_executed": {
+    "S1": true,
+    "S3": false
+  },
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "overall_decision": "no_eodhd_options_strategy_feasibility",
+  "primary_blocker": null,
+  "prospective_validation": false,
+  "protected_boundary_applied_to_observation_date": true,
+  "repair_version": "v0.1",
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "rough_screen_positive": {
+    "S1": false,
+    "S2": false,
+    "S2_hidden_veto": false,
+    "S3": false
+  },
+  "s1_overnight_straddle_status": "not_supported",
+  "s2_directional_spread_status": "blocked_direction_mapping_unavailable",
+  "s2_hidden_veto_status": "blocked_direction_mapping_unavailable",
+  "s3_dte1_straddle_status": "insufficient_support",
+  "stock_signal_time": "15:30 America/New_York",
+  "strategies_evaluated_independently": true,
+  "strategy_promotion": false,
+  "strategy_status_reasons": {
+    "S1": "not_supported",
+    "S2": "blocked_direction_mapping_unavailable",
+    "S2_hidden_veto": "blocked_direction_mapping_unavailable",
+    "S3": "insufficient_support"
+  }
+}

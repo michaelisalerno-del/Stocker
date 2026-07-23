@@ -1,0 +1,81 @@
+{
+  "achieved_pnl_claimed": false,
+  "before_network": {
+    "cache_sources_examined": {
+      "fixed-overnight-options-v0": 143,
+      "fixed-overnight-options-v01": 5643
+    },
+    "cached_exact_date_records_recovered": 144283,
+    "cached_responses_examined": 5786,
+    "cached_responses_recovered": 3005,
+    "cached_responses_with_requested_date": 3005,
+    "canonical_rejections": 0,
+    "conflicting_duplicate_groups": 0,
+    "exact_date_records_by_source": {
+      "fixed-overnight-options-v0": 3529,
+      "fixed-overnight-options-v01": 147606
+    },
+    "extra_date_records_discarded": 8594,
+    "post_boundary_records_discarded": 104,
+    "previously_missing_chains_recovered": 1,
+    "protected_option_observations_materialised": 0,
+    "provider_dte_disagreement_records": 13665,
+    "raw_provider_records_examined_by_source": {
+      "fixed-overnight-options-v0": 3530,
+      "fixed-overnight-options-v01": 156199
+    },
+    "unquotable_exact_date_records_discarded": 6852
+  },
+  "broker_integration_required": false,
+  "cache_sources_examined": {
+    "fixed-overnight-options-v0": 143,
+    "fixed-overnight-options-v01": 5643
+  },
+  "cached_exact_date_records_recovered": 144283,
+  "cached_responses_examined": 5786,
+  "cached_responses_recovered": 3005,
+  "cached_responses_with_requested_date": 3005,
+  "canonical_rejections": 0,
+  "conflicting_duplicate_groups": 0,
+  "contract_expiration_may_cross_protected_boundary": true,
+  "daily_option_high_low_used": false,
+  "directional_strategy_requires_audited_mapping": true,
+  "exact_date_records_by_source": {
+    "fixed-overnight-options-v0": 3529,
+    "fixed-overnight-options-v01": 147606
+  },
+  "exact_observation_date_filtering": true,
+  "execution_enabled": false,
+  "extra_date_records_discarded": 8594,
+  "extra_provider_dates_discarded_before_materialisation": true,
+  "initially_unresolved_requests": 0,
+  "intraday_option_fill_simulated": false,
+  "new_logical_requests": 5643,
+  "new_manifest_page_rows": 5643,
+  "new_unique_raw_responses": 2927,
+  "newly_downloaded_logical_bytes": 143531387,
+  "newly_downloaded_records": 156199,
+  "newly_downloaded_unique_raw_bytes": 143319539,
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "post_boundary_records_discarded": 104,
+  "previously_missing_chains_recovered": 1,
+  "prospective_validation": false,
+  "protected_boundary_applied_to_observation_date": true,
+  "protected_option_observations_materialised": 0,
+  "provider_dte_disagreement_records": 13665,
+  "raw_provider_records_examined_by_source": {
+    "fixed-overnight-options-v0": 3530,
+    "fixed-overnight-options-v01": 156199
+  },
+  "remaining_unresolved_requests": 0,
+  "repair_version": "v0.1",
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "stock_signal_time": "15:30 America/New_York",
+  "strategies_evaluated_independently": true,
+  "strategy_promotion": false,
+  "unquotable_exact_date_records_discarded": 6852
+}

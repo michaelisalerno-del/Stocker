@@ -210,17 +210,83 @@ class SetupRequester:
         requests_per_minute: int,
         cache_dir: Path,
         max_attempts: int = 4,
+        maximum_download_bytes: int | None = None,
     ) -> None:
+        if maximum_download_bytes is not None and maximum_download_bytes < 1:
+            raise ValueError("maximum_download_bytes must be positive")
         self.transport = transport
         self.token = token
         self.minimum_interval = 60.0 / float(requests_per_minute)
         self.max_attempts = max_attempts
         self.cache_dir = cache_dir
+        self.maximum_download_bytes = maximum_download_bytes
+        self._download_bytes_accounted = 0
         self.last_request_monotonic: float | None = None
         self.http_requests_attempted = 0
         self.logical_requests_completed = 0
         self.manifest_rows: list[dict[str, object]] = []
         self.last_response_sha256: str | None = None
+
+    def account_cached_bytes(self, response_bytes: int) -> None:
+        """Count a verified resumed response against the same fixed byte ceiling."""
+
+        if response_bytes < 0:
+            raise ValueError("response_bytes must be non-negative")
+        if (
+            self.maximum_download_bytes is not None
+            and self._download_bytes_accounted + response_bytes > self.maximum_download_bytes
+        ):
+            raise OptionsResourceLimitExceeded(
+                "blocked_options_download_resource_limit: download-byte ceiling"
+            )
+        self._download_bytes_accounted += response_bytes
+
+    @staticmethod
+    def _close_response(response: requests.Response) -> None:
+        response.close()
+
+    def _bounded_response_content(self, response: requests.Response) -> bytes:
+        """Stream no more than the remaining setup-response byte allowance."""
+
+        if self.maximum_download_bytes is None:
+            content = response.content
+            self._download_bytes_accounted += len(content)
+            return content
+        remaining = self.maximum_download_bytes - self._download_bytes_accounted
+        content_length_value = response.headers.get("Content-Length")
+        content_length: int | None = None
+        if content_length_value is not None:
+            try:
+                content_length = int(content_length_value)
+            except ValueError:
+                content_length = None
+        if content_length is not None and content_length > remaining:
+            self._close_response(response)
+            raise OptionsResourceLimitExceeded(
+                "blocked_options_download_resource_limit: download-byte ceiling"
+            )
+        chunks: list[bytes] = []
+        consumed = 0
+        chunk_size = max(min(65_536, remaining), 1)
+        for chunk in response.iter_content(chunk_size=chunk_size):
+            if not chunk:
+                continue
+            available = remaining - consumed
+            if len(chunk) > available:
+                self._close_response(response)
+                raise OptionsResourceLimitExceeded(
+                    "blocked_options_download_resource_limit: download-byte ceiling"
+                )
+            chunks.append(bytes(chunk))
+            consumed += len(chunk)
+            self._download_bytes_accounted += len(chunk)
+            if consumed == remaining and content_length is None:
+                self._close_response(response)
+                raise OptionsResourceLimitExceeded(
+                    "blocked_options_download_resource_limit: download-byte ceiling"
+                )
+        self._close_response(response)
+        return b"".join(chunks)
 
     def _cache_response(self, content: bytes) -> tuple[str, Path]:
         response_hash = sha256_bytes(content)
@@ -310,7 +376,7 @@ class SetupRequester:
                 continue
             if response.status_code == 200:
                 try:
-                    content = response.content
+                    content = self._bounded_response_content(response)
                 except (
                     requests.ConnectionError,
                     requests.Timeout,

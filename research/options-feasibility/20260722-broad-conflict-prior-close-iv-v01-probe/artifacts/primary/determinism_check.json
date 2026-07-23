@@ -1,0 +1,12 @@
+{
+  "joined_row_mismatches": 0,
+  "maximum_movement_difference": null,
+  "maximum_option_feature_difference": 0.0,
+  "maximum_probability_difference": null,
+  "models_refit": false,
+  "passed": true,
+  "reason_models_not_refit": "retrieval_feasibility_probe_only",
+  "redownloaded": false,
+  "selected_contract_mismatches": 0,
+  "status": "cached_probe_reconstruction_match"
+}

@@ -86,7 +86,10 @@ def response_page(*, offset: int, limit: int, total: int, ids: list[str]) -> Fak
         }
         for record_id in ids
     ]
-    next_link = "" if offset + len(data) >= total else "https://eodhd.com/api/next"
+    next_offset = offset + len(data)
+    next_link = (
+        "" if next_offset >= total else f"https://eodhd.com/api/next?page%5Boffset%5D={next_offset}"
+    )
     return FakeResponse(
         200,
         {
@@ -95,6 +98,18 @@ def response_page(*, offset: int, limit: int, total: int, ids: list[str]) -> Fak
             "links": {"next": next_link},
         },
     )
+
+
+def response_page_without_total(
+    *, offset: int, limit: int, ids: list[str], has_next: bool
+) -> FakeResponse:
+    response = response_page(offset=offset, limit=limit, total=offset + len(ids), ids=ids)
+    del response.payload["meta"]["total"]
+    next_offset = offset + len(ids)
+    response.payload["links"]["next"] = (
+        f"https://eodhd.com/api/next?page%5Boffset%5D={next_offset}" if has_next else None
+    )
+    return response
 
 
 def test_pagination_hashes_and_caches_every_complete_page(tmp_path: Path) -> None:
@@ -127,6 +142,69 @@ def test_pagination_hashes_and_caches_every_complete_page(tmp_path: Path) -> Non
     assert all(row.response_hash for row in result.manifest_rows)
     assert all(Path(row.cache_path).is_file() for row in result.manifest_rows)
     assert token not in json.dumps([row.to_dict() for row in result.manifest_rows])
+
+
+def test_live_next_link_pagination_without_total_is_complete_and_resumable(
+    tmp_path: Path,
+) -> None:
+    responses = [
+        response_page_without_total(offset=0, limit=2, ids=["one", "two"], has_next=True),
+        response_page_without_total(offset=2, limit=2, ids=["three"], has_next=False),
+    ]
+    request = OptionsRequest(
+        underlying_symbol="AAPL",
+        contract_id="AAPL250117C00200000",
+        compact=False,
+    )
+    first = EODHDOptionsDownloader(
+        DownloadConfig(token="secret", data_dir=tmp_path, page_limit=2),
+        transport=FakeTransport(responses),
+        sleep=lambda _seconds: None,
+    ).download(request)
+
+    resumed_transport = FakeTransport([])
+    resumed = EODHDOptionsDownloader(
+        DownloadConfig(token="secret", data_dir=tmp_path, page_limit=2),
+        transport=resumed_transport,
+        sleep=lambda _seconds: None,
+    ).download(request)
+
+    assert [row["id"] for row in first.records] == ["one", "two", "three"]
+    assert [row["id"] for row in resumed.records] == ["one", "two", "three"]
+    assert resumed_transport.calls == []
+
+
+def test_contract_history_request_uses_only_immutable_contract_filter() -> None:
+    request = OptionsRequest(
+        underlying_symbol="AAPL",
+        contract_id="AAPL250117C00200000",
+        compact=False,
+    )
+
+    params = request.parameters(offset=0, limit=10)
+
+    assert params["filter[contract]"] == "AAPL250117C00200000"
+    assert "filter[underlying_symbol]" not in params
+    assert not any("tradetime" in key for key in params)
+    assert params["compact"] == 0
+
+
+def test_contract_history_request_rejects_conflicting_chain_filters() -> None:
+    with pytest.raises(ValueError, match="contract-history request"):
+        OptionsRequest(
+            underlying_symbol="AAPL",
+            contract_id="AAPL250117C00200000",
+            trade_date_from=date(2025, 1, 2),
+            compact=False,
+        )
+
+
+def test_contract_history_request_requires_resource_ids() -> None:
+    with pytest.raises(ValueError, match="compact=False"):
+        OptionsRequest(
+            underlying_symbol="AAPL",
+            contract_id="AAPL250117C00200000",
+        )
 
 
 def test_completed_download_resumes_from_verified_content_cache(tmp_path: Path) -> None:
@@ -509,6 +587,33 @@ def test_setup_requester_counts_retries_hashes_and_caches_responses(
     assert row["response_hash"] == sha256_bytes(success.content)
     assert Path(str(row["cache_path"])).read_bytes() == success.content
     assert "ephemeral-secret" not in json.dumps(row, sort_keys=True)
+
+
+def test_setup_requester_streams_and_stops_before_byte_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    import download_options
+
+    response = FakeResponse(200, {"data": ["AAPL.US"]})
+    requester = download_options.SetupRequester(
+        FakeTransport([response]),  # type: ignore[arg-type]
+        token="ephemeral-secret",
+        requests_per_minute=60,
+        cache_dir=tmp_path / "raw" / "setup",
+        maximum_download_bytes=len(response.content) - 1,
+    )
+
+    with pytest.raises(OptionsResourceLimitExceeded, match="resource_limit"):
+        requester.get_json(
+            "/mp/unicornbay/options/underlying-symbols",
+            params={"fmt": "json"},
+            timeout=30.0,
+        )
+
+    assert response.closed is True
+    assert requester.manifest_rows == []
+    assert not list((tmp_path / "raw" / "setup").glob("*.json"))
 
 
 def test_setup_requester_rejects_echoed_token_before_cache(

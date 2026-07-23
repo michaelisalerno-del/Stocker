@@ -14,6 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
 from pathlib import Path
 from typing import Any, Final, Protocol, Self, cast
+from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
 SECRET_PARAMETER_NAMES: Final[frozenset[str]] = frozenset({"api_token", "token", "authorization"})
@@ -117,6 +118,7 @@ class OptionsRequest:
     """One deterministic, bounded historical options request chunk."""
 
     underlying_symbol: str
+    contract_id: str | None = None
     trade_date_from: date | None = None
     trade_date_to: date | None = None
     strike_from: float | None = None
@@ -127,6 +129,25 @@ class OptionsRequest:
     compact: bool = True
     endpoint: str = OPTIONS_EOD_ENDPOINT
 
+    def __post_init__(self) -> None:
+        if not self.underlying_symbol.strip():
+            raise ValueError("underlying symbol is required")
+        if self.contract_id is not None:
+            if not self.contract_id.strip():
+                raise ValueError("contract identity cannot be empty")
+            if self.compact:
+                raise ValueError("contract-history request requires compact=False")
+            chain_filters = (
+                self.trade_date_from,
+                self.trade_date_to,
+                self.strike_from,
+                self.strike_to,
+                self.expiration_from,
+                self.expiration_to,
+            )
+            if any(value is not None for value in chain_filters):
+                raise ValueError("contract-history request cannot include chain filters")
+
     def replace(self, **changes: Any) -> Self:
         """Return a copy with explicit field changes."""
 
@@ -136,12 +157,15 @@ class OptionsRequest:
         """Return provider parameters without authentication."""
 
         params: dict[str, object] = {
-            "filter[underlying_symbol]": self.underlying_symbol,
             "page[offset]": offset,
             "page[limit]": limit,
             "compact": int(self.compact),
             "fmt": "json",
         }
+        if self.contract_id is not None:
+            params["filter[contract]"] = self.contract_id
+        else:
+            params["filter[underlying_symbol]"] = self.underlying_symbol
         optional = {
             "filter[tradetime_from]": self.trade_date_from,
             "filter[tradetime_to]": self.trade_date_to,
@@ -150,7 +174,7 @@ class OptionsRequest:
             "filter[exp_date_from]": self.expiration_from,
             "filter[exp_date_to]": self.expiration_to,
         }
-        for key, value in optional.items():
+        for key, value in () if self.contract_id is not None else optional.items():
             if value is not None:
                 params[key] = value.isoformat() if isinstance(value, date) else value
         if self.fields:
@@ -655,6 +679,24 @@ def _date_text(value: date | None) -> str | None:
     return None if value is None else value.isoformat()
 
 
+def _next_page_offset(links: Mapping[str, Any]) -> int | None:
+    next_value = links.get("next")
+    if next_value in {None, ""}:
+        return None
+    if not isinstance(next_value, str):
+        raise OptionsSchemaError("pagination next link is invalid")
+    values = parse_qs(urlparse(next_value).query).get("page[offset]")
+    if values is None or len(values) != 1:
+        raise OptionsSchemaError("pagination next link lacks one offset")
+    try:
+        offset = int(values[0])
+    except ValueError as exc:
+        raise OptionsSchemaError("pagination next-link offset is invalid") from exc
+    if offset < 0:
+        raise OptionsSchemaError("pagination next-link offset is negative")
+    return offset
+
+
 class EODHDOptionsDownloader:
     """Sequential, resumable, content-addressed options EOD downloader."""
 
@@ -864,8 +906,10 @@ class EODHDOptionsDownloader:
             raise OptionsSchemaError("completed request manifest is invalid") from exc
         expected_offset = 0
         expected_total: int | None = None
+        pagination_has_total: bool | None = None
         records: list[dict[str, Any]] = []
-        for row in sorted(rows, key=lambda item: item.offset):
+        ordered_rows = sorted(rows, key=lambda item: item.offset)
+        for row_index, row in enumerate(ordered_rows):
             if row.offset != expected_offset:
                 raise OptionsSchemaError("resumed pagination offsets are not contiguous")
             cache_path = Path(row.cache_path)
@@ -896,20 +940,43 @@ class EODHDOptionsDownloader:
                 _CachedResponse(cast(dict[str, Any], payload_value), content)
             )
             meta = cast(dict[str, Any], payload["meta"])
+            links = cast(dict[str, Any], payload["links"])
             try:
-                total = int(meta["total"])
+                page_offset = int(meta["offset"])
+                page_limit = int(meta["limit"])
             except (KeyError, TypeError, ValueError) as exc:
-                raise OptionsSchemaError("resumed pagination total is invalid") from exc
-            if expected_total is None:
-                expected_total = total
-            elif total != expected_total:
-                raise OptionsSchemaError("resumed pagination total changed")
+                raise OptionsSchemaError("resumed pagination metadata is invalid") from exc
+            if page_offset != row.offset or page_limit < 1:
+                raise OptionsSchemaError("resumed pagination metadata changed")
+            has_total = meta.get("total") is not None
+            if pagination_has_total is None:
+                pagination_has_total = has_total
+            elif pagination_has_total != has_total:
+                raise OptionsSchemaError("resumed pagination mode changed")
+            if has_total:
+                try:
+                    total = int(meta["total"])
+                except (TypeError, ValueError) as exc:
+                    raise OptionsSchemaError("resumed pagination total is invalid") from exc
+                if total < 0:
+                    raise OptionsSchemaError("resumed pagination total is negative")
+                if expected_total is None:
+                    expected_total = total
+                elif total != expected_total:
+                    raise OptionsSchemaError("resumed pagination total changed")
             if len(page_records) != row.record_count:
                 raise OptionsSchemaError("resumed record count differs from manifest")
             records.extend(page_records)
             expected_offset += len(page_records)
-        if expected_total is None or expected_offset != expected_total:
-            raise OptionsSchemaError("resumed download is incomplete")
+            next_offset = _next_page_offset(links)
+            is_final_manifest_page = row_index == len(ordered_rows) - 1
+            if is_final_manifest_page:
+                if next_offset is not None:
+                    raise OptionsSchemaError("resumed download is incomplete")
+                if expected_total is not None and expected_offset != expected_total:
+                    raise OptionsSchemaError("resumed download total is incomplete")
+            elif next_offset != expected_offset:
+                raise OptionsSchemaError("resumed pagination next offset is not contiguous")
         return DownloadResult(records=records, manifest_rows=rows)
 
     def _save_resume(
@@ -972,6 +1039,7 @@ class EODHDOptionsDownloader:
         all_records: list[dict[str, Any]] = []
         manifest: list[RequestManifestRow] = []
         expected_total: int | None = None
+        pagination_has_total: bool | None = None
         while True:
             if offset > self.config.maximum_offset:
                 raise OffsetLimitExceeded(
@@ -1010,12 +1078,26 @@ class EODHDOptionsDownloader:
             try:
                 page_offset = int(meta["offset"])
                 page_limit = int(meta["limit"])
-                total = int(meta["total"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise OptionsSchemaError(
                     "pagination metadata is invalid", manifest_rows=manifest
                 ) from exc
-            if page_offset != offset or page_limit < 1 or total < 0:
+            has_total = meta.get("total") is not None
+            if pagination_has_total is None:
+                pagination_has_total = has_total
+            elif pagination_has_total != has_total:
+                raise OptionsSchemaError(
+                    "pagination mode changed within one request", manifest_rows=manifest
+                )
+            total: int | None = None
+            if has_total:
+                try:
+                    total = int(meta["total"])
+                except (TypeError, ValueError) as exc:
+                    raise OptionsSchemaError(
+                        "pagination total is invalid", manifest_rows=manifest
+                    ) from exc
+            if page_offset != offset or page_limit < 1 or (total is not None and total < 0):
                 raise OptionsSchemaError(
                     "pagination metadata disagrees with request", manifest_rows=manifest
                 )
@@ -1051,34 +1133,45 @@ class EODHDOptionsDownloader:
                     str(error), manifest_rows=[*manifest, current_row]
                 ) from None
             manifest.append(current_row)
-            if expected_total is None:
+            if total is not None and expected_total is None:
                 expected_total = total
                 if total > self.config.maximum_offset + self.config.page_limit:
                     raise OffsetLimitExceeded(
                         "response total exceeds the provider's retrievable offset window",
                         manifest_rows=manifest,
                     )
-            elif total != expected_total:
+            elif total is not None and total != expected_total:
                 raise OptionsSchemaError(
                     "pagination total changed within one request", manifest_rows=manifest
                 )
             all_records.extend(records)
             consumed = offset + len(records)
-            if consumed >= total:
+            try:
+                next_offset = _next_page_offset(links)
+            except OptionsSchemaError as error:
+                error.manifest_rows = manifest
+                raise
+            if total is not None and consumed >= total:
                 if consumed != total:
                     raise OptionsSchemaError(
                         "pagination returned more rows than meta.total",
                         manifest_rows=manifest,
                     )
-                if links.get("next") not in {None, ""}:
+                if next_offset is not None:
                     raise OptionsSchemaError(
                         "final page unexpectedly advertises a next link",
                         manifest_rows=manifest,
                     )
                 break
-            if not records or links.get("next") in {None, ""}:
+            if total is None and next_offset is None:
+                break
+            if not records or next_offset is None:
                 raise OptionsSchemaError(
                     "pagination truncated before meta.total", manifest_rows=manifest
+                )
+            if next_offset != consumed:
+                raise OptionsSchemaError(
+                    "pagination next offset is not contiguous", manifest_rows=manifest
                 )
             offset = consumed
         result = DownloadResult(records=all_records, manifest_rows=manifest)

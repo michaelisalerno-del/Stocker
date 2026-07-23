@@ -1,0 +1,227 @@
+{
+  "experiment": "EODHD Fixed Overnight Options Strategy Quick Screen V0",
+  "contract_version": "0",
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "options_data_granularity": "end_of_day",
+  "stock_signal_time": "15:30 America/New_York",
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "intraday_option_fill_simulated": false,
+  "daily_option_high_low_used": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "prospective_validation": false,
+  "achieved_pnl_claimed": false,
+  "safety": {
+    "research_only": true,
+    "retrospective_options_strategy_screen": true,
+    "options_data_granularity": "end_of_day",
+    "stock_signal_time": "15:30 America/New_York",
+    "option_entry_time_proxy": "same_session_end_of_day_quote",
+    "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+    "intraday_option_fill_simulated": false,
+    "daily_option_high_low_used": false,
+    "execution_enabled": false,
+    "order_placement": "disabled",
+    "broker_integration_required": false,
+    "strategy_promotion": false,
+    "prospective_validation": false,
+    "achieved_pnl_claimed": false
+  },
+  "dates": {
+    "development": ["2024-01-01", "2024-12-31"],
+    "assessment": ["2025-01-01", "2025-08-22"],
+    "protected_start": "2025-08-23"
+  },
+  "frozen_cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "stock_signal": {
+    "completed_five_minute_bar_ordinal": 72,
+    "zero_based_bar_ordinal": 71,
+    "expected_feature_available_time": "15:30 America/New_York",
+    "minimum_complete_five_minute_bars_before_close": 3,
+    "checkpoints": 1
+  },
+  "structures": [
+    {
+      "id": "S1",
+      "name": "overnight_atm_straddle",
+      "signal": "BROAD_CONFLICT and cheap_iv",
+      "entry_dte": [7, 14],
+      "exit": "exact_next_us_session_closing_bid"
+    },
+    {
+      "id": "S2",
+      "name": "overnight_directional_debit_spread",
+      "signal": "frozen_direction_eligibility",
+      "entry_dte": [7, 14],
+      "long_absolute_delta": 0.5,
+      "short_absolute_delta": 0.25,
+      "maximum_absolute_delta_error": 0.1,
+      "exit": "exact_next_us_session_closing_bid_ask"
+    },
+    {
+      "id": "S3",
+      "name": "dte1_atm_straddle",
+      "signal": "BROAD_CONFLICT and cheap_iv",
+      "entry_dte": [1, 1],
+      "primary_exit": "expiration_session_closing_bid",
+      "secondary_diagnostic": "expiry_intrinsic"
+    }
+  ],
+  "directional_veto": {
+    "count": 1,
+    "id": "hidden_2_3_2_prior_6",
+    "comparison": "S2_VETO_minus_S2_ALL"
+  },
+  "causal_contract_preselection": {
+    "selection_date": "exact_previous_us_trading_session",
+    "entry_chain_contract_reselection": false,
+    "forward_fill": false,
+    "same_close_greeks_for_selection": false
+  },
+  "previous_close_options_state": {
+    "fields": [
+      "atm_iv",
+      "straddle_mid_pct",
+      "combined_relative_spread",
+      "combined_open_interest"
+    ],
+    "cheap_iv": "previous_close_atm_iv <= stock_specific_2024_median_atm_iv",
+    "threshold_search": false
+  },
+  "quote_requirements": {
+    "minimum_open_interest_at_selection": 25,
+    "maximum_relative_spread": 0.75,
+    "bid_minimum": 0,
+    "ask_not_below_bid": true,
+    "midpoint_positive": true,
+    "adjusted_or_ambiguous_contracts_rejected": true
+  },
+  "costs": {
+    "primary_commission_per_contract_per_side_per_leg_usd": 0.75,
+    "sensitivity_commission_per_contract_per_side_per_leg_usd": 1.0,
+    "market_impact_beyond_bid_ask": false,
+    "returns_annualised": false
+  },
+  "matched_controls": {
+    "maximum_controls": 5,
+    "minimum_controls_for_match": 3,
+    "claim_minimum_coverage": 0.7,
+    "keys": [
+      "stock",
+      "calendar_month",
+      "weekday",
+      "entry_dte_bin",
+      "previous_close_atm_iv_development_quartile"
+    ],
+    "future_returns_used_for_matching": false
+  },
+  "quick_screen_concentration_gates": {
+    "maximum_month_trade_share": 0.3,
+    "top_5pct_positive_pnl_contribution_must_be_below": 1.0,
+    "source": "frozen_repository_concentration_convention",
+    "threshold_search": false
+  },
+  "bootstrap": {
+    "draws": 10,
+    "seed": 20260723,
+    "unit": "whole_signal_session",
+    "contract_reconstruction_inside_draw": false,
+    "interval_levels": [0.8, 0.9, 0.95]
+  },
+  "resource_limits": {
+    "processes": 1,
+    "n_jobs": 1,
+    "gpu": false,
+    "stocks": 20,
+    "stock_signal_checkpoints": 1,
+    "option_structures": 3,
+    "directional_veto_rules": 1,
+    "maximum_session_bootstrap_draws": 10,
+    "maximum_plots": 2,
+    "maximum_new_option_records": 500000,
+    "maximum_additional_raw_download_bytes": 5368709120,
+    "strike_search": false,
+    "dte_search": false,
+    "delta_search": false,
+    "holding_period_search": false,
+    "stop_or_target_search": false,
+    "model_fitting": false,
+    "strategy_optimiser": false,
+    "full_repository_test_suite": false
+  },
+  "support_gates": {
+    "S1": {
+      "minimum_assessment_trades": 60,
+      "minimum_sessions": 40,
+      "minimum_stocks": 10,
+      "minimum_months": 5,
+      "maximum_stock_share": 0.2
+    },
+    "S2": {
+      "minimum_all_trades": 80,
+      "minimum_veto_trades": 50,
+      "minimum_sessions": 50,
+      "minimum_stocks": 10,
+      "minimum_months": 5,
+      "minimum_bullish": 20,
+      "minimum_bearish": 20
+    },
+    "S3": {
+      "minimum_assessment_trades": 40,
+      "minimum_sessions": 30,
+      "minimum_stocks": 8,
+      "minimum_months": 4,
+      "maximum_stock_share": 0.25
+    }
+  },
+  "allowed_strategy_statuses": [
+    "supported",
+    "descriptive_only",
+    "not_supported",
+    "insufficient_support",
+    "blocked"
+  ],
+  "allowed_overall_decisions": [
+    "multiple_eodhd_options_strategies_show_feasibility",
+    "overnight_straddle_feasible_only",
+    "directional_debit_spread_feasible_only",
+    "dte1_straddle_feasible_only",
+    "hidden_diversion_veto_improves_directional_spreads",
+    "descriptive_options_strategy_results_only",
+    "no_eodhd_options_strategy_feasibility",
+    "blocked_missing_eodhd_api_token",
+    "blocked_insufficient_options_cache",
+    "blocked_direction_mapping_unavailable",
+    "blocked_options_contract_reconstruction_failure",
+    "blocked_options_quote_integrity_failure",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_quick_options_strategy_resource_limit",
+    "blocked_reproducibility_or_audit_failure"
+  ]
+}

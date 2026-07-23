@@ -1,0 +1,246 @@
+{
+  "achieved_pnl_claimed": false,
+  "allowed_overall_decisions": [
+    "multiple_eodhd_options_strategies_show_feasibility",
+    "overnight_straddle_feasible_only",
+    "directional_debit_spread_feasible_only",
+    "dte1_straddle_feasible_only",
+    "hidden_diversion_veto_improves_directional_spreads",
+    "descriptive_options_strategy_results_only",
+    "no_eodhd_options_strategy_feasibility",
+    "blocked_missing_eodhd_api_token",
+    "blocked_insufficient_options_cache",
+    "blocked_direction_mapping_unavailable",
+    "blocked_options_contract_reconstruction_failure",
+    "blocked_options_quote_integrity_failure",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_quick_options_strategy_resource_limit",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "allowed_strategy_statuses": [
+    "supported",
+    "descriptive_only",
+    "not_supported",
+    "insufficient_support",
+    "blocked"
+  ],
+  "bootstrap": {
+    "contract_reconstruction_inside_draw": false,
+    "draws": 10,
+    "interval_levels": [
+      0.8,
+      0.9,
+      0.95
+    ],
+    "seed": 20260723,
+    "unit": "whole_signal_session"
+  },
+  "broker_integration_required": false,
+  "causal_contract_preselection": {
+    "entry_chain_contract_reselection": false,
+    "forward_fill": false,
+    "same_close_greeks_for_selection": false,
+    "selection_date": "exact_previous_us_trading_session"
+  },
+  "contract_version": "0",
+  "costs": {
+    "market_impact_beyond_bid_ask": false,
+    "primary_commission_per_contract_per_side_per_leg_usd": 0.75,
+    "returns_annualised": false,
+    "sensitivity_commission_per_contract_per_side_per_leg_usd": 1.0
+  },
+  "daily_option_high_low_used": false,
+  "dates": {
+    "assessment": [
+      "2025-01-01",
+      "2025-08-22"
+    ],
+    "development": [
+      "2024-01-01",
+      "2024-12-31"
+    ],
+    "protected_start": "2025-08-23"
+  },
+  "directional_veto": {
+    "comparison": "S2_VETO_minus_S2_ALL",
+    "count": 1,
+    "id": "hidden_2_3_2_prior_6"
+  },
+  "execution_enabled": false,
+  "experiment": "EODHD Fixed Overnight Options Strategy Quick Screen V0",
+  "frozen_cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "intraday_option_fill_simulated": false,
+  "matched_controls": {
+    "claim_minimum_coverage": 0.7,
+    "future_returns_used_for_matching": false,
+    "keys": [
+      "stock",
+      "calendar_month",
+      "weekday",
+      "entry_dte_bin",
+      "previous_close_atm_iv_development_quartile"
+    ],
+    "maximum_controls": 5,
+    "minimum_controls_for_match": 3
+  },
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "previous_close_options_state": {
+    "cheap_iv": "previous_close_atm_iv <= stock_specific_2024_median_atm_iv",
+    "fields": [
+      "atm_iv",
+      "straddle_mid_pct",
+      "combined_relative_spread",
+      "combined_open_interest"
+    ],
+    "threshold_search": false
+  },
+  "prospective_validation": false,
+  "quick_screen_concentration_gates": {
+    "maximum_month_trade_share": 0.3,
+    "source": "frozen_repository_concentration_convention",
+    "threshold_search": false,
+    "top_5pct_positive_pnl_contribution_must_be_below": 1.0
+  },
+  "quote_requirements": {
+    "adjusted_or_ambiguous_contracts_rejected": true,
+    "ask_not_below_bid": true,
+    "bid_minimum": 0,
+    "maximum_relative_spread": 0.75,
+    "midpoint_positive": true,
+    "minimum_open_interest_at_selection": 25
+  },
+  "research_only": true,
+  "resource_limits": {
+    "delta_search": false,
+    "directional_veto_rules": 1,
+    "dte_search": false,
+    "full_repository_test_suite": false,
+    "gpu": false,
+    "holding_period_search": false,
+    "maximum_additional_raw_download_bytes": 5368709120,
+    "maximum_new_option_records": 500000,
+    "maximum_plots": 2,
+    "maximum_session_bootstrap_draws": 10,
+    "model_fitting": false,
+    "n_jobs": 1,
+    "option_structures": 3,
+    "processes": 1,
+    "stock_signal_checkpoints": 1,
+    "stocks": 20,
+    "stop_or_target_search": false,
+    "strategy_optimiser": false,
+    "strike_search": false
+  },
+  "retrospective_options_strategy_screen": true,
+  "safety": {
+    "achieved_pnl_claimed": false,
+    "broker_integration_required": false,
+    "daily_option_high_low_used": false,
+    "execution_enabled": false,
+    "intraday_option_fill_simulated": false,
+    "option_entry_time_proxy": "same_session_end_of_day_quote",
+    "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+    "options_data_granularity": "end_of_day",
+    "order_placement": "disabled",
+    "prospective_validation": false,
+    "research_only": true,
+    "retrospective_options_strategy_screen": true,
+    "stock_signal_time": "15:30 America/New_York",
+    "strategy_promotion": false
+  },
+  "stock_signal": {
+    "checkpoints": 1,
+    "completed_five_minute_bar_ordinal": 72,
+    "expected_feature_available_time": "15:30 America/New_York",
+    "minimum_complete_five_minute_bars_before_close": 3,
+    "zero_based_bar_ordinal": 71
+  },
+  "stock_signal_time": "15:30 America/New_York",
+  "strategy_promotion": false,
+  "structures": [
+    {
+      "entry_dte": [
+        7,
+        14
+      ],
+      "exit": "exact_next_us_session_closing_bid",
+      "id": "S1",
+      "name": "overnight_atm_straddle",
+      "signal": "BROAD_CONFLICT and cheap_iv"
+    },
+    {
+      "entry_dte": [
+        7,
+        14
+      ],
+      "exit": "exact_next_us_session_closing_bid_ask",
+      "id": "S2",
+      "long_absolute_delta": 0.5,
+      "maximum_absolute_delta_error": 0.1,
+      "name": "overnight_directional_debit_spread",
+      "short_absolute_delta": 0.25,
+      "signal": "frozen_direction_eligibility"
+    },
+    {
+      "entry_dte": [
+        1,
+        1
+      ],
+      "id": "S3",
+      "name": "dte1_atm_straddle",
+      "primary_exit": "expiration_session_closing_bid",
+      "secondary_diagnostic": "expiry_intrinsic",
+      "signal": "BROAD_CONFLICT and cheap_iv"
+    }
+  ],
+  "support_gates": {
+    "S1": {
+      "maximum_stock_share": 0.2,
+      "minimum_assessment_trades": 60,
+      "minimum_months": 5,
+      "minimum_sessions": 40,
+      "minimum_stocks": 10
+    },
+    "S2": {
+      "minimum_all_trades": 80,
+      "minimum_bearish": 20,
+      "minimum_bullish": 20,
+      "minimum_months": 5,
+      "minimum_sessions": 50,
+      "minimum_stocks": 10,
+      "minimum_veto_trades": 50
+    },
+    "S3": {
+      "maximum_stock_share": 0.25,
+      "minimum_assessment_trades": 40,
+      "minimum_months": 4,
+      "minimum_sessions": 30,
+      "minimum_stocks": 8
+    }
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "achieved_pnl_claimed": false,
+  "audit_stage": "independent",
+  "auditor_reused_runner_decision_logic": false,
+  "broker_integration_required": false,
+  "checks": {
+    "atm_strike_selection": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "commissions": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "contract_multipliers": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "corporate_action_exclusions": {
+      "applicability": "applicable",
+      "detail": "signal- or exit-session split-boundary rows cannot enter option requirements",
+      "passed": true
+    },
+    "dates_cohort_and_one_row_per_regular_session": {
+      "applicability": "applicable",
+      "detail": "observed_rows=8240, expected_rows=8240",
+      "passed": true
+    },
+    "decision_logic": {
+      "applicability": "applicable",
+      "detail": "expected=blocked_missing_eodhd_api_token, observed=blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "delta_spread_leg_selection": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "determinism": {
+      "applicability": "applicable",
+      "detail": "signals, selections, trade identities, quotes, P&L, and decision agree",
+      "passed": true
+    },
+    "direction_eligibility_and_mapping_rejection": {
+      "applicability": "applicable",
+      "detail": "no audited orientation-to-price direction mapping; S2 rejected",
+      "passed": true
+    },
+    "dte_calculation": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "entry_exit_bid_ask_sides": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "expiry_intrinsic_values": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "not applicable: the run failed closed before contract construction with blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "fail_closed_primary_blocker": {
+      "applicability": "applicable",
+      "detail": "primary_blocker=blocked_missing_eodhd_api_token",
+      "passed": true
+    },
+    "frozen_route_state_reconstruction": {
+      "applicability": "applicable",
+      "detail": "label_mismatches=0",
+      "passed": true
+    },
+    "implementation_identity": {
+      "applicability": "applicable",
+      "detail": "runner, auditor, contract, and reusable module hashes agree",
+      "passed": true
+    },
+    "matched_controls_and_veto": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "no matched-control or veto claim emitted without constructed trades",
+      "passed": true
+    },
+    "no_daily_option_high_low": {
+      "applicability": "applicable",
+      "detail": "analytical option artifacts contain no option high/low fields",
+      "passed": true
+    },
+    "ordinal_72_signal_timing": {
+      "applicability": "applicable",
+      "detail": "available_rows=7786",
+      "passed": true
+    },
+    "previous_session_contract_preselection_and_no_same_close_selection": {
+      "applicability": "applicable",
+      "detail": "required_option_date_rows=6864",
+      "passed": true
+    },
+    "protected_boundary": {
+      "applicability": "applicable",
+      "detail": "no market or option record dated 2025-08-23 or later",
+      "passed": true
+    },
+    "required_artifacts": {
+      "applicability": "applicable",
+      "detail": "missing=[]",
+      "passed": true
+    },
+    "scientific_and_execution_boundary": {
+      "applicability": "applicable",
+      "detail": "exact frozen flags",
+      "passed": true
+    },
+    "strategy_specific_chain_coverage": {
+      "applicability": "applicable",
+      "detail": "expected_missing=5786, observed_missing=5786",
+      "passed": true
+    },
+    "whole_session_bootstrap": {
+      "applicability": "not_applicable_blocked_before_contract_selection",
+      "detail": "exactly ten draws frozen; no interval inferred from zero trades",
+      "passed": true
+    }
+  },
+  "daily_option_high_low_used": false,
+  "execution_enabled": false,
+  "failures": [],
+  "intraday_option_fill_simulated": false,
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "passed": true,
+  "prospective_validation": false,
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "stock_signal_time": "15:30 America/New_York",
+  "strategy_promotion": false,
+  "trade_dependent_checks_explained_as_not_applicable": true
+}

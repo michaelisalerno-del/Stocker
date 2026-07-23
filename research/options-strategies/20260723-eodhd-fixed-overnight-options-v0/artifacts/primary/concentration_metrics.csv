@@ -1,0 +1,5 @@
+strategy,period,maximum_stock_share,maximum_month_share,top_5pct_positive_pnl_contribution,concentration_gate_passed,status,blocker
+S1,assessment,,,,False,blocked,blocked_missing_eodhd_api_token
+S2_ALL,assessment,,,,False,blocked,blocked_missing_eodhd_api_token
+S2_VETO,assessment,,,,False,blocked,blocked_missing_eodhd_api_token
+S3,assessment,,,,False,blocked,blocked_missing_eodhd_api_token

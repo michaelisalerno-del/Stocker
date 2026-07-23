@@ -1,0 +1,35 @@
+{
+  "achieved_pnl_claimed": false,
+  "audited_mapping": {},
+  "audited_orientation_to_price_direction_mapping_available": false,
+  "broker_integration_required": false,
+  "daily_option_high_low_used": false,
+  "direction_invented": false,
+  "directional_strategy_blocker": "blocked_direction_mapping_unavailable",
+  "evidence": [
+    {
+      "path": "research/route-competition/20260722-route-competition-hazard-quick-v0/contract.json",
+      "sha256": "f8767a4be81b3f3b9d6bc3238b439c43d0b45b0ff38a4825044c6500a94fa97c"
+    },
+    {
+      "path": "research/registered-loop-routes/20260722-hidden-loop-competing-routes-v0/contract.json",
+      "sha256": "d50b4e99d17a26fd5050ba190ee9dcd16ff823e63b477aeeee782950f5e56a33"
+    },
+    {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260718-loop-event-semantics-v2/primary/implementation_census.csv",
+      "sha256": "8987533988299459afb21e96a9de32f5e8ef23020395bc6841c0caa5c004d12f"
+    }
+  ],
+  "execution_enabled": false,
+  "intraday_option_fill_simulated": false,
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "prospective_validation": false,
+  "reason": "frozen orientation IDs encode structural path orientation; no audited artifact maps them one-to-one to bullish or bearish price direction",
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "stock_signal_time": "15:30 America/New_York",
+  "strategy_promotion": false
+}

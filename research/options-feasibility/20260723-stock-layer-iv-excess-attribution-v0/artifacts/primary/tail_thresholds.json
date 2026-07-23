@@ -1,0 +1,58 @@
+{
+  "broker_integration_required": false,
+  "cross_market_mismatch_group_test": true,
+  "daily_stock_group_test": true,
+  "development_frozen_subgroup_medians": {
+    "front_options_implied_tension": 0.03163306323477703,
+    "posterior_transition_probability": 0.1803059634618838,
+    "prior_close_atm_iv": 0.98135
+  },
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "fitted_period": "development_2024_only",
+  "frozen_joined_panel": true,
+  "intraday_compressed_transition_group_test": true,
+  "intraday_option_quotes_used": false,
+  "iv_excess_tail_test": true,
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "prediction_thresholds": {
+    "G0": {
+      "top_2pct": 0.4651577701582347,
+      "top_5pct": 0.4393208545694627,
+      "top_decile": 0.41288220590867475,
+      "top_quintile": 0.3809157842082903
+    },
+    "G1": {
+      "top_2pct": 0.4794619514516174,
+      "top_5pct": 0.4479051925744042,
+      "top_decile": 0.42024451441628613,
+      "top_quintile": 0.38432978149977914
+    },
+    "G2": {
+      "top_2pct": 0.5526081991701193,
+      "top_5pct": 0.4959616606157864,
+      "top_decile": 0.452518820771225,
+      "top_quintile": 0.40289025256892613
+    },
+    "G3": {
+      "top_2pct": 0.5478340843398996,
+      "top_5pct": 0.493152417339067,
+      "top_decile": 0.4497767284683586,
+      "top_quintile": 0.3997043738429292
+    },
+    "G4": {
+      "top_2pct": 0.5509597690522591,
+      "top_5pct": 0.4964235324193843,
+      "top_decile": 0.4517126873252264,
+      "top_quintile": 0.4009842370693823
+    }
+  },
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_grouped_ablation_screen": true,
+  "research_only": true,
+  "route_competition_group_test": true,
+  "strategy_promotion": false
+}

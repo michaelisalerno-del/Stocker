@@ -1,0 +1,195 @@
+{
+  "broker_integration_required": false,
+  "cross_market_mismatch_group_test": true,
+  "daily_stock_group_test": true,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "feature_groups_disjoint": true,
+  "frozen_joined_panel": true,
+  "groups": {
+    "D": {
+      "category_controls": [],
+      "name": "daily_stock_context",
+      "numeric_features": [
+        "daily_compression",
+        "daily_directional_efficiency",
+        "daily_trend_persistence",
+        "daily_extension",
+        "daily_rejection",
+        "daily_volatility_acceleration",
+        "daily_relative_strength",
+        "daily_activity_acceleration",
+        "daily_stock_regime_p_0",
+        "daily_stock_regime_p_1",
+        "daily_stock_regime_p_2",
+        "daily_stock_regime_p_3",
+        "daily_stock_regime_entropy",
+        "daily_stock_regime_margin"
+      ]
+    },
+    "I": {
+      "category_controls": [],
+      "name": "intraday_compressed_transition_context",
+      "numeric_features": [
+        "arousal",
+        "conviction",
+        "tension",
+        "signed_pressure",
+        "posterior_entropy",
+        "transition_probability",
+        "persistence_probability",
+        "expected_state_age",
+        "top_state_probability",
+        "top_second_margin",
+        "prior_6_mean_range",
+        "prior_6_price_travel",
+        "prior_6_absolute_net_movement",
+        "prior_6_activity_proxy",
+        "recent_vs_earlier_range_ratio",
+        "recent_vs_earlier_activity_ratio",
+        "current_bar_range_vs_prior_6",
+        "current_bar_activity_vs_prior_6",
+        "current_bar_body_fraction",
+        "current_bar_extreme_wick_fraction",
+        "any_registered_completion_prior_6",
+        "any_registered_completion_prior_12",
+        "same_identity_active_prefix_with_prior_completion",
+        "any_hidden_event_prior_6",
+        "hidden_2_3_2_prior_6",
+        "bars_since_latest_registered_completion"
+      ],
+      "route_competition_fields_included": false
+    },
+    "M": {
+      "category_controls": [],
+      "name": "cross_market_mismatch",
+      "numeric_features": [
+        "mismatch_compression_vs_front_iv",
+        "mismatch_daily_volatility_vs_front_iv",
+        "mismatch_route_vs_front_premium",
+        "mismatch_direction_agreement",
+        "mismatch_complacent_broad_conflict"
+      ]
+    },
+    "O": {
+      "category_controls": [
+        "stock"
+      ],
+      "name": "front_options_context",
+      "numeric_features": [
+        "front_options_implied_tension",
+        "front_options_premium_richness",
+        "front_options_downside_asymmetry",
+        "front_options_liquidity_stress",
+        "front_options_positioning_concentration",
+        "front_options_directional_positioning",
+        "front_options_surface_disagreement",
+        "front_options_regime_p_0",
+        "front_options_regime_p_1",
+        "front_options_regime_p_2",
+        "front_options_regime_p_3",
+        "front_options_regime_entropy",
+        "front_options_regime_margin",
+        "skew_25d_missing",
+        "near_spot_oi_concentration_missing",
+        "call_put_oi_imbalance_missing",
+        "checkpoint_6",
+        "checkpoint_8",
+        "checkpoint_10",
+        "checkpoint_12",
+        "checkpoint_14",
+        "checkpoint_16",
+        "checkpoint_18",
+        "checkpoint_20",
+        "checkpoint_22",
+        "checkpoint_24",
+        "checkpoint_26",
+        "checkpoint_28",
+        "checkpoint_30",
+        "checkpoint_32",
+        "checkpoint_34"
+      ]
+    },
+    "R": {
+      "category_controls": [
+        "route_state"
+      ],
+      "frozen_route_state_indicator_vocabulary": [
+        "BROAD_CONFLICT",
+        "NARROWING",
+        "DOMINANT_ROUTE",
+        "LOW_ROUTE_SUPPORT",
+        "OTHER"
+      ],
+      "name": "route_competition",
+      "numeric_features": [
+        "active_prefix_count",
+        "active_prefix_family_count",
+        "top_prefix_depth_fraction",
+        "second_prefix_depth_fraction",
+        "top_minus_second_prefix_depth",
+        "prefix_family_entropy",
+        "orientation_disagreement_fraction",
+        "new_prefixes_last_1_bar",
+        "invalidated_prefixes_last_1_bar",
+        "active_prefix_count_change_last_1_bar",
+        "active_prefix_count_change_last_3_bars",
+        "top_prefix_depth_change_last_1_bar",
+        "top_prefix_depth_change_last_3_bars",
+        "matching_recent_loop_prefix_count",
+        "recent_loop_memory_weighted_top_depth"
+      ],
+      "observed_route_states": [
+        "BROAD_CONFLICT",
+        "LOW_ROUTE_SUPPORT",
+        "NARROWING",
+        "OTHER"
+      ],
+      "zero_support_states": [
+        "DOMINANT_ROUTE"
+      ]
+    }
+  },
+  "intraday_compressed_transition_group_test": true,
+  "intraday_option_quotes_used": false,
+  "iv_excess_tail_test": true,
+  "model_group_order": {
+    "G0": [
+      "O"
+    ],
+    "G1": [
+      "O",
+      "D"
+    ],
+    "G2": [
+      "O",
+      "D",
+      "I"
+    ],
+    "G3": [
+      "O",
+      "D",
+      "I",
+      "R"
+    ],
+    "G4": [
+      "O",
+      "D",
+      "I",
+      "R",
+      "M"
+    ]
+  },
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_grouped_ablation_screen": true,
+  "research_only": true,
+  "route_competition_group_test": true,
+  "route_state_encoding": "Frozen categorical control. BROAD_CONFLICT is the fitted reference level; DOMINANT_ROUTE has zero support in the frozen panel.",
+  "strategy_promotion": false,
+  "total_unique_numeric_features": 91,
+  "unintentional_duplicate_features": []
+}

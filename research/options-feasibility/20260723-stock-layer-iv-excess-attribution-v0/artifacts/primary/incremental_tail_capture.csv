@@ -1,0 +1,5 @@
+comparison,entering_rows,leaving_rows,new_positive_targets_entering_top_decile,positive_targets_leaving_top_decile,net_change_captured_positive_targets,mean_iv_residual_entering_top_decile,mean_iv_residual_leaving_top_decile
+G1-G0,196,209,76,88,-12,-0.0004950964383973684,0.0006627693765980221
+G2-G1,678,442,343,162,181,0.0017328896613730011,-0.00023647028030640137
+G3-G2,181,213,61,95,-34,0.00015237332508240276,0.0008636344253483649
+G4-G3,30,27,15,15,0,0.0017320885896624204,0.002119137225759004

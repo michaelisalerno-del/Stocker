@@ -1,0 +1,326 @@
+{
+  "audit_kind": "independent_artifact_and_source_reconstruction",
+  "back_expiry_bulk_download_enabled": false,
+  "back_expiry_schema_preflight_only": true,
+  "branches_run_independently": true,
+  "broker_integration_required": false,
+  "checks": [
+    {
+      "branch": "global",
+      "check": "contract_safety_flags",
+      "evidence": {
+        "mismatches": {}
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "decision_safety_flags",
+      "evidence": {
+        "mismatches": {}
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "dates_and_protected_boundary",
+      "evidence": {
+        "back_expiry_bulk_download_enabled": false,
+        "back_expiry_schema_preflight_only": true,
+        "boundary_applies_to": "observation_date_not_contract_expiration",
+        "branches_run_independently": true,
+        "broker_integration_required": false,
+        "daily_stock_context_test": true,
+        "directional_outcomes_primary": false,
+        "execution_enabled": false,
+        "front_options_only_context_test": true,
+        "intraday_option_quotes_used": false,
+        "maximum_market_observation_date": "2025-08-22",
+        "maximum_option_observation_date": "2025-08-21",
+        "model_branch_protected_option_observations_materialised": 0,
+        "option_pnl_calculated": false,
+        "order_placement": "disabled",
+        "passed": true,
+        "preflight_protected_option_observations_materialised": 0,
+        "preflight_protected_records_returned": 7,
+        "preflight_protected_records_returned_and_rejected": 7,
+        "preflight_raw_response_persisted": false,
+        "previous_close_options_only": true,
+        "production_runtime_modified": false,
+        "prospective_validation": false,
+        "protected_market_rows_materialised": 0,
+        "protected_option_observations_materialised": 0,
+        "protected_start": "2025-08-23",
+        "quick_context_screen": true,
+        "research_only": true,
+        "strategy_promotion": false,
+        "underlying_movement_outcomes_opened": true
+      },
+      "passed": true
+    },
+    {
+      "branch": "A",
+      "check": "structural_panel_and_clean_completion_target",
+      "evidence": {
+        "direct_eligibility_mismatches": 0,
+        "direct_target_mismatches": 0,
+        "rows": 87443
+      },
+      "passed": true
+    },
+    {
+      "branch": "A",
+      "check": "candidate_normalised_weights",
+      "evidence": {
+        "maximum_difference": 0.0
+      },
+      "passed": true
+    },
+    {
+      "branch": "A",
+      "check": "daily_stock_context_and_frozen_regime_reconstruction",
+      "evidence": {
+        "hard_regime_mismatches": 0,
+        "maximum_dimension_difference": 0.0,
+        "maximum_posterior_difference": 4.884981308350689e-15
+      },
+      "passed": true
+    },
+    {
+      "branch": "B",
+      "check": "exact_previous_session_options_chronology",
+      "evidence": {
+        "previous_session_mismatches": 0,
+        "rows": 2179,
+        "same_or_future_rows": 0
+      },
+      "passed": true
+    },
+    {
+      "branch": "B",
+      "check": "front_raw_feature_surface",
+      "evidence": {},
+      "passed": true
+    },
+    {
+      "branch": "B",
+      "check": "front_atm_pair_and_raw_feature_reconstruction",
+      "evidence": {
+        "maximum_raw_feature_difference": 0.0,
+        "protected_cache_rows_loaded": 0,
+        "rows": 2179,
+        "selected_contract_mismatches": 0
+      },
+      "passed": true
+    },
+    {
+      "branch": "B",
+      "check": "seven_front_dimensions_and_canonical_front_regime",
+      "evidence": {
+        "hard_regime_mismatches": 0,
+        "maximum_dimension_difference": 0.0,
+        "maximum_posterior_difference": 2.609024107869118e-15
+      },
+      "passed": true
+    },
+    {
+      "branch": "B",
+      "check": "five_cross_market_mismatch_features",
+      "evidence": {
+        "maximum_difference": 0.0
+      },
+      "passed": true
+    },
+    {
+      "branch": "C",
+      "check": "fifteen_minute_iv_excess_target",
+      "evidence": {
+        "iv_expectation_difference": 0.0,
+        "movement_difference": 0.0,
+        "rows": 24130,
+        "target_mismatches": 0
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "a0_a1_b0_b1_c0_c1_feature_surfaces",
+      "evidence": {
+        "mismatches": {}
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "model_coefficients_and_manual_probability_reconstruction",
+      "evidence": {
+        "maximum_difference_by_model": {
+          "A0": 0.0,
+          "A1": 0.0,
+          "B0": 0.0,
+          "B1": 0.0,
+          "C0": 0.0,
+          "C1": 0.0
+        },
+        "rows_per_model": 100
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "log_loss_brier_auc_and_average_precision",
+      "evidence": {
+        "maximum_differences": {
+          "A0": {
+            "auc": 0.0,
+            "average_precision": 3.469446951953614e-17,
+            "brier_score": 2.42861286636753e-17,
+            "log_loss": 1.3877787807814457e-17
+          },
+          "A1": {
+            "auc": 0.0,
+            "average_precision": 0.0,
+            "brier_score": 3.469446951953614e-17,
+            "log_loss": 0.0
+          },
+          "B0": {
+            "auc": 0.0,
+            "average_precision": 1.3877787807814457e-17,
+            "brier_score": 8.673617379884035e-17,
+            "log_loss": 2.7755575615628914e-17
+          },
+          "B1": {
+            "auc": 0.0,
+            "average_precision": 1.3877787807814457e-17,
+            "brier_score": 5.551115123125783e-17,
+            "log_loss": 2.7755575615628914e-17
+          },
+          "C0": {
+            "auc": 0.0,
+            "average_precision": 0.0,
+            "brier_score": 8.326672684688674e-17,
+            "log_loss": 0.0
+          },
+          "C1": {
+            "auc": 0.0,
+            "average_precision": 0.0,
+            "brier_score": 0.0,
+            "log_loss": 0.0
+          }
+        }
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "shared_whole_session_bootstrap",
+      "evidence": {
+        "artifact_rows": 45,
+        "reconstructed_interval_maximum_difference": 9.84455572616838e-17
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "front_options_and_stock_structure_null_designs",
+      "evidence": {
+        "front_null_refits": 3,
+        "null_models_refitted_by_auditor": 0,
+        "stock_null_refits": 3
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "single_request_back_expiry_preflight_isolation",
+      "evidence": {
+        "raw_response_sha256": "0153a66e6c7661b7603164912a4d9b887b3bde44b28b366d5e4ce2381bda0227",
+        "record_count": 16,
+        "request_count": 1,
+        "status": "supported_noncompact_schema"
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "branch_isolation",
+      "evidence": {
+        "branch_a_assessment_rows": 33729,
+        "joined_assessment_rows": 10265
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "determinism",
+      "evidence": {
+        "back_expiry_bulk_download_enabled": false,
+        "back_expiry_schema_preflight_only": true,
+        "bootstrap_repeated": false,
+        "branches_run_independently": true,
+        "broker_integration_required": false,
+        "daily_stock_context_test": true,
+        "decision_mismatches": 0,
+        "directional_outcomes_primary": false,
+        "execution_enabled": false,
+        "front_options_only_context_test": true,
+        "front_options_regime_mapping_mismatches": 0,
+        "intraday_option_quotes_used": false,
+        "joined_row_mismatches": 0,
+        "maximum_feature_difference": 0.0,
+        "maximum_front_raw_feature_difference": 0.0,
+        "maximum_probability_difference": 0.0,
+        "null_draws_repeated": false,
+        "option_pnl_calculated": false,
+        "options_redownloaded": false,
+        "order_placement": "disabled",
+        "pair_reconstruction_applicable": true,
+        "pair_selection_rebuilt_from_cached_chains": true,
+        "passed": true,
+        "previous_close_options_only": true,
+        "production_runtime_modified": false,
+        "prospective_validation": false,
+        "quick_context_screen": true,
+        "research_only": true,
+        "selected_contract_mismatches": 0,
+        "strategy_promotion": false,
+        "underlying_movement_outcomes_opened": true
+      },
+      "passed": true
+    },
+    {
+      "branch": "global",
+      "check": "decision_logic",
+      "evidence": {
+        "expected_overall": "stock_structure_improves_iv_excess_only",
+        "gate_mismatches": {},
+        "observed_overall": "stock_structure_improves_iv_excess_only",
+        "status_mismatches": {}
+      },
+      "passed": true
+    }
+  ],
+  "checks_failed": 0,
+  "checks_passed": 21,
+  "checks_run": 21,
+  "daily_stock_context_test": true,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "failed_checks": [],
+  "front_options_only_context_test": true,
+  "intraday_option_quotes_used": false,
+  "model_probability_rows_per_model": 100,
+  "models_manually_reconstructed": 6,
+  "null_models_refitted": 0,
+  "option_pnl_calculated": false,
+  "options_requests_made": 0,
+  "order_placement": "disabled",
+  "passed": true,
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_context_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "underlying_movement_outcomes_opened": true
+}

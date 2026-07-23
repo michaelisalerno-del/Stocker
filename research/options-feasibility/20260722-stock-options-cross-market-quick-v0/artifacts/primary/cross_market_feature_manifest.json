@@ -1,0 +1,220 @@
+{
+  "base_options_features": [
+    "atm_iv",
+    "call_iv",
+    "put_iv",
+    "call_put_iv_gap",
+    "straddle_mid_pct",
+    "combined_relative_spread",
+    "log1p_combined_open_interest",
+    "front_dte",
+    "atm_log_moneyness",
+    "skew_25d",
+    "skew_25d_missing",
+    "term_structure",
+    "term_structure_missing"
+  ],
+  "broker_integration_required": false,
+  "cross_market_disagreement_features": [
+    "complacent_conflict",
+    "structural_tension_gap",
+    "route_vs_priced_move",
+    "directional_agreement",
+    "transition_vs_term_urgency"
+  ],
+  "development_only_standardization": {
+    "standardised_call_put_iv_gap": {
+      "mean": 0.06328723404255317,
+      "scale": 0.11022623083771803
+    },
+    "standardised_prefix_family_entropy": {
+      "mean": 0.5021175677118058,
+      "scale": 0.3715012049289839
+    },
+    "standardised_signed_pressure": {
+      "mean": 0.24512447783682817,
+      "scale": 0.4335985070199398
+    },
+    "standardised_tension": {
+      "mean": -0.031160658082452403,
+      "scale": 0.5083297865250703
+    },
+    "standardised_transition_probability": {
+      "mean": 0.18265705651288397,
+      "scale": 0.06291620348782051
+    }
+  },
+  "development_only_stock_relative_parameters": {
+    "AAL": {
+      "atm_iv": {
+        "median": 0.5207999999999999,
+        "scale": 0.06604983000000005,
+        "sorted_values": [
+          0.47624999999999995,
+          0.56535
+        ]
+      },
+      "straddle_mid_pct": {
+        "median": 0.06455988174638855,
+        "scale": 0.011628713207959284,
+        "sorted_values": [
+          0.05671642214301658,
+          0.07240334134976052
+        ]
+      }
+    },
+    "MSTR": {
+      "atm_iv": {
+        "median": 1.0194,
+        "scale": 0.36694349999999987,
+        "sorted_values": [
+          0.7719,
+          1.2669
+        ]
+      },
+      "straddle_mid_pct": {
+        "median": 0.12205031569402847,
+        "scale": 0.03934618968209472,
+        "sorted_values": [
+          0.09551167433284223,
+          0.14858895705521472
+        ]
+      }
+    },
+    "WULF": {
+      "atm_iv": {
+        "median": 1.3685,
+        "scale": 1.0,
+        "sorted_values": [
+          1.3685
+        ]
+      },
+      "straddle_mid_pct": {
+        "median": 0.17024542488426758,
+        "scale": 1.0,
+        "sorted_values": [
+          0.17024542488426758
+        ]
+      }
+    }
+  },
+  "directional_outcomes_primary": false,
+  "disagreement_formulas": {
+    "complacent_conflict": "BROAD_CONFLICT * (-atm_iv_stock_robust_z)",
+    "directional_agreement": "standardised_signed_pressure * standardised_call_put_iv_gap",
+    "route_vs_priced_move": "standardised_prefix_family_entropy - straddle_move_stock_robust_z",
+    "structural_tension_gap": "standardised_tension - atm_iv_stock_robust_z",
+    "transition_vs_term_urgency": "standardised_transition_probability - term_structure_stock_robust_z"
+  },
+  "execution_enabled": false,
+  "feature_search": false,
+  "fit_period": "2024 development only",
+  "frozen_h0_features": [
+    "arousal",
+    "conviction",
+    "tension",
+    "signed_pressure",
+    "posterior_entropy",
+    "transition_probability",
+    "persistence_probability",
+    "expected_state_age",
+    "top_state_probability",
+    "top_second_margin",
+    "prior_6_mean_range",
+    "prior_6_price_travel",
+    "prior_6_absolute_net_movement",
+    "prior_6_activity_proxy",
+    "recent_vs_earlier_range_ratio",
+    "recent_vs_earlier_activity_ratio",
+    "current_bar_range_vs_prior_6",
+    "current_bar_activity_vs_prior_6",
+    "current_bar_body_fraction",
+    "current_bar_extreme_wick_fraction",
+    "any_registered_completion_prior_6",
+    "any_registered_completion_prior_12",
+    "same_identity_active_prefix_with_prior_completion",
+    "any_hidden_event_prior_6",
+    "hidden_2_3_2_prior_6",
+    "bars_since_latest_registered_completion",
+    "checkpoint_6",
+    "checkpoint_8",
+    "checkpoint_10",
+    "checkpoint_12",
+    "checkpoint_14",
+    "checkpoint_16",
+    "checkpoint_18",
+    "checkpoint_20",
+    "checkpoint_22",
+    "checkpoint_24",
+    "checkpoint_26",
+    "checkpoint_28",
+    "checkpoint_30",
+    "checkpoint_32",
+    "checkpoint_34"
+  ],
+  "frozen_route_features": [
+    "active_prefix_count",
+    "active_prefix_family_count",
+    "top_prefix_depth_fraction",
+    "second_prefix_depth_fraction",
+    "top_minus_second_prefix_depth",
+    "prefix_family_entropy",
+    "orientation_disagreement_fraction",
+    "new_prefixes_last_1_bar",
+    "invalidated_prefixes_last_1_bar",
+    "active_prefix_count_change_last_1_bar",
+    "active_prefix_count_change_last_3_bars",
+    "top_prefix_depth_change_last_1_bar",
+    "top_prefix_depth_change_last_3_bars",
+    "matching_recent_loop_prefix_count",
+    "recent_loop_memory_weighted_top_depth"
+  ],
+  "interaction_search": false,
+  "intraday_option_quotes_used": false,
+  "option_pnl_calculated": false,
+  "options_model_features": [
+    "atm_iv",
+    "call_iv",
+    "put_iv",
+    "call_put_iv_gap",
+    "straddle_mid_pct",
+    "combined_relative_spread",
+    "log1p_combined_open_interest",
+    "front_dte",
+    "atm_log_moneyness",
+    "skew_25d",
+    "skew_25d_missing",
+    "term_structure",
+    "term_structure_missing",
+    "atm_iv_stock_percentile",
+    "atm_iv_stock_robust_z",
+    "straddle_move_stock_robust_z",
+    "skew_stock_robust_z",
+    "term_structure_stock_robust_z",
+    "iv_minus_realised_20d"
+  ],
+  "order_placement": "disabled",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_cross_market_screen": true,
+  "realised_volatility": {
+    "annualization": "sqrt(252)",
+    "information_time": "required previous options-session close",
+    "minimum_valid_sessions": 15,
+    "returns": "daily close-to-close log returns",
+    "trailing_sessions": 20
+  },
+  "research_only": true,
+  "stock_relative_options_features": [
+    "atm_iv_stock_percentile",
+    "atm_iv_stock_robust_z",
+    "straddle_move_stock_robust_z",
+    "skew_stock_robust_z",
+    "term_structure_stock_robust_z"
+  ],
+  "strategy_promotion": false,
+  "test_a_options_to_stock": true,
+  "test_b_stock_to_options_movement": true,
+  "underlying_movement_outcomes_opened": true
+}

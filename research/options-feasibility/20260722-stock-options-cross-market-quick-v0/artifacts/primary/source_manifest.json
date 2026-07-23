@@ -1,0 +1,4541 @@
+{
+  "broker_integration_required": false,
+  "bulk_options_downloads_made": 0,
+  "cached_history_records_materialised": 18,
+  "cached_options_records_used": 3624,
+  "cached_stock_dates": 9,
+  "cached_symbols": [
+    "AAL",
+    "MSTR",
+    "WULF"
+  ],
+  "coverage_by_date": [
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 14654,
+      "estimated_additional_requests": 119,
+      "exact_chains_cached": 3,
+      "signal_date": "2024-01-17",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 2
+    },
+    {
+      "eligible_structural_rows": 219,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-18",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-19",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 249,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-22",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 258,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-23",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 189,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-24",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 224,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-25",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 229,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-26",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-29",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 203,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-30",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 224,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-01-31",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 213,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-01",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 227,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-02",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 169,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-05",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 250,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-06",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 186,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-07",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 224,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-08",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 220,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-09",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 249,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-12",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 203,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-13",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 231,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-14",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 223,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-15",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-16",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 219,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-20",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 220,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-21",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 217,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-22",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-23",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-26",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-27",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 237,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-28",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 211,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-02-29",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 217,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-01",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 111,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-04",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 138,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-05",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 122,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-06",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 210,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-07",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 208,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-08",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 239,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-11",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 240,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-12",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 244,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-13",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 236,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-14",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 220,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-15",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 245,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-18",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 171,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-19",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-20",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 209,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-21",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-22",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 224,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-25",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 203,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-26",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-27",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 230,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-03-28",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-01",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-02",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-03",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-04",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-05",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 232,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-08",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 209,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-09",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 257,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-10",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 199,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-11",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 199,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-12",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 201,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-15",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 230,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-16",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 252,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-17",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 246,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-18",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 245,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-19",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 197,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-22",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 249,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-23",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 247,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-24",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-25",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 222,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-26",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 241,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-29",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-04-30",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 240,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-01",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 186,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-02",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 74,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-03",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 50,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-06",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-07",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 203,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-08",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 181,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-09",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 209,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-10",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-13",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 209,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-14",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-15",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-16",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 192,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-17",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 223,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-20",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-21",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-22",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-23",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-24",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 196,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-28",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 217,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-29",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 199,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-30",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-05-31",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 210,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-03",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-04",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 195,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-05",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 188,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-06",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-07",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 213,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-10",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 219,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-11",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-12",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 190,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-13",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-14",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-17",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-18",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-20",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 208,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-21",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-24",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 187,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-25",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-26",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 181,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-27",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 200,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-06-28",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 234,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-01",
+      "stock_dates": 20,
+      "test_a_positives": 8,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-02",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-03",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 178,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-05",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-08",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 196,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-09",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 186,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-10",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-11",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-12",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 248,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-15",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-16",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-17",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 262,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-18",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 237,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-19",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 202,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-22",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-23",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 223,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-24",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 242,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-25",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 239,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-26",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 242,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-29",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-30",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-07-31",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 275,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-01",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-02",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 261,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-05",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 251,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-06",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 245,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-07",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 264,
+      "estimated_additional_records": 16378,
+      "estimated_additional_requests": 133,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-08",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 241,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-09",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-12",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 222,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-13",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 203,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-14",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 258,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-15",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-16",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-19",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 232,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-20",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 220,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-21",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 193,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-22",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 255,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-23",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 209,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-26",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-27",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 210,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-28",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 166,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-29",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 226,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-08-30",
+      "stock_dates": 20,
+      "test_a_positives": 8,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 201,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-03",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 237,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-04",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 252,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-05",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-06",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 241,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-09",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-10",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 227,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-11",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 217,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-12",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 234,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-13",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 207,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-16",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-17",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-18",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 193,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-19",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-20",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 198,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-23",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 193,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-24",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 211,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-25",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-26",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-27",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 247,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-09-30",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 16378,
+      "estimated_additional_requests": 133,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-01",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-02",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 207,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-03",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 227,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-04",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 241,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-07",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 210,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-08",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-09",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 211,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-10",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-11",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 202,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-14",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 195,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-15",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 257,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-16",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 234,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-17",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 234,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-18",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-21",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-22",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-23",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 198,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-24",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 222,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-25",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 223,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-28",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 184,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-29",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 250,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-30",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 239,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-10-31",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 14654,
+      "estimated_additional_requests": 119,
+      "exact_chains_cached": 3,
+      "signal_date": "2024-11-01",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 3
+    },
+    {
+      "eligible_structural_rows": 236,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-04",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 227,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-05",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 178,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-06",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 242,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-07",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 232,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-08",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 222,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-11",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 191,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-12",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-13",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-14",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 192,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-15",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 255,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-18",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 248,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-19",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-20",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 212,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-21",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 249,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-22",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 261,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-25",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 242,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-26",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 249,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-27",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-11-29",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 219,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-02",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 262,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-03",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 226,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-04",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 186,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-05",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 260,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-06",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-09",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-10",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 232,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-11",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-12",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 208,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-13",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 239,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-16",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-17",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 241,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-18",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 217,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-19",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 253,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-20",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 201,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-23",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-24",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-26",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 211,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-27",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 187,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-30",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2024-12-31",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-02",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 244,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-03",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-06",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-07",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 202,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-08",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 242,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-10",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 237,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-13",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-14",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 246,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-15",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 244,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-16",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 200,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-17",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 231,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-21",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 211,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-22",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 227,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-23",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 250,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-24",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-27",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 189,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-28",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 185,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-29",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 208,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-30",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-01-31",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-03",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 245,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-04",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 213,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-05",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 201,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-06",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-07",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 189,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-10",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-11",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-12",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 245,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-13",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 258,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-14",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 217,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-18",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 236,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-19",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-20",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 198,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-21",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-24",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-25",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 196,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-26",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 212,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-27",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 229,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-02-28",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 190,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-03",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 196,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-04",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 240,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-05",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-06",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 240,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-07",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-10",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-11",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 200,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-12",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 218,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-13",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 247,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-14",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 188,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-17",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-18",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 230,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-19",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 262,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-20",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 195,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-21",
+      "stock_dates": 20,
+      "test_a_positives": 8,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 190,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-24",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 237,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-25",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 219,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-26",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 254,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-27",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 248,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-28",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 245,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-03-31",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 230,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-01",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 210,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-02",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-03",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 258,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-04",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 240,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-07",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 237,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-08",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-09",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 201,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-10",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 239,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-11",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 229,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-14",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-15",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-16",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-17",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 229,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-21",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-22",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 195,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-23",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-24",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 176,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-25",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-28",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 240,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-29",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 179,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-04-30",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 249,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-01",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 203,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-02",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 235,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-05",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 224,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-06",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 219,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-07",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-08",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 239,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-09",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 177,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-12",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-13",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-14",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 208,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-15",
+      "stock_dates": 20,
+      "test_a_positives": 8,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 232,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-16",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 214,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-19",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 188,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-20",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 230,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-21",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 16378,
+      "estimated_additional_requests": 133,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-22",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-23",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 204,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-27",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-28",
+      "stock_dates": 20,
+      "test_a_positives": 8,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-29",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 207,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-05-30",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 200,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-02",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 238,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-03",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 203,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-04",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 200,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-05",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 186,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-06",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 202,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-09",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 221,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-10",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-11",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 243,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-12",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-13",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 216,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-16",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 229,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-17",
+      "stock_dates": 20,
+      "test_a_positives": 7,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 193,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-18",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 173,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-20",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 232,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-23",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 202,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-24",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 165,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-25",
+      "stock_dates": 20,
+      "test_a_positives": 6,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 186,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-26",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 168,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-27",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 190,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-06-30",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 217,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-01",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 165,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-02",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 225,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-03",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 183,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-07",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 184,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-08",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 179,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-09",
+      "stock_dates": 20,
+      "test_a_positives": 8,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 171,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-10",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 208,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-11",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-14",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-15",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 230,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-16",
+      "stock_dates": 20,
+      "test_a_positives": 5,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 192,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-17",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 228,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-18",
+      "stock_dates": 20,
+      "test_a_positives": 8,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 233,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-21",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 219,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-22",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 137,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-23",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-24",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 177,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-25",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 180,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-28",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 232,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-29",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-30",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 206,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-07-31",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 205,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-01",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 223,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-04",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 215,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-05",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 200,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-06",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 195,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-07",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 244,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-08",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 212,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-11",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 223,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-12",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 174,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-13",
+      "stock_dates": 20,
+      "test_a_positives": 1,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 242,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-14",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 188,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-15",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 226,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-18",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 207,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-19",
+      "stock_dates": 20,
+      "test_a_positives": 2,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 186,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-20",
+      "stock_dates": 20,
+      "test_a_positives": 4,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 239,
+      "estimated_additional_records": 17240,
+      "estimated_additional_requests": 140,
+      "exact_chains_cached": 0,
+      "signal_date": "2025-08-21",
+      "stock_dates": 20,
+      "test_a_positives": 3,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 241,
+      "estimated_additional_records": 14654,
+      "estimated_additional_requests": 119,
+      "exact_chains_cached": 3,
+      "signal_date": "2025-08-22",
+      "stock_dates": 20,
+      "test_a_positives": 0,
+      "valid_atm_pairs_cached": 3
+    }
+  ],
+  "coverage_by_month": [
+    {
+      "eligible_structural_rows": 4484,
+      "estimated_additional_records": 344800,
+      "estimated_additional_requests": 2800,
+      "exact_chains_cached": 0,
+      "period": "assessment",
+      "stock_dates": 400,
+      "test_a_positives": 75,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2025-01"
+    },
+    {
+      "eligible_structural_rows": 4168,
+      "estimated_additional_records": 327560,
+      "estimated_additional_requests": 2660,
+      "exact_chains_cached": 0,
+      "period": "assessment",
+      "stock_dates": 380,
+      "test_a_positives": 46,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2025-02"
+    },
+    {
+      "eligible_structural_rows": 4731,
+      "estimated_additional_records": 362040,
+      "estimated_additional_requests": 2940,
+      "exact_chains_cached": 0,
+      "period": "assessment",
+      "stock_dates": 420,
+      "test_a_positives": 62,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2025-03"
+    },
+    {
+      "eligible_structural_rows": 4684,
+      "estimated_additional_records": 362040,
+      "estimated_additional_requests": 2940,
+      "exact_chains_cached": 0,
+      "period": "assessment",
+      "stock_dates": 420,
+      "test_a_positives": 52,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2025-04"
+    },
+    {
+      "eligible_structural_rows": 4583,
+      "estimated_additional_records": 361178,
+      "estimated_additional_requests": 2933,
+      "exact_chains_cached": 0,
+      "period": "assessment",
+      "stock_dates": 420,
+      "test_a_positives": 65,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2025-05"
+    },
+    {
+      "eligible_structural_rows": 4096,
+      "estimated_additional_records": 344800,
+      "estimated_additional_requests": 2800,
+      "exact_chains_cached": 0,
+      "period": "assessment",
+      "stock_dates": 400,
+      "test_a_positives": 51,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2025-06"
+    },
+    {
+      "eligible_structural_rows": 4411,
+      "estimated_additional_records": 379280,
+      "estimated_additional_requests": 3080,
+      "exact_chains_cached": 0,
+      "period": "assessment",
+      "stock_dates": 440,
+      "test_a_positives": 62,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2025-07"
+    },
+    {
+      "eligible_structural_rows": 3420,
+      "estimated_additional_records": 273254,
+      "estimated_additional_requests": 2219,
+      "exact_chains_cached": 3,
+      "period": "assessment",
+      "stock_dates": 320,
+      "test_a_positives": 38,
+      "valid_atm_pairs_cached": 3,
+      "year_month": "2025-08"
+    },
+    {
+      "eligible_structural_rows": 2436,
+      "estimated_additional_records": 187054,
+      "estimated_additional_requests": 1519,
+      "exact_chains_cached": 3,
+      "period": "development",
+      "stock_dates": 220,
+      "test_a_positives": 37,
+      "valid_atm_pairs_cached": 2,
+      "year_month": "2024-01"
+    },
+    {
+      "eligible_structural_rows": 4356,
+      "estimated_additional_records": 344800,
+      "estimated_additional_requests": 2800,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 400,
+      "test_a_positives": 55,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-02"
+    },
+    {
+      "eligible_structural_rows": 4111,
+      "estimated_additional_records": 344800,
+      "estimated_additional_requests": 2800,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 400,
+      "test_a_positives": 60,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-03"
+    },
+    {
+      "eligible_structural_rows": 4960,
+      "estimated_additional_records": 379280,
+      "estimated_additional_requests": 3080,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 440,
+      "test_a_positives": 85,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-04"
+    },
+    {
+      "eligible_structural_rows": 4342,
+      "estimated_additional_records": 379280,
+      "estimated_additional_requests": 3080,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 440,
+      "test_a_positives": 79,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-05"
+    },
+    {
+      "eligible_structural_rows": 4041,
+      "estimated_additional_records": 327560,
+      "estimated_additional_requests": 2660,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 380,
+      "test_a_positives": 70,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-06"
+    },
+    {
+      "eligible_structural_rows": 4946,
+      "estimated_additional_records": 379280,
+      "estimated_additional_requests": 3080,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 440,
+      "test_a_positives": 74,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-07"
+    },
+    {
+      "eligible_structural_rows": 5084,
+      "estimated_additional_records": 378418,
+      "estimated_additional_requests": 3073,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 440,
+      "test_a_positives": 72,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-08"
+    },
+    {
+      "eligible_structural_rows": 4391,
+      "estimated_additional_records": 344800,
+      "estimated_additional_requests": 2800,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 400,
+      "test_a_positives": 56,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-09"
+    },
+    {
+      "eligible_structural_rows": 5001,
+      "estimated_additional_records": 395658,
+      "estimated_additional_requests": 3213,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 460,
+      "test_a_positives": 56,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-10"
+    },
+    {
+      "eligible_structural_rows": 4536,
+      "estimated_additional_records": 342214,
+      "estimated_additional_requests": 2779,
+      "exact_chains_cached": 3,
+      "period": "development",
+      "stock_dates": 400,
+      "test_a_positives": 61,
+      "valid_atm_pairs_cached": 3,
+      "year_month": "2024-11"
+    },
+    {
+      "eligible_structural_rows": 4662,
+      "estimated_additional_records": 362040,
+      "estimated_additional_requests": 2940,
+      "exact_chains_cached": 0,
+      "period": "development",
+      "stock_dates": 420,
+      "test_a_positives": 62,
+      "valid_atm_pairs_cached": 0,
+      "year_month": "2024-12"
+    }
+  ],
+  "coverage_by_stock": [
+    {
+      "eligible_structural_rows": 2953,
+      "estimated_additional_records": 343938,
+      "estimated_additional_requests": 2793,
+      "exact_chains_cached": 3,
+      "stock_dates": 402,
+      "symbol": "AAL",
+      "test_a_positives": 61,
+      "valid_atm_pairs_cached": 3
+    },
+    {
+      "eligible_structural_rows": 4595,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "AAOI",
+      "test_a_positives": 65,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4285,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "APLD",
+      "test_a_positives": 64,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4742,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "ASTS",
+      "test_a_positives": 52,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4687,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "CIFR",
+      "test_a_positives": 50,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4226,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "HIMS",
+      "test_a_positives": 58,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4362,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "IONQ",
+      "test_a_positives": 67,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4728,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "IREN",
+      "test_a_positives": 67,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 5067,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "MARA",
+      "test_a_positives": 48,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 3736,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "MP",
+      "test_a_positives": 77,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 3764,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "MRNA",
+      "test_a_positives": 83,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4220,
+      "estimated_additional_records": 343076,
+      "estimated_additional_requests": 2786,
+      "exact_chains_cached": 3,
+      "stock_dates": 402,
+      "symbol": "MSTR",
+      "test_a_positives": 56,
+      "valid_atm_pairs_cached": 3
+    },
+    {
+      "eligible_structural_rows": 4380,
+      "estimated_additional_records": 345662,
+      "estimated_additional_requests": 2807,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "NVTS",
+      "test_a_positives": 75,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4647,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "QBTS",
+      "test_a_positives": 53,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4754,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "RGTI",
+      "test_a_positives": 51,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4786,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "RIOT",
+      "test_a_positives": 48,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4204,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "RIVN",
+      "test_a_positives": 76,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4520,
+      "estimated_additional_records": 345662,
+      "estimated_additional_requests": 2807,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "SMCI",
+      "test_a_positives": 46,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 3892,
+      "estimated_additional_records": 346524,
+      "estimated_additional_requests": 2814,
+      "exact_chains_cached": 0,
+      "stock_dates": 402,
+      "symbol": "SOFI",
+      "test_a_positives": 70,
+      "valid_atm_pairs_cached": 0
+    },
+    {
+      "eligible_structural_rows": 4895,
+      "estimated_additional_records": 343938,
+      "estimated_additional_requests": 2793,
+      "exact_chains_cached": 3,
+      "stock_dates": 402,
+      "symbol": "WULF",
+      "test_a_positives": 51,
+      "valid_atm_pairs_cached": 2
+    }
+  ],
+  "coverage_evidence": {
+    "assessment_months": 1,
+    "assessment_rows": 39,
+    "assessment_sessions": 1,
+    "assessment_stocks": 3,
+    "broad_conflict_rows": 8,
+    "eligible_assessment_structural_rows": 34577,
+    "exact_pair_row_coverage": 0.0011279174017410417,
+    "gates": {
+      "assessment_months": false,
+      "assessment_rows": false,
+      "assessment_sessions": false,
+      "assessment_stocks": false,
+      "broad_conflict_rows": false,
+      "exact_pair_row_coverage": false,
+      "low_route_support_rows": false,
+      "maximum_stock_weight_share": false,
+      "test_a_positives": false,
+      "test_b_positives": false
+    },
+    "low_route_support_rows": 6,
+    "maximum_stock_weight_share": 0.33333333333333337,
+    "passed": false,
+    "test_a_positives": 0,
+    "test_b_positives": 14
+  },
+  "directional_outcomes_primary": false,
+  "exact_stock_date_gap_manifest": "options_coverage_gap.csv",
+  "execution_enabled": false,
+  "final_branch": "agent/stock-options-cross-market-quick-v0",
+  "frozen_dense_panel": "research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/dense_advance_panel.parquet",
+  "frozen_dense_panel_sha256": "a916b792e15e8630dadc09bed64d71be5533ce9f3b2bd93af06605d0faaa0cc3",
+  "frozen_pair_ledger": "research/options-feasibility/20260722-broad-conflict-prior-close-iv-v01-probe/artifacts/primary/contract_history_probe_results.csv",
+  "frozen_pair_ledger_sha256": "e18b9fbbe9fbe853208f26d3a599826288eaa747a3c45ee2aa521796bd5d2124",
+  "frozen_trace_panel": "research/route-competition/20260722-route-competition-hazard-quick-v0/artifacts/primary/causal_state_trace.parquet",
+  "frozen_trace_panel_sha256": "b58ad2f824ed1a81d0d8846864bb1127330a46b4bd93d5d762ccff1f60857f1d",
+  "intraday_option_quotes_used": false,
+  "network_requests_made": 0,
+  "option_pnl_calculated": false,
+  "options_schema_mapping": "research/options-feasibility/20260722-broad-conflict-prior-close-iv-v0/artifacts/primary/eodhd_options_schema_mapping.json",
+  "options_schema_mapping_sha256": "f38c10795460f809e155767abb47a09032ea0be8a4a2bcb28735013c6935ab2b",
+  "order_placement": "disabled",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "protected_cached_history_records_skipped_before_materialisation": 24,
+  "quick_cross_market_screen": true,
+  "request_gap": {
+    "cached_exact_chain_stock_dates": 9,
+    "cached_pair_quality_failures": 1,
+    "cached_valid_atm_pair_stock_dates": 8,
+    "eligible_stock_dates": 8037,
+    "estimate_assumptions": {
+      "contract_discovery_window_dte": "7-90",
+      "history_contract_roles": "front ATM call/put, front approximately-25-delta call/put, back ATM call/put",
+      "history_contracts_per_stock_date": 6,
+      "quality_failure_fallback_allowed": false,
+      "records_calibrated_from_cached_probe": true
+    },
+    "estimated_additional_records": 6920136,
+    "estimated_additional_requests": 56196,
+    "exact_missing_targets_manifest": "options_coverage_gap.csv",
+    "frozen_bulk_plan_not_executed": {
+      "estimated_records": 2009250,
+      "estimated_requests": 2141,
+      "reason_not_executed": "historical observation-date filtering is unavailable on the bulk endpoint",
+      "symbol_month_chunks": 400
+    },
+    "missing_exact_chain_stock_dates": 8028,
+    "new_downloads_this_experiment": 0,
+    "split_boundary_exclusions": 3,
+    "viable_endpoints": [
+      "/mp/unicornbay/options/contracts",
+      "/mp/unicornbay/options/eod with filter[contract]"
+    ]
+  },
+  "research_only": true,
+  "starting_branch": "agent/options-prior-close-iv-screen-v0",
+  "starting_sha": "b0ad90a0ee01635877ab1bc2ddec6c751feca26e",
+  "strategy_promotion": false,
+  "test_a_options_to_stock": true,
+  "test_b_stock_to_options_movement": true,
+  "underlying_movement_outcomes_opened": true
+}

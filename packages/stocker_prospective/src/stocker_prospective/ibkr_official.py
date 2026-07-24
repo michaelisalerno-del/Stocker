@@ -2,10 +2,26 @@
 
 from __future__ import annotations
 
+import math
+from datetime import UTC, datetime
 from typing import Any
 
 from stocker_prospective.ibkr import IBKRMarketDataAdapter, require_official_ibkr_api
-from stocker_prospective.market_data import MarketDataType
+from stocker_prospective.market_data import MarketDataType, RealtimeBarUpdate
+
+
+def create_official_stock_contract(symbol: str) -> Any:
+    """Build the narrow STK contract used for exact qualification."""
+
+    require_official_ibkr_api()
+    from ibapi.contract import Contract
+
+    contract = Contract()
+    contract.symbol = symbol
+    contract.secType = "STK"
+    contract.exchange = "SMART"
+    contract.currency = "USD"
+    return contract
 
 
 def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
@@ -25,7 +41,9 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
             # The official callback name contains "order", but the value also
             # seeds market-data request IDs. It never creates an order surface.
             adapter.request_ids.synchronise(orderId)
-            adapter.connection.connected(MarketDataType.LIVE)
+            # nextValidId completes the socket handshake; it does not confirm
+            # the market-data type for any request.
+            adapter.on_connected(None)
 
         def error(
             self,
@@ -37,10 +55,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
             adapter.on_error(reqId, errorCode, errorString)
 
         def connectionClosed(self) -> None:  # noqa: N802
-            adapter.connection.connection_lost(
-                code=1100,
-                message="official_socket_connection_closed",
-            )
+            adapter.on_connection_closed()
 
         def marketDataType(self, reqId: int, marketDataType: int) -> None:  # noqa: N802
             mapped = {
@@ -52,7 +67,11 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
             self._market_data_types[reqId] = mapped
             adapter.on_quote_update(
                 reqId,
-                {"field": "market_data_type", "value": mapped},
+                {
+                    "field": "market_data_type",
+                    "value": mapped,
+                    "receive_timestamp_utc": datetime.now(UTC).isoformat(),
+                },
             )
 
         def securityDefinitionOptionParameter(  # noqa: N802
@@ -102,8 +121,13 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                         4: "last",
                         9: "close",
                     }.get(tickType, f"price_tick_{tickType}"),
-                    "value": None if price < 0 else price,
+                    "value": (
+                        None
+                        if not math.isfinite(price) or price < 0 or abs(price) >= 1e307
+                        else price
+                    ),
                     "market_data_type": self._market_data_types.get(reqId),
+                    "receive_timestamp_utc": datetime.now(UTC).isoformat(),
                     "attributes": {
                         "can_auto_execute": getattr(attrib, "canAutoExecute", None),
                         "past_limit": getattr(attrib, "pastLimit", None),
@@ -114,6 +138,10 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
 
         def tickSize(self, reqId: int, tickType: int, size: Any) -> None:  # noqa: N802
             numeric = float(size) if size is not None else None
+            if numeric is not None and (
+                not math.isfinite(numeric) or numeric < 0 or abs(numeric) >= 1e307
+            ):
+                numeric = None
             adapter.on_quote_update(
                 reqId,
                 {
@@ -127,6 +155,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                     }.get(tickType, f"size_tick_{tickType}"),
                     "value": numeric,
                     "market_data_type": self._market_data_types.get(reqId),
+                    "receive_timestamp_utc": datetime.now(UTC).isoformat(),
                 },
             )
 
@@ -149,10 +178,18 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 11: "ask",
                 12: "last",
                 13: "model",
+                80: "bid",
+                81: "ask",
+                82: "last",
+                83: "model",
             }.get(tickType, f"tick_{tickType}")
 
             def present(value: float) -> float | None:
-                return None if value is None or value < -1e300 else value
+                return (
+                    None
+                    if value is None or not math.isfinite(value) or abs(value) >= 1e307
+                    else value
+                )
 
             adapter.on_quote_update(
                 reqId,
@@ -168,10 +205,81 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                     "theta": present(theta),
                     "underlying_reference_price": present(undPrice),
                     "market_data_type": self._market_data_types.get(reqId),
+                    "receive_timestamp_utc": datetime.now(UTC).isoformat(),
                 },
             )
 
         def tickSnapshotEnd(self, reqId: int) -> None:  # noqa: N802
             adapter.callbacks.complete(reqId)
 
-    return _StockerOfficialMarketDataClient()
+        def realtimeBar(  # noqa: N802
+            self,
+            reqId: int,
+            time: int,
+            open_: float,
+            high: float,
+            low: float,
+            close: float,
+            volume: Any,
+            wap: Any,
+            count: int,
+        ) -> None:
+            def numeric(value: Any) -> float | None:
+                if value is None:
+                    return None
+                converted = float(value)
+                return (
+                    None if not math.isfinite(converted) or abs(converted) >= 1e307 else converted
+                )
+
+            adapter.on_realtime_bar(
+                RealtimeBarUpdate(
+                    request_id=reqId,
+                    source_timestamp_utc=datetime.fromtimestamp(time, tz=UTC),
+                    receive_timestamp_utc=datetime.now(UTC),
+                    open=numeric(open_),
+                    high=numeric(high),
+                    low=numeric(low),
+                    close=numeric(close),
+                    volume=numeric(volume),
+                    wap=numeric(wap),
+                    trade_count=None if count < 0 else count,
+                )
+            )
+
+    class _MarketDataClientFacade:
+        """Expose only the official socket and market-data calls Stocker uses."""
+
+        __slots__ = ("__client",)
+
+        def __init__(self, client: Any) -> None:
+            self.__client = client
+
+        def connect(self, host: str, port: int, client_id: int) -> Any:
+            return self.__client.connect(host, port, client_id)
+
+        def disconnect(self) -> None:
+            self.__client.disconnect()
+
+        def run(self) -> None:
+            self.__client.run()
+
+        def reqMktData(self, *arguments: Any) -> None:  # noqa: N802
+            self.__client.reqMktData(*arguments)
+
+        def cancelMktData(self, request_id: int) -> None:  # noqa: N802
+            self.__client.cancelMktData(request_id)
+
+        def reqSecDefOptParams(self, *arguments: Any) -> None:  # noqa: N802
+            self.__client.reqSecDefOptParams(*arguments)
+
+        def reqContractDetails(self, request_id: int, contract: Any) -> None:  # noqa: N802
+            self.__client.reqContractDetails(request_id, contract)
+
+        def reqRealTimeBars(self, *arguments: Any) -> None:  # noqa: N802
+            self.__client.reqRealTimeBars(*arguments)
+
+        def cancelRealTimeBars(self, request_id: int) -> None:  # noqa: N802
+            self.__client.cancelRealTimeBars(request_id)
+
+    return _MarketDataClientFacade(_StockerOfficialMarketDataClient())

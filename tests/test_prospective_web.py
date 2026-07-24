@@ -4,6 +4,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from stocker_prospective.config import ProspectiveConfig
@@ -61,6 +62,7 @@ def seeded_app(tmp_path: Path, *, authenticated: bool = False) -> TestClient:
             git_commit="deadbeef",
             universe_path=ROOT / "configs/prospective/anchor-frozen-20.json",
             owner_id="test-web-fixture",
+            recorder_lease_stale_seconds=60,
         )
     )
     return TestClient(create_web_app(cfg))
@@ -90,10 +92,20 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         api_response = client.get(endpoint)
         assert api_response.status_code == 200, endpoint
         assert api_response.headers["content-type"].startswith("application/json")
+    health = client.get("/api/health").json()
+    assert None not in health["blockers"]
+    assert health["no_order_path_verified"] is True
+    assert health["market_data"]["current_budget"]["rejected_signals"] == 1
 
     signal_id = client.get("/api/signals").json()["items"][0]["id"]
     structure_id = client.get("/api/shadow").json()["items"][0]["id"]
-    assert client.get(f"/api/signals/{signal_id}").status_code == 200
+    signal_detail = client.get(f"/api/signals/{signal_id}")
+    assert signal_detail.status_code == 200
+    assert {item["computation_source"] for item in signal_detail.json()["option_computations"]} == {
+        "ask",
+        "bid",
+        "model",
+    }
     assert client.get(f"/api/shadow/{structure_id}").status_code == 200
 
 
@@ -152,3 +164,12 @@ def test_production_errors_do_not_leak_stack_traces(tmp_path: Path) -> None:
     assert response.status_code == 404
     assert response.json() == {"detail": "not_found"}
     assert "Traceback" not in response.text
+
+
+def test_web_fails_closed_when_trading_configuration_is_enabled(tmp_path: Path) -> None:
+    unsafe = config(tmp_path).model_copy(
+        update={"risk": config(tmp_path).risk.model_copy(update={"trading_enabled": True})}
+    )
+
+    with pytest.raises(RuntimeError, match="blocked_unsafe_runtime_configuration"):
+        create_web_app(unsafe)

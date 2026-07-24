@@ -13,7 +13,7 @@ orders and does not establish an options edge.
 /opt/stocker/releases/<git-commit>/    immutable application releases
 /opt/stocker/current                  atomic symlink to one release
 /etc/stocker/prospective.yaml         runtime configuration (root:stocker 0640)
-/etc/stocker/stocker.env              secrets only (root:stocker 0640)
+/etc/stocker/stocker.env              release identity and secrets (root:stocker 0640)
 /var/lib/stocker/prospective/         SQLite database and WAL
 /var/lib/stocker/bundles/             immutable bundle store + active pointer
 /var/lib/stocker/daily-context/       signed package store + session pointers
@@ -56,7 +56,7 @@ Inside each copied release:
 
 ```bash
 cd /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
-sudo -u stocker uv sync --locked --no-default-groups --group server
+sudo -u stocker uv sync --locked --no-editable --no-default-groups --group server
 ```
 
 This installs the server dependency group into the release-local `.venv`.
@@ -111,7 +111,7 @@ sudo -u stocker tar -xzf \
   /secure-transfer/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz \
   -C /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 cd /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
-sudo -u stocker uv sync --locked --no-default-groups --group server
+sudo -u stocker uv sync --locked --no-editable --no-default-groups --group server
 sudo ln -s /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT /opt/stocker/current.next
 sudo mv -T /opt/stocker/current.next /opt/stocker/current
 ```
@@ -208,9 +208,11 @@ Replay needs no bundle, EODHD credential, or IBKR client:
 
 ```bash
 cd /opt/stocker/current
-sudo -u stocker .venv/bin/stocker-prospective replay run \
+sudo -u stocker env STOCKER_GIT_COMMIT=REPLACE_WITH_GIT_COMMIT \
+  .venv/bin/stocker-prospective replay run \
   --config configs/prospective/replay.example.yaml
-sudo -u stocker .venv/bin/stocker-prospective replay run \
+sudo -u stocker env STOCKER_GIT_COMMIT=REPLACE_WITH_GIT_COMMIT \
+  .venv/bin/stocker-prospective replay run \
   --config configs/prospective/replay.example.yaml
 ```
 
@@ -224,9 +226,17 @@ To serve that replay:
 
 ```bash
 cd /opt/stocker/current
-sudo -u stocker .venv/bin/stocker-prospective web run \
+sudo -u stocker env STOCKER_GIT_COMMIT=REPLACE_WITH_GIT_COMMIT \
+  .venv/bin/stocker-prospective web run \
   --config configs/prospective/replay.example.yaml
 ```
+
+For a persistent systemd replay deployment, copy
+`configs/prospective/server-replay.example.yaml` to
+`/etc/stocker/prospective.yaml`. It keeps the database and fixtures outside and
+inside the correct server boundaries respectively; the workstation-oriented
+replay example intentionally uses `/tmp` and must not be installed as the
+service configuration.
 
 ## 9. Verify health and API safety
 
@@ -262,16 +272,20 @@ sudo ss -ltnp
 sudo ufw deny REPLACE_WITH_IBKR_SOCKET_PORT/tcp
 ```
 
-Install units and start only after the frozen bundle, parity, context, and
-official dependency gates are satisfied:
+Record-only IBKR diagnostics require the hash-verified registered universe and
+the official dependency. A missing active frozen bundle remains an explicit
+health blocker but does not prevent underlying evidence recording; a bundle
+hash mismatch still fails closed. Record-only deliberately persists
+source-semantic blockers instead of scoring. Shadow scoring requires a
+verified active bundle, passing feature parity, and exact signed
+previous-session context. Install the units only after the gates for the
+selected mode are satisfied:
 
 ```bash
 sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-recorder.service \
-  /etc/systemd/system/stocker-recorder.service
-sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-web.service \
-  /etc/systemd/system/stocker-web.service
+  /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now stocker-recorder.service
 sudo systemctl enable --now stocker-web.service
@@ -344,10 +358,8 @@ Install and enable the daily checked backup timer:
 ```bash
 sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-backup.service \
-  /etc/systemd/system/stocker-backup.service
-sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-backup.timer \
-  /etc/systemd/system/stocker-backup.timer
+  /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now stocker-backup.timer
 sudo systemctl start stocker-backup.service
@@ -409,4 +421,3 @@ send the token as a bearer credential or a `Secure`, `HttpOnly`,
 There are no state-changing web routes in this slice, so there is no CSRF
 mutation surface. Any future recorder start/stop control must add authenticated
 operator authorization and CSRF protection and still cannot enable orders.
-

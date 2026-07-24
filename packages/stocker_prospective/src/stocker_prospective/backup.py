@@ -49,7 +49,8 @@ def backup_database(
     manifest_path = root / f"{stem}.json"
     if backup_path.exists() or manifest_path.exists():
         raise FileExistsError(f"backup already exists for {timestamp.isoformat()}")
-    with sqlite3.connect(source_path) as source, sqlite3.connect(backup_path) as target:
+    source_uri = f"{source_path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(source_uri, uri=True) as source, sqlite3.connect(backup_path) as target:
         source.backup(target)
         row = target.execute("PRAGMA quick_check").fetchone()
     quick_check = "unavailable" if row is None else str(row[0])

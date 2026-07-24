@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from stocker_prospective.bars import CompletedBar, assess_bar_for_features
+from stocker_prospective.bars import (
+    CompletedBar,
+    DiagnosticFiveMinuteBarAggregator,
+    assess_bar_for_features,
+)
+from stocker_prospective.market_data import RealtimeBarUpdate
 
 END = datetime(2026, 7, 24, 14, 35, tzinfo=UTC)
 
@@ -93,3 +98,116 @@ def test_non_rth_and_missing_values_are_rejections_not_forward_fills() -> None:
 
     assert outside.rejection_reason == "outside_frozen_regular_session"
     assert missing.rejection_reason == "missing_required_bar_value"
+
+
+def test_ibkr_five_second_bars_form_one_completed_diagnostic_bar() -> None:
+    aggregator = DiagnosticFiveMinuteBarAggregator()
+    aggregator.register(7, symbol="AAL", permanent_contract_id=265598)
+    completed: tuple[CompletedBar, ...] = ()
+    start = datetime(2026, 7, 24, 14, 30, tzinfo=UTC)
+    for index in range(60):
+        timestamp = start + timedelta(seconds=index * 5)
+        completed += aggregator.add(
+            RealtimeBarUpdate(
+                request_id=7,
+                source_timestamp_utc=timestamp,
+                receive_timestamp_utc=timestamp + timedelta(seconds=1),
+                open=12.0 + index / 1000,
+                high=12.1 + index / 1000,
+                low=11.9 + index / 1000,
+                close=12.05 + index / 1000,
+                volume=10.0,
+                wap=12.03,
+                trade_count=2,
+            )
+        )
+    completed += aggregator.add(
+        RealtimeBarUpdate(
+            request_id=7,
+            source_timestamp_utc=start + timedelta(minutes=5),
+            receive_timestamp_utc=start + timedelta(minutes=5, seconds=1),
+            open=12.1,
+            high=12.2,
+            low=12.0,
+            close=12.15,
+            volume=10.0,
+            wap=12.13,
+            trade_count=2,
+        )
+    )
+
+    assert len(completed) == 1
+    result = completed[0]
+    assert result.complete is True
+    assert result.bar_start_utc == start
+    assert result.bar_end_utc == start + timedelta(minutes=5)
+    assert result.activity_value == 600.0
+    assert result.activity_semantic_label.endswith("not_eodhd_historical_activity_proxy")
+    assessment = assess_bar_for_features(
+        result,
+        maximum_feature_age=timedelta(seconds=15),
+        source_semantics_allowed=False,
+    )
+    assert assessment.rejection_reason == "blocked_feature_source_semantics_mismatch"
+
+
+def test_missing_five_second_bar_remains_partial_and_is_never_filled() -> None:
+    aggregator = DiagnosticFiveMinuteBarAggregator()
+    aggregator.register(7, symbol="AAL", permanent_contract_id=265598)
+    start = datetime(2026, 7, 24, 14, 30, tzinfo=UTC)
+    aggregator.add(
+        RealtimeBarUpdate(
+            request_id=7,
+            source_timestamp_utc=start,
+            receive_timestamp_utc=start + timedelta(seconds=1),
+            open=12.0,
+            high=12.1,
+            low=11.9,
+            close=12.05,
+            volume=None,
+            wap=None,
+            trade_count=None,
+        )
+    )
+
+    result = aggregator.flush()[0]
+    assert result.complete is False
+    assert result.activity_value is None
+    assert result.source_timestamp_utc == start
+    assert result.feature_as_of_utc == start
+    assert (
+        assess_bar_for_features(
+            result,
+            maximum_feature_age=timedelta(seconds=15),
+            source_semantics_allowed=False,
+        ).rejection_reason
+        == "partial_bar"
+    )
+
+
+def test_fully_observed_final_rth_bucket_can_complete_without_a_later_bucket() -> None:
+    aggregator = DiagnosticFiveMinuteBarAggregator()
+    aggregator.register(7, symbol="AAL", permanent_contract_id=265598)
+    start = datetime(2026, 7, 24, 19, 55, tzinfo=UTC)
+    for index in range(60):
+        timestamp = start + timedelta(seconds=index * 5)
+        aggregator.add(
+            RealtimeBarUpdate(
+                request_id=7,
+                source_timestamp_utc=timestamp,
+                receive_timestamp_utc=timestamp + timedelta(seconds=1),
+                open=12.0,
+                high=12.1,
+                low=11.9,
+                close=12.05,
+                volume=10.0,
+                wap=12.03,
+                trade_count=2,
+            )
+        )
+
+    result = aggregator.flush(completed_through_utc=start + timedelta(minutes=5))[0]
+
+    assert result.complete is True
+    assert result.bar_end_utc == start + timedelta(minutes=5)
+    assert result.source_timestamp_utc == result.bar_end_utc

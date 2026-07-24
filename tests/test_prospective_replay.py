@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from stocker_prospective.database import ProspectiveRepository
+from stocker_prospective.database import ProspectiveRepository, RecorderLeaseHeld
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.universe import UniverseError, load_registered_universe
 
@@ -46,6 +46,7 @@ def replay_settings(tmp_path: Path) -> ReplaySettings:
         git_commit="deadbeef",
         universe_path=UNIVERSE,
         owner_id="test-recorder",
+        recorder_lease_stale_seconds=60,
     )
 
 
@@ -93,11 +94,37 @@ def test_deterministic_replay_is_complete_and_restart_idempotent(tmp_path: Path)
             ORDER BY id LIMIT 1
             """
         ).fetchone()
+        computation_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(option_quote_computation)")
+        }
 
     assert score_labels == {"synthetic_replay_not_frozen_m1"}
     assert {"captured", "missed", "diagnostic_only"} <= capture_statuses
     assert {"live", "delayed"} <= market_data_types
     assert missed == (None, "no_expiry_in_bucket")
+    assert {
+        "computation_source",
+        "implied_volatility",
+        "delta",
+        "gamma",
+        "theta",
+        "vega",
+    } <= computation_columns
+
+
+def test_replay_honours_configured_lease_staleness(tmp_path: Path) -> None:
+    settings = replay_settings(tmp_path)
+    run_deterministic_replay(settings)
+    heartbeat = datetime.now(UTC) - timedelta(seconds=45)
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute(
+            "UPDATE recorder_lease SET heartbeat_at_utc = ?",
+            (heartbeat.isoformat(),),
+        )
+
+    competing = settings.model_copy(update={"owner_id": "competing-recorder"})
+    with pytest.raises(RecorderLeaseHeld, match="blocked_recorder_lease_held"):
+        run_deterministic_replay(competing)
 
 
 def test_replay_refuses_records_before_explicit_prospective_start(tmp_path: Path) -> None:

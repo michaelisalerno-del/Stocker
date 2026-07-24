@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -32,7 +33,7 @@ class RuntimeConfig(BaseModel):
     prospective_start_utc: datetime
     instance_id: str = Field(min_length=1)
     app_version: str = Field(min_length=1)
-    git_commit: str = Field(min_length=7)
+    git_commit: str = Field(pattern=r"^[a-f0-9]{7,64}$")
     run_id: str | None = None
     recorder_lease_stale_seconds: int = Field(default=60, ge=15)
     heartbeat_seconds: int = Field(default=10, ge=1)
@@ -102,7 +103,7 @@ class IBKRConfig(BaseModel):
     market_data_line_budget: int = Field(default=100, ge=1)
     reserved_line_headroom: int = Field(default=10, ge=0)
     request_rate_per_second: int = Field(default=20, ge=1)
-    quote_capture_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    quote_capture_timeout_seconds: float = Field(default=15.0, ge=12.0)
     allowed_market_data_types: list[MarketDataTypeName] = Field(
         default_factory=_default_market_data_types
     )
@@ -142,6 +143,21 @@ class ProspectiveConfig(BaseModel):
     def _ibkr_port_is_explicit(self) -> ProspectiveConfig:
         if self.runtime.source == "ibkr" and self.ibkr.port is None:
             raise ValueError("IBKR port must be explicitly configured")
+        if self.runtime.heartbeat_seconds * 2 >= self.runtime.recorder_lease_stale_seconds:
+            raise ValueError("recorder heartbeat must be less than half the stale-lease interval")
+        longest_blocking_call = max(
+            self.ibkr.connect_timeout_seconds,
+            self.ibkr.request_timeout_seconds,
+            self.ibkr.quote_capture_timeout_seconds,
+        )
+        if (
+            self.runtime.source == "ibkr"
+            and longest_blocking_call + self.runtime.heartbeat_seconds
+            >= self.runtime.recorder_lease_stale_seconds
+        ):
+            raise ValueError(
+                "IBKR timeout plus heartbeat must remain below the stale-lease interval"
+            )
         return self
 
 
@@ -166,6 +182,14 @@ def load_prospective_config(path: str | Path) -> ProspectiveConfig:
     payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(payload, dict):
         raise ValueError("prospective config must be a YAML mapping")
+    runtime = payload.get("runtime")
+    if isinstance(runtime, dict) and runtime.get("git_commit") == "${STOCKER_GIT_COMMIT}":
+        commit = os.environ.get("STOCKER_GIT_COMMIT")
+        if not commit:
+            raise RuntimeSafetyError(
+                "blocked_unsafe_runtime_configuration: STOCKER_GIT_COMMIT is absent"
+            )
+        runtime["git_commit"] = commit
     return ProspectiveConfig.model_validate(payload)
 
 

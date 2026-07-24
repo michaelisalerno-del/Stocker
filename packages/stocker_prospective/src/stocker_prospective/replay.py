@@ -9,14 +9,14 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from stocker_prospective.database import (
     EvidenceMetadata,
     ProspectiveRepository,
     ScoreInput,
 )
-from stocker_prospective.market_data import MarketDataType
+from stocker_prospective.market_data import MarketDataBudgetSnapshot, MarketDataType
 from stocker_prospective.options import DteBucket, select_expiries
 from stocker_prospective.shadow import (
     OptionExecutableQuote,
@@ -45,6 +45,7 @@ class ReplaySettings(BaseModel):
     git_commit: str
     universe_path: Path
     owner_id: str
+    recorder_lease_stale_seconds: int = Field(gt=0)
 
     @field_validator("prospective_start_utc")
     @classmethod
@@ -187,6 +188,26 @@ def _record_health_and_connection_events(
     repository: ProspectiveRepository,
     metadata: EvidenceMetadata,
 ) -> None:
+    with repository._connect() as connection:
+        budget_exists = connection.execute(
+            "SELECT 1 FROM market_data_budget_event WHERE run_id = ? LIMIT 1",
+            (metadata.run_id,),
+        ).fetchone()
+    if budget_exists is None:
+        repository.record_market_data_budget_event(
+            metadata,
+            MarketDataBudgetSnapshot(
+                line_limit=100,
+                reserved_headroom=10,
+                usable_lines=90,
+                active_lines=0,
+                pending_requests=0,
+                awaiting_cancellation=0,
+                current_request_rate=0,
+                waiting_signals=0,
+                rejected_signals=1,
+            ),
+        )
     for blocker in REPLAY_BLOCKERS:
         _insert_enveloped(
             repository,
@@ -537,7 +558,7 @@ def _record_capture(
                 stale=stale,
             )
             quotes[(right, strike)] = quote
-            _insert_enveloped(
+            quote_id = _insert_enveloped(
                 repository,
                 metadata=metadata,
                 existence_sql=(
@@ -551,12 +572,10 @@ def _record_capture(
                     "bid, ask, bid_size, ask_size, last, last_size, volume, open_interest, "
                     "bid_implied_volatility, ask_implied_volatility, last_implied_volatility, "
                     "model_implied_volatility, bid_delta, ask_delta, last_delta, model_delta, "
-                    "gamma, theta, vega, underlying_reference_price, computation_source, "
                     "provider_timestamp_utc, receive_timestamp_utc, market_data_type, "
                     "staleness_seconds, completeness, permission_error"
                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, "
-                    "0.30, 0.32, NULL, 0.31, NULL, NULL, NULL, 0.50, 0.04, -0.02, 0.08, "
-                    "12.0, 'ibkr_model_option_computation_synthetic_replay', ?, ?, ?, ?, "
+                    "0.30, 0.32, NULL, 0.31, NULL, NULL, NULL, 0.50, ?, ?, ?, ?, "
                     "'complete', NULL)"
                 ),
                 insert_parameters=(
@@ -573,6 +592,42 @@ def _record_capture(
                     120.0 if stale else 0.1,
                 ),
             )
+            for computation_source, implied_volatility, delta, gamma, theta, vega in (
+                ("bid", 0.30, None, None, None, None),
+                ("ask", 0.32, None, None, None, None),
+                ("model", 0.31, 0.50, 0.04, -0.02, 0.08),
+            ):
+                _insert_enveloped(
+                    repository,
+                    metadata=metadata,
+                    existence_sql=(
+                        "SELECT id FROM option_quote_computation "
+                        "WHERE option_quote_id = ? AND computation_source = ?"
+                    ),
+                    existence_parameters=(quote_id, computation_source),
+                    insert_sql=(
+                        "INSERT INTO option_quote_computation("
+                        "envelope_id, run_id, option_quote_id, computation_source, "
+                        "implied_volatility, delta, gamma, theta, vega, option_price, "
+                        "present_value_dividend, underlying_reference_price, "
+                        "provider_timestamp_utc, receive_timestamp_utc, market_data_type, "
+                        "completeness) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, "
+                        "12.0, ?, ?, ?, 'complete')"
+                    ),
+                    insert_parameters=(
+                        metadata.run_id,
+                        quote_id,
+                        computation_source,
+                        implied_volatility,
+                        delta,
+                        gamma,
+                        theta,
+                        vega,
+                        quote.provider_timestamp.isoformat(),
+                        quote.receive_timestamp.isoformat(),
+                        quote.market_data_type.value,
+                    ),
+                )
     return quotes
 
 
@@ -790,9 +845,20 @@ def run_deterministic_replay(settings: ReplaySettings) -> ReplayResult:
     repository.acquire_recorder_lease(
         run_id=settings.run_id,
         owner_id=settings.owner_id,
-        now=_timestamp(str(bars[-1]["end"])) + timedelta(minutes=31),
-        stale_after=timedelta(seconds=30),
+        # Lease time is operational wall time, not synthetic evidence time.
+        # This keeps stale-owner recovery meaningful for a continuous replay
+        # service while all research records remain fixture-deterministic.
+        now=datetime.now(UTC),
+        stale_after=timedelta(seconds=settings.recorder_lease_stale_seconds),
     )
+
+    def heartbeat() -> None:
+        repository.heartbeat_recorder_lease(
+            run_id=settings.run_id,
+            owner_id=settings.owner_id,
+            now=datetime.now(UTC),
+        )
+
     _record_universe(
         repository,
         run_id=settings.run_id,
@@ -800,6 +866,7 @@ def run_deterministic_replay(settings: ReplaySettings) -> ReplayResult:
         symbols=universe.symbols,
         recorded_at=first_bar_end,
     )
+    heartbeat()
     with repository._connect() as connection:
         connection.execute(
             """
@@ -843,6 +910,7 @@ def run_deterministic_replay(settings: ReplaySettings) -> ReplayResult:
         session_date=session_date,
         previous_session=previous_session,
     )
+    heartbeat()
 
     con_id = int(fixture["underlying_contract_id"])
     _insert_enveloped(
@@ -863,6 +931,7 @@ def run_deterministic_replay(settings: ReplaySettings) -> ReplayResult:
     eventizer = SignalEventizer(repository)
     episodes: list[tuple[str, datetime]] = []
     for bar in bars:
+        heartbeat()
         end = _timestamp(str(bar["end"]))
         metadata = _metadata(
             settings,
@@ -912,10 +981,12 @@ def run_deterministic_replay(settings: ReplaySettings) -> ReplayResult:
         expiry_by_bucket=expiry_by_bucket,
         strikes=tuple(float(value) for value in fixture["strikes"]),
     )
+    heartbeat()
     horizons = tuple(int(value) for value in fixture["capture_horizons_minutes"])
     for signal_index, (episode_id, crossing) in enumerate(episodes):
         live_surfaces: dict[int, dict[tuple[str, float], OptionExecutableQuote]] = {}
         for horizon in horizons:
+            heartbeat()
             target = crossing + timedelta(minutes=horizon)
             capture_metadata = _metadata(
                 settings,

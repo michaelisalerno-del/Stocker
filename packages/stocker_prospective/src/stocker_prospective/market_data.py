@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -76,13 +76,20 @@ class BoundedCallbackRegistry:
         *,
         max_pending_requests: int,
         max_items_per_request: int,
+        max_finished_requests: int | None = None,
     ) -> None:
         if max_pending_requests <= 0 or max_items_per_request <= 0:
             raise ValueError("callback bounds must be positive")
+        finished_bound = (
+            max_pending_requests if max_finished_requests is None else max_finished_requests
+        )
+        if finished_bound <= 0:
+            raise ValueError("finished callback bound must be positive")
         self._max_pending = max_pending_requests
         self._max_items = max_items_per_request
+        self._max_finished = finished_bound
         self._pending: dict[int, _PendingCallback] = {}
-        self._finished: dict[int, CallbackResult] = {}
+        self._finished: OrderedDict[int, CallbackResult] = OrderedDict()
         self._lock = threading.RLock()
 
     def begin(self, request_id: int, *, kind: str) -> None:
@@ -96,6 +103,10 @@ class BoundedCallbackRegistry:
                 event=threading.Event(),
                 items=[],
             )
+
+    def is_pending(self, request_id: int) -> bool:
+        with self._lock:
+            return request_id in self._pending
 
     def add(self, request_id: int, item: Any) -> None:
         with self._lock:
@@ -116,6 +127,22 @@ class BoundedCallbackRegistry:
         with self._lock:
             pending = self._require_pending(request_id)
             pending.error = reason
+            pending.event.set()
+
+    def abort(self, request_id: int, reason: str) -> None:
+        """Remove a request whose upstream call failed before callbacks could run."""
+
+        with self._lock:
+            pending = self._require_pending(request_id)
+            result = CallbackResult(
+                request_id=request_id,
+                kind=pending.kind,
+                items=tuple(pending.items),
+                complete=False,
+                error=reason,
+            )
+            self._pending.pop(request_id)
+            self._store_finished(result)
             pending.event.set()
 
     def wait(self, request_id: int, *, timeout_seconds: float) -> CallbackResult:
@@ -144,7 +171,7 @@ class BoundedCallbackRegistry:
                     complete=current.complete and current.error is None,
                     error=current.error,
                 )
-                self._finished[request_id] = finished
+                self._store_finished(finished)
                 self._pending.pop(request_id, None)
         if finished.error is not None:
             raise CallbackRequestError(finished.error)
@@ -161,16 +188,115 @@ class BoundedCallbackRegistry:
                     complete=False,
                     error="shutdown_during_pending_request",
                 )
-                self._finished[request_id] = result
+                self._store_finished(result)
                 pending.event.set()
             self._pending.clear()
             return request_ids
+
+    def _store_finished(self, result: CallbackResult) -> None:
+        self._finished[result.request_id] = result
+        self._finished.move_to_end(result.request_id)
+        while len(self._finished) > self._max_finished:
+            self._finished.popitem(last=False)
 
     def _require_pending(self, request_id: int) -> _PendingCallback:
         pending = self._pending.get(request_id)
         if pending is None:
             raise CallbackRequestError("unknown_or_finished_callback_request")
         return pending
+
+
+class BoundedStreamQuoteCache:
+    """Keep only the latest fields for a bounded set of streaming requests."""
+
+    def __init__(self, *, max_subscriptions: int, max_fields_per_subscription: int) -> None:
+        if max_subscriptions <= 0 or max_fields_per_subscription <= 0:
+            raise ValueError("stream cache bounds must be positive")
+        self._max_subscriptions = max_subscriptions
+        self._max_fields = max_fields_per_subscription
+        self._quotes: dict[int, OrderedDict[str, dict[str, Any]]] = {}
+        self._lock = threading.RLock()
+
+    def register(self, request_id: int) -> None:
+        with self._lock:
+            if request_id in self._quotes:
+                return
+            if len(self._quotes) >= self._max_subscriptions:
+                raise CallbackRequestError("bounded_stream_subscription_cache_exhausted")
+            self._quotes[request_id] = OrderedDict()
+
+    def add(self, request_id: int, payload: dict[str, Any]) -> None:
+        with self._lock:
+            fields = self._quotes.get(request_id)
+            if fields is None:
+                raise CallbackRequestError("unknown_stream_subscription")
+            field = str(payload.get("field", "unknown"))
+            source = payload.get("computation_source")
+            key = field if source is None else f"{field}:{source}"
+            if key not in fields and len(fields) >= self._max_fields:
+                raise CallbackRequestError("bounded_stream_field_cache_exhausted")
+            fields[key] = dict(payload)
+            fields.move_to_end(key)
+
+    def snapshot(self, request_id: int) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            fields = self._quotes.get(request_id)
+            if fields is None:
+                raise CallbackRequestError("unknown_stream_subscription")
+            return tuple(dict(payload) for payload in fields.values())
+
+    def remove(self, request_id: int) -> bool:
+        with self._lock:
+            return self._quotes.pop(request_id, None) is not None
+
+    def clear(self) -> tuple[int, ...]:
+        with self._lock:
+            request_ids = tuple(self._quotes)
+            self._quotes.clear()
+            return request_ids
+
+
+@dataclass(frozen=True)
+class RealtimeBarUpdate:
+    request_id: int
+    source_timestamp_utc: datetime
+    receive_timestamp_utc: datetime
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    volume: float | None
+    wap: float | None
+    trade_count: int | None
+
+
+class BoundedRealtimeBarQueue:
+    """Bound realtime-bar callbacks and make overflow explicit."""
+
+    def __init__(self, *, max_items: int) -> None:
+        if max_items <= 0:
+            raise ValueError("realtime bar queue bound must be positive")
+        self._max_items = max_items
+        self._items: deque[RealtimeBarUpdate] = deque()
+        self._lock = threading.RLock()
+
+    def add(self, update: RealtimeBarUpdate) -> None:
+        with self._lock:
+            if len(self._items) >= self._max_items:
+                raise CallbackRequestError("bounded_realtime_bar_queue_exhausted")
+            self._items.append(update)
+
+    def drain(self, *, limit: int | None = None) -> tuple[RealtimeBarUpdate, ...]:
+        if limit is not None and limit <= 0:
+            raise ValueError("drain limit must be positive")
+        with self._lock:
+            count = len(self._items) if limit is None else min(limit, len(self._items))
+            return tuple(self._items.popleft() for _ in range(count))
+
+    @property
+    def size(self) -> int:
+        with self._lock:
+            return len(self._items)
 
 
 class SubscriptionRegistry:
@@ -198,6 +324,10 @@ class SubscriptionRegistry:
             keys = tuple(self._active)
             self._active.clear()
             return keys
+
+    def active_items(self) -> tuple[tuple[str, int], ...]:
+        with self._lock:
+            return tuple(self._active.items())
 
     @property
     def active_count(self) -> int:
@@ -282,8 +412,8 @@ class MarketDataBudget:
     def reserve(self, key: str, *, lines: int = 1, now: float | None = None) -> None:
         if not key:
             raise ValueError("reservation key is required")
-        if lines <= 0:
-            raise ValueError("lines must be positive")
+        if lines < 0:
+            raise ValueError("lines must be nonnegative")
         timestamp = time.monotonic() if now is None else now
         with self._lock:
             existing = self._reservations.get(key)
@@ -405,6 +535,7 @@ class ConnectionTracker:
     """Deterministic interpretation of the official IBKR connectivity events."""
 
     def __init__(self) -> None:
+        self._lock = threading.RLock()
         self._state = ConnectionState.DISCONNECTED
         self._market_data_type: MarketDataType | None = None
         self._requires_rebuild = False
@@ -413,48 +544,68 @@ class ConnectionTracker:
         self.events: list[ConnectionEvent] = []
 
     def connecting(self) -> None:
-        self._record(ConnectionState.CONNECTING, None, "connecting", None)
+        with self._lock:
+            self._record(ConnectionState.CONNECTING, None, "connecting", None)
 
-    def connected(self, market_data_type: MarketDataType) -> None:
-        self._market_data_type = market_data_type
-        self._requires_rebuild = False
-        self._record(ConnectionState.CONNECTED, None, "connected", None)
+    def connected(self, market_data_type: MarketDataType | None) -> None:
+        with self._lock:
+            self._market_data_type = market_data_type
+            self._requires_rebuild = False
+            self._record(ConnectionState.CONNECTED, None, "connected", None)
+
+    def subscriptions_rebuilt(self) -> None:
+        with self._lock:
+            self._requires_rebuild = False
 
     def connection_lost(self, *, code: int, message: str) -> None:
-        self._record(ConnectionState.DISCONNECTED, code, message, False)
+        with self._lock:
+            self._record(ConnectionState.DISCONNECTED, code, message, False)
 
     def connection_restored(self, *, data_maintained: bool, code: int) -> None:
-        self._requires_rebuild = not data_maintained
-        message = (
-            "connectivity_restored_data_maintained"
-            if data_maintained
-            else "connectivity_restored_data_lost"
-        )
-        self._record(ConnectionState.CONNECTED, code, message, data_maintained)
+        with self._lock:
+            self._requires_rebuild = not data_maintained
+            message = (
+                "connectivity_restored_data_maintained"
+                if data_maintained
+                else "connectivity_restored_data_lost"
+            )
+            self._record(ConnectionState.CONNECTED, code, message, data_maintained)
 
     def socket_port_reset(self, port: int) -> None:
-        self._requires_rebuild = True
-        self._record(
-            ConnectionState.PORT_RESET,
-            1300,
-            f"socket_port_mismatch_or_reset:{port}",
-            False,
-        )
+        with self._lock:
+            self._requires_rebuild = True
+            self._record(
+                ConnectionState.PORT_RESET,
+                1300,
+                f"socket_port_mismatch_or_reset:{port}",
+                False,
+            )
 
     def degraded(self, *, code: int, message: str) -> None:
-        self._record(ConnectionState.DEGRADED, code, message, None)
+        with self._lock:
+            self._record(ConnectionState.DEGRADED, code, message, None)
 
     def shutting_down(self) -> None:
-        self._record(ConnectionState.SHUTTING_DOWN, None, "shutting_down", None)
+        with self._lock:
+            self._record(ConnectionState.SHUTTING_DOWN, None, "shutting_down", None)
 
     def health(self) -> ConnectionHealth:
-        return ConnectionHealth(
-            state=self._state,
-            market_data_type=self._market_data_type,
-            subscriptions_require_rebuild=self._requires_rebuild,
-            last_error_code=self._last_error_code,
-            last_message=self._last_message,
-        )
+        with self._lock:
+            return ConnectionHealth(
+                state=self._state,
+                market_data_type=self._market_data_type,
+                subscriptions_require_rebuild=self._requires_rebuild,
+                last_error_code=self._last_error_code,
+                last_message=self._last_message,
+            )
+
+    def drain_events(self) -> tuple[ConnectionEvent, ...]:
+        """Return and clear events after the recorder persists them."""
+
+        with self._lock:
+            events = tuple(self.events)
+            self.events.clear()
+            return events
 
     def _record(
         self,

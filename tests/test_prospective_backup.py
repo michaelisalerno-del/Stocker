@@ -21,6 +21,7 @@ def test_online_backup_is_checked_and_preserves_prospective_records(tmp_path: Pa
             git_commit="deadbeef",
             universe_path=ROOT / "configs/prospective/anchor-frozen-20.json",
             owner_id="backup-test-owner",
+            recorder_lease_stale_seconds=60,
         )
     )
 

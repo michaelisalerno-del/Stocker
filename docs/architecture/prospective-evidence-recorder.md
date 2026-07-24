@@ -57,22 +57,39 @@ GET routes only.
 
 - owns the only prospective database writer and singleton recorder lease;
 - owns the optional official IBKR callback loop;
-- creates completed-bar, context, feature, score, signal, quote, and health
-  evidence;
+- creates completed-bar, underlying-quote, connection, budget, rejection, and
+  health evidence in the admitted live record-only path;
 - maintains a heartbeat and recovers a stale owner only after the configured
   lease interval;
 - uses monotonic request IDs, bounded callback queues, market-data line
   headroom, and a local request-rate limit;
-- discovers option-chain coordinates with `reqSecDefOptParams`, then qualifies
-  only the fixed bounded contracts;
-- schedules entry and 5/10/15/30-minute capture rows; and
+- qualifies the exact `STK` contract for every registered anchor symbol, then
+  maintains at most one bounded quote and one five-second real-time-bar
+  subscription per qualified symbol;
+- aggregates exactly 60 distinct five-second callbacks into a completed
+  five-minute diagnostic bar without filling gaps, and persists partial bars
+  as rejections;
+- records executable-side underlying quotes at completed-bar checkpoints,
+  preserving per-field freshness and live/frozen/delayed identity;
+- rebuilds subscriptions only after an official lost-data reconnect and
+  records any discarded buffered callbacks explicitly;
+- exposes bounded option-chain metadata, exact-contract qualification, and
+  temporary-snapshot primitives without any whole-chain streaming;
+- exercises entry and 5/10/15/30-minute option captures and all shadow
+  accounting deterministically in replay; and
 - cancels temporary market-data requests on completion, timeout, shutdown, or
   failure.
 
 The current checkout has no approved frozen model bundle and its feature
-parity gate is blocked. Consequently, deterministic replay works, while real
-frozen M1 scoring correctly refuses to start. The optional official `ibapi`
-dependency is also absent from the repository by design.
+parity gate is blocked. Consequently, deterministic replay works and the
+record-only IBKR service may use the independently hash-verified registered
+universe while persisting `blocked_missing_verified_frozen_bundle` and
+`blocked_feature_source_semantics_mismatch`. Shadow/frozen-M1 scoring refuses
+to start. Since no eligible real score can cross the gate, live
+signal-triggered option scheduling is not admitted in this deployment; the
+option capture scheduler and shadow path are replay evidence, not a claimed
+live option recorder. The optional official `ibapi` dependency is absent from
+the repository by design.
 
 ### `stocker-web`
 
@@ -114,6 +131,8 @@ Manifest version 1 binds:
 - expected dtypes and missing-value policy;
 - M1 threshold and provenance;
 - registered 20-stock universe and identity;
+- canonical ordered-symbol universe hash and source-artifact SHA-256;
+- previous-session context schema and ordered-feature hashes;
 - training, reference, holdout, and protected intervals;
 - code/feature contract version;
 - audit and determinism references; and
@@ -121,10 +140,12 @@ Manifest version 1 binds:
 
 The builder refuses database/data-set suffixes, missing artifacts, an altered
 20-stock membership, a different threshold provenance, and an existing output
-directory. Installed bundles are made read-only and never overwritten.
-Activation is a compare-and-swap operation with operator identity and an
-append-only action log. Every score attempt reloads and reverifies the active
-bundle.
+directory. Verification requires the manifest identity set and file map to
+match exactly, rejects unlisted files, non-canonical paths, traversal and
+symlinks, and checks both size and SHA-256. Installed bundles are made
+read-only and never overwritten. Activation is a compare-and-swap operation
+with operator identity and an append-only action log. Every score attempt
+reloads and reverifies the active bundle.
 
 The registered anchor cohort is mechanically extracted from the actual local
 M1 artifact at
@@ -257,13 +278,24 @@ live under `stocker_prospective/migrations` and create:
 - feature snapshot and model score;
 - signal eventisation, episode, and checkpoint;
 - option contract, surface capture, and quote;
+- source-separated bid, ask, last, and model option computations;
 - shadow structure, leg, and horizon valuation;
 - data-health, IBKR connection, and ordered audit events.
+- append-only market-data budget telemetry.
 
 Evidence tables reference an envelope containing run ID, prospective start,
 application version, Git commit, artifact identity, universe identity, cohort,
 source timestamps, and recording timestamp. Inserts are append-oriented and
 uniqueness-constrained.
+
+Migration `0003` makes `option_quote_computation` the authoritative,
+source-separated Greeks/IV record. The older nullable collapsed computation
+columns remain only for migration compatibility and are not written by this
+runtime. Migration `0004` adds symbol/permanent-contract identity to underlying
+quotes. Migration application and its registry insert are one SQLite
+transaction.
+Migration `0005` records current active/pending/cancelling lines, request rate,
+waiting/rejected signals, and reserved capacity for the separate web process.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have
@@ -283,4 +315,3 @@ This phase has no:
 - hand-built mismatch feature;
 - new hidden-loop feature; or
 - direction inferred from option returns.
-

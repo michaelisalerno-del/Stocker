@@ -5,7 +5,8 @@ deployable prospective slice now lives in `stocker_prospective` and is strictly
 record-only/shadow:
 
 ```bash
-uv sync --locked --no-default-groups --group server
+export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
+uv sync --locked --no-editable --no-default-groups --group server
 uv run stocker-prospective replay run \
   --config configs/prospective/replay.example.yaml
 uv run stocker-prospective web run \

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 import shutil
 import stat
 import uuid
@@ -30,6 +32,8 @@ DISALLOWED_BUNDLE_SUFFIXES = {
     ".sqlite",
     ".sqlite3",
 }
+SAFE_BUNDLE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{2,}$"
+SAFE_BUNDLE_ID = re.compile(SAFE_BUNDLE_ID_PATTERN)
 
 
 class BundleError(RuntimeError):
@@ -41,7 +45,7 @@ class BundleBuildSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    bundle_id: str = Field(min_length=3, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]+$")
+    bundle_id: str = Field(pattern=SAFE_BUNDLE_ID_PATTERN)
     created_at_utc: datetime
     m0_artifact: Path
     m1_artifact: Path
@@ -58,6 +62,8 @@ class BundleBuildSpec(BaseModel):
     holdout_end: str
     protected_start: str = PROTECTED_START
     code_feature_contract_version: str = Field(min_length=1)
+    previous_session_context_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    previous_session_context_feature_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     audit_references: list[Path] = Field(default_factory=list)
     determinism_references: list[Path] = Field(default_factory=list)
 
@@ -97,7 +103,9 @@ class UniverseIdentity(FileIdentity):
     cohort: Literal["anchor_frozen_20"]
     symbol_count: int
     symbols: list[str]
+    universe_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     source_artifact: str
+    source_artifact_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class FrozenThreshold(BaseModel):
@@ -127,7 +135,7 @@ class BundleManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     manifest_version: Literal["1"]
-    bundle_id: str
+    bundle_id: str = Field(pattern=SAFE_BUNDLE_ID_PATTERN)
     bundle_kind: Literal["frozen_m1"] = "frozen_m1"
     created_at_utc: datetime
     scientific_classification: Literal[
@@ -139,6 +147,8 @@ class BundleManifest(BaseModel):
         "underlying_movement_selection_not_option_profitability"
     )
     code_feature_contract_version: str
+    previous_session_context_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    previous_session_context_feature_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     m0_artifact: FileIdentity
     m1_artifact: FileIdentity
     preprocessor: FileIdentity
@@ -168,7 +178,7 @@ class ActiveBundle(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    bundle_id: str
+    bundle_id: str = Field(pattern=SAFE_BUNDLE_ID_PATTERN)
     manifest_sha256: str
     activated_at_utc: datetime
     operator: str
@@ -244,12 +254,19 @@ def _feature_schema(identity: FileIdentity, path: Path) -> FeatureSchemaIdentity
 def _universe(identity: FileIdentity, path: Path) -> UniverseIdentity:
     payload = _load_json(path, "universe")
     symbols = payload.get("symbols")
+    universe_hash = payload.get("universe_hash")
+    source_artifact_sha256 = payload.get("source_artifact_sha256")
+    canonical_symbols = json.dumps(symbols, separators=(",", ":"), ensure_ascii=True)
+    expected_universe_hash = hashlib.sha256((canonical_symbols + "\n").encode("utf-8")).hexdigest()
     if (
         payload.get("cohort") != ANCHOR_COHORT
         or not isinstance(symbols, list)
         or len(symbols) != 20
         or len(set(symbols)) != 20
         or any(not isinstance(symbol, str) or symbol != symbol.upper() for symbol in symbols)
+        or universe_hash != expected_universe_hash
+        or not isinstance(source_artifact_sha256, str)
+        or re.fullmatch(r"[a-f0-9]{64}", source_artifact_sha256) is None
     ):
         raise BundleError(
             "blocked_frozen_universe_mismatch: anchor_frozen_20 must contain 20 unique "
@@ -264,8 +281,15 @@ def _universe(identity: FileIdentity, path: Path) -> UniverseIdentity:
         cohort=ANCHOR_COHORT,
         symbol_count=20,
         symbols=symbols,
+        universe_hash=universe_hash,
         source_artifact=str(payload.get("source_artifact", "")),
+        source_artifact_sha256=source_artifact_sha256,
     )
+
+
+def _require_safe_bundle_id(bundle_id: str) -> None:
+    if SAFE_BUNDLE_ID.fullmatch(bundle_id) is None:
+        raise BundleError("blocked_unsafe_bundle_content: invalid bundle identifier")
 
 
 def _threshold(
@@ -353,6 +377,8 @@ def build_bundle(spec: BundleBuildSpec, destination: str | Path) -> BundleManife
             created_at_utc=spec.created_at_utc.astimezone(UTC),
             scientific_classification=SCIENTIFIC_CLASSIFICATION,
             code_feature_contract_version=spec.code_feature_contract_version,
+            previous_session_context_schema_hash=spec.previous_session_context_schema_hash,
+            previous_session_context_feature_hash=spec.previous_session_context_feature_hash,
             m0_artifact=m0,
             m1_artifact=m1,
             preprocessor=preprocessor,
@@ -388,6 +414,8 @@ def build_bundle(spec: BundleBuildSpec, destination: str | Path) -> BundleManife
 
 def _manifest(path: Path) -> BundleManifest:
     manifest_path = path / "manifest.json"
+    if path.is_symlink() or manifest_path.is_symlink():
+        raise BundleError("blocked_unsafe_bundle_content: bundle paths may not be symlinks")
     if not manifest_path.is_file():
         raise BundleError(
             f"blocked_missing_verified_frozen_bundle: missing manifest at {manifest_path}"
@@ -398,24 +426,114 @@ def _manifest(path: Path) -> BundleManifest:
         raise BundleError("blocked_feature_schema_mismatch: invalid bundle manifest") from exc
 
 
+def _declared_file_identities(manifest: BundleManifest) -> dict[str, FileIdentity]:
+    identities = [
+        manifest.m0_artifact,
+        manifest.m1_artifact,
+        manifest.preprocessor,
+        manifest.feature_schema,
+        manifest.universe,
+        manifest.threshold.provenance,
+        *manifest.audit_references,
+        *manifest.determinism_references,
+    ]
+    declared: dict[str, FileIdentity] = {}
+    for identity in identities:
+        if identity.path in declared:
+            raise BundleError(
+                f"blocked_unsafe_bundle_content: duplicate file identity {identity.path}"
+            )
+        declared[identity.path] = identity
+    return declared
+
+
+def _safe_bundle_relative_path(relative_path: str) -> bool:
+    candidate = Path(relative_path)
+    return bool(
+        relative_path
+        and not candidate.is_absolute()
+        and ".." not in candidate.parts
+        and candidate.as_posix() == relative_path
+    )
+
+
+def _resolves_within(root: Path, relative_path: str) -> bool:
+    try:
+        (root / relative_path).resolve(strict=False).relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def verify_bundle(path: str | Path) -> BundleVerification:
     """Verify manifest schema, every file hash, universe, and embedded contracts."""
 
     root = Path(path)
     manifest = _manifest(root)
     blockers: list[str] = []
+    try:
+        declared_files = _declared_file_identities(manifest)
+    except BundleError as exc:
+        blockers.append(str(exc).split(":", 1)[0])
+        declared_files = {}
+    if set(declared_files) - set(manifest.files):
+        blockers.append("blocked_missing_verified_frozen_bundle")
+    if set(manifest.files) - set(declared_files):
+        blockers.append("blocked_unsafe_bundle_content")
+    if any(
+        manifest.files.get(relative_path) != identity.sha256
+        for relative_path, identity in declared_files.items()
+        if relative_path in manifest.files
+    ):
+        blockers.append("blocked_frozen_artifact_hash_mismatch")
+
+    actual_files: set[str] = set()
+    for candidate in root.rglob("*"):
+        if candidate.is_symlink():
+            blockers.append("blocked_unsafe_bundle_content")
+            continue
+        if candidate.is_file():
+            actual_files.add(candidate.relative_to(root).as_posix())
+        elif not candidate.is_dir():
+            blockers.append("blocked_unsafe_bundle_content")
+    if actual_files - {"manifest.json"} - set(manifest.files):
+        blockers.append("blocked_unsafe_bundle_content")
+
+    resolved_root = root.resolve()
     for relative_path, expected_hash in manifest.files.items():
+        if not _safe_bundle_relative_path(relative_path):
+            blockers.append("blocked_unsafe_bundle_content")
+            continue
         candidate = root / relative_path
         try:
-            candidate.relative_to(root)
+            candidate.resolve(strict=False).relative_to(resolved_root)
         except ValueError:
             blockers.append("blocked_unsafe_bundle_content")
             continue
-        if not candidate.is_file():
+        if candidate.is_symlink():
+            blockers.append("blocked_unsafe_bundle_content")
+        elif not candidate.is_file():
             blockers.append("blocked_missing_verified_frozen_bundle")
-        elif _sha256(candidate) != expected_hash:
+        elif _sha256(candidate) != expected_hash or (
+            relative_path in declared_files
+            and candidate.stat().st_size != declared_files[relative_path].size_bytes
+        ):
             blockers.append("blocked_frozen_artifact_hash_mismatch")
+    contract_paths = (
+        manifest.feature_schema.path,
+        manifest.universe.path,
+        manifest.threshold.provenance.path,
+    )
+    contracts_are_safe = all(
+        _safe_bundle_relative_path(relative_path)
+        and _resolves_within(root, relative_path)
+        and not (root / relative_path).is_symlink()
+        and (root / relative_path).is_file()
+        for relative_path in contract_paths
+    )
     try:
+        if not contracts_are_safe:
+            raise BundleError("blocked_unsafe_bundle_content: invalid embedded contract path")
         schema = _feature_schema(
             manifest.feature_schema,
             root / manifest.feature_schema.path,
@@ -462,7 +580,11 @@ def validate_feature_vector(
                 )
             continue
         valid = {
-            "float64": isinstance(value, (int, float)) and not isinstance(value, bool),
+            "float64": (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+            ),
             "int64": isinstance(value, int) and not isinstance(value, bool),
             "bool": isinstance(value, bool),
             "string": isinstance(value, str),
@@ -507,7 +629,10 @@ def install_bundle(
     root = Path(bundle_root)
     installed_root = root / "installed"
     installed_root.mkdir(parents=True, exist_ok=True)
+    _require_safe_bundle_id(verification.manifest.bundle_id)
     destination = installed_root / verification.manifest.bundle_id
+    if not _resolves_within(installed_root, verification.manifest.bundle_id):
+        raise BundleError("blocked_unsafe_bundle_content: bundle path escapes installed root")
     if destination.exists():
         raise BundleError(f"installed bundle already exists: {destination}")
     temporary = installed_root / f".{verification.manifest.bundle_id}.{uuid.uuid4().hex}.tmp"
@@ -574,6 +699,7 @@ def activate_bundle(
 
     if not operator.strip():
         raise BundleError("operator identity is required")
+    _require_safe_bundle_id(bundle_id)
     root = Path(bundle_root)
     current = _active_pointer(root)
     current_id = None if current is None else current.bundle_id
@@ -582,6 +708,8 @@ def activate_bundle(
             f"active bundle changed: expected {expected_current_bundle_id!r}, found {current_id!r}"
         )
     installed = root / "installed" / bundle_id
+    if not _resolves_within(root / "installed", bundle_id):
+        raise BundleError("blocked_unsafe_bundle_content: bundle path escapes installed root")
     verification = verify_bundle(installed)
     if not verification.verified:
         raise BundleError(", ".join(verification.blockers))

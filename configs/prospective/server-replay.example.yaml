@@ -1,16 +1,15 @@
 paths:
-  # Replay state is deliberately outside the Git checkout/release.
-  database: /tmp/stocker-prospective-replay/prospective.sqlite3
-  bundle_root: /tmp/stocker-prospective-replay/bundles
-  context_root: /tmp/stocker-prospective-replay/context
-  feature_parity_report: configs/prospective/feature-parity-m1.json
-  replay_universe: configs/prospective/anchor-frozen-20.json
+  database: /var/lib/stocker/prospective/prospective.sqlite3
+  bundle_root: /var/lib/stocker/bundles
+  context_root: /var/lib/stocker/daily-context
+  feature_parity_report: /opt/stocker/current/configs/prospective/feature-parity-m1.json
+  replay_universe: /opt/stocker/current/configs/prospective/anchor-frozen-20.json
 
 runtime:
   mode: shadow
   source: replay
   prospective_start_utc: "2026-07-24T13:00:00Z"
-  instance_id: replay-workstation
+  instance_id: stocker-dedicated-replay
   app_version: 0.1.0
   git_commit: ${STOCKER_GIT_COMMIT}
   run_id: deterministic-replay-v1
@@ -54,4 +53,4 @@ ibkr:
 context:
   mode: signed_import
   hmac_secret_env: STOCKER_CONTEXT_SIGNING_SECRET
-  import_directory: /tmp/stocker-prospective-replay/context/incoming
+  import_directory: /var/lib/stocker/daily-context/incoming

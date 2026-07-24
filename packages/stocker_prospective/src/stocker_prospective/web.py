@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from stocker_prospective.bundle import BundleError, load_active_bundle
-from stocker_prospective.config import ProspectiveConfig, public_config
+from stocker_prospective.config import (
+    ProspectiveConfig,
+    public_config,
+    validate_runtime_safety,
+)
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.read_store import ProspectiveReadStore
 
@@ -63,7 +67,8 @@ def _parity_projection(config: ProspectiveConfig) -> dict[str, Any]:
 def create_web_app(config: ProspectiveConfig) -> FastAPI:
     """Create a web app that receives no recorder or broker object."""
 
-    store = ProspectiveReadStore(config.paths.database)
+    validate_runtime_safety(config, object())
+    store = ProspectiveReadStore(config.paths.database, run_id=config.runtime.run_id)
     static_root = Path(__file__).with_name("web_static")
     authentication_token: str | None = None
     if config.web.authentication_enabled:
@@ -83,7 +88,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     allowed_hosts = list(config.web.allowed_hosts)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
     app.mount("/assets", StaticFiles(directory=static_root), name="assets")
-    rate_windows: dict[str, deque[float]] = defaultdict(deque)
+    rate_windows: OrderedDict[str, deque[float]] = OrderedDict()
+    maximum_rate_limit_identities = 4096
 
     @app.middleware("http")
     async def security_boundary(request: Request, call_next: Any) -> Any:
@@ -111,7 +117,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         ):
             client_ip = request.headers["x-forwarded-for"].split(",", 1)[0].strip()
         now = time.monotonic()
-        window = rate_windows[client_ip]
+        window = rate_windows.setdefault(client_ip, deque())
+        rate_windows.move_to_end(client_ip)
+        while len(rate_windows) > maximum_rate_limit_identities:
+            rate_windows.popitem(last=False)
         while window and window[0] <= now - 60:
             window.popleft()
         if len(window) >= config.web.requests_per_minute:
@@ -151,15 +160,12 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         runtime = store.runtime_projection()
         bundle = _active_bundle_projection(config)
         parity = _parity_projection(config)
-        blockers = list(
-            dict.fromkeys(
-                [
-                    *(item["blocker_code"] for item in runtime["blockers"]),
-                    *bundle["blockers"],
-                    parity["blocker"],
-                ]
-            )
-        )
+        blocker_candidates = [
+            *(item["blocker_code"] for item in runtime["blockers"]),
+            *bundle["blockers"],
+            parity["blocker"],
+        ]
+        blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
         return {
             "status": "blocked" if blockers else "healthy",
             "research_only": True,
@@ -179,6 +185,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "latest": runtime["latest_capture"],
                 "line_budget": config.ibkr.market_data_line_budget,
                 "reserved_headroom": config.ibkr.reserved_line_headroom,
+                "current_budget": runtime["market_data_budget"],
             },
             "database": store.database_health(),
             "active_bundle": bundle,
@@ -192,7 +199,16 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "latest_score": runtime["latest_score"],
             "latest_signal_episode": runtime["latest_signal_episode"],
             "blockers": blockers,
-            "no_order_path_verified": True,
+            "no_order_path_verified": config.risk.trading_enabled is False
+            and all(
+                not any(
+                    forbidden in str(getattr(route, "path", "")).lower()
+                    for forbidden in ("order", "account", "credential", "threshold", "upload")
+                )
+                and set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
+                for route in app.routes
+                if str(getattr(route, "path", "")).startswith("/api/")
+            ),
         }
 
     @app.get("/api/runtime")

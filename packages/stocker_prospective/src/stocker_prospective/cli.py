@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import time
-from datetime import UTC, date, datetime
+import uuid
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, NoReturn
+from zoneinfo import ZoneInfo
 
 import typer
 import uvicorn
@@ -27,6 +30,7 @@ from stocker_prospective.bundle import (
 )
 from stocker_prospective.config import (
     ProspectiveConfig,
+    RuntimeSafetyError,
     load_prospective_config,
     validate_persistent_paths,
     validate_runtime_safety,
@@ -37,11 +41,23 @@ from stocker_prospective.context import (
     SignedDailyContext,
     create_signed_context,
     import_signed_context,
+    load_imported_context,
 )
 from stocker_prospective.database import ProspectiveRepository
-from stocker_prospective.ibkr import require_official_ibkr_api
-from stocker_prospective.parity import load_feature_parity_report
+from stocker_prospective.ibkr import (
+    IBKRConnectionConfig,
+    IBKRMarketDataAdapter,
+    OfficialIBKRDependencyError,
+    require_official_ibkr_api,
+)
+from stocker_prospective.market_data import MarketDataBudget, MarketDataType
+from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
+from stocker_prospective.recorder import (
+    IBKRDiagnosticRecorder,
+    RecorderDeploymentIdentity,
+)
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
+from stocker_prospective.universe import UniverseError, load_registered_universe
 from stocker_prospective.web import create_web_app
 
 app = typer.Typer(
@@ -295,7 +311,11 @@ def database_backup(
         _fatal(str(exc))
 
 
-def _replay_settings(config: ProspectiveConfig) -> ReplaySettings:
+def _replay_settings(
+    config: ProspectiveConfig,
+    *,
+    owner_id: str | None = None,
+) -> ReplaySettings:
     if config.runtime.run_id is None:
         raise ValueError("replay requires an explicit runtime.run_id")
     if config.paths.replay_universe is None:
@@ -307,20 +327,115 @@ def _replay_settings(config: ProspectiveConfig) -> ReplaySettings:
         app_version=config.runtime.app_version,
         git_commit=config.runtime.git_commit,
         universe_path=config.paths.replay_universe,
-        owner_id=config.runtime.instance_id,
+        owner_id=config.runtime.instance_id if owner_id is None else owner_id,
+        recorder_lease_stale_seconds=config.runtime.recorder_lease_stale_seconds,
     )
+
+
+def _recorder_owner_id(config: ProspectiveConfig) -> str:
+    """Return a process-unique identity even when two processes share one config."""
+
+    return f"{config.runtime.instance_id}:{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex}"
+
+
+def _ibkr_adapter(config: ProspectiveConfig) -> IBKRMarketDataAdapter:
+    if config.ibkr.port is None:
+        raise RuntimeSafetyError(
+            "blocked_unsafe_runtime_configuration: IBKR port must be explicitly configured"
+        )
+    connection_config = IBKRConnectionConfig(
+        host=config.ibkr.host,
+        port=config.ibkr.port,
+        client_id=config.ibkr.client_id,
+        expected_environment=config.ibkr.expected_environment,
+        connect_timeout_seconds=config.ibkr.connect_timeout_seconds,
+        request_timeout_seconds=config.ibkr.request_timeout_seconds,
+        quote_capture_timeout_seconds=config.ibkr.quote_capture_timeout_seconds,
+        allowed_market_data_types=tuple(
+            MarketDataType(value) for value in config.ibkr.allowed_market_data_types
+        ),
+    )
+    return IBKRMarketDataAdapter(
+        config=connection_config,
+        budget=MarketDataBudget(
+            line_limit=config.ibkr.market_data_line_budget,
+            reserved_headroom=config.ibkr.reserved_line_headroom,
+            request_rate_limit=config.ibkr.request_rate_per_second,
+        ),
+    )
+
+
+def _validate_ibkr_scoring_inputs(
+    config: ProspectiveConfig,
+) -> RecorderDeploymentIdentity:
+    try:
+        verification = load_active_bundle(config.paths.bundle_root)
+    except BundleError as exc:
+        if (
+            config.runtime.mode != "record_only"
+            or not str(exc).startswith("blocked_missing_verified_frozen_bundle")
+            or config.paths.replay_universe is None
+        ):
+            raise
+        universe = load_registered_universe(config.paths.replay_universe)
+        return RecorderDeploymentIdentity.from_registered_universe(universe)
+    identity = RecorderDeploymentIdentity.from_bundle(verification)
+    if config.runtime.mode != "shadow":
+        return identity
+    parity = load_feature_parity_report(config.paths.feature_parity_report)
+    parity.require_scoring_allowed()
+    if config.paths.context_root is None:
+        raise ContextValidationError(
+            "blocked_missing_previous_session_options_context: context_root is absent"
+        )
+    secret = os.environ.get(config.context.hmac_secret_env)
+    if not secret:
+        raise ContextValidationError(
+            "blocked_missing_previous_session_options_context: signing secret is absent"
+        )
+    current_session = datetime.now(ZoneInfo("America/New_York")).date()
+    load_imported_context(
+        context_root=config.paths.context_root,
+        current_session=current_session,
+        secret=secret.encode(),
+        expected_schema_hash=verification.manifest.previous_session_context_schema_hash,
+        expected_feature_hash=verification.manifest.previous_session_context_feature_hash,
+        expected_symbols=tuple(verification.manifest.universe.symbols),
+    )
+    return identity
 
 
 @replay_app.command("run")
 def replay_run(config_path: Path = typer.Option(..., "--config", exists=True)) -> None:
     """Run the deterministic fixture and exit."""
 
+    config: ProspectiveConfig | None = None
+    owner_id: str | None = None
     try:
         config = load_prospective_config(config_path)
         validate_runtime_safety(config, _ReplayMarketDataBoundary())
-        _emit(run_deterministic_replay(_replay_settings(config)))
+        owner_id = _recorder_owner_id(config)
+        _emit(
+            run_deterministic_replay(
+                _replay_settings(
+                    config,
+                    owner_id=owner_id,
+                )
+            )
+        )
     except Exception as exc:
         _fatal(str(exc))
+    finally:
+        if (
+            config is not None
+            and config.runtime.run_id is not None
+            and owner_id is not None
+            and config.paths.database.is_file()
+        ):
+            ProspectiveRepository(config.paths.database).release_recorder_lease(
+                run_id=config.runtime.run_id,
+                owner_id=owner_id,
+            )
 
 
 @recorder_app.command("run")
@@ -331,29 +446,73 @@ def recorder_run(
 ) -> None:
     """Own the single recorder lease and market-data loop."""
 
+    adapter: IBKRMarketDataAdapter | None = None
+    diagnostic_recorder: Any | None = None
+    repository: ProspectiveRepository | None = None
+    lease_owned = False
+    config: ProspectiveConfig | None = None
+    owner_id: str | None = None
     try:
         config = load_prospective_config(config_path)
-        validate_runtime_safety(config, _ReplayMarketDataBoundary())
         validate_persistent_paths(config, release_directory)
+        if config.runtime.run_id is None:
+            raise RuntimeSafetyError(
+                "blocked_unsafe_runtime_configuration: runtime.run_id is required"
+            )
+        owner_id = _recorder_owner_id(config)
         if config.runtime.source == "replay":
-            result = run_deterministic_replay(_replay_settings(config))
+            validate_runtime_safety(config, _ReplayMarketDataBoundary())
+            result = run_deterministic_replay(
+                _replay_settings(
+                    config,
+                    owner_id=owner_id,
+                )
+            )
             _emit(result)
+            repository = ProspectiveRepository(config.paths.database)
+            lease_owned = True
             if once:
+                repository.release_recorder_lease(
+                    run_id=config.runtime.run_id,
+                    owner_id=owner_id,
+                )
+                lease_owned = False
                 return
         else:
+            adapter = _ibkr_adapter(config)
+            validate_runtime_safety(config, adapter)
             require_official_ibkr_api()
-            load_active_bundle(config.paths.bundle_root)
-            parity = load_feature_parity_report(config.paths.feature_parity_report)
-            if config.runtime.mode == "shadow":
-                parity.require_scoring_allowed()
-            _fatal(
-                "blocked_ibkr_connection: configure and attach the official callback client",
-                exit_code=69,
+            deployment_identity = _validate_ibkr_scoring_inputs(config)
+            repository = ProspectiveRepository(config.paths.database)
+            repository.migrate()
+            repository.acquire_recorder_lease(
+                run_id=config.runtime.run_id,
+                owner_id=owner_id,
+                now=datetime.now(UTC),
+                stale_after=timedelta(seconds=config.runtime.recorder_lease_stale_seconds),
+            )
+            lease_owned = True
+            from stocker_prospective.ibkr_official import (
+                create_official_callback_client,
+                create_official_stock_contract,
             )
 
-        if config.runtime.run_id is None:
-            raise ValueError("runtime.run_id is required")
-        repository = ProspectiveRepository(config.paths.database)
+            adapter.attach_official_client(create_official_callback_client(adapter))
+            adapter.start()
+            diagnostic_recorder = IBKRDiagnosticRecorder(
+                config=config,
+                repository=repository,
+                adapter=adapter,
+                identity=deployment_identity,
+                contract_factory=create_official_stock_contract,
+                heartbeat=lambda: repository.heartbeat_recorder_lease(
+                    run_id=config.runtime.run_id or "",
+                    owner_id=owner_id or "",
+                    now=datetime.now(UTC),
+                ),
+            )
+
+        assert repository is not None
         stopping = False
 
         def request_stop(_signum: int, _frame: object) -> None:
@@ -363,14 +522,50 @@ def recorder_run(
         signal.signal(signal.SIGTERM, request_stop)
         signal.signal(signal.SIGINT, request_stop)
         while not stopping:
+            if diagnostic_recorder is not None:
+                diagnostic_recorder.poll(now=datetime.now(UTC))
             repository.heartbeat_recorder_lease(
                 run_id=config.runtime.run_id,
-                owner_id=config.runtime.instance_id,
+                owner_id=owner_id,
                 now=datetime.now(UTC),
             )
             time.sleep(config.runtime.heartbeat_seconds)
+    except typer.Exit:
+        raise
+    except (
+        BundleError,
+        ContextValidationError,
+        FeatureParityError,
+        OfficialIBKRDependencyError,
+        RuntimeSafetyError,
+        UniverseError,
+        ValueError,
+    ) as exc:
+        _fatal(str(exc), exit_code=78)
     except Exception as exc:
-        _fatal(str(exc))
+        _fatal(str(exc), exit_code=75)
+    finally:
+        if diagnostic_recorder is not None:
+            try:
+                diagnostic_recorder.shutdown(now=datetime.now(UTC))
+            except Exception as exc:
+                typer.echo(f"recorder shutdown cleanup failed: {exc}", err=True)
+        if adapter is not None:
+            try:
+                adapter.stop()
+            except Exception as exc:
+                typer.echo(f"IBKR adapter cleanup failed: {exc}", err=True)
+        if (
+            lease_owned
+            and repository is not None
+            and config is not None
+            and config.runtime.run_id is not None
+            and owner_id is not None
+        ):
+            repository.release_recorder_lease(
+                run_id=config.runtime.run_id,
+                owner_id=owner_id,
+            )
 
 
 @web_app.command("run")
@@ -379,6 +574,7 @@ def web_run(config_path: Path = typer.Option(..., "--config", exists=True)) -> N
 
     try:
         config = load_prospective_config(config_path)
+        validate_runtime_safety(config, object())
         application = create_web_app(config)
         forwarded = ",".join(config.web.trusted_proxy_ips) if config.web.trust_proxy_headers else ""
         uvicorn.run(
@@ -389,5 +585,9 @@ def web_run(config_path: Path = typer.Option(..., "--config", exists=True)) -> N
             forwarded_allow_ips=forwarded,
             log_level="info",
         )
+    except typer.Exit:
+        raise
+    except (RuntimeSafetyError, ValueError) as exc:
+        _fatal(str(exc), exit_code=78)
     except Exception as exc:
-        _fatal(str(exc))
+        _fatal(str(exc), exit_code=75)

@@ -114,6 +114,7 @@ def verify_signed_context(
     secret: bytes,
     expected_schema_hash: str | None = None,
     expected_feature_hash: str | None = None,
+    expected_symbols: tuple[str, ...] | None = None,
 ) -> SignedDailyContext:
     """Validate signature, hashes, completeness, and exact D-1 session identity."""
 
@@ -136,6 +137,13 @@ def verify_signed_context(
         raise ContextValidationError("blocked_feature_schema_mismatch")
     if package.completeness != "complete" or not package.features_by_symbol:
         raise ContextValidationError("blocked_missing_previous_session_options_context")
+    if expected_symbols is not None and (
+        set(package.features_by_symbol) != set(expected_symbols)
+        or any(not package.features_by_symbol[symbol] for symbol in expected_symbols)
+    ):
+        raise ContextValidationError(
+            "blocked_missing_previous_session_options_context: anchor symbol context is incomplete"
+        )
     return package
 
 
@@ -160,6 +168,7 @@ def import_signed_context(
     operator: str,
     expected_schema_hash: str | None = None,
     expected_feature_hash: str | None = None,
+    expected_symbols: tuple[str, ...] | None = None,
 ) -> SignedDailyContext:
     """Install and atomically map one signed package to one exact US session."""
 
@@ -177,6 +186,7 @@ def import_signed_context(
         secret=secret,
         expected_schema_hash=expected_schema_hash,
         expected_feature_hash=expected_feature_hash,
+        expected_symbols=expected_symbols,
     )
     root = Path(context_root)
     installed = root / "installed" / f"{verified.context_id}.json"
@@ -238,6 +248,7 @@ def load_imported_context(
     secret: bytes,
     expected_schema_hash: str | None = None,
     expected_feature_hash: str | None = None,
+    expected_symbols: tuple[str, ...] | None = None,
 ) -> SignedDailyContext:
     """Load only the explicit pointer for ``current_session`` and reverify it."""
 
@@ -265,6 +276,7 @@ def load_imported_context(
         secret=secret,
         expected_schema_hash=expected_schema_hash,
         expected_feature_hash=expected_feature_hash,
+        expected_symbols=expected_symbols,
     )
     if not hmac.compare_digest(pointer.integrity_hash, verified.integrity_hash):
         raise ContextValidationError("invalid_context_signature")

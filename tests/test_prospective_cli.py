@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
+import stocker_prospective.cli as cli_module
+import stocker_prospective.ibkr_official as ibkr_official_module
+from stocker_prospective.bundle import BundleError
 from stocker_prospective.cli import app
+from stocker_prospective.config import load_prospective_config
 
 ROOT = Path(__file__).parents[1]
 RUNNER = CliRunner()
@@ -37,6 +43,21 @@ def write_replay_config(tmp_path: Path) -> Path:
             "mode": "signed_import",
             "hmac_secret_env": "STOCKER_CONTEXT_SIGNING_SECRET",
         },
+    }
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    return path
+
+
+def write_ibkr_config(tmp_path: Path) -> Path:
+    path = write_replay_config(tmp_path)
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["runtime"]["source"] = "ibkr"
+    payload["runtime"]["mode"] = "record_only"
+    payload["ibkr"] = {
+        "host": "127.0.0.1",
+        "port": 7497,
+        "client_id": 71,
+        "expected_environment": "paper",
     }
     path.write_text(yaml.safe_dump(payload), encoding="utf-8")
     return path
@@ -76,3 +97,126 @@ def test_cli_replay_runs_and_db_migration_is_idempotent(tmp_path: Path) -> None:
     assert migrate.exit_code == 0, migrate.stdout
     assert "synthetic_replay_not_frozen_m1" in first.stdout
     assert '"signal_episode_count": 2' in first.stdout
+
+
+def test_recorder_process_owner_is_unique_for_the_same_config(tmp_path: Path) -> None:
+    config = load_prospective_config(write_replay_config(tmp_path))
+
+    first = cli_module._recorder_owner_id(config)
+    second = cli_module._recorder_owner_id(config)
+
+    assert first != second
+    assert first.startswith("cli-test:")
+
+
+def test_record_only_can_use_verified_registered_universe_when_bundle_is_missing(
+    tmp_path: Path,
+) -> None:
+    config = load_prospective_config(write_ibkr_config(tmp_path))
+
+    identity = cli_module._validate_ibkr_scoring_inputs(config)
+
+    assert identity.bundle_verified is False
+    assert identity.model_artifact_id == "blocked_missing_verified_frozen_bundle"
+    assert len(identity.symbols) == 20
+
+
+def test_example_config_requires_explicit_deployed_git_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    example = ROOT / "configs/prospective/replay.example.yaml"
+    monkeypatch.delenv("STOCKER_GIT_COMMIT", raising=False)
+
+    with pytest.raises(RuntimeError, match="STOCKER_GIT_COMMIT is absent"):
+        load_prospective_config(example)
+
+    monkeypatch.setenv("STOCKER_GIT_COMMIT", "abcdef1234567890")
+    loaded = load_prospective_config(example)
+    assert loaded.runtime.git_commit == "abcdef1234567890"
+
+
+def test_transient_ibkr_failure_uses_restartable_exit_and_releases_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_ibkr_config(tmp_path)
+    release = tmp_path / "release"
+    release.mkdir()
+
+    class FakeAdapter:
+        stopped = False
+
+        def attach_official_client(self, client: object) -> None:
+            return None
+
+        def start(self) -> None:
+            raise RuntimeError("blocked_ibkr_connection")
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    adapter = FakeAdapter()
+    monkeypatch.setattr(cli_module, "_ibkr_adapter", lambda _config: adapter)
+    monkeypatch.setattr(cli_module, "require_official_ibkr_api", lambda: object())
+    monkeypatch.setattr(cli_module, "_validate_ibkr_scoring_inputs", lambda _config: None)
+    monkeypatch.setattr(
+        ibkr_official_module,
+        "create_official_callback_client",
+        lambda _adapter: object(),
+    )
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "recorder",
+            "run",
+            "--config",
+            str(config),
+            "--release-directory",
+            str(release),
+        ],
+    )
+
+    assert result.exit_code == 75
+    assert "blocked_ibkr_connection" in result.stderr
+    assert adapter.stopped is True
+    with sqlite3.connect(tmp_path / "shared/data/prospective.sqlite3") as connection:
+        assert connection.execute("SELECT COUNT(*) FROM recorder_lease").fetchone() == (0,)
+
+
+def test_permanent_bundle_failure_uses_restart_preventing_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_ibkr_config(tmp_path)
+    release = tmp_path / "release"
+    release.mkdir()
+
+    class FakeAdapter:
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli_module, "_ibkr_adapter", lambda _config: FakeAdapter())
+    monkeypatch.setattr(cli_module, "require_official_ibkr_api", lambda: object())
+    monkeypatch.setattr(
+        cli_module,
+        "_validate_ibkr_scoring_inputs",
+        lambda _config: (_ for _ in ()).throw(
+            BundleError("blocked_missing_verified_frozen_bundle")
+        ),
+    )
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "recorder",
+            "run",
+            "--config",
+            str(config),
+            "--release-directory",
+            str(release),
+        ],
+    )
+
+    assert result.exit_code == 78
+    assert "blocked_missing_verified_frozen_bundle" in result.stderr

@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from stocker_prospective.bars import CompletedBar
 from stocker_prospective.bundle import SCIENTIFIC_CLASSIFICATION
+from stocker_prospective.market_data import MarketDataBudgetSnapshot
 
 
 class RecorderLeaseHeld(RuntimeError):
@@ -74,6 +77,45 @@ class LeaseRecord(BaseModel):
     recovered_stale_owner: bool
 
 
+class UnderlyingContractInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    metadata: EvidenceMetadata
+    symbol: str
+    con_id: int | None
+    exchange: str | None
+    currency: str | None
+    local_symbol: str | None
+    qualification_status: str
+    rejection_reason: str | None
+
+
+class UnderlyingQuoteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    metadata: EvidenceMetadata
+    symbol: str
+    con_id: int
+    target_timestamp_utc: datetime
+    actual_quote_timestamp_utc: datetime | None
+    capture_lag_seconds: float | None
+    bid: float | None
+    ask: float | None
+    bid_size: float | None
+    ask_size: float | None
+    last: float | None
+    last_size: float | None
+    midpoint: float | None
+    spread: float | None
+    provider_timestamp_utc: datetime | None
+    receive_timestamp_utc: datetime | None
+    market_data_type: str | None
+    freshness: str
+    completeness: str
+    capture_status: str
+    missing_quote_reason: str | None
+
+
 class ProspectiveRepository:
     """Single-writer SQLite repository with explicit migrations."""
 
@@ -109,10 +151,14 @@ class ProspectiveRepository:
             for path in sorted(migration_root.glob("*.sql")):
                 if path.name in applied:
                     continue
-                connection.executescript(path.read_text(encoding="utf-8"))
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at_utc) VALUES (?, ?)",
-                    (path.name, datetime.now(UTC).isoformat()),
+                version = path.name.replace("'", "''")
+                applied_at = datetime.now(UTC).isoformat().replace("'", "''")
+                connection.executescript(
+                    "BEGIN IMMEDIATE;\n"
+                    f"{path.read_text(encoding='utf-8')}\n"
+                    "INSERT INTO schema_migrations(version, applied_at_utc) "
+                    f"VALUES ('{version}', '{applied_at}');\n"
+                    "COMMIT;\n"
                 )
 
     @staticmethod
@@ -149,6 +195,389 @@ class ProspectiveRepository:
                     SCIENTIFIC_CLASSIFICATION,
                 ),
             )
+            existing = connection.execute(
+                "SELECT * FROM prospective_run WHERE run_id = ?",
+                (metadata.run_id,),
+            ).fetchone()
+            assert existing is not None
+            expected = {
+                "prospective_start_utc": metadata.prospective_start_utc.isoformat(),
+                "app_version": metadata.app_version,
+                "git_commit": metadata.git_commit,
+                "model_artifact_id": metadata.model_artifact_id,
+                "universe_id": metadata.universe_id,
+                "cohort": metadata.cohort,
+                "mode": mode,
+                "scientific_classification": SCIENTIFIC_CLASSIFICATION,
+            }
+            if any(str(existing[name]) != value for name, value in expected.items()):
+                raise ValueError(
+                    "blocked_unsafe_runtime_configuration: prospective run identity mismatch"
+                )
+
+    def register_universe_membership(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        symbols: tuple[str, ...],
+        operational_status: str | None = None,
+        operational_status_by_symbol: Mapping[str, tuple[str, str | None]] | None = None,
+    ) -> None:
+        """Register every frozen member exactly once; never silently drop one."""
+
+        self._validate_metadata(metadata)
+        if len(symbols) != 20 or len(set(symbols)) != 20:
+            raise ValueError("blocked_frozen_universe_mismatch")
+        if operational_status_by_symbol is not None:
+            if set(operational_status_by_symbol) != set(symbols):
+                raise ValueError("blocked_frozen_universe_mismatch")
+        elif operational_status is None:
+            raise ValueError("an explicit operational status is required for every symbol")
+        with self._connect() as connection:
+            for symbol in symbols:
+                status, rejection_reason = (
+                    operational_status_by_symbol[symbol]
+                    if operational_status_by_symbol is not None
+                    else (operational_status, None)
+                )
+                assert status is not None
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO universe_membership(
+                        run_id, universe_id, cohort, symbol, operational_status,
+                        rejection_reason, recorded_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        metadata.run_id,
+                        metadata.universe_id,
+                        metadata.cohort,
+                        symbol,
+                        status,
+                        rejection_reason,
+                        metadata.recorded_at_utc.isoformat(),
+                    ),
+                )
+            rows = connection.execute(
+                """
+                SELECT symbol FROM universe_membership
+                WHERE run_id = ? AND cohort = ?
+                """,
+                (metadata.run_id, metadata.cohort),
+            ).fetchall()
+            if {str(row["symbol"]) for row in rows} != set(symbols):
+                raise ValueError("blocked_frozen_universe_mismatch")
+
+    def record_underlying_contract(self, item: UnderlyingContractInput) -> int:
+        self._validate_metadata(item.metadata)
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id FROM underlying_contract
+                WHERE run_id = ? AND symbol = ?
+                  AND ((con_id IS NULL AND ? IS NULL) OR con_id = ?)
+                ORDER BY id LIMIT 1
+                """,
+                (
+                    item.metadata.run_id,
+                    item.symbol,
+                    item.con_id,
+                    item.con_id,
+                ),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
+            envelope_id = self._insert_envelope(connection, item.metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO underlying_contract(
+                    envelope_id, run_id, symbol, con_id, exchange, currency,
+                    local_symbol, qualification_status, rejection_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    item.metadata.run_id,
+                    item.symbol,
+                    item.con_id,
+                    item.exchange,
+                    item.currency,
+                    item.local_symbol,
+                    item.qualification_status,
+                    item.rejection_reason,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_underlying_bar(
+        self,
+        metadata: EvidenceMetadata,
+        bar: CompletedBar,
+        *,
+        eligibility: bool,
+        rejection_reason: str,
+    ) -> int:
+        self._validate_metadata(metadata)
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id FROM underlying_bar
+                WHERE run_id = ? AND symbol = ? AND bar_end_utc = ?
+                """,
+                (metadata.run_id, bar.symbol, bar.bar_end_utc.isoformat()),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
+            envelope_id = self._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO underlying_bar(
+                    envelope_id, run_id, symbol, con_id, bar_start_utc, bar_end_utc,
+                    session_date, open, high, low, close, activity_value,
+                    activity_semantic_label, bar_source, source_timestamp_utc,
+                    receive_timestamp_utc, completeness, feature_as_of_utc,
+                    m0_probability, m1_probability, frozen_threshold, model_bundle_id,
+                    feature_schema_hash, eligibility, rejection_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL,
+                          NULL, NULL, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    bar.symbol,
+                    bar.permanent_contract_id,
+                    bar.bar_start_utc.isoformat(),
+                    bar.bar_end_utc.isoformat(),
+                    bar.session_date.isoformat(),
+                    bar.open,
+                    bar.high,
+                    bar.low,
+                    bar.close,
+                    bar.activity_value,
+                    bar.activity_semantic_label,
+                    bar.bar_source,
+                    bar.source_timestamp_utc.isoformat(),
+                    bar.receive_timestamp_utc.isoformat(),
+                    "complete" if bar.complete else "partial",
+                    bar.feature_as_of_utc.isoformat(),
+                    metadata.model_artifact_id,
+                    None,
+                    int(eligibility),
+                    rejection_reason,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_underlying_quote(self, item: UnderlyingQuoteInput) -> int:
+        self._validate_metadata(item.metadata)
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id FROM underlying_quote
+                WHERE run_id = ? AND signal_episode_id IS NULL
+                  AND symbol = ? AND target_timestamp_utc = ?
+                """,
+                (
+                    item.metadata.run_id,
+                    item.symbol,
+                    item.target_timestamp_utc.isoformat(),
+                ),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
+            envelope_id = self._insert_envelope(connection, item.metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO underlying_quote(
+                    envelope_id, run_id, signal_episode_id, symbol, con_id,
+                    target_timestamp_utc,
+                    actual_quote_timestamp_utc, capture_lag_seconds, bid, ask,
+                    bid_size, ask_size, last, last_size, midpoint, spread,
+                    provider_timestamp_utc, receive_timestamp_utc, market_data_type,
+                    freshness, completeness, capture_status, missing_quote_reason
+                ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    item.metadata.run_id,
+                    item.symbol,
+                    item.con_id,
+                    item.target_timestamp_utc.isoformat(),
+                    (
+                        None
+                        if item.actual_quote_timestamp_utc is None
+                        else item.actual_quote_timestamp_utc.isoformat()
+                    ),
+                    item.capture_lag_seconds,
+                    item.bid,
+                    item.ask,
+                    item.bid_size,
+                    item.ask_size,
+                    item.last,
+                    item.last_size,
+                    item.midpoint,
+                    item.spread,
+                    (
+                        None
+                        if item.provider_timestamp_utc is None
+                        else item.provider_timestamp_utc.isoformat()
+                    ),
+                    (
+                        None
+                        if item.receive_timestamp_utc is None
+                        else item.receive_timestamp_utc.isoformat()
+                    ),
+                    item.market_data_type,
+                    item.freshness,
+                    item.completeness,
+                    item.capture_status,
+                    item.missing_quote_reason,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_data_health_event(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        severity: str,
+        blocker_code: str | None,
+        component: str,
+        message: str,
+        details: dict[str, object],
+    ) -> int:
+        self._validate_metadata(metadata)
+        with self._connect() as connection:
+            envelope_id = self._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO data_health_event(
+                    envelope_id, run_id, severity, blocker_code, component,
+                    message, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    severity,
+                    blocker_code,
+                    component,
+                    message,
+                    json.dumps(details, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_ibkr_connection_event(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        state: str,
+        error_code: int | None,
+        message: str,
+        data_maintained: bool | None,
+        reconnect_attempt: int | None,
+        details: dict[str, object],
+    ) -> int:
+        self._validate_metadata(metadata)
+        with self._connect() as connection:
+            envelope_id = self._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO ibkr_connection_event(
+                    envelope_id, run_id, state, error_code, message,
+                    data_maintained, reconnect_attempt, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    state,
+                    error_code,
+                    message,
+                    None if data_maintained is None else int(data_maintained),
+                    reconnect_attempt,
+                    json.dumps(details, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_market_data_budget_event(
+        self,
+        metadata: EvidenceMetadata,
+        snapshot: MarketDataBudgetSnapshot,
+    ) -> int:
+        self._validate_metadata(metadata)
+        with self._connect() as connection:
+            envelope_id = self._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO market_data_budget_event(
+                    envelope_id, run_id, line_limit, reserved_headroom,
+                    usable_lines, active_lines, pending_requests,
+                    awaiting_cancellation, current_request_rate,
+                    waiting_signals, rejected_signals, recorded_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    snapshot.line_limit,
+                    snapshot.reserved_headroom,
+                    snapshot.usable_lines,
+                    snapshot.active_lines,
+                    snapshot.pending_requests,
+                    snapshot.awaiting_cancellation,
+                    snapshot.current_request_rate,
+                    snapshot.waiting_signals,
+                    snapshot.rejected_signals,
+                    metadata.recorded_at_utc.isoformat(),
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_audit_event(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        event_type: str,
+        actor: str,
+        message: str,
+        payload: dict[str, object],
+    ) -> int:
+        self._validate_metadata(metadata)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM audit_event WHERE run_id = ?",
+                (metadata.run_id,),
+            ).fetchone()
+            assert row is not None
+            envelope_id = self._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO audit_event(
+                    envelope_id, run_id, sequence, event_type, actor, message, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    int(row["next"]),
+                    event_type,
+                    actor,
+                    message,
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
 
     def _insert_envelope(
         self,
@@ -281,6 +710,19 @@ class ProspectiveRepository:
             generation=int(row["generation"]),
             recovered_stale_owner=bool(row["recovered_stale_owner"]),
         )
+
+    def release_recorder_lease(self, *, run_id: str, owner_id: str) -> bool:
+        """Release only the exact process-owned lease during graceful shutdown."""
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM recorder_lease
+                WHERE lease_key = 'prospective_recorder' AND run_id = ? AND owner_id = ?
+                """,
+                (run_id, owner_id),
+            )
+        return cursor.rowcount == 1
 
     def record_score(self, score: ScoreInput) -> StoredScore:
         """Idempotently append one model score."""

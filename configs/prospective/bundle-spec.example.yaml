@@ -21,6 +21,8 @@ holdout_start: "2025-09-01"
 holdout_end: "2025-12-31"
 protected_start: "2026-01-01"
 code_feature_contract_version: m1-group-o-plus-group-i-v1
+previous_session_context_schema_hash: REPLACE_WITH_64_HEX_SCHEMA_HASH
+previous_session_context_feature_hash: REPLACE_WITH_64_HEX_FEATURE_HASH
 
 audit_references:
   - ../../research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/lightweight_audit.json

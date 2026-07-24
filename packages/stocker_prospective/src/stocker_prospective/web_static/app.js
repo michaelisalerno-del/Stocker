@@ -291,6 +291,23 @@ async function loadSignal(signalId) {
           detail.option_quotes,
         ),
       ),
+      subsection(
+        "Source-separated option computations",
+        table(
+          [
+            { label: "Target", value: "target_timestamp_utc", format: clock },
+            { label: "DTE", value: "dte_bucket" },
+            { label: "Contract", value: "local_symbol" },
+            { label: "Source", value: "computation_source" },
+            { label: "IV", value: "implied_volatility" },
+            { label: "Delta", value: "delta" },
+            { label: "Gamma", value: "gamma" },
+            { label: "Theta", value: "theta" },
+            { label: "Vega", value: "vega" },
+          ],
+          detail.option_computations,
+        ),
+      ),
       subsection("Feature parity", jsonBlock(detail.feature_parity)),
     );
     replace("signal-evidence", stack);
@@ -401,6 +418,7 @@ function renderSafety() {
   const parity = health.feature_parity;
   const context = health.previous_session_context || {};
   const lease = health.recorder.lease || {};
+  const budget = health.market_data.current_budget || {};
   const cards = [
     safetyCard("No-order-path verification", health.no_order_path_verified ? "VERIFIED ABSENT" : "FAILED", "The web process receives no broker object and exposes GET routes only.", health.no_order_path_verified ? "ok" : "danger"),
     safetyCard("risk.trading_enabled", "FALSE", "Startup rejects any true value. No paper or live order path exists.", "ok"),
@@ -408,7 +426,7 @@ function renderSafety() {
     safetyCard("Feature parity", parity.scoring_allowed ? "ALLOWED" : "BLOCKED", `${parity.blocker} // ${JSON.stringify(parity.counts)}`, parity.scoring_allowed ? "ok" : "danger"),
     safetyCard("Previous-session context", context.eligibility ? "EXACT + ELIGIBLE" : "BLOCKED", `${clean(context.required_previous_session)} required // ${clean(context.observation_date)} observed`, context.eligibility ? "ok" : "danger"),
     safetyCard("Recorder lease", lease.owner_id ? "HELD" : "MISSING", `${clean(lease.owner_id)} // heartbeat ${clock(lease.heartbeat_at_utc)}`, lease.owner_id ? "ok" : "danger"),
-    safetyCard("Market-data budget", `${health.market_data.line_budget} LINES`, `${health.market_data.reserved_headroom} reserved headroom; bounded rejection is audited.`),
+    safetyCard("Market-data budget", `${budget.active_lines ?? 0} / ${budget.usable_lines ?? (health.market_data.line_budget - health.market_data.reserved_headroom)} ACTIVE`, `${budget.pending_requests ?? 0} pending; ${budget.awaiting_cancellation ?? 0} cancelling; ${budget.current_request_rate ?? 0} requests in window; ${budget.waiting_signals ?? 0} waiting; ${budget.rejected_signals ?? 0} rejected.`),
     safetyCard("Reconnect state", clean((health.ibkr || {}).message || "REPLAY DIAGNOSTIC"), "1102 retained-data and 1101 lost-data recovery remain distinct."),
     safetyCard("Application identity", `${health.application.version} / ${short(health.application.git_commit, 12)}`, `${health.instance_identity} // persistent database outside release.`),
   ];

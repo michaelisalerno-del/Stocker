@@ -6,12 +6,15 @@ import pytest
 
 from stocker_prospective.market_data import (
     BoundedCallbackRegistry,
+    BoundedRealtimeBarQueue,
+    BoundedStreamQuoteCache,
     CallbackRequestError,
     ConnectionState,
     ConnectionTracker,
     MarketDataBudget,
     MarketDataBudgetError,
     MarketDataType,
+    RealtimeBarUpdate,
     RequestIdAllocator,
     SubscriptionRegistry,
     classify_ibkr_error,
@@ -73,6 +76,23 @@ def test_market_data_budget_enforces_request_rate() -> None:
 
     budget.reserve("c", now=11.1)
     assert budget.snapshot().active_lines == 3
+
+
+def test_metadata_requests_consume_rate_budget_without_market_data_lines() -> None:
+    budget = MarketDataBudget(
+        line_limit=20,
+        reserved_headroom=2,
+        request_rate_limit=2,
+        request_rate_window_seconds=1,
+    )
+
+    budget.reserve("metadata-a", lines=0, now=10.0)
+    budget.reserve("metadata-b", lines=0, now=10.1)
+
+    assert budget.snapshot(now=10.2).active_lines == 0
+    assert budget.snapshot(now=10.2).pending_requests == 2
+    with pytest.raises(MarketDataBudgetError, match="request_rate"):
+        budget.reserve("metadata-c", lines=0, now=10.2)
 
 
 def test_connection_tracker_distinguishes_maintained_and_lost_data_reconnects() -> None:
@@ -169,6 +189,55 @@ def test_market_data_adapter_contract_has_no_order_surface() -> None:
     assert "submit_order" not in public_names
 
 
+def test_adapter_rejects_inherited_order_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import stocker_prospective.ibkr as ibkr_module
+    from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
+
+    monkeypatch.setattr(ibkr_module, "require_official_ibkr_api", lambda: object())
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=7497,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=MarketDataBudget(
+            line_limit=4,
+            reserved_headroom=1,
+            request_rate_limit=20,
+        ),
+    )
+
+    class OrderCapableBase:
+        def placeOrder(self) -> None:  # noqa: N802
+            return None
+
+    class UnsafeInheritedClient(OrderCapableBase):
+        def connect(self) -> bool:
+            return True
+
+        def disconnect(self) -> None:
+            return None
+
+        def run(self) -> None:
+            return None
+
+        def reqMktData(self) -> None:  # noqa: N802
+            return None
+
+        def cancelMktData(self) -> None:  # noqa: N802
+            return None
+
+    with pytest.raises(TypeError, match="order-capable"):
+        adapter.attach_official_client(UnsafeInheritedClient())
+
+
 def test_market_data_types_keep_missing_values_and_primary_eligibility_distinct() -> None:
     assert MarketDataType.LIVE.primary_eligible is True
     assert MarketDataType.FROZEN.primary_eligible is False
@@ -199,6 +268,62 @@ def test_callback_registry_correlates_bounds_times_out_and_preserves_none() -> N
     registry.add(13, "second")
     with pytest.raises(CallbackRequestError, match="bounded_callback_queue_exhausted"):
         registry.add(13, "third")
+
+
+def test_callback_registry_evicts_finished_results_at_a_fixed_bound() -> None:
+    registry = BoundedCallbackRegistry(
+        max_pending_requests=2,
+        max_items_per_request=2,
+        max_finished_requests=1,
+    )
+    registry.begin(1, kind="first")
+    registry.complete(1)
+    registry.wait(1, timeout_seconds=0)
+    registry.begin(2, kind="second")
+    registry.complete(2)
+    registry.wait(2, timeout_seconds=0)
+
+    # Request 1 has been evicted, so its ID may safely be reused.
+    registry.begin(1, kind="reused")
+
+
+def test_stream_quote_cache_is_bounded_and_keeps_only_latest_fields() -> None:
+    cache = BoundedStreamQuoteCache(max_subscriptions=1, max_fields_per_subscription=2)
+    cache.register(10)
+    cache.add(10, {"field": "bid", "value": 1.0})
+    cache.add(10, {"field": "bid", "value": 1.1})
+    cache.add(10, {"field": "ask", "value": 1.2})
+
+    assert cache.snapshot(10) == (
+        {"field": "bid", "value": 1.1},
+        {"field": "ask", "value": 1.2},
+    )
+    with pytest.raises(CallbackRequestError, match="field_cache_exhausted"):
+        cache.add(10, {"field": "last", "value": 1.15})
+    with pytest.raises(CallbackRequestError, match="subscription_cache_exhausted"):
+        cache.register(11)
+
+
+def test_realtime_bar_queue_rejects_overflow_and_drains_in_order() -> None:
+    queue = BoundedRealtimeBarQueue(max_items=1)
+    update = RealtimeBarUpdate(
+        request_id=1,
+        source_timestamp_utc=datetime(2026, 7, 24, 14, 30, tzinfo=UTC),
+        receive_timestamp_utc=datetime(2026, 7, 24, 14, 30, 1, tzinfo=UTC),
+        open=12.0,
+        high=12.1,
+        low=11.9,
+        close=12.05,
+        volume=None,
+        wap=None,
+        trade_count=None,
+    )
+    queue.add(update)
+
+    with pytest.raises(CallbackRequestError, match="realtime_bar_queue_exhausted"):
+        queue.add(update)
+    assert queue.drain() == (update,)
+    assert queue.size == 0
 
 
 def test_callback_shutdown_fails_pending_requests() -> None:
@@ -262,13 +387,15 @@ def test_temporary_quote_capture_is_cancelled_and_missing_values_remain_none() -
 
     class FakeClient:
         cancelled: list[int] = []
+        snapshot_flags: list[bool] = []
 
-        def reqMktData(self, request_id: int, *_: object) -> None:
+        def reqMktData(self, request_id: int, *arguments: object) -> None:
+            self.snapshot_flags.append(bool(arguments[2]))
             adapter.on_quote_update(
                 request_id,
                 {"bid": 1.25, "ask": None, "market_data_type": "live"},
-                complete=True,
             )
+            adapter.callbacks.complete(request_id)
 
         def cancelMktData(self, request_id: int) -> None:
             self.cancelled.append(request_id)
@@ -280,6 +407,7 @@ def test_temporary_quote_capture_is_cancelled_and_missing_values_remain_none() -
 
     assert result.items == ({"bid": 1.25, "ask": None, "market_data_type": "live"},)
     assert client.cancelled == [result.request_id]
+    assert client.snapshot_flags == [True]
     assert budget.snapshot().active_lines == 0
 
 
@@ -320,4 +448,152 @@ def test_incomplete_temporary_capture_times_out_and_is_still_cancelled() -> None
         adapter.capture_temporary_quote(contract=object(), timeout_seconds=0)
 
     assert len(client.cancelled) == 1
+    assert budget.snapshot().active_lines == 0
+
+
+def test_continuous_market_data_updates_use_bounded_stream_cache() -> None:
+    from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
+
+    budget = MarketDataBudget(
+        line_limit=4,
+        reserved_headroom=1,
+        request_rate_limit=20,
+    )
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=7497,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=budget,
+    )
+
+    class StreamingClient:
+        def reqMktData(self, request_id: int, *_: object) -> None:
+            adapter.on_quote_update(request_id, {"field": "bid", "value": 1.0})
+            adapter.on_quote_update(request_id, {"field": "bid", "value": 1.1})
+
+        def cancelMktData(self, request_id: int) -> None:
+            return None
+
+    adapter._client = StreamingClient()
+    request_id = adapter.request_market_data(object(), subscription_key="AAL")
+
+    assert adapter.stream_quotes.snapshot(request_id) == ({"field": "bid", "value": 1.1},)
+    assert budget.snapshot().active_lines == 1
+    adapter.cancel_market_data(request_id, subscription_key="AAL")
+    assert budget.snapshot().active_lines == 0
+
+
+def test_realtime_bar_subscription_uses_correct_cancel_and_lost_data_cleanup() -> None:
+    from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
+
+    budget = MarketDataBudget(
+        line_limit=4,
+        reserved_headroom=1,
+        request_rate_limit=20,
+    )
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=7497,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=budget,
+    )
+
+    class RealtimeClient:
+        cancelled: list[int] = []
+
+        def reqRealTimeBars(self, request_id: int, *_: object) -> None:
+            adapter.on_realtime_bar(
+                RealtimeBarUpdate(
+                    request_id=request_id,
+                    source_timestamp_utc=datetime(2026, 7, 24, 14, 30, tzinfo=UTC),
+                    receive_timestamp_utc=datetime(2026, 7, 24, 14, 30, 1, tzinfo=UTC),
+                    open=12.0,
+                    high=12.1,
+                    low=11.9,
+                    close=12.05,
+                    volume=10.0,
+                    wap=12.03,
+                    trade_count=2,
+                )
+            )
+
+        def cancelRealTimeBars(self, request_id: int) -> None:
+            self.cancelled.append(request_id)
+
+        def cancelMktData(self, request_id: int) -> None:
+            raise AssertionError(f"wrong cancellation method for {request_id}")
+
+    client = RealtimeClient()
+    adapter._client = client
+    request_id = adapter.request_realtime_bars(object(), subscription_key="AAL-bars")
+
+    assert adapter.realtime_bars.drain()[0].request_id == request_id
+    adapter.on_error(-1, 1101, "data lost")
+    assert budget.snapshot().active_lines == 0
+    assert adapter.subscriptions.active_count == 0
+    assert adapter.connection.health().subscriptions_require_rebuild is True
+    assert client.cancelled == []
+
+    rebuilt_id = adapter.request_realtime_bars(object(), subscription_key="AAL-bars")
+    adapter.connection.subscriptions_rebuilt()
+    adapter.cancel_realtime_bars(rebuilt_id, subscription_key="AAL-bars")
+    assert client.cancelled == [rebuilt_id]
+    assert adapter.connection.health().subscriptions_require_rebuild is False
+
+
+def test_option_metadata_and_qualification_are_rate_bounded() -> None:
+    from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
+
+    budget = MarketDataBudget(
+        line_limit=10,
+        reserved_headroom=1,
+        request_rate_limit=1,
+    )
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=7497,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=budget,
+    )
+
+    class MetadataClient:
+        def reqSecDefOptParams(self, request_id: int, *_: object) -> None:
+            adapter.on_option_parameter_end(request_id)
+
+        def reqContractDetails(self, request_id: int, contract: object) -> None:
+            adapter.on_contract_details(request_id, contract)
+            adapter.on_contract_details_end(request_id)
+
+    adapter._client = MetadataClient()
+    adapter.request_option_chain_metadata(
+        underlying_symbol="AAL",
+        exchange="",
+        underlying_security_type="STK",
+        underlying_contract_id=1,
+    )
+
+    with pytest.raises(MarketDataBudgetError, match="request_rate"):
+        adapter.qualify_exact_contract(object())
+
     assert budget.snapshot().active_lines == 0

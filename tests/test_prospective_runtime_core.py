@@ -88,6 +88,12 @@ def test_runtime_configuration_fails_closed_and_defaults_to_loopback(tmp_path: P
                 "web": {**config.web.model_dump(), "host": "0.0.0.0"},
             }
         )
+    with pytest.raises(ValueError, match="heartbeat"):
+        _config(
+            tmp_path,
+            heartbeat_seconds=10,
+            recorder_lease_stale_seconds=20,
+        )
 
 
 def test_runtime_paths_cannot_depend_on_release_directory(tmp_path: Path) -> None:
@@ -103,6 +109,19 @@ def test_runtime_paths_cannot_depend_on_release_directory(tmp_path: Path) -> Non
     )
     with pytest.raises(RuntimeSafetyError, match="outside the application release"):
         validate_persistent_paths(nested, release)
+
+
+def test_existing_prospective_run_identity_cannot_be_reused_with_different_commit(
+    tmp_path: Path,
+) -> None:
+    repository = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    repository.migrate()
+    metadata = _metadata()
+    repository.create_run(metadata)
+    changed = metadata.model_copy(update={"git_commit": "f" * 40})
+
+    with pytest.raises(ValueError, match="prospective run identity mismatch"):
+        repository.create_run(changed)
 
 
 def _unsigned_context(observation_date: date) -> DailyContextUnsigned:
@@ -138,6 +157,16 @@ def test_signed_context_requires_exact_previous_xnys_session() -> None:
     assert verified.integrity_hash
     with pytest.raises(ContextValidationError, match="invalid_context_signature"):
         verify_signed_context(package, current_session=current_session, secret=b"wrong")
+    with pytest.raises(
+        ContextValidationError,
+        match="anchor symbol context is incomplete",
+    ):
+        verify_signed_context(
+            package,
+            current_session=current_session,
+            secret=b"secret",
+            expected_symbols=("AAL", "AAOI"),
+        )
     for invalid_date in (current_session, date(2026, 7, 22), date(2026, 7, 17)):
         invalid = create_signed_context(_unsigned_context(invalid_date), b"secret")
         with pytest.raises(
@@ -256,6 +285,38 @@ def test_recorder_lease_is_single_owner_with_heartbeat_and_stale_recovery(
     assert heartbeat.heartbeat_at_utc == now + timedelta(seconds=10)
     assert recovered.owner_id == "owner-b"
     assert recovered.recovered_stale_owner is True
+
+
+def test_recorder_lease_can_only_be_released_by_its_exact_owner(tmp_path: Path) -> None:
+    repository = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    repository.migrate()
+    now = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+    repository.acquire_recorder_lease(
+        run_id="prospective-test",
+        owner_id="process-a",
+        now=now,
+        stale_after=timedelta(seconds=30),
+    )
+
+    assert (
+        repository.release_recorder_lease(
+            run_id="prospective-test",
+            owner_id="process-b",
+        )
+        is False
+    )
+    assert repository.release_recorder_lease(
+        run_id="prospective-test",
+        owner_id="process-a",
+    )
+    reacquired = repository.acquire_recorder_lease(
+        run_id="prospective-test",
+        owner_id="process-b",
+        now=now + timedelta(seconds=1),
+        stale_after=timedelta(seconds=30),
+    )
+
+    assert reacquired.owner_id == "process-b"
 
 
 def test_signal_eventisation_is_crossing_based_and_restart_idempotent(tmp_path: Path) -> None:

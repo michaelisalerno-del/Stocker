@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,7 +57,11 @@ def _build_spec(tmp_path: Path) -> BundleBuildSpec:
         "universe_id": "anchor-frozen-20-v1",
         "cohort": "anchor_frozen_20",
         "symbols": ANCHOR_SYMBOLS,
+        "universe_hash": hashlib.sha256(
+            (json.dumps(ANCHOR_SYMBOLS, separators=(",", ":")) + "\n").encode()
+        ).hexdigest(),
         "source_artifact": "model_coefficients.json#M1.category_levels.stock",
+        "source_artifact_sha256": "e" * 64,
     }
     feature_schema = {
         "schema_version": "1",
@@ -95,6 +100,8 @@ def _build_spec(tmp_path: Path) -> BundleBuildSpec:
         holdout_end="2025-12-31",
         protected_start="2026-01-01",
         code_feature_contract_version="m1-group-o-plus-group-i-v1",
+        previous_session_context_schema_hash="c" * 64,
+        previous_session_context_feature_hash="d" * 64,
         audit_references=[
             _write(source / "audit.json", '{"passed":true}'),
         ],
@@ -141,6 +148,72 @@ def test_bundle_hash_mismatch_and_missing_artifact_fail_closed(tmp_path: Path) -
         build_bundle(missing_spec, tmp_path / "never-built")
 
 
+def test_bundle_manifest_cannot_omit_required_identities_or_escape_root(tmp_path: Path) -> None:
+    spec = _build_spec(tmp_path)
+    output = tmp_path / "bundle"
+    build_bundle(spec, output)
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    manifest["files"].pop(manifest["m0_artifact"]["path"])
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    omitted = verify_bundle(output)
+
+    assert omitted.verified is False
+    assert "blocked_missing_verified_frozen_bundle" in omitted.blockers
+
+    manifest["files"][manifest["m0_artifact"]["path"]] = manifest["m0_artifact"]["sha256"]
+    manifest["files"]["../outside"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    escaped = verify_bundle(output)
+
+    assert escaped.verified is False
+    assert "blocked_unsafe_bundle_content" in escaped.blockers
+
+
+def test_bundle_rejects_symlinks_and_unlisted_files(tmp_path: Path) -> None:
+    spec = _build_spec(tmp_path)
+    output = tmp_path / "bundle"
+    build_bundle(spec, output)
+    artifact = output / "artifacts" / "m1.joblib"
+    external = _write(tmp_path / "external.joblib", artifact.read_bytes())
+    artifact.unlink()
+    artifact.symlink_to(external)
+
+    linked = verify_bundle(output)
+
+    assert linked.verified is False
+    assert "blocked_unsafe_bundle_content" in linked.blockers
+
+    artifact.unlink()
+    artifact.write_bytes(external.read_bytes())
+    _write(output / "unlisted.bin", b"not declared")
+    unlisted = verify_bundle(output)
+
+    assert unlisted.verified is False
+    assert "blocked_unsafe_bundle_content" in unlisted.blockers
+
+
+def test_bundle_identifier_cannot_escape_the_installed_root(tmp_path: Path) -> None:
+    spec = _build_spec(tmp_path)
+    built = tmp_path / "bundle"
+    build_bundle(spec, built)
+    manifest_path = built / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["bundle_id"] = "../../outside"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(BundleError, match="invalid bundle manifest"):
+        verify_bundle(built)
+    with pytest.raises(BundleError, match="invalid bundle identifier"):
+        activate_bundle(
+            "../../outside",
+            tmp_path / "server-bundles",
+            operator="test",
+            expected_current_bundle_id=None,
+        )
+
+
 def test_feature_order_dtype_and_universe_are_strict(tmp_path: Path) -> None:
     spec = _build_spec(tmp_path)
     output = tmp_path / "bundle"
@@ -173,6 +246,16 @@ def test_feature_order_dtype_and_universe_are_strict(tmp_path: Path) -> None:
                 ("arousal", 0.2),
             ],
         )
+    for nonfinite in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(BundleError, match="blocked_feature_schema_mismatch"):
+            validate_feature_vector(
+                manifest,
+                [
+                    ("front_options_implied_tension", nonfinite),
+                    ("checkpoint_6", 1.0),
+                    ("arousal", 0.2),
+                ],
+            )
 
     invalid = _build_spec(tmp_path / "bad-universe")
     payload = json.loads(invalid.universe.read_text(encoding="utf-8"))

@@ -1,0 +1,106 @@
+{
+  "binding_holdout": {
+    "calendar": "XNYS_actual_sessions",
+    "end": "2025-12-31",
+    "start": "2025-09-01"
+  },
+  "broker_integration_required": false,
+  "checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "complete_requests_redownloaded": false,
+  "completed_receipts_reused": true,
+  "daily_stock_features_excluded": true,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "experiment": "Minimal Intraday Stock \u2192 IV-Excess Holdout Validation V0.1",
+  "frozen_holdout_validation": true,
+  "hand_built_mismatch_features_excluded": true,
+  "hard_limits": {
+    "binding_tails": 1,
+    "full_repository_test_suite": false,
+    "gpu": false,
+    "intraday_h0_bundle_null_refits": 3,
+    "maximum_additional_eodhd_records": 150000,
+    "maximum_additional_raw_bytes": 150000000,
+    "maximum_cumulative_eodhd_records": 500000,
+    "maximum_plots": 2,
+    "n_jobs": 1,
+    "primary_logistic_models": 2,
+    "processes": 1,
+    "session_bootstrap_draws": 10
+  },
+  "holdout_end": "2025-12-31",
+  "holdout_outcomes_opened_only_after_coverage_preflight": true,
+  "holdout_start": "2025-09-01",
+  "intraday_option_quotes_used": false,
+  "minimal_options_plus_intraday_h0_model": true,
+  "mismatch_features_excluded": true,
+  "models": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "primary_fits": [
+      "M0_group_O",
+      "M1_group_O_plus_group_I"
+    ],
+    "solver": "liblinear"
+  },
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "partial_cohort_model_allowed": false,
+  "previous_close_options_only": true,
+  "prior_reference_period": {
+    "binding": false,
+    "end": "2025-08-22",
+    "permitted_use": "predecessor_compatibility_only",
+    "start": "2025-01-01"
+  },
+  "prior_reference_period_not_used_for_tuning": true,
+  "production_runtime_modified": false,
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "route_competition_features_excluded": true,
+  "route_state_features_excluded": true,
+  "seeds": {
+    "intraday_h0_null_refits": [
+      20260765,
+      20260766,
+      20260767
+    ],
+    "model": 20260722,
+    "session_bootstrap": 20260764
+  },
+  "strategy_promotion": false,
+  "strict_continuation_of": "Minimal Intraday Stock \u2192 IV-Excess Holdout Validation V0",
+  "strict_resume": true,
+  "tail": {
+    "holdout_rank_forcing": false,
+    "quantile": 0.95,
+    "threshold_source": "weighted_2024_development_predictions",
+    "weighted_quantile_method": "deterministic_midpoint_cdf"
+  },
+  "top_5_percent_tail_frozen": true,
+  "top_5_percent_threshold_frozen": true,
+  "training_end": "2024-12-31",
+  "training_period": {
+    "end": "2024-12-31",
+    "start": "2024-01-01"
+  }
+}

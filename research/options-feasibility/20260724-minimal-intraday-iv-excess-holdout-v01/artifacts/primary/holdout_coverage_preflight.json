@@ -1,0 +1,971 @@
+{
+  "broker_integration_required": false,
+  "complete_requests_redownloaded": false,
+  "completed_receipts_reused": true,
+  "daily_stock_features_excluded": true,
+  "directional_outcomes_primary": false,
+  "exact_previous_close_chains": 1313,
+  "execution_enabled": false,
+  "expected_joined_rows": 13070,
+  "expected_month_count": 4,
+  "expected_session_count": 68,
+  "expected_stock_count": 20,
+  "front_pair_rule": {
+    "expiry": "nearest_valid_7_to_45_DTE",
+    "strike": "common_call_put_min_abs_log_strike_over_prior_close",
+    "substitute_expiry_after_quality_failure": false
+  },
+  "frozen_holdout_validation": true,
+  "gates": {
+    "all_four_holdout_months": true,
+    "expected_rows_at_least_5000": true,
+    "expected_sessions_at_least_60": true,
+    "expected_stocks_at_least_15": true,
+    "maximum_month_weight_share_at_most_0_35": true,
+    "maximum_stock_weight_share_at_most_0_12": true,
+    "planned_stock_month_cells_at_least_70pct": true
+  },
+  "hand_built_mismatch_features_excluded": true,
+  "holdout_end": "2025-12-31",
+  "holdout_outcomes_opened_only_after_coverage_preflight": true,
+  "holdout_start": "2025-09-01",
+  "intraday_option_quotes_used": false,
+  "maximum_expected_month_weight_share": 0.28001776261703915,
+  "maximum_expected_stock_weight_share": 0.055441192754385527,
+  "minimal_options_plus_intraday_h0_model": true,
+  "mismatch_features_excluded": true,
+  "non_exact_previous_session_observations": 0,
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "outcome_columns_read": false,
+  "pair_coverage_by_stock_month": [
+    {
+      "chain_records": 1768,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 147,
+      "expected_weight": 0.8386480908152735,
+      "month": "2025-09",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "AAL"
+    },
+    {
+      "chain_records": 1618,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 123,
+      "expected_weight": 0.7552631578947369,
+      "month": "2025-10",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "AAL"
+    },
+    {
+      "chain_records": 1468,
+      "exact_chain_sessions": 14,
+      "expected_joined_rows": 127,
+      "expected_weight": 0.7105263157894737,
+      "month": "2025-11",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 18,
+      "symbol": "AAL"
+    },
+    {
+      "chain_records": 1872,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 116,
+      "expected_weight": 0.7552631578947369,
+      "month": "2025-12",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 21,
+      "symbol": "AAL"
+    },
+    {
+      "chain_records": 1677,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 160,
+      "expected_weight": 0.6775369797041624,
+      "month": "2025-09",
+      "selected_pair_sessions": 13,
+      "stock_sessions": 20,
+      "symbol": "AAOI"
+    },
+    {
+      "chain_records": 1965,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 191,
+      "expected_weight": 0.76671826625387,
+      "month": "2025-10",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 22,
+      "symbol": "AAOI"
+    },
+    {
+      "chain_records": 1168,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 66,
+      "expected_weight": 0.25263157894736843,
+      "month": "2025-11",
+      "selected_pair_sessions": 5,
+      "stock_sessions": 19,
+      "symbol": "AAOI"
+    },
+    {
+      "chain_records": 2008,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 114,
+      "expected_weight": 0.5052631578947369,
+      "month": "2025-12",
+      "selected_pair_sessions": 10,
+      "stock_sessions": 22,
+      "symbol": "AAOI"
+    },
+    {
+      "chain_records": 2808,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 150,
+      "expected_weight": 0.6804609563123495,
+      "month": "2025-09",
+      "selected_pair_sessions": 13,
+      "stock_sessions": 21,
+      "symbol": "APLD"
+    },
+    {
+      "chain_records": 3993,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 152,
+      "expected_weight": 0.7605263157894737,
+      "month": "2025-10",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 22,
+      "symbol": "APLD"
+    },
+    {
+      "chain_records": 2979,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 181,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "APLD"
+    },
+    {
+      "chain_records": 4060,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 185,
+      "expected_weight": 0.7552631578947369,
+      "month": "2025-12",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 22,
+      "symbol": "APLD"
+    },
+    {
+      "chain_records": 3806,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 165,
+      "expected_weight": 0.7860165118679051,
+      "month": "2025-09",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 21,
+      "symbol": "ASTS"
+    },
+    {
+      "chain_records": 5204,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 183,
+      "expected_weight": 0.7374493927125506,
+      "month": "2025-10",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 23,
+      "symbol": "ASTS"
+    },
+    {
+      "chain_records": 3268,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 152,
+      "expected_weight": 0.6605263157894737,
+      "month": "2025-11",
+      "selected_pair_sessions": 13,
+      "stock_sessions": 19,
+      "symbol": "ASTS"
+    },
+    {
+      "chain_records": 4757,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 168,
+      "expected_weight": 0.7078947368421052,
+      "month": "2025-12",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 22,
+      "symbol": "ASTS"
+    },
+    {
+      "chain_records": 1465,
+      "exact_chain_sessions": 14,
+      "expected_joined_rows": 127,
+      "expected_weight": 0.5722738218094255,
+      "month": "2025-09",
+      "selected_pair_sessions": 11,
+      "stock_sessions": 19,
+      "symbol": "CIFR"
+    },
+    {
+      "chain_records": 2925,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 155,
+      "expected_weight": 0.8962729221243153,
+      "month": "2025-10",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 23,
+      "symbol": "CIFR"
+    },
+    {
+      "chain_records": 2173,
+      "exact_chain_sessions": 13,
+      "expected_joined_rows": 151,
+      "expected_weight": 0.6578947368421053,
+      "month": "2025-11",
+      "selected_pair_sessions": 13,
+      "stock_sessions": 17,
+      "symbol": "CIFR"
+    },
+    {
+      "chain_records": 2636,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 189,
+      "expected_weight": 0.8578947368421053,
+      "month": "2025-12",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 22,
+      "symbol": "CIFR"
+    },
+    {
+      "chain_records": 4195,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 156,
+      "expected_weight": 0.7886480908152734,
+      "month": "2025-09",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 21,
+      "symbol": "HIMS"
+    },
+    {
+      "chain_records": 4369,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 158,
+      "expected_weight": 0.843641343176947,
+      "month": "2025-10",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "HIMS"
+    },
+    {
+      "chain_records": 3652,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 176,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "HIMS"
+    },
+    {
+      "chain_records": 3912,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 153,
+      "expected_weight": 0.8078947368421052,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "HIMS"
+    },
+    {
+      "chain_records": 3404,
+      "exact_chain_sessions": 13,
+      "expected_joined_rows": 122,
+      "expected_weight": 0.6222738218094256,
+      "month": "2025-09",
+      "selected_pair_sessions": 12,
+      "stock_sessions": 18,
+      "symbol": "IONQ"
+    },
+    {
+      "chain_records": 5356,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 172,
+      "expected_weight": 0.9462729221243154,
+      "month": "2025-10",
+      "selected_pair_sessions": 18,
+      "stock_sessions": 23,
+      "symbol": "IONQ"
+    },
+    {
+      "chain_records": 3914,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 162,
+      "expected_weight": 0.7131578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 19,
+      "symbol": "IONQ"
+    },
+    {
+      "chain_records": 4008,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 181,
+      "expected_weight": 0.7578947368421053,
+      "month": "2025-12",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 22,
+      "symbol": "IONQ"
+    },
+    {
+      "chain_records": 3287,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 154,
+      "expected_weight": 0.6833849329205367,
+      "month": "2025-09",
+      "selected_pair_sessions": 13,
+      "stock_sessions": 20,
+      "symbol": "IREN"
+    },
+    {
+      "chain_records": 5602,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 176,
+      "expected_weight": 0.9193498452012384,
+      "month": "2025-10",
+      "selected_pair_sessions": 18,
+      "stock_sessions": 22,
+      "symbol": "IREN"
+    },
+    {
+      "chain_records": 4223,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 156,
+      "expected_weight": 0.7131578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 19,
+      "symbol": "IREN"
+    },
+    {
+      "chain_records": 4349,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 181,
+      "expected_weight": 0.8078947368421052,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "IREN"
+    },
+    {
+      "chain_records": 2640,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 171,
+      "expected_weight": 0.7798245614035088,
+      "month": "2025-09",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 20,
+      "symbol": "MARA"
+    },
+    {
+      "chain_records": 3750,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 207,
+      "expected_weight": 0.9193498452012384,
+      "month": "2025-10",
+      "selected_pair_sessions": 18,
+      "stock_sessions": 23,
+      "symbol": "MARA"
+    },
+    {
+      "chain_records": 2027,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 171,
+      "expected_weight": 0.7105263157894737,
+      "month": "2025-11",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 19,
+      "symbol": "MARA"
+    },
+    {
+      "chain_records": 2003,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 204,
+      "expected_weight": 0.8578947368421053,
+      "month": "2025-12",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 22,
+      "symbol": "MARA"
+    },
+    {
+      "chain_records": 2999,
+      "exact_chain_sessions": 13,
+      "expected_joined_rows": 115,
+      "expected_weight": 0.674905400756794,
+      "month": "2025-09",
+      "selected_pair_sessions": 13,
+      "stock_sessions": 16,
+      "symbol": "MP"
+    },
+    {
+      "chain_records": 4975,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 178,
+      "expected_weight": 0.9962729221243153,
+      "month": "2025-10",
+      "selected_pair_sessions": 19,
+      "stock_sessions": 23,
+      "symbol": "MP"
+    },
+    {
+      "chain_records": 3102,
+      "exact_chain_sessions": 14,
+      "expected_joined_rows": 121,
+      "expected_weight": 0.6578947368421053,
+      "month": "2025-11",
+      "selected_pair_sessions": 13,
+      "stock_sessions": 18,
+      "symbol": "MP"
+    },
+    {
+      "chain_records": 3095,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 159,
+      "expected_weight": 0.8078947368421052,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "MP"
+    },
+    {
+      "chain_records": 2250,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 142,
+      "expected_weight": 0.7333849329205366,
+      "month": "2025-09",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 20,
+      "symbol": "MRNA"
+    },
+    {
+      "chain_records": 2821,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 155,
+      "expected_weight": 0.9462729221243154,
+      "month": "2025-10",
+      "selected_pair_sessions": 18,
+      "stock_sessions": 23,
+      "symbol": "MRNA"
+    },
+    {
+      "chain_records": 1974,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 139,
+      "expected_weight": 0.7131578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 19,
+      "symbol": "MRNA"
+    },
+    {
+      "chain_records": 2250,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 154,
+      "expected_weight": 0.8052631578947368,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "MRNA"
+    },
+    {
+      "chain_records": 6800,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 153,
+      "expected_weight": 0.8386480908152735,
+      "month": "2025-09",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "MSTR"
+    },
+    {
+      "chain_records": 7625,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 189,
+      "expected_weight": 0.8962729221243153,
+      "month": "2025-10",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 23,
+      "symbol": "MSTR"
+    },
+    {
+      "chain_records": 5161,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 149,
+      "expected_weight": 0.6078947368421053,
+      "month": "2025-11",
+      "selected_pair_sessions": 12,
+      "stock_sessions": 19,
+      "symbol": "MSTR"
+    },
+    {
+      "chain_records": 5718,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 168,
+      "expected_weight": 0.8052631578947369,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "MSTR"
+    },
+    {
+      "chain_records": 960,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 169,
+      "expected_weight": 0.7798245614035088,
+      "month": "2025-09",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 20,
+      "symbol": "NVTS"
+    },
+    {
+      "chain_records": 1887,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 195,
+      "expected_weight": 0.8936413431769469,
+      "month": "2025-10",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 22,
+      "symbol": "NVTS"
+    },
+    {
+      "chain_records": 1273,
+      "exact_chain_sessions": 14,
+      "expected_joined_rows": 151,
+      "expected_weight": 0.7105263157894737,
+      "month": "2025-11",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 18,
+      "symbol": "NVTS"
+    },
+    {
+      "chain_records": 1396,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 209,
+      "expected_weight": 0.8578947368421053,
+      "month": "2025-12",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 22,
+      "symbol": "NVTS"
+    },
+    {
+      "chain_records": 2834,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 139,
+      "expected_weight": 0.7360165118679051,
+      "month": "2025-09",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 21,
+      "symbol": "QBTS"
+    },
+    {
+      "chain_records": 4643,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 174,
+      "expected_weight": 0.843641343176947,
+      "month": "2025-10",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 23,
+      "symbol": "QBTS"
+    },
+    {
+      "chain_records": 3140,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 203,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "QBTS"
+    },
+    {
+      "chain_records": 3681,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 201,
+      "expected_weight": 0.7578947368421053,
+      "month": "2025-12",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 22,
+      "symbol": "QBTS"
+    },
+    {
+      "chain_records": 2806,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 161,
+      "expected_weight": 0.7886480908152734,
+      "month": "2025-09",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 21,
+      "symbol": "RGTI"
+    },
+    {
+      "chain_records": 4809,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 163,
+      "expected_weight": 0.7193498452012383,
+      "month": "2025-10",
+      "selected_pair_sessions": 14,
+      "stock_sessions": 22,
+      "symbol": "RGTI"
+    },
+    {
+      "chain_records": 3029,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 166,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "RGTI"
+    },
+    {
+      "chain_records": 3016,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 185,
+      "expected_weight": 0.8078947368421052,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "RGTI"
+    },
+    {
+      "chain_records": 2518,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 157,
+      "expected_weight": 0.8386480908152735,
+      "month": "2025-09",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "RIOT"
+    },
+    {
+      "chain_records": 3227,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 214,
+      "expected_weight": 0.9193498452012384,
+      "month": "2025-10",
+      "selected_pair_sessions": 18,
+      "stock_sessions": 22,
+      "symbol": "RIOT"
+    },
+    {
+      "chain_records": 2204,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 177,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "RIOT"
+    },
+    {
+      "chain_records": 2274,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 167,
+      "expected_weight": 0.8052631578947369,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "RIOT"
+    },
+    {
+      "chain_records": 2181,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 183,
+      "expected_weight": 0.8386480908152735,
+      "month": "2025-09",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "RIVN"
+    },
+    {
+      "chain_records": 2098,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 169,
+      "expected_weight": 0.8605263157894737,
+      "month": "2025-10",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 22,
+      "symbol": "RIVN"
+    },
+    {
+      "chain_records": 2141,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 165,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "RIVN"
+    },
+    {
+      "chain_records": 2806,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 137,
+      "expected_weight": 0.8078947368421052,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 22,
+      "symbol": "RIVN"
+    },
+    {
+      "chain_records": 4205,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 132,
+      "expected_weight": 0.8386480908152735,
+      "month": "2025-09",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "SMCI"
+    },
+    {
+      "chain_records": 5012,
+      "exact_chain_sessions": 19,
+      "expected_joined_rows": 236,
+      "expected_weight": 0.9962729221243153,
+      "month": "2025-10",
+      "selected_pair_sessions": 19,
+      "stock_sessions": 23,
+      "symbol": "SMCI"
+    },
+    {
+      "chain_records": 3588,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 165,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "SMCI"
+    },
+    {
+      "chain_records": 3576,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 139,
+      "expected_weight": 0.8578947368421053,
+      "month": "2025-12",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 22,
+      "symbol": "SMCI"
+    },
+    {
+      "chain_records": 4093,
+      "exact_chain_sessions": 16,
+      "expected_joined_rows": 148,
+      "expected_weight": 0.8386480908152735,
+      "month": "2025-09",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "SOFI"
+    },
+    {
+      "chain_records": 4328,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 186,
+      "expected_weight": 0.9193498452012384,
+      "month": "2025-10",
+      "selected_pair_sessions": 18,
+      "stock_sessions": 22,
+      "symbol": "SOFI"
+    },
+    {
+      "chain_records": 3266,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 162,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "SOFI"
+    },
+    {
+      "chain_records": 3136,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 146,
+      "expected_weight": 0.8052631578947369,
+      "month": "2025-12",
+      "selected_pair_sessions": 16,
+      "stock_sessions": 21,
+      "symbol": "SOFI"
+    },
+    {
+      "chain_records": 1527,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 186,
+      "expected_weight": 0.7798245614035088,
+      "month": "2025-09",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 20,
+      "symbol": "WULF"
+    },
+    {
+      "chain_records": 2258,
+      "exact_chain_sessions": 18,
+      "expected_joined_rows": 212,
+      "expected_weight": 0.9193498452012384,
+      "month": "2025-10",
+      "selected_pair_sessions": 18,
+      "stock_sessions": 22,
+      "symbol": "WULF"
+    },
+    {
+      "chain_records": 1817,
+      "exact_chain_sessions": 15,
+      "expected_joined_rows": 153,
+      "expected_weight": 0.7631578947368421,
+      "month": "2025-11",
+      "selected_pair_sessions": 15,
+      "stock_sessions": 19,
+      "symbol": "WULF"
+    },
+    {
+      "chain_records": 1958,
+      "exact_chain_sessions": 17,
+      "expected_joined_rows": 196,
+      "expected_weight": 0.8578947368421053,
+      "month": "2025-12",
+      "selected_pair_sessions": 17,
+      "stock_sessions": 22,
+      "symbol": "WULF"
+    }
+  ],
+  "pair_coverage_by_structural_checkpoint": [
+    {
+      "checkpoint": 6,
+      "expected_joined_rows": 1133,
+      "expected_sessions": 68,
+      "expected_stocks": 20,
+      "expected_weight": 7.127269080069052
+    },
+    {
+      "checkpoint": 8,
+      "expected_joined_rows": 1087,
+      "expected_sessions": 68,
+      "expected_stocks": 20,
+      "expected_weight": 6.199186132315052
+    },
+    {
+      "checkpoint": 10,
+      "expected_joined_rows": 998,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 5.2784456279316165
+    },
+    {
+      "checkpoint": 12,
+      "expected_joined_rows": 940,
+      "expected_sessions": 68,
+      "expected_stocks": 20,
+      "expected_weight": 4.5951662829487905
+    },
+    {
+      "checkpoint": 14,
+      "expected_joined_rows": 858,
+      "expected_sessions": 68,
+      "expected_stocks": 20,
+      "expected_weight": 4.010374869989163
+    },
+    {
+      "checkpoint": 16,
+      "expected_joined_rows": 826,
+      "expected_sessions": 68,
+      "expected_stocks": 20,
+      "expected_weight": 3.6481667843503995
+    },
+    {
+      "checkpoint": 18,
+      "expected_joined_rows": 821,
+      "expected_sessions": 68,
+      "expected_stocks": 20,
+      "expected_weight": 3.633220685318903
+    },
+    {
+      "checkpoint": 20,
+      "expected_joined_rows": 821,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.5284671475674294
+    },
+    {
+      "checkpoint": 22,
+      "expected_joined_rows": 794,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.420797312720092
+    },
+    {
+      "checkpoint": 24,
+      "expected_joined_rows": 786,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.2847609887451714
+    },
+    {
+      "checkpoint": 26,
+      "expected_joined_rows": 806,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.404340862345943
+    },
+    {
+      "checkpoint": 28,
+      "expected_joined_rows": 810,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.4537860949026307
+    },
+    {
+      "checkpoint": 30,
+      "expected_joined_rows": 793,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.4153769207530025
+    },
+    {
+      "checkpoint": 32,
+      "expected_joined_rows": 801,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.613129500560536
+    },
+    {
+      "checkpoint": 34,
+      "expected_joined_rows": 796,
+      "expected_sessions": 67,
+      "expected_stocks": 20,
+      "expected_weight": 3.723357545792451
+    }
+  ],
+  "pair_selected_stock_sessions": 1214,
+  "partial_cohort_model_allowed": false,
+  "passed": true,
+  "planned_session_count": 85,
+  "planned_stock_month_cells": 80,
+  "previous_close_options_only": true,
+  "prior_reference_period_not_used_for_tuning": true,
+  "production_runtime_modified": false,
+  "represented_stock_month_cell_rate": 1.0,
+  "represented_stock_month_cells": 80,
+  "research_only": true,
+  "route_competition_features_excluded": true,
+  "route_state_features_excluded": true,
+  "same_day_or_future_observations": 0,
+  "strategy_promotion": false,
+  "strict_resume": true,
+  "top_5_percent_tail_frozen": true,
+  "top_5_percent_threshold_frozen": true,
+  "total_holdout_stock_sessions": 1700,
+  "training_end": "2024-12-31",
+  "valid_atm_pairs": 1214
+}

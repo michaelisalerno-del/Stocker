@@ -1,0 +1,101 @@
+{
+  "research_only": true,
+  "frozen_holdout_validation": true,
+  "holdout_start": "2025-09-01",
+  "holdout_end": "2025-12-31",
+  "training_end": "2024-12-31",
+  "prior_reference_period_not_used_for_tuning": true,
+  "previous_close_options_only": true,
+  "minimal_options_plus_intraday_h0_model": true,
+  "daily_stock_features_excluded": true,
+  "route_competition_features_excluded": true,
+  "route_state_features_excluded": true,
+  "hand_built_mismatch_features_excluded": true,
+  "top_5_percent_tail_frozen": true,
+  "option_pnl_calculated": false,
+  "intraday_option_quotes_used": false,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "experiment": "Minimal Intraday Stock \u2192 IV-Excess Holdout Validation V0",
+  "training_period": {
+    "start": "2024-01-01",
+    "end": "2024-12-31"
+  },
+  "prior_reference_period": {
+    "start": "2025-01-01",
+    "end": "2025-08-22",
+    "binding": false,
+    "permitted_use": "predecessor_compatibility_only"
+  },
+  "binding_holdout": {
+    "start": "2025-09-01",
+    "end": "2025-12-31",
+    "calendar": "XNYS_actual_sessions"
+  },
+  "protected_start": "2026-01-01",
+  "checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "models": {
+    "primary_fits": [
+      "M0_group_O",
+      "M1_group_O_plus_group_I"
+    ],
+    "penalty": "l2",
+    "C": 0.25,
+    "solver": "liblinear",
+    "max_iter": 300,
+    "class_weight": null,
+    "n_jobs": 1
+  },
+  "tail": {
+    "quantile": 0.95,
+    "threshold_source": "weighted_2024_development_predictions",
+    "weighted_quantile_method": "deterministic_midpoint_cdf",
+    "holdout_rank_forcing": false
+  },
+  "seeds": {
+    "model": 20260722,
+    "session_bootstrap": 20260764,
+    "intraday_h0_null_refits": [
+      20260765,
+      20260766,
+      20260767
+    ]
+  },
+  "decision_conventions": {
+    "materially_adverse_checkpoint_increment": "log_loss_or_brier_improvement_below_-1e-12",
+    "largest_5pct_tail_rows_dominant_above": 0.5
+  },
+  "hard_limits": {
+    "processes": 1,
+    "n_jobs": 1,
+    "gpu": false,
+    "primary_logistic_models": 2,
+    "binding_tails": 1,
+    "session_bootstrap_draws": 10,
+    "intraday_h0_bundle_null_refits": 3,
+    "maximum_new_eodhd_records": 350000,
+    "maximum_new_raw_bytes": 1000000000,
+    "maximum_plots": 2,
+    "full_repository_test_suite": false
+  }
+}

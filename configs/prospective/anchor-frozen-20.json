@@ -1,0 +1,32 @@
+{
+  "schema_version": "1",
+  "universe_id": "anchor-frozen-20-20260724",
+  "cohort": "anchor_frozen_20",
+  "symbols": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "universe_hash": "ab2a55b55329b83e410ebdf46fa5d47f5a75a44798d01374a4d7f072da57b634",
+  "source_artifact": "research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/model_coefficients.json",
+  "source_artifact_sha256": "49bd22e47b20274b1fe058ae15d899fb4a3a5e18feb418f990ef5139528161b9",
+  "source_field": "M1.category_levels.stock",
+  "registration_note": "Mechanically extracted from the local frozen M1 research artifact; no outcome-based changes."
+}

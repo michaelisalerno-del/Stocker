@@ -25,6 +25,7 @@ dependencies = [
 [project.scripts]
 stocker = "stocker_launcher:main"
 stocker-mcp = "stocker_launcher:mcp_main"
+stocker-prospective = "stocker_prospective.cli:app"
 
 [dependency-groups]
 research = [
@@ -46,10 +47,13 @@ research = [
 ]
 server = [
   "httpx>=0.27",
+  "joblib>=1.4",
+  "pandas>=2.2",
   "tenacity>=8.4",
   "prometheus-client>=0.20",
   "fastapi>=0.111",
   "uvicorn>=0.30",
+  "pandas-market-calendars>=4.4",
 ]
 dev = [
   "pytest>=8.2",
@@ -68,6 +72,7 @@ packages = [
   "packages/stocker_backtest/src/stocker_backtest",
   "packages/stocker_execution/src/stocker_execution",
   "packages/stocker_mcp/src/stocker_mcp",
+  "packages/stocker_prospective/src/stocker_prospective",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -82,6 +87,7 @@ pythonpath = [
   "packages/stocker_backtest/src",
   "packages/stocker_execution/src",
   "packages/stocker_mcp/src",
+  "packages/stocker_prospective/src",
 ]
 addopts = "-q"
 
@@ -95,6 +101,7 @@ src = [
   "packages/stocker_backtest/src",
   "packages/stocker_execution/src",
   "packages/stocker_mcp/src",
+  "packages/stocker_prospective/src",
   "apps",
   "tests",
 ]
@@ -118,6 +125,7 @@ packages = [
   "stocker_backtest",
   "stocker_execution",
   "stocker_mcp",
+  "stocker_prospective",
 ]
 ignore_missing_imports = true
 

@@ -1,0 +1,35 @@
+[Unit]
+Description=Stocker prospective read-only web application
+Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=stocker
+Group=stocker
+WorkingDirectory=/opt/stocker/current
+EnvironmentFile=/etc/stocker/stocker.env
+ExecStart=/opt/stocker/current/.venv/bin/stocker-prospective web run --config /etc/stocker/prospective.yaml
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=78
+KillSignal=SIGTERM
+TimeoutStopSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadOnlyPaths=/var/lib/stocker
+
+[Install]
+WantedBy=multi-user.target

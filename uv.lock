@@ -2219,6 +2219,9 @@ research = [
 server = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "joblib" },
+    { name = "pandas" },
+    { name = "pandas-market-calendars" },
     { name = "prometheus-client" },
     { name = "tenacity" },
     { name = "uvicorn" },
@@ -2266,6 +2269,9 @@ research = [
 server = [
     { name = "fastapi", specifier = ">=0.111" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "joblib", specifier = ">=1.4" },
+    { name = "pandas", specifier = ">=2.2" },
+    { name = "pandas-market-calendars", specifier = ">=4.4" },
     { name = "prometheus-client", specifier = ">=0.20" },
     { name = "tenacity", specifier = ">=8.4" },
     { name = "uvicorn", specifier = ">=0.30" },

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Read-only prospective Stocker evidence recorder monitor."
+    />
+    <title>Stocker // Prospective Evidence Recorder</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <a class="skip-nav" href="#main">Skip to evidence</a>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="masthead">
+      <div class="identity-lockup">
+        <span class="coordinate">SRV // PROSPECTIVE // 01</span>
+        <h1>STOCKER <span>EVIDENCE RECORDER</span></h1>
+      </div>
+      <div class="safety-flag" role="status" aria-live="polite">
+        <span class="pulse" aria-hidden="true"></span>
+        <span>
+          RESEARCH-ONLY SYSTEM
+          <strong>LIVE TRADING DISABLED</strong>
+        </span>
+      </div>
+    </header>
+
+    <div class="command-rail">
+      <nav aria-label="Recorder screens">
+        <button class="nav-item is-active" type="button" data-screen="live-monitor">
+          <span>01</span> Live Monitor
+        </button>
+        <button class="nav-item" type="button" data-screen="signal-detail">
+          <span>02</span> Signal Detail
+        </button>
+        <button class="nav-item" type="button" data-screen="shadow-blotter">
+          <span>03</span> Shadow Blotter
+        </button>
+        <button class="nav-item" type="button" data-screen="safety-audit">
+          <span>04</span> Safety + Audit
+        </button>
+      </nav>
+      <div class="rail-meta">
+        <span>READ-ONLY</span>
+        <span>NO ORDER BUS</span>
+        <button id="refresh" class="refresh" type="button">Refresh evidence</button>
+      </div>
+    </div>
+
+    <main id="main">
+      <section id="live-monitor" class="screen is-active" aria-labelledby="live-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">01 / Runtime condition</span>
+            <h2 id="live-title">Live Monitor</h2>
+          </div>
+          <p>
+            Prospective evidence health at the dedicated server boundary. A visible
+            blocker is a correct state, not a degraded presentation.
+          </p>
+        </div>
+        <div id="blocker-strip" class="blocker-strip" aria-live="polite"></div>
+        <div id="runtime-grid" class="metric-grid" aria-live="polite">
+          <div class="loading-panel">Reading persistent runtime state…</div>
+        </div>
+        <div class="monitor-lower">
+          <article class="panel">
+            <header><span>A</span><h3>Frozen scoring checkpoint</h3></header>
+            <div id="score-panel"></div>
+          </article>
+          <article class="panel">
+            <header><span>B</span><h3>Anchor cohort operations</h3></header>
+            <div id="universe-panel"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="signal-detail" class="screen" aria-labelledby="signal-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">02 / Crossing evidence</span>
+            <h2 id="signal-title">Signal Detail</h2>
+          </div>
+          <p>
+            Below-to-above episodes and every above-threshold checkpoint. Replay
+            scores remain synthetic; no option return determines direction.
+          </p>
+        </div>
+        <div class="split-workspace">
+          <article class="panel list-panel">
+            <header><span>S</span><h3>Episode index</h3></header>
+            <div id="signal-list" class="data-region"></div>
+          </article>
+          <article class="panel detail-panel">
+            <header><span>D</span><h3>Selected episode evidence</h3></header>
+            <div id="signal-evidence" class="data-region">
+              <div class="empty-state">
+                Select an episode to inspect its immutable evidence chain.
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="shadow-blotter" class="screen" aria-labelledby="shadow-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">03 / Quoted research ledger</span>
+            <h2 id="shadow-title">Shadow Blotter</h2>
+          </div>
+          <p>
+            Ask-side entries and bid-side exits from observed quotes. Fees are
+            separate. This ledger does not establish an options edge.
+          </p>
+        </div>
+        <div class="ledger-banner">
+          <span>PRIMARY LEDGER</span>
+          <strong>OBSERVED EXECUTABLE-SIDE QUOTES</strong>
+          <span>PAPER LEDGER: NOT IMPLEMENTED</span>
+        </div>
+        <article class="panel blotter-panel">
+          <header><span>Q</span><h3>Structure ledger</h3></header>
+          <div id="shadow-list" class="data-region"></div>
+        </article>
+        <article class="panel shadow-detail-panel">
+          <header><span>V</span><h3>Legs + horizon valuations</h3></header>
+          <div id="shadow-evidence" class="data-region">
+            <div class="empty-state">
+              Select a quoted structure to inspect every leg and horizon.
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="safety-audit" class="screen" aria-labelledby="safety-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">04 / Immutable controls</span>
+            <h2 id="safety-title">Safety + Audit</h2>
+          </div>
+          <p>
+            Bundle integrity, feature parity, lease ownership, reconnect state,
+            market-data bounds, and the ordered operator trail.
+          </p>
+        </div>
+        <div id="safety-grid" class="safety-grid"></div>
+        <article class="panel audit-panel">
+          <header><span>Λ</span><h3>Ordered audit log</h3></header>
+          <div id="audit-log" class="data-region"></div>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <span id="last-sync">Not yet synchronized</span>
+      <p>
+        Scientific scope: previous-close front-options context + current intraday H0
+        stock condition → selection of near-term underlying movement beyond
+        previous-close option-implied movement. Option profitability remains unknown.
+      </p>
+    </footer>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

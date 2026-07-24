@@ -1,0 +1,583 @@
+{
+  "schema_version": "1",
+  "generated_at_utc": "2026-07-24T00:00:00Z",
+  "frozen_model_source_artifact": "research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/model_coefficients.json",
+  "frozen_model_source_sha256": "49bd22e47b20274b1fe058ae15d899fb4a3a5e18feb418f990ef5139528161b9",
+  "frozen_feature_list_sha256": "e97bb767fc21c557034f7c53c96a58fc9e69741549fabcd25e7adf497efc907f",
+  "historical_bar_source": "EODHD five-minute bars plus the EODHD historical activity proxy",
+  "planned_runtime_bar_source": "IBKR completed five-minute bars and market-data callbacks",
+  "overall_scoring_allowed": false,
+  "overall_blocker": "blocked_feature_source_semantics_mismatch",
+  "features": [
+    {
+      "feature_name": "front_options_implied_tension",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen research transform",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen Group O implied-tension transform from the previous close.",
+      "runtime_definition": "No deployable serialized Group O transform or exact input schema was found.",
+      "parity_status": "missing",
+      "explanation": "The daily observation transport exists, but the approved frozen transformation artifact does not.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_premium_richness",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen research transform",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen Group O premium-richness transform from the previous close.",
+      "runtime_definition": "No deployable serialized Group O transform or exact input schema was found.",
+      "parity_status": "missing",
+      "explanation": "Transported values cannot be assumed equivalent without the frozen transform.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_downside_asymmetry",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen research transform",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen Group O downside-asymmetry transform from the previous close.",
+      "runtime_definition": "No deployable serialized Group O transform or exact input schema was found.",
+      "parity_status": "missing",
+      "explanation": "The server must not recreate this transformation from report numbers.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_liquidity_stress",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen research transform",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen Group O liquidity-stress transform from the previous close.",
+      "runtime_definition": "No deployable serialized Group O transform or exact input schema was found.",
+      "parity_status": "missing",
+      "explanation": "A source observation alone is not the frozen feature.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_positioning_concentration",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen research transform",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen Group O positioning-concentration transform from the previous close.",
+      "runtime_definition": "No deployable serialized Group O transform or exact input schema was found.",
+      "parity_status": "missing",
+      "explanation": "No outcome-driven replacement or approximation is permitted.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_directional_positioning",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen research transform",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen Group O directional-positioning transform from the previous close.",
+      "runtime_definition": "No deployable serialized Group O transform or exact input schema was found.",
+      "parity_status": "missing",
+      "explanation": "This is prior-session context; direction is never inferred from prospective option returns.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_surface_disagreement",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen research transform",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen Group O surface-disagreement transform from the previous close.",
+      "runtime_definition": "No deployable serialized Group O transform or exact input schema was found.",
+      "parity_status": "missing",
+      "explanation": "The exact frozen computation is unavailable.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_regime_p_0",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen Group O state model",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Probability component 0 from the frozen options-context state model.",
+      "runtime_definition": "No serialized frozen options-context state model was found.",
+      "parity_status": "missing",
+      "explanation": "No new daily stock regime is introduced; this existing options-context component remains unavailable.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_regime_p_1",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen Group O state model",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Probability component 1 from the frozen options-context state model.",
+      "runtime_definition": "No serialized frozen options-context state model was found.",
+      "parity_status": "missing",
+      "explanation": "The component cannot be manufactured from the numerical handoff.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_regime_p_2",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen Group O state model",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Probability component 2 from the frozen options-context state model.",
+      "runtime_definition": "No serialized frozen options-context state model was found.",
+      "parity_status": "missing",
+      "explanation": "The component cannot be manufactured from the numerical handoff.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_regime_p_3",
+      "historical_source": "Previous-valid-session EODHD options observation and frozen Group O state model",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Probability component 3 from the frozen options-context state model.",
+      "runtime_definition": "No serialized frozen options-context state model was found.",
+      "parity_status": "missing",
+      "explanation": "The component cannot be manufactured from the numerical handoff.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_regime_entropy",
+      "historical_source": "Frozen previous-session Group O state probabilities",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Entropy of the frozen Group O probability vector.",
+      "runtime_definition": "Required frozen probability vector is unavailable.",
+      "parity_status": "missing",
+      "explanation": "Derived context cannot be computed without its frozen inputs.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "front_options_regime_margin",
+      "historical_source": "Frozen previous-session Group O state probabilities",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Top-to-second probability margin of the frozen Group O vector.",
+      "runtime_definition": "Required frozen probability vector is unavailable.",
+      "parity_status": "missing",
+      "explanation": "Derived context cannot be computed without its frozen inputs.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "skew_25d_missing",
+      "historical_source": "Previous-session Group O feature builder",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen missingness indicator for the 25-delta skew input.",
+      "runtime_definition": "Exact source-field and missing-value contract is unavailable.",
+      "parity_status": "missing",
+      "explanation": "Missingness semantics are part of the frozen preprocessor.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "near_spot_oi_concentration_missing",
+      "historical_source": "Previous-session Group O feature builder",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen missingness indicator for near-spot open-interest concentration.",
+      "runtime_definition": "Exact source-field and missing-value contract is unavailable.",
+      "parity_status": "missing",
+      "explanation": "Missingness must not be inferred differently on the server.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "call_put_oi_imbalance_missing",
+      "historical_source": "Previous-session Group O feature builder",
+      "runtime_source": "Approved previous-session context provider or signed import",
+      "historical_definition": "Frozen missingness indicator for call/put open-interest imbalance.",
+      "runtime_definition": "Exact source-field and missing-value contract is unavailable.",
+      "parity_status": "missing",
+      "explanation": "Missingness must not be converted to zero.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_6",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 6.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Regular-session boundary and bar-completion equivalence must be checked in parallel.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_8",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 8.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_10",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 10.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_12",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 12.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_14",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 14.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_16",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 16.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_18",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 18.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_20",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 20.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_22",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 22.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_24",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 24.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_26",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 26.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_28",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 28.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_30",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 30.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_32",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 32.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "checkpoint_34",
+      "historical_source": "Completed EODHD five-minute regular-session bar ordinal",
+      "runtime_source": "Completed IBKR five-minute regular-session bar ordinal",
+      "historical_definition": "One-hot checkpoint at frozen bar ordinal 34.",
+      "runtime_definition": "Planned one-hot from completed runtime bars using the US session calendar.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Exact bar boundaries remain unverified.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "arousal",
+      "historical_source": "Frozen H0 intraday state inference over EODHD five-minute inputs",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Frozen H0 arousal value at the completed-bar checkpoint.",
+      "runtime_definition": "Unavailable because the serialized H0 state/preprocessor artifact was not found.",
+      "parity_status": "missing",
+      "explanation": "The runtime will record inputs but cannot reconstruct this state from report coefficients.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "conviction",
+      "historical_source": "Frozen H0 intraday state inference over EODHD five-minute inputs",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Frozen H0 conviction value at the completed-bar checkpoint.",
+      "runtime_definition": "Unavailable because the serialized H0 state/preprocessor artifact was not found.",
+      "parity_status": "missing",
+      "explanation": "No hand-built substitute is allowed.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "tension",
+      "historical_source": "Frozen H0 intraday state inference over EODHD five-minute inputs",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Frozen H0 tension value at the completed-bar checkpoint.",
+      "runtime_definition": "Unavailable because the serialized H0 state/preprocessor artifact was not found.",
+      "parity_status": "missing",
+      "explanation": "No hand-built substitute is allowed.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "signed_pressure",
+      "historical_source": "Frozen H0 intraday state inference over EODHD five-minute inputs",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Frozen H0 signed-pressure value at the completed-bar checkpoint.",
+      "runtime_definition": "Unavailable because the serialized H0 state/preprocessor artifact was not found.",
+      "parity_status": "missing",
+      "explanation": "No hand-built mismatch formula is introduced.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "posterior_entropy",
+      "historical_source": "Frozen H0 posterior state distribution",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Entropy of the frozen H0 posterior at the completed checkpoint.",
+      "runtime_definition": "Unavailable without the frozen H0 posterior machinery.",
+      "parity_status": "missing",
+      "explanation": "The state contract cannot be reconstructed safely.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "transition_probability",
+      "historical_source": "Frozen H0 intraday state inference",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Frozen H0 transition probability.",
+      "runtime_definition": "Unavailable without the frozen state machinery.",
+      "parity_status": "missing",
+      "explanation": "No route-state labels or route competition are added.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "persistence_probability",
+      "historical_source": "Frozen H0 intraday state inference",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Frozen H0 persistence probability.",
+      "runtime_definition": "Unavailable without the frozen state machinery.",
+      "parity_status": "missing",
+      "explanation": "No route-state labels or route competition are added.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "expected_state_age",
+      "historical_source": "Frozen H0 intraday state inference",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Frozen H0 expected state age.",
+      "runtime_definition": "Unavailable without the frozen state machinery.",
+      "parity_status": "missing",
+      "explanation": "State-age semantics must remain frozen.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "top_state_probability",
+      "historical_source": "Frozen H0 posterior state distribution",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Top probability from the frozen H0 posterior.",
+      "runtime_definition": "Unavailable without the frozen state machinery.",
+      "parity_status": "missing",
+      "explanation": "The posterior cannot be approximated.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "top_second_margin",
+      "historical_source": "Frozen H0 posterior state distribution",
+      "runtime_source": "No approved runtime H0 state artifact",
+      "historical_definition": "Top-to-second probability margin from the frozen H0 posterior.",
+      "runtime_definition": "Unavailable without the frozen state machinery.",
+      "parity_status": "missing",
+      "explanation": "The posterior cannot be approximated.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "prior_6_mean_range",
+      "historical_source": "Completed EODHD five-minute regular-session bars",
+      "runtime_source": "Planned completed IBKR five-minute regular-session bars",
+      "historical_definition": "Mean range over the prior six frozen historical bars.",
+      "runtime_definition": "Same formula is possible, but source, adjustments, RTH boundary and callback cutoff are unverified.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "IBKR bar construction must be compared in parallel before scoring.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "prior_6_price_travel",
+      "historical_source": "Completed EODHD five-minute regular-session bars",
+      "runtime_source": "Planned completed IBKR five-minute regular-session bars",
+      "historical_definition": "Frozen price-travel calculation over the prior six bars.",
+      "runtime_definition": "Formula can be implemented only after exact bar-source parity is verified.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "No callbacks received after the checkpoint may be treated as known.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "prior_6_absolute_net_movement",
+      "historical_source": "Completed EODHD five-minute regular-session bars",
+      "runtime_source": "Planned completed IBKR five-minute regular-session bars",
+      "historical_definition": "Absolute net movement over the prior six frozen historical bars.",
+      "runtime_definition": "Same arithmetic over IBKR bars remains source-unverified.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Adjusted/unadjusted handling and bar close cutoffs require verification.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "prior_6_activity_proxy",
+      "historical_source": "EODHD historical_relative_activity on five-minute bars",
+      "runtime_source": "IBKR trade-volume field is available but is not substituted",
+      "historical_definition": "Prior-six aggregation of the EODHD historical activity proxy.",
+      "runtime_definition": "Recorder stores IBKR volume with its own semantic label only.",
+      "parity_status": "incompatible",
+      "explanation": "IBKR trade volume is not proven equivalent to the EODHD activity proxy.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "recent_vs_earlier_range_ratio",
+      "historical_source": "Completed EODHD five-minute regular-session bars",
+      "runtime_source": "Planned completed IBKR five-minute regular-session bars",
+      "historical_definition": "Frozen recent-to-earlier range ratio.",
+      "runtime_definition": "Same formula over a different unverified bar source.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Parallel source comparison is required.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "recent_vs_earlier_activity_ratio",
+      "historical_source": "EODHD historical_relative_activity on five-minute bars",
+      "runtime_source": "IBKR trade-volume field is available but is not substituted",
+      "historical_definition": "Frozen recent-to-earlier ratio of the EODHD activity proxy.",
+      "runtime_definition": "No verified equivalent runtime activity proxy exists.",
+      "parity_status": "incompatible",
+      "explanation": "A different volume semantic would alter the validated H0 input.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "current_bar_range_vs_prior_6",
+      "historical_source": "Completed EODHD five-minute regular-session bars",
+      "runtime_source": "Planned completed IBKR five-minute regular-session bars",
+      "historical_definition": "Current completed-bar range relative to the prior six.",
+      "runtime_definition": "Same formula is source-unverified and partial bars are always rejected.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Completed-bar and source parity must be established.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "current_bar_activity_vs_prior_6",
+      "historical_source": "EODHD historical_relative_activity on five-minute bars",
+      "runtime_source": "IBKR trade-volume field is available but is not substituted",
+      "historical_definition": "Current EODHD activity proxy relative to its prior-six values.",
+      "runtime_definition": "No verified equivalent runtime activity proxy exists.",
+      "parity_status": "incompatible",
+      "explanation": "Runtime volume is recorded diagnostically under a distinct semantic label.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "current_bar_body_fraction",
+      "historical_source": "Completed EODHD five-minute regular-session OHLC",
+      "runtime_source": "Planned completed IBKR five-minute regular-session OHLC",
+      "historical_definition": "Frozen candle-body fraction for the completed bar.",
+      "runtime_definition": "Same arithmetic over an unverified bar-construction source.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "OHLC equivalence and adjustment handling require parallel validation.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "current_bar_extreme_wick_fraction",
+      "historical_source": "Completed EODHD five-minute regular-session OHLC",
+      "runtime_source": "Planned completed IBKR five-minute regular-session OHLC",
+      "historical_definition": "Frozen extreme-wick fraction for the completed bar.",
+      "runtime_definition": "Same arithmetic over an unverified bar-construction source.",
+      "parity_status": "requires_parallel_validation",
+      "explanation": "Partial or corrected callbacks cannot be silently accepted.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "any_registered_completion_prior_6",
+      "historical_source": "Frozen H0 registered-completion ledger",
+      "runtime_source": "No approved frozen completion-contract artifact",
+      "historical_definition": "Indicator of an existing frozen registered completion in the prior six bars.",
+      "runtime_definition": "Unavailable without the authoritative registered completion contract.",
+      "parity_status": "missing",
+      "explanation": "No new loop feature or completion rule is introduced.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "any_registered_completion_prior_12",
+      "historical_source": "Frozen H0 registered-completion ledger",
+      "runtime_source": "No approved frozen completion-contract artifact",
+      "historical_definition": "Indicator of an existing frozen registered completion in the prior twelve bars.",
+      "runtime_definition": "Unavailable without the authoritative registered completion contract.",
+      "parity_status": "missing",
+      "explanation": "No new loop feature or completion rule is introduced.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "same_identity_active_prefix_with_prior_completion",
+      "historical_source": "Frozen H0 loop identity and registered-completion state",
+      "runtime_source": "No approved frozen loop-identity artifact",
+      "historical_definition": "Frozen same-identity active-prefix indicator with prior completion.",
+      "runtime_definition": "Unavailable without the frozen identity contract.",
+      "parity_status": "missing",
+      "explanation": "Route-state labels and hand-built identity logic are explicitly excluded.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "any_hidden_event_prior_6",
+      "historical_source": "Existing frozen H0 hidden-event ledger",
+      "runtime_source": "No approved frozen hidden-event artifact",
+      "historical_definition": "Indicator from the hidden-event feature already present in frozen H0.",
+      "runtime_definition": "Unavailable; no additional hidden-loop feature is added.",
+      "parity_status": "missing",
+      "explanation": "Only the existing frozen contract would be acceptable.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "hidden_2_3_2_prior_6",
+      "historical_source": "Existing frozen H0 hidden-event ledger",
+      "runtime_source": "No approved frozen hidden-event artifact",
+      "historical_definition": "Frozen hidden 2-3-2 indicator in the prior six bars.",
+      "runtime_definition": "Unavailable; no reconstructed hidden-loop logic is accepted.",
+      "parity_status": "missing",
+      "explanation": "The implementation does not invent a new hidden-loop feature.",
+      "scoring_allowed": false
+    },
+    {
+      "feature_name": "bars_since_latest_registered_completion",
+      "historical_source": "Frozen H0 registered-completion ledger",
+      "runtime_source": "No approved frozen completion-contract artifact",
+      "historical_definition": "Bars elapsed since the latest frozen registered completion.",
+      "runtime_definition": "Unavailable without the authoritative frozen completion ledger.",
+      "parity_status": "missing",
+      "explanation": "No new completion semantics are inferred.",
+      "scoring_allowed": false
+    }
+  ]
+}

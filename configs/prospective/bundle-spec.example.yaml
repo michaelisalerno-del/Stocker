@@ -1,0 +1,29 @@
+bundle_id: REPLACE-WITH-IMMUTABLE-BUNDLE-ID
+created_at_utc: "2026-07-24T00:00:00Z"
+
+# These three serialized artifacts do not exist in the inspected repository.
+# Supply approved frozen files; never replace them with model_coefficients.json.
+m0_artifact: REQUIRED_APPROVED/m0.joblib
+m1_artifact: REQUIRED_APPROVED/m1.joblib
+preprocessor: REQUIRED_APPROVED/preprocessor.joblib
+
+# Supply an approved ordered schema with dtypes and missing-value policy.
+feature_schema: REQUIRED_APPROVED/feature-schema.json
+universe: anchor-frozen-20.json
+threshold: 0.49588519865576763
+threshold_provenance: m1-threshold-provenance.json
+
+training_start: "2024-01-01"
+training_end: "2024-12-31"
+historical_reference_start: "2025-01-01"
+historical_reference_end: "2025-08-22"
+holdout_start: "2025-09-01"
+holdout_end: "2025-12-31"
+protected_start: "2026-01-01"
+code_feature_contract_version: m1-group-o-plus-group-i-v1
+
+audit_references:
+  - ../../research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/lightweight_audit.json
+  - ../../research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/pre_outcome_freeze_manifest.json
+determinism_references:
+  - ../../research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/determinism_check.json

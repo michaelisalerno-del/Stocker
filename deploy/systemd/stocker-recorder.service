@@ -1,0 +1,35 @@
+[Unit]
+Description=Stocker prospective market-data recorder
+Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=stocker
+Group=stocker
+WorkingDirectory=/opt/stocker/current
+EnvironmentFile=/etc/stocker/stocker.env
+ExecStart=/opt/stocker/current/.venv/bin/stocker-prospective recorder run --config /etc/stocker/prospective.yaml --release-directory /opt/stocker/current
+Restart=on-failure
+RestartSec=15
+RestartPreventExitStatus=78
+KillSignal=SIGTERM
+TimeoutStopSec=45
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/stocker
+
+[Install]
+WantedBy=multi-user.target

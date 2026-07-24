@@ -1,0 +1,295 @@
+"""Read-only SQLite projections for the Stocker web process."""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+
+class ProspectiveReadStore:
+    """A query-only store that opens SQLite with ``mode=ro``."""
+
+    def __init__(self, database_path: str | Path) -> None:
+        self.database_path = Path(database_path)
+
+    def _connect(self) -> sqlite3.Connection:
+        uri = f"file:{self.database_path.resolve()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True, timeout=2.0)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only = ON")
+        connection.execute("PRAGMA busy_timeout = 2000")
+        return connection
+
+    @staticmethod
+    def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        return None if row is None else dict(row)
+
+    def database_health(self) -> dict[str, Any]:
+        try:
+            with self._connect() as connection:
+                result = connection.execute("PRAGMA quick_check").fetchone()
+                migration = connection.execute(
+                    "SELECT version, applied_at_utc FROM schema_migrations "
+                    "ORDER BY version DESC LIMIT 1"
+                ).fetchone()
+            return {
+                "status": "healthy" if result and result[0] == "ok" else "degraded",
+                "quick_check": None if result is None else result[0],
+                "latest_migration": self._dict(migration),
+                "path_exposed": False,
+                "mode": "read_only_wal",
+            }
+        except sqlite3.Error:
+            return {
+                "status": "unavailable",
+                "quick_check": None,
+                "latest_migration": None,
+                "path_exposed": False,
+                "mode": "read_only_wal",
+            }
+
+    def latest_run(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM prospective_run ORDER BY created_at_utc DESC LIMIT 1"
+            ).fetchone()
+        return self._dict(row)
+
+    def runtime_projection(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            run = connection.execute(
+                "SELECT * FROM prospective_run ORDER BY created_at_utc DESC LIMIT 1"
+            ).fetchone()
+            session = connection.execute(
+                "SELECT * FROM runtime_session ORDER BY opened_at_utc DESC LIMIT 1"
+            ).fetchone()
+            lease = connection.execute(
+                "SELECT * FROM recorder_lease WHERE lease_key = 'prospective_recorder'"
+            ).fetchone()
+            bar = connection.execute(
+                "SELECT * FROM underlying_bar ORDER BY bar_end_utc DESC LIMIT 1"
+            ).fetchone()
+            score = connection.execute(
+                "SELECT * FROM model_score ORDER BY bar_end_utc DESC LIMIT 1"
+            ).fetchone()
+            context = connection.execute(
+                "SELECT * FROM previous_session_options_context "
+                "ORDER BY current_session_date DESC LIMIT 1"
+            ).fetchone()
+            connection_event = connection.execute(
+                "SELECT * FROM ibkr_connection_event ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            capture = connection.execute(
+                "SELECT market_data_type, capture_status, budget_status, "
+                "target_timestamp_utc FROM option_surface_capture "
+                "ORDER BY target_timestamp_utc DESC, id DESC LIMIT 1"
+            ).fetchone()
+            episode = connection.execute(
+                "SELECT * FROM signal_episode ORDER BY crossing_timestamp_utc DESC LIMIT 1"
+            ).fetchone()
+            blockers = connection.execute(
+                "SELECT blocker_code, component, message, severity "
+                "FROM data_health_event WHERE blocker_code IS NOT NULL ORDER BY id"
+            ).fetchall()
+        return {
+            "run": self._dict(run),
+            "session": self._dict(session),
+            "recorder_lease": self._dict(lease),
+            "last_completed_bar": self._dict(bar),
+            "latest_score": self._dict(score),
+            "previous_session_context": self._dict(context),
+            "ibkr_connection": self._dict(connection_event),
+            "latest_capture": self._dict(capture),
+            "latest_signal_episode": self._dict(episode),
+            "blockers": [dict(row) for row in blockers],
+        }
+
+    def universe(self) -> dict[str, list[dict[str, Any]]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM universe_membership ORDER BY cohort, symbol"
+            ).fetchall()
+        anchor = [dict(row) for row in rows if row["cohort"] == "anchor_frozen_20"]
+        exploratory = [
+            dict(row)
+            for row in rows
+            if row["cohort"] == "prospective_external_universe_exploratory"
+        ]
+        return {
+            "anchor_frozen_20": anchor,
+            "prospective_external_universe_exploratory": exploratory,
+        }
+
+    def signals(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT e.*, s.m1_probability, s.frozen_threshold, s.score_label,
+                       COUNT(c.id) AS checkpoint_count
+                FROM signal_episode e
+                LEFT JOIN model_score s
+                  ON s.run_id = e.run_id AND s.cohort = e.cohort
+                 AND s.symbol = e.symbol
+                 AND s.model_bundle_id = e.model_bundle_id
+                 AND s.bar_end_utc = e.crossing_timestamp_utc
+                LEFT JOIN signal_checkpoint c ON c.signal_episode_id = e.id
+                GROUP BY e.id
+                ORDER BY e.crossing_timestamp_utc DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def signal_detail(self, signal_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            episode = connection.execute(
+                """
+                SELECT e.*, v.prospective_start_utc, v.app_version, v.git_commit,
+                       v.model_artifact_id, v.universe_id, v.source_timestamps_json,
+                       v.recorded_at_utc
+                FROM signal_episode e
+                JOIN evidence_envelope v ON v.id = e.envelope_id
+                WHERE e.id = ?
+                """,
+                (signal_id,),
+            ).fetchone()
+            if episode is None:
+                return None
+            checkpoints = connection.execute(
+                """
+                SELECT c.*, s.m0_probability, s.m1_probability, s.frozen_threshold,
+                       s.feature_schema_hash, s.eligibility, s.rejection_reason,
+                       s.score_label
+                FROM signal_checkpoint c
+                JOIN model_score s ON s.id = c.model_score_id
+                WHERE c.signal_episode_id = ?
+                ORDER BY c.checkpoint_timestamp_utc
+                """,
+                (signal_id,),
+            ).fetchall()
+            feature = connection.execute(
+                """
+                SELECT f.* FROM feature_snapshot f
+                WHERE f.run_id = ? AND f.symbol = ? AND f.bar_end_utc = ?
+                ORDER BY f.id DESC LIMIT 1
+                """,
+                (
+                    episode["run_id"],
+                    episode["symbol"],
+                    episode["crossing_timestamp_utc"],
+                ),
+            ).fetchone()
+            context = connection.execute(
+                """
+                SELECT * FROM previous_session_options_context
+                WHERE run_id = ? ORDER BY current_session_date DESC LIMIT 1
+                """,
+                (episode["run_id"],),
+            ).fetchone()
+            underlying_quotes = connection.execute(
+                """
+                SELECT * FROM underlying_quote WHERE signal_episode_id = ?
+                ORDER BY target_timestamp_utc
+                """,
+                (signal_id,),
+            ).fetchall()
+            captures = connection.execute(
+                """
+                SELECT * FROM option_surface_capture WHERE signal_episode_id = ?
+                ORDER BY target_timestamp_utc, dte_bucket
+                """,
+                (signal_id,),
+            ).fetchall()
+            option_quotes = connection.execute(
+                """
+                SELECT q.*, c.con_id, c.local_symbol, c.expiry, c.strike, c.right,
+                       c.multiplier, c.exchange, c.trading_class, c.dte_bucket,
+                       x.target_timestamp_utc, x.capture_status
+                FROM option_quote q
+                JOIN option_contract c ON c.id = q.option_contract_id
+                JOIN option_surface_capture x ON x.id = q.surface_capture_id
+                WHERE x.signal_episode_id = ?
+                ORDER BY x.target_timestamp_utc, c.dte_bucket, c.strike, c.right
+                """,
+                (signal_id,),
+            ).fetchall()
+        return {
+            "episode": dict(episode),
+            "checkpoints": [dict(row) for row in checkpoints],
+            "feature_snapshot": self._dict(feature),
+            "previous_session_context": self._dict(context),
+            "underlying_quotes": [dict(row) for row in underlying_quotes],
+            "captures": [dict(row) for row in captures],
+            "option_quotes": [dict(row) for row in option_quotes],
+        }
+
+    def shadow(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT s.*, e.crossing_timestamp_utc,
+                       COUNT(h.id) AS horizon_count,
+                       MAX(h.horizon_minutes) AS latest_horizon_minutes
+                FROM shadow_structure s
+                JOIN signal_episode e ON e.id = s.signal_episode_id
+                LEFT JOIN shadow_horizon_valuation h ON h.shadow_structure_id = s.id
+                GROUP BY s.id
+                ORDER BY e.crossing_timestamp_utc DESC, s.structure_type
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def shadow_detail(self, structure_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            structure = connection.execute(
+                """
+                SELECT s.*, e.crossing_timestamp_utc
+                FROM shadow_structure s
+                JOIN signal_episode e ON e.id = s.signal_episode_id
+                WHERE s.id = ?
+                """,
+                (structure_id,),
+            ).fetchone()
+            if structure is None:
+                return None
+            legs = connection.execute(
+                """
+                SELECT l.*, c.con_id, c.local_symbol, c.expiry, c.strike, c.right,
+                       c.multiplier, c.exchange, c.trading_class
+                FROM shadow_leg l JOIN option_contract c ON c.id = l.option_contract_id
+                WHERE l.shadow_structure_id = ? ORDER BY l.id
+                """,
+                (structure_id,),
+            ).fetchall()
+            horizons = connection.execute(
+                """
+                SELECT * FROM shadow_horizon_valuation
+                WHERE shadow_structure_id = ? ORDER BY horizon_minutes
+                """,
+                (structure_id,),
+            ).fetchall()
+        return {
+            "structure": dict(structure),
+            "legs": [dict(row) for row in legs],
+            "horizons": [dict(row) for row in horizons],
+            "ledger": "quoted_research_ledger",
+            "paper_ledger": {"implemented": False, "records": []},
+        }
+
+    def audit(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT a.*, e.recorded_at_utc, e.app_version, e.git_commit,
+                       e.model_artifact_id, e.universe_id, e.cohort
+                FROM audit_event a
+                JOIN evidence_envelope e ON e.id = a.envelope_id
+                ORDER BY a.run_id, a.sequence LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]

@@ -1,0 +1,57 @@
+paths:
+  # Replay state is deliberately outside the Git checkout/release.
+  database: /tmp/stocker-prospective-replay/prospective.sqlite3
+  bundle_root: /tmp/stocker-prospective-replay/bundles
+  context_root: /tmp/stocker-prospective-replay/context
+  feature_parity_report: configs/prospective/feature-parity-m1.json
+  replay_universe: configs/prospective/anchor-frozen-20.json
+
+runtime:
+  mode: shadow
+  source: replay
+  prospective_start_utc: "2026-07-24T13:00:00Z"
+  instance_id: replay-workstation
+  app_version: 0.1.0
+  git_commit: 0d6de0836cfcd7ab2b29f88d9df636235d41de6d
+  run_id: deterministic-replay-v1
+  recorder_lease_stale_seconds: 60
+  heartbeat_seconds: 10
+
+risk:
+  trading_enabled: false
+
+web:
+  host: 127.0.0.1
+  port: 8765
+  production: true
+  trust_proxy_headers: false
+  trusted_proxy_ips: []
+  authentication_enabled: false
+  auth_token_env: null
+  auth_cookie_name: __Host-stocker_session
+  auth_cookie_secure: true
+  requests_per_minute: 240
+  allowed_hosts:
+    - 127.0.0.1
+    - localhost
+
+ibkr:
+  host: 127.0.0.1
+  port: null
+  client_id: 71
+  expected_environment: paper
+  connect_timeout_seconds: 10
+  request_timeout_seconds: 10
+  reconnect_max_attempts: 5
+  reconnect_backoff_seconds: 2
+  market_data_line_budget: 100
+  reserved_line_headroom: 10
+  request_rate_per_second: 20
+  quote_capture_timeout_seconds: 5
+  allowed_market_data_types:
+    - live
+
+context:
+  mode: signed_import
+  hmac_secret_env: STOCKER_CONTEXT_SIGNING_SECRET
+  import_directory: /tmp/stocker-prospective-replay/context/incoming

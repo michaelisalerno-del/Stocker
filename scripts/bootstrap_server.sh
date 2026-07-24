@@ -17,7 +17,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 echo "Syncing core and server dependencies with uv..."
-uv sync --no-editable --no-default-groups --group server
+uv sync --locked --no-editable --no-default-groups --group server
 
 echo
 echo "Bootstrap complete."

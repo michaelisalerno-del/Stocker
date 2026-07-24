@@ -82,7 +82,7 @@ bash scripts/bootstrap_server.sh
 The server bootstrap installs only core and `server` dependency groups:
 
 ```bash
-uv sync --no-editable --no-default-groups --group server
+uv sync --locked --no-editable --no-default-groups --group server
 uv run --no-sync stocker server dry-run --config configs/server.example.yaml
 ```
 
@@ -90,9 +90,9 @@ The dedicated prospective recorder has a separate, no-order process boundary:
 
 ```bash
 export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
-uv run stocker-prospective replay run \
+uv run --no-sync stocker-prospective replay run \
   --config configs/prospective/replay.example.yaml
-uv run stocker-prospective web run \
+uv run --no-sync stocker-prospective web run \
   --config configs/prospective/replay.example.yaml
 ```
 

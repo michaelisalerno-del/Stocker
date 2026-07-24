@@ -7,9 +7,9 @@ record-only/shadow:
 ```bash
 export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
 uv sync --locked --no-editable --no-default-groups --group server
-uv run stocker-prospective replay run \
+uv run --no-sync stocker-prospective replay run \
   --config configs/prospective/replay.example.yaml
-uv run stocker-prospective web run \
+uv run --no-sync stocker-prospective web run \
   --config configs/prospective/replay.example.yaml
 ```
 

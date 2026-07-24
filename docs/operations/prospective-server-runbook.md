@@ -30,7 +30,7 @@ On the dedicated server:
 ```bash
 sudo useradd --system --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker
 sudo install -d -o root -g root -m 0755 /opt/stocker/releases
-sudo install -d -o root -g root -m 0755 /etc/stocker
+sudo install -d -o root -g stocker -m 0750 /etc/stocker
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/prospective
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/bundles
@@ -57,10 +57,14 @@ Inside each copied release:
 ```bash
 cd /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 sudo -u stocker uv sync --locked --no-editable --no-default-groups --group server
+sudo chown -R root:stocker /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
+sudo chmod -R go-w /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 ```
 
-This installs the server dependency group into the release-local `.venv`.
-Production data does not enter the virtual environment.
+Run the sync only while the staging release belongs to `stocker`, then transfer
+ownership to root and remove group/other write access as shown. This installs
+the server dependency group into the release-local `.venv`; production data
+does not enter the virtual environment.
 
 ## 3. Install the optional official IBKR Python API
 
@@ -112,6 +116,10 @@ sudo -u stocker tar -xzf \
   -C /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 cd /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 sudo -u stocker uv sync --locked --no-editable --no-default-groups --group server
+sudo chown -R root:stocker \
+  /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
+sudo chmod -R go-w \
+  /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 sudo ln -s /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT /opt/stocker/current.next
 sudo mv -T /opt/stocker/current.next /opt/stocker/current
 ```

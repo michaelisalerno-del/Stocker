@@ -30,6 +30,7 @@ ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
 ReadOnlyPaths=/var/lib/stocker
+ReadWritePaths=/var/lib/stocker/prospective
 
 [Install]
 WantedBy=multi-user.target

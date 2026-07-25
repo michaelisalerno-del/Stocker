@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -8,10 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from stocker_prospective.config import ProspectiveConfig
+from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.web import create_web_app
 
 ROOT = Path(__file__).parents[1]
+WEB_UNIT = ROOT / "deploy/systemd/stocker-web.service"
 
 
 def config(tmp_path: Path, *, authenticated: bool = False) -> ProspectiveConfig:
@@ -124,6 +127,30 @@ def test_no_order_account_threshold_or_upload_endpoint_exists(tmp_path: Path) ->
         assert forbidden not in lowered
     assert client.post("/api/recorder/start").status_code == 404
     assert client.post("/api/orders").status_code == 404
+
+
+def test_web_sqlite_connections_cannot_write_domain_records(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+    store = ProspectiveReadStore(cfg.paths.database, run_id=cfg.runtime.run_id)
+
+    with (
+        store._connect() as connection,
+        pytest.raises(
+            sqlite3.OperationalError,
+            match="readonly",
+        ),
+    ):
+        connection.execute("DELETE FROM prospective_run")
+
+
+def test_web_service_writes_only_sqlite_wal_coordination_files() -> None:
+    unit = WEB_UNIT.read_text(encoding="utf-8")
+
+    assert "ProtectSystem=strict" in unit
+    assert "ReadWritePaths=/var/lib/stocker/prospective" in unit
+    assert "ReadWritePaths=/var/lib/stocker\n" not in unit
+    assert "ReadWritePaths=/var/lib/stocker/bundles" not in unit
 
 
 def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> None:

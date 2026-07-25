@@ -722,6 +722,15 @@ Configuration/bundle-integrity exit code 78 is in
 `RestartPreventExitStatus`; systemd will not loop on those failures.
 Transient runtime failures use bounded systemd restart limits.
 
+The web process opens SQLite with `mode=ro` and `PRAGMA query_only=ON`, so SQL
+writes are rejected. Its systemd unit keeps all of `/var/lib/stocker`
+read-only except `/var/lib/stocker/prospective`, because a read-only SQLite WAL
+client may need to create or update `-shm` coordination metadata when the
+single recorder writer is stopped or restarting. That narrow mount exception
+does not make the web repository a domain-record writer; tests execute a
+destructive SQL statement through the web store and require SQLite to reject
+it as read-only.
+
 At the current repository state, IBKR mode is expected to block rather than
 claim frozen M1 scoring.
 

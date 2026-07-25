@@ -132,7 +132,6 @@ sudo find /var/lib/stocker/ibkr-api/status -xdev -type f \
 sudo chgrp -R stocker-readers /var/lib/stocker/bundles
 sudo chmod -R g+rX,o-rwx /var/lib/stocker/bundles
 
-sudo /usr/local/libexec/stocker-prepare-web-sqlite-boundary
 sudo -u stocker-web -g stocker-readers test ! -r /etc/stocker/stocker.env
 sudo -u stocker-web -g stocker-readers test ! -w \
   /var/lib/stocker/prospective/prospective.sqlite3
@@ -140,7 +139,9 @@ sudo -u stocker-web -g stocker-readers test ! -w \
 
 Do not recursively change `/var/lib/stocker/secure-transfer`,
 `/var/lib/stocker/daily-context`, or `/var/lib/stocker/backups`; those remain
-recorder/operator-private.
+recorder/operator-private. Do not invoke a helper left by an older release in
+this migration step. Section 10 installs the new descriptor-relative helper
+from the staged release before running it.
 
 ## 2. Install Python and `uv`
 

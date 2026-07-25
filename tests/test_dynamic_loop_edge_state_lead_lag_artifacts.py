@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "research/slrno-v2/20260714-regime-loop-handoff/work"
 ARTIFACT_ROOT = WORK / "artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1"
 FROZEN_V2_COMMIT = "ca3537a0f337097a9a75abf87ae4bf419fae6a5d"
-FROZEN_LEAD_LAG_HANDOFF_COMMIT = "d28d7f8f"
+FROZEN_LEAD_LAG_HANDOFF_COMMIT = "5a3a5f3c93c3050a6591830bfc9fa0fbbb4c4f93"
 
 
 def test_primary_and_exact_rerun_manifests_are_byte_identical() -> None:

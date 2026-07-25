@@ -50,6 +50,15 @@ from stocker_prospective.ibkr import (
     OfficialIBKRDependencyError,
     require_official_ibkr_api,
 )
+from stocker_prospective.ibkr_api import (
+    OfficialIBKRApiProvenanceError,
+    evaluate_official_ibkr_api_update,
+    fetch_latest_official_ibkr_api_release,
+    inspect_official_ibkr_api_archive,
+    load_official_ibkr_api_provenance,
+    write_immutable_official_ibkr_api_provenance,
+    write_official_ibkr_api_update_status,
+)
 from stocker_prospective.market_data import MarketDataBudget, MarketDataType
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.recorder import (
@@ -71,12 +80,14 @@ database_app = typer.Typer(help="Manage the prospective database schema.")
 replay_app = typer.Typer(help="Run the deterministic synthetic vertical slice.")
 recorder_app = typer.Typer(help="Run the market-data recorder process.")
 web_app = typer.Typer(help="Run the read-only web process.")
+ibkr_api_app = typer.Typer(help="Verify first-party IBKR API provenance and check for updates.")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(context_app, name="context")
 app.add_typer(database_app, name="db")
 app.add_typer(replay_app, name="replay")
 app.add_typer(recorder_app, name="recorder")
 app.add_typer(web_app, name="web")
+app.add_typer(ibkr_api_app, name="ibkr-api")
 
 
 class _ReplayMarketDataBoundary:
@@ -98,6 +109,64 @@ def _emit(payload: Any) -> None:
 def _fatal(message: str, *, exit_code: int = 78) -> NoReturn:
     typer.echo(message, err=True)
     raise typer.Exit(exit_code)
+
+
+@ibkr_api_app.command("verify")
+def ibkr_api_verify(
+    provenance: Path = typer.Option(..., exists=True, dir_okay=False),
+) -> None:
+    """Verify the installed Python tree against official archive provenance."""
+
+    try:
+        require_official_ibkr_api(provenance)
+        _emit(load_official_ibkr_api_provenance(provenance))
+    except (OfficialIBKRDependencyError, OfficialIBKRApiProvenanceError) as exc:
+        _fatal(str(exc))
+
+
+@ibkr_api_app.command("register")
+def ibkr_api_register(
+    archive: Path = typer.Option(..., exists=True, dir_okay=False),
+    installed_package_root: Path = typer.Option(..., exists=True, file_okay=False),
+    provenance: Path = typer.Option(...),
+    operator: str = typer.Option(...),
+) -> None:
+    """Register an installed tree only when it exactly matches IBKR's latest ZIP."""
+
+    try:
+        release = fetch_latest_official_ibkr_api_release()
+        record = inspect_official_ibkr_api_archive(
+            archive,
+            installed_package_root=installed_package_root,
+            release=release,
+            registered_by=operator,
+            checked_at=datetime.now(UTC),
+        )
+        write_immutable_official_ibkr_api_provenance(provenance, record)
+        _emit(record)
+    except OfficialIBKRApiProvenanceError as exc:
+        _fatal(str(exc))
+
+
+@ibkr_api_app.command("check-update")
+def ibkr_api_check_update(
+    provenance: Path = typer.Option(..., exists=True, dir_okay=False),
+    output: Path = typer.Option(...),
+) -> None:
+    """Record whether IBKR advertises a newer first-party archive; never install it."""
+
+    try:
+        installed = load_official_ibkr_api_provenance(provenance)
+        latest = fetch_latest_official_ibkr_api_release()
+        status = evaluate_official_ibkr_api_update(
+            installed,
+            latest,
+            checked_at=datetime.now(UTC),
+        )
+        write_official_ibkr_api_update_status(output, status)
+        _emit(status)
+    except OfficialIBKRApiProvenanceError as exc:
+        _fatal(str(exc))
 
 
 def _mapping(path: Path) -> dict[str, Any]:

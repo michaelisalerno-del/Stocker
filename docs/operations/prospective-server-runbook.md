@@ -17,6 +17,9 @@ orders and does not establish an options edge.
 /var/lib/stocker/prospective/         SQLite database and WAL
 /var/lib/stocker/bundles/             immutable bundle store + active pointer
 /var/lib/stocker/daily-context/       signed package store + session pointers
+/var/lib/stocker/ibkr-api/provenance/ immutable official-archive records
+/var/lib/stocker/ibkr-api/status/     read-only release-check result for the app
+/var/lib/stocker/secure-transfer/     restricted operator transfer staging
 /var/lib/stocker/backups/             checked immutable SQLite backups
 ```
 
@@ -35,6 +38,10 @@ sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/prospective
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/bundles
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/daily-context/incoming
+sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/ibkr-api
+sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/ibkr-api/provenance
+sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/ibkr-api/status
+sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/secure-transfer
 sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/backups
 ```
 
@@ -57,42 +64,111 @@ Inside each copied release:
 ```bash
 cd /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 sudo -u stocker uv sync --locked --no-editable --no-default-groups --group server
-sudo chown -R root:stocker /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
-sudo chmod -R go-w /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 ```
 
-Run the sync only while the staging release belongs to `stocker`, then transfer
-ownership to root and remove group/other write access as shown. This installs
-the server dependency group into the release-local `.venv`; production data
-does not enter the virtual environment.
+Keep the staging release owned by `stocker` through official-API installation
+and verification. Section 4 transfers it to root and removes write access only
+after every release-local dependency is complete. Production data does not
+enter the virtual environment.
 
 ## 3. Install the optional official IBKR Python API
 
 Recheck the official download page at install time:
 <https://interactivebrokers.github.io/>.
 
-Do not run `pip install ibapi` from a package registry. On 2026-07-24, Python
-was provided in the official **Latest** Mac/Unix archive, under
-`source/pythonclient`.
+Do not run `pip install ibapi` from a package registry. On 2026-07-25, Python
+was provided in the official **Latest** Mac/Unix archive. The first verified
+server archive is `twsapi_macunix.1048.01.zip`, which contains
+`API_Version=10.48.01` and installs `ibapi==10.48.1`. Its expected SHA-256 is
+`0446c403cdfd3a059685c5e11814b32e0b811fdf5e1f68564f8e08b655e49547`.
 
-After an operator manually downloads the official archive:
+The operator must accept IBKR's licence and download the archive manually.
+Copy it directly into restricted server staging:
 
 ```bash
-sha256sum /secure-transfer/TWS_API_REPLACE_WITH_VERSION.zip
-unzip -q /secure-transfer/TWS_API_REPLACE_WITH_VERSION.zip -d /secure-transfer/tws-api
-cat /secure-transfer/tws-api/IBJts/source/Api_VersionNum.txt
-sudo -u stocker uv pip install \
-  --python /opt/stocker/current/.venv/bin/python \
-  /secure-transfer/tws-api/IBJts/source/pythonclient
-/opt/stocker/current/.venv/bin/python -c 'import ibapi; print(ibapi.__file__)'
+scp /path/to/twsapi_macunix.1048.01.zip \
+  root@SERVER:/var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
 ```
 
-Record the archive hash, API version, TWS/IB Gateway version, operator, and
-install time in the server change record. Do not copy the extracted source into
-Git or a Stocker bundle.
+Then verify it and install it into the **staged release** before that release is
+made immutable or promoted:
+
+```bash
+sudo chown root:stocker \
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+sudo chmod 0640 \
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+sha256sum /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+IBKR_EXTRACT_DIR="$(
+  sudo -u stocker mktemp -d /var/lib/stocker/ibkr-api-extract.XXXXXX
+)"
+sudo -u stocker python3.12 -m zipfile -e \
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip \
+  "$IBKR_EXTRACT_DIR"
+cat "$IBKR_EXTRACT_DIR/IBJts/API_VersionNum.txt"
+sudo -u stocker uv pip install \
+  --python /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/python \
+  "$IBKR_EXTRACT_DIR/IBJts/source/pythonclient"
+sudo -u stocker rm -rf -- "$IBKR_EXTRACT_DIR"
+/opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/python \
+  -c 'import ibapi; print(ibapi.__version__, ibapi.__file__)'
+```
+
+Register provenance with the same staged release. Registration fetches only
+IBKR's current official release metadata; it refuses an archive that is no
+longer the advertised Latest Mac/Unix release or whose installed source tree
+differs:
+
+```bash
+IBKR_PACKAGE_ROOT="$(
+  /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/python \
+  -c 'import pathlib, ibapi; print(pathlib.Path(ibapi.__file__).parent)'
+)"
+sudo /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective \
+  ibkr-api register \
+  --archive /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip \
+  --installed-package-root "$IBKR_PACKAGE_ROOT" \
+  --provenance /var/lib/stocker/ibkr-api/provenance/10.48.1.json \
+  --operator REPLACE_WITH_OPERATOR_ID
+sudo chown root:stocker /var/lib/stocker/ibkr-api/provenance/10.48.1.json
+sudo chmod 0640 /var/lib/stocker/ibkr-api/provenance/10.48.1.json
+sudo ln -s provenance/10.48.1.json \
+  /var/lib/stocker/ibkr-api/active-provenance.json.next
+sudo mv -Tf /var/lib/stocker/ibkr-api/active-provenance.json.next \
+  /var/lib/stocker/ibkr-api/active-provenance.json
+```
+
+The active pointer is an operator-owned atomic selection. Installed provenance
+records are never mutated. Every application release must contain the exact
+registered `ibapi` tree before promotion; rollback verification will fail
+closed if a release contains a different or absent tree.
+
+Install the read-only weekly release checker:
+
+```bash
+sudo install -o root -g root -m 0644 \
+  /opt/stocker/current/deploy/systemd/stocker-ibkr-api-update.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibkr-api-update.timer \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now stocker-ibkr-api-update.timer
+sudo systemctl start stocker-ibkr-api-update.service
+sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective \
+  ibkr-api verify \
+  --provenance /var/lib/stocker/ibkr-api/active-provenance.json
+```
+
+The timer fetches metadata and writes update status only. It has no package
+installer, download command, or environment-file access. When an update is
+reported, repeat the manual licence, hash, staging, tests, and atomic promotion
+procedure during planned maintenance. Never replace broker code automatically
+while the recorder is running. A missing check or a check older than 14 days is
+an explicit health blocker; a future-dated check is rejected.
 
 If the official client is absent, replay remains available and IBKR mode
 returns `blocked_official_ibkr_api_not_installed`.
+If it is present without matching immutable provenance, IBKR mode returns
+`blocked_unverified_official_ibkr_api`.
 
 ## 4. Copy a versioned application release
 
@@ -103,19 +179,27 @@ git rev-parse HEAD
 git status --short
 git archive --format=tar.gz --output=/tmp/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz HEAD
 sha256sum /tmp/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz
-scp /tmp/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz operator@SERVER:/secure-transfer/
+scp /tmp/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz \
+  root@SERVER:/var/lib/stocker/secure-transfer/
 ```
 
 On the server:
 
 ```bash
+sudo chown root:stocker \
+  /var/lib/stocker/secure-transfer/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz
+sudo chmod 0640 \
+  /var/lib/stocker/secure-transfer/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz
 sudo install -d -o stocker -g stocker -m 0755 \
   /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 sudo -u stocker tar -xzf \
-  /secure-transfer/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz \
+  /var/lib/stocker/secure-transfer/stocker-REPLACE_WITH_GIT_COMMIT.tar.gz \
   -C /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 cd /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 sudo -u stocker uv sync --locked --no-editable --no-default-groups --group server
+# Repeat section 3's extraction/install commands; do not rewrite provenance.
+sudo -u stocker .venv/bin/stocker-prospective ibkr-api verify \
+  --provenance /var/lib/stocker/ibkr-api/active-provenance.json
 sudo chown -R root:stocker \
   /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 sudo chmod -R go-w \
@@ -143,17 +227,21 @@ uv run stocker-prospective bundle build \
 uv run stocker-prospective bundle inspect /tmp/REPLACE_WITH_BUNDLE_ID
 uv run stocker-prospective bundle verify /tmp/REPLACE_WITH_BUNDLE_ID
 tar -C /tmp -czf /tmp/REPLACE_WITH_BUNDLE_ID.tar.gz REPLACE_WITH_BUNDLE_ID
-scp /tmp/REPLACE_WITH_BUNDLE_ID.tar.gz operator@SERVER:/secure-transfer/
+scp /tmp/REPLACE_WITH_BUNDLE_ID.tar.gz \
+  root@SERVER:/var/lib/stocker/secure-transfer/
 ```
 
 On the server:
 
 ```bash
-tar -xzf /secure-transfer/REPLACE_WITH_BUNDLE_ID.tar.gz -C /secure-transfer
+sudo tar -xzf /var/lib/stocker/secure-transfer/REPLACE_WITH_BUNDLE_ID.tar.gz \
+  -C /var/lib/stocker/secure-transfer
+sudo chown -R stocker:stocker \
+  /var/lib/stocker/secure-transfer/REPLACE_WITH_BUNDLE_ID
 sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective bundle verify \
-  /secure-transfer/REPLACE_WITH_BUNDLE_ID
+  /var/lib/stocker/secure-transfer/REPLACE_WITH_BUNDLE_ID
 sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective bundle install \
-  /secure-transfer/REPLACE_WITH_BUNDLE_ID \
+  /var/lib/stocker/secure-transfer/REPLACE_WITH_BUNDLE_ID \
   --bundle-root /var/lib/stocker/bundles \
   --operator REPLACE_WITH_OPERATOR_ID
 sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective bundle list \
@@ -195,6 +283,13 @@ Before first prospective start, set:
   half that line budget;
 - context-signing secret in the environment file; and
 - optional web auth token only when `authentication_enabled: true`.
+
+Keep these server paths in `/etc/stocker/stocker.env`:
+
+```dotenv
+STOCKER_IBKR_API_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json
+STOCKER_IBKR_API_UPDATE_STATUS=/var/lib/stocker/ibkr-api/status/update-status.json
+```
 
 Never put IBKR username, password, or 2FA material in either file. Stocker has
 no fields for them.
@@ -259,7 +354,10 @@ curl --fail --silent http://127.0.0.1:8765/openapi.json | jq '.paths | keys'
 The replay health response should be correctly `blocked`, with synthetic data
 visible and real-scoring/IBKR blockers present. It should state
 `LIVE TRADING DISABLED`, `no_order_path_verified: true`, and expose no secret or
-database path.
+database path. The `ibkr_api` section independently reports whether the
+first-party package is installed, source-tree verified, and current. That does
+not imply that IB Gateway is installed, authenticated, connected, or permitted
+for live market data.
 
 ## 10. Start record-only IBKR mode
 
@@ -342,7 +440,9 @@ curl --fail --silent http://127.0.0.1:8765/api/health | jq .
 ```
 
 Confirm the older release supports the already-applied database schema before
-rollback. Never restore an older database as part of application rollback.
+rollback. Confirm it also contains the exact `ibapi` tree named by the active
+provenance record. Never restore an older database as part of application
+rollback.
 
 ## 14. Roll back the active bundle
 

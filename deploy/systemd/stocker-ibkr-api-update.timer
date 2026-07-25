@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly first-party IBKR API release check
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=21600
+Unit=stocker-ibkr-api-update.service
+
+[Install]
+WantedBy=timers.target
+

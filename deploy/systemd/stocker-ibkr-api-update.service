@@ -1,0 +1,24 @@
+[Unit]
+Description=Check the official IBKR API release without installing it
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/var/lib/stocker/ibkr-api/active-provenance.json
+
+[Service]
+Type=oneshot
+User=stocker
+Group=stocker
+WorkingDirectory=/opt/stocker/current
+ExecStart=/opt/stocker/current/.venv/bin/stocker-prospective ibkr-api check-update --provenance /var/lib/stocker/ibkr-api/active-provenance.json --output /var/lib/stocker/ibkr-api/status/update-status.json
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/var/lib/stocker/ibkr-api/active-provenance.json
+ReadWritePaths=/var/lib/stocker/ibkr-api/status

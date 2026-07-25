@@ -78,6 +78,9 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     assert 'id="signal-detail"' in response.text
     assert 'id="shadow-blotter"' in response.text
     assert 'id="safety-audit"' in response.text
+    script = client.get("/assets/app.js")
+    assert script.status_code == 200
+    assert "Official IBKR API" in script.text
 
     endpoints = (
         "/api/health",
@@ -96,6 +99,8 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     assert None not in health["blockers"]
     assert health["no_order_path_verified"] is True
     assert health["market_data"]["current_budget"]["rejected_signals"] == 1
+    assert health["ibkr_api"]["verified"] is False
+    assert health["ibkr_api"]["automatic_installation"] is False
 
     signal_id = client.get("/api/signals").json()["items"][0]["id"]
     structure_id = client.get("/api/shadow").json()["items"][0]["id"]

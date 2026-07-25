@@ -8,11 +8,20 @@ CI and replay independent from the optional dependency.
 from __future__ import annotations
 
 import importlib.util
+import os
 import threading
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from stocker_prospective.ibkr_api import (
+    OfficialIBKRApiProvenanceError,
+    load_official_ibkr_api_provenance,
+    load_official_ibkr_api_update_status,
+    python_package_tree_sha256,
+)
 from stocker_prospective.market_data import (
     BoundedCallbackRegistry,
     BoundedRealtimeBarQueue,
@@ -28,6 +37,9 @@ from stocker_prospective.market_data import (
 )
 
 IBKR_DEPENDENCY_BLOCKER = "blocked_official_ibkr_api_not_installed"
+IBKR_PROVENANCE_BLOCKER = "blocked_unverified_official_ibkr_api"
+IBKR_API_UPDATE_MAX_AGE = timedelta(days=14)
+IBKR_API_UPDATE_FUTURE_TOLERANCE = timedelta(minutes=5)
 
 
 class OfficialIBKRDependencyError(RuntimeError):
@@ -62,16 +74,115 @@ def official_ibkr_api_available() -> bool:
     return importlib.util.find_spec("ibapi") is not None
 
 
-def require_official_ibkr_api() -> ModuleType:
+def require_official_ibkr_api(provenance_path: str | Path | None = None) -> ModuleType:
     if not official_ibkr_api_available():
         raise OfficialIBKRDependencyError(
             f"{IBKR_DEPENDENCY_BLOCKER}: install the official TWS API Python client "
             "from the IBKR Latest Mac/Unix distribution"
         )
+    configured_path = provenance_path or os.environ.get("STOCKER_IBKR_API_PROVENANCE")
+    if configured_path is None or not Path(configured_path).is_file():
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: official archive provenance is absent"
+        )
+    try:
+        provenance = load_official_ibkr_api_provenance(configured_path)
+    except OfficialIBKRApiProvenanceError as exc:
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: official archive provenance is invalid"
+        ) from exc
     module = __import__("ibapi")
     if not isinstance(module, ModuleType):
         raise OfficialIBKRDependencyError(f"{IBKR_DEPENDENCY_BLOCKER}: invalid ibapi module")
+    module_file = getattr(module, "__file__", None)
+    if not isinstance(module_file, (str, os.PathLike)) or not Path(module_file).is_file():
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: installed ibapi module path is invalid"
+        )
+    if getattr(module, "__version__", None) != provenance.api_version:
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: installed ibapi version mismatch"
+        )
+    try:
+        installed_tree_sha256 = python_package_tree_sha256(Path(module_file).parent)
+    except OfficialIBKRApiProvenanceError as exc:
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: installed ibapi tree is invalid"
+        ) from exc
+    if installed_tree_sha256 != provenance.installed_tree_sha256:
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: installed ibapi tree hash mismatch"
+        )
     return module
+
+
+def official_ibkr_api_projection() -> dict[str, Any]:
+    """Return secret-free installed-client and update health for the web process."""
+
+    provenance_path = os.environ.get("STOCKER_IBKR_API_PROVENANCE")
+    update_status_path = os.environ.get("STOCKER_IBKR_API_UPDATE_STATUS")
+    projection: dict[str, Any] = {
+        "installed": official_ibkr_api_available(),
+        "verified": False,
+        "api_version": None,
+        "release_channel": None,
+        "release_date": None,
+        "update_checked_at_utc": None,
+        "latest_api_version": None,
+        "update_available": None,
+        "update_status_fresh": False,
+        "automatic_installation": False,
+        "blocker": None,
+    }
+    try:
+        require_official_ibkr_api(provenance_path)
+        provenance = load_official_ibkr_api_provenance(str(provenance_path))
+    except OfficialIBKRDependencyError as exc:
+        projection["blocker"] = str(exc).split(":", 1)[0]
+        return projection
+    projection.update(
+        {
+            "verified": True,
+            "api_version": provenance.api_version,
+            "release_channel": provenance.release_channel,
+            "release_date": provenance.release_date.isoformat(),
+        }
+    )
+    if update_status_path is None:
+        projection["blocker"] = "blocked_ibkr_api_update_status_missing"
+        return projection
+    if not Path(update_status_path).is_file():
+        projection["blocker"] = "blocked_ibkr_api_update_status_missing"
+        return projection
+    try:
+        status = load_official_ibkr_api_update_status(update_status_path)
+    except OfficialIBKRApiProvenanceError:
+        projection["blocker"] = "blocked_ibkr_api_update_status_invalid"
+        return projection
+    if (
+        status.installed_api_version != provenance.api_version
+        or status.installed_source_url != provenance.source_url
+    ):
+        projection["blocker"] = "blocked_ibkr_api_update_status_invalid"
+        return projection
+    projection.update(
+        {
+            "update_checked_at_utc": status.checked_at_utc.isoformat(),
+            "latest_api_version": status.latest_api_version,
+        }
+    )
+    update_age = datetime.now(UTC) - status.checked_at_utc.astimezone(UTC)
+    if update_age > IBKR_API_UPDATE_MAX_AGE or update_age < -IBKR_API_UPDATE_FUTURE_TOLERANCE:
+        projection["blocker"] = "blocked_ibkr_api_update_check_stale"
+        return projection
+    projection.update(
+        {
+            "update_available": status.update_available,
+            "update_status_fresh": True,
+            "blocker": ("blocked_outdated_official_ibkr_api" if status.update_available else None),
+        }
+    )
+    return projection
 
 
 class IBKRMarketDataAdapter:

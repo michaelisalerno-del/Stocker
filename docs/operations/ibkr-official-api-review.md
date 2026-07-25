@@ -1,6 +1,6 @@
 # Official IBKR API review for the Stocker prospective recorder
 
-Checked: **2026-07-24**
+Checked: **2026-07-25**
 
 Scope: the native TWS API used only for bounded market-data recording on the
 dedicated Stocker server. This review does not authorise order submission,
@@ -21,15 +21,25 @@ not establish an options edge.
   Windows and Mac/Unix packages. The Stable Mac/Unix package was listed as Java
   and Posix C++ only. Recheck this page at install time rather than assuming
   that "Stable" contains Python.
+- The official Latest Mac/Unix archive checked and installed for the first
+  server slice was
+  `twsapi_macunix.1048.01.zip` (`API_Version=10.48.01`,
+  Python package `ibapi==10.48.1`) with SHA-256
+  `0446c403cdfd3a059685c5e11814b32e0b811fdf5e1f68564f8e08b655e49547`.
 - Install `ibapi` into the Stocker server virtual environment from the extracted
   official archive's `source/pythonclient` directory with
-  `python3 -m pip install .`. Record the archive SHA-256, API version,
-  `API_VersionNum.txt`, installed package metadata, TWS/IB Gateway version, and
-  installation operator in the server audit record. Do not vendor or
-  redistribute the IBKR source in this repository or a Stocker bundle.
+  `uv pip install --python RELEASE/.venv/bin/python SOURCE`. Register immutable
+  provenance that binds the official URL and archive hash to the exact installed
+  Python source-tree hash. Do not vendor or redistribute the IBKR source in this
+  repository or a Stocker bundle.
 - If the official client is absent or its provenance/version cannot be
-  established, keep replay operational and report
-  `blocked_official_ibkr_api_not_installed`.
+  established, keep replay operational and report either
+  `blocked_official_ibkr_api_not_installed` or
+  `blocked_unverified_official_ibkr_api`.
+- Check the official Latest Mac/Unix release metadata weekly. Record whether a
+  newer release exists, but never download or install broker code from that
+  timer. Review, licence acceptance, archive verification, test, and promotion
+  remain deliberate operator actions outside a trading session.
 - Connect the recorder to TWS or IB Gateway over `127.0.0.1`. Require explicit
   host, port, client ID, and expected environment configuration. Never expose
   the IBKR socket on a public interface.

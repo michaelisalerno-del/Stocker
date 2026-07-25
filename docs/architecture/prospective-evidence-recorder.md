@@ -89,7 +89,11 @@ to start. Since no eligible real score can cross the gate, live
 signal-triggered option scheduling is not admitted in this deployment; the
 option capture scheduler and shadow path are replay evidence, not a claimed
 live option recorder. The optional official `ibapi` dependency is absent from
-the repository by design.
+the repository and immutable model bundle by design. A server release may
+install it only from an operator-accepted official IBKR archive; startup hashes
+the installed Python tree against an immutable provenance record. A weekly
+read-only job checks official release metadata and can raise an update-review
+blocker, but it never downloads or installs broker code.
 
 ### `stocker-web`
 
@@ -117,7 +121,7 @@ IB Gateway/TWS is installed and authenticated independently on the dedicated
 server. It remains loopback-only and in Read-Only API mode. Stocker does not
 store or automate usernames, passwords, 2FA, sessions, or GUI login.
 
-The official API review and source links checked on 2026-07-24 are in
+The official API review and source links checked on 2026-07-25 are in
 [ibkr-official-api-review.md](../operations/ibkr-official-api-review.md).
 
 ## Frozen bundle contract

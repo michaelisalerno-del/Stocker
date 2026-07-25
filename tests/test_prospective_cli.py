@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, date, datetime
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 import yaml
@@ -12,6 +14,7 @@ import stocker_prospective.ibkr_official as ibkr_official_module
 from stocker_prospective.bundle import BundleError
 from stocker_prospective.cli import app
 from stocker_prospective.config import load_prospective_config
+from stocker_prospective.ibkr_api import OfficialIBKRApiProvenance, OfficialIBKRApiRelease
 
 ROOT = Path(__file__).parents[1]
 RUNNER = CliRunner()
@@ -71,10 +74,116 @@ def test_cli_exposes_operational_commands_and_no_order_command() -> None:
     assert "recorder" in result.stdout
     assert "web" in result.stdout
     assert "replay" in result.stdout
+    assert "ibkr-api" in result.stdout
     lowered = result.stdout.lower()
     assert "place-order" not in lowered
     assert "cancel-order" not in lowered
     assert "\n│ orders " not in lowered
+
+
+def test_ibkr_api_register_writes_verified_immutable_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "twsapi_macunix.1048.01.zip"
+    package_source = 'VERSION = {"major": 10, "minor": 48, "micro": 1}\n'
+    with ZipFile(archive, "w") as bundle:
+        bundle.writestr("IBJts/API_VersionNum.txt", "API_Version=10.48.01\r\n")
+        bundle.writestr(
+            "IBJts/source/pythonclient/ibapi/__init__.py",
+            package_source,
+        )
+    installed_package = tmp_path / "installed/ibapi"
+    installed_package.mkdir(parents=True)
+    (installed_package / "__init__.py").write_text(package_source, encoding="utf-8")
+    release = OfficialIBKRApiRelease(
+        api_version="10.48",
+        release_date=date(2026, 7, 7),
+        source_url=("https://interactivebrokers.github.io/downloads/twsapi_macunix.1048.01.zip"),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "fetch_latest_official_ibkr_api_release",
+        lambda: release,
+        raising=False,
+    )
+    provenance = tmp_path / "provenance.json"
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "ibkr-api",
+            "register",
+            "--archive",
+            str(archive),
+            "--installed-package-root",
+            str(installed_package),
+            "--provenance",
+            str(provenance),
+            "--operator",
+            "test-operator",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = yaml.safe_load(provenance.read_text(encoding="utf-8"))
+    assert payload["api_version"] == "10.48.1"
+    assert payload["archive_filename"] == archive.name
+    assert payload["registered_by"] == "test-operator"
+
+
+def test_ibkr_api_update_check_records_status_without_installing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree_hash = "2fb1a3296db30cc2ec0c21503856b06990ca7f0fc2cefcfe6f4cbf8c9c196a63"
+    installed = OfficialIBKRApiProvenance(
+        schema_version="1",
+        source="interactive_brokers_official_tws_api",
+        release_channel="latest",
+        platform="mac_unix",
+        api_version="10.48.1",
+        release_date=date(2026, 7, 7),
+        official_page_url="https://interactivebrokers.github.io/",
+        official_page_checked_at_utc=datetime(2026, 7, 25, 9, tzinfo=UTC),
+        source_url=("https://interactivebrokers.github.io/downloads/twsapi_macunix.1048.01.zip"),
+        archive_filename="twsapi_macunix.1048.01.zip",
+        archive_sha256="0" * 64,
+        source_tree_sha256=tree_hash,
+        installed_tree_sha256=tree_hash,
+        registered_at_utc=datetime(2026, 7, 25, 9, 5, tzinfo=UTC),
+        registered_by="test-operator",
+    )
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(installed.model_dump_json(indent=2), encoding="utf-8")
+    latest = OfficialIBKRApiRelease(
+        api_version="10.49",
+        release_date=date(2026, 8, 4),
+        source_url=("https://interactivebrokers.github.io/downloads/twsapi_macunix.1049.01.zip"),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "fetch_latest_official_ibkr_api_release",
+        lambda: latest,
+    )
+    status_path = tmp_path / "update-status.json"
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "ibkr-api",
+            "check-update",
+            "--provenance",
+            str(provenance),
+            "--output",
+            str(status_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    status = yaml.safe_load(status_path.read_text(encoding="utf-8"))
+    assert status["update_available"] is True
+    assert status["automatic_installation"] is False
 
 
 def test_cli_replay_runs_and_db_migration_is_idempotent(tmp_path: Path) -> None:

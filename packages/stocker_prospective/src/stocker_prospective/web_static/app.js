@@ -146,6 +146,21 @@ function renderHealth() {
   const lease = health.recorder.lease || {};
   const context = health.previous_session_context || {};
   const capture = health.market_data.latest || {};
+  const ibkrApi = health.ibkr_api || {};
+  let ibkrApiState = `API ${clean(ibkrApi.api_version)} VERIFIED`;
+  if (!ibkrApi.verified) {
+    ibkrApiState = "BLOCKED";
+  } else if (ibkrApi.blocker) {
+    ibkrApiState = "UPDATE CHECK BLOCKED";
+  } else if (ibkrApi.update_available === true) {
+    ibkrApiState = "UPDATE REVIEW";
+  } else if (ibkrApi.update_available === false) {
+    ibkrApiState = `API ${clean(ibkrApi.api_version)} CURRENT`;
+  }
+  const ibkrApiNote = ibkrApi.blocker
+    || (ibkrApi.update_available === null || ibkrApi.update_available === undefined
+      ? "Official source verified; update check pending"
+      : `Latest ${clean(ibkrApi.latest_api_version)}; automatic installation disabled`);
   [
     metric("Runtime state", health.status, "Fail-closed health", health.status === "blocked" ? "danger" : "ok"),
     metric("Instance", health.instance_identity, health.application.git_commit),
@@ -153,6 +168,7 @@ function renderHealth() {
     metric("Lease heartbeat", clock(lease.heartbeat_at_utc), lease.owner_id || "No owner", lease.owner_id ? "ok" : "danger"),
     metric("Active bundle", health.active_bundle.bundle_id || "UNAVAILABLE", health.active_bundle.verified ? "Verified" : "Verification blocked", health.active_bundle.verified ? "ok" : "danger"),
     metric("IBKR state", (health.ibkr || {}).state || "REPLAY / OFFLINE", (health.ibkr || {}).message || "No live broker dependency"),
+    metric("Official IBKR API", ibkrApiState, ibkrApiNote, ibkrApi.verified && ibkrApi.update_status_fresh && !ibkrApi.blocker && ibkrApi.update_available !== true ? "ok" : "danger"),
     metric("Market data", capture.market_data_type || "synthetic", `${health.market_data.line_budget - health.market_data.reserved_headroom} usable lines`),
     metric("Database", health.database.status, health.database.mode, health.database.status === "healthy" ? "ok" : "danger"),
     metric("Anchor cohort", (state.universe || {}).anchor_count || 0, "Frozen membership; no pooling"),
@@ -419,9 +435,21 @@ function renderSafety() {
   const context = health.previous_session_context || {};
   const lease = health.recorder.lease || {};
   const budget = health.market_data.current_budget || {};
+  const ibkrApi = health.ibkr_api || {};
+  let ibkrApiSafetyState = "VERIFIED / CHECK PENDING";
+  if (!ibkrApi.verified) {
+    ibkrApiSafetyState = "BLOCKED";
+  } else if (ibkrApi.blocker) {
+    ibkrApiSafetyState = "UPDATE CHECK BLOCKED";
+  } else if (ibkrApi.update_available === true) {
+    ibkrApiSafetyState = "MANUAL UPDATE REVIEW";
+  } else if (ibkrApi.update_available === false) {
+    ibkrApiSafetyState = "VERIFIED + CURRENT";
+  }
   const cards = [
     safetyCard("No-order-path verification", health.no_order_path_verified ? "VERIFIED ABSENT" : "FAILED", "The web process receives no broker object and exposes GET routes only.", health.no_order_path_verified ? "ok" : "danger"),
     safetyCard("risk.trading_enabled", "FALSE", "Startup rejects any true value. No paper or live order path exists.", "ok"),
+    safetyCard("Official IBKR API", ibkrApiSafetyState, `${clean(ibkrApi.blocker)} // installed ${clean(ibkrApi.api_version)} // latest ${clean(ibkrApi.latest_api_version)} // update check fresh ${clean(ibkrApi.update_status_fresh)} // automatic installation FALSE.`, ibkrApi.verified && ibkrApi.update_status_fresh && !ibkrApi.blocker && ibkrApi.update_available !== true ? "ok" : "danger"),
     safetyCard("Active bundle", bundle.verified ? "VERIFIED" : "BLOCKED", bundle.bundle_id || clean(bundle.blockers), bundle.verified ? "ok" : "danger"),
     safetyCard("Feature parity", parity.scoring_allowed ? "ALLOWED" : "BLOCKED", `${parity.blocker} // ${JSON.stringify(parity.counts)}`, parity.scoring_allowed ? "ok" : "danger"),
     safetyCard("Previous-session context", context.eligibility ? "EXACT + ELIGIBLE" : "BLOCKED", `${clean(context.required_previous_session)} required // ${clean(context.observation_date)} observed`, context.eligibility ? "ok" : "danger"),

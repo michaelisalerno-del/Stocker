@@ -21,6 +21,7 @@ from stocker_prospective.config import (
     public_config,
     validate_runtime_safety,
 )
+from stocker_prospective.ibkr import official_ibkr_api_projection
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.read_store import ProspectiveReadStore
 
@@ -160,10 +161,12 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         runtime = store.runtime_projection()
         bundle = _active_bundle_projection(config)
         parity = _parity_projection(config)
+        ibkr_api = official_ibkr_api_projection()
         blocker_candidates = [
             *(item["blocker_code"] for item in runtime["blockers"]),
             *bundle["blockers"],
             parity["blocker"],
+            ibkr_api["blocker"] if config.runtime.source == "ibkr" else None,
         ]
         blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
         return {
@@ -181,6 +184,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "lease": runtime["recorder_lease"],
             },
             "ibkr": runtime["ibkr_connection"],
+            "ibkr_api": ibkr_api,
             "market_data": {
                 "latest": runtime["latest_capture"],
                 "line_budget": config.ibkr.market_data_line_budget,

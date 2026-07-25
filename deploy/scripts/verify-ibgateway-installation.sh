@@ -37,9 +37,11 @@ esac
 identity="$(basename -- "$active_path")"
 provenance="$installer_root/$identity.runtime-provenance"
 manifest="$installer_root/$identity.manifest.sha256"
+symlink_manifest="$installer_root/$identity.symlinks"
 
 [ -f "$provenance" ] || fail "provenance_missing"
 [ -f "$manifest" ] || fail "file_manifest_missing"
+[ -f "$symlink_manifest" ] || fail "symlink_manifest_missing"
 [ -x "$active_path/ibgateway" ] || fail "launcher_missing"
 
 manifest_version="$(read_field manifest_version)" ||
@@ -53,6 +55,10 @@ recorded_manifest="$(read_field file_manifest_path)" ||
     fail "invalid_provenance_manifest_path"
 manifest_sha256="$(read_field file_manifest_sha256)" ||
     fail "invalid_provenance_manifest_sha256"
+recorded_symlink_manifest="$(read_field symlink_manifest_path)" ||
+    fail "invalid_provenance_symlink_manifest_path"
+symlink_manifest_sha256="$(read_field symlink_manifest_sha256)" ||
+    fail "invalid_provenance_symlink_manifest_sha256"
 
 [ "$manifest_version" = "1" ] || fail "unsupported_provenance_version"
 [ "$source_url" = \
@@ -60,6 +66,8 @@ manifest_sha256="$(read_field file_manifest_sha256)" ||
     fail "unapproved_source_url"
 [ "$installed_path" = "$active_path" ] || fail "active_path_mismatch"
 [ "$recorded_manifest" = "$manifest" ] || fail "manifest_path_mismatch"
+[ "$recorded_symlink_manifest" = "$symlink_manifest" ] ||
+    fail "symlink_manifest_path_mismatch"
 case "$installer_path" in
     "$installer_root"/*) ;;
     *) fail "installer_path_outside_archive_root" ;;
@@ -68,11 +76,16 @@ esac
 
 [ "${#installer_sha256}" -eq 64 ] || fail "invalid_installer_sha256"
 [ "${#manifest_sha256}" -eq 64 ] || fail "invalid_manifest_sha256"
+[ "${#symlink_manifest_sha256}" -eq 64 ] ||
+    fail "invalid_symlink_manifest_sha256"
 case "$installer_sha256" in
     *[!0-9a-f]*) fail "invalid_installer_sha256" ;;
 esac
 case "$manifest_sha256" in
     *[!0-9a-f]*) fail "invalid_manifest_sha256" ;;
+esac
+case "$symlink_manifest_sha256" in
+    *[!0-9a-f]*) fail "invalid_symlink_manifest_sha256" ;;
 esac
 
 actual_installer_sha256="$(sha256sum "$installer_path" | awk '{print $1}')"
@@ -81,6 +94,11 @@ actual_installer_sha256="$(sha256sum "$installer_path" | awk '{print $1}')"
 actual_manifest_sha256="$(sha256sum "$manifest" | awk '{print $1}')"
 [ "$actual_manifest_sha256" = "$manifest_sha256" ] ||
     fail "manifest_hash_mismatch"
+actual_recorded_symlink_sha256="$(
+    sha256sum "$symlink_manifest" | awk '{print $1}'
+)"
+[ "$actual_recorded_symlink_sha256" = "$symlink_manifest_sha256" ] ||
+    fail "symlink_manifest_hash_mismatch"
 
 if find "$active_path" -xdev ! -user "$expected_owner" -print -quit | grep -q .; then
     fail "installed_file_has_wrong_owner"
@@ -90,9 +108,37 @@ if find "$active_path" -xdev \( -type f -o -type d \) \
 then
     fail "installed_file_group_or_other_writable"
 fi
-(
+
+find "$active_path" -xdev -type l -exec sh -c '
+    release_root=$1
+    shift
+    for link do
+        resolved=$(readlink -f -- "$link") || exit 1
+        case "$resolved" in
+            "$release_root" | "$release_root"/*) ;;
+            *) exit 1 ;;
+        esac
+    done
+' sh "$active_path" {} + || fail "symlink_target_outside_release"
+
+actual_installed_manifest_sha256="$(
     cd "$active_path"
-    sha256sum --quiet --strict -c "$manifest"
-) || fail "installed_file_hash_mismatch"
+    find . -type f -print0 |
+        LC_ALL=C sort -z |
+        xargs -0 -r sha256sum |
+        sha256sum |
+        awk '{print $1}'
+)"
+[ "$actual_installed_manifest_sha256" = "$manifest_sha256" ] ||
+    fail "installed_file_manifest_mismatch"
+actual_installed_symlink_sha256="$(
+    cd "$active_path"
+    find . -type l -printf '%P\t%l\n' |
+        LC_ALL=C sort |
+        sha256sum |
+        awk '{print $1}'
+)"
+[ "$actual_installed_symlink_sha256" = "$symlink_manifest_sha256" ] ||
+    fail "installed_symlink_manifest_mismatch"
 
 printf 'IB Gateway integrity verified: %s\n' "$identity"

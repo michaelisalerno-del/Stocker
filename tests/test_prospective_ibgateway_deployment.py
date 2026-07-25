@@ -73,7 +73,8 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
     assert "sha256sum --check" in runbook
-    assert 'sudo test ! -e "$INSTALLER"' in runbook
+    assert 'sudo ln "$INSTALLER_TMP" "$INSTALLER"' in runbook
+    assert 'sudo mkdir --mode=0750 "$TARGET"' in runbook
     assert 'sudo test ! -e "$PROVENANCE"' in runbook
     assert 'sudo ln "$PROVENANCE_TMP" "$PROVENANCE"' in runbook
     assert "verify-ibgateway-installation.sh" in runbook
@@ -108,6 +109,10 @@ def test_gateway_integrity_verifier_fails_after_installed_file_mutation(
     manifest = installer_root / f"{identity}.manifest.sha256"
     launcher_sha = hashlib.sha256(launcher.read_bytes()).hexdigest()
     manifest.write_text(f"{launcher_sha}  ./ibgateway\n", encoding="ascii")
+    launcher_link = target / "launcher-link"
+    launcher_link.symlink_to("ibgateway")
+    symlink_manifest = installer_root / f"{identity}.symlinks"
+    symlink_manifest.write_text("launcher-link\tibgateway\n", encoding="ascii")
     provenance = installer_root / f"{identity}.runtime-provenance"
     provenance.write_text(
         "\n".join(
@@ -121,6 +126,9 @@ def test_gateway_integrity_verifier_fails_after_installed_file_mutation(
                 f"installed_path={target}",
                 f"file_manifest_path={manifest}",
                 f"file_manifest_sha256={hashlib.sha256(manifest.read_bytes()).hexdigest()}",
+                f"symlink_manifest_path={symlink_manifest}",
+                "symlink_manifest_sha256="
+                f"{hashlib.sha256(symlink_manifest.read_bytes()).hexdigest()}",
                 "recorded_at_utc=2026-07-25T00:00:00Z",
             )
         )
@@ -146,6 +154,20 @@ def test_gateway_integrity_verifier_fails_after_installed_file_mutation(
     )
     assert verified.returncode == 0, verified.stderr
 
+    launcher_link.unlink()
+    launcher_link.symlink_to("/bin/sh")
+    escaped_link = subprocess.run(
+        ["/bin/sh", str(VERIFY_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert escaped_link.returncode != 0
+    assert "ibgateway_integrity:symlink_target_outside_release" in escaped_link.stderr
+
+    launcher_link.unlink()
+    launcher_link.symlink_to("ibgateway")
     launcher.write_bytes(b"mutated launcher\n")
     rejected = subprocess.run(
         ["/bin/sh", str(VERIFY_SCRIPT)],
@@ -155,4 +177,4 @@ def test_gateway_integrity_verifier_fails_after_installed_file_mutation(
         env=environment,
     )
     assert rejected.returncode != 0
-    assert "ibgateway_integrity:installed_file_hash_mismatch" in rejected.stderr
+    assert "ibgateway_integrity:installed_file_manifest_mismatch" in rejected.stderr

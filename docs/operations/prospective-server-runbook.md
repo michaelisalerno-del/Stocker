@@ -203,26 +203,29 @@ sudo apt-get install --no-install-recommends \
 set -o errexit -o nounset -o pipefail
 IDENTITY=REPLACE_WITH_VERSIONED_ID
 INSTALLER=/var/lib/ibgateway/installers/ibgateway-20260725-latest-linux-x64.sh
-INSTALLER_PART="${INSTALLER}.part"
 EXPECTED_SHA=791abe12594c0d9c8736769fd8ee6368861b0d1a6b70e11275b32dedfec16692
 TARGET="/opt/ibgateway/releases/$IDENTITY"
 MANIFEST="/var/lib/ibgateway/installers/$IDENTITY.manifest.sha256"
+SYMLINKS="/var/lib/ibgateway/installers/$IDENTITY.symlinks"
 PROVENANCE="/var/lib/ibgateway/installers/$IDENTITY.runtime-provenance"
-sudo test ! -e "$INSTALLER"
-sudo test ! -e "$INSTALLER_PART"
-sudo test ! -e "$TARGET"
 sudo test ! -e "$MANIFEST"
+sudo test ! -e "$SYMLINKS"
 sudo test ! -e "$PROVENANCE"
+INSTALLER_TMP="$(
+  sudo mktemp /var/lib/ibgateway/installers/.installer.XXXXXX
+)"
 sudo curl --fail --location --proto '=https' --tlsv1.2 \
-  --output "$INSTALLER_PART" \
+  --output "$INSTALLER_TMP" \
   https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh
-printf '%s  %s\n' "$EXPECTED_SHA" "$INSTALLER_PART" |
+printf '%s  %s\n' "$EXPECTED_SHA" "$INSTALLER_TMP" |
   sudo sha256sum --check
-sudo mv "$INSTALLER_PART" "$INSTALLER"
-sudo chown root:ibgateway "$INSTALLER"
-sudo chmod 0750 "$INSTALLER"
+sudo chown root:ibgateway "$INSTALLER_TMP"
+sudo chmod 0750 "$INSTALLER_TMP"
+sudo ln "$INSTALLER_TMP" "$INSTALLER"
+sudo rm -- "$INSTALLER_TMP"
 sudo install -d -o root -g ibgateway -m 0750 /opt/ibgateway/releases
-sudo install -d -o ibgateway -g ibgateway -m 0750 "$TARGET"
+sudo mkdir --mode=0750 "$TARGET"
+sudo chown ibgateway:ibgateway "$TARGET"
 cd /var/lib/ibgateway
 sudo -H -u ibgateway "$INSTALLER" -q -dir "$TARGET"
 sudo chown -R root:ibgateway "$TARGET"
@@ -241,6 +244,19 @@ sudo ln "$MANIFEST_TMP" "$MANIFEST"
 sudo rm -- "$MANIFEST_TMP"
 MANIFEST_SHA="$(sudo sha256sum "$MANIFEST" | awk '{print $1}')"
 
+SYMLINKS_TMP="$(
+  sudo mktemp /var/lib/ibgateway/installers/.symlinks.XXXXXX
+)"
+sudo sh -c \
+  'cd "$1" && find . -type l -printf "%P\t%l\n" | LC_ALL=C sort' \
+  sh "$TARGET" |
+  sudo tee "$SYMLINKS_TMP" >/dev/null
+sudo chown root:ibgateway "$SYMLINKS_TMP"
+sudo chmod 0640 "$SYMLINKS_TMP"
+sudo ln "$SYMLINKS_TMP" "$SYMLINKS"
+sudo rm -- "$SYMLINKS_TMP"
+SYMLINKS_SHA="$(sudo sha256sum "$SYMLINKS" | awk '{print $1}')"
+
 PROVENANCE_TMP="$(
   sudo mktemp /var/lib/ibgateway/installers/.provenance.XXXXXX
 )"
@@ -253,6 +269,8 @@ PROVENANCE_TMP="$(
   printf 'installed_path=%s\n' "$TARGET"
   printf 'file_manifest_path=%s\n' "$MANIFEST"
   printf 'file_manifest_sha256=%s\n' "$MANIFEST_SHA"
+  printf 'symlink_manifest_path=%s\n' "$SYMLINKS"
+  printf 'symlink_manifest_sha256=%s\n' "$SYMLINKS_SHA"
   printf 'recorded_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } | sudo tee "$PROVENANCE_TMP" >/dev/null
 sudo chown root:ibgateway "$PROVENANCE_TMP"
@@ -273,11 +291,13 @@ sudo -H -u ibgateway env \
 sudo mv -Tf /opt/ibgateway/current.next /opt/ibgateway/current
 ```
 
-The archive, file manifest, and provenance names are create-only. Reusing an
-identity must stop at a `test` or hard-link failure; never overwrite one.
-Every Gateway start rechecks the archived installer, the manifest, ownership,
-write permissions, and every installed file. An integrity failure makes the
-systemd `ExecCondition` skip startup instead of entering a restart loop.
+The archive, regular-file manifest, symlink-target manifest, and provenance
+names are create-only. Reusing an identity must stop at a `test` or hard-link
+failure; never overwrite one. Every Gateway start rechecks the archived
+installer, both manifests, ownership, write permissions, every installed file,
+and that every symlink resolves inside the immutable release. An integrity
+failure makes the systemd `ExecCondition` skip startup instead of entering a
+restart loop.
 
 Create X11 and VNC authentication material. This VNC credential is only for the
 loopback tunnel; it is not an IBKR credential and is never exposed by Stocker:

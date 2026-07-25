@@ -1,7 +1,7 @@
 [Unit]
 Description=Official IB Gateway with manual paper-account authentication
 Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
-Wants=network-online.target stocker-ibgateway-window-manager.service stocker-ibgateway-vnc.service
+Wants=network-online.target stocker-ibgateway-window-manager.service stocker-ibgateway-vnc.service stocker-ibgateway-loopback-proxy.socket
 Requires=stocker-ibgateway-display.service
 After=network-online.target stocker-ibgateway-display.service stocker-ibgateway-window-manager.service
 ConditionPathExists=/opt/ibgateway/current/ibgateway

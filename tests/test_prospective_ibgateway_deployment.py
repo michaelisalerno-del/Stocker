@@ -11,6 +11,7 @@ import pytest
 ROOT = Path(__file__).parents[1]
 SYSTEMD = ROOT / "deploy/systemd"
 VERIFY_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-installation.sh"
+PROXY_SCRIPT = ROOT / "deploy/scripts/run-ibgateway-loopback-proxy.sh"
 RUNBOOK = ROOT / "docs/operations/prospective-server-runbook.md"
 
 
@@ -66,6 +67,55 @@ def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
     assert "WantedBy=multi-user.target" not in unit
 
 
+def test_gateway_api_proxy_exposes_only_a_verified_loopback_endpoint() -> None:
+    socket_unit = _unit("stocker-ibgateway-loopback-proxy.socket")
+    service_unit = _unit("stocker-ibgateway-loopback-proxy.service")
+    gateway_unit = _unit("stocker-ibgateway.service")
+
+    assert "ListenStream=127.0.0.1:4003" in socket_unit
+    assert "0.0.0.0" not in socket_unit
+    assert "User=ibgateway" in service_unit
+    assert "ExecStart=/usr/local/libexec/stocker-ibgateway-loopback-proxy" in service_unit
+    assert "EnvironmentFile=" not in service_unit
+    assert "stocker-ibgateway-loopback-proxy.socket" in gateway_unit
+
+
+def test_gateway_proxy_runner_accepts_only_one_numeric_upstream_port(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "proxy.env"
+    config.write_text("IBGATEWAY_UPSTREAM_PORT=4999\n", encoding="ascii")
+    environment = {
+        **os.environ,
+        "IBGATEWAY_PROXY_CONFIG": str(config),
+        "IBGATEWAY_SOCKET_PROXYD": "/bin/echo",
+    }
+
+    accepted = subprocess.run(
+        ["/bin/sh", str(PROXY_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert accepted.returncode == 0
+    assert "--connections-max=4 127.0.0.1:4999" in accepted.stdout
+
+    config.write_text(
+        "IBGATEWAY_UPSTREAM_PORT=4999\nUNEXPECTED=value\n",
+        encoding="ascii",
+    )
+    rejected = subprocess.run(
+        ["/bin/sh", str(PROXY_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert rejected.returncode != 0
+    assert "blocked_unsafe_runtime_configuration" in rejected.stderr
+
+
 def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     runbook = RUNBOOK.read_text(encoding="utf-8")
 
@@ -73,6 +123,8 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "manual IBKR username, password, and 2FA" in runbook
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
+    assert "ufw default deny incoming" in runbook
+    assert "IBGATEWAY_UPSTREAM_PORT=" in runbook
     assert "sha256sum --check" in runbook
     assert 'sudo ln "$INSTALLER_TMP" "$INSTALLER"' in runbook
     assert 'sudo mkdir --mode=0750 "$TARGET"' in runbook

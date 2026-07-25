@@ -337,16 +337,47 @@ sudo chmod 0600 \
   /etc/ibgateway/vnc-password
 ```
 
-Install the private graphical-session units:
+Configure a non-secret, exact upstream port for the loopback proxy. The
+Gateway may bind that upstream port to a wildcard address even when its own
+localhost-only policy is enabled. The host firewall therefore blocks the
+upstream port on every non-loopback interface, while Stocker connects only to
+the separate `127.0.0.1:4003` proxy:
 
 ```bash
+IBKR_GATEWAY_PORT=REPLACE_WITH_EXACT_CONFIGURED_PORT
+printf 'IBGATEWAY_UPSTREAM_PORT=%s\n' "$IBKR_GATEWAY_PORT" |
+  sudo tee /etc/ibgateway/loopback-proxy.env >/dev/null
+sudo chown root:ibgateway /etc/ibgateway/loopback-proxy.env
+sudo chmod 0640 /etc/ibgateway/loopback-proxy.env
+
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp comment 'SSH'
+sudo ufw allow 80/tcp comment 'HTTP redirect and ACME'
+sudo ufw allow 443/tcp comment 'Stocker HTTPS'
+sudo ufw allow in on lo to any port "$IBKR_GATEWAY_PORT" proto tcp \
+  comment 'IB Gateway loopback only'
+sudo ufw deny in to any port "$IBKR_GATEWAY_PORT" proto tcp \
+  comment 'Block public IBKR API'
+sudo ufw --force enable
+```
+
+Install the private graphical-session and loopback-proxy units:
+
+```bash
+sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/run-ibgateway-loopback-proxy.sh \
+  /usr/local/libexec/stocker-ibgateway-loopback-proxy
 sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-display.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-window-manager.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-vnc.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.socket \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl enable stocker-ibgateway-loopback-proxy.socket
 sudo systemctl enable --now stocker-ibgateway.service
 ```
 
@@ -379,22 +410,30 @@ database, commands, or logs. Choose the paper session. In Gateway API settings:
 5. Configure the supported daily auto-restart window if desired. Plan for
    manual authentication again after the weekly reset.
 
-Verify that Gateway and VNC remain private:
+Verify that the upstream port is firewall-restricted, the Stocker endpoint is
+loopback-only, and VNC remains private:
 
 ```bash
-IBKR_PORT=REPLACE_WITH_EXACT_CONFIGURED_PORT
-sudo ss -H -ltnp "( sport = :$IBKR_PORT )"
+IBKR_GATEWAY_PORT=REPLACE_WITH_EXACT_CONFIGURED_PORT
+STOCKER_IBKR_PROXY_PORT=4003
+sudo ss -H -ltnp "( sport = :$IBKR_GATEWAY_PORT )"
+sudo ss -H -ltnp "( sport = :$STOCKER_IBKR_PROXY_PORT )"
 sudo ss -H -ltnp "( sport = :5901 )"
+sudo ufw status verbose
 sudo systemctl status \
-  stocker-ibgateway.service stocker-ibgateway-vnc.service
+  stocker-ibgateway.service \
+  stocker-ibgateway-loopback-proxy.socket \
+  stocker-ibgateway-vnc.service
 ```
 
-The expected listeners are `127.0.0.1:<configured API port>` and
-`127.0.0.1:5901`. The recorder independently parses the Linux listener table
-for the exact configured API port and refuses any wildcard or non-loopback
-listener with `blocked_unsafe_runtime_configuration`. Stop the VNC helper
-between maintenance sessions if desired; the Gateway itself and Stocker
-recorder do not depend on VNC after login.
+The Gateway upstream may appear as `*:<configured Gateway port>`, but UFW must
+deny that port on every non-loopback interface. The Stocker-facing listener
+must be exactly `127.0.0.1:4003`; configure the recorder with that proxy port,
+never the wildcard upstream. The recorder independently parses the Linux
+listener table and refuses any wildcard or non-loopback configured endpoint
+with `blocked_unsafe_runtime_configuration`. VNC must remain on loopback port
+5901. Stop the VNC helper between maintenance sessions if desired; Gateway and
+the Stocker recorder do not depend on VNC after login.
 
 ## 4. Copy a versioned application release
 

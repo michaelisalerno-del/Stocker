@@ -113,7 +113,7 @@ def test_gateway_proxy_runner_accepts_only_one_numeric_upstream_port(
     }
 
     accepted = subprocess.run(
-        ["/bin/sh", str(PROXY_SCRIPT)],
+        [str(PROXY_SCRIPT)],
         check=False,
         capture_output=True,
         text=True,
@@ -127,7 +127,7 @@ def test_gateway_proxy_runner_accepts_only_one_numeric_upstream_port(
         encoding="ascii",
     )
     rejected = subprocess.run(
-        ["/bin/sh", str(PROXY_SCRIPT)],
+        [str(PROXY_SCRIPT)],
         check=False,
         capture_output=True,
         text=True,
@@ -148,7 +148,7 @@ def test_gateway_proxy_runner_rejects_public_and_proxy_ports(
         encoding="ascii",
     )
     rejected = subprocess.run(
-        ["/bin/sh", str(PROXY_SCRIPT)],
+        [str(PROXY_SCRIPT)],
         check=False,
         capture_output=True,
         text=True,
@@ -196,7 +196,7 @@ def _run_boundary_verifier(
         "-A ufw6-user-input -p tcp -m tcp --dport 22 -j ACCEPT\n"
     )
     return subprocess.run(
-        ["/bin/sh", str(BOUNDARY_SCRIPT)],
+        [str(BOUNDARY_SCRIPT)],
         check=False,
         capture_output=True,
         text=True,

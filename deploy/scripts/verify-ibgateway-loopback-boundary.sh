@@ -1,3 +1,4 @@
+#!/bin/sh
 set -eu
 
 config_path="${IBGATEWAY_PROXY_CONFIG:-/etc/ibgateway/loopback-proxy.env}"

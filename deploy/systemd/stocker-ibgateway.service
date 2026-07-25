@@ -19,7 +19,7 @@ Environment=HOME=/var/lib/ibgateway
 Environment=DISPLAY=:71
 Environment=XAUTHORITY=/var/lib/ibgateway/.Xauthority
 ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway
-ExecCondition=/usr/local/libexec/stocker-verify-ibgateway
+ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway
 ExecStart=/opt/ibgateway/current/ibgateway
 Restart=on-failure
 RestartSec=20

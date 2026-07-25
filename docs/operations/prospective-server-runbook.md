@@ -285,7 +285,7 @@ sudo install -o root -g root -m 0755 \
 sudo test ! -e /opt/ibgateway/current.next
 sudo test ! -L /opt/ibgateway/current.next
 sudo ln -s "$TARGET" /opt/ibgateway/current.next
-sudo -H -u ibgateway env \
+sudo env \
   IBGATEWAY_ACTIVE_LINK=/opt/ibgateway/current.next \
   /usr/local/libexec/stocker-verify-ibgateway
 sudo mv -Tf /opt/ibgateway/current.next /opt/ibgateway/current
@@ -298,6 +298,11 @@ installer, both manifests, ownership, write permissions, every installed file,
 and that every symlink resolves inside the immutable release. An integrity
 failure makes the systemd `ExecCondition` skip startup instead of entering a
 restart loop.
+
+The verifier is a read-only root `ExecCondition` because the official release
+contains a root-only uninstaller that the `ibgateway` account cannot hash. The
+Gateway main process and every GUI helper still run as the unprivileged,
+isolated `ibgateway` user; the verifier performs no writes or network access.
 
 Legacy version-1 Gateway provenance does not satisfy this contract. Generate
 new version-2 regular-file and symlink manifests and create a new immutable

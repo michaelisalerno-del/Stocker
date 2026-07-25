@@ -44,7 +44,7 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "WorkingDirectory=/var/lib/ibgateway" in unit
     assert "ConditionPathExists=/opt/ibgateway/current/ibgateway" in unit
     assert "ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway" in unit
-    assert "ExecCondition=/usr/local/libexec/stocker-verify-ibgateway" in unit
+    assert "ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway" in unit
     assert "ReadWritePaths=/var/lib/ibgateway /tmp" in unit
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit

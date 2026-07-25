@@ -617,21 +617,41 @@ symlink. Do not point a release at the database or bundle directory.
 
 ## 5. Build, transfer, install, and activate a frozen bundle
 
-The inspected repository is currently missing the serialized M0, M1,
-preprocessor, and approved dtype/missing-policy schema. The build command below
-must fail with `blocked_missing_verified_frozen_bundle` until those approved
-files are supplied. Never substitute `model_coefficients.json`.
+The original research run wrote a complete audited numerical handoff, but did
+not serialize deployable estimator objects. The repository therefore provides
+an explicit, no-fit reconstruction command. It accepts only the hash-bound
+frozen JSON files, verifies their pre-outcome freeze identities and safety
+flags, and emits deterministic M0, M1, preprocessing, feature-schema,
+previous-session-context-schema, threshold-provenance, and reconstruction
+artifacts. It never invokes model fitting and never reads observations.
+
+This command is authorized only for the audited
+`20260724-minimal-intraday-iv-excess-holdout-v01` handoff. It does not refit,
+change the frozen threshold or universe, use 2026+ observations, establish an
+options edge, or enable orders.
 
 On the research machine:
 
 ```bash
+FROZEN_ROOT=research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary
+BUNDLE_ID=m1-frozen-20260724-v1
+CREATED_AT_UTC=REPLACE_WITH_CURRENT_UTC_ISO_TIMESTAMP
+OPERATOR_ID=REPLACE_WITH_OPERATOR_ID
+
+uv run stocker-prospective bundle reconstruct \
+  --frozen-root "$FROZEN_ROOT" \
+  --universe configs/prospective/anchor-frozen-20.json \
+  --output "/tmp/$BUNDLE_ID-reconstructed" \
+  --bundle-id "$BUNDLE_ID" \
+  --created-at-utc "$CREATED_AT_UTC" \
+  --operator "$OPERATOR_ID"
 uv run stocker-prospective bundle build \
-  --spec configs/prospective/bundle-spec.example.yaml \
-  --output /tmp/REPLACE_WITH_BUNDLE_ID
-uv run stocker-prospective bundle inspect /tmp/REPLACE_WITH_BUNDLE_ID
-uv run stocker-prospective bundle verify /tmp/REPLACE_WITH_BUNDLE_ID
-tar -C /tmp -czf /tmp/REPLACE_WITH_BUNDLE_ID.tar.gz REPLACE_WITH_BUNDLE_ID
-scp /tmp/REPLACE_WITH_BUNDLE_ID.tar.gz \
+  --spec "/tmp/$BUNDLE_ID-reconstructed/bundle-spec.yaml" \
+  --output "/tmp/$BUNDLE_ID"
+uv run stocker-prospective bundle inspect "/tmp/$BUNDLE_ID"
+uv run stocker-prospective bundle verify "/tmp/$BUNDLE_ID"
+tar -C /tmp -czf "/tmp/$BUNDLE_ID.tar.gz" "$BUNDLE_ID"
+scp "/tmp/$BUNDLE_ID.tar.gz" \
   root@SERVER:/var/lib/stocker/secure-transfer/
 ```
 
@@ -801,11 +821,12 @@ never the Gateway upstream port.
 Record-only IBKR diagnostics require the hash-verified registered universe and
 the official dependency. A missing active frozen bundle remains an explicit
 health blocker but does not prevent underlying evidence recording; a bundle
-hash mismatch still fails closed. Record-only deliberately persists
-source-semantic blockers instead of scoring. Shadow scoring requires a
-verified active bundle, passing feature parity, and exact signed
-previous-session context. Install the units only after the gates for the
-selected mode are satisfied:
+hash mismatch still fails closed. Installing the reconstructed bundle removes
+only the missing-artifact blocker. Record-only deliberately persists
+source-semantic blockers instead of scoring. Shadow scoring still requires
+passing feature parity and exact signed previous-session context. Do not lower
+either gate after observing outcomes. Install the units only after the gates
+for the selected mode are satisfied:
 
 ```bash
 sudo install -o root -g root -m 0644 \

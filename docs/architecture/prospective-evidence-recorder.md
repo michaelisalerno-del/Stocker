@@ -151,6 +151,16 @@ read-only and never overwritten. Activation is a compare-and-swap operation
 with operator identity and an append-only action log. Every score attempt
 reloads and reverifies the active bundle.
 
+The audited V0.1 research run did not write serialized estimator objects. The
+deployment reconstruction seam therefore verifies the pre-outcome freeze
+hashes and safety flags, materializes no-fit scorers from the frozen medians,
+means, scales, category levels, coefficients, and intercepts, and emits a
+machine-readable record with zero fit invocations and zero protected
+observations read. The reconstructed M0 and M1 probabilities are pinned by
+independent deterministic fixtures before bundle construction. This removes an
+artifact-format blocker only; feature-source parity and exact previous-session
+context remain separate fail-closed scoring gates.
+
 The registered anchor cohort is mechanically extracted from the actual local
 M1 artifact at
 `research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/model_coefficients.json`

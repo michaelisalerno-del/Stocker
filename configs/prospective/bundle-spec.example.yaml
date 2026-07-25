@@ -1,8 +1,9 @@
 bundle_id: REPLACE-WITH-IMMUTABLE-BUNDLE-ID
 created_at_utc: "2026-07-24T00:00:00Z"
 
-# These three serialized artifacts do not exist in the inspected repository.
-# Supply approved frozen files; never replace them with model_coefficients.json.
+# This template remains deliberately non-runnable. For the audited V0.1
+# handoff, first run `stocker-prospective bundle reconstruct`; use the
+# bundle-spec.yaml it emits. Do not hand-edit coefficients or thresholds.
 m0_artifact: REQUIRED_APPROVED/m0.joblib
 m1_artifact: REQUIRED_APPROVED/m1.joblib
 preprocessor: REQUIRED_APPROVED/preprocessor.joblib

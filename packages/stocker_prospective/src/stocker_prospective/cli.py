@@ -44,6 +44,10 @@ from stocker_prospective.context import (
     load_imported_context,
 )
 from stocker_prospective.database import ProspectiveRepository
+from stocker_prospective.frozen_artifacts import (
+    FrozenArtifactReconstructionError,
+    reconstruct_frozen_artifacts,
+)
 from stocker_prospective.ibkr import (
     IBKRConnectionConfig,
     IBKRMarketDataAdapter,
@@ -202,6 +206,33 @@ def _resolve_spec_paths(spec_path: Path, payload: dict[str, Any]) -> dict[str, A
             for candidate in (Path(str(value)),)
         ]
     return result
+
+
+@bundle_app.command("reconstruct")
+def bundle_reconstruct(
+    frozen_root: Path = typer.Option(..., exists=True, file_okay=False),
+    universe: Path = typer.Option(..., exists=True, dir_okay=False),
+    output: Path = typer.Option(...),
+    bundle_id: str = typer.Option(...),
+    created_at_utc: str = typer.Option(..., help="Timezone-aware ISO-8601 timestamp."),
+    operator: str = typer.Option(...),
+) -> None:
+    """Reconstruct no-fit deployable artifacts from the audited frozen JSON."""
+
+    try:
+        created_at = datetime.fromisoformat(created_at_utc.replace("Z", "+00:00"))
+        _emit(
+            reconstruct_frozen_artifacts(
+                frozen_root=frozen_root,
+                universe_path=universe,
+                output_directory=output,
+                bundle_id=bundle_id,
+                created_at_utc=created_at,
+                operator=operator,
+            )
+        )
+    except (FrozenArtifactReconstructionError, ValueError) as exc:
+        _fatal(str(exc))
 
 
 @bundle_app.command("build")

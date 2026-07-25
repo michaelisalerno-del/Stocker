@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from stocker_prospective.config import ProspectiveConfig
+from stocker_prospective.database import ProspectiveRepository
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.web import create_web_app
@@ -101,6 +102,7 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     script = client.get("/assets/app.js")
     assert script.status_code == 200
     assert "Official IBKR API" in script.text
+    assert "Recorder readiness" in script.text
 
     endpoints = (
         "/api/health",
@@ -132,6 +134,38 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         "model",
     }
     assert client.get(f"/api/shadow/{structure_id}").status_code == 200
+
+
+def test_health_reports_live_recorder_waiting_for_prospective_start(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    prospective_start = datetime.now(UTC) + timedelta(hours=1)
+    cfg = cfg.model_copy(
+        update={
+            "runtime": cfg.runtime.model_copy(
+                update={
+                    "mode": "record_only",
+                    "prospective_start_utc": prospective_start,
+                }
+            )
+        }
+    )
+    repository = ProspectiveRepository(cfg.paths.database)
+    repository.migrate()
+    repository.acquire_recorder_lease(
+        run_id=cfg.runtime.run_id or "",
+        owner_id="server-instance:recorder-process",
+        now=datetime.now(UTC),
+        stale_after=timedelta(seconds=cfg.runtime.recorder_lease_stale_seconds),
+    )
+
+    health = TestClient(create_web_app(cfg)).get("/api/health").json()
+
+    assert health["recorder"]["lease"]["owner_id"] == "server-instance:recorder-process"
+    assert health["recorder"]["operational_status"] == "waiting_for_prospective_start"
+    with sqlite3.connect(cfg.paths.database) as connection:
+        assert connection.execute("SELECT count(*) FROM prospective_run").fetchone() == (0,)
 
 
 def test_no_order_account_threshold_or_upload_endpoint_exists(tmp_path: Path) -> None:

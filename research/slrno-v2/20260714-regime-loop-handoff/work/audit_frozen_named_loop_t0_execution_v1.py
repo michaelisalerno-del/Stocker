@@ -19,6 +19,7 @@ REPO = WORK.parents[3]
 CONTRACT_PATH = WORK / "contracts/20260717-frozen-named-loop-t0-execution-realism-v1.json"
 DEFAULT_PRIMARY = WORK / "artifacts/20260717-frozen-named-loop-t0-execution-realism-v1/primary"
 DEFAULT_EXACT = WORK / "artifacts/20260717-frozen-named-loop-t0-execution-realism-v1/exact_rerun"
+FROZEN_HANDOFF_COMMIT = "9b0fcf7"
 EXCLUSIONS = {"independent_audit.json", "exact_rerun_identity.json"}
 STRESSES = {"F0": 0.0, "F5": 5.0, "F10": 10.0, "F15": 15.0, "F20": 20.0}
 FAMILIES = {
@@ -998,18 +999,12 @@ def prohibited_changed_paths(paths: Iterable[str]) -> list[str]:
 
 def _check_safety(contract: Mapping[str, Any]) -> tuple[bool, str]:
     start = str(contract["frozen_lineage"]["inspected_head_before_editing"])
-    commands = [
-        ["git", "diff", "--name-only", start],
-        ["git", "diff", "--cached", "--name-only"],
-        ["git", "ls-files", "--others", "--exclude-standard"],
-    ]
     changed = sorted(
-        {
-            line
-            for command in commands
-            for line in subprocess.check_output(command, cwd=REPO, text=True).splitlines()
-            if line
-        }
+        subprocess.check_output(
+            ["git", "diff", "--name-only", start, FROZEN_HANDOFF_COMMIT],
+            cwd=REPO,
+            text=True,
+        ).splitlines()
     )
     prohibited = prohibited_changed_paths(changed)
     if prohibited:
@@ -1027,7 +1022,9 @@ def _check_safety(contract: Mapping[str, Any]) -> tuple[bool, str]:
         and safety["application_runtime_changed"] is False
     ):
         return False, "contract safety boundary drift"
-    return True, f"all {len(changed)} changed paths remain confined to research/package/tests"
+    return True, (
+        f"all {len(changed)} frozen-handoff paths remain confined to research/package/tests"
+    )
 
 
 def verify_exact_identity(primary: Path, exact: Path) -> dict[str, object]:

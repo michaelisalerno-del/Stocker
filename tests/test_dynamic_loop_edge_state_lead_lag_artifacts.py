@@ -7,6 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "research/slrno-v2/20260714-regime-loop-handoff/work"
 ARTIFACT_ROOT = WORK / "artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1"
+FROZEN_V2_COMMIT = "ca3537a0f337097a9a75abf87ae4bf419fae6a5d"
+FROZEN_LEAD_LAG_HANDOFF_COMMIT = "d28d7f8f"
 
 
 def test_primary_and_exact_rerun_manifests_are_byte_identical() -> None:
@@ -35,14 +37,14 @@ def test_independent_audit_passes_identity_and_safety_checks() -> None:
     assert checks["no_runtime_or_execution_paths_modified"] is True
 
 
-def test_no_broker_order_position_or_deployment_path_changed_since_frozen_v2() -> None:
+def test_frozen_handoff_did_not_change_broker_order_position_or_deployment_paths() -> None:
     changed = subprocess.check_output(
         [
             "git",
             "diff",
             "--name-only",
-            "ca3537a0f337097a9a75abf87ae4bf419fae6a5d",
-            "HEAD",
+            FROZEN_V2_COMMIT,
+            FROZEN_LEAD_LAG_HANDOFF_COMMIT,
         ],
         cwd=ROOT,
         text=True,

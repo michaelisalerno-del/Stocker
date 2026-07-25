@@ -7,6 +7,7 @@ import secrets
 import time
 from collections import OrderedDict, defaultdict, deque
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,26 @@ def _parity_projection(config: ProspectiveConfig) -> dict[str, Any]:
             "counts": {},
             "report": None,
         }
+
+
+def _recorder_operational_status(
+    config: ProspectiveConfig,
+    lease: dict[str, Any] | None,
+) -> str:
+    if lease is None:
+        return "inactive"
+    try:
+        heartbeat = datetime.fromisoformat(str(lease["heartbeat_at_utc"]))
+    except (KeyError, TypeError, ValueError):
+        return "stale"
+    if heartbeat.tzinfo is None:
+        return "stale"
+    now = datetime.now(UTC)
+    if (now - heartbeat).total_seconds() > config.runtime.recorder_lease_stale_seconds:
+        return "stale"
+    if now < config.runtime.prospective_start_utc:
+        return "waiting_for_prospective_start"
+    return "active"
 
 
 def create_web_app(config: ProspectiveConfig) -> FastAPI:
@@ -192,6 +213,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "mode": config.runtime.mode,
                 "run_id": config.runtime.run_id,
                 "lease": runtime["recorder_lease"],
+                "operational_status": _recorder_operational_status(
+                    config,
+                    runtime["recorder_lease"],
+                ),
             },
             "ibkr": runtime["ibkr_connection"],
             "ibkr_api": ibkr_api,

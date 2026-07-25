@@ -165,6 +165,14 @@ function renderHealth() {
     metric("Runtime state", health.status, "Fail-closed health", health.status === "blocked" ? "danger" : "ok"),
     metric("Instance", health.instance_identity, health.application.git_commit),
     metric("Recorder mode", health.recorder.mode, health.recorder.run_id),
+    metric(
+      "Recorder readiness",
+      health.recorder.operational_status,
+      "Operational state; scoring gates remain separate",
+      ["active", "waiting_for_prospective_start"].includes(health.recorder.operational_status)
+        ? "ok"
+        : "danger",
+    ),
     metric("Lease heartbeat", clock(lease.heartbeat_at_utc), lease.owner_id || "No owner", lease.owner_id ? "ok" : "danger"),
     metric("Active bundle", health.active_bundle.bundle_id || "UNAVAILABLE", health.active_bundle.verified ? "Verified" : "Verification blocked", health.active_bundle.verified ? "ok" : "danger"),
     metric("IBKR state", (health.ibkr || {}).state || "REPLAY / OFFLINE", (health.ibkr || {}).message || "No live broker dependency"),

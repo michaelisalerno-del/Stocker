@@ -97,11 +97,23 @@ class ProspectiveReadStore:
     def runtime_projection(self) -> dict[str, Any]:
         with self._connect() as connection:
             run = self._run_row(connection)
+            lease_run_id = self.run_id if self.run_id is not None else (
+                None if run is None else str(run["run_id"])
+            )
+            lease = (
+                None
+                if lease_run_id is None
+                else connection.execute(
+                    "SELECT * FROM recorder_lease "
+                    "WHERE lease_key = 'prospective_recorder' AND run_id = ?",
+                    (lease_run_id,),
+                ).fetchone()
+            )
             if run is None:
                 return {
                     "run": None,
                     "session": None,
-                    "recorder_lease": None,
+                    "recorder_lease": self._dict(lease),
                     "last_completed_bar": None,
                     "latest_score": None,
                     "previous_session_context": None,
@@ -115,11 +127,6 @@ class ProspectiveReadStore:
             session = connection.execute(
                 "SELECT * FROM runtime_session WHERE run_id = ? "
                 "ORDER BY opened_at_utc DESC LIMIT 1",
-                (run_id,),
-            ).fetchone()
-            lease = connection.execute(
-                "SELECT * FROM recorder_lease "
-                "WHERE lease_key = 'prospective_recorder' AND run_id = ?",
                 (run_id,),
             ).fetchone()
             bar = connection.execute(

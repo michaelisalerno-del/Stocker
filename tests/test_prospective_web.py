@@ -15,6 +15,8 @@ from stocker_prospective.web import create_web_app
 
 ROOT = Path(__file__).parents[1]
 WEB_UNIT = ROOT / "deploy/systemd/stocker-web.service"
+WEB_BOUNDARY_SCRIPT = ROOT / "deploy/scripts/prepare-web-sqlite-boundary.sh"
+WEB_ENV_TEMPLATE = ROOT / "deploy/stocker-web.env.example"
 
 
 def config(tmp_path: Path, *, authenticated: bool = False) -> ProspectiveConfig:
@@ -144,13 +146,45 @@ def test_web_sqlite_connections_cannot_write_domain_records(tmp_path: Path) -> N
         connection.execute("DELETE FROM prospective_run")
 
 
-def test_web_service_writes_only_sqlite_wal_coordination_files() -> None:
+def test_web_store_anchor_keeps_wal_coordination_files_available(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+    store = ProspectiveReadStore(cfg.paths.database, run_id=cfg.runtime.run_id)
+
+    store.open_anchor()
+    try:
+        with sqlite3.connect(cfg.paths.database) as writer:
+            assert writer.execute("PRAGMA journal_mode = WAL").fetchone() == ("wal",)
+            writer.execute("SELECT count(*) FROM prospective_run").fetchone()
+        assert Path(f"{cfg.paths.database}-shm").is_file()
+        assert Path(f"{cfg.paths.database}-wal").is_file()
+    finally:
+        store.close_anchor()
+
+
+def test_web_service_uses_a_distinct_os_identity_and_sqlite_boundary() -> None:
     unit = WEB_UNIT.read_text(encoding="utf-8")
+    boundary = WEB_BOUNDARY_SCRIPT.read_text(encoding="utf-8")
+    web_environment = WEB_ENV_TEMPLATE.read_text(encoding="utf-8")
 
     assert "ProtectSystem=strict" in unit
+    assert "User=stocker-web" in unit
+    assert "Group=stocker" in unit
+    assert "EnvironmentFile=/etc/stocker/stocker-web.env" in unit
+    assert "ExecStartPre=+/usr/local/libexec/stocker-prepare-web-sqlite-boundary" in unit
+    assert "ReadOnlyPaths=/var/lib/stocker" in unit
     assert "ReadWritePaths=/var/lib/stocker/prospective" in unit
     assert "ReadWritePaths=/var/lib/stocker\n" not in unit
     assert "ReadWritePaths=/var/lib/stocker/bundles" not in unit
+    assert 'database_directory="/var/lib/stocker/prospective"' in boundary
+    assert 'database_path="$database_directory/prospective.sqlite3"' in boundary
+    assert 'chmod 0750 "$database_directory"' in boundary
+    assert 'chmod 0640 "$database_path" "$wal_path"' in boundary
+    assert 'chmod 0660 "$shm_path"' in boundary
+    assert "symlink" in boundary
+    assert "STOCKER_CONTEXT_SIGNING_SECRET" not in web_environment
 
 
 def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> None:

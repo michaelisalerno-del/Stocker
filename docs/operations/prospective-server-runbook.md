@@ -13,7 +13,8 @@ orders and does not establish an options edge.
 /opt/stocker/releases/<git-commit>/    immutable application releases
 /opt/stocker/current                  atomic symlink to one release
 /etc/stocker/prospective.yaml         runtime configuration (root:stocker 0640)
-/etc/stocker/stocker.env              release identity and secrets (root:stocker 0640)
+/etc/stocker/stocker.env              recorder identity + secrets (root:stocker 0640)
+/etc/stocker/stocker-web.env          secret-minimal web identity (root:stocker 0640)
 /var/lib/stocker/prospective/         SQLite database and WAL
 /var/lib/stocker/bundles/             immutable bundle store + active pointer
 /var/lib/stocker/daily-context/       signed package store + session pointers
@@ -37,6 +38,8 @@ On the dedicated server:
 
 ```bash
 sudo useradd --system --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker
+sudo useradd --system --home-dir /nonexistent --no-create-home \
+  --shell /usr/sbin/nologin stocker-web
 sudo install -d -o root -g root -m 0755 /opt/stocker/releases
 sudo install -d -o root -g stocker -m 0750 /etc/stocker
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker
@@ -51,7 +54,10 @@ sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/backups
 ```
 
 Do not add `stocker` to privileged groups. Keep the IBKR GUI/session under an
-independently managed desktop login if required by the host.
+independently managed desktop login if required by the host. Do not make
+`stocker-web` the database owner and do not add it to privileged groups; the
+web unit selects group `stocker` only for the minimum read/SHM permissions
+described below.
 
 ## 2. Install Python and `uv`
 
@@ -579,8 +585,12 @@ sudo install -o root -g stocker -m 0640 \
 sudo install -o root -g stocker -m 0640 \
   /opt/stocker/current/deploy/stocker.env.example \
   /etc/stocker/stocker.env
+sudo install -o root -g stocker -m 0640 \
+  /opt/stocker/current/deploy/stocker-web.env.example \
+  /etc/stocker/stocker-web.env
 sudoedit /etc/stocker/prospective.yaml
 sudoedit /etc/stocker/stocker.env
+sudoedit /etc/stocker/stocker-web.env
 ```
 
 Before first prospective start, set:
@@ -597,15 +607,18 @@ Before first prospective start, set:
 - context-signing secret in the environment file; and
 - optional web auth token only when `authentication_enabled: true`.
 
-Keep these server paths in `/etc/stocker/stocker.env`:
+Keep these server paths in both `/etc/stocker/stocker.env` and the
+secret-minimal `/etc/stocker/stocker-web.env`:
 
 ```dotenv
 STOCKER_IBKR_API_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json
 STOCKER_IBKR_API_UPDATE_STATUS=/var/lib/stocker/ibkr-api/status/update-status.json
 ```
 
-Never put IBKR username, password, or 2FA material in either file. Stocker has
-no fields for them.
+Put the context-signing secret only in `stocker.env`; never expose it to the web
+process. Put an optional built-in web-auth token only in `stocker-web.env`.
+Never put IBKR username, password, or 2FA material in any Stocker file. Stocker
+has no fields for them.
 
 ## 7. Migrate the database
 
@@ -713,6 +726,9 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-recorder.service \
   /opt/stocker/current/deploy/systemd/stocker-web.service \
   /etc/systemd/system/
+sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/prepare-web-sqlite-boundary.sh \
+  /usr/local/libexec/stocker-prepare-web-sqlite-boundary
 sudo systemctl daemon-reload
 sudo systemctl enable --now stocker-recorder.service
 sudo systemctl enable --now stocker-web.service
@@ -722,14 +738,29 @@ Configuration/bundle-integrity exit code 78 is in
 `RestartPreventExitStatus`; systemd will not loop on those failures.
 Transient runtime failures use bounded systemd restart limits.
 
-The web process opens SQLite with `mode=ro` and `PRAGMA query_only=ON`, so SQL
-writes are rejected. Its systemd unit keeps all of `/var/lib/stocker`
-read-only except `/var/lib/stocker/prospective`, because a read-only SQLite WAL
-client may need to create or update `-shm` coordination metadata when the
-single recorder writer is stopped or restarting. That narrow mount exception
-does not make the web repository a domain-record writer; tests execute a
-destructive SQL statement through the web store and require SQLite to reject
-it as read-only.
+The web service runs as the distinct `stocker-web` OS identity; the database
+and its directory remain owned by `stocker`. Before web startup, a root helper
+refuses symlinks, restores directory mode 0750, database/WAL mode 0640, and
+creates only the SQLite SHM coordination file at mode 0660. The web identity
+cannot write, truncate, replace, rename, or unlink the database or WAL through
+filesystem syscalls. It can update only the group-writable SHM file. The
+systemd mount keeps every other `/var/lib/stocker` path read-only.
+
+The web repository independently opens SQLite with `mode=ro` and
+`PRAGMA query_only=ON`, and a process-lifetime read-only anchor keeps WAL/SHM
+coordination files present while the recorder opens and closes writer
+connections. Tests require destructive SQL to fail. On the deployed host,
+verify the independent filesystem boundary too:
+
+```bash
+sudo -u stocker-web -g stocker test ! -w \
+  /var/lib/stocker/prospective/prospective.sqlite3
+sudo -u stocker-web -g stocker test ! -w \
+  /var/lib/stocker/prospective/prospective.sqlite3-wal
+sudo -u stocker-web -g stocker test -w \
+  /var/lib/stocker/prospective/prospective.sqlite3-shm
+sudo -u stocker-web -g stocker test ! -w /var/lib/stocker/prospective
+```
 
 At the current repository state, IBKR mode is expected to block rather than
 claim frozen M1 scoring.

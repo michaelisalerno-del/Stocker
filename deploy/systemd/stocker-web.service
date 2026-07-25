@@ -5,13 +5,15 @@ After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
 StartLimitBurst=5
+ConditionPathExists=/usr/local/libexec/stocker-prepare-web-sqlite-boundary
 
 [Service]
 Type=simple
-User=stocker
+User=stocker-web
 Group=stocker
 WorkingDirectory=/opt/stocker/current
-EnvironmentFile=/etc/stocker/stocker.env
+EnvironmentFile=/etc/stocker/stocker-web.env
+ExecStartPre=+/usr/local/libexec/stocker-prepare-web-sqlite-boundary
 ExecStart=/opt/stocker/current/.venv/bin/stocker-prospective web run --config /etc/stocker/prospective.yaml
 Restart=on-failure
 RestartSec=10

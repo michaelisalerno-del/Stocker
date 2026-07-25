@@ -6,6 +6,7 @@ import os
 import secrets
 import time
 from collections import OrderedDict, defaultdict, deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -80,11 +81,20 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "blocked_unsafe_runtime_configuration: web authentication token is absent"
             )
 
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> Any:
+        store.open_anchor()
+        try:
+            yield
+        finally:
+            store.close_anchor()
+
     app = FastAPI(
         title="Stocker Prospective Evidence Recorder",
         version=config.runtime.app_version,
         docs_url=None if config.web.production else "/docs",
         redoc_url=None,
+        lifespan=lifespan,
     )
     allowed_hosts = list(config.web.allowed_hosts)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)

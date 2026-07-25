@@ -13,6 +13,7 @@ class ProspectiveReadStore:
     def __init__(self, database_path: str | Path, *, run_id: str | None = None) -> None:
         self.database_path = Path(database_path)
         self.run_id = run_id
+        self._anchor: sqlite3.Connection | None = None
 
     def _connect(self) -> sqlite3.Connection:
         uri = f"file:{self.database_path.resolve()}?mode=ro"
@@ -21,6 +22,27 @@ class ProspectiveReadStore:
         connection.execute("PRAGMA query_only = ON")
         connection.execute("PRAGMA busy_timeout = 2000")
         return connection
+
+    def open_anchor(self) -> None:
+        """Keep WAL coordination files live for the read-only web process."""
+
+        if self._anchor is not None:
+            return
+        connection = self._connect()
+        try:
+            connection.execute("SELECT count(*) FROM sqlite_schema").fetchone()
+        except Exception:
+            connection.close()
+            raise
+        self._anchor = connection
+
+    def close_anchor(self) -> None:
+        """Release the process-lifetime read-only WAL anchor."""
+
+        if self._anchor is None:
+            return
+        self._anchor.close()
+        self._anchor = None
 
     @staticmethod
     def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:

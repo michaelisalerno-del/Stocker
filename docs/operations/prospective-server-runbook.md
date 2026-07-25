@@ -123,14 +123,26 @@ sudo find /var/lib/stocker/ibkr-api/status -xdev -type f \
 sudo -u stocker-web -g stocker-readers test ! -r /etc/stocker/stocker.env
 sudo -u stocker-web -g stocker-readers test ! -w \
   /var/lib/stocker/prospective/prospective.sqlite3
+sudo -u stocker-web -g stocker-readers test -x /var/lib/stocker/bundles
+if sudo test -d /var/lib/stocker/bundles/installed; then
+  sudo -u stocker-web -g stocker-readers test -x \
+    /var/lib/stocker/bundles/installed
+fi
+if sudo test -f /var/lib/stocker/bundles/active.json; then
+  sudo -u stocker-web -g stocker-readers test -r \
+    /var/lib/stocker/bundles/active.json
+fi
 ```
 
 Do not recursively change `/var/lib/stocker/secure-transfer`,
 `/var/lib/stocker/daily-context`, or `/var/lib/stocker/backups`; those remain
 recorder/operator-private. The migration helper opens the recorder-writable
-persistent root, bundle root, database directory, database, WAL, and SHM by
-descriptor with `O_NOFOLLOW`; it refuses unexpected owners, file types, links,
-or groups before applying ownership and mode changes.
+persistent root, bundle store, installed bundle tree, control files, database
+directory, database, WAL, and SHM by descriptor with `O_NOFOLLOW`; it refuses
+unexpected owners, entries, file types, links, or groups before applying
+ownership and mode changes. Installed-bundle files become reader-group
+read-only, while `active.json` and `operator-actions.jsonl` remain
+recorder-owned and reader-readable.
 
 ## 2. Install Python and `uv`
 

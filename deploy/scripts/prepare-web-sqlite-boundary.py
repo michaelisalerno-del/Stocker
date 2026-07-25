@@ -21,6 +21,7 @@ SHM_NAME = f"{DATABASE_NAME}-shm"
 RECORDER_USER = "stocker"
 WEB_USER = "stocker-web"
 READER_GROUP = "stocker-readers"
+BUNDLE_CONTROL_FILES = frozenset({"active.json", "operator-actions.jsonl"})
 
 
 def fail(reason: str) -> NoReturn:
@@ -140,6 +141,119 @@ def open_or_create_auxiliary(
             fail(f"{label}_open_failed")
 
 
+def migrate_installed_bundle_tree(
+    directory_descriptor: int,
+    *,
+    owner_uid: int,
+    allowed_group_gids: frozenset[int],
+    reader_gid: int,
+) -> None:
+    for name in os.listdir(directory_descriptor):
+        metadata = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            child_descriptor = open_directory(
+                directory_descriptor,
+                name,
+                directory_flags=(os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC),
+                label="installed_bundle_directory",
+            )
+            try:
+                require_directory(
+                    child_descriptor,
+                    owner_uid=owner_uid,
+                    allowed_group_gids=allowed_group_gids,
+                    label="installed_bundle_directory",
+                )
+                os.fchown(child_descriptor, owner_uid, reader_gid)
+                os.fchmod(child_descriptor, 0o550)
+                migrate_installed_bundle_tree(
+                    child_descriptor,
+                    owner_uid=owner_uid,
+                    allowed_group_gids=allowed_group_gids,
+                    reader_gid=reader_gid,
+                )
+            finally:
+                os.close(child_descriptor)
+        elif stat.S_ISREG(metadata.st_mode):
+            file_descriptor = open_existing(
+                directory_descriptor,
+                name,
+                writable=False,
+                label="installed_bundle_file",
+            )
+            try:
+                require_regular_file(
+                    file_descriptor,
+                    owner_uid=owner_uid,
+                    allowed_group_gids=allowed_group_gids,
+                    label="installed_bundle_file",
+                )
+                os.fchown(file_descriptor, owner_uid, reader_gid)
+                os.fchmod(file_descriptor, 0o440)
+            finally:
+                os.close(file_descriptor)
+        else:
+            fail("installed_bundle_unsupported_file_type")
+
+
+def migrate_bundle_store(
+    bundle_descriptor: int,
+    *,
+    directory_flags: int,
+    owner_uid: int,
+    allowed_group_gids: frozenset[int],
+    reader_gid: int,
+) -> None:
+    entries = frozenset(os.listdir(bundle_descriptor))
+    unexpected = entries - BUNDLE_CONTROL_FILES - {"installed"}
+    if unexpected:
+        fail("bundle_directory_unexpected_entry")
+
+    if "installed" in entries:
+        installed_descriptor = open_directory(
+            bundle_descriptor,
+            "installed",
+            directory_flags=directory_flags,
+            label="installed_bundle_root",
+        )
+        try:
+            require_directory(
+                installed_descriptor,
+                owner_uid=owner_uid,
+                allowed_group_gids=allowed_group_gids,
+                label="installed_bundle_root",
+            )
+            os.fchown(installed_descriptor, owner_uid, reader_gid)
+            os.fchmod(installed_descriptor, 0o2750)
+            migrate_installed_bundle_tree(
+                installed_descriptor,
+                owner_uid=owner_uid,
+                allowed_group_gids=allowed_group_gids,
+                reader_gid=reader_gid,
+            )
+        finally:
+            os.close(installed_descriptor)
+
+    for name in BUNDLE_CONTROL_FILES & entries:
+        file_descriptor = open_existing(
+            bundle_descriptor,
+            name,
+            writable=False,
+            label="bundle_control_file",
+        )
+        try:
+            require_regular_file(
+                file_descriptor,
+                owner_uid=owner_uid,
+                allowed_group_gids=allowed_group_gids,
+                label="bundle_control_file",
+            )
+            os.fchown(file_descriptor, owner_uid, reader_gid)
+            os.fchmod(file_descriptor, 0o640)
+        finally:
+            os.close(file_descriptor)
+
+
 def main(*, migrate_existing: bool = False) -> None:
     if os.geteuid() != 0:
         fail("root_required")
@@ -193,6 +307,13 @@ def main(*, migrate_existing: bool = False) -> None:
                 )
                 os.fchown(bundle_descriptor, recorder_uid, reader_gid)
                 os.fchmod(bundle_descriptor, 0o2750)
+                migrate_bundle_store(
+                    bundle_descriptor,
+                    directory_flags=directory_flags,
+                    owner_uid=recorder_uid,
+                    allowed_group_gids=allowed_group_gids,
+                    reader_gid=reader_gid,
+                )
             finally:
                 os.close(bundle_descriptor)
 

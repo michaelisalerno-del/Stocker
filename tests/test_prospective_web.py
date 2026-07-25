@@ -280,6 +280,14 @@ def test_web_boundary_migrates_legacy_paths_without_path_mutations(
     bundle_directory = persistent_root / "bundles"
     database_directory.mkdir(parents=True)
     bundle_directory.mkdir()
+    installed_bundle = bundle_directory / "installed" / "test-bundle"
+    installed_bundle.mkdir(parents=True)
+    installed_artifact = installed_bundle / "artifact.joblib"
+    installed_artifact.touch()
+    active_pointer = bundle_directory / "active.json"
+    active_pointer.touch()
+    operator_actions = bundle_directory / "operator-actions.jsonl"
+    operator_actions.touch()
     database = database_directory / "prospective.sqlite3"
     database.touch()
     fchown_calls: list[tuple[int, int, int]] = []
@@ -312,6 +320,35 @@ def test_web_boundary_migrates_legacy_paths_without_path_mutations(
     assert Path(f"{database}-wal").stat().st_mode & 0o777 == 0o640
     assert Path(f"{database}-shm").stat().st_mode & 0o777 == 0o660
     assert bundle_directory.stat().st_mode & 0o7777 == 0o2750
+    assert (bundle_directory / "installed").stat().st_mode & 0o7777 == 0o2750
+    assert installed_bundle.stat().st_mode & 0o777 == 0o550
+    assert installed_artifact.stat().st_mode & 0o777 == 0o440
+    assert active_pointer.stat().st_mode & 0o777 == 0o640
+    assert operator_actions.stat().st_mode & 0o777 == 0o640
+
+
+def test_web_boundary_refuses_symlinks_in_installed_bundle_tree(tmp_path: Path) -> None:
+    boundary = load_web_boundary_module()
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    target = tmp_path / "outside"
+    target.touch()
+    (installed / "artifact.joblib").symlink_to(target)
+    directory_descriptor = os.open(installed, os.O_RDONLY | os.O_DIRECTORY)
+
+    try:
+        with pytest.raises(SystemExit) as blocked:
+            boundary.migrate_installed_bundle_tree(
+                directory_descriptor,
+                owner_uid=os.getuid(),
+                allowed_group_gids=frozenset({os.getgid()}),
+                reader_gid=os.getgid(),
+            )
+    finally:
+        os.close(directory_descriptor)
+
+    assert blocked.value.code == 78
+    assert target.read_bytes() == b""
 
 
 def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> None:

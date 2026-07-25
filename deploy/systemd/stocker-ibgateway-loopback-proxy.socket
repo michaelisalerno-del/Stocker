@@ -10,8 +10,8 @@ ListenStream=127.0.0.1:4003
 NoDelay=true
 Accept=no
 Service=stocker-ibgateway-loopback-proxy.service
-TriggerLimitIntervalSec=1h
-TriggerLimitBurst=1
+TriggerLimitIntervalSec=5min
+TriggerLimitBurst=3
 
 [Install]
 WantedBy=sockets.target

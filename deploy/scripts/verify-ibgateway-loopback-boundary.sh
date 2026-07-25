@@ -5,6 +5,8 @@ config_path="${IBGATEWAY_PROXY_CONFIG:-/etc/ibgateway/loopback-proxy.env}"
 ufw_bin="${IBGATEWAY_UFW:-/usr/sbin/ufw}"
 iptables_bin="${IBGATEWAY_IPTABLES:-/usr/sbin/iptables}"
 ip6tables_bin="${IBGATEWAY_IP6TABLES:-/usr/sbin/ip6tables}"
+nft_bin="${IBGATEWAY_NFT:-/usr/sbin/nft}"
+nft_json_verifier="${IBGATEWAY_NFT_JSON_VERIFIER:-/usr/local/libexec/stocker-verify-ibgateway-nft-boundary-json}"
 
 fail() {
     printf '%s\n' \
@@ -93,6 +95,8 @@ read_upstream_port
 require_executable "$ufw_bin" "ufw_missing"
 require_executable "$iptables_bin" "iptables_missing"
 require_executable "$ip6tables_bin" "ip6tables_missing"
+require_executable "$nft_bin" "nft_missing"
+require_executable "$nft_json_verifier" "nft_json_verifier_missing"
 
 ufw_status="$("$ufw_bin" status 2>/dev/null)" || fail "ufw_status_unavailable"
 [ "$(printf '%s\n' "$ufw_status" | sed -n '1p')" = "Status: active" ] ||
@@ -100,5 +104,12 @@ ufw_status="$("$ufw_bin" status 2>/dev/null)" || fail "ufw_status_unavailable"
 
 verify_chain "ipv4" "ufw-user-input" "$iptables_bin"
 verify_chain "ipv6" "ufw6-user-input" "$ip6tables_bin"
+
+nft_json="$(
+    "$nft_bin" -j list table inet stocker_ibgateway 2>/dev/null
+)" || fail "nft_effective_guard_missing"
+printf '%s\n' "$nft_json" |
+    "$nft_json_verifier" "$upstream_port" >/dev/null 2>&1 ||
+    fail "nft_effective_guard_invalid"
 
 printf 'ibgateway_loopback_boundary:verified:%s\n' "$upstream_port"

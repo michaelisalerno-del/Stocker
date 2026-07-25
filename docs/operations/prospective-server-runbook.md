@@ -199,7 +199,7 @@ sudo install -d -o root -g ibgateway -m 0750 \
 sudo install -d -o root -g root -m 0700 /etc/ibgateway
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
-  xvfb x11vnc openbox xauth dbus-x11
+  xvfb x11vnc openbox xauth dbus-x11 nftables
 set -o errexit -o nounset -o pipefail
 IDENTITY=REPLACE_WITH_VERSIONED_ID
 INSTALLER=/var/lib/ibgateway/installers/ibgateway-20260725-latest-linux-x64.sh
@@ -370,17 +370,30 @@ sudo ufw insert 1 allow in on lo to any port "$IBKR_GATEWAY_PORT" proto tcp \
 sudo ufw --force enable
 ```
 
-The two inserted rules must remain the first two rules in both the
+The two inserted UFW rules must remain the first two rules in both the
 `ufw-user-input` and `ufw6-user-input` chains: loopback allow first, then
 non-loopback deny. This prevents an older broad allow from shadowing the broker
-deny. Port 4003 is the frozen internal deployment contract for this unit set;
-changing it requires a coordinated unit, runtime-template, documentation, and
+deny inside those chains. A separate Stocker-owned `inet stocker_ibgateway`
+nftables base chain is the primary effective-path guard. It runs at input
+priority -300, accepts the exact broker port only on loopback, and drops that
+port without a source restriction everywhere else before UFW or another normal
+filter chain can accept it. The installer replaces that two-rule table in one
+atomic nftables transaction.
+
+Port 4003 is the frozen internal deployment contract for this unit set; changing
+it requires a coordinated unit, runtime-template, documentation, and
 contract-version change.
 
 Install the private graphical-session, firewall verifier, and loopback-proxy
 units:
 
 ```bash
+sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/install-ibgateway-loopback-boundary.sh \
+  /usr/local/libexec/stocker-install-ibgateway-loopback-boundary
+sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/verify-ibgateway-nft-boundary-json.py \
+  /usr/local/libexec/stocker-verify-ibgateway-nft-boundary-json
 sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/verify-ibgateway-loopback-boundary.sh \
   /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
@@ -397,16 +410,21 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo /usr/local/libexec/stocker-install-ibgateway-loopback-boundary
 sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo systemctl enable stocker-ibgateway-loopback-proxy.socket
 sudo systemctl enable --now stocker-ibgateway.service
 ```
 
-The verifier runs before both Gateway and the proxy socket. Missing or malformed
-proxy configuration, inactive UFW, a shadowing IPv4 rule, or a shadowing/missing
-IPv6 rule blocks startup with `blocked_unsafe_runtime_configuration`. The proxy
+The installer and read-only verifier run before both Gateway and the proxy
+socket. The verifier parses nftables JSON and requires exactly the unrestricted
+drop, loopback allow, input hook, and priority above; a source-restricted rule
+does not pass. Missing or malformed proxy configuration, inactive UFW, a
+shadowing UFW rule, a missing IPv6 rule, or a missing/altered effective-path
+guard blocks startup with `blocked_unsafe_runtime_configuration`. The proxy
 socket therefore cannot look healthy before its configuration and firewall
-boundary have passed.
+boundary have passed. Proxy recovery is bounded to three activations in five
+minutes; exit 78 is never automatically restarted.
 
 The display has no TCP listener. VNC listens only on server loopback and
 requires its separate random password. Do not add port 5901 to the public
@@ -447,6 +465,7 @@ sudo ss -H -ltnp "( sport = :$IBKR_GATEWAY_PORT )"
 sudo ss -H -ltnp "( sport = :$STOCKER_IBKR_PROXY_PORT )"
 sudo ss -H -ltnp "( sport = :5901 )"
 sudo ufw status verbose
+sudo nft -j list table inet stocker_ibgateway | jq .
 sudo systemctl status \
   stocker-ibgateway.service \
   stocker-ibgateway-loopback-boundary.service \
@@ -672,6 +691,7 @@ it before Gateway can start:
 
 ```bash
 sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
+sudo nft -j list table inet stocker_ibgateway | jq .
 sudo ss -H -ltnp '( sport = :4003 )'
 sudo grep -A3 '^ibkr:' /etc/stocker/prospective.yaml
 ```

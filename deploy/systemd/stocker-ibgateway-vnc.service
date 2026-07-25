@@ -14,7 +14,7 @@ Type=simple
 User=ibgateway
 Group=ibgateway
 Environment=HOME=/var/lib/ibgateway
-ExecStart=/usr/bin/x11vnc -display :71 -auth /var/lib/ibgateway/.Xauthority -localhost -rfbport 5901 -rfbauth /var/lib/ibgateway/vnc.pass -forever -shared -noxdamage -repeat
+ExecStart=/usr/bin/x11vnc -display :71 -auth /var/lib/ibgateway/.Xauthority -localhost -noipv6 -rfbport 5901 -rfbauth /var/lib/ibgateway/vnc.pass -forever -shared -noxdamage -repeat
 Restart=on-failure
 RestartSec=5
 UMask=0077

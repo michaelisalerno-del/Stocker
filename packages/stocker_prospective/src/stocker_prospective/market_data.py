@@ -513,6 +513,11 @@ class ConnectionState(StrEnum):
     SHUTTING_DOWN = "shutting_down"
 
 
+class ConnectionEventKind(StrEnum):
+    STATE_TRANSITION = "state_transition"
+    INFORMATIONAL_NOTIFICATION = "informational_notification"
+
+
 @dataclass(frozen=True)
 class ConnectionEvent:
     recorded_at: datetime
@@ -520,6 +525,7 @@ class ConnectionEvent:
     code: int | None
     message: str
     data_maintained: bool | None
+    event_kind: ConnectionEventKind
 
 
 @dataclass(frozen=True)
@@ -585,6 +591,21 @@ class ConnectionTracker:
         with self._lock:
             self._record(ConnectionState.DEGRADED, code, message, None)
 
+    def notification(self, *, code: int, message: str) -> None:
+        """Audit an official informational callback without changing health."""
+
+        with self._lock:
+            self.events.append(
+                ConnectionEvent(
+                    recorded_at=datetime.now(UTC),
+                    state=self._state,
+                    code=code,
+                    message=message,
+                    data_maintained=None,
+                    event_kind=ConnectionEventKind.INFORMATIONAL_NOTIFICATION,
+                )
+            )
+
     def shutting_down(self) -> None:
         with self._lock:
             self._record(ConnectionState.SHUTTING_DOWN, None, "shutting_down", None)
@@ -624,5 +645,6 @@ class ConnectionTracker:
                 code=code,
                 message=message,
                 data_maintained=data_maintained,
+                event_kind=ConnectionEventKind.STATE_TRANSITION,
             )
         )

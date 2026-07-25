@@ -143,7 +143,10 @@ class ProspectiveReadStore:
                 (run_id,),
             ).fetchone()
             connection_event = connection.execute(
-                "SELECT * FROM ibkr_connection_event WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM ibkr_connection_event WHERE run_id = ? "
+                "AND COALESCE(json_extract(details_json, '$.event_kind'), "
+                "'state_transition') = 'state_transition' "
+                "ORDER BY id DESC LIMIT 1",
                 (run_id,),
             ).fetchone()
             capture = connection.execute(

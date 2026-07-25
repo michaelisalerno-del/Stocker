@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from stocker_prospective.config import ProspectiveConfig
-from stocker_prospective.database import ProspectiveRepository
+from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.web import create_web_app
@@ -166,6 +166,54 @@ def test_health_reports_live_recorder_waiting_for_prospective_start(
     assert health["recorder"]["operational_status"] == "waiting_for_prospective_start"
     with sqlite3.connect(cfg.paths.database) as connection:
         assert connection.execute("SELECT count(*) FROM prospective_run").fetchone() == (0,)
+
+
+def test_runtime_projection_ignores_informational_ibkr_event_for_latest_health(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+    repository = ProspectiveRepository(cfg.paths.database)
+    metadata = EvidenceMetadata(
+        run_id=cfg.runtime.run_id or "",
+        prospective_start_utc=cfg.runtime.prospective_start_utc,
+        app_version=cfg.runtime.app_version,
+        git_commit=cfg.runtime.git_commit,
+        model_artifact_id="synthetic_replay_not_frozen_m1",
+        universe_id="anchor-frozen-20-v1",
+        cohort="anchor_frozen_20",
+        source_timestamps=["2026-07-24T14:00:00Z"],
+        recorded_at_utc=datetime(2026, 7, 24, 14, 0, tzinfo=UTC),
+    )
+    repository.record_ibkr_connection_event(
+        metadata,
+        state="degraded",
+        error_code=354,
+        message="blocked_ibkr_market_data_subscription:missing_subscription",
+        data_maintained=None,
+        reconnect_attempt=None,
+        details={"source": "official_ibkr_callback", "event_kind": "state_transition"},
+    )
+    repository.record_ibkr_connection_event(
+        metadata,
+        state="degraded",
+        error_code=2104,
+        message="Market data farm connection is OK",
+        data_maintained=None,
+        reconnect_attempt=None,
+        details={
+            "source": "official_ibkr_callback",
+            "event_kind": "informational_notification",
+        },
+    )
+
+    projected = ProspectiveReadStore(
+        cfg.paths.database,
+        run_id=cfg.runtime.run_id,
+    ).runtime_projection()["ibkr_connection"]
+
+    assert projected["error_code"] == 354
+    assert projected["message"] == "blocked_ibkr_market_data_subscription:missing_subscription"
 
 
 def test_no_order_account_threshold_or_upload_endpoint_exists(tmp_path: Path) -> None:

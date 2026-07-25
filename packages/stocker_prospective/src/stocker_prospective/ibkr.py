@@ -43,6 +43,7 @@ IBKR_DEPENDENCY_BLOCKER = "blocked_official_ibkr_api_not_installed"
 IBKR_PROVENANCE_BLOCKER = "blocked_unverified_official_ibkr_api"
 IBKR_API_UPDATE_MAX_AGE = timedelta(days=14)
 IBKR_API_UPDATE_FUTURE_TOLERANCE = timedelta(minutes=5)
+IBKR_INFORMATIONAL_NOTIFICATION_CODES = frozenset({2104, 2106, 2107, 2108, 2158})
 
 
 class OfficialIBKRDependencyError(RuntimeError):
@@ -675,6 +676,9 @@ class IBKRMarketDataAdapter:
         self._clear_lost_subscriptions()
 
     def on_error(self, request_id: int, code: int, message: str) -> None:
+        if code in IBKR_INFORMATIONAL_NOTIFICATION_CODES:
+            self.connection.notification(code=code, message=message)
+            return
         if code == 1100:
             self._connected.clear()
             self.connection.connection_lost(code=code, message=message)

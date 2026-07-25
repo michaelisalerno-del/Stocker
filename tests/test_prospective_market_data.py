@@ -9,6 +9,7 @@ from stocker_prospective.market_data import (
     BoundedRealtimeBarQueue,
     BoundedStreamQuoteCache,
     CallbackRequestError,
+    ConnectionEventKind,
     ConnectionState,
     ConnectionTracker,
     MarketDataBudget,
@@ -113,6 +114,46 @@ def test_connection_tracker_distinguishes_maintained_and_lost_data_reconnects() 
     assert tracker.health().state is ConnectionState.PORT_RESET
     assert tracker.health().subscriptions_require_rebuild is True
     assert [event.code for event in tracker.events] == [None, 1100, 1102, 1100, 1101, 1300]
+
+
+@pytest.mark.parametrize("code", [2104, 2106, 2107, 2108, 2158])
+def test_ibkr_connection_notifications_do_not_degrade_or_fail_requests(code: int) -> None:
+    from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
+
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=7497,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=MarketDataBudget(
+            line_limit=4,
+            reserved_headroom=1,
+            request_rate_limit=20,
+        ),
+    )
+    adapter.on_connected(MarketDataType.LIVE)
+    adapter.callbacks.begin(17, kind="quote")
+
+    adapter.on_error(17, code, "official connectivity notification")
+
+    health = adapter.connection.health()
+    assert health.state is ConnectionState.CONNECTED
+    assert health.last_error_code is None
+    assert health.last_message == "connected"
+    assert adapter.callbacks.is_pending(17)
+    assert adapter.connection.events[-1].code == code
+    assert adapter.connection.events[-1].message == "official connectivity notification"
+    assert adapter.connection.events[-1].state is ConnectionState.CONNECTED
+    assert (
+        adapter.connection.events[-1].event_kind
+        is ConnectionEventKind.INFORMATIONAL_NOTIFICATION
+    )
 
 
 def test_shutdown_clears_pending_requests_without_inventing_callbacks() -> None:

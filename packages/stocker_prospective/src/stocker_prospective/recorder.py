@@ -615,7 +615,10 @@ class IBKRDiagnosticRecorder:
                 message=event.message,
                 data_maintained=event.data_maintained,
                 reconnect_attempt=None,
-                details={"source": "official_ibkr_callback"},
+                details={
+                    "source": "official_ibkr_callback",
+                    "event_kind": event.event_kind.value,
+                },
             )
 
     def _persist_budget(self, now: datetime) -> None:

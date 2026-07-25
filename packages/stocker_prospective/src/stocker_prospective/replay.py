@@ -806,7 +806,7 @@ def _record_shadow(
             )
 
 
-def _count(connection: sqlite3.Connection, table: str) -> int:
+def _count(connection: sqlite3.Connection, table: str, *, run_id: str) -> int:
     allowed = {
         "signal_episode",
         "signal_checkpoint",
@@ -817,7 +817,10 @@ def _count(connection: sqlite3.Connection, table: str) -> int:
     }
     if table not in allowed:
         raise ValueError(table)
-    row = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+    row = connection.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
     assert row is not None
     return int(row[0])
 
@@ -1031,12 +1034,36 @@ def run_deterministic_replay(settings: ReplaySettings) -> ReplayResult:
             fixture_id=str(fixture["fixture_id"]),
             run_id=settings.run_id,
             score_label=str(fixture["score_label"]),
-            signal_episode_count=_count(connection, "signal_episode"),
-            signal_checkpoint_count=_count(connection, "signal_checkpoint"),
-            surface_capture_count=_count(connection, "option_surface_capture"),
-            option_quote_count=_count(connection, "option_quote"),
-            shadow_structure_count=_count(connection, "shadow_structure"),
-            shadow_horizon_count=_count(connection, "shadow_horizon_valuation"),
+            signal_episode_count=_count(
+                connection,
+                "signal_episode",
+                run_id=settings.run_id,
+            ),
+            signal_checkpoint_count=_count(
+                connection,
+                "signal_checkpoint",
+                run_id=settings.run_id,
+            ),
+            surface_capture_count=_count(
+                connection,
+                "option_surface_capture",
+                run_id=settings.run_id,
+            ),
+            option_quote_count=_count(
+                connection,
+                "option_quote",
+                run_id=settings.run_id,
+            ),
+            shadow_structure_count=_count(
+                connection,
+                "shadow_structure",
+                run_id=settings.run_id,
+            ),
+            shadow_horizon_count=_count(
+                connection,
+                "shadow_horizon_valuation",
+                run_id=settings.run_id,
+            ),
             capture_horizons_minutes=horizons,
             blockers=REPLAY_BLOCKERS,
         )

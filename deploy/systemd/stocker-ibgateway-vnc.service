@@ -1,0 +1,27 @@
+[Unit]
+Description=Loopback-only VNC access for manual IB Gateway authentication
+Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Requires=stocker-ibgateway-display.service
+After=stocker-ibgateway-display.service
+PartOf=stocker-ibgateway.service
+
+[Service]
+Type=simple
+User=stocker
+Group=stocker
+Environment=HOME=/var/lib/stocker
+ExecStart=/usr/bin/x11vnc -display :71 -auth /var/lib/stocker/ibgateway/.Xauthority -localhost -rfbport 5901 -rfbauth /var/lib/stocker/ibgateway/vnc.pass -forever -shared -noxdamage -repeat
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/stocker /tmp

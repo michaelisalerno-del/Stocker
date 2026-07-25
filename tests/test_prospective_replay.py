@@ -112,6 +112,30 @@ def test_deterministic_replay_is_complete_and_restart_idempotent(tmp_path: Path)
     } <= computation_columns
 
 
+def test_replay_result_counts_only_the_requested_run(tmp_path: Path) -> None:
+    first_settings = replay_settings(tmp_path)
+    second_settings = first_settings.model_copy(
+        update={
+            "run_id": "replay-run-002",
+            "owner_id": "second-test-recorder",
+        }
+    )
+
+    first = run_deterministic_replay(first_settings)
+    ProspectiveRepository(first_settings.database_path).release_recorder_lease(
+        run_id=first_settings.run_id,
+        owner_id=first_settings.owner_id,
+    )
+    second = run_deterministic_replay(second_settings)
+
+    assert first.signal_episode_count == 2
+    assert second.signal_episode_count == 2
+    assert first.shadow_structure_count == 10
+    assert second.shadow_structure_count == 10
+    assert first.shadow_horizon_count == 40
+    assert second.shadow_horizon_count == 40
+
+
 def test_replay_honours_configured_lease_staleness(tmp_path: Path) -> None:
     settings = replay_settings(tmp_path)
     run_deterministic_replay(settings)

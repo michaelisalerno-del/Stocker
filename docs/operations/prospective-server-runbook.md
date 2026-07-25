@@ -19,8 +19,11 @@ orders and does not establish an options edge.
 /var/lib/stocker/daily-context/       signed package store + session pointers
 /var/lib/stocker/ibkr-api/provenance/ immutable official-archive records
 /var/lib/stocker/ibkr-api/status/     read-only release-check result for the app
+/var/lib/stocker/ibgateway/           GUI settings, X authority, and VNC auth
 /var/lib/stocker/secure-transfer/     restricted operator transfer staging
 /var/lib/stocker/backups/             checked immutable SQLite backups
+/opt/ibgateway/releases/<identity>/   versioned official Gateway installations
+/opt/ibgateway/current                atomic pointer to one Gateway installation
 ```
 
 Application rollback changes only `/opt/stocker/current`. It never replaces,
@@ -43,6 +46,7 @@ sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/ibkr-api/provenance
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/ibkr-api/status
 sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/secure-transfer
 sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/backups
+sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/ibgateway
 ```
 
 Do not add `stocker` to privileged groups. Keep the IBKR GUI/session under an
@@ -169,6 +173,121 @@ If the official client is absent, replay remains available and IBKR mode
 returns `blocked_official_ibkr_api_not_installed`.
 If it is present without matching immutable provenance, IBKR mode returns
 `blocked_unverified_official_ibkr_api`.
+
+### 3a. Install the official IB Gateway and private login display
+
+The Python API is only the socket client. A running, authenticated TWS or IB
+Gateway is also required. Use the current official Linux X86_64 installer from
+<https://www.interactivebrokers.com/en/trading/ibgateway-latest.php>. The
+official Latest Gateway does not update itself; install each reviewed download
+into a new versioned directory and atomically change `/opt/ibgateway/current`
+during planned maintenance.
+
+The first server installation on 2026-07-25 used the official Latest URL below.
+Its observed SHA-256 was
+`791abe12594c0d9c8736769fd8ee6368861b0d1a6b70e11275b32dedfec16692`.
+Recheck the official page and record a new hash for any later release rather
+than treating this observed hash as permanent.
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends \
+  xvfb x11vnc openbox xauth dbus-x11
+sudo curl --fail --location --proto '=https' --tlsv1.2 \
+  --output /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh \
+  https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh
+sudo sha256sum \
+  /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh
+sudo chmod 0750 \
+  /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh
+sudo install -d -o root -g stocker -m 0750 /opt/ibgateway/releases
+sudo /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh \
+  -q -dir /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
+sudo chown -R root:stocker \
+  /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
+sudo chmod -R o-rwx \
+  /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
+sudo ln -s /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID \
+  /opt/ibgateway/current.next
+sudo mv -Tf /opt/ibgateway/current.next /opt/ibgateway/current
+```
+
+Create X11 and VNC authentication material. This VNC credential is only for the
+loopback tunnel; it is not an IBKR credential and is never exposed by Stocker:
+
+```bash
+sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/ibgateway
+X_COOKIE="$(mcookie)"
+sudo -u stocker touch /var/lib/stocker/ibgateway/.Xauthority
+sudo -u stocker xauth -f /var/lib/stocker/ibgateway/.Xauthority \
+  add :71 . "$X_COOKIE"
+unset X_COOKIE
+VNC_PASSWORD="$(openssl rand -hex 4)"
+sudo x11vnc -storepasswd "$VNC_PASSWORD" \
+  /var/lib/stocker/ibgateway/vnc.pass
+printf '%s\n' "$VNC_PASSWORD" |
+  sudo tee /etc/stocker/ibgateway-vnc-password >/dev/null
+unset VNC_PASSWORD
+sudo chown stocker:stocker /var/lib/stocker/ibgateway/vnc.pass
+sudo chmod 0600 \
+  /var/lib/stocker/ibgateway/.Xauthority \
+  /var/lib/stocker/ibgateway/vnc.pass \
+  /etc/stocker/ibgateway-vnc-password
+```
+
+Install the private graphical-session units:
+
+```bash
+sudo install -o root -g root -m 0644 \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-display.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-window-manager.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-vnc.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now stocker-ibgateway.service
+```
+
+The display has no TCP listener. VNC listens only on server loopback and
+requires its separate random password. Do not add port 5901 to the public
+firewall.
+
+From the operator workstation, create an SSH tunnel:
+
+```bash
+ssh -N -L 5901:127.0.0.1:5901 operator@SERVER
+```
+
+Open a native VNC client at `127.0.0.1:5901`. Retrieve the VNC password through
+an authenticated SSH session:
+
+```bash
+sudo cat /etc/stocker/ibgateway-vnc-password
+```
+
+Enter the manual IBKR username, password, and 2FA only in the official Gateway
+window. They must never enter the Stocker website, configuration, environment,
+database, commands, or logs. Choose the paper session. In Gateway API settings:
+
+1. Keep **Read-Only API** enabled.
+2. Record the exact socket port; paper Gateway commonly defaults to 4002, but
+   the runtime must use the value actually displayed.
+3. Permit localhost only.
+4. Keep API message logging free of unnecessary market-data payloads.
+5. Configure the supported daily auto-restart window if desired. Plan for
+   manual authentication again after the weekly reset.
+
+Verify that Gateway and VNC remain private:
+
+```bash
+sudo ss -ltnp | grep -E ':(4001|4002|7496|7497|5901)\b'
+sudo systemctl status \
+  stocker-ibgateway.service stocker-ibgateway-vnc.service
+```
+
+The expected listeners are `127.0.0.1:<configured API port>` and
+`127.0.0.1:5901`. Stop the VNC helper between maintenance sessions if desired;
+the Gateway itself and Stocker recorder do not depend on VNC after login.
 
 ## 4. Copy a versioned application release
 

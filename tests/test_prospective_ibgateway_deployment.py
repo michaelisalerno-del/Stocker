@@ -57,8 +57,8 @@ def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
     unit = _unit("stocker-ibgateway-vnc.service")
 
     assert "-localhost" in unit
-    assert "-noipv6" in unit
     assert "-rfbport 5901" in unit
+    assert "-rfbportv6 5901" in unit
     assert "-rfbauth /var/lib/ibgateway/vnc.pass" in unit
     assert "ConditionPathExists=/var/lib/ibgateway/vnc.pass" in unit
     assert "StartLimitBurst=" in unit

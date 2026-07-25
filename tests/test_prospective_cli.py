@@ -271,7 +271,7 @@ def test_transient_ibkr_failure_uses_restartable_exit_and_releases_lease(
     monkeypatch.setattr(
         cli_module,
         "require_ibkr_socket_loopback_only",
-        lambda _port: ("127.0.0.1",),
+        lambda _host, _port: ("127.0.0.1",),
     )
     monkeypatch.setattr(
         ibkr_official_module,

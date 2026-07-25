@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from datetime import datetime
 from pathlib import Path
@@ -110,8 +111,12 @@ class IBKRConfig(BaseModel):
 
     @model_validator(mode="after")
     def _headroom_is_bounded(self) -> IBKRConfig:
-        if self.host in {"0.0.0.0", "::"}:
-            raise ValueError("IBKR host may not bind or target all interfaces")
+        try:
+            host_address = ipaddress.ip_address(self.host)
+        except ValueError as exc:
+            raise ValueError("IBKR host must be a literal loopback address") from exc
+        if not host_address.is_loopback:
+            raise ValueError("IBKR host must be a literal loopback address")
         if self.reserved_line_headroom >= self.market_data_line_budget:
             raise ValueError("reserved line headroom must be below the line budget")
         if self.request_rate_per_second > self.market_data_line_budget / 2:

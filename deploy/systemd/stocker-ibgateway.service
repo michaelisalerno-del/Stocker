@@ -6,6 +6,7 @@ Requires=stocker-ibgateway-display.service
 After=network-online.target stocker-ibgateway-display.service stocker-ibgateway-window-manager.service
 ConditionPathExists=/opt/ibgateway/current/ibgateway
 ConditionPathExists=/var/lib/ibgateway/.Xauthority
+ConditionPathExists=/usr/local/libexec/stocker-verify-ibgateway
 StartLimitIntervalSec=300
 StartLimitBurst=3
 
@@ -17,7 +18,8 @@ WorkingDirectory=/var/lib/ibgateway
 Environment=HOME=/var/lib/ibgateway
 Environment=DISPLAY=:71
 Environment=XAUTHORITY=/var/lib/ibgateway/.Xauthority
-ExecCondition=/usr/bin/test -x /opt/ibgateway/current/ibgateway
+ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway
+ExecCondition=/usr/local/libexec/stocker-verify-ibgateway
 ExecStart=/opt/ibgateway/current/ibgateway
 Restart=on-failure
 RestartSec=20

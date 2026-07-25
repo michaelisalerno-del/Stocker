@@ -88,6 +88,13 @@ def test_runtime_configuration_fails_closed_and_defaults_to_loopback(tmp_path: P
                 "web": {**config.web.model_dump(), "host": "0.0.0.0"},
             }
         )
+    with pytest.raises(ValueError, match="IBKR host must be a literal loopback address"):
+        ProspectiveConfig.model_validate(
+            {
+                **config.model_dump(),
+                "ibkr": {**config.ibkr.model_dump(), "host": "10.0.0.5"},
+            }
+        )
     with pytest.raises(ValueError, match="heartbeat"):
         _config(
             tmp_path,

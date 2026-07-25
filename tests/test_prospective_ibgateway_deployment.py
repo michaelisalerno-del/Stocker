@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import os
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[1]
 SYSTEMD = ROOT / "deploy/systemd"
+VERIFY_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-installation.sh"
 RUNBOOK = ROOT / "docs/operations/prospective-server-runbook.md"
 
 
@@ -36,7 +43,8 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "HOME=/var/lib/ibgateway" in unit
     assert "WorkingDirectory=/var/lib/ibgateway" in unit
     assert "ConditionPathExists=/opt/ibgateway/current/ibgateway" in unit
-    assert "ExecCondition=/usr/bin/test -x /opt/ibgateway/current/ibgateway" in unit
+    assert "ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway" in unit
+    assert "ExecCondition=/usr/local/libexec/stocker-verify-ibgateway" in unit
     assert "ReadWritePaths=/var/lib/ibgateway /tmp" in unit
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
@@ -65,6 +73,10 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
     assert "sha256sum --check" in runbook
+    assert 'sudo test ! -e "$INSTALLER"' in runbook
+    assert 'sudo test ! -e "$PROVENANCE"' in runbook
+    assert 'sudo ln "$PROVENANCE_TMP" "$PROVENANCE"' in runbook
+    assert "verify-ibgateway-installation.sh" in runbook
     assert "useradd --system --home-dir /var/lib/ibgateway" in runbook
     assert 'x11vnc -storepasswd "$VNC_PASSWORD"' not in runbook
     assert "ReadWritePaths=/var/lib/stocker" not in "".join(
@@ -76,3 +88,71 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
             "stocker-ibgateway.service",
         )
     )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="verifier targets Linux systemd hosts")
+def test_gateway_integrity_verifier_fails_after_installed_file_mutation(
+    tmp_path: Path,
+) -> None:
+    release_root = tmp_path / "releases"
+    installer_root = tmp_path / "installers"
+    target = release_root / "10481e-test"
+    target.mkdir(parents=True)
+    installer_root.mkdir()
+    launcher = target / "ibgateway"
+    launcher.write_bytes(b"verified launcher\n")
+    launcher.chmod(0o755)
+    installer = installer_root / "ibgateway.sh"
+    installer.write_bytes(b"verified installer\n")
+    identity = target.name
+    manifest = installer_root / f"{identity}.manifest.sha256"
+    launcher_sha = hashlib.sha256(launcher.read_bytes()).hexdigest()
+    manifest.write_text(f"{launcher_sha}  ./ibgateway\n", encoding="ascii")
+    provenance = installer_root / f"{identity}.runtime-provenance"
+    provenance.write_text(
+        "\n".join(
+            (
+                "manifest_version=1",
+                "source_url=https://download2.interactivebrokers.com/installers/"
+                "ibgateway/latest-standalone/"
+                "ibgateway-latest-standalone-linux-x64.sh",
+                f"installer_path={installer}",
+                f"installer_sha256={hashlib.sha256(installer.read_bytes()).hexdigest()}",
+                f"installed_path={target}",
+                f"file_manifest_path={manifest}",
+                f"file_manifest_sha256={hashlib.sha256(manifest.read_bytes()).hexdigest()}",
+                "recorded_at_utc=2026-07-25T00:00:00Z",
+            )
+        )
+        + "\n",
+        encoding="ascii",
+    )
+    active = tmp_path / "current"
+    active.symlink_to(target)
+    environment = {
+        **os.environ,
+        "IBGATEWAY_ACTIVE_LINK": str(active),
+        "IBGATEWAY_INSTALLER_ROOT": str(installer_root),
+        "IBGATEWAY_RELEASE_ROOT": str(release_root),
+        "IBGATEWAY_EXPECTED_OWNER": target.owner(),
+    }
+
+    verified = subprocess.run(
+        ["/bin/sh", str(VERIFY_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert verified.returncode == 0, verified.stderr
+
+    launcher.write_bytes(b"mutated launcher\n")
+    rejected = subprocess.run(
+        ["/bin/sh", str(VERIFY_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert rejected.returncode != 0
+    assert "ibgateway_integrity:installed_file_hash_mismatch" in rejected.stderr

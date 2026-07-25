@@ -200,38 +200,84 @@ sudo install -d -o root -g root -m 0700 /etc/ibgateway
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
   xvfb x11vnc openbox xauth dbus-x11
+set -o errexit -o nounset -o pipefail
+IDENTITY=REPLACE_WITH_VERSIONED_ID
 INSTALLER=/var/lib/ibgateway/installers/ibgateway-20260725-latest-linux-x64.sh
+INSTALLER_PART="${INSTALLER}.part"
 EXPECTED_SHA=791abe12594c0d9c8736769fd8ee6368861b0d1a6b70e11275b32dedfec16692
+TARGET="/opt/ibgateway/releases/$IDENTITY"
+MANIFEST="/var/lib/ibgateway/installers/$IDENTITY.manifest.sha256"
+PROVENANCE="/var/lib/ibgateway/installers/$IDENTITY.runtime-provenance"
+sudo test ! -e "$INSTALLER"
+sudo test ! -e "$INSTALLER_PART"
+sudo test ! -e "$TARGET"
+sudo test ! -e "$MANIFEST"
+sudo test ! -e "$PROVENANCE"
 sudo curl --fail --location --proto '=https' --tlsv1.2 \
-  --output "$INSTALLER" \
+  --output "$INSTALLER_PART" \
   https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh
-printf '%s  %s\n' "$EXPECTED_SHA" "$INSTALLER" |
+printf '%s  %s\n' "$EXPECTED_SHA" "$INSTALLER_PART" |
   sudo sha256sum --check
+sudo mv "$INSTALLER_PART" "$INSTALLER"
 sudo chown root:ibgateway "$INSTALLER"
 sudo chmod 0750 "$INSTALLER"
-TARGET=/opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
 sudo install -d -o root -g ibgateway -m 0750 /opt/ibgateway/releases
 sudo install -d -o ibgateway -g ibgateway -m 0750 "$TARGET"
 cd /var/lib/ibgateway
 sudo -H -u ibgateway "$INSTALLER" -q -dir "$TARGET"
 sudo chown -R root:ibgateway "$TARGET"
 sudo chmod -R go-w "$TARGET"
+
+MANIFEST_TMP="$(
+  sudo mktemp /var/lib/ibgateway/installers/.manifest.XXXXXX
+)"
+sudo sh -c \
+  'cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' \
+  sh "$TARGET" |
+  sudo tee "$MANIFEST_TMP" >/dev/null
+sudo chown root:ibgateway "$MANIFEST_TMP"
+sudo chmod 0640 "$MANIFEST_TMP"
+sudo ln "$MANIFEST_TMP" "$MANIFEST"
+sudo rm -- "$MANIFEST_TMP"
+MANIFEST_SHA="$(sudo sha256sum "$MANIFEST" | awk '{print $1}')"
+
+PROVENANCE_TMP="$(
+  sudo mktemp /var/lib/ibgateway/installers/.provenance.XXXXXX
+)"
 {
+  printf 'manifest_version=1\n'
   printf 'source_url=%s\n' \
     'https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh'
-  printf 'sha256=%s\n' "$EXPECTED_SHA"
+  printf 'installer_path=%s\n' "$INSTALLER"
+  printf 'installer_sha256=%s\n' "$EXPECTED_SHA"
   printf 'installed_path=%s\n' "$TARGET"
+  printf 'file_manifest_path=%s\n' "$MANIFEST"
+  printf 'file_manifest_sha256=%s\n' "$MANIFEST_SHA"
   printf 'recorded_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-} | sudo tee \
-  /var/lib/ibgateway/installers/REPLACE_WITH_VERSIONED_ID.provenance >/dev/null
-sudo chown root:ibgateway \
-  /var/lib/ibgateway/installers/REPLACE_WITH_VERSIONED_ID.provenance
-sudo chmod 0640 \
-  /var/lib/ibgateway/installers/REPLACE_WITH_VERSIONED_ID.provenance
-sudo ln -s /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID \
-  /opt/ibgateway/current.next
+} | sudo tee "$PROVENANCE_TMP" >/dev/null
+sudo chown root:ibgateway "$PROVENANCE_TMP"
+sudo chmod 0640 "$PROVENANCE_TMP"
+sudo ln "$PROVENANCE_TMP" "$PROVENANCE"
+sudo rm -- "$PROVENANCE_TMP"
+
+sudo install -d -o root -g root -m 0755 /usr/local/libexec
+sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/verify-ibgateway-installation.sh \
+  /usr/local/libexec/stocker-verify-ibgateway
+sudo test ! -e /opt/ibgateway/current.next
+sudo test ! -L /opt/ibgateway/current.next
+sudo ln -s "$TARGET" /opt/ibgateway/current.next
+sudo -H -u ibgateway env \
+  IBGATEWAY_ACTIVE_LINK=/opt/ibgateway/current.next \
+  /usr/local/libexec/stocker-verify-ibgateway
 sudo mv -Tf /opt/ibgateway/current.next /opt/ibgateway/current
 ```
+
+The archive, file manifest, and provenance names are create-only. Reusing an
+identity must stop at a `test` or hard-link failure; never overwrite one.
+Every Gateway start rechecks the archived installer, the manifest, ownership,
+write permissions, and every installed file. An integrity failure makes the
+systemd `ExecCondition` skip startup instead of entering a restart loop.
 
 Create X11 and VNC authentication material. This VNC credential is only for the
 loopback tunnel; it is not an IBKR credential and is never exposed by Stocker:

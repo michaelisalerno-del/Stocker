@@ -11,6 +11,7 @@ import importlib.util
 import ipaddress
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -55,12 +56,25 @@ def _decode_proc_net_address(value: str, *, ipv6: bool) -> str:
 
 
 def require_ibkr_socket_loopback_only(
+    host: str,
     port: int,
     *,
     proc_net_root: Path = Path("/proc/net"),
 ) -> tuple[str, ...]:
     """Fail closed unless the exact configured Linux listener is loopback-only."""
 
+    try:
+        destination = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise RuntimeSafetyError(
+            "blocked_unsafe_runtime_configuration: "
+            f"ibkr host must be a literal loopback address: {host}"
+        ) from exc
+    if not destination.is_loopback:
+        raise RuntimeSafetyError(
+            "blocked_unsafe_runtime_configuration: "
+            f"ibkr host must be a literal loopback address: {host}"
+        )
     listeners: list[str] = []
     for filename, ipv6 in (("tcp", False), ("tcp6", True)):
         table = proc_net_root / filename
@@ -105,6 +119,12 @@ class IBKRConnectionConfig:
     def __post_init__(self) -> None:
         if not self.host:
             raise ValueError("IBKR host is required")
+        try:
+            host_address = ipaddress.ip_address(self.host)
+        except ValueError as exc:
+            raise ValueError("IBKR host must be a literal loopback address") from exc
+        if not host_address.is_loopback:
+            raise ValueError("IBKR host must be a literal loopback address")
         if not 1 <= self.port <= 65535:
             raise ValueError("IBKR port must be explicitly configured")
         if self.client_id < 0:
@@ -238,6 +258,9 @@ class IBKRMarketDataAdapter:
         *,
         config: IBKRConnectionConfig,
         budget: MarketDataBudget,
+        socket_preflight: Callable[[str, int], tuple[str, ...]] = (
+            require_ibkr_socket_loopback_only
+        ),
     ) -> None:
         self.config = config
         self.budget = budget
@@ -258,6 +281,7 @@ class IBKRMarketDataAdapter:
         self._client: Any | None = None
         self._stopping = threading.Event()
         self._connected = threading.Event()
+        self._socket_preflight = socket_preflight
 
     @property
     def dependency_blocker(self) -> str | None:
@@ -286,6 +310,7 @@ class IBKRMarketDataAdapter:
             raise RuntimeError("official IBKR callback client has not been attached")
         if self._loop_thread is not None and self._loop_thread.is_alive():
             return
+        self._socket_preflight(self.config.host, self.config.port)
         self.connection.connecting()
         self._connected.clear()
         connection_result = self._client.connect(
@@ -335,6 +360,7 @@ class IBKRMarketDataAdapter:
 
         if self._client is None:
             raise RuntimeError("blocked_ibkr_connection")
+        self._socket_preflight(self.config.host, self.config.port)
         self._connected.clear()
         try:
             self._client.disconnect()

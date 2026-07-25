@@ -68,11 +68,15 @@ privileged group. Its only group is the non-secret `stocker-readers` group.
 
 ### 1a. Migrate an existing installation to the reader boundary
 
-For an existing single-`stocker` installation, stop both application services
-before changing ownership. These commands are idempotent and do not replace
-the database, bundles, or evidence records:
+For an existing single-`stocker` installation, first stage the new versioned
+release through Sections 2–4, but stop before changing `/opt/stocker/current`.
+Then stop both application services and install the migration helper from that
+staged release. These commands are idempotent and do not replace the database,
+bundles, or evidence records:
 
 ```bash
+STAGED_RELEASE=/opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
+sudo test -x "$STAGED_RELEASE/deploy/scripts/prepare-web-sqlite-boundary.py"
 sudo systemctl stop stocker-web.service stocker-recorder.service
 getent group stocker-readers >/dev/null ||
   sudo groupadd --system stocker-readers
@@ -84,8 +88,12 @@ else
     --gid stocker-readers --shell /usr/sbin/nologin stocker-web
 fi
 
-sudo chown root:stocker-readers /etc/stocker /var/lib/stocker
-sudo chmod 0750 /etc/stocker /var/lib/stocker
+sudo install -o root -g root -m 0755 \
+  "$STAGED_RELEASE/deploy/scripts/prepare-web-sqlite-boundary.py" \
+  /usr/local/libexec/stocker-prepare-web-sqlite-boundary
+
+sudo chown root:stocker-readers /etc/stocker
+sudo chmod 0750 /etc/stocker
 sudo chown root:stocker-readers /etc/stocker/prospective.yaml
 sudo chown root:stocker /etc/stocker/stocker.env
 sudo chown root:stocker-readers /etc/stocker/stocker-web.env
@@ -94,26 +102,8 @@ sudo chmod 0640 \
   /etc/stocker/stocker.env \
   /etc/stocker/stocker-web.env
 
-sudo chown stocker:stocker-readers \
-  /var/lib/stocker/prospective \
-  /var/lib/stocker/bundles
-sudo chmod 2750 \
-  /var/lib/stocker/prospective \
-  /var/lib/stocker/bundles
-for path in \
-  /var/lib/stocker/prospective/prospective.sqlite3 \
-  /var/lib/stocker/prospective/prospective.sqlite3-wal
-do
-  if sudo test -e "$path"; then
-    sudo chown stocker:stocker-readers "$path"
-    sudo chmod 0640 "$path"
-  fi
-done
-path=/var/lib/stocker/prospective/prospective.sqlite3-shm
-if sudo test -e "$path"; then
-  sudo chown stocker:stocker-readers "$path"
-  sudo chmod 0660 "$path"
-fi
+sudo /usr/local/libexec/stocker-prepare-web-sqlite-boundary \
+  --migrate-existing
 
 sudo chown root:stocker-readers \
   /var/lib/stocker/ibkr-api \
@@ -129,8 +119,6 @@ sudo chmod 2750 /var/lib/stocker/ibkr-api/status
 sudo find /var/lib/stocker/ibkr-api/status -xdev -type f \
   -exec chown stocker:stocker-readers {} + \
   -exec chmod 0640 {} +
-sudo chgrp -R stocker-readers /var/lib/stocker/bundles
-sudo chmod -R g+rX,o-rwx /var/lib/stocker/bundles
 
 sudo -u stocker-web -g stocker-readers test ! -r /etc/stocker/stocker.env
 sudo -u stocker-web -g stocker-readers test ! -w \
@@ -139,9 +127,10 @@ sudo -u stocker-web -g stocker-readers test ! -w \
 
 Do not recursively change `/var/lib/stocker/secure-transfer`,
 `/var/lib/stocker/daily-context`, or `/var/lib/stocker/backups`; those remain
-recorder/operator-private. Do not invoke a helper left by an older release in
-this migration step. Section 10 installs the new descriptor-relative helper
-from the staged release before running it.
+recorder/operator-private. The migration helper opens the recorder-writable
+persistent root, bundle root, database directory, database, WAL, and SHM by
+descriptor with `O_NOFOLLOW`; it refuses unexpected owners, file types, links,
+or groups before applying ownership and mode changes.
 
 ## 2. Install Python and `uv`
 

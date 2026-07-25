@@ -14,6 +14,7 @@ import stocker_prospective.ibkr_official as ibkr_official_module
 from stocker_prospective.bundle import BundleError
 from stocker_prospective.cli import app
 from stocker_prospective.config import load_prospective_config
+from stocker_prospective.database import ProspectiveRepository
 from stocker_prospective.ibkr_api import OfficialIBKRApiProvenance, OfficialIBKRApiRelease
 
 ROOT = Path(__file__).parents[1]
@@ -294,6 +295,37 @@ def test_transient_ibkr_failure_uses_restartable_exit_and_releases_lease(
     assert result.exit_code == 75
     assert "blocked_ibkr_connection" in result.stderr
     assert adapter.stopped is True
+    with sqlite3.connect(tmp_path / "shared/data/prospective.sqlite3") as connection:
+        assert connection.execute("SELECT COUNT(*) FROM recorder_lease").fetchone() == (0,)
+
+
+def test_replay_anchor_failure_releases_the_acquired_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_replay_config(tmp_path)
+    release = tmp_path / "release"
+    release.mkdir()
+
+    def fail_anchor(_repository: object) -> None:
+        raise OSError("synthetic anchor failure")
+
+    monkeypatch.setattr(ProspectiveRepository, "open_anchor", fail_anchor)
+    result = RUNNER.invoke(
+        app,
+        [
+            "recorder",
+            "run",
+            "--config",
+            str(config),
+            "--release-directory",
+            str(release),
+            "--once",
+        ],
+    )
+
+    assert result.exit_code == 75
+    assert "synthetic anchor failure" in result.stderr
     with sqlite3.connect(tmp_path / "shared/data/prospective.sqlite3") as connection:
         assert connection.execute("SELECT COUNT(*) FROM recorder_lease").fetchone() == (0,)
 

@@ -14,6 +14,7 @@ from typing import NoReturn
 PERSISTENT_ROOT = "/var/lib/stocker"
 DATABASE_DIRECTORY = "/var/lib/stocker/prospective"
 DATABASE_DIRECTORY_NAME = "prospective"
+BUNDLE_DIRECTORY_NAME = "bundles"
 DATABASE_NAME = "prospective.sqlite3"
 WAL_NAME = f"{DATABASE_NAME}-wal"
 SHM_NAME = f"{DATABASE_NAME}-shm"
@@ -34,7 +35,7 @@ def require_regular_file(
     descriptor: int,
     *,
     owner_uid: int,
-    group_gid: int,
+    allowed_group_gids: frozenset[int],
     label: str,
 ) -> None:
     metadata = os.fstat(descriptor)
@@ -42,8 +43,39 @@ def require_regular_file(
         fail(f"{label}_not_regular")
     if metadata.st_nlink != 1:
         fail(f"{label}_unexpected_link_count")
-    if metadata.st_uid != owner_uid or metadata.st_gid != group_gid:
+    if metadata.st_uid != owner_uid or metadata.st_gid not in allowed_group_gids:
         fail(f"{label}_unexpected_owner")
+
+
+def require_directory(
+    descriptor: int,
+    *,
+    owner_uid: int,
+    allowed_group_gids: frozenset[int],
+    label: str,
+) -> None:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISDIR(metadata.st_mode):
+        fail(f"{label}_not_directory")
+    if metadata.st_uid != owner_uid or metadata.st_gid not in allowed_group_gids:
+        fail(f"{label}_unexpected_owner")
+
+
+def open_directory(
+    parent_descriptor: int,
+    name: str,
+    *,
+    directory_flags: int,
+    label: str,
+) -> int:
+    try:
+        return os.open(name, directory_flags, dir_fd=parent_descriptor)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            fail(f"{label}_symlink")
+        if exc.errno == errno.ENOENT:
+            fail(f"{label}_missing")
+        fail(f"{label}_open_failed")
 
 
 def open_existing(
@@ -72,6 +104,7 @@ def open_or_create_auxiliary(
     mode: int,
     owner_uid: int,
     group_gid: int,
+    allowed_group_gids: frozenset[int],
     label: str,
 ) -> int:
     flags = os.O_CLOEXEC | os.O_NOFOLLOW | os.O_RDWR
@@ -81,9 +114,11 @@ def open_or_create_auxiliary(
             require_regular_file(
                 descriptor,
                 owner_uid=owner_uid,
-                group_gid=group_gid,
+                allowed_group_gids=allowed_group_gids,
                 label=label,
             )
+            if os.fstat(descriptor).st_gid != group_gid:
+                os.fchown(descriptor, owner_uid, group_gid)
             return descriptor
         except FileNotFoundError:
             try:
@@ -105,11 +140,13 @@ def open_or_create_auxiliary(
             fail(f"{label}_open_failed")
 
 
-def main() -> None:
+def main(*, migrate_existing: bool = False) -> None:
     if os.geteuid() != 0:
         fail("root_required")
     try:
-        recorder_uid = pwd.getpwnam(RECORDER_USER).pw_uid
+        recorder_identity = pwd.getpwnam(RECORDER_USER)
+        recorder_uid = recorder_identity.pw_uid
+        recorder_gid = recorder_identity.pw_gid
         web_uid = pwd.getpwnam(WEB_USER).pw_uid
         reader_gid = grp.getgrnam(READER_GROUP).gr_gid
     except KeyError:
@@ -124,25 +161,56 @@ def main() -> None:
         fail("persistent_root_open_failed")
     try:
         root_metadata = os.fstat(root_descriptor)
-        if root_metadata.st_uid != 0 or root_metadata.st_gid != reader_gid:
-            fail("persistent_root_unexpected_owner")
-        if stat.S_IMODE(root_metadata.st_mode) != 0o750:
-            fail("persistent_root_unexpected_mode")
+        if migrate_existing:
+            if root_metadata.st_uid not in {0, recorder_uid}:
+                fail("persistent_root_unexpected_owner")
+            if root_metadata.st_gid not in {recorder_gid, reader_gid}:
+                fail("persistent_root_unexpected_owner")
+            os.fchown(root_descriptor, 0, reader_gid)
+            os.fchmod(root_descriptor, 0o750)
+        else:
+            if root_metadata.st_uid != 0 or root_metadata.st_gid != reader_gid:
+                fail("persistent_root_unexpected_owner")
+            if stat.S_IMODE(root_metadata.st_mode) != 0o750:
+                fail("persistent_root_unexpected_mode")
 
-        try:
-            directory_descriptor = os.open(
-                DATABASE_DIRECTORY_NAME,
-                directory_flags,
-                dir_fd=root_descriptor,
+        allowed_group_gids = (
+            frozenset({recorder_gid, reader_gid}) if migrate_existing else frozenset({reader_gid})
+        )
+        if migrate_existing:
+            bundle_descriptor = open_directory(
+                root_descriptor,
+                BUNDLE_DIRECTORY_NAME,
+                directory_flags=directory_flags,
+                label="bundle_directory",
             )
-        except OSError as exc:
-            if exc.errno == errno.ELOOP:
-                fail("database_directory_symlink")
-            fail("database_directory_open_failed")
+            try:
+                require_directory(
+                    bundle_descriptor,
+                    owner_uid=recorder_uid,
+                    allowed_group_gids=allowed_group_gids,
+                    label="bundle_directory",
+                )
+                os.fchown(bundle_descriptor, recorder_uid, reader_gid)
+                os.fchmod(bundle_descriptor, 0o2750)
+            finally:
+                os.close(bundle_descriptor)
+
+        directory_descriptor = open_directory(
+            root_descriptor,
+            DATABASE_DIRECTORY_NAME,
+            directory_flags=directory_flags,
+            label="database_directory",
+        )
         try:
             directory_metadata = os.fstat(directory_descriptor)
-            if directory_metadata.st_uid != recorder_uid or directory_metadata.st_gid != reader_gid:
+            if (
+                directory_metadata.st_uid != recorder_uid
+                or directory_metadata.st_gid not in allowed_group_gids
+            ):
                 fail("database_directory_unexpected_owner")
+            if directory_metadata.st_gid != reader_gid:
+                os.fchown(directory_descriptor, recorder_uid, reader_gid)
             os.fchmod(directory_descriptor, 0o2750)
 
             database_descriptor = open_existing(
@@ -155,9 +223,11 @@ def main() -> None:
                 require_regular_file(
                     database_descriptor,
                     owner_uid=recorder_uid,
-                    group_gid=reader_gid,
+                    allowed_group_gids=allowed_group_gids,
                     label="database",
                 )
+                if os.fstat(database_descriptor).st_gid != reader_gid:
+                    os.fchown(database_descriptor, recorder_uid, reader_gid)
                 os.fchmod(database_descriptor, 0o640)
             finally:
                 os.close(database_descriptor)
@@ -168,6 +238,7 @@ def main() -> None:
                 mode=0o640,
                 owner_uid=recorder_uid,
                 group_gid=reader_gid,
+                allowed_group_gids=allowed_group_gids,
                 label="wal",
             )
             try:
@@ -181,6 +252,7 @@ def main() -> None:
                 mode=0o660,
                 owner_uid=recorder_uid,
                 group_gid=reader_gid,
+                allowed_group_gids=allowed_group_gids,
                 label="shm",
             )
             try:
@@ -196,8 +268,15 @@ def main() -> None:
 
 
 def run() -> None:
+    arguments = sys.argv[1:]
+    if arguments == []:
+        migrate_existing = False
+    elif arguments == ["--migrate-existing"]:
+        migrate_existing = True
+    else:
+        fail("unsupported_arguments")
     try:
-        main()
+        main(migrate_existing=migrate_existing)
     except OSError:
         fail("filesystem_operation_failed")
 

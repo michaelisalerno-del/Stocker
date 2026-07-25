@@ -5,7 +5,7 @@ import os
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -223,6 +223,7 @@ def test_web_boundary_refuses_auxiliary_symlinks(tmp_path: Path) -> None:
                 mode=0o640,
                 owner_uid=os.getuid(),
                 group_gid=os.getgid(),
+                allowed_group_gids=frozenset({os.getgid()}),
                 label="wal",
             )
     finally:
@@ -237,14 +238,80 @@ def test_web_boundary_maps_filesystem_errors_to_non_restart_status(
 ) -> None:
     boundary = load_web_boundary_module()
 
-    def raise_os_error() -> None:
+    def raise_os_error(*, migrate_existing: bool) -> None:
+        assert migrate_existing is False
         raise OSError("synthetic boundary failure")
 
     monkeypatch.setattr(boundary, "main", raise_os_error)
+    monkeypatch.setattr(boundary.sys, "argv", ["stocker-prepare-web-sqlite-boundary"])
     with pytest.raises(SystemExit) as blocked:
         boundary.run()
 
     assert blocked.value.code == 78
+
+
+def test_web_boundary_migration_mode_is_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boundary = load_web_boundary_module()
+    requested: list[bool] = []
+
+    def capture_mode(*, migrate_existing: bool) -> None:
+        requested.append(migrate_existing)
+
+    monkeypatch.setattr(boundary, "main", capture_mode)
+    monkeypatch.setattr(
+        boundary.sys,
+        "argv",
+        ["stocker-prepare-web-sqlite-boundary", "--migrate-existing"],
+    )
+    boundary.run()
+
+    assert requested == [True]
+
+
+def test_web_boundary_migrates_legacy_paths_without_path_mutations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boundary = load_web_boundary_module()
+    persistent_root = tmp_path / "persistent"
+    database_directory = persistent_root / "prospective"
+    bundle_directory = persistent_root / "bundles"
+    database_directory.mkdir(parents=True)
+    bundle_directory.mkdir()
+    database = database_directory / "prospective.sqlite3"
+    database.touch()
+    fchown_calls: list[tuple[int, int, int]] = []
+
+    monkeypatch.setattr(boundary, "PERSISTENT_ROOT", str(persistent_root))
+    monkeypatch.setattr(boundary.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        boundary.pwd,
+        "getpwnam",
+        lambda name: SimpleNamespace(
+            pw_uid=os.getuid() if name == "stocker" else os.getuid() + 1,
+            pw_gid=os.getgid(),
+        ),
+    )
+    monkeypatch.setattr(
+        boundary.grp,
+        "getgrnam",
+        lambda _name: SimpleNamespace(gr_gid=os.getgid()),
+    )
+    monkeypatch.setattr(
+        boundary.os,
+        "fchown",
+        lambda descriptor, uid, gid: fchown_calls.append((descriptor, uid, gid)),
+    )
+
+    boundary.main(migrate_existing=True)
+
+    assert fchown_calls
+    assert database.stat().st_mode & 0o777 == 0o640
+    assert Path(f"{database}-wal").stat().st_mode & 0o777 == 0o640
+    assert Path(f"{database}-shm").stat().st_mode & 0o777 == 0o660
+    assert bundle_directory.stat().st_mode & 0o7777 == 0o2750
 
 
 def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> None:

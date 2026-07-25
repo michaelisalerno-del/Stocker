@@ -541,8 +541,8 @@ def recorder_run(
             )
             _emit(result)
             repository = ProspectiveRepository(config.paths.database)
-            repository.open_anchor()
             lease_owned = True
+            repository.open_anchor()
             if once:
                 repository.release_recorder_lease(
                     run_id=config.runtime.run_id,

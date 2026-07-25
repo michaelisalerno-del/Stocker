@@ -541,6 +541,7 @@ def recorder_run(
             )
             _emit(result)
             repository = ProspectiveRepository(config.paths.database)
+            repository.open_anchor()
             lease_owned = True
             if once:
                 repository.release_recorder_lease(
@@ -556,6 +557,7 @@ def recorder_run(
             deployment_identity = _validate_ibkr_scoring_inputs(config)
             repository = ProspectiveRepository(config.paths.database)
             repository.migrate()
+            repository.open_anchor()
             repository.acquire_recorder_lease(
                 run_id=config.runtime.run_id,
                 owner_id=owner_id,
@@ -637,6 +639,8 @@ def recorder_run(
                 run_id=config.runtime.run_id,
                 owner_id=owner_id,
             )
+        if repository is not None:
+            repository.close_anchor()
 
 
 @web_app.command("run")

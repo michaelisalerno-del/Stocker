@@ -66,6 +66,82 @@ independently managed desktop login if required by the host. Do not make
 `stocker-web` the database owner and do not add it to `stocker` or any
 privileged group. Its only group is the non-secret `stocker-readers` group.
 
+### 1a. Migrate an existing installation to the reader boundary
+
+For an existing single-`stocker` installation, stop both application services
+before changing ownership. These commands are idempotent and do not replace
+the database, bundles, or evidence records:
+
+```bash
+sudo systemctl stop stocker-web.service stocker-recorder.service
+getent group stocker-readers >/dev/null ||
+  sudo groupadd --system stocker-readers
+sudo usermod --append --groups stocker-readers stocker
+if id -u stocker-web >/dev/null 2>&1; then
+  sudo usermod --gid stocker-readers stocker-web
+else
+  sudo useradd --system --home-dir /nonexistent --no-create-home \
+    --gid stocker-readers --shell /usr/sbin/nologin stocker-web
+fi
+
+sudo chown root:stocker-readers /etc/stocker /var/lib/stocker
+sudo chmod 0750 /etc/stocker /var/lib/stocker
+sudo chown root:stocker-readers /etc/stocker/prospective.yaml
+sudo chown root:stocker /etc/stocker/stocker.env
+sudo chown root:stocker-readers /etc/stocker/stocker-web.env
+sudo chmod 0640 \
+  /etc/stocker/prospective.yaml \
+  /etc/stocker/stocker.env \
+  /etc/stocker/stocker-web.env
+
+sudo chown stocker:stocker-readers \
+  /var/lib/stocker/prospective \
+  /var/lib/stocker/bundles
+sudo chmod 2750 \
+  /var/lib/stocker/prospective \
+  /var/lib/stocker/bundles
+for path in \
+  /var/lib/stocker/prospective/prospective.sqlite3 \
+  /var/lib/stocker/prospective/prospective.sqlite3-wal
+do
+  if sudo test -e "$path"; then
+    sudo chown stocker:stocker-readers "$path"
+    sudo chmod 0640 "$path"
+  fi
+done
+path=/var/lib/stocker/prospective/prospective.sqlite3-shm
+if sudo test -e "$path"; then
+  sudo chown stocker:stocker-readers "$path"
+  sudo chmod 0660 "$path"
+fi
+
+sudo chown root:stocker-readers \
+  /var/lib/stocker/ibkr-api \
+  /var/lib/stocker/ibkr-api/provenance
+sudo chmod 0750 \
+  /var/lib/stocker/ibkr-api \
+  /var/lib/stocker/ibkr-api/provenance
+sudo find /var/lib/stocker/ibkr-api/provenance -xdev -type f \
+  -exec chown root:stocker-readers {} + \
+  -exec chmod 0640 {} +
+sudo chown stocker:stocker-readers /var/lib/stocker/ibkr-api/status
+sudo chmod 2750 /var/lib/stocker/ibkr-api/status
+sudo find /var/lib/stocker/ibkr-api/status -xdev -type f \
+  -exec chown stocker:stocker-readers {} + \
+  -exec chmod 0640 {} +
+sudo chgrp -R stocker-readers /var/lib/stocker/bundles
+sudo chmod -R g+rX,o-rwx /var/lib/stocker/bundles
+
+sudo /usr/local/libexec/stocker-prepare-web-sqlite-boundary
+sudo -u stocker-web -g stocker-readers test ! -r /etc/stocker/stocker.env
+sudo -u stocker-web -g stocker-readers test ! -w \
+  /var/lib/stocker/prospective/prospective.sqlite3
+```
+
+Do not recursively change `/var/lib/stocker/secure-transfer`,
+`/var/lib/stocker/daily-context`, or `/var/lib/stocker/backups`; those remain
+recorder/operator-private.
+
 ## 2. Install Python and `uv`
 
 Install the repository's required CPython 3.12 and `uv` using the server's
@@ -752,11 +828,16 @@ environment stays `root:stocker 0640`, so the reader group cannot open it.
 Before web startup, a root helper uses descriptor-relative `O_NOFOLLOW` opens
 and exclusive creation; it never performs a check-then-path mutation. It
 requires the root-owned persistent parent, restores directory mode 2750,
-database/WAL mode 0640, and creates only the SQLite SHM coordination file at
-mode 0660. The web identity
+database/WAL mode 0640, and creates or verifies only the SQLite WAL/SHM
+coordination files (SHM mode 0660). The web identity
 cannot write, truncate, replace, rename, or unlink the database or WAL through
 filesystem syscalls. It can update only the group-writable SHM file. The
-systemd mount keeps every other `/var/lib/stocker` path read-only.
+systemd mount keeps every other `/var/lib/stocker` path read-only. The helper
+runs as an `ExecCondition`; its exit-78 safety rejection skips web startup
+without entering the service's automatic restart policy. The recorder holds a
+process-lifetime SQLite connection while it owns the lease, so a live recorder
+cannot remove WAL coordination files between the condition and the web
+process's read-only anchor.
 
 The web repository independently opens SQLite with `mode=ro` and
 `PRAGMA query_only=ON`, and a process-lifetime read-only anchor keeps WAL/SHM

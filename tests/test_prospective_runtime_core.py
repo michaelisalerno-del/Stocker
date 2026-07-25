@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -292,6 +293,22 @@ def test_recorder_lease_is_single_owner_with_heartbeat_and_stale_recovery(
     assert heartbeat.heartbeat_at_utc == now + timedelta(seconds=10)
     assert recovered.owner_id == "owner-b"
     assert recovered.recovered_stale_owner is True
+
+
+def test_recorder_anchor_keeps_wal_coordination_files_available(tmp_path: Path) -> None:
+    database = tmp_path / "prospective.sqlite3"
+    repository = ProspectiveRepository(database)
+    repository.migrate()
+
+    repository.open_anchor()
+    try:
+        with sqlite3.connect(database) as writer:
+            assert writer.execute("PRAGMA journal_mode = WAL").fetchone() == ("wal",)
+            writer.execute("SELECT count(*) FROM schema_migrations").fetchone()
+        assert Path(f"{database}-wal").is_file()
+        assert Path(f"{database}-shm").is_file()
+    finally:
+        repository.close_anchor()
 
 
 def test_recorder_lease_can_only_be_released_by_its_exact_owner(tmp_path: Path) -> None:

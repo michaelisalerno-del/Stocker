@@ -121,6 +121,7 @@ class ProspectiveRepository:
 
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = Path(database_path)
+        self._anchor: sqlite3.Connection | None = None
 
     def _connect(self) -> sqlite3.Connection:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +131,27 @@ class ProspectiveRepository:
         connection.execute("PRAGMA busy_timeout = 5000")
         connection.execute("PRAGMA journal_mode = WAL")
         return connection
+
+    def open_anchor(self) -> None:
+        """Hold WAL coordination files for the recorder process lifetime."""
+
+        if self._anchor is not None:
+            return
+        connection = self._connect()
+        try:
+            connection.execute("SELECT count(*) FROM sqlite_schema").fetchone()
+        except Exception:
+            connection.close()
+            raise
+        self._anchor = connection
+
+    def close_anchor(self) -> None:
+        """Release the recorder's process-lifetime WAL anchor."""
+
+        if self._anchor is None:
+            return
+        self._anchor.close()
+        self._anchor = None
 
     def migrate(self) -> None:
         """Apply package migrations exactly once."""

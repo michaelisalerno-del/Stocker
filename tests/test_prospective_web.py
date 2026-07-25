@@ -189,7 +189,8 @@ def test_web_service_uses_a_distinct_os_identity_and_sqlite_boundary() -> None:
     assert "User=stocker-web" in unit
     assert "Group=stocker-readers" in unit
     assert "EnvironmentFile=/etc/stocker/stocker-web.env" in unit
-    assert "ExecStartPre=+/usr/local/libexec/stocker-prepare-web-sqlite-boundary" in unit
+    assert "ExecCondition=+/usr/local/libexec/stocker-prepare-web-sqlite-boundary" in unit
+    assert "ExecStartPre=" not in unit
     assert "ReadOnlyPaths=/var/lib/stocker" in unit
     assert "ReadWritePaths=/var/lib/stocker/prospective" in unit
     assert "ReadWritePaths=/var/lib/stocker\n" not in unit

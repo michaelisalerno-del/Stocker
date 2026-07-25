@@ -32,6 +32,38 @@ FROZEN_INPUT_FILES: Final = (
 MODEL_NAMES: Final = ("M0", "M1")
 CONTRACT_VERSION: Final = "minimal-intraday-iv-excess-holdout-v01-group-o-plus-group-i"
 RECONSTRUCTION_METHOD: Final = "deterministic_frozen_json_no_refit"
+AUTHORIZATION_SCOPE: Final = (
+    "deterministic reconstruction of deployable M0/M1 artifacts from the audited "
+    "frozen JSON, without refitting, threshold changes, protected-data research, "
+    "or live/paper trading"
+)
+AUDITED_SOURCE_HASHES: Final[dict[str, str]] = {
+    "model_coefficients.json": "49bd22e47b20274b1fe058ae15d899fb4a3a5e18feb418f990ef5139528161b9",
+    "minimal_feature_manifest.json": (
+        "5c8743f7fa424a2aeca3a9a64e7696099377bc79a4ad8a240de7d9efc4be5e34"
+    ),
+    "model_configurations.json": (
+        "384bc6ad64f430481d62ca7a6986f91c1227ae3a52e3117a7a59d9efc2859656"
+    ),
+    "pre_outcome_freeze_manifest.json": (
+        "461ef18a35636b78c7d2f1e7efd77ef9aadd38722afc74e795be6315bc75445e"
+    ),
+    "frozen_tail_thresholds.json": (
+        "0f291a281410818591b64d3c4ed6bf668032a9dac229a3c50e7a1d961437c5c3"
+    ),
+    "historical_model_reconstruction.json": (
+        "101430b6cd3c786611f34788a86082e95bd60686495dff7dda202a3eccf7a384"
+    ),
+    "lightweight_audit.json": (
+        "65cabbe5d83c7b4d88f540b2eeb8245766113ae018ca5f7a83c4243ce484b4f9"
+    ),
+    "determinism_check.json": (
+        "6f865c4950f84a4a3ab52839a53a0a24bc49af5fbadbd759fae3465532076f0f"
+    ),
+}
+AUDITED_UNIVERSE_SHA256: Final = (
+    "af2391ea47e0097b16979151e3c69f6c4335755033a323db418759573c3991e3"
+)
 
 REQUIRED_SAFETY_FLAGS: Final[dict[str, object]] = {
     "daily_stock_features_excluded": True,
@@ -65,6 +97,7 @@ class FrozenArtifactReconstruction(BaseModel):
     bundle_id: str
     created_at_utc: datetime
     operator: str
+    authorization_scope: str
     reconstruction_method: str
     fit_invocations: int = Field(ge=0)
     protected_observations_read: int = Field(ge=0)
@@ -108,6 +141,12 @@ class ReconstructedFrozenLogisticModel:
     def predict_proba(self, frame: pd.DataFrame) -> np.ndarray:
         """Apply the frozen preprocessing and return two-class probabilities."""
 
+        expected_design = (
+            *self.numeric_features,
+            *(f"control_stock__{level}" for level in self.stock_levels[1:]),
+        )
+        if self.design_columns != expected_design:
+            raise ValueError("blocked_feature_schema_mismatch: design columns differ")
         missing = sorted({*self.numeric_features, "stock"}.difference(frame.columns))
         if missing:
             raise ValueError(f"blocked_feature_schema_mismatch: missing features {missing}")
@@ -249,6 +288,10 @@ def _model_from_specification(
             f"blocked_feature_schema_mismatch: {name}.intercept is invalid"
         ) from exc
     expected_design_width = len(numeric_features) + len(stock_levels) - 1
+    expected_design_columns = (
+        *numeric_features,
+        *(f"control_stock__{level}" for level in stock_levels[1:]),
+    )
     valid = (
         specification.get("model_id") == name
         and specification.get("kind") == "logistic"
@@ -259,6 +302,7 @@ def _model_from_specification(
         and len(means) == len(numeric_features)
         and len(scales) == len(numeric_features)
         and all(scale > 0.0 for scale in scales)
+        and design_columns == expected_design_columns
         and len(design_columns) == expected_design_width
         and len(coefficients) == expected_design_width
         and math.isfinite(intercept)
@@ -321,6 +365,12 @@ def reconstruct_frozen_artifacts(
         raise FrozenArtifactReconstructionError(
             "blocked_missing_verified_frozen_bundle: " + ", ".join(missing)
         )
+    for name, expected_hash in AUDITED_SOURCE_HASHES.items():
+        _require_hash(sources[name], expected_hash, f"approved {name}")
+    if _sha256(universe_source) != AUDITED_UNIVERSE_SHA256:
+        raise FrozenArtifactReconstructionError(
+            "blocked_frozen_universe_mismatch: approved universe identity differs"
+        )
 
     payloads = {name: _load_object(path) for name, path in sources.items()}
     for name in (
@@ -360,6 +410,31 @@ def reconstruct_frozen_artifacts(
     ):
         raise FrozenArtifactReconstructionError(
             "blocked_unsafe_runtime_configuration: pre-outcome freeze is invalid"
+        )
+    reconstruction_audit = payloads["historical_model_reconstruction.json"]
+    lightweight_audit = payloads["lightweight_audit.json"]
+    determinism = payloads["determinism_check.json"]
+    if (
+        reconstruction_audit.get("passed") is not True
+        or reconstruction_audit.get("M0_exactly_reproduced") is not True
+        or reconstruction_audit.get("M1_changed_after_reference_inspection") is not False
+        or lightweight_audit.get("passed") is not True
+        or lightweight_audit.get("independent_audit_passed") is not True
+        or determinism.get("passed") is not True
+        or determinism.get("status") != "passed"
+        or any(
+            float(determinism.get(name, math.inf)) != 0.0
+            for name in (
+                "maximum_feature_difference",
+                "maximum_probability_difference",
+                "joined_row_mismatches",
+                "selected_contract_mismatches",
+                "tail_membership_mismatches",
+            )
+        )
+    ):
+        raise FrozenArtifactReconstructionError(
+            "blocked_frozen_artifact_hash_mismatch: required audit evidence did not pass"
         )
 
     feature_manifest = payloads["minimal_feature_manifest.json"]
@@ -523,6 +598,7 @@ def reconstruct_frozen_artifacts(
             bundle_id=bundle_id,
             created_at_utc=created_at_utc.astimezone(UTC),
             operator=operator,
+            authorization_scope=AUTHORIZATION_SCOPE,
             reconstruction_method=RECONSTRUCTION_METHOD,
             fit_invocations=0,
             protected_observations_read=0,

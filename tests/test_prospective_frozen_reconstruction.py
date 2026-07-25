@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
+import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
@@ -94,7 +96,7 @@ def test_frozen_json_reconstructs_deterministic_deployable_artifacts_without_ref
         for item in json.loads((first / "feature-schema.json").read_text())["features"]
     ]
     frame = joblib.load(first / "preprocessor.joblib").transform(
-        __import__("pandas").DataFrame(
+        pd.DataFrame(
             [[values[name] for name in ordered_names]],
             columns=ordered_names,
         )
@@ -159,6 +161,70 @@ def test_reconstruction_rejects_a_universe_not_bound_to_the_frozen_model(
             created_at_utc=datetime(2026, 7, 25, 12, 0, tzinfo=UTC),
             operator="test-operator",
         )
+
+
+def test_reconstruction_rejects_altered_or_failed_audit_evidence(tmp_path: Path) -> None:
+    copied = tmp_path / "frozen"
+    copied.mkdir()
+    for name in (
+        "model_coefficients.json",
+        "minimal_feature_manifest.json",
+        "model_configurations.json",
+        "pre_outcome_freeze_manifest.json",
+        "frozen_tail_thresholds.json",
+        "historical_model_reconstruction.json",
+        "lightweight_audit.json",
+        "determinism_check.json",
+    ):
+        (copied / name).write_bytes((FROZEN_ROOT / name).read_bytes())
+    determinism = json.loads((copied / "determinism_check.json").read_text())
+    determinism["passed"] = False
+    determinism["status"] = "failed"
+    (copied / "determinism_check.json").write_text(json.dumps(determinism))
+
+    with pytest.raises(
+        FrozenArtifactReconstructionError,
+        match="blocked_frozen_artifact_hash_mismatch",
+    ):
+        reconstruct_frozen_artifacts(
+            frozen_root=copied,
+            universe_path=UNIVERSE,
+            output_directory=tmp_path / "output",
+            bundle_id="m1-frozen-20260724-v1",
+            created_at_utc=datetime(2026, 7, 25, 12, 0, tzinfo=UTC),
+            operator="test-operator",
+        )
+
+
+def test_reconstructed_model_rejects_reordered_frozen_design_columns(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "reconstructed"
+    reconstruct_frozen_artifacts(
+        frozen_root=FROZEN_ROOT,
+        universe_path=UNIVERSE,
+        output_directory=output,
+        bundle_id="m1-frozen-20260724-v1",
+        created_at_utc=datetime(2026, 7, 25, 12, 0, tzinfo=UTC),
+        operator="test-operator",
+    )
+    model = joblib.load(output / "m1.joblib")
+    reordered = replace(
+        model,
+        design_columns=(
+            model.design_columns[1],
+            model.design_columns[0],
+            *model.design_columns[2:],
+        ),
+    )
+    schema = json.loads((output / "feature-schema.json").read_text())
+    frame = pd.DataFrame(
+        [[0.0 for _item in schema["features"][:-1]] + ["AAL"]],
+        columns=[item["name"] for item in schema["features"]],
+    )
+
+    with pytest.raises(ValueError, match="blocked_feature_schema_mismatch"):
+        reordered.predict_proba(frame)
 
 
 def test_reconstruction_cli_builds_an_activatable_bundle_while_parity_stays_closed(

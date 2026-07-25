@@ -261,7 +261,7 @@ PROVENANCE_TMP="$(
   sudo mktemp /var/lib/ibgateway/installers/.provenance.XXXXXX
 )"
 {
-  printf 'manifest_version=1\n'
+  printf 'manifest_version=2\n'
   printf 'source_url=%s\n' \
     'https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh'
   printf 'installer_path=%s\n' "$INSTALLER"
@@ -298,6 +298,12 @@ installer, both manifests, ownership, write permissions, every installed file,
 and that every symlink resolves inside the immutable release. An integrity
 failure makes the systemd `ExecCondition` skip startup instead of entering a
 restart loop.
+
+Legacy version-1 Gateway provenance does not satisfy this contract. Generate
+new version-2 regular-file and symlink manifests and create a new immutable
+runtime-provenance record before re-promoting an existing verified release, or
+install it under a new identity. Never relabel or overwrite the version-1
+record.
 
 Create X11 and VNC authentication material. This VNC credential is only for the
 loopback tunnel; it is not an IBKR credential and is never exposed by Stocker:

@@ -60,7 +60,7 @@ recorded_symlink_manifest="$(read_field symlink_manifest_path)" ||
 symlink_manifest_sha256="$(read_field symlink_manifest_sha256)" ||
     fail "invalid_provenance_symlink_manifest_sha256"
 
-[ "$manifest_version" = "1" ] || fail "unsupported_provenance_version"
+[ "$manifest_version" = "2" ] || fail "unsupported_provenance_version"
 [ "$source_url" = \
     "https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh" ] ||
     fail "unapproved_source_url"

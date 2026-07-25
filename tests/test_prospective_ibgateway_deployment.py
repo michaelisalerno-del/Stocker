@@ -117,7 +117,7 @@ def test_gateway_integrity_verifier_fails_after_installed_file_mutation(
     provenance.write_text(
         "\n".join(
             (
-                "manifest_version=1",
+                "manifest_version=2",
                 "source_url=https://download2.interactivebrokers.com/installers/"
                 "ibgateway/latest-standalone/"
                 "ibgateway-latest-standalone-linux-x64.sh",

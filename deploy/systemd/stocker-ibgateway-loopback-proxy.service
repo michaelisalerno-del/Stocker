@@ -4,12 +4,16 @@ Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbo
 Requires=stocker-ibgateway.service
 After=stocker-ibgateway.service
 PartOf=stocker-ibgateway.service
+StartLimitIntervalSec=1h
+StartLimitBurst=1
 
 [Service]
 Type=notify
 User=ibgateway
 Group=ibgateway
 ExecStart=/usr/local/libexec/stocker-ibgateway-loopback-proxy
+Restart=no
+RestartPreventExitStatus=78
 NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true

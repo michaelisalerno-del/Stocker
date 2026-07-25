@@ -2,8 +2,8 @@
 Description=Official IB Gateway with manual paper-account authentication
 Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
 Wants=network-online.target stocker-ibgateway-window-manager.service stocker-ibgateway-vnc.service stocker-ibgateway-loopback-proxy.socket
-Requires=stocker-ibgateway-display.service
-After=network-online.target stocker-ibgateway-display.service stocker-ibgateway-window-manager.service
+Requires=stocker-ibgateway-display.service ufw.service
+After=network-online.target ufw.service stocker-ibgateway-display.service stocker-ibgateway-window-manager.service
 ConditionPathExists=/opt/ibgateway/current/ibgateway
 ConditionPathExists=/var/lib/ibgateway/.Xauthority
 ConditionPathExists=/usr/local/libexec/stocker-verify-ibgateway
@@ -20,6 +20,8 @@ Environment=DISPLAY=:71
 Environment=XAUTHORITY=/var/lib/ibgateway/.Xauthority
 ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway
 ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway
+ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
+ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 ExecStart=/opt/ibgateway/current/ibgateway
 Restart=on-failure
 RestartSec=20

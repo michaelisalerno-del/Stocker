@@ -345,6 +345,14 @@ the separate `127.0.0.1:4003` proxy:
 
 ```bash
 IBKR_GATEWAY_PORT=REPLACE_WITH_EXACT_CONFIGURED_PORT
+case "$IBKR_GATEWAY_PORT" in
+  ''|*[!0-9]*|22|80|443|4003)
+    echo 'Refusing missing, non-numeric, public-service, or proxy port' >&2
+    exit 1
+    ;;
+esac
+test "$IBKR_GATEWAY_PORT" -ge 1
+test "$IBKR_GATEWAY_PORT" -le 65535
 printf 'IBGATEWAY_UPSTREAM_PORT=%s\n' "$IBKR_GATEWAY_PORT" |
   sudo tee /etc/ibgateway/loopback-proxy.env >/dev/null
 sudo chown root:ibgateway /etc/ibgateway/loopback-proxy.env
@@ -355,16 +363,27 @@ sudo ufw default allow outgoing
 sudo ufw allow 22/tcp comment 'SSH'
 sudo ufw allow 80/tcp comment 'HTTP redirect and ACME'
 sudo ufw allow 443/tcp comment 'Stocker HTTPS'
-sudo ufw allow in on lo to any port "$IBKR_GATEWAY_PORT" proto tcp \
-  comment 'IB Gateway loopback only'
-sudo ufw deny in to any port "$IBKR_GATEWAY_PORT" proto tcp \
+sudo ufw insert 1 deny in to any port "$IBKR_GATEWAY_PORT" proto tcp \
   comment 'Block public IBKR API'
+sudo ufw insert 1 allow in on lo to any port "$IBKR_GATEWAY_PORT" proto tcp \
+  comment 'IB Gateway loopback only'
 sudo ufw --force enable
 ```
 
-Install the private graphical-session and loopback-proxy units:
+The two inserted rules must remain the first two rules in both the
+`ufw-user-input` and `ufw6-user-input` chains: loopback allow first, then
+non-loopback deny. This prevents an older broad allow from shadowing the broker
+deny. Port 4003 is the frozen internal deployment contract for this unit set;
+changing it requires a coordinated unit, runtime-template, documentation, and
+contract-version change.
+
+Install the private graphical-session, firewall verifier, and loopback-proxy
+units:
 
 ```bash
+sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/verify-ibgateway-loopback-boundary.sh \
+  /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/run-ibgateway-loopback-proxy.sh \
   /usr/local/libexec/stocker-ibgateway-loopback-proxy
@@ -372,14 +391,22 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-display.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-window-manager.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-vnc.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-boundary.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.socket \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo systemctl enable stocker-ibgateway-loopback-proxy.socket
 sudo systemctl enable --now stocker-ibgateway.service
 ```
+
+The verifier runs before both Gateway and the proxy socket. Missing or malformed
+proxy configuration, inactive UFW, a shadowing IPv4 rule, or a shadowing/missing
+IPv6 rule blocks startup with `blocked_unsafe_runtime_configuration`. The proxy
+socket therefore cannot look healthy before its configuration and firewall
+boundary have passed.
 
 The display has no TCP listener. VNC listens only on server loopback and
 requires its separate random password. Do not add port 5901 to the public
@@ -422,6 +449,7 @@ sudo ss -H -ltnp "( sport = :5901 )"
 sudo ufw status verbose
 sudo systemctl status \
   stocker-ibgateway.service \
+  stocker-ibgateway-loopback-boundary.service \
   stocker-ibgateway-loopback-proxy.socket \
   stocker-ibgateway-vnc.service
 ```
@@ -542,8 +570,9 @@ Before first prospective start, set:
 - the exact future `prospective_start_utc`;
 - server instance identity, release version, and Git commit;
 - `record_only` or `shadow` only;
-- the exact TWS/Gateway host, socket port, dedicated non-zero client ID, and
-  paper environment;
+- the Stocker endpoint exactly as `127.0.0.1:4003`, a dedicated non-zero client
+  ID, and the paper environment (the Gateway upstream port belongs only in
+  `/etc/ibgateway/loopback-proxy.env`);
 - measured line budget, reserved headroom, and a request rate no greater than
   half that line budget;
 - context-signing secret in the environment file; and
@@ -632,16 +661,23 @@ First configure TWS or IB Gateway manually:
 2. Enable socket clients.
 3. Keep Read-Only API enabled.
 4. Keep localhost-only connections enabled.
-5. Set and record the exact socket port.
+5. Set and record the exact Gateway upstream socket port only in
+   `/etc/ibgateway/loopback-proxy.env`.
 6. Use a dedicated non-zero client ID that is not the Master client.
 7. Authenticate manually, including 2FA.
 
-Confirm the socket is not publicly bound:
+Confirm that the fail-closed boundary passes and that Stocker uses only its
+loopback proxy. The Gateway listener may be wildcard-bound because UFW blocks
+it before Gateway can start:
 
 ```bash
-sudo ss -ltnp
-sudo ufw deny REPLACE_WITH_IBKR_SOCKET_PORT/tcp
+sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
+sudo ss -H -ltnp '( sport = :4003 )'
+sudo grep -A3 '^ibkr:' /etc/stocker/prospective.yaml
 ```
+
+The runtime configuration must contain `host: 127.0.0.1` and `port: 4003`,
+never the Gateway upstream port.
 
 Record-only IBKR diagnostics require the hash-verified registered universe and
 the official dependency. A missing active frozen bundle remains an explicit

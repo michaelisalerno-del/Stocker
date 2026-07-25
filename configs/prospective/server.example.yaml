@@ -39,8 +39,9 @@ web:
 
 ibkr:
   host: 127.0.0.1
-  # Example only. Set the exact API socket configured in this server's TWS/Gateway.
-  port: 7497
+  # Frozen internal deployment contract: connect only to the Stocker loopback proxy.
+  # The Gateway's separate upstream API socket is never configured here.
+  port: 4003
   client_id: 71
   expected_environment: paper
   connect_timeout_seconds: 10

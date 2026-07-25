@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +13,9 @@ ROOT = Path(__file__).parents[1]
 SYSTEMD = ROOT / "deploy/systemd"
 VERIFY_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-installation.sh"
 PROXY_SCRIPT = ROOT / "deploy/scripts/run-ibgateway-loopback-proxy.sh"
+BOUNDARY_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-loopback-boundary.sh"
 RUNBOOK = ROOT / "docs/operations/prospective-server-runbook.md"
+SERVER_CONFIG = ROOT / "configs/prospective/server.example.yaml"
 
 
 def _unit(name: str) -> str:
@@ -46,6 +49,11 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "ConditionPathExists=/opt/ibgateway/current/ibgateway" in unit
     assert "ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway" in unit
     assert "ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway" in unit
+    assert (
+        "ExecCondition=/usr/bin/test -x "
+        "/usr/local/libexec/stocker-verify-ibgateway-loopback-boundary"
+    ) in unit
+    assert ("ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway-loopback-boundary") in unit
     assert "ReadWritePaths=/var/lib/ibgateway /tmp" in unit
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
@@ -70,13 +78,26 @@ def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
 def test_gateway_api_proxy_exposes_only_a_verified_loopback_endpoint() -> None:
     socket_unit = _unit("stocker-ibgateway-loopback-proxy.socket")
     service_unit = _unit("stocker-ibgateway-loopback-proxy.service")
+    boundary_unit = _unit("stocker-ibgateway-loopback-boundary.service")
     gateway_unit = _unit("stocker-ibgateway.service")
 
     assert "ListenStream=127.0.0.1:4003" in socket_unit
     assert "0.0.0.0" not in socket_unit
+    assert "Requires=stocker-ibgateway-loopback-boundary.service" in socket_unit
+    assert "After=stocker-ibgateway-loopback-boundary.service" in socket_unit
+    assert "TriggerLimitIntervalSec=1h" in socket_unit
+    assert "TriggerLimitBurst=1" in socket_unit
     assert "User=ibgateway" in service_unit
     assert "ExecStart=/usr/local/libexec/stocker-ibgateway-loopback-proxy" in service_unit
+    assert "StartLimitIntervalSec=1h" in service_unit
+    assert "StartLimitBurst=1" in service_unit
+    assert "RestartPreventExitStatus=78" in service_unit
     assert "EnvironmentFile=" not in service_unit
+    assert "User=root" in boundary_unit
+    assert (
+        "ExecStart=/usr/local/libexec/stocker-verify-ibgateway-loopback-boundary"
+    ) in boundary_unit
+    assert "Requires=ufw.service" in boundary_unit
     assert "stocker-ibgateway-loopback-proxy.socket" in gateway_unit
 
 
@@ -116,6 +137,143 @@ def test_gateway_proxy_runner_accepts_only_one_numeric_upstream_port(
     assert "blocked_unsafe_runtime_configuration" in rejected.stderr
 
 
+@pytest.mark.parametrize("reserved_port", (22, 80, 443, 4003))
+def test_gateway_proxy_runner_rejects_public_and_proxy_ports(
+    tmp_path: Path,
+    reserved_port: int,
+) -> None:
+    config = tmp_path / "proxy.env"
+    config.write_text(
+        f"IBGATEWAY_UPSTREAM_PORT={reserved_port}\n",
+        encoding="ascii",
+    )
+    rejected = subprocess.run(
+        ["/bin/sh", str(PROXY_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "IBGATEWAY_PROXY_CONFIG": str(config),
+            "IBGATEWAY_SOCKET_PROXYD": "/bin/true",
+        },
+    )
+
+    assert rejected.returncode == 78
+    assert "upstream_port_reserved" in rejected.stderr
+
+
+def _mock_command(path: Path, output: str) -> Path:
+    path.write_text(
+        "#!/bin/sh\nprintf '%s' " + shlex.quote(output) + "\n",
+        encoding="ascii",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _run_boundary_verifier(
+    tmp_path: Path,
+    *,
+    ufw_status: str = "Status: active\n",
+    ipv4_rules: str | None = None,
+    ipv6_rules: str | None = None,
+    include_config: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    config = tmp_path / "proxy.env"
+    if include_config:
+        config.write_text("IBGATEWAY_UPSTREAM_PORT=4002\n", encoding="ascii")
+    valid_ipv4 = (
+        "-N ufw-user-input\n"
+        "-A ufw-user-input -i lo -p tcp -m tcp --dport 4002 -j ACCEPT\n"
+        "-A ufw-user-input -p tcp -m tcp --dport 4002 -j DROP\n"
+        "-A ufw-user-input -p tcp -m tcp --dport 22 -j ACCEPT\n"
+    )
+    valid_ipv6 = (
+        "-N ufw6-user-input\n"
+        "-A ufw6-user-input -i lo -p tcp -m tcp --dport 4002 -j ACCEPT\n"
+        "-A ufw6-user-input -p tcp -m tcp --dport 4002 -j DROP\n"
+        "-A ufw6-user-input -p tcp -m tcp --dport 22 -j ACCEPT\n"
+    )
+    return subprocess.run(
+        ["/bin/sh", str(BOUNDARY_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "IBGATEWAY_PROXY_CONFIG": str(config),
+            "IBGATEWAY_UFW": str(_mock_command(tmp_path / "ufw", ufw_status)),
+            "IBGATEWAY_IPTABLES": str(
+                _mock_command(
+                    tmp_path / "iptables",
+                    valid_ipv4 if ipv4_rules is None else ipv4_rules,
+                )
+            ),
+            "IBGATEWAY_IP6TABLES": str(
+                _mock_command(
+                    tmp_path / "ip6tables",
+                    valid_ipv6 if ipv6_rules is None else ipv6_rules,
+                )
+            ),
+        },
+    )
+
+
+def test_gateway_boundary_verifier_accepts_effective_ipv4_and_ipv6_rules(
+    tmp_path: Path,
+) -> None:
+    verified = _run_boundary_verifier(tmp_path)
+
+    assert verified.returncode == 0, verified.stderr
+    assert "ibgateway_loopback_boundary:verified:4002" in verified.stdout
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "reason"),
+    (
+        ({"include_config": False}, "config_missing"),
+        ({"ufw_status": "Status: inactive\n"}, "ufw_inactive"),
+        (
+            {
+                "ipv4_rules": (
+                    "-N ufw-user-input\n"
+                    "-A ufw-user-input -j ACCEPT\n"
+                    "-A ufw-user-input -i lo -p tcp --dport 4002 -j ACCEPT\n"
+                    "-A ufw-user-input -p tcp --dport 4002 -j DROP\n"
+                )
+            },
+            "ipv4_first_rule_not_loopback_allow",
+        ),
+        (
+            {
+                "ipv6_rules": (
+                    "-N ufw6-user-input\n-A ufw6-user-input -i lo -p tcp --dport 4002 -j ACCEPT\n"
+                )
+            },
+            "ipv6_second_rule_not_non_loopback_deny",
+        ),
+    ),
+)
+def test_gateway_boundary_verifier_fails_closed(
+    tmp_path: Path,
+    kwargs: dict[str, object],
+    reason: str,
+) -> None:
+    rejected = _run_boundary_verifier(tmp_path, **kwargs)  # type: ignore[arg-type]
+
+    assert rejected.returncode == 78
+    assert f"ibgateway_loopback_boundary:{reason}" in rejected.stderr
+
+
+def test_record_only_server_template_uses_only_the_stocker_proxy_port() -> None:
+    config = SERVER_CONFIG.read_text(encoding="utf-8")
+
+    assert "port: 4003" in config
+    assert "Stocker loopback proxy" in config
+    assert "port: 7497" not in config
+
+
 def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     runbook = RUNBOOK.read_text(encoding="utf-8")
 
@@ -124,6 +282,12 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
     assert "ufw default deny incoming" in runbook
+    assert 'case "$IBKR_GATEWAY_PORT" in' in runbook
+    assert "sudo ufw insert 1 deny in" in runbook
+    assert "sudo ufw insert 1 allow in on lo" in runbook
+    assert "stocker-verify-ibgateway-loopback-boundary" in runbook
+    assert "127.0.0.1:4003" in runbook
+    assert "frozen internal deployment contract" in runbook
     assert "IBGATEWAY_UPSTREAM_PORT=" in runbook
     assert "sha256sum --check" in runbook
     assert 'sudo ln "$INSTALLER_TMP" "$INSTALLER"' in runbook

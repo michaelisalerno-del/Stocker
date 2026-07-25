@@ -2,12 +2,16 @@
 Description=Loopback-only Stocker endpoint for the IB Gateway API
 Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
 PartOf=stocker-ibgateway.service
+Requires=stocker-ibgateway-loopback-boundary.service
+After=stocker-ibgateway-loopback-boundary.service
 
 [Socket]
 ListenStream=127.0.0.1:4003
 NoDelay=true
 Accept=no
 Service=stocker-ibgateway-loopback-proxy.service
+TriggerLimitIntervalSec=1h
+TriggerLimitBurst=1
 
 [Install]
 WantedBy=sockets.target

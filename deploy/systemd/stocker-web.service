@@ -10,7 +10,7 @@ ConditionPathExists=/usr/local/libexec/stocker-prepare-web-sqlite-boundary
 [Service]
 Type=simple
 User=stocker-web
-Group=stocker
+Group=stocker-readers
 WorkingDirectory=/opt/stocker/current
 EnvironmentFile=/etc/stocker/stocker-web.env
 ExecStartPre=+/usr/local/libexec/stocker-prepare-web-sqlite-boundary

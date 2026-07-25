@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,8 +17,21 @@ from stocker_prospective.web import create_web_app
 
 ROOT = Path(__file__).parents[1]
 WEB_UNIT = ROOT / "deploy/systemd/stocker-web.service"
-WEB_BOUNDARY_SCRIPT = ROOT / "deploy/scripts/prepare-web-sqlite-boundary.sh"
+WEB_BOUNDARY_SCRIPT = ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py"
 WEB_ENV_TEMPLATE = ROOT / "deploy/stocker-web.env.example"
+RECORDER_ENV_TEMPLATE = ROOT / "deploy/stocker.env.example"
+
+
+def load_web_boundary_module() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "stocker_prepare_web_sqlite_boundary",
+        WEB_BOUNDARY_SCRIPT,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def config(tmp_path: Path, *, authenticated: bool = False) -> ProspectiveConfig:
@@ -168,23 +183,67 @@ def test_web_service_uses_a_distinct_os_identity_and_sqlite_boundary() -> None:
     unit = WEB_UNIT.read_text(encoding="utf-8")
     boundary = WEB_BOUNDARY_SCRIPT.read_text(encoding="utf-8")
     web_environment = WEB_ENV_TEMPLATE.read_text(encoding="utf-8")
+    recorder_environment = RECORDER_ENV_TEMPLATE.read_text(encoding="utf-8")
 
     assert "ProtectSystem=strict" in unit
     assert "User=stocker-web" in unit
-    assert "Group=stocker" in unit
+    assert "Group=stocker-readers" in unit
     assert "EnvironmentFile=/etc/stocker/stocker-web.env" in unit
     assert "ExecStartPre=+/usr/local/libexec/stocker-prepare-web-sqlite-boundary" in unit
     assert "ReadOnlyPaths=/var/lib/stocker" in unit
     assert "ReadWritePaths=/var/lib/stocker/prospective" in unit
     assert "ReadWritePaths=/var/lib/stocker\n" not in unit
     assert "ReadWritePaths=/var/lib/stocker/bundles" not in unit
-    assert 'database_directory="/var/lib/stocker/prospective"' in boundary
-    assert 'database_path="$database_directory/prospective.sqlite3"' in boundary
-    assert 'chmod 0750 "$database_directory"' in boundary
-    assert 'chmod 0640 "$database_path" "$wal_path"' in boundary
-    assert 'chmod 0660 "$shm_path"' in boundary
-    assert "symlink" in boundary
+    assert boundary.startswith("#!/usr/bin/python3\n")
+    assert 'DATABASE_DIRECTORY = "/var/lib/stocker/prospective"' in boundary
+    assert 'DATABASE_NAME = "prospective.sqlite3"' in boundary
+    assert "os.O_NOFOLLOW" in boundary
+    assert "os.O_EXCL" in boundary
+    assert "dir_fd=" in boundary
+    assert "os.fchmod" in boundary
+    assert "os.chmod(" not in boundary
     assert "STOCKER_CONTEXT_SIGNING_SECRET" not in web_environment
+    assert "STOCKER_CONTEXT_SIGNING_SECRET" in recorder_environment
+    assert "EnvironmentFile=/etc/stocker/stocker.env" not in unit
+
+
+def test_web_boundary_refuses_auxiliary_symlinks(tmp_path: Path) -> None:
+    boundary = load_web_boundary_module()
+    target = tmp_path / "outside"
+    target.touch()
+    (tmp_path / "prospective.sqlite3-wal").symlink_to(target)
+    directory_descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+
+    try:
+        with pytest.raises(SystemExit) as blocked:
+            boundary.open_or_create_auxiliary(
+                directory_descriptor,
+                "prospective.sqlite3-wal",
+                mode=0o640,
+                owner_uid=os.getuid(),
+                group_gid=os.getgid(),
+                label="wal",
+            )
+    finally:
+        os.close(directory_descriptor)
+
+    assert blocked.value.code == 78
+    assert target.read_bytes() == b""
+
+
+def test_web_boundary_maps_filesystem_errors_to_non_restart_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boundary = load_web_boundary_module()
+
+    def raise_os_error() -> None:
+        raise OSError("synthetic boundary failure")
+
+    monkeypatch.setattr(boundary, "main", raise_os_error)
+    with pytest.raises(SystemExit) as blocked:
+        boundary.run()
+
+    assert blocked.value.code == 78
 
 
 def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> None:

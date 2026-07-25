@@ -12,9 +12,9 @@ orders and does not establish an options edge.
 ```text
 /opt/stocker/releases/<git-commit>/    immutable application releases
 /opt/stocker/current                  atomic symlink to one release
-/etc/stocker/prospective.yaml         runtime configuration (root:stocker 0640)
+/etc/stocker/prospective.yaml         runtime config (root:stocker-readers 0640)
 /etc/stocker/stocker.env              recorder identity + secrets (root:stocker 0640)
-/etc/stocker/stocker-web.env          secret-minimal web identity (root:stocker 0640)
+/etc/stocker/stocker-web.env          web identity (root:stocker-readers 0640)
 /var/lib/stocker/prospective/         SQLite database and WAL
 /var/lib/stocker/bundles/             immutable bundle store + active pointer
 /var/lib/stocker/daily-context/       signed package store + session pointers
@@ -37,27 +37,34 @@ restores, or rolls back `/var/lib/stocker`.
 On the dedicated server:
 
 ```bash
-sudo useradd --system --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker
+sudo groupadd --system stocker
+sudo groupadd --system stocker-readers
+sudo useradd --system --gid stocker --home-dir /var/lib/stocker \
+  --shell /usr/sbin/nologin stocker
+sudo usermod --append --groups stocker-readers stocker
 sudo useradd --system --home-dir /nonexistent --no-create-home \
-  --shell /usr/sbin/nologin stocker-web
+  --gid stocker-readers --shell /usr/sbin/nologin stocker-web
 sudo install -d -o root -g root -m 0755 /opt/stocker/releases
-sudo install -d -o root -g stocker -m 0750 /etc/stocker
-sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker
-sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/prospective
-sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/bundles
+sudo install -d -o root -g stocker-readers -m 0750 /etc/stocker
+sudo install -d -o root -g stocker-readers -m 0750 /var/lib/stocker
+sudo install -d -o stocker -g stocker-readers -m 2750 \
+  /var/lib/stocker/prospective
+sudo install -d -o stocker -g stocker-readers -m 2750 \
+  /var/lib/stocker/bundles
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/daily-context/incoming
-sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/ibkr-api
-sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/ibkr-api/provenance
-sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/ibkr-api/status
+sudo install -d -o root -g stocker-readers -m 0750 /var/lib/stocker/ibkr-api
+sudo install -d -o root -g stocker-readers -m 0750 \
+  /var/lib/stocker/ibkr-api/provenance
+sudo install -d -o stocker -g stocker-readers -m 2750 \
+  /var/lib/stocker/ibkr-api/status
 sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/secure-transfer
 sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/backups
 ```
 
 Do not add `stocker` to privileged groups. Keep the IBKR GUI/session under an
 independently managed desktop login if required by the host. Do not make
-`stocker-web` the database owner and do not add it to privileged groups; the
-web unit selects group `stocker` only for the minimum read/SHM permissions
-described below.
+`stocker-web` the database owner and do not add it to `stocker` or any
+privileged group. Its only group is the non-secret `stocker-readers` group.
 
 ## 2. Install Python and `uv`
 
@@ -141,7 +148,8 @@ sudo /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective
   --installed-package-root "$IBKR_PACKAGE_ROOT" \
   --provenance /var/lib/stocker/ibkr-api/provenance/10.48.1.json \
   --operator REPLACE_WITH_OPERATOR_ID
-sudo chown root:stocker /var/lib/stocker/ibkr-api/provenance/10.48.1.json
+sudo chown root:stocker-readers \
+  /var/lib/stocker/ibkr-api/provenance/10.48.1.json
 sudo chmod 0640 /var/lib/stocker/ibkr-api/provenance/10.48.1.json
 sudo ln -s provenance/10.48.1.json \
   /var/lib/stocker/ibkr-api/active-provenance.json.next
@@ -579,13 +587,13 @@ view or a hash mismatch. An installed bundle is never edited or overwritten.
 Copy the templates and restrict them:
 
 ```bash
-sudo install -o root -g stocker -m 0640 \
+sudo install -o root -g stocker-readers -m 0640 \
   /opt/stocker/current/configs/prospective/server.example.yaml \
   /etc/stocker/prospective.yaml
 sudo install -o root -g stocker -m 0640 \
   /opt/stocker/current/deploy/stocker.env.example \
   /etc/stocker/stocker.env
-sudo install -o root -g stocker -m 0640 \
+sudo install -o root -g stocker-readers -m 0640 \
   /opt/stocker/current/deploy/stocker-web.env.example \
   /etc/stocker/stocker-web.env
 sudoedit /etc/stocker/prospective.yaml
@@ -727,7 +735,7 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-web.service \
   /etc/systemd/system/
 sudo install -o root -g root -m 0755 \
-  /opt/stocker/current/deploy/scripts/prepare-web-sqlite-boundary.sh \
+  /opt/stocker/current/deploy/scripts/prepare-web-sqlite-boundary.py \
   /usr/local/libexec/stocker-prepare-web-sqlite-boundary
 sudo systemctl daemon-reload
 sudo systemctl enable --now stocker-recorder.service
@@ -738,10 +746,14 @@ Configuration/bundle-integrity exit code 78 is in
 `RestartPreventExitStatus`; systemd will not loop on those failures.
 Transient runtime failures use bounded systemd restart limits.
 
-The web service runs as the distinct `stocker-web` OS identity; the database
-and its directory remain owned by `stocker`. Before web startup, a root helper
-refuses symlinks, restores directory mode 0750, database/WAL mode 0640, and
-creates only the SQLite SHM coordination file at mode 0660. The web identity
+The web service runs as the distinct `stocker-web:stocker-readers` OS identity;
+the database and its directory remain owned by `stocker`. The recorder secret
+environment stays `root:stocker 0640`, so the reader group cannot open it.
+Before web startup, a root helper uses descriptor-relative `O_NOFOLLOW` opens
+and exclusive creation; it never performs a check-then-path mutation. It
+requires the root-owned persistent parent, restores directory mode 2750,
+database/WAL mode 0640, and creates only the SQLite SHM coordination file at
+mode 0660. The web identity
 cannot write, truncate, replace, rename, or unlink the database or WAL through
 filesystem syscalls. It can update only the group-writable SHM file. The
 systemd mount keeps every other `/var/lib/stocker` path read-only.
@@ -753,13 +765,14 @@ connections. Tests require destructive SQL to fail. On the deployed host,
 verify the independent filesystem boundary too:
 
 ```bash
-sudo -u stocker-web -g stocker test ! -w \
+sudo -u stocker-web -g stocker-readers test ! -w \
   /var/lib/stocker/prospective/prospective.sqlite3
-sudo -u stocker-web -g stocker test ! -w \
+sudo -u stocker-web -g stocker-readers test ! -w \
   /var/lib/stocker/prospective/prospective.sqlite3-wal
-sudo -u stocker-web -g stocker test -w \
+sudo -u stocker-web -g stocker-readers test -w \
   /var/lib/stocker/prospective/prospective.sqlite3-shm
-sudo -u stocker-web -g stocker test ! -w /var/lib/stocker/prospective
+sudo -u stocker-web -g stocker-readers test ! -w /var/lib/stocker/prospective
+sudo -u stocker-web -g stocker-readers test ! -r /etc/stocker/stocker.env
 ```
 
 At the current repository state, IBKR mode is expected to block rather than

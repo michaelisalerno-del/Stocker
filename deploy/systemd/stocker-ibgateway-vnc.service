@@ -17,6 +17,7 @@ Environment=HOME=/var/lib/ibgateway
 ExecStart=/usr/bin/x11vnc -display :71 -auth /var/lib/ibgateway/.Xauthority -localhost -rfbport 5901 -rfbportv6 5901 -rfbauth /var/lib/ibgateway/vnc.pass -forever -shared -noxdamage -repeat
 Restart=on-failure
 RestartSec=5
+SuccessExitStatus=2
 UMask=0077
 NoNewPrivileges=true
 PrivateDevices=true

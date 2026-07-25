@@ -60,6 +60,7 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "ReadWritePaths=/var/lib/ibgateway /tmp" in unit
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
+    assert "SuccessExitStatus=143" in unit
     assert "username" not in lowered
     assert "password" not in lowered
     assert "2fa" not in lowered
@@ -74,6 +75,7 @@ def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
     assert "-rfbauth /var/lib/ibgateway/vnc.pass" in unit
     assert "ConditionPathExists=/var/lib/ibgateway/vnc.pass" in unit
     assert "StartLimitBurst=" in unit
+    assert "SuccessExitStatus=2" in unit
     assert "0.0.0.0" not in unit
     assert "WantedBy=multi-user.target" not in unit
 

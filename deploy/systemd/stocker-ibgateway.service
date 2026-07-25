@@ -26,6 +26,7 @@ ExecStart=/opt/ibgateway/current/ibgateway
 Restart=on-failure
 RestartSec=20
 KillSignal=SIGTERM
+SuccessExitStatus=143
 TimeoutStopSec=60
 UMask=0077
 NoNewPrivileges=true

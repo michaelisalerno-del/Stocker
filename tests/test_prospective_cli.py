@@ -269,6 +269,11 @@ def test_transient_ibkr_failure_uses_restartable_exit_and_releases_lease(
     monkeypatch.setattr(cli_module, "require_official_ibkr_api", lambda: object())
     monkeypatch.setattr(cli_module, "_validate_ibkr_scoring_inputs", lambda _config: None)
     monkeypatch.setattr(
+        cli_module,
+        "require_ibkr_socket_loopback_only",
+        lambda _port: ("127.0.0.1",),
+    )
+    monkeypatch.setattr(
         ibkr_official_module,
         "create_official_callback_client",
         lambda _adapter: object(),

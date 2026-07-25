@@ -14,11 +14,15 @@ def _unit(name: str) -> str:
 def test_gateway_display_never_exposes_x11_tcp() -> None:
     unit = _unit("stocker-ibgateway-display.service")
 
-    assert "User=stocker" in unit
-    assert "Group=stocker" in unit
+    assert "User=ibgateway" in unit
+    assert "Group=ibgateway" in unit
     assert "-nolisten tcp" in unit
-    assert "-auth /var/lib/stocker/ibgateway/.Xauthority" in unit
+    assert "-auth /var/lib/ibgateway/.Xauthority" in unit
     assert " -ac" not in unit
+    assert "ConditionPathExists=/var/lib/ibgateway/.Xauthority" in unit
+    assert "StartLimitBurst=" in unit
+    assert "ReadWritePaths=/var/lib/ibgateway /tmp" in unit
+    assert "ReadWritePaths=/var/lib/stocker" not in unit
 
 
 def test_gateway_process_uses_installed_official_boundary_without_credentials() -> None:
@@ -27,8 +31,14 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
 
     assert "ExecStart=/opt/ibgateway/current/ibgateway" in unit
     assert "DISPLAY=:71" in unit
-    assert "XAUTHORITY=/var/lib/stocker/ibgateway/.Xauthority" in unit
-    assert "User=stocker" in unit
+    assert "XAUTHORITY=/var/lib/ibgateway/.Xauthority" in unit
+    assert "User=ibgateway" in unit
+    assert "HOME=/var/lib/ibgateway" in unit
+    assert "WorkingDirectory=/var/lib/ibgateway" in unit
+    assert "ConditionPathExists=/opt/ibgateway/current/ibgateway" in unit
+    assert "ExecCondition=/usr/bin/test -x /opt/ibgateway/current/ibgateway" in unit
+    assert "ReadWritePaths=/var/lib/ibgateway /tmp" in unit
+    assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
     assert "username" not in lowered
     assert "password" not in lowered
@@ -40,7 +50,9 @@ def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
 
     assert "-localhost" in unit
     assert "-rfbport 5901" in unit
-    assert "-rfbauth /var/lib/stocker/ibgateway/vnc.pass" in unit
+    assert "-rfbauth /var/lib/ibgateway/vnc.pass" in unit
+    assert "ConditionPathExists=/var/lib/ibgateway/vnc.pass" in unit
+    assert "StartLimitBurst=" in unit
     assert "0.0.0.0" not in unit
     assert "WantedBy=multi-user.target" not in unit
 
@@ -52,3 +64,15 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "manual IBKR username, password, and 2FA" in runbook
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
+    assert "sha256sum --check" in runbook
+    assert "useradd --system --home-dir /var/lib/ibgateway" in runbook
+    assert 'x11vnc -storepasswd "$VNC_PASSWORD"' not in runbook
+    assert "ReadWritePaths=/var/lib/stocker" not in "".join(
+        _unit(name)
+        for name in (
+            "stocker-ibgateway-display.service",
+            "stocker-ibgateway-window-manager.service",
+            "stocker-ibgateway-vnc.service",
+            "stocker-ibgateway.service",
+        )
+    )

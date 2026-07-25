@@ -48,6 +48,7 @@ from stocker_prospective.ibkr import (
     IBKRConnectionConfig,
     IBKRMarketDataAdapter,
     OfficialIBKRDependencyError,
+    require_ibkr_socket_loopback_only,
     require_official_ibkr_api,
 )
 from stocker_prospective.ibkr_api import (
@@ -552,6 +553,8 @@ def recorder_run(
             validate_runtime_safety(config, adapter)
             require_official_ibkr_api()
             deployment_identity = _validate_ibkr_scoring_inputs(config)
+            assert config.ibkr.port is not None
+            require_ibkr_socket_loopback_only(config.ibkr.port)
             repository = ProspectiveRepository(config.paths.database)
             repository.migrate()
             repository.acquire_recorder_lease(

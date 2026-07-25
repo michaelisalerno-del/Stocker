@@ -4,15 +4,18 @@ Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbo
 Requires=stocker-ibgateway-display.service
 After=stocker-ibgateway-display.service
 PartOf=stocker-ibgateway.service
+ConditionPathExists=/var/lib/ibgateway/.Xauthority
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 Type=simple
-User=stocker
-Group=stocker
-Environment=HOME=/var/lib/stocker
+User=ibgateway
+Group=ibgateway
+Environment=HOME=/var/lib/ibgateway
 Environment=DISPLAY=:71
-Environment=XAUTHORITY=/var/lib/stocker/ibgateway/.Xauthority
-ExecStart=/usr/bin/openbox --display :71
+Environment=XAUTHORITY=/var/lib/ibgateway/.Xauthority
+ExecStart=/usr/bin/openbox
 Restart=on-failure
 RestartSec=5
 UMask=0077
@@ -26,4 +29,4 @@ ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX
-ReadWritePaths=/var/lib/stocker /tmp
+ReadWritePaths=/var/lib/ibgateway /tmp

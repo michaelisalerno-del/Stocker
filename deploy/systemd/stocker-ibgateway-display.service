@@ -2,13 +2,16 @@
 Description=Private X11 display for the manually authenticated IB Gateway
 Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
 PartOf=stocker-ibgateway.service
+ConditionPathExists=/var/lib/ibgateway/.Xauthority
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 Type=simple
-User=stocker
-Group=stocker
-Environment=HOME=/var/lib/stocker
-ExecStart=/usr/bin/Xvfb :71 -screen 0 1280x900x24 -nolisten tcp -noreset -auth /var/lib/stocker/ibgateway/.Xauthority
+User=ibgateway
+Group=ibgateway
+Environment=HOME=/var/lib/ibgateway
+ExecStart=/usr/bin/Xvfb :71 -screen 0 1280x900x24 -nolisten tcp -noreset -auth /var/lib/ibgateway/.Xauthority
 Restart=on-failure
 RestartSec=5
 UMask=0077
@@ -22,4 +25,4 @@ ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX
-ReadWritePaths=/var/lib/stocker /tmp
+ReadWritePaths=/var/lib/ibgateway /tmp

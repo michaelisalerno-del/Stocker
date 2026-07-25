@@ -8,6 +8,7 @@ CI and replay independent from the optional dependency.
 from __future__ import annotations
 
 import importlib.util
+import ipaddress
 import os
 import threading
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from stocker_prospective.config import RuntimeSafetyError
 from stocker_prospective.ibkr_api import (
     OfficialIBKRApiProvenanceError,
     load_official_ibkr_api_provenance,
@@ -44,6 +46,49 @@ IBKR_API_UPDATE_FUTURE_TOLERANCE = timedelta(minutes=5)
 
 class OfficialIBKRDependencyError(RuntimeError):
     """The operator has not installed the official IBKR Python client."""
+
+
+def _decode_proc_net_address(value: str, *, ipv6: bool) -> str:
+    raw = bytes.fromhex(value)
+    raw = b"".join(raw[index : index + 4][::-1] for index in range(0, 16, 4)) if ipv6 else raw[::-1]
+    return str(ipaddress.ip_address(raw))
+
+
+def require_ibkr_socket_loopback_only(
+    port: int,
+    *,
+    proc_net_root: Path = Path("/proc/net"),
+) -> tuple[str, ...]:
+    """Fail closed unless the exact configured Linux listener is loopback-only."""
+
+    listeners: list[str] = []
+    for filename, ipv6 in (("tcp", False), ("tcp6", True)):
+        table = proc_net_root / filename
+        if not table.is_file():
+            continue
+        for row in table.read_text(encoding="ascii").splitlines()[1:]:
+            fields = row.split()
+            if len(fields) < 4 or fields[3] != "0A":
+                continue
+            try:
+                address_hex, port_hex = fields[1].split(":", maxsplit=1)
+                listener_port = int(port_hex, 16)
+                address = _decode_proc_net_address(address_hex, ipv6=ipv6)
+            except (ValueError, OSError):
+                continue
+            if listener_port == port and address not in listeners:
+                listeners.append(address)
+    if not listeners:
+        raise RuntimeError(f"blocked_ibkr_connection: configured_socket_not_listening:{port}")
+    unsafe = tuple(
+        address for address in listeners if not ipaddress.ip_address(address).is_loopback
+    )
+    if unsafe:
+        raise RuntimeSafetyError(
+            "blocked_unsafe_runtime_configuration: "
+            f"ibkr socket is not loopback-only: port={port}, addresses={','.join(unsafe)}"
+        )
+    return tuple(listeners)
 
 
 @dataclass(frozen=True)

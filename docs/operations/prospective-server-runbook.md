@@ -19,9 +19,11 @@ orders and does not establish an options edge.
 /var/lib/stocker/daily-context/       signed package store + session pointers
 /var/lib/stocker/ibkr-api/provenance/ immutable official-archive records
 /var/lib/stocker/ibkr-api/status/     read-only release-check result for the app
-/var/lib/stocker/ibgateway/           GUI settings, X authority, and VNC auth
 /var/lib/stocker/secure-transfer/     restricted operator transfer staging
 /var/lib/stocker/backups/             checked immutable SQLite backups
+/var/lib/ibgateway/                   isolated Gateway home, GUI settings, auth
+/var/lib/ibgateway/installers/        reviewed installer + immutable provenance
+/etc/ibgateway/vnc-password           root-only maintenance credential
 /opt/ibgateway/releases/<identity>/   versioned official Gateway installations
 /opt/ibgateway/current                atomic pointer to one Gateway installation
 ```
@@ -46,7 +48,6 @@ sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/ibkr-api/provenance
 sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/ibkr-api/status
 sudo install -d -o root -g stocker -m 0750 /var/lib/stocker/secure-transfer
 sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/backups
-sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/ibgateway
 ```
 
 Do not add `stocker` to privileged groups. Keep the IBKR GUI/session under an
@@ -190,23 +191,43 @@ Recheck the official page and record a new hash for any later release rather
 than treating this observed hash as permanent.
 
 ```bash
+sudo useradd --system --home-dir /var/lib/ibgateway \
+  --create-home --shell /usr/sbin/nologin ibgateway
+sudo install -d -o ibgateway -g ibgateway -m 0700 /var/lib/ibgateway
+sudo install -d -o root -g ibgateway -m 0750 \
+  /var/lib/ibgateway/installers
+sudo install -d -o root -g root -m 0700 /etc/ibgateway
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
   xvfb x11vnc openbox xauth dbus-x11
+INSTALLER=/var/lib/ibgateway/installers/ibgateway-20260725-latest-linux-x64.sh
+EXPECTED_SHA=791abe12594c0d9c8736769fd8ee6368861b0d1a6b70e11275b32dedfec16692
 sudo curl --fail --location --proto '=https' --tlsv1.2 \
-  --output /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh \
+  --output "$INSTALLER" \
   https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh
-sudo sha256sum \
-  /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh
-sudo chmod 0750 \
-  /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh
-sudo install -d -o root -g stocker -m 0750 /opt/ibgateway/releases
-sudo /var/lib/stocker/secure-transfer/ibgateway-latest-linux-x64.sh \
-  -q -dir /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
-sudo chown -R root:stocker \
-  /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
-sudo chmod -R o-rwx \
-  /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
+printf '%s  %s\n' "$EXPECTED_SHA" "$INSTALLER" |
+  sudo sha256sum --check
+sudo chown root:ibgateway "$INSTALLER"
+sudo chmod 0750 "$INSTALLER"
+TARGET=/opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID
+sudo install -d -o root -g ibgateway -m 0750 /opt/ibgateway/releases
+sudo install -d -o ibgateway -g ibgateway -m 0750 "$TARGET"
+cd /var/lib/ibgateway
+sudo -H -u ibgateway "$INSTALLER" -q -dir "$TARGET"
+sudo chown -R root:ibgateway "$TARGET"
+sudo chmod -R go-w "$TARGET"
+{
+  printf 'source_url=%s\n' \
+    'https://download2.interactivebrokers.com/installers/ibgateway/latest-standalone/ibgateway-latest-standalone-linux-x64.sh'
+  printf 'sha256=%s\n' "$EXPECTED_SHA"
+  printf 'installed_path=%s\n' "$TARGET"
+  printf 'recorded_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} | sudo tee \
+  /var/lib/ibgateway/installers/REPLACE_WITH_VERSIONED_ID.provenance >/dev/null
+sudo chown root:ibgateway \
+  /var/lib/ibgateway/installers/REPLACE_WITH_VERSIONED_ID.provenance
+sudo chmod 0640 \
+  /var/lib/ibgateway/installers/REPLACE_WITH_VERSIONED_ID.provenance
 sudo ln -s /opt/ibgateway/releases/REPLACE_WITH_VERSIONED_ID \
   /opt/ibgateway/current.next
 sudo mv -Tf /opt/ibgateway/current.next /opt/ibgateway/current
@@ -216,23 +237,27 @@ Create X11 and VNC authentication material. This VNC credential is only for the
 loopback tunnel; it is not an IBKR credential and is never exposed by Stocker:
 
 ```bash
-sudo install -d -o stocker -g stocker -m 0700 /var/lib/stocker/ibgateway
+sudo install -d -o ibgateway -g ibgateway -m 0700 /var/lib/ibgateway
 X_COOKIE="$(mcookie)"
-sudo -u stocker touch /var/lib/stocker/ibgateway/.Xauthority
-sudo -u stocker xauth -f /var/lib/stocker/ibgateway/.Xauthority \
-  add :71 . "$X_COOKIE"
+sudo -H -u ibgateway touch /var/lib/ibgateway/.Xauthority
+printf 'add :71 . %s\n' "$X_COOKIE" |
+  sudo -H -u ibgateway xauth -f /var/lib/ibgateway/.Xauthority source -
 unset X_COOKIE
-VNC_PASSWORD="$(openssl rand -hex 4)"
-sudo x11vnc -storepasswd "$VNC_PASSWORD" \
-  /var/lib/stocker/ibgateway/vnc.pass
+VNC_PASSWORD="$(openssl rand -base64 6)"
+printf '%s\n%s\ny\n' "$VNC_PASSWORD" "$VNC_PASSWORD" |
+  sudo -H -u ibgateway env SHELL=/bin/sh script -q -c \
+    'x11vnc -storepasswd /var/lib/ibgateway/vnc.pass' /dev/null \
+    >/dev/null 2>&1
+sudo install -o root -g root -m 0600 /dev/null \
+  /etc/ibgateway/vnc-password
 printf '%s\n' "$VNC_PASSWORD" |
-  sudo tee /etc/stocker/ibgateway-vnc-password >/dev/null
+  sudo tee /etc/ibgateway/vnc-password >/dev/null
 unset VNC_PASSWORD
-sudo chown stocker:stocker /var/lib/stocker/ibgateway/vnc.pass
+sudo chown ibgateway:ibgateway /var/lib/ibgateway/vnc.pass
 sudo chmod 0600 \
-  /var/lib/stocker/ibgateway/.Xauthority \
-  /var/lib/stocker/ibgateway/vnc.pass \
-  /etc/stocker/ibgateway-vnc-password
+  /var/lib/ibgateway/.Xauthority \
+  /var/lib/ibgateway/vnc.pass \
+  /etc/ibgateway/vnc-password
 ```
 
 Install the private graphical-session units:
@@ -262,7 +287,7 @@ Open a native VNC client at `127.0.0.1:5901`. Retrieve the VNC password through
 an authenticated SSH session:
 
 ```bash
-sudo cat /etc/stocker/ibgateway-vnc-password
+sudo cat /etc/ibgateway/vnc-password
 ```
 
 Enter the manual IBKR username, password, and 2FA only in the official Gateway
@@ -280,14 +305,19 @@ database, commands, or logs. Choose the paper session. In Gateway API settings:
 Verify that Gateway and VNC remain private:
 
 ```bash
-sudo ss -ltnp | grep -E ':(4001|4002|7496|7497|5901)\b'
+IBKR_PORT=REPLACE_WITH_EXACT_CONFIGURED_PORT
+sudo ss -H -ltnp "( sport = :$IBKR_PORT )"
+sudo ss -H -ltnp "( sport = :5901 )"
 sudo systemctl status \
   stocker-ibgateway.service stocker-ibgateway-vnc.service
 ```
 
 The expected listeners are `127.0.0.1:<configured API port>` and
-`127.0.0.1:5901`. Stop the VNC helper between maintenance sessions if desired;
-the Gateway itself and Stocker recorder do not depend on VNC after login.
+`127.0.0.1:5901`. The recorder independently parses the Linux listener table
+for the exact configured API port and refuses any wildcard or non-loopback
+listener with `blocked_unsafe_runtime_configuration`. Stop the VNC helper
+between maintenance sessions if desired; the Gateway itself and Stocker
+recorder do not depend on VNC after login.
 
 ## 4. Copy a versioned application release
 

@@ -4,17 +4,20 @@ Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbo
 Wants=network-online.target stocker-ibgateway-window-manager.service stocker-ibgateway-vnc.service
 Requires=stocker-ibgateway-display.service
 After=network-online.target stocker-ibgateway-display.service stocker-ibgateway-window-manager.service
+ConditionPathExists=/opt/ibgateway/current/ibgateway
+ConditionPathExists=/var/lib/ibgateway/.Xauthority
 StartLimitIntervalSec=300
 StartLimitBurst=3
 
 [Service]
 Type=simple
-User=stocker
-Group=stocker
-WorkingDirectory=/var/lib/stocker/ibgateway
-Environment=HOME=/var/lib/stocker
+User=ibgateway
+Group=ibgateway
+WorkingDirectory=/var/lib/ibgateway
+Environment=HOME=/var/lib/ibgateway
 Environment=DISPLAY=:71
-Environment=XAUTHORITY=/var/lib/stocker/ibgateway/.Xauthority
+Environment=XAUTHORITY=/var/lib/ibgateway/.Xauthority
+ExecCondition=/usr/bin/test -x /opt/ibgateway/current/ibgateway
 ExecStart=/opt/ibgateway/current/ibgateway
 Restart=on-failure
 RestartSec=20
@@ -31,7 +34,7 @@ ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=/var/lib/stocker /tmp
+ReadWritePaths=/var/lib/ibgateway /tmp
 
 [Install]
 WantedBy=multi-user.target

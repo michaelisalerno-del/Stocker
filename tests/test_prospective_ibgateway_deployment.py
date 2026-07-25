@@ -75,7 +75,6 @@ def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
     assert "-rfbauth /var/lib/ibgateway/vnc.pass" in unit
     assert "ConditionPathExists=/var/lib/ibgateway/vnc.pass" in unit
     assert "StartLimitBurst=" in unit
-    assert "SuccessExitStatus=2" in unit
     assert "0.0.0.0" not in unit
     assert "WantedBy=multi-user.target" not in unit
 

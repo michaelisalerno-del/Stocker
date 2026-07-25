@@ -110,6 +110,16 @@ class FrozenArtifactReconstruction(BaseModel):
     universe_hash: str
 
 
+def _expected_design_columns(
+    numeric_features: tuple[str, ...],
+    stock_levels: tuple[str, ...],
+) -> tuple[str, ...]:
+    return (
+        *numeric_features,
+        *(f"control_stock__{level}" for level in stock_levels[1:]),
+    )
+
+
 @dataclass(frozen=True)
 class OrderedFeatureFramePreprocessor:
     """Validate and pass through the frozen ordered raw feature frame."""
@@ -141,9 +151,9 @@ class ReconstructedFrozenLogisticModel:
     def predict_proba(self, frame: pd.DataFrame) -> np.ndarray:
         """Apply the frozen preprocessing and return two-class probabilities."""
 
-        expected_design = (
-            *self.numeric_features,
-            *(f"control_stock__{level}" for level in self.stock_levels[1:]),
+        expected_design = _expected_design_columns(
+            self.numeric_features,
+            self.stock_levels,
         )
         if self.design_columns != expected_design:
             raise ValueError("blocked_feature_schema_mismatch: design columns differ")
@@ -288,10 +298,7 @@ def _model_from_specification(
             f"blocked_feature_schema_mismatch: {name}.intercept is invalid"
         ) from exc
     expected_design_width = len(numeric_features) + len(stock_levels) - 1
-    expected_design_columns = (
-        *numeric_features,
-        *(f"control_stock__{level}" for level in stock_levels[1:]),
-    )
+    expected_design_columns = _expected_design_columns(numeric_features, stock_levels)
     valid = (
         specification.get("model_id") == name
         and specification.get("kind") == "logistic"

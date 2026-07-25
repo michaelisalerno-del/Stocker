@@ -288,7 +288,7 @@ sudo useradd --system --home-dir /var/lib/ibgateway \
 sudo install -d -o ibgateway -g ibgateway -m 0700 /var/lib/ibgateway
 sudo install -d -o root -g ibgateway -m 0750 \
   /var/lib/ibgateway/installers
-sudo install -d -o root -g root -m 0700 /etc/ibgateway
+sudo install -d -o root -g ibgateway -m 0710 /etc/ibgateway
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
   xvfb x11vnc openbox xauth dbus-x11 nftables

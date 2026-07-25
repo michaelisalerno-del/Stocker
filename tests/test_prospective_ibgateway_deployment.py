@@ -477,6 +477,8 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert 'sudo ln "$PROVENANCE_TMP" "$PROVENANCE"' in runbook
     assert "verify-ibgateway-installation.sh" in runbook
     assert "useradd --system --home-dir /var/lib/ibgateway" in runbook
+    assert "install -d -o root -g ibgateway -m 0710 /etc/ibgateway" in runbook
+    assert "install -d -o root -g root -m 0700 /etc/ibgateway" not in runbook
     assert 'x11vnc -storepasswd "$VNC_PASSWORD"' not in runbook
     assert "ReadWritePaths=/var/lib/stocker" not in "".join(
         _unit(name)

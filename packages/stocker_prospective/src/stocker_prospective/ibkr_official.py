@@ -48,10 +48,13 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
         def error(
             self,
             reqId: int,
+            errorTime: int,
             errorCode: int,
             errorString: str,
             advancedOrderRejectJson: str = "",
         ) -> None:
+            # Current official TWS API releases include the broker timestamp
+            # between the request ID and error code.
             adapter.on_error(reqId, errorCode, errorString)
 
         def connectionClosed(self) -> None:  # noqa: N802

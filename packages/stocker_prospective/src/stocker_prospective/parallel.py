@@ -243,6 +243,8 @@ class ParallelSourceCaptureService:
 
     def _latest_due_session(self, now: datetime) -> tuple[date, datetime] | None:
         now_utc = now.astimezone(UTC)
+        if now_utc < self.config.runtime.prospective_start_utc.astimezone(UTC):
+            return None
         start_day = self.config.runtime.prospective_start_utc.astimezone(NEW_YORK).date()
         end_day = now_utc.astimezone(NEW_YORK).date()
         import pandas_market_calendars as mcal

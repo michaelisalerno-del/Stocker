@@ -236,6 +236,7 @@ def test_parallel_capture_waits_for_registered_delay_and_never_backfills(
         sleep=lambda _seconds: None,
     )
 
+    service.poll(now=datetime(2026, 7, 26, 22, 0, tzinfo=UTC))
     service.poll(now=datetime(2026, 7, 27, 21, 59, tzinfo=UTC))
     assert provider.calls == []
 

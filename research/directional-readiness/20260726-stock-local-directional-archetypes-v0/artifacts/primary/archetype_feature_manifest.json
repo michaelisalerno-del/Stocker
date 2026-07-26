@@ -1,0 +1,77 @@
+{
+  "A1": {
+    "attempt_window": "T-5 through T-3",
+    "continuation_acceptance_features_included": false,
+    "features": [
+      "a_attempt_return_abs",
+      "a_attempt_path_length",
+      "a_attempt_directional_efficiency",
+      "a_response_followthrough",
+      "a_reversal_efficiency_change",
+      "a_wick_rejection",
+      "a_close_location_recovery",
+      "a_failure_close_near_extreme",
+      "a_boundary_failure",
+      "a_boundary_distance_inside",
+      "a_boundary_maintenance_count",
+      "a_vwap_reclaim_failure",
+      "a_vwap_distance_after_failure",
+      "a_attempt_price_impact",
+      "a_response_price_impact",
+      "a_price_impact_decline",
+      "a_elevated_activity_weak_progress",
+      "a_relative_recovery",
+      "a_market_resilience"
+    ],
+    "interpretation": "bar-derived price-response proxy, not direct order flow",
+    "name": "opposite_side_absorption_and_reversal",
+    "response_window": "T-2 through T-1"
+  },
+  "C1": {
+    "absorption_features_included": false,
+    "features": [
+      "c_z_return_5m",
+      "c_z_return_10m",
+      "c_z_return_20m",
+      "c_z_return_30m",
+      "c_directional_efficiency_20m",
+      "c_mean_clv_4",
+      "c_directional_close_fraction_4",
+      "c_signed_wick_asymmetry_4",
+      "c_signed_vwap_slope_4",
+      "c_signed_vwap_distance",
+      "c_vwap_side_closes_3",
+      "c_break_above_prior_six_high",
+      "c_break_below_prior_six_low",
+      "c_signed_boundary_distance",
+      "c_signed_boundary_acceptance_count",
+      "c_boundary_rejection",
+      "c_relative_return_5m",
+      "c_relative_return_10m",
+      "c_relative_agreement"
+    ],
+    "name": "continuation_and_level_acceptance"
+  },
+  "R1": {
+    "beta_fit": "2024 completed five-minute bars only",
+    "features": [
+      "r_residual_return_5m",
+      "r_residual_return_10m",
+      "r_residual_return_20m",
+      "r_residual_slope",
+      "r_residual_persistence",
+      "r_change_in_residual_strength",
+      "r_stock_flat_up_market_down",
+      "r_stock_flat_down_market_up",
+      "r_residual_volatility_score",
+      "r_distance_from_normal_residual_range",
+      "r_absolute_residual_direction_agreement",
+      "r_improving_while_absolute_compressed"
+    ],
+    "name": "stock_specific_relative_strength",
+    "peer_stock_cross_section_used": false
+  },
+  "archetypes_combined_for_primary_inference": false,
+  "research_only": true,
+  "three_archetypes_tested_separately": true
+}

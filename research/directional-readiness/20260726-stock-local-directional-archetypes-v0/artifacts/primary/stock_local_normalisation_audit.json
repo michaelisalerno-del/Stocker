@@ -1,0 +1,18 @@
+{
+  "clipped_applications": 2595,
+  "clipping_boundaries_development_only": true,
+  "development_only": true,
+  "fallback_applications": 44550,
+  "fallback_level_counts": {
+    "development_pooled": 900,
+    "stock_adjacent_checkpoint_group": 3330,
+    "stock_checkpoint": 40320
+  },
+  "missing_value_applications": 2391,
+  "missing_values_development_only": true,
+  "oof_sessions_excluded": true,
+  "passed": true,
+  "peer_slate_normalisation": false,
+  "research_only": true,
+  "stock_local_normalisation": true
+}

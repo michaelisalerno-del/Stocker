@@ -1,0 +1,45 @@
+{
+  "A1": {
+    "boundary": 0.10239913693629493,
+    "development_action_coverage": 0.350210970464135,
+    "development_actions": 166,
+    "development_rows": 474,
+    "effective_target_coverage": 0.35,
+    "method": "deterministic_descending_weighted_quantile",
+    "minimum_actions": 80,
+    "same_call_put_boundary": true,
+    "source": "2024_blocked_oof_only",
+    "target_coverage": 0.35
+  },
+  "C1": {
+    "boundary": 0.08831660487389237,
+    "development_action_coverage": 0.350210970464135,
+    "development_actions": 166,
+    "development_rows": 474,
+    "effective_target_coverage": 0.35,
+    "method": "deterministic_descending_weighted_quantile",
+    "minimum_actions": 80,
+    "same_call_put_boundary": true,
+    "source": "2024_blocked_oof_only",
+    "target_coverage": 0.35
+  },
+  "R1": {
+    "boundary": 0.09516361267323831,
+    "development_action_coverage": 0.350210970464135,
+    "development_actions": 166,
+    "development_rows": 474,
+    "effective_target_coverage": 0.35,
+    "method": "deterministic_descending_weighted_quantile",
+    "minimum_actions": 80,
+    "same_call_put_boundary": true,
+    "source": "2024_blocked_oof_only",
+    "target_coverage": 0.35
+  },
+  "checkpoint_specific_thresholds": false,
+  "minimum_development_actions": 80,
+  "research_only": true,
+  "same_boundary_for_call_and_put": true,
+  "source": "2024 blocked complete-session OOF predictions only",
+  "stock_specific_thresholds": false,
+  "target_action_coverage": 0.35
+}

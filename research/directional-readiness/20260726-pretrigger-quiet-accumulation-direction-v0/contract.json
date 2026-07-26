@@ -1,0 +1,174 @@
+{
+  "experiment": "Pre-Trigger Quiet Accumulation / Distribution Direction Screen V0",
+  "research_only": true,
+  "retrospective_candidate_screen": true,
+  "movement_model_frozen": true,
+  "movement_model_refit_allowed": false,
+  "m1_threshold": 0.49588519865576763,
+  "fresh_episode_definition_frozen": true,
+  "direction_marker_precedes_trigger_bar": true,
+  "trigger_bar_excluded_from_direction_features": true,
+  "primary_pretrigger_window_bars": 5,
+  "primary_direction_horizon_minutes": 10,
+  "quiet_accumulation_and_distribution_mirrored": true,
+  "direct_order_flow_claim": false,
+  "activity_proxy_not_exchange_volume": true,
+  "route_orientation_features_excluded": true,
+  "option_pnl_calculated": false,
+  "intraday_option_quotes_used": false,
+  "broker_access": false,
+  "paper_orders_allowed": false,
+  "live_orders_allowed": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "development": {
+    "start": "2024-01-01",
+    "end": "2024-12-31"
+  },
+  "retrospective_assessment": {
+    "start": "2025-01-01",
+    "end": "2025-08-22",
+    "untouched_confirmation": false
+  },
+  "excluded_opened_holdout": {
+    "start": "2025-09-01",
+    "end": "2025-12-31"
+  },
+  "protected": {
+    "start": "2026-01-01",
+    "read_allowed": false,
+    "materialisation_allowed": false
+  },
+  "epsilon": 1e-12,
+  "secondary_pretrigger_windows_bars": [
+    3,
+    9
+  ],
+  "prospective_entry": "open_of_first_completed_five_minute_bar_after_m1_trigger",
+  "activity_proxy_field": "historical_relative_activity",
+  "activity_proxy_label": "activity proxy",
+  "vwap": {
+    "implementation": "causal_session_typical_price_weighted_by_positive_existing_activity_field",
+    "activity_is_not_asserted_exchange_volume": true,
+    "atr_denominator": "prior_completed_bar_true_range_mean_14",
+    "atr_window_bars": 14
+  },
+  "signed_pressure": {
+    "field": "signed_pressure",
+    "provenance": "audited behavioural-state dimension on even completed-bar checkpoints",
+    "alignment": "exact_checkpoint_bar_close_only",
+    "interpolation": false,
+    "forward_fill": false,
+    "redefinition": false,
+    "bars_without_an_exact_snapshot": "missing",
+    "full_five_bar_history_required_for_full_hypothesis": true
+  },
+  "market_proxy": {
+    "symbol": "VTI",
+    "field": "vti__bar_log_return",
+    "causal": true
+  },
+  "quiet_score": {
+    "signed_components": [
+      "pressure_sum_25",
+      "pressure_persistence_25",
+      "pressure_slope_25",
+      "signed_absorption_divergence_25",
+      "activity_without_displacement_25",
+      "relative_resilience_25",
+      "mean_clv_25",
+      "mean_wick_asymmetry_25",
+      "break_failure_asymmetry_25",
+      "mean_vwap_distance_25",
+      "vwap_side_balance_25",
+      "vwap_reclaim_balance_25",
+      "accumulation_sign_persistence_25"
+    ],
+    "standardisation": "development_median_iqr",
+    "missing_imputation": "development_median",
+    "component_clip": [
+      -3.0,
+      3.0
+    ],
+    "weights": "equal",
+    "quietness": "sigmoid(range_compression_25) * sigmoid(path_compression_25)"
+  },
+  "models": {
+    "family": "l2_logistic",
+    "penalty": "l2",
+    "C": 0.25,
+    "solver": "liblinear",
+    "max_iter": 300,
+    "class_weight": null,
+    "episode_weights": "equal",
+    "development_only": true
+  },
+  "confidence_policy": {
+    "target_action_coverage": 0.35,
+    "minimum_development_actions": 100,
+    "symmetric": true,
+    "development_oof_only": true
+  },
+  "score_bins": {
+    "boundaries": "development_q20_q40_q60_q80",
+    "central_neutral_region": "development_q40_to_q60"
+  },
+  "attribution": {
+    "grouped_permutations": 20,
+    "within": "session_x_checkpoint",
+    "seeds": [
+      2026072601,
+      2026072602,
+      2026072603,
+      2026072604,
+      2026072605,
+      2026072606,
+      2026072607,
+      2026072608,
+      2026072609,
+      2026072610,
+      2026072611,
+      2026072612,
+      2026072613,
+      2026072614,
+      2026072615,
+      2026072616,
+      2026072617,
+      2026072618,
+      2026072619,
+      2026072620
+    ]
+  },
+  "bootstrap": {
+    "draws": 100,
+    "seed": 2026072621,
+    "unit": "whole_assessment_session",
+    "interval_levels": [
+      0.8,
+      0.9,
+      0.95
+    ],
+    "model_refit": false
+  },
+  "label_nulls": {
+    "refits": 5,
+    "seeds": [
+      2026072631,
+      2026072632,
+      2026072633,
+      2026072634,
+      2026072635
+    ],
+    "within": "development_session_x_checkpoint"
+  },
+  "temporal_placebo": {
+    "seed": 2026072641,
+    "construction": "move_each_stocks_complete_quiet_feature_bundle_to_its_next_fresh_episode"
+  },
+  "component_materiality_rule": "strict_mean_deterioration_greater_than_zero_on_each_named_metric",
+  "composite_strong_bin_minimum_episodes": 25,
+  "source_hashes": {
+    "front_options_cross_market_panel_sha256": "f62ef0144c12c813cbc665ba6d5ba1a235a6f77101a04b9f491c77b24c295529",
+    "frozen_state_surface_sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+  }
+}

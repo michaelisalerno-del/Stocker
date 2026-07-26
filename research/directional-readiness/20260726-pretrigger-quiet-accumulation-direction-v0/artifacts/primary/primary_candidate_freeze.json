@@ -1,0 +1,24 @@
+{
+  "C": 0.25,
+  "assessment_model_switching_allowed": false,
+  "composite_weights": "equal",
+  "model_family": "l2_logistic",
+  "primary_candidate": "Q1",
+  "primary_horizon_minutes": 10,
+  "primary_window_bars": 5,
+  "primary_window_minutes": 25,
+  "score_bin_boundaries": {
+    "q20": -0.03248654080822349,
+    "q40": -0.006841392786584458,
+    "q60": 0.0066891840253674876,
+    "q80": 0.0360738879829692
+  },
+  "subgroup_boundaries": {
+    "largest_absolute_movement_q75": 0.01478011214680873,
+    "m1_probability_median": 0.5333314715960257,
+    "prior_close_atm_iv_median": 0.94495,
+    "transition_probability_median": 0.1565929159601579
+  },
+  "trigger_bar_excluded": true,
+  "written_before_assessment_target_construction": true
+}

@@ -1,0 +1,59 @@
+{
+  "activity_proxy": {
+    "causal_definition": "current activity divided by same-stock same-clock expanding prior-session mean with repository minimum history",
+    "confirmed_exchange_volume": false,
+    "field": "historical_relative_activity",
+    "label": "activity proxy"
+  },
+  "authorized_materialized_session_max": "2025-08-22",
+  "authorized_materialized_session_min": "2024-01-02",
+  "branch_c": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_cross_market_panel.parquet",
+    "role": "frozen_M1_Group_O_plus_Group_I_and_audited_pressure_snapshots",
+    "sha256": "f62ef0144c12c813cbc665ba6d5ba1a235a6f77101a04b9f491c77b24c295529"
+  },
+  "intraday_option_quotes_used": false,
+  "market_proxy": {
+    "causal": true,
+    "field": "vti__bar_log_return",
+    "symbol": "VTI"
+  },
+  "predecessor_runner": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/research/directional-readiness/20260726-movement-qualified-direction-screen-v0/run_screen_v0.py",
+    "sha256": "de7093ce9b5565cec5c2b3e67cf1f0f24a6c7cba582d1d30462acd6ad1f2eb04"
+  },
+  "protected_outcomes_materialized": false,
+  "signed_pressure": {
+    "alignment": "exact_checkpoint_bar_close_only",
+    "bars_with_exact_pressure_snapshot": 24130,
+    "bars_without_exact_snapshot_missing": 305173,
+    "forward_fill": false,
+    "future_pressure_rows": 0,
+    "interpolation": false,
+    "redefinition": false,
+    "source_checkpoint_values": [
+      6,
+      8,
+      10,
+      12,
+      14,
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30,
+      32,
+      34
+    ],
+    "source_field": "signed_pressure",
+    "source_snapshots": 24130
+  },
+  "state_surface": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+    "role": "five_minute_OHLC_activity_proxy_market_proxy_and_causal_timestamps",
+    "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+  }
+}

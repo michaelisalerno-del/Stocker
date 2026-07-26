@@ -1,0 +1,19 @@
+{
+  "assessment_episodes": 253,
+  "development_episodes": 285,
+  "entry_is_next_five_minute_bar_open": true,
+  "episode_identity_mismatches": 0,
+  "episodes_per_session": 2.152,
+  "fresh_episodes": 538,
+  "fresh_unspaced_crossings": 559,
+  "maximum_episodes_per_stock_session": 3,
+  "minimum_episode_spacing_minutes": 30,
+  "passed": true,
+  "raw_above_threshold_assessment_rows": 608,
+  "raw_above_threshold_checkpoint_rows": 1266,
+  "raw_above_threshold_development_rows": 658,
+  "raw_checkpoint_rows": 24130,
+  "sessions": 250,
+  "signal_is_completed_checkpoint_bar_close": true,
+  "spacing_violations": 0
+}

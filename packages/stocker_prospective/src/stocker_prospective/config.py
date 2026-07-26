@@ -140,6 +140,10 @@ class ParallelValidationConfig(BaseModel):
     enabled: bool = False
     provider: Literal["eodhd"] = "eodhd"
     api_token_env: str = Field(default="EODHD_API_TOKEN", min_length=1)
+    credential_status_env: str = Field(
+        default="STOCKER_EODHD_TOKEN_CONFIGURED",
+        min_length=1,
+    )
     base_url: Literal["https://eodhd.com/api"] = "https://eodhd.com/api"
     request_timeout_seconds: float = Field(default=30.0, gt=0.0)
     max_retries: int = Field(default=3, ge=1, le=10)
@@ -295,8 +299,8 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
         "parallel_validation": {
             "enabled": config.parallel_validation.enabled,
             "provider": config.parallel_validation.provider,
-            "credential_configured": bool(
-                os.environ.get(config.parallel_validation.api_token_env)
+            "credential_configured": (
+                os.environ.get(config.parallel_validation.credential_status_env) == "1"
             ),
             "capture_delay_seconds": config.parallel_validation.capture_delay_seconds,
         },

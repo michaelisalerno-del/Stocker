@@ -212,7 +212,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         parity = _parity_projection(config)
         ibkr_api = official_ibkr_api_projection()
         parallel_credential_configured = bool(
-            os.environ.get(config.parallel_validation.api_token_env)
+            os.environ.get(config.parallel_validation.credential_status_env) == "1"
         )
         parallel_blocker = (
             "blocked_missing_eodhd_server_token"

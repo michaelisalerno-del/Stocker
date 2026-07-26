@@ -76,6 +76,7 @@ def config(
             "parallel_validation": {
                 "enabled": parallel_enabled,
                 "api_token_env": "EODHD_API_TOKEN",
+                "credential_status_env": "STOCKER_EODHD_TOKEN_CONFIGURED",
             },
         }
     )
@@ -461,6 +462,7 @@ def test_parallel_vendor_credential_blocker_is_boolean_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("EODHD_API_TOKEN", raising=False)
+    monkeypatch.delenv("STOCKER_EODHD_TOKEN_CONFIGURED", raising=False)
     cfg = config(tmp_path, parallel_enabled=True)
     run_deterministic_replay(
         ReplaySettings(
@@ -483,6 +485,16 @@ def test_parallel_vendor_credential_blocker_is_boolean_only(
     assert health["parallel_validation"]["credential_configured"] is False
     assert public["parallel_validation"]["credential_configured"] is False
     assert "EODHD_API_TOKEN" not in str(public)
+
+    monkeypatch.setenv("EODHD_API_TOKEN", "must-not-enter-web-process")
+    assert client.get("/api/health").json()["parallel_validation"][
+        "credential_configured"
+    ] is False
+
+    monkeypatch.setenv("STOCKER_EODHD_TOKEN_CONFIGURED", "1")
+    projected = client.get("/api/health").json()
+    assert projected["parallel_validation"]["credential_configured"] is True
+    assert "must-not-enter-web-process" not in str(projected)
 
 
 def test_optional_auth_protects_browser_and_api_with_secure_cookie_support(

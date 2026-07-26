@@ -732,9 +732,11 @@ EODHD_API_TOKEN=REPLACE_IN_EDITOR
 Put the context-signing secret only in `stocker.env`; never expose it to the web
 process. Put an optional built-in web-auth token only in `stocker-web.env`.
 Put the EODHD token only in `stocker.env`; the web process receives only a
-boolean `credential_configured` projection. EODHD does not run as a separate
-service. The recorder makes bounded requests after the session and stores
-source-labelled evidence that is permanently ineligible for scoring.
+boolean `credential_configured` projection. Set
+`STOCKER_EODHD_TOKEN_CONFIGURED=1` in `stocker-web.env` only after the token is
+present in `stocker.env`; otherwise leave it `0`. EODHD does not run as a
+separate service. The recorder makes bounded requests after the session and
+stores source-labelled evidence that is permanently ineligible for scoring.
 Never put IBKR username, password, or 2FA material in any Stocker file. Stocker
 has no fields for them.
 

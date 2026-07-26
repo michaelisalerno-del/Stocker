@@ -69,6 +69,7 @@ parallel_validation:
   enabled: false
   provider: eodhd
   api_token_env: EODHD_API_TOKEN
+  credential_status_env: STOCKER_EODHD_TOKEN_CONFIGURED
   base_url: https://eodhd.com/api
   request_timeout_seconds: 30
   max_retries: 3

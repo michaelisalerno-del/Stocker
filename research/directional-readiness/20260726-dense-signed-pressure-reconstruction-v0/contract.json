@@ -1,0 +1,53 @@
+{
+  "experiment": "Dense Five-Minute Signed-Pressure Reconstruction and Frozen Directional Rerun V0",
+  "research_only": true,
+  "feature_reconstruction": true,
+  "existing_signed_pressure_formula_frozen": true,
+  "new_pressure_definition_allowed": false,
+  "interpolation_allowed": false,
+  "forward_fill_allowed": false,
+  "backfill_from_future_allowed": false,
+  "future_outcome_features_allowed": false,
+  "dense_bar_frequency_minutes": 5,
+  "sparse_checkpoint_compatibility_required": true,
+  "maximum_sparse_checkpoint_difference": 1e-12,
+  "upstream_dependency_reconstruction_required": true,
+  "development_start": "2024-01-01",
+  "development_end": "2024-12-31",
+  "assessment_start": "2025-01-01",
+  "assessment_end": "2025-08-22",
+  "opened_holdout_excluded": true,
+  "excluded_opened_holdout_start": "2025-09-01",
+  "excluded_opened_holdout_end": "2025-12-31",
+  "protected_start": "2026-01-01",
+  "protected_read_allowed": false,
+  "protected_materialisation_allowed": false,
+  "frozen_directional_design_unchanged": true,
+  "broker_access": false,
+  "option_pnl_calculated": false,
+  "execution_enabled": false,
+  "production_runtime_modified": false,
+  "activity_proxy_field": "historical_relative_activity",
+  "activity_proxy_label": "activity proxy",
+  "activity_proxy_confirmed_exchange_volume": false,
+  "signed_pressure_claim": "bar-derived behavioural pressure; not direct order flow",
+  "dense_checkpoints": {
+    "first": 1,
+    "last": 34,
+    "bar_frequency_minutes": 5
+  },
+  "primary_pressure_window": {
+    "bars": 5,
+    "relative_to_trigger": [
+      "T-5",
+      "T-4",
+      "T-3",
+      "T-2",
+      "T-1"
+    ],
+    "four_of_five_allowed": false,
+    "imputation_allowed": false
+  },
+  "phase2_authorization_decision": "dense_signed_pressure_reconstruction_supported",
+  "phase2_scientific_settings_mutable": false
+}

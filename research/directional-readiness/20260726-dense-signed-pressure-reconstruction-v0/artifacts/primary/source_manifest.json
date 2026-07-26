@@ -1,0 +1,66 @@
+{
+  "activity_proxy": {
+    "confirmed_exchange_volume": false,
+    "field": "historical_relative_activity",
+    "label": "activity proxy"
+  },
+  "assessment_end": "2025-08-22",
+  "assessment_start": "2025-01-01",
+  "backfill_from_future_allowed": false,
+  "broker_access": false,
+  "causal_state_trace": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/research/route-competition/20260722-route-competition-hazard-quick-v0/artifacts/primary/causal_state_trace.parquet",
+    "role": "authorized completed five-minute OHLC and activity-proxy source",
+    "sha256": "b58ad2f824ed1a81d0d8846864bb1127330a46b4bd93d5d762ccff1f60857f1d"
+  },
+  "component_scaling": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json",
+    "preprocessing_hash": "dcabf51ecd501b061c40a3d77750a49f4b9fd0434dd11499e98c35cbdda39a15",
+    "sha256": "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2"
+  },
+  "dense_bar_frequency_minutes": 5,
+  "development_end": "2024-12-31",
+  "development_start": "2024-01-01",
+  "directional_branch_c": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_cross_market_panel.parquet",
+    "role": "sparse subset consumed by frozen directional experiment",
+    "sha256": "f62ef0144c12c813cbc665ba6d5ba1a235a6f77101a04b9f491c77b24c295529"
+  },
+  "execution_enabled": false,
+  "existing_signed_pressure_formula_frozen": true,
+  "feature_reconstruction": true,
+  "forward_fill_allowed": false,
+  "fresh_episode_identities": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/research/directional-readiness/20260726-pretrigger-quiet-accumulation-direction-v0/artifacts/primary/episode_identity_comparison.csv",
+    "sha256": "36859423a64f8dc98fd91544841db078d963f6785cc33bd076e8fc1920ef3afb"
+  },
+  "frozen_directional_design_unchanged": true,
+  "full_audited_sparse_pressure_panel": {
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/dense_advance_panel.parquet",
+    "role": "full archived even-checkpoint pressure snapshots",
+    "sha256": "a916b792e15e8630dadc09bed64d71be5533ce9f3b2bd93af06605d0faaa0cc3"
+  },
+  "future_outcome_features_allowed": false,
+  "interpolation_allowed": false,
+  "maximum_sparse_checkpoint_difference": 1e-12,
+  "new_pressure_definition_allowed": false,
+  "opened_holdout_excluded": true,
+  "option_pnl_calculated": false,
+  "production_runtime_modified": false,
+  "protected_outcomes_materialized": false,
+  "protected_outcomes_read": false,
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "signed_pressure_source": {
+    "function": "_signed_pressure",
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/packages/stocker_research/src/stocker_research/behavioural_state_dimensions_v0.py",
+    "sha256": "75dc4974fbd51d43ff09a684cf2692849d376e5b5d06246daf2e72603fafa1de"
+  },
+  "sparse_checkpoint_compatibility_required": true,
+  "sparse_panel_call_site": {
+    "function": "add_development_frozen_baseline_features",
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/research/route-competition/20260722-route-competition-hazard-quick-v0/run_screen_v0.py",
+    "sha256": "c3e5dc116cc0c365798bb161e8f4add93057a9ae33457030bd4a6fa1520a943b"
+  },
+  "upstream_dependency_reconstruction_required": true
+}

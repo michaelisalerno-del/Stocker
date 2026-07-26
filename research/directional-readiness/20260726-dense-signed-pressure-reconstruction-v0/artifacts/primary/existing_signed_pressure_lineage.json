@@ -1,0 +1,39 @@
+{
+  "calculated_directly_or_vector": "calculated as one wider behavioural vector dimension",
+  "call_sites": [
+    "derive_behavioural_dimensions",
+    "add_development_frozen_baseline_features"
+  ],
+  "checkpoint_specific_structure": true,
+  "clipping_rule": "each standardized component clipped to [-5,+5]",
+  "component_weights": "equal_arithmetic_mean",
+  "formula_hash": "70308f5e794d0b405b379a04db8542e193f0f4d8be6119578ac991396617d68a",
+  "function_name": "_signed_pressure",
+  "function_signature": "_signed_pressure(frame)",
+  "future_filtered_population_membership_found": true,
+  "input_columns": [
+    "z_signed_progress",
+    "z_signed_efficiency",
+    "z_mean_close_location",
+    "z_boundary_slope"
+  ],
+  "lineage_unambiguous": true,
+  "missing_value_rule": "reject non-finite prefix input; no imputation",
+  "normalisation": "session x checkpoint cross-sectional median for signed progress, then checkpoint-specific 2024 median/IQR scaling",
+  "output_scale": "dimensionless equal mean of four robust-standardized components",
+  "raw_bar_component_source_function": "bar_component_frame",
+  "raw_component_source_function": "opening_raw_components",
+  "required_behavioural_dimensions": [],
+  "required_historical_lookback": "completed regular-session prefix; sparse implementation currently requires even prefix count and three later bars for row inclusion",
+  "required_raw_inputs": [
+    "regular-session open/high/low/close",
+    "historical_relative_activity presence gate"
+  ],
+  "required_regime_or_posterior_features": [],
+  "route_call_site_file": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/research/route-competition/20260722-route-competition-hazard-quick-v0/run_screen_v0.py",
+  "route_call_site_function": "add_development_frozen_baseline_features",
+  "route_source_sha256": "c3e5dc116cc0c365798bb161e8f4add93057a9ae33457030bd4a6fa1520a943b",
+  "sign_convention": "positive is upward bar-derived pressure; negative downward",
+  "source_file": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-2/packages/stocker_research/src/stocker_research/behavioural_state_dimensions_v0.py",
+  "source_sha256": "75dc4974fbd51d43ff09a684cf2692849d376e5b5d06246daf2e72603fafa1de"
+}

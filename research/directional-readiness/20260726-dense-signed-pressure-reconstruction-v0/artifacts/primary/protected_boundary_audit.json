@@ -1,0 +1,16 @@
+{
+  "assessment_end_enforced": "2025-08-22",
+  "broker_access": false,
+  "execution_enabled": false,
+  "feature_reconstruction": true,
+  "maximum_session": "2025-08-22",
+  "minimum_session": "2024-01-02",
+  "opened_holdout_excluded": true,
+  "opened_holdout_rows": 0,
+  "opened_holdout_rows_materialized": 0,
+  "passed": true,
+  "protected_outcome_rows_materialized": 0,
+  "protected_rows": 0,
+  "protected_start": "2026-01-01",
+  "research_only": true
+}

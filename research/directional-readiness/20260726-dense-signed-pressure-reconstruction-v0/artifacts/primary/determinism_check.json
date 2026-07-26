@@ -1,0 +1,13 @@
+{
+  "bootstrap_or_null_samples_redrawn": false,
+  "dense_bar_identity_mismatches": 0,
+  "dense_surface_identity_mismatches": 0,
+  "dense_surface_metadata_mismatches": 0,
+  "maximum_pressure_difference": 0.0,
+  "maximum_repeat_causal_progress_difference": 0.0,
+  "maximum_upstream_feature_difference": 0.0,
+  "passed": true,
+  "pressure_validity_mismatches": 0,
+  "redownloaded_data": false,
+  "sparse_checkpoint_mismatches": 0
+}

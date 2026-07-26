@@ -1,0 +1,17 @@
+{
+  "backfill_used": false,
+  "blocker": "blocked_dense_pressure_upstream_dependency",
+  "boundary_slope_causal": true,
+  "completed_ohlc_causal": true,
+  "cross_sectional_signed_progress_membership_causal": false,
+  "forward_fill_used": false,
+  "future_filtered_current_eligible_rows_all_checkpoints": 300,
+  "future_filtered_current_eligible_rows_sparse_checkpoints": 161,
+  "future_filtered_slates_all_checkpoints": 62,
+  "future_filtered_slates_sparse_checkpoints": 32,
+  "historical_relative_activity_causal": true,
+  "interpolation_used": false,
+  "mean_close_location_causal": true,
+  "passed": false,
+  "signed_efficiency_causal": true
+}

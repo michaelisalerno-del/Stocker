@@ -1,0 +1,26 @@
+{
+  "activity_proxy_is_confirmed_exchange_volume": false,
+  "activity_proxy_label": "historical_relative_activity",
+  "all_dense_dependency_classification": {
+    "causality_status": "future_dependent_population_membership",
+    "changed_rows": 300,
+    "changed_slates": 62,
+    "classification": "D"
+  },
+  "binding_class_d_dependency": "cross_sectional_signed_progress_slate_membership",
+  "complete_upstream_causal_chain_reconstructable": false,
+  "component_extraction": {
+    "boundary_slope": "same causal normalized high/low OLS slope mean",
+    "mean_close_location": "same causal close-location mean",
+    "signed_efficiency": "same causal return-efficiency formula",
+    "signed_progress": "same session/checkpoint peer-relative progress"
+  },
+  "exact_formula_reused": true,
+  "new_formula_created": false,
+  "sparse_even_dependency_classification": {
+    "causality_status": "future_dependent_population_membership",
+    "changed_rows": 161,
+    "changed_slates": 32,
+    "classification": "D"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "assessment_end": "2025-08-22",
+  "assessment_outcomes_used": false,
+  "assessment_start": "2025-01-01",
+  "broker_access": false,
+  "call_put_abstain_policy": true,
+  "direction_model_is_second_stage": true,
+  "direction_models_trained_on_2024_only": true,
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "m1_threshold_frozen": 0.49588519865576763,
+  "movement_model_frozen": true,
+  "movement_model_refit_allowed": false,
+  "opened_movement_holdout_excluded": true,
+  "option_pnl_calculated": false,
+  "paper_orders_allowed": false,
+  "primary_direction_horizon_minutes": 10,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "retrospective_directional_screen": true,
+  "rows_from_2026_onward_protected": true,
+  "strategy_promotion": false,
+  "thresholds": {
+    "D0": {
+      "boundary": 0.08280279227130671,
+      "development_action_coverage": 0.5263157894736842,
+      "development_actions": 150,
+      "development_rows": 285,
+      "effective_target_coverage": 0.5263157894736842,
+      "fixed_probability_sensitivities": {
+        "55_percent_probability": 0.05,
+        "60_percent_probability": 0.1,
+        "65_percent_probability": 0.15
+      },
+      "method": "deterministic_descending_weighted_quantile",
+      "minimum_actions": 150,
+      "same_call_put_boundary": true,
+      "source": "2024_blocked_oof_only",
+      "target_coverage": 0.35
+    },
+    "D1": {
+      "boundary": 0.08605747116326468,
+      "development_action_coverage": 0.5263157894736842,
+      "development_actions": 150,
+      "development_rows": 285,
+      "effective_target_coverage": 0.5263157894736842,
+      "fixed_probability_sensitivities": {
+        "55_percent_probability": 0.05,
+        "60_percent_probability": 0.1,
+        "65_percent_probability": 0.15
+      },
+      "method": "deterministic_descending_weighted_quantile",
+      "minimum_actions": 150,
+      "same_call_put_boundary": true,
+      "source": "2024_blocked_oof_only",
+      "target_coverage": 0.35
+    },
+    "D2": {
+      "boundary": 0.09484477538095726,
+      "development_action_coverage": 0.5263157894736842,
+      "development_actions": 150,
+      "development_rows": 285,
+      "effective_target_coverage": 0.5263157894736842,
+      "fixed_probability_sensitivities": {
+        "55_percent_probability": 0.05,
+        "60_percent_probability": 0.1,
+        "65_percent_probability": 0.15
+      },
+      "method": "deterministic_descending_weighted_quantile",
+      "minimum_actions": 150,
+      "same_call_put_boundary": true,
+      "source": "2024_blocked_oof_only",
+      "target_coverage": 0.35
+    }
+  },
+  "written_before_assessment_scoring": true
+}

@@ -1,0 +1,5 @@
+metric,value,gate,passed
+maximum_stock_share_of_episodes,0.11067193675889328,0.15,True
+maximum_stock_share_of_actions,0.08955223880597014,0.2,True
+maximum_month_share_of_actions,0.15671641791044777,0.3,True
+maximum_session_share_of_actions,0.03731343283582089,0.08,True

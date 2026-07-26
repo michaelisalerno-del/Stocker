@@ -1,0 +1,80 @@
+{
+  "IBKR_accessed": false,
+  "assessment_end": "2025-08-22",
+  "assessment_start": "2025-01-01",
+  "broker_access": false,
+  "broker_accessed": false,
+  "call_put_abstain_policy": true,
+  "development_period": [
+    "2024-01-01",
+    "2024-12-31"
+  ],
+  "direction_model_is_second_stage": true,
+  "direction_models_trained_on_2024_only": true,
+  "excluded_opened_movement_holdout": [
+    "2025-09-01",
+    "2025-12-31"
+  ],
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "m1_threshold_frozen": 0.49588519865576763,
+  "movement_model_frozen": true,
+  "movement_model_refit_allowed": false,
+  "new_options_data_downloaded": false,
+  "opened_movement_holdout_excluded": true,
+  "option_pnl_calculated": false,
+  "paper_orders_allowed": false,
+  "primary_direction_horizon_minutes": 10,
+  "production_runtime_modified": false,
+  "protected_period_not_materialized": [
+    "2026-01-01",
+    "onward"
+  ],
+  "research_only": true,
+  "retrospective_assessment_period": [
+    "2025-01-01",
+    "2025-08-22"
+  ],
+  "retrospective_directional_screen": true,
+  "rows_from_2026_onward_protected": true,
+  "sources": {
+    "audited_behavioural_dimensions": {
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-21-you-are-working-in-the-github-2/research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/compact_decision_panel.parquet",
+      "read_filter": [
+        "2024-01-01",
+        "2025-08-22"
+      ],
+      "role": "sparse_audited_signed_exhaustion",
+      "sha256": "589edb9b3dcbe5ea9dd91d1330054c03c5fee4b3baff0ea030559dd754bec479"
+    },
+    "audited_route_ledger": {
+      "available": true,
+      "path": "research/route-competition/20260722-route-competition-hazard-quick-v0/artifacts/primary/route_competition_ledger.parquet",
+      "role": "causal_active_prefix_and_registered_loop_orientation",
+      "sha256": "b3eab7d5b699719220bd8fd084ca0b25a8b2b56851211a093fe04a3cb22f124a"
+    },
+    "audited_state_centroids": {
+      "available": true,
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_cluster_centroids.csv",
+      "role": "outcome_free_semantic_orientation_contract",
+      "sha256": "c8022ce1336693fe509dc1e41b3d9185dff35214d8b5b77e19508c5ce6553979"
+    },
+    "frozen_branch_c_panel": {
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_cross_market_panel.parquet",
+      "role": "frozen_M1_Group_O_plus_Group_I_checkpoint_surface",
+      "rows": 24130,
+      "sha256": "f62ef0144c12c813cbc665ba6d5ba1a235a6f77101a04b9f491c77b24c295529"
+    },
+    "frozen_five_minute_state_surface": {
+      "materialized_rows": 329303,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+      "read_filter": [
+        "2024-01-01",
+        "2025-08-22"
+      ],
+      "role": "causal_direction_features_and_underlying_targets",
+      "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+    }
+  },
+  "strategy_promotion": false
+}

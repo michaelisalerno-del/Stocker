@@ -16,7 +16,11 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-BUNDLE_MANIFEST_VERSION: Final = "1"
+from stocker_prospective.frozen_artifacts import (
+    APPROVED_FEATURE_RUNTIME_REGISTRY_SHA256,
+)
+
+BUNDLE_MANIFEST_VERSION: Final = "2"
 SCIENTIFIC_CLASSIFICATION: Final = (
     "Previous-close front-options context + current intraday H0 stock condition -> "
     "improved prediction that near-term underlying movement exceeds previous-close "
@@ -38,6 +42,19 @@ SAFE_BUNDLE_ID = re.compile(SAFE_BUNDLE_ID_PATTERN)
 
 class BundleError(RuntimeError):
     """A fail-closed bundle contract violation."""
+
+
+class FeatureRuntimeBuildSpec(BaseModel):
+    """Exact frozen feature-runtime inputs copied from registered research artifacts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    registry: Path
+    h0_parameters: Path
+    h0_preprocessing: Path
+    loop_dictionary: Path
+    front_options_feature_manifest: Path
+    front_options_regime_mapping: Path
 
 
 class BundleBuildSpec(BaseModel):
@@ -66,6 +83,7 @@ class BundleBuildSpec(BaseModel):
     previous_session_context_feature_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     audit_references: list[Path] = Field(default_factory=list)
     determinism_references: list[Path] = Field(default_factory=list)
+    feature_runtime: FeatureRuntimeBuildSpec | None = None
 
 
 class FileIdentity(BaseModel):
@@ -77,6 +95,31 @@ class FileIdentity(BaseModel):
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     size_bytes: int = Field(ge=0)
     format: str
+
+
+class FeatureRuntimeIdentity(BaseModel):
+    """Verified assets required to reproduce the frozen feature transforms."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    contract_version: Literal["frozen-m1-feature-runtime-v1"]
+    registry: FileIdentity
+    h0_parameters: FileIdentity
+    h0_preprocessing: FileIdentity
+    loop_dictionary: FileIdentity
+    front_options_feature_manifest: FileIdentity
+    front_options_regime_mapping: FileIdentity
+    h0_model_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    h0_development_emission_panel_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    h0_emission_features: tuple[str, ...]
+    loop_dictionary_version: str
+    loop_dictionary_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    loop_definition_count: int = Field(gt=0)
+    front_options_raw_features: tuple[str, ...]
+    front_options_dimensions: tuple[str, ...]
+    front_options_missing_indicators: tuple[str, ...]
+    scoring_authorized_by_registry: Literal[False]
+    scoring_blocker: Literal["blocked_feature_source_semantics_mismatch"]
 
 
 class FeatureDefinition(BaseModel):
@@ -134,7 +177,7 @@ class BundleManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    manifest_version: Literal["1"]
+    manifest_version: Literal["1", "2"]
     bundle_id: str = Field(pattern=SAFE_BUNDLE_ID_PATTERN)
     bundle_kind: Literal["frozen_m1"] = "frozen_m1"
     created_at_utc: datetime
@@ -161,6 +204,7 @@ class BundleManifest(BaseModel):
     protected_start: Literal["2026-01-01"]
     audit_references: list[FileIdentity]
     determinism_references: list[FileIdentity]
+    feature_runtime: FeatureRuntimeIdentity | None = None
     files: dict[str, str]
 
 
@@ -233,6 +277,147 @@ def _load_json(path: Path, role: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise BundleError(f"blocked_feature_schema_mismatch: {role} must be an object")
     return payload
+
+
+_FEATURE_RUNTIME_ROLES: Final[tuple[str, ...]] = (
+    "h0_parameters",
+    "h0_preprocessing",
+    "loop_dictionary",
+    "front_options_feature_manifest",
+    "front_options_regime_mapping",
+)
+_FEATURE_RUNTIME_SUFFIXES: Final[dict[str, str]] = {
+    "h0_parameters": ".npz",
+    "h0_preprocessing": ".csv",
+    "loop_dictionary": ".csv",
+    "front_options_feature_manifest": ".json",
+    "front_options_regime_mapping": ".json",
+}
+
+
+def _require_string_tuple(value: object, *, role: str) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item for item in value)
+        or len(value) != len(set(value))
+    ):
+        raise BundleError(f"blocked_feature_schema_mismatch: invalid {role}")
+    return tuple(value)
+
+
+def _runtime_file_identities(runtime: FeatureRuntimeIdentity) -> tuple[FileIdentity, ...]:
+    return (
+        runtime.registry,
+        runtime.h0_parameters,
+        runtime.h0_preprocessing,
+        runtime.loop_dictionary,
+        runtime.front_options_feature_manifest,
+        runtime.front_options_regime_mapping,
+    )
+
+
+def _build_feature_runtime(
+    spec: FeatureRuntimeBuildSpec,
+    root: Path,
+) -> FeatureRuntimeIdentity:
+    if spec.registry.suffix.lower() != ".json" or not spec.registry.is_file():
+        raise BundleError(
+            "blocked_missing_verified_frozen_bundle: feature-runtime registry is absent"
+        )
+    if _sha256(spec.registry) != APPROVED_FEATURE_RUNTIME_REGISTRY_SHA256:
+        raise BundleError(
+            "blocked_frozen_artifact_hash_mismatch: feature-runtime registry differs"
+        )
+    registry_payload = _load_json(spec.registry, "feature-runtime registry")
+    artifacts = registry_payload.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise BundleError("blocked_feature_schema_mismatch: feature-runtime artifacts are absent")
+    sources = {
+        role: Path(getattr(spec, role))
+        for role in _FEATURE_RUNTIME_ROLES
+    }
+    for role, source in sources.items():
+        registration = artifacts.get(role)
+        if (
+            not source.is_file()
+            or source.suffix.lower() != _FEATURE_RUNTIME_SUFFIXES[role]
+            or not isinstance(registration, dict)
+            or registration.get("sha256") != _sha256(source)
+        ):
+            raise BundleError(
+                f"blocked_frozen_artifact_hash_mismatch: feature-runtime {role} differs"
+            )
+        if source.stat().st_size > 10 * 1024 * 1024:
+            raise BundleError(
+                f"blocked_unsafe_bundle_content: feature-runtime {role} exceeds 10 MiB"
+            )
+    h0 = registry_payload.get("h0")
+    loop = registry_payload.get("loop_dictionary")
+    front = registry_payload.get("front_options")
+    if (
+        registry_payload.get("schema_version") != "1"
+        or registry_payload.get("feature_contract_version")
+        != "frozen-m1-feature-runtime-v1"
+        or registry_payload.get("fit_invocations") != 0
+        or registry_payload.get("protected_observations_read") != 0
+        or registry_payload.get("scoring_authorized_by_registry") is not False
+        or registry_payload.get("scoring_blocker")
+        != "blocked_feature_source_semantics_mismatch"
+        or not isinstance(h0, dict)
+        or not isinstance(loop, dict)
+        or not isinstance(front, dict)
+        or front.get("fitted_period") != "development_2024_only"
+        or front.get("previous_close_options_only") is not True
+    ):
+        raise BundleError(
+            "blocked_feature_schema_mismatch: feature-runtime registry safety contract differs"
+        )
+    registry = _copy_identity(
+        spec.registry,
+        root,
+        "contracts/frozen-feature-runtime.json",
+    )
+    copied: dict[str, FileIdentity] = {}
+    for role, source in sources.items():
+        copied[role] = _copy_identity(
+            source,
+            root,
+            f"feature-runtime/{role}{source.suffix.lower()}",
+        )
+    try:
+        return FeatureRuntimeIdentity(
+            contract_version="frozen-m1-feature-runtime-v1",
+            registry=registry,
+            **copied,
+            h0_model_hash=str(h0["embedded_model_hash"]),
+            h0_development_emission_panel_hash=str(h0["development_emission_panel_hash"]),
+            h0_emission_features=_require_string_tuple(
+                h0.get("emission_features"),
+                role="H0 emission features",
+            ),
+            loop_dictionary_version=str(loop["version"]),
+            loop_dictionary_hash=str(loop["dictionary_hash"]),
+            loop_definition_count=int(loop["registered_definition_count"]),
+            front_options_raw_features=_require_string_tuple(
+                front.get("raw_features"),
+                role="front-options raw features",
+            ),
+            front_options_dimensions=_require_string_tuple(
+                front.get("dimensions"),
+                role="front-options dimensions",
+            ),
+            front_options_missing_indicators=_require_string_tuple(
+                front.get("missing_indicators"),
+                role="front-options missing indicators",
+            ),
+            scoring_authorized_by_registry=False,
+            scoring_blocker="blocked_feature_source_semantics_mismatch",
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BundleError(
+            "blocked_feature_schema_mismatch: feature-runtime registry identity is invalid"
+        ) from exc
 
 
 def _feature_schema(identity: FileIdentity, path: Path) -> FeatureSchemaIdentity:
@@ -361,6 +546,11 @@ def build_bundle(spec: BundleBuildSpec, destination: str | Path) -> BundleManife
             _copy_identity(path, temporary, f"references/determinism/{index:02d}-{path.name}")
             for index, path in enumerate(spec.determinism_references, start=1)
         ]
+        feature_runtime = (
+            None
+            if spec.feature_runtime is None
+            else _build_feature_runtime(spec.feature_runtime, temporary)
+        )
         identities = [
             m0,
             m1,
@@ -370,9 +560,12 @@ def build_bundle(spec: BundleBuildSpec, destination: str | Path) -> BundleManife
             threshold_file,
             *audits,
             *determinism,
+            *(() if feature_runtime is None else _runtime_file_identities(feature_runtime)),
         ]
         manifest = BundleManifest(
-            manifest_version=BUNDLE_MANIFEST_VERSION,
+            manifest_version=(
+                "1" if feature_runtime is None else BUNDLE_MANIFEST_VERSION
+            ),
             bundle_id=spec.bundle_id,
             created_at_utc=spec.created_at_utc.astimezone(UTC),
             scientific_classification=SCIENTIFIC_CLASSIFICATION,
@@ -398,6 +591,7 @@ def build_bundle(spec: BundleBuildSpec, destination: str | Path) -> BundleManife
             protected_start=PROTECTED_START,
             audit_references=audits,
             determinism_references=determinism,
+            feature_runtime=feature_runtime,
             files={identity.path: identity.sha256 for identity in identities},
         )
         (temporary / "manifest.json").write_bytes(_canonical_json(manifest.model_dump(mode="json")))
@@ -436,6 +630,11 @@ def _declared_file_identities(manifest: BundleManifest) -> dict[str, FileIdentit
         manifest.threshold.provenance,
         *manifest.audit_references,
         *manifest.determinism_references,
+        *(
+            ()
+            if manifest.feature_runtime is None
+            else _runtime_file_identities(manifest.feature_runtime)
+        ),
     ]
     declared: dict[str, FileIdentity] = {}
     for identity in identities:
@@ -523,6 +722,11 @@ def verify_bundle(path: str | Path) -> BundleVerification:
         manifest.feature_schema.path,
         manifest.universe.path,
         manifest.threshold.provenance.path,
+        *(
+            ()
+            if manifest.feature_runtime is None
+            else (manifest.feature_runtime.registry.path,)
+        ),
     )
     contracts_are_safe = all(
         _safe_bundle_relative_path(relative_path)
@@ -550,6 +754,48 @@ def verify_bundle(path: str | Path) -> BundleVerification:
         )
         if threshold != manifest.threshold:
             blockers.append("blocked_feature_schema_mismatch")
+        if manifest.manifest_version == "2" and manifest.feature_runtime is None:
+            blockers.append("blocked_missing_verified_frozen_bundle")
+        if manifest.feature_runtime is not None:
+            runtime = manifest.feature_runtime
+            registry_payload = _load_json(
+                root / runtime.registry.path,
+                "feature-runtime registry",
+            )
+            registered_artifacts = registry_payload.get("artifacts")
+            registered_h0 = registry_payload.get("h0")
+            registered_loop = registry_payload.get("loop_dictionary")
+            registered_front = registry_payload.get("front_options")
+            if (
+                registry_payload.get("feature_contract_version")
+                != runtime.contract_version
+                or registry_payload.get("scoring_authorized_by_registry")
+                is not runtime.scoring_authorized_by_registry
+                or registry_payload.get("scoring_blocker") != runtime.scoring_blocker
+                or not isinstance(registered_artifacts, dict)
+                or any(
+                    not isinstance(registered_artifacts.get(role), dict)
+                    or registered_artifacts[role].get("sha256")
+                    != getattr(runtime, role).sha256
+                    for role in _FEATURE_RUNTIME_ROLES
+                )
+                or not isinstance(registered_h0, dict)
+                or registered_h0.get("embedded_model_hash") != runtime.h0_model_hash
+                or registered_h0.get("development_emission_panel_hash")
+                != runtime.h0_development_emission_panel_hash
+                or tuple(registered_h0.get("emission_features", ()))
+                != runtime.h0_emission_features
+                or not isinstance(registered_loop, dict)
+                or registered_loop.get("dictionary_hash") != runtime.loop_dictionary_hash
+                or not isinstance(registered_front, dict)
+                or tuple(registered_front.get("raw_features", ()))
+                != runtime.front_options_raw_features
+                or tuple(registered_front.get("dimensions", ()))
+                != runtime.front_options_dimensions
+                or tuple(registered_front.get("missing_indicators", ()))
+                != runtime.front_options_missing_indicators
+            ):
+                blockers.append("blocked_feature_schema_mismatch")
     except BundleError as exc:
         code = str(exc).split(":", 1)[0]
         blockers.append(code)

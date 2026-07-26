@@ -176,18 +176,21 @@ records.
 
 ## Current frozen-artifact and parity state
 
-The repository contains numerical research handoff files but no serialized M0,
-M1, or preprocessor. In particular,
-`model_coefficients.json` is not accepted as a deployable model and is never
-used to reconstruct one.
+The audited numerical handoff is deterministically reconstructable into M0,
+M1, and the ordered preprocessor under the operator's explicit no-refit
+authorization. Reconstruction verifies the frozen JSON hashes and audit flags,
+invokes no fit method, reads no 2026+ observation, and emits a self-contained
+deployment bundle.
 
-The precise missing inputs expected by
-`configs/prospective/bundle-spec.example.yaml` are:
+`configs/prospective/frozen-feature-runtime-v1.json` separately registers the
+exact frozen H0 parameters/preprocessing, semantic loop dictionary,
+front-options dimension parameters, and serialized four-state regime mapping.
+A version-2 bundle copies and hashes all five assets. The server loader rechecks
+their embedded identities and the exact implementation-source hashes. The
+bundle never points back to a research-machine path.
 
-- `REQUIRED_APPROVED/m0.joblib`
-- `REQUIRED_APPROVED/m1.joblib`
-- `REQUIRED_APPROVED/preprocessor.joblib`
-- `REQUIRED_APPROVED/feature-schema.json`
+This makes the frozen transform machinery deployable; it does **not** declare
+the live inputs equivalent or authorize scoring.
 
 The exact frozen threshold is registered from
 `frozen_tail_thresholds.json` as `0.49588519865576763`; it was not reselected.
@@ -199,7 +202,7 @@ in exact model order:
 | Status | Count | Runtime consequence |
 | --- | ---: | --- |
 | `incompatible` | 3 | IBKR volume cannot replace the EODHD historical activity proxy |
-| `missing` | 32 | Frozen Group O/H0/loop transforms are not deployable |
+| `missing` | 32 | Live completed-bar H0/loop feature construction is not yet authorized |
 | `requires_parallel_validation` | 22 | IBKR versus EODHD bar construction is not yet verified |
 | `exact` / `verified_equivalent` | 0 | No real scoring permission exists yet |
 
@@ -209,6 +212,16 @@ Overall real-scoring blocker:
 The server may record source-labelled IBKR bars and quotes once a verified
 bundle/universe and official client are installed, but it may not label an
 altered reconstruction as frozen M1.
+
+The append-only EODHD parallel path retrieves the latest due XNYS session after
+a fixed two-hour delay, records every returned five-minute bar as
+`parallel_validation_only`, and never exposes those rows to the scorer. The
+pre-observation gate is
+`configs/prospective/parallel-feature-validation-v1.json`: 20 complete
+sessions, all 20 anchor symbols, no outcome fields, no automatic promotion, and
+an independent signed parity audit before any future run can use a revised
+parity report. EODHD is an API request source, not a daemon that must remain
+running.
 
 ## Dynamic previous-session context
 

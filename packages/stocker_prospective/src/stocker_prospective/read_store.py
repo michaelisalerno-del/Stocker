@@ -120,6 +120,7 @@ class ProspectiveReadStore:
                     "ibkr_connection": None,
                     "latest_capture": None,
                     "market_data_budget": None,
+                    "parallel_source_capture": None,
                     "latest_signal_episode": None,
                     "blockers": [],
                 }
@@ -159,6 +160,11 @@ class ProspectiveReadStore:
                 "SELECT * FROM market_data_budget_event WHERE run_id = ? ORDER BY id DESC LIMIT 1",
                 (run_id,),
             ).fetchone()
+            parallel_capture = connection.execute(
+                "SELECT * FROM source_capture_completion WHERE run_id = ? "
+                "ORDER BY session_date DESC, id DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
             episode = connection.execute(
                 "SELECT * FROM signal_episode WHERE run_id = ? "
                 "ORDER BY crossing_timestamp_utc DESC LIMIT 1",
@@ -180,6 +186,7 @@ class ProspectiveReadStore:
             "ibkr_connection": self._dict(connection_event),
             "latest_capture": self._dict(capture),
             "market_data_budget": self._dict(budget),
+            "parallel_source_capture": self._dict(parallel_capture),
             "latest_signal_episode": self._dict(episode),
             "blockers": [dict(row) for row in blockers],
         }

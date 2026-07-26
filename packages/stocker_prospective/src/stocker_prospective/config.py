@@ -132,6 +132,21 @@ class ContextConfig(BaseModel):
     import_directory: Path | None = None
 
 
+class ParallelValidationConfig(BaseModel):
+    """Bounded vendor capture used only to establish source-feature parity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    provider: Literal["eodhd"] = "eodhd"
+    api_token_env: str = Field(default="EODHD_API_TOKEN", min_length=1)
+    base_url: Literal["https://eodhd.com/api"] = "https://eodhd.com/api"
+    request_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    max_retries: int = Field(default=3, ge=1, le=10)
+    capture_delay_seconds: int = Field(default=7200, ge=60, le=43_200)
+    requests_per_minute: int = Field(default=20, ge=1, le=60)
+
+
 class ProspectiveConfig(BaseModel):
     """Top-level prospective recorder/web configuration."""
 
@@ -143,6 +158,9 @@ class ProspectiveConfig(BaseModel):
     web: WebConfig = Field(default_factory=WebConfig)
     ibkr: IBKRConfig = Field(default_factory=IBKRConfig)
     context: ContextConfig
+    parallel_validation: ParallelValidationConfig = Field(
+        default_factory=ParallelValidationConfig
+    )
 
     @model_validator(mode="after")
     def _ibkr_port_is_explicit(self) -> ProspectiveConfig:
@@ -274,4 +292,12 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "allowed_market_data_types": config.ibkr.allowed_market_data_types,
         },
         "context": {"mode": config.context.mode},
+        "parallel_validation": {
+            "enabled": config.parallel_validation.enabled,
+            "provider": config.parallel_validation.provider,
+            "credential_configured": bool(
+                os.environ.get(config.parallel_validation.api_token_env)
+            ),
+            "capture_delay_seconds": config.parallel_validation.capture_delay_seconds,
+        },
     }

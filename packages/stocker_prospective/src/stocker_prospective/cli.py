@@ -65,6 +65,10 @@ from stocker_prospective.ibkr_api import (
     write_official_ibkr_api_update_status,
 )
 from stocker_prospective.market_data import MarketDataBudget, MarketDataType
+from stocker_prospective.parallel import (
+    ParallelSourceCaptureService,
+    build_parallel_eodhd_service,
+)
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.recorder import (
     IBKRDiagnosticRecorder,
@@ -205,6 +209,17 @@ def _resolve_spec_paths(spec_path: Path, payload: dict[str, Any]) -> dict[str, A
             for value in result.get(name, [])
             for candidate in (Path(str(value)),)
         ]
+    runtime = result.get("feature_runtime")
+    if isinstance(runtime, dict):
+        result["feature_runtime"] = {
+            name: (
+                candidate
+                if candidate.is_absolute()
+                else spec_path.parent / candidate
+            )
+            for name, value in runtime.items()
+            for candidate in (Path(str(value)),)
+        }
     return result
 
 
@@ -216,6 +231,18 @@ def bundle_reconstruct(
     bundle_id: str = typer.Option(...),
     created_at_utc: str = typer.Option(..., help="Timezone-aware ISO-8601 timestamp."),
     operator: str = typer.Option(...),
+    feature_runtime_registry: Path | None = typer.Option(
+        None,
+        exists=True,
+        dir_okay=False,
+        help="Registered frozen H0/front-options feature-runtime contract.",
+    ),
+    repository_root: Path | None = typer.Option(
+        None,
+        exists=True,
+        file_okay=False,
+        help="Research repository root used only while copying registered artifacts.",
+    ),
 ) -> None:
     """Reconstruct no-fit deployable artifacts from the audited frozen JSON."""
 
@@ -229,6 +256,8 @@ def bundle_reconstruct(
                 bundle_id=bundle_id,
                 created_at_utc=created_at,
                 operator=operator,
+                feature_runtime_registry_path=feature_runtime_registry,
+                repository_root=repository_root,
             )
         )
     except (FrozenArtifactReconstructionError, ValueError) as exc:
@@ -550,6 +579,7 @@ def recorder_run(
 
     adapter: IBKRMarketDataAdapter | None = None
     diagnostic_recorder: Any | None = None
+    parallel_capture: ParallelSourceCaptureService | None = None
     repository: ProspectiveRepository | None = None
     lease_owned = False
     config: ProspectiveConfig | None = None
@@ -615,6 +645,17 @@ def recorder_run(
                     now=datetime.now(UTC),
                 ),
             )
+            if config.parallel_validation.enabled:
+                parallel_capture = build_parallel_eodhd_service(
+                    config=config,
+                    repository=repository,
+                    identity=deployment_identity,
+                    heartbeat=lambda: repository.heartbeat_recorder_lease(
+                        run_id=config.runtime.run_id or "",
+                        owner_id=owner_id or "",
+                        now=datetime.now(UTC),
+                    ),
+                )
 
         assert repository is not None
         stopping = False
@@ -628,6 +669,8 @@ def recorder_run(
         while not stopping:
             if diagnostic_recorder is not None:
                 diagnostic_recorder.poll(now=datetime.now(UTC))
+            if parallel_capture is not None:
+                parallel_capture.poll(now=datetime.now(UTC))
             repository.heartbeat_recorder_lease(
                 run_id=config.runtime.run_id,
                 owner_id=owner_id,

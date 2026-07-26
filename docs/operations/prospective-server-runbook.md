@@ -634,22 +634,25 @@ On the research machine:
 
 ```bash
 FROZEN_ROOT=research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary
-BUNDLE_ID=m1-frozen-20260724-v1
+BUNDLE_ID=m1-frozen-20260724-feature-runtime-v1
 CREATED_AT_UTC=REPLACE_WITH_CURRENT_UTC_ISO_TIMESTAMP
 OPERATOR_ID=REPLACE_WITH_OPERATOR_ID
 
-uv run stocker-prospective bundle reconstruct \
+uv run --no-editable stocker-prospective bundle reconstruct \
   --frozen-root "$FROZEN_ROOT" \
   --universe configs/prospective/anchor-frozen-20.json \
+  --feature-runtime-registry \
+    configs/prospective/frozen-feature-runtime-v1.json \
+  --repository-root "$PWD" \
   --output "/tmp/$BUNDLE_ID-reconstructed" \
   --bundle-id "$BUNDLE_ID" \
   --created-at-utc "$CREATED_AT_UTC" \
   --operator "$OPERATOR_ID"
-uv run stocker-prospective bundle build \
+uv run --no-editable stocker-prospective bundle build \
   --spec "/tmp/$BUNDLE_ID-reconstructed/bundle-spec.yaml" \
   --output "/tmp/$BUNDLE_ID"
-uv run stocker-prospective bundle inspect "/tmp/$BUNDLE_ID"
-uv run stocker-prospective bundle verify "/tmp/$BUNDLE_ID"
+uv run --no-editable stocker-prospective bundle inspect "/tmp/$BUNDLE_ID"
+uv run --no-editable stocker-prospective bundle verify "/tmp/$BUNDLE_ID"
 tar -C /tmp -czf "/tmp/$BUNDLE_ID.tar.gz" "$BUNDLE_ID"
 scp "/tmp/$BUNDLE_ID.tar.gz" \
   root@SERVER:/var/lib/stocker/secure-transfer/
@@ -711,6 +714,8 @@ Before first prospective start, set:
 - measured line budget, reserved headroom, and a request rate no greater than
   half that line budget;
 - context-signing secret in the environment file; and
+- `parallel_validation.enabled: true` only when after-session EODHD source
+  comparison is intended; and
 - optional web auth token only when `authentication_enabled: true`.
 
 Keep these server paths in both `/etc/stocker/stocker.env` and the
@@ -719,10 +724,17 @@ secret-minimal `/etc/stocker/stocker-web.env`:
 ```dotenv
 STOCKER_IBKR_API_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json
 STOCKER_IBKR_API_UPDATE_STATUS=/var/lib/stocker/ibkr-api/status/update-status.json
+# Required only when parallel_validation.enabled is true. Set the value with
+# sudoedit; never put a real token in this runbook or a shell command.
+EODHD_API_TOKEN=REPLACE_IN_EDITOR
 ```
 
 Put the context-signing secret only in `stocker.env`; never expose it to the web
 process. Put an optional built-in web-auth token only in `stocker-web.env`.
+Put the EODHD token only in `stocker.env`; the web process receives only a
+boolean `credential_configured` projection. EODHD does not run as a separate
+service. The recorder makes bounded requests after the session and stores
+source-labelled evidence that is permanently ineligible for scoring.
 Never put IBKR username, password, or 2FA material in any Stocker file. Stocker
 has no fields for them.
 
@@ -827,6 +839,13 @@ source-semantic blockers instead of scoring. Shadow scoring still requires
 passing feature parity and exact signed previous-session context. Do not lower
 either gate after observing outcomes. Install the units only after the gates
 for the selected mode are satisfied:
+
+When `parallel_validation.enabled` is true, the recorder also makes one bounded
+five-minute-history request per anchor symbol after the configured
+`capture_delay_seconds`. It does not backfill those rows into a score. The
+fixed acceptance contract requires at least 20 complete prospective sessions
+and an independent audit; collecting data does not automatically change
+`feature-parity-m1.json`.
 
 ```bash
 sudo install -o root -g root -m 0644 \

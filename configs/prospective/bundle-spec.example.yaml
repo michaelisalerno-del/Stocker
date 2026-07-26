@@ -30,3 +30,14 @@ audit_references:
   - ../../research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/pre_outcome_freeze_manifest.json
 determinism_references:
   - ../../research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/determinism_check.json
+
+# The reconstruction command copies these exact registered files into its
+# staging directory and emits resolved relative paths. Do not point a server
+# bundle at the research checkout.
+feature_runtime:
+  registry: REQUIRED_APPROVED/frozen-feature-runtime.json
+  h0_parameters: REQUIRED_APPROVED/full_refit_parameters.npz
+  h0_preprocessing: REQUIRED_APPROVED/full_refit_preprocessing.csv
+  loop_dictionary: REQUIRED_APPROVED/semantic_loop_dictionary_v2.csv
+  front_options_feature_manifest: REQUIRED_APPROVED/front_options_feature_manifest.json
+  front_options_regime_mapping: REQUIRED_APPROVED/front_options_regime_mapping.json

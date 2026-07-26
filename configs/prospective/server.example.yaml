@@ -62,3 +62,15 @@ context:
   mode: signed_import
   hmac_secret_env: STOCKER_CONTEXT_SIGNING_SECRET
   import_directory: /var/lib/stocker/daily-context/incoming
+
+# Append-only after-session EODHD bars for IBKR/EODHD source-parity evidence.
+# These observations are always marked ineligible for scoring.
+parallel_validation:
+  enabled: false
+  provider: eodhd
+  api_token_env: EODHD_API_TOKEN
+  base_url: https://eodhd.com/api
+  request_timeout_seconds: 30
+  max_retries: 3
+  capture_delay_seconds: 7200
+  requests_per_minute: 20

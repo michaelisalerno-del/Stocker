@@ -1,0 +1,55 @@
+{
+  "schema_version": "1",
+  "contract_id": "m1-eodhd-ibkr-source-parity-v1",
+  "registered_at_utc": "2026-07-26T00:00:00Z",
+  "prospective_only": true,
+  "outcome_fields_allowed": false,
+  "option_return_fields_allowed": false,
+  "automatic_feature_parity_promotion": false,
+  "anchor_cohort": "anchor_frozen_20",
+  "anchor_symbol_count": 20,
+  "minimum_complete_sessions": 20,
+  "minimum_symbols_per_session": 20,
+  "minimum_complete_bar_fraction": 0.99,
+  "required_session_calendar": "XNYS",
+  "required_regular_session_bar_count": 78,
+  "required_bar_width_minutes": 5,
+  "required_timestamp_match_fraction": 1.0,
+  "price_comparison": {
+    "fields": [
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "minimum_observation_match_fraction": 0.99,
+    "maximum_p99_absolute_relative_difference": 0.000001
+  },
+  "activity_comparison": {
+    "historical_semantic_label": "eodhd_historical_activity_proxy",
+    "candidate_semantic_label": "ibkr_trade_volume_not_eodhd_historical_activity_proxy",
+    "minimum_finite_pair_fraction": 0.99,
+    "minimum_pearson_correlation": 0.999,
+    "minimum_spearman_correlation": 0.999,
+    "maximum_median_absolute_relative_difference": 0.01,
+    "maximum_p99_absolute_relative_difference": 0.05,
+    "semantic_review_required": true
+  },
+  "failure_policy": {
+    "missing_symbol": "session_fails",
+    "partial_bar": "observation_fails",
+    "timestamp_mismatch": "observation_fails",
+    "late_or_retrieved_after_session": "allowed_for_source_comparison_only",
+    "use_for_same_session_scoring": false,
+    "lower_gate_after_observation": false
+  },
+  "promotion_policy": {
+    "requires_independent_audit": true,
+    "requires_new_signed_machine_readable_parity_report": true,
+    "requires_operator_activation_for_future_run": true,
+    "may_change_frozen_model": false,
+    "may_change_frozen_threshold": false,
+    "may_change_anchor_universe": false,
+    "may_use_underlying_or_option_outcomes": false
+  }
+}

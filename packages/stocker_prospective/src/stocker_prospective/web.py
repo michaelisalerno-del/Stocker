@@ -36,6 +36,19 @@ def _active_bundle_projection(config: ProspectiveConfig) -> dict[str, Any]:
             "manifest_sha256": verification.manifest_sha256,
             "verified": verification.verified,
             "blockers": verification.blockers,
+            "feature_runtime": {
+                "installed": verification.manifest.feature_runtime is not None,
+                "contract_version": (
+                    None
+                    if verification.manifest.feature_runtime is None
+                    else verification.manifest.feature_runtime.contract_version
+                ),
+                "scoring_authorized_by_registry": (
+                    False
+                    if verification.manifest.feature_runtime is None
+                    else verification.manifest.feature_runtime.scoring_authorized_by_registry
+                ),
+            },
         }
     except BundleError as exc:
         return {
@@ -43,6 +56,11 @@ def _active_bundle_projection(config: ProspectiveConfig) -> dict[str, Any]:
             "manifest_sha256": None,
             "verified": False,
             "blockers": [str(exc).split(":", 1)[0]],
+            "feature_runtime": {
+                "installed": False,
+                "contract_version": None,
+                "scoring_authorized_by_registry": False,
+            },
         }
 
 
@@ -193,11 +211,21 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         bundle = _active_bundle_projection(config)
         parity = _parity_projection(config)
         ibkr_api = official_ibkr_api_projection()
+        parallel_credential_configured = bool(
+            os.environ.get(config.parallel_validation.api_token_env)
+        )
+        parallel_blocker = (
+            "blocked_missing_eodhd_server_token"
+            if config.parallel_validation.enabled
+            and not parallel_credential_configured
+            else None
+        )
         blocker_candidates = [
             *(item["blocker_code"] for item in runtime["blockers"]),
             *bundle["blockers"],
             parity["blocker"],
             ibkr_api["blocker"] if config.runtime.source == "ibkr" else None,
+            parallel_blocker,
         ]
         blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
         return {
@@ -232,6 +260,17 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "scoring_allowed": parity["scoring_allowed"],
                 "blocker": parity["blocker"],
                 "counts": parity["counts"],
+            },
+            "parallel_validation": {
+                "enabled": config.parallel_validation.enabled,
+                "provider": config.parallel_validation.provider,
+                "credential_configured": parallel_credential_configured,
+                "capture_delay_seconds": (
+                    config.parallel_validation.capture_delay_seconds
+                ),
+                "latest_capture": runtime["parallel_source_capture"],
+                "scoring_allowed": False,
+                "blocker": parallel_blocker,
             },
             "previous_session_context": runtime["previous_session_context"],
             "last_completed_bar": runtime["last_completed_bar"],

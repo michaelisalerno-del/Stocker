@@ -9,6 +9,7 @@ from stocker_prospective.parity import FeatureParityError, load_feature_parity_r
 
 ROOT = Path(__file__).parents[1]
 REPORT = ROOT / "configs/prospective/feature-parity-m1.json"
+PARALLEL_CONTRACT = ROOT / "configs/prospective/parallel-feature-validation-v1.json"
 MODEL = (
     ROOT / "research/options-feasibility/"
     "20260724-minimal-intraday-iv-excess-holdout-v01/"
@@ -59,3 +60,18 @@ def test_invalid_status_or_missing_feature_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(FeatureParityError, match="blocked_feature_schema_mismatch"):
         load_feature_parity_report(broken)
+
+
+def test_parallel_validation_contract_is_source_only_and_cannot_auto_promote() -> None:
+    payload = json.loads(PARALLEL_CONTRACT.read_text(encoding="utf-8"))
+
+    assert payload["prospective_only"] is True
+    assert payload["outcome_fields_allowed"] is False
+    assert payload["option_return_fields_allowed"] is False
+    assert payload["automatic_feature_parity_promotion"] is False
+    assert payload["anchor_symbol_count"] == 20
+    assert payload["minimum_complete_sessions"] == 20
+    assert payload["failure_policy"]["use_for_same_session_scoring"] is False
+    assert payload["failure_policy"]["lower_gate_after_observation"] is False
+    assert payload["promotion_policy"]["requires_independent_audit"] is True
+    assert payload["promotion_policy"]["may_change_frozen_threshold"] is False

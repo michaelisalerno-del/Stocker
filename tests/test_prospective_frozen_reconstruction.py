@@ -32,6 +32,9 @@ FROZEN_ROOT = (
     / "artifacts/primary"
 )
 UNIVERSE = ROOT / "configs/prospective/anchor-frozen-20.json"
+FEATURE_RUNTIME_REGISTRY = (
+    ROOT / "configs/prospective/frozen-feature-runtime-v1.json"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -290,3 +293,54 @@ def test_reconstruction_cli_builds_an_activatable_bundle_while_parity_stays_clos
         match="blocked_feature_source_semantics_mismatch",
     ):
         parity.require_scoring_allowed()
+
+
+def test_reconstruction_can_embed_registered_feature_runtime_without_refitting(
+    tmp_path: Path,
+) -> None:
+    reconstructed = tmp_path / "reconstructed"
+    bundle = tmp_path / "bundle"
+    runner = CliRunner()
+
+    reconstruction = runner.invoke(
+        app,
+        [
+            "bundle",
+            "reconstruct",
+            "--frozen-root",
+            str(FROZEN_ROOT),
+            "--universe",
+            str(UNIVERSE),
+            "--feature-runtime-registry",
+            str(FEATURE_RUNTIME_REGISTRY),
+            "--repository-root",
+            str(ROOT),
+            "--output",
+            str(reconstructed),
+            "--bundle-id",
+            "m1-frozen-feature-runtime-test-v1",
+            "--created-at-utc",
+            "2026-07-26T12:00:00Z",
+            "--operator",
+            "test-operator",
+        ],
+    )
+    built = runner.invoke(
+        app,
+        [
+            "bundle",
+            "build",
+            "--spec",
+            str(reconstructed / "bundle-spec.yaml"),
+            "--output",
+            str(bundle),
+        ],
+    )
+
+    assert reconstruction.exit_code == 0, reconstruction.stdout
+    assert built.exit_code == 0, built.stdout
+    verification = verify_bundle(bundle)
+    assert verification.verified is True
+    assert verification.manifest.manifest_version == "2"
+    assert verification.manifest.feature_runtime is not None
+    assert verification.manifest.feature_runtime.scoring_authorized_by_registry is False

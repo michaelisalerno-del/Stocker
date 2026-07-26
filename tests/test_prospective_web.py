@@ -35,7 +35,12 @@ def load_web_boundary_module() -> ModuleType:
     return module
 
 
-def config(tmp_path: Path, *, authenticated: bool = False) -> ProspectiveConfig:
+def config(
+    tmp_path: Path,
+    *,
+    authenticated: bool = False,
+    parallel_enabled: bool = False,
+) -> ProspectiveConfig:
     return ProspectiveConfig.model_validate(
         {
             "paths": {
@@ -67,6 +72,10 @@ def config(tmp_path: Path, *, authenticated: bool = False) -> ProspectiveConfig:
             "context": {
                 "mode": "signed_import",
                 "hmac_secret_env": "CONTEXT_SIGNING_SECRET",
+            },
+            "parallel_validation": {
+                "enabled": parallel_enabled,
+                "api_token_env": "EODHD_API_TOKEN",
             },
         }
     )
@@ -442,8 +451,38 @@ def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> 
     assert body["safety"] == {"trading_enabled": False, "order_path": "absent"}
     assert str(cfg.paths.database) not in serialized
     assert "CONTEXT_SIGNING_SECRET" not in serialized
+    assert "EODHD_API_TOKEN" not in serialized
     assert "auth_token_env" not in serialized
     assert "password" not in serialized.lower()
+
+
+def test_parallel_vendor_credential_blocker_is_boolean_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("EODHD_API_TOKEN", raising=False)
+    cfg = config(tmp_path, parallel_enabled=True)
+    run_deterministic_replay(
+        ReplaySettings(
+            database_path=cfg.paths.database,
+            run_id="replay-run-001",
+            prospective_start_utc=datetime(2026, 7, 24, 13, 0, tzinfo=UTC),
+            app_version="0.1.0-test",
+            git_commit="deadbeef",
+            universe_path=ROOT / "configs/prospective/anchor-frozen-20.json",
+            owner_id="test-web-fixture",
+            recorder_lease_stale_seconds=60,
+        )
+    )
+    client = TestClient(create_web_app(cfg))
+
+    health = client.get("/api/health").json()
+    public = client.get("/api/config/public").json()
+
+    assert "blocked_missing_eodhd_server_token" in health["blockers"]
+    assert health["parallel_validation"]["credential_configured"] is False
+    assert public["parallel_validation"]["credential_configured"] is False
+    assert "EODHD_API_TOKEN" not in str(public)
 
 
 def test_optional_auth_protects_browser_and_api_with_secure_cookie_support(

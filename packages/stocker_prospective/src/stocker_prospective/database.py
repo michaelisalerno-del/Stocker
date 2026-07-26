@@ -116,6 +116,31 @@ class UnderlyingQuoteInput(BaseModel):
     missing_quote_reason: str | None
 
 
+class SourceBarObservationInput(BaseModel):
+    """One external bar retained only as prospective source-parity evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    metadata: EvidenceMetadata
+    provider: str
+    provider_record_id: str
+    symbol: str
+    session_date: date
+    bar_start_utc: datetime
+    bar_end_utc: datetime
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    activity_value: float | None
+    activity_semantic_label: str
+    source_timestamp_utc: datetime
+    receive_timestamp_utc: datetime
+    completeness: Literal["complete", "partial"]
+    eligibility: Literal[False] = False
+    rejection_reason: Literal["parallel_validation_only"] = "parallel_validation_only"
+
+
 class ProspectiveRepository:
     """Single-writer SQLite repository with explicit migrations."""
 
@@ -456,6 +481,137 @@ class ProspectiveRepository:
                     item.completeness,
                     item.capture_status,
                     item.missing_quote_reason,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_source_bar_observation(self, item: SourceBarObservationInput) -> int:
+        """Append one never-score external source observation idempotently."""
+
+        self._validate_metadata(item.metadata)
+        payload = {
+            key: value
+            for key, value in item.model_dump(mode="json").items()
+            if key not in {"metadata", "receive_timestamp_utc"}
+        }
+        record_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, record_hash FROM source_bar_observation
+                WHERE run_id = ? AND provider = ? AND provider_record_id = ?
+                """,
+                (
+                    item.metadata.run_id,
+                    item.provider,
+                    item.provider_record_id,
+                ),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["record_hash"]) != record_hash:
+                    raise ValueError("parallel source provider identity collision")
+                return int(existing["id"])
+            envelope_id = self._insert_envelope(connection, item.metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO source_bar_observation(
+                    envelope_id, run_id, provider, provider_record_id, symbol,
+                    session_date, bar_start_utc, bar_end_utc, open, high, low, close,
+                    activity_value, activity_semantic_label, source_timestamp_utc,
+                    receive_timestamp_utc, completeness, eligibility,
+                    rejection_reason, record_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    item.metadata.run_id,
+                    item.provider,
+                    item.provider_record_id,
+                    item.symbol,
+                    item.session_date.isoformat(),
+                    item.bar_start_utc.astimezone(UTC).isoformat(),
+                    item.bar_end_utc.astimezone(UTC).isoformat(),
+                    item.open,
+                    item.high,
+                    item.low,
+                    item.close,
+                    item.activity_value,
+                    item.activity_semantic_label,
+                    item.source_timestamp_utc.astimezone(UTC).isoformat(),
+                    item.receive_timestamp_utc.astimezone(UTC).isoformat(),
+                    item.completeness,
+                    item.rejection_reason,
+                    record_hash,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def source_capture_completed(
+        self,
+        *,
+        run_id: str,
+        provider: str,
+        session_date: date,
+    ) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM source_capture_completion
+                WHERE run_id = ? AND provider = ? AND session_date = ?
+                """,
+                (run_id, provider, session_date.isoformat()),
+            ).fetchone()
+        return row is not None
+
+    def record_source_capture_completion(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        provider: str,
+        session_date: date,
+        status: Literal["complete", "partial"],
+        requested_symbol_count: int,
+        captured_symbol_count: int,
+        bar_count: int,
+        missing_symbols: tuple[str, ...],
+    ) -> int:
+        """Close one session once; a partial capture remains partial."""
+
+        self._validate_metadata(metadata)
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id FROM source_capture_completion
+                WHERE run_id = ? AND provider = ? AND session_date = ?
+                """,
+                (metadata.run_id, provider, session_date.isoformat()),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
+            envelope_id = self._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO source_capture_completion(
+                    envelope_id, run_id, provider, session_date, status,
+                    requested_symbol_count, captured_symbol_count, bar_count,
+                    missing_symbols_json, completed_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    provider,
+                    session_date.isoformat(),
+                    status,
+                    requested_symbol_count,
+                    captured_symbol_count,
+                    bar_count,
+                    json.dumps(missing_symbols, separators=(",", ":")),
+                    metadata.recorded_at_utc.isoformat(),
                 ),
             )
             assert cursor.lastrowid is not None
@@ -953,6 +1109,7 @@ class ProspectiveRepository:
             "model_score",
             "evidence_envelope",
             "signal_eventization",
+            "source_bar_observation",
         }
         if table not in allowed:
             raise ValueError("unsupported count table")

@@ -64,6 +64,9 @@ AUDITED_SOURCE_HASHES: Final[dict[str, str]] = {
 AUDITED_UNIVERSE_SHA256: Final = (
     "af2391ea47e0097b16979151e3c69f6c4335755033a323db418759573c3991e3"
 )
+APPROVED_FEATURE_RUNTIME_REGISTRY_SHA256: Final = (
+    "623474a2b8c3be3ed35010643b2bb7e98d3086af29884d6b1b00953a1e17a85d"
+)
 
 REQUIRED_SAFETY_FLAGS: Final[dict[str, object]] = {
     "daily_stock_features_excluded": True,
@@ -346,6 +349,61 @@ def _copy_reference(source: Path, destination: Path) -> None:
     shutil.copyfile(source, destination)
 
 
+_FEATURE_RUNTIME_ROLES = (
+    "h0_parameters",
+    "h0_preprocessing",
+    "loop_dictionary",
+    "front_options_feature_manifest",
+    "front_options_regime_mapping",
+)
+
+
+def _registered_feature_runtime_sources(
+    registry_path: Path,
+    repository_root: Path,
+) -> tuple[dict[str, Any], dict[str, Path]]:
+    if _sha256(registry_path) != APPROVED_FEATURE_RUNTIME_REGISTRY_SHA256:
+        raise FrozenArtifactReconstructionError(
+            "blocked_frozen_artifact_hash_mismatch: feature-runtime registry differs"
+        )
+    registry = _load_object(registry_path)
+    artifacts = registry.get("artifacts")
+    if (
+        registry.get("schema_version") != "1"
+        or registry.get("feature_contract_version") != "frozen-m1-feature-runtime-v1"
+        or registry.get("fit_invocations") != 0
+        or registry.get("protected_observations_read") != 0
+        or registry.get("scoring_authorized_by_registry") is not False
+        or registry.get("scoring_blocker") != "blocked_feature_source_semantics_mismatch"
+        or not isinstance(artifacts, dict)
+    ):
+        raise FrozenArtifactReconstructionError(
+            "blocked_feature_schema_mismatch: frozen feature-runtime registry is invalid"
+        )
+    sources: dict[str, Path] = {}
+    resolved_root = repository_root.resolve()
+    for role in _FEATURE_RUNTIME_ROLES:
+        registration = artifacts.get(role)
+        if not isinstance(registration, dict):
+            raise FrozenArtifactReconstructionError(
+                f"blocked_feature_schema_mismatch: feature-runtime {role} is unregistered"
+            )
+        try:
+            source = (repository_root / str(registration["path"])).resolve()
+            source.relative_to(resolved_root)
+        except (KeyError, ValueError) as exc:
+            raise FrozenArtifactReconstructionError(
+                f"blocked_unsafe_bundle_content: feature-runtime {role} path is invalid"
+            ) from exc
+        if not source.is_file():
+            raise FrozenArtifactReconstructionError(
+                f"blocked_missing_verified_frozen_bundle: missing {role} at {source}"
+            )
+        _require_hash(source, registration.get("sha256"), f"feature-runtime {role}")
+        sources[role] = source
+    return registry, sources
+
+
 def reconstruct_frozen_artifacts(
     *,
     frozen_root: str | Path,
@@ -354,6 +412,8 @@ def reconstruct_frozen_artifacts(
     bundle_id: str,
     created_at_utc: datetime,
     operator: str,
+    feature_runtime_registry_path: str | Path | None = None,
+    repository_root: str | Path | None = None,
 ) -> FrozenArtifactReconstruction:
     """Reconstruct deployable scorers without fitting or reading observations."""
 
@@ -366,6 +426,26 @@ def reconstruct_frozen_artifacts(
         raise FrozenArtifactReconstructionError("operator identity is required")
     if created_at_utc.tzinfo is None or created_at_utc.utcoffset() is None:
         raise FrozenArtifactReconstructionError("created_at_utc must be timezone-aware")
+    feature_registry_path = (
+        None
+        if feature_runtime_registry_path is None
+        else Path(feature_runtime_registry_path)
+    )
+    if (feature_registry_path is None) != (repository_root is None):
+        raise FrozenArtifactReconstructionError(
+            "feature-runtime registry and repository root must be supplied together"
+        )
+    feature_runtime_sources: dict[str, Path] = {}
+    if feature_registry_path is not None:
+        if not feature_registry_path.is_file():
+            raise FrozenArtifactReconstructionError(
+                "blocked_missing_verified_frozen_bundle: feature-runtime registry is absent"
+            )
+        assert repository_root is not None
+        _registry, feature_runtime_sources = _registered_feature_runtime_sources(
+            feature_registry_path,
+            Path(repository_root),
+        )
     sources = {name: source_root / name for name in FROZEN_INPUT_FILES}
     missing = [str(path) for path in (*sources.values(), universe_source) if not path.is_file()]
     if missing:
@@ -586,8 +666,23 @@ def reconstruct_frozen_artifacts(
             relative = Path("references/determinism") / name
             _copy_reference(sources[name], temporary / relative)
             determinism_paths.append(relative.as_posix())
+        feature_runtime_paths: dict[str, str] = {}
+        if feature_registry_path is not None:
+            registry_relative = "feature-runtime-sources/registry.json"
+            _copy_reference(feature_registry_path, temporary / registry_relative)
+            feature_runtime_paths["registry"] = registry_relative
+            for role, source in feature_runtime_sources.items():
+                runtime_relative = f"feature-runtime-sources/{role}{source.suffix.lower()}"
+                _copy_reference(source, temporary / runtime_relative)
+                feature_runtime_paths[role] = runtime_relative
 
-        source_hashes = {name: _sha256(path) for name, path in sources.items()}
+        source_hashes = {
+            **{name: _sha256(path) for name, path in sources.items()},
+            **{
+                f"feature_runtime.{role}": _sha256(path)
+                for role, path in feature_runtime_sources.items()
+            },
+        }
         output_names = (
             "m0.joblib",
             "m1.joblib",
@@ -598,6 +693,7 @@ def reconstruct_frozen_artifacts(
             "universe.json",
             *audit_paths,
             *determinism_paths,
+            *feature_runtime_paths.values(),
         )
         output_names = tuple(dict.fromkeys(output_names))
         output_hashes = {name: _sha256(temporary / name) for name in output_names}
@@ -645,6 +741,8 @@ def reconstruct_frozen_artifacts(
             "audit_references": [*audit_paths, "reconstruction-manifest.json"],
             "determinism_references": determinism_paths,
         }
+        if feature_runtime_paths:
+            bundle_spec["feature_runtime"] = feature_runtime_paths
         (temporary / "bundle-spec.yaml").write_text(
             yaml.safe_dump(bundle_spec, sort_keys=False),
             encoding="utf-8",

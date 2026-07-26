@@ -42,7 +42,6 @@ from stocker_prospective.market_data import (
 IBKR_DEPENDENCY_BLOCKER = "blocked_official_ibkr_api_not_installed"
 IBKR_PROVENANCE_BLOCKER = "blocked_unverified_official_ibkr_api"
 IBKR_API_UPDATE_MAX_AGE = timedelta(days=14)
-IBKR_API_UPDATE_FUTURE_TOLERANCE = timedelta(minutes=5)
 IBKR_INFORMATIONAL_NOTIFICATION_CODES = frozenset({2104, 2106, 2107, 2108, 2158})
 
 
@@ -238,7 +237,7 @@ def official_ibkr_api_projection() -> dict[str, Any]:
         }
     )
     update_age = datetime.now(UTC) - status.checked_at_utc.astimezone(UTC)
-    if update_age > IBKR_API_UPDATE_MAX_AGE or update_age < -IBKR_API_UPDATE_FUTURE_TOLERANCE:
+    if update_age > IBKR_API_UPDATE_MAX_AGE or update_age < timedelta(0):
         projection["blocker"] = "blocked_ibkr_api_update_check_stale"
         return projection
     projection.update(

@@ -724,9 +724,21 @@ secret-minimal `/etc/stocker/stocker-web.env`:
 ```dotenv
 STOCKER_IBKR_API_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json
 STOCKER_IBKR_API_UPDATE_STATUS=/var/lib/stocker/ibkr-api/status/update-status.json
+```
+
+Put the token only in `/etc/stocker/stocker.env`:
+
+```dotenv
 # Required only when parallel_validation.enabled is true. Set the value with
 # sudoedit; never put a real token in this runbook or a shell command.
 EODHD_API_TOKEN=REPLACE_IN_EDITOR
+```
+
+Put only its non-secret status projection in
+`/etc/stocker/stocker-web.env`:
+
+```dotenv
+STOCKER_EODHD_TOKEN_CONFIGURED=0
 ```
 
 Put the context-signing secret only in `stocker.env`; never expose it to the web

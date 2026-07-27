@@ -35,6 +35,8 @@ class RuntimeCapacitySettings:
     configured_max_tick_by_tick: int = 1
     configured_max_depth: int = 0
     configured_max_concurrent_snapshots: int = 2
+    configured_max_active_option_episodes: int = 1
+    configured_max_option_lines_per_episode: int = 8
     configured_historical_requests_per_window: int = 60
     configured_option_computation_available: bool = False
 
@@ -46,12 +48,18 @@ class RuntimeCapacitySettings:
             self.configured_max_tick_by_tick,
             self.configured_max_depth,
             self.configured_max_concurrent_snapshots,
+            self.configured_max_active_option_episodes,
+            self.configured_max_option_lines_per_episode,
             self.configured_historical_requests_per_window,
         )
         if self.configured_total_market_data_lines <= 0:
             raise ValueError("configured total market-data lines must be positive")
         if any(value < 0 for value in nonnegative):
             raise ValueError("configured capacity values must be nonnegative")
+        if self.configured_max_active_option_episodes not in {1, 2}:
+            raise ValueError("configured active option episodes must be one or two")
+        if self.configured_max_option_lines_per_episode < 4:
+            raise ValueError("configured option lines must secure the four primary legs")
 
 
 @dataclass(frozen=True)
@@ -114,6 +122,8 @@ class RuntimeCapacityManifest:
     depth_in_use: int
     available_depth: int
     snapshot_pacing_limit: CapacityValue
+    max_active_option_episodes: CapacityValue
+    max_option_lines_per_episode: CapacityValue
     historical_requests_per_window: CapacityValue
     option_computation_available: CapacityValue
     market_data_status: CapacityValue
@@ -242,6 +252,22 @@ def resolve_runtime_capacity(
         environment_name="IBKR_MAX_CONCURRENT_SNAPSHOTS",
         fallback=settings.configured_max_concurrent_snapshots,
     )
+    active_option_episodes = _resolved_integer(
+        discovered=None,
+        environment=values,
+        environment_name="IBKR_MAX_ACTIVE_OPTION_EPISODES",
+        fallback=settings.configured_max_active_option_episodes,
+    )
+    option_lines_per_episode = _resolved_integer(
+        discovered=None,
+        environment=values,
+        environment_name="IBKR_MAX_OPTION_LINES_PER_EPISODE",
+        fallback=settings.configured_max_option_lines_per_episode,
+    )
+    if int(active_option_episodes.value) not in {1, 2}:
+        raise ValueError("IBKR_MAX_ACTIVE_OPTION_EPISODES must be one or two")
+    if int(option_lines_per_episode.value) < 4:
+        raise ValueError("IBKR_MAX_OPTION_LINES_PER_EPISODE must be at least four")
     historical = _resolved_integer(
         discovered=discovery.historical_requests_per_window,
         environment=values,
@@ -299,6 +325,8 @@ def resolve_runtime_capacity(
         depth_in_use=discovery.depth_in_use,
         available_depth=max(0, int(depth.value) - discovery.depth_in_use),
         snapshot_pacing_limit=snapshots,
+        max_active_option_episodes=active_option_episodes,
+        max_option_lines_per_episode=option_lines_per_episode,
         historical_requests_per_window=historical,
         option_computation_available=option_computation,
         market_data_status=CapacityValue(

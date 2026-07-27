@@ -51,9 +51,16 @@ probability distribution.
 
 ## Verification status
 
+The required independent Standards/Spec review corrected operator-document
+drift, made the official-client market-data facade explicit and testable,
+normalised real IBKR field/value callbacks, coupled budget eviction to
+broker-side cancellation, reserved discovered in-use capacity, selected ATM
+comparisons by frozen roles, and restricted V1 calibration to the exact first
+20 valid sessions.
+
 The feature-scoped verification suite passes:
 
-- 77 focused backend, web, fake-adapter, budget-degradation, reconnect, and
+- 125 focused backend, web, fake-adapter, budget-degradation, reconnect, and
   deterministic tests.
 - Scoped Ruff formatting and lint checks.
 - Strict mypy for all 63 prospective source files.
@@ -63,10 +70,12 @@ The feature-scoped verification suite passes:
 - Two identical audit replays with zero M1C, tail, episode, subscription, DTE,
   contract, or outcome mismatches and maximum floating difference `0.0`.
 
-The repository-wide test run reached 1,291 passes and one skip. Thirteen
-failures and 19 setup errors are confined to unrelated historical SLRNO
-integration tests whose frozen parquet inputs are absent from this checkout;
-those prior artifacts were not modified or reconstructed. This repository has
-no Node package manifest or TypeScript build surface.
+A broad final run excluding only eight unrelated historical-integration files
+passes 1,247 tests with one skip. The unfiltered baseline run reached 1,291
+passes and one skip; its 13 failures and 19 setup errors were confined to those
+historical SLRNO integration files because their frozen parquet inputs are
+absent from this checkout. Those prior artifacts were not modified or
+reconstructed. This repository has no Node package manifest or TypeScript
+build surface.
 
 Commit SHAs and push status are recorded in the delivery response.

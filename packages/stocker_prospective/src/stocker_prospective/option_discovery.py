@@ -57,6 +57,37 @@ SHORT_DELTA_TOLERANCE = 0.12
 LONG_DELTA_TOLERANCE = 0.08
 
 
+def merge_snapshot_items(items: tuple[object, ...]) -> dict[str, object]:
+    """Merge official field/value callbacks and direct fake-adapter snapshots."""
+
+    merged: dict[str, object] = {}
+    for item in items:
+        values = (
+            item
+            if isinstance(item, dict)
+            else {
+                name: getattr(item, name)
+                for name in (
+                    "bid",
+                    "ask",
+                    "delta",
+                    "market_data_type",
+                )
+                if hasattr(item, name)
+            }
+        )
+        callback_field = values.get("field")
+        if isinstance(callback_field, str) and "value" in values:
+            callback_value = values.get("value")
+            if callback_value is not None:
+                merged[callback_field] = callback_value
+        for name, value in values.items():
+            if name in {"field", "value"} or value is None:
+                continue
+            merged[str(name)] = value
+    return merged
+
+
 def _attribute(value: Any, *names: str) -> Any:
     if isinstance(value, dict):
         for name in names:
@@ -744,25 +775,7 @@ class BoundedOptionDiscoveryService:
         finally:
             if state is not None:
                 state.snapshots.release(snapshot_id)
-        merged: dict[str, object] = {}
-        for item in result.items:
-            values = (
-                item
-                if isinstance(item, dict)
-                else {
-                    name: getattr(item, name)
-                    for name in (
-                        "bid",
-                        "ask",
-                        "delta",
-                        "market_data_type",
-                    )
-                    if hasattr(item, name)
-                }
-            )
-            for name, value in values.items():
-                if value is not None:
-                    merged[str(name)] = value
+        merged = merge_snapshot_items(result.items)
         market_data_type = str(merged.get("market_data_type", "")).lower()
         bid = _attribute(merged, "bid")
         ask = _attribute(merged, "ask")

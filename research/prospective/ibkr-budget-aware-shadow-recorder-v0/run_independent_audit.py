@@ -98,8 +98,7 @@ def _canonical(value: object) -> str:
 
 def _write(path: Path, value: object) -> None:
     path.write_text(
-        json.dumps(value, sort_keys=True, indent=2, default=str, allow_nan=False)
-        + "\n",
+        json.dumps(value, sort_keys=True, indent=2, default=str, allow_nan=False) + "\n",
         encoding="utf-8",
     )
 
@@ -125,9 +124,7 @@ def _provider_observations(
 ]:
     ibkr: list[ProviderM1CObservation] = []
     eodhd: list[ProviderM1CObservation] = []
-    for index, (prediction, fixture) in enumerate(
-        zip(predictions, prediction_inputs, strict=True)
-    ):
+    for index, (prediction, fixture) in enumerate(zip(predictions, prediction_inputs, strict=True)):
         end = datetime.fromisoformat(str(fixture["timestamp_utc"]))
         start = end - timedelta(minutes=5)
         runtime_probability = float(prediction["probability"])
@@ -135,9 +132,7 @@ def _provider_observations(
         eodhd_probability = min(1.0, max(0.0, runtime_probability + vendor_shift))
         common = {
             "symbol": str(prediction["symbol"]),
-            "session": datetime.fromisoformat(
-                f"{prediction['session']}T00:00:00+00:00"
-            ).date(),
+            "session": datetime.fromisoformat(f"{prediction['session']}T00:00:00+00:00").date(),
             "checkpoint": int(prediction["checkpoint"]),
             "features": {
                 "audit_probability_input": runtime_probability,
@@ -256,12 +251,8 @@ def _allocation_decisions() -> list[dict[str, object]]:
                 "decision": index,
                 "accepted": active.accepted,
                 "evicted_keys": active.evicted_keys,
-                "future_trading_reserve_lines": (
-                    budget.future_trading_reserve_lines
-                ),
-                "usage_after_release": budget.snapshot()[
-                    "current_internal_usage"
-                ],
+                "future_trading_reserve_lines": (budget.future_trading_reserve_lines),
+                "usage_after_release": budget.snapshot()["current_internal_usage"],
             }
         )
     return outputs
@@ -353,9 +344,7 @@ def _constrained_episodes() -> list[dict[str, object]]:
                 "dte_primary": dte.primary.value if dte.primary else None,
                 "dte_secondary": tuple(item.value for item in dte.secondary),
                 "completion_state": completed.state.value,
-                "usage_after_cancel": budget.snapshot()[
-                    "current_internal_usage"
-                ],
+                "usage_after_cancel": budget.snapshot()["current_internal_usage"],
             }
         )
     return outputs
@@ -364,6 +353,7 @@ def _constrained_episodes() -> list[dict[str, object]]:
 def _safety_audit() -> dict[str, object]:
     web_path = ROOT / "packages/stocker_prospective/src/stocker_prospective/web.py"
     ibkr_path = ROOT / "packages/stocker_prospective/src/stocker_prospective/ibkr.py"
+    official_path = ROOT / "packages/stocker_prospective/src/stocker_prospective/ibkr_official.py"
     web_source = web_path.read_text(encoding="utf-8")
     forbidden_segments = {
         "order",
@@ -398,25 +388,40 @@ def _safety_audit() -> dict[str, object]:
     adapter_methods = {
         node.name
         for class_node in adapter_tree.body
-        if isinstance(class_node, ast.ClassDef)
-        and class_node.name == "IBKRMarketDataAdapter"
+        if isinstance(class_node, ast.ClassDef) and class_node.name == "IBKRMarketDataAdapter"
         for node in class_node.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     forbidden_methods = sorted(adapter_methods.intersection(ORDER_METHOD_NAMES))
-    calibration_signature = tuple(
-        inspect.signature(create_ibkr_calibration_candidate).parameters
+    official_source = official_path.read_text(encoding="utf-8")
+    official_tree = ast.parse(official_source)
+    facade_methods = {
+        node.name
+        for class_node in official_tree.body
+        if isinstance(class_node, ast.ClassDef)
+        and class_node.name == "OfficialMarketDataOnlyClient"
+        for node in class_node.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    forbidden_facade_methods = sorted(facade_methods.intersection(ORDER_METHOD_NAMES))
+    official_factory_returns_facade = (
+        "return OfficialMarketDataOnlyClient(_StockerOfficialMarketDataClient())" in official_source
     )
+    calibration_signature = tuple(inspect.signature(create_ibkr_calibration_candidate).parameters)
     calibration_source = inspect.getsource(create_ibkr_calibration_candidate)
     return {
         "forbidden_routes": forbidden_routes,
         "forbidden_adapter_methods": forbidden_methods,
+        "forbidden_official_facade_methods": forbidden_facade_methods,
+        "official_factory_returns_market_data_facade": official_factory_returns_facade,
         "calibration_parameters": calibration_signature,
         "calibration_mentions_option_pnl": "option_pnl" in calibration_source,
         "calibration_mentions_future_outcome": "future" in calibration_source,
         "passed": (
             not forbidden_routes
             and not forbidden_methods
+            and not forbidden_facade_methods
+            and official_factory_returns_facade
             and calibration_signature == ("report", "ibkr")
             and "outcome_fields_used=()" in calibration_source
             and "option_pnl_used=False" in calibration_source
@@ -429,12 +434,8 @@ def main() -> None:
     fixture = json.loads(REPLAY_FIXTURE.read_text(encoding="utf-8"))
     prediction_inputs = [dict(row) for row in fixture["prediction_inputs"]]
     option_inputs = [dict(row) for row in fixture["defined_risk_inputs"][:25]]
-    predictions_a, prediction_audit_a = source._prediction_fixture(
-        prediction_inputs
-    )
-    predictions_b, prediction_audit_b = source._prediction_fixture(
-        prediction_inputs
-    )
+    predictions_a, prediction_audit_a = source._prediction_fixture(prediction_inputs)
+    predictions_b, prediction_audit_b = source._prediction_fixture(prediction_inputs)
     option_a, option_audit_a = source._option_fixture(option_inputs)
     option_b, option_audit_b = source._option_fixture(option_inputs)
 
@@ -460,9 +461,7 @@ def main() -> None:
     transfer_difference = max(
         (
             abs(
-                manual_differences[
-                    (row.symbol, row.session, row.checkpoint)
-                ]
+                manual_differences[(row.symbol, row.session, row.checkpoint)]
                 - row.absolute_difference
             )
             for row in transfer_report.probability_comparisons
@@ -522,22 +521,16 @@ def main() -> None:
         "m1c_probability_mismatches": probability_mismatches,
         "tail_membership_mismatches": tail_membership_mismatches,
         "episode_identity_mismatches": episode_identity_mismatches,
-        "subscription_allocation_mismatches": (
-            subscription_allocation_mismatches
-        ),
+        "subscription_allocation_mismatches": (subscription_allocation_mismatches),
         "dte_allocation_mismatches": dte_allocation_mismatches,
         "option_contract_mismatches": option_contract_mismatches,
         "shadow_outcome_mismatches": shadow_outcome_mismatches,
         "maximum_floating_difference": maximum_floating_difference,
         "canonical_hash_a": hashlib.sha256(
-            _canonical(
-                [predictions_a, allocation_a, constrained_a, option_a]
-            ).encode()
+            _canonical([predictions_a, allocation_a, constrained_a, option_a]).encode()
         ).hexdigest(),
         "canonical_hash_b": hashlib.sha256(
-            _canonical(
-                [predictions_b, allocation_b, constrained_b, option_b]
-            ).encode()
+            _canonical([predictions_b, allocation_b, constrained_b, option_b]).encode()
         ).hexdigest(),
         "claims_boundary": claims_boundary(),
     }
@@ -591,14 +584,10 @@ def main() -> None:
         "contract_version": "ibkr-budget-aware-shadow-recorder-independent-audit-v0",
         "manual_reconstruction_counts": {
             "m1c_ibkr_replay_probabilities": len(predictions_a),
-            "eodhd_ibkr_probability_comparisons": (
-                len(transfer_report.probability_comparisons)
-            ),
+            "eodhd_ibkr_probability_comparisons": (len(transfer_report.probability_comparisons)),
             "subscription_allocation_decisions": len(allocation_a),
             "constrained_option_episodes": len(constrained_a),
-            "shadow_outcomes": sum(
-                len(row["structures"]) for row in option_a
-            ),
+            "shadow_outcomes": sum(len(row["structures"]) for row in option_a),
         },
         "m1c": {
             "artifact_hashes": artifact_hashes,
@@ -618,12 +607,8 @@ def main() -> None:
             "contaminated_features_present": [],
         },
         "capacity": {
-            "available_research_level1_lines": (
-                manifest.available_research_level1_lines
-            ),
-            "reserved_future_trading_lines": (
-                manifest.reserved_future_trading_lines.value
-            ),
+            "available_research_level1_lines": (manifest.available_research_level1_lines),
+            "reserved_future_trading_lines": (manifest.reserved_future_trading_lines.value),
             "subscription_class_priority_reconstructions": len(allocation_a),
             "automatic_cancellation_leaks": sum(
                 int(row["usage_after_cancel"]) for row in constrained_a
@@ -639,15 +624,9 @@ def main() -> None:
         },
         "option": {
             "constrained_episode_count": len(constrained_a),
-            "contract_mismatches": option_audit_a[
-                "option_contract_mismatches"
-            ],
-            "shadow_outcome_mismatches": option_audit_a[
-                "shadow_pnl_mismatches"
-            ],
-            "maximum_fill_difference": option_audit_a[
-                "maximum_floating_difference"
-            ],
+            "contract_mismatches": option_audit_a["option_contract_mismatches"],
+            "shadow_outcome_mismatches": option_audit_a["shadow_pnl_mismatches"],
+            "maximum_fill_difference": option_audit_a["maximum_floating_difference"],
             "conservative_fill_formula_verified": True,
             "naked_short_structures": [],
         },
@@ -673,36 +652,20 @@ def main() -> None:
         "manual_probability_difference": (
             prediction_audit_a["maximum_probability_difference"] <= 1e-12
         ),
-        "threshold_membership": (
-            prediction_audit_a["threshold_membership_mismatches"] == 0
-        ),
-        "transfer_comparison_count": (
-            transfer_report.probability_metrics.count >= 100
-        ),
+        "threshold_membership": (prediction_audit_a["threshold_membership_mismatches"] == 0),
+        "transfer_comparison_count": (transfer_report.probability_metrics.count >= 100),
         "transfer_bar_semantics": transfer_report.bar_semantics_passed,
         "transfer_manual_metric": transfer_difference <= 1e-12,
         "allocation_count": len(allocation_a) >= 50,
         "constrained_episode_count": len(constrained_a) >= 25,
         "option_replay_audit": option_audit_a == option_audit_b,
-        "shadow_outcome_count": (
-            sum(len(row["structures"]) for row in option_a) >= 25
-        ),
-        "option_contract_identity": (
-            option_audit_a["option_contract_mismatches"] == 0
-        ),
-        "option_structure_legs": (
-            option_audit_a["structure_leg_mismatches"] == 0
-        ),
+        "shadow_outcome_count": (sum(len(row["structures"]) for row in option_a) >= 25),
+        "option_contract_identity": (option_audit_a["option_contract_mismatches"] == 0),
+        "option_structure_legs": (option_audit_a["structure_leg_mismatches"] == 0),
         "shadow_fill_formula": option_audit_a["shadow_pnl_mismatches"] == 0,
-        "shadow_fill_difference": (
-            option_audit_a["maximum_floating_difference"] <= 1e-12
-        ),
-        "future_trading_reserve": (
-            manifest.reserved_future_trading_lines.value == 12
-        ),
-        "automatic_cancellation": all(
-            int(row["usage_after_cancel"]) == 0 for row in constrained_a
-        ),
+        "shadow_fill_difference": (option_audit_a["maximum_floating_difference"] <= 1e-12),
+        "future_trading_reserve": (manifest.reserved_future_trading_lines.value == 12),
+        "automatic_cancellation": all(int(row["usage_after_cancel"]) == 0 for row in constrained_a),
         "no_order_and_calibration_safety": bool(safety["passed"]),
         "determinism": bool(determinism["passed"]),
     }
@@ -711,8 +674,7 @@ def main() -> None:
     if not independent["passed"]:
         failures = sorted(name for name, passed in checks.items() if not passed)
         raise RuntimeError(
-            "budget-aware recorder independent audit failed closed: "
-            + ",".join(failures)
+            "budget-aware recorder independent audit failed closed: " + ",".join(failures)
         )
     _write(DETERMINISM_OUTPUT, determinism)
     _write(AUDIT_OUTPUT, independent)

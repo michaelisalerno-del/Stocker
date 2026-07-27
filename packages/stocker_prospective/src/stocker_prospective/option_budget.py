@@ -211,6 +211,7 @@ class EpisodeAllocationRecord:
 
 PersistenceSink = Callable[[EpisodeAllocationRecord], object]
 DisplacementSink = Callable[[str, str, datetime], object]
+EvictionSink = Callable[[str, str, datetime], bool]
 PhaseResolver = Callable[[OptionEpisodeTask], tuple[str, bool]]
 
 
@@ -238,6 +239,7 @@ class BudgetAwareEpisodeStateMachine:
         maximum_recording_duration: timedelta = timedelta(minutes=65),
         persistence_sink: PersistenceSink | None = None,
         displacement_sink: DisplacementSink | None = None,
+        eviction_sink: EvictionSink | None = None,
         phase_resolver: PhaseResolver | None = None,
     ) -> None:
         if max_active_episodes not in {1, 2}:
@@ -253,6 +255,7 @@ class BudgetAwareEpisodeStateMachine:
         self.snapshots = SnapshotConcurrencyGate(max_concurrent=max_concurrent_snapshots)
         self.persistence_sink = persistence_sink
         self.displacement_sink = displacement_sink
+        self.eviction_sink = eviction_sink
         self.phase_resolver = phase_resolver
         self._tasks: dict[str, OptionEpisodeTask] = {}
         self._records: dict[str, EpisodeAllocationRecord] = {}
@@ -430,6 +433,27 @@ class BudgetAwareEpisodeStateMachine:
                 now_utc=now,
             )
             if decision.accepted:
+                eviction_results = (
+                    ()
+                    if self.eviction_sink is None
+                    else tuple(
+                        self.eviction_sink(evicted_key, intent.key, now)
+                        for evicted_key in decision.evicted_keys
+                    )
+                )
+                eviction_cancelled = all(eviction_results)
+                if not eviction_cancelled:
+                    self.budget.release(
+                        intent.key,
+                        owner_id=owner_id,
+                        reason="evicted_subscription_cancellation_failed",
+                        now_utc=now,
+                    )
+                    denied_by_index[source_index] = (
+                        intent.key,
+                        "evicted_subscription_cancellation_failed",
+                    )
+                    continue
                 approved_by_index[source_index] = intent.key
             else:
                 denied_by_index[source_index] = (intent.key, decision.reason)

@@ -5,6 +5,7 @@ import zipfile
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 
@@ -23,6 +24,7 @@ from stocker_prospective.database import (
     ProspectiveRepository,
 )
 from stocker_prospective.fake_ibkr import FakeIBKRAdapter
+from stocker_prospective.ibkr_official import OfficialMarketDataOnlyClient
 from stocker_prospective.live_subscriptions import (
     LiveSubscriptionController,
     QualifiedUnderlying,
@@ -36,6 +38,9 @@ from stocker_prospective.option_budget import (
     OptionSubscriptionIntent,
     SnapshotConcurrencyGate,
 )
+from stocker_prospective.option_discovery import merge_snapshot_items
+from stocker_prospective.option_ledger import OptionContract
+from stocker_prospective.option_recorder import _planned_atm_contract
 from stocker_prospective.options import DteBucket
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.subscriptions import (
@@ -104,6 +109,8 @@ def test_runtime_capacity_prefers_discovery_and_preserves_future_trading_reserve
     assert manifest.available_tick_by_tick == 3
     assert manifest.available_depth == 2
     assert manifest.snapshot_pacing_limit.value == 3
+    assert manifest.max_active_option_episodes.value == 1
+    assert manifest.max_option_lines_per_episode.value == 8
     assert manifest.option_computation_available.value is True
 
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -123,6 +130,8 @@ def test_runtime_capacity_uses_exact_environment_fallback_names() -> None:
             "IBKR_MAX_TICK_BY_TICK": "2",
             "IBKR_MAX_DEPTH": "1",
             "IBKR_MAX_CONCURRENT_SNAPSHOTS": "2",
+            "IBKR_MAX_ACTIVE_OPTION_EPISODES": "2",
+            "IBKR_MAX_OPTION_LINES_PER_EPISODE": "7",
         },
         observed_at=datetime(2026, 7, 27, 14, 0, tzinfo=UTC),
     )
@@ -134,7 +143,27 @@ def test_runtime_capacity_uses_exact_environment_fallback_names() -> None:
     assert manifest.tick_by_tick_capacity.value == 2
     assert manifest.depth_capacity.value == 1
     assert manifest.snapshot_pacing_limit.value == 2
+    assert manifest.max_active_option_episodes.value == 2
+    assert manifest.max_active_option_episodes.source == "configured_environment"
+    assert manifest.max_option_lines_per_episode.value == 7
+    assert manifest.max_option_lines_per_episode.source == "configured_environment"
     assert manifest.available_research_level1_lines == 48
+
+
+def test_preexisting_internal_usage_is_reserved_from_new_research_allocations() -> None:
+    manager = SubscriptionBudgetManager(
+        limits={SubscriptionKind.LEVEL1: 20},
+        request_rate_limit=20,
+        total_line_limit=40,
+        externally_reserved_lines=5,
+        preexisting_internal_lines=10,
+        future_trading_reserve_lines=12,
+        safety_margin_lines=2,
+    )
+
+    assert manager.usable_research_lines == 11
+    assert manager.snapshot()["preexisting_internal_lines"] == 10
+    assert manager.snapshot()["total_current_internal_usage"] == 10
 
 
 def test_discovered_available_lines_raise_effective_external_reservation() -> None:
@@ -741,6 +770,48 @@ def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_de
     assert all(budget.get(f"BAR|{con_id}|5m|RTH") is not None for con_id in (1, 2, 3))
 
 
+def test_level2_is_not_admitted_during_engineering_transfer_phase() -> None:
+    adapter = _SubscriptionAdapter()
+    budget = SubscriptionBudgetManager(
+        limits={
+            SubscriptionKind.BAR: 1,
+            SubscriptionKind.LEVEL1: 1,
+            SubscriptionKind.TICK_BY_TICK: 2,
+            SubscriptionKind.DEPTH: 1,
+        },
+        request_rate_limit=100,
+        total_line_limit=20,
+        future_trading_reserve_lines=12,
+        safety_margin_lines=2,
+    )
+    controller = LiveSubscriptionController(
+        adapter=adapter,  # type: ignore[arg-type]
+        budget=budget,
+        normalizer=_Normalizer(),  # type: ignore[arg-type]
+        repository=_SubscriptionRepository(),  # type: ignore[arg-type]
+        depth_rows=5,
+        enable_depth=True,
+        depth_phase_permitted=lambda _metadata: False,
+    )
+    contract = QualifiedUnderlying(
+        symbol="AAL",
+        con_id=1,
+        upstream_contract=SimpleNamespace(conId=1, symbol="AAL"),
+        exchange="SMART",
+    )
+
+    controller.start_always_on(_metadata(), (contract,))
+    result = controller.promote_active_episode(
+        _metadata(),
+        symbol="AAL",
+        episode_id="quiet-engineering",
+    )
+
+    assert ("depth", 1) not in adapter.requests
+    assert result.budget_state is BudgetState.OPTIONAL_FEEDS_DEGRADED
+    assert result.denied_keys == ("DEPTH|1|5|1",)
+
+
 def test_dte_allocation_is_one_dte_first_and_never_substitutes_a_missing_primary() -> None:
     allocator = DteAllocator()
     quiet = allocator.allocate(
@@ -904,6 +975,148 @@ def test_option_state_machine_limits_lines_queues_overlap_and_persists_degradati
     assert all(record.capacity_before and record.capacity_after for record in persisted)
 
 
+def test_official_client_facade_hides_inseparable_order_methods() -> None:
+    class RawOfficialClient:
+        def __init__(self) -> None:
+            self.requests: list[tuple[object, ...]] = []
+
+        def reqMktData(self, *arguments: object) -> None:  # noqa: N802
+            self.requests.append(arguments)
+
+        def placeOrder(self, *_arguments: object) -> None:  # noqa: N802
+            raise AssertionError("order method must never be reachable")
+
+    raw = RawOfficialClient()
+    facade = OfficialMarketDataOnlyClient(raw)
+
+    facade.reqMktData(17, "bounded-contract")
+
+    assert raw.requests == [(17, "bounded-contract")]
+    assert not hasattr(facade, "placeOrder")
+    assert not hasattr(facade, "cancelOrder")
+    assert not hasattr(facade, "reqAccountSummary")
+    assert not hasattr(facade, "reqPositions")
+
+
+def test_official_field_value_callbacks_merge_into_valid_option_snapshot() -> None:
+    merged = merge_snapshot_items(
+        (
+            {"field": "bid", "value": 1.20, "market_data_type": "live"},
+            {"field": "ask", "value": 1.30, "market_data_type": "live"},
+            {
+                "field": "option_computation",
+                "delta": 0.25,
+                "implied_volatility": 0.31,
+                "market_data_type": "live",
+            },
+        )
+    )
+
+    assert merged["bid"] == 1.20
+    assert merged["ask"] == 1.30
+    assert merged["delta"] == 0.25
+    assert merged["implied_volatility"] == 0.31
+    assert "field" not in merged
+    assert "value" not in merged
+
+
+def test_quiet_atm_selection_uses_roles_instead_of_first_condor_legs() -> None:
+    expiry = date(2026, 7, 28)
+
+    def option(
+        con_id: int,
+        strike: float,
+        right: Literal["C", "P"],
+    ) -> OptionContract:
+        return OptionContract(
+            underlying_con_id=1,
+            con_id=con_id,
+            expiry=expiry,
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=strike,
+            right=right,
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        )
+
+    short_call = option(101, 105.0, "C")
+    short_put = option(102, 95.0, "P")
+    atm_call = option(103, 100.0, "C")
+    atm_put = option(104, 100.0, "P")
+    planned = (short_call, short_put, atm_call, atm_put)
+    roles = {
+        short_call.con_id_key: ("primary_short_call_025_delta",),
+        short_put.con_id_key: ("primary_short_put_minus_025_delta",),
+        atm_call.con_id_key: ("comparison_atm_call",),
+        atm_put.con_id_key: ("comparison_atm_put",),
+    }
+
+    assert _planned_atm_contract(planned, selection_roles=roles, right="C") is atm_call
+    assert _planned_atm_contract(planned, selection_roles=roles, right="P") is atm_put
+
+
+def test_episode_allocation_cancels_every_evicted_broker_stream() -> None:
+    now = datetime(2026, 7, 27, 14, 0, tzinfo=UTC)
+    manager = SubscriptionBudgetManager(
+        limits={SubscriptionKind.OPTION: 2},
+        request_rate_limit=20,
+        total_line_limit=20,
+        future_trading_reserve_lines=12,
+    )
+    existing_key = canonical_subscription_key(SubscriptionKind.OPTION, con_id=900)
+    assert manager.allocate(
+        key=existing_key,
+        kind=SubscriptionKind.OPTION,
+        symbol="CONTROL",
+        con_id=900,
+        request_id=900,
+        priority=SubscriptionPriority.OPTIONAL_RESEARCH,
+        owner_id="control:900",
+        subscription_class=SubscriptionClass.OPTIONAL_RESEARCH,
+        protected=False,
+        now_monotonic=1.0,
+        now_utc=now,
+    ).accepted
+    evictions: list[tuple[str, str]] = []
+    machine = BudgetAwareEpisodeStateMachine(
+        budget=manager,
+        max_active_episodes=1,
+        max_option_lines_per_episode=8,
+        eviction_sink=lambda evicted, replacement, _observed: (
+            evictions.append((evicted, replacement)) or True
+        ),
+    )
+    requested = tuple(
+        OptionSubscriptionIntent(
+            key=canonical_subscription_key(SubscriptionKind.OPTION, con_id=con_id),
+            con_id=con_id,
+            role=f"primary_leg_{con_id}",
+            subscription_class=SubscriptionClass.ACTIVE_EPISODE,
+            required=True,
+            dte_bucket=DteBucket.ONE_DTE,
+        )
+        for con_id in (901, 902)
+    )
+    record = machine.submit(
+        OptionEpisodeTask(
+            episode_id="quiet-eviction",
+            symbol="AAL",
+            kind=EpisodeKind.QUIET,
+            probability=0.10,
+            triggered_at_utc=now,
+            useful_until_utc=now + timedelta(minutes=60),
+            requested_subscriptions=requested,
+        ),
+        now=now,
+    )
+
+    assert record.state is EpisodeState.PRIMARY_LEGS_STREAMING
+    assert evictions == [(existing_key, requested[1].key)]
+    assert manager.get(existing_key) is None
+
+
 def _transfer_observations(
     *,
     ibkr_transform=lambda value: value,
@@ -989,9 +1202,26 @@ def test_transfer_monitor_detects_rank_preserving_scale_shift_and_v1_uses_no_out
     assert report.decision == "ibkr_ranking_supported_probability_scale_shifted"
     assert candidate.candidate_id == "M1C_IBKR_CALIBRATION_V1_CANDIDATE"
     assert candidate.source == "ibkr_probability_distribution_only"
+    assert len(candidate.source_valid_sessions) == 20
+    assert candidate.source_observation_count == len(ibkr)
     assert candidate.outcome_fields_used == ()
     assert candidate.option_pnl_used is False
     assert candidate.thresholds["bottom_10"] < candidate.thresholds["bottom_20"]
+
+    invalid_extra_session = (
+        *ibkr,
+        ProviderM1CObservation(
+            **{
+                **ibkr[0].__dict__,
+                "session": date(2026, 2, 1),
+            }
+        ),
+    )
+    with pytest.raises(ValueError, match="exactly twenty valid sessions"):
+        create_ibkr_calibration_candidate(
+            report=report,
+            ibkr=invalid_extra_session,
+        )
 
 
 def test_transfer_monitor_blocks_before_twenty_valid_sessions_and_on_bar_semantics() -> None:

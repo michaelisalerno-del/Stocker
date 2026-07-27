@@ -89,6 +89,24 @@ def _resolved_contract_match(
     )
 
 
+def _planned_atm_contract(
+    planned_contracts: tuple[OptionContract, ...],
+    *,
+    selection_roles: Mapping[str, tuple[str, ...]],
+    right: Literal["C", "P"],
+) -> OptionContract | None:
+    marker = "atm_call" if right == "C" else "atm_put"
+    return next(
+        (
+            contract
+            for contract in planned_contracts
+            if contract.right == right
+            and any(marker in role for role in selection_roles.get(contract.con_id_key, ()))
+        ),
+        None,
+    )
+
+
 def _required_quote_matrix_completion(
     *,
     planned_contracts: tuple[OptionContract, ...],
@@ -159,6 +177,7 @@ class BoundedOptionRecorder:
             Callable[[str, datetime, datetime], tuple[float, ...]] | None
         ) = None,
         underlying_halt_provider: Callable[[str, datetime, datetime], bool] | None = None,
+        eviction_sink: Callable[[str, str, datetime], bool] | None = None,
     ) -> None:
         if maximum_quote_age <= timedelta(0):
             raise ValueError("maximum_quote_age must be positive")
@@ -175,8 +194,13 @@ class BoundedOptionRecorder:
         self.request_pacer = request_pacer
         self.underlying_path_provider = underlying_path_provider
         self.underlying_halt_provider = underlying_halt_provider
+        self.eviction_sink = eviction_sink
         self._active: dict[tuple[str, int], _ActiveOption] = {}
         self._planned_contracts_by_episode: dict[str, tuple[OptionContract, ...]] = {}
+        self._selection_roles_by_episode: dict[
+            str,
+            dict[str, tuple[str, ...]],
+        ] = {}
         self._requested_contract_count_by_episode: dict[str, int] = {}
         self._plan_capacity_reduced_by_episode: dict[str, bool] = {}
         self._plan_missing_buckets_by_episode: dict[str, tuple[str, ...]] = {}
@@ -225,6 +249,7 @@ class BoundedOptionRecorder:
             )
             self._quiet_observations.add(episode_id)
         self._planned_contracts_by_episode[episode_id] = plan.contracts
+        self._selection_roles_by_episode[episode_id] = dict(plan.selection_roles)
         self._requested_contract_count_by_episode[episode_id] = plan.requested_contract_count
         self._plan_capacity_reduced_by_episode[episode_id] = plan.capacity_reduced
         self._plan_missing_buckets_by_episode[episode_id] = plan.missing_buckets
@@ -291,7 +316,31 @@ class BoundedOptionRecorder:
                 now_monotonic=time.monotonic(),
                 now_utc=started_at,
             )
-            if not decision.accepted:
+            eviction_results = (
+                ()
+                if self.eviction_sink is None
+                else tuple(
+                    self.eviction_sink(evicted_key, subscription_key, started_at)
+                    for evicted_key in decision.evicted_keys
+                )
+            )
+            allocation_denial_reason = (
+                decision.reason
+                if not decision.accepted
+                else (
+                    "evicted_subscription_cancellation_failed"
+                    if not all(eviction_results)
+                    else None
+                )
+            )
+            if allocation_denial_reason is not None:
+                if decision.accepted:
+                    self.subscriptions.release(
+                        subscription_key,
+                        owner_id=owner_id,
+                        reason=allocation_denial_reason,
+                        now_utc=started_at,
+                    )
                 if quiet_state:
                     self.repository.record_quiet_option_contract(
                         metadata,
@@ -300,7 +349,7 @@ class BoundedOptionRecorder:
                         selection_rank=rank,
                         selection_roles=selection_roles,
                         resolution_status="subscription_capacity_denied",
-                        rejection_reason=decision.reason,
+                        rejection_reason=allocation_denial_reason,
                         recording_started_at_utc=None,
                         recording_ends_at_utc=recording_ends,
                     )
@@ -311,7 +360,7 @@ class BoundedOptionRecorder:
                         contract=contract,
                         selection_rank=rank,
                         resolution_status="subscription_capacity_denied",
-                        rejection_reason=decision.reason,
+                        rejection_reason=allocation_denial_reason,
                         recording_started_at_utc=None,
                         recording_ends_at_utc=recording_ends,
                     )
@@ -479,12 +528,54 @@ class BoundedOptionRecorder:
             self._active.pop(active_key)
         self._contracts_by_episode.pop(episode_id, None)
         self._planned_contracts_by_episode.pop(episode_id, None)
+        self._selection_roles_by_episode.pop(episode_id, None)
         self._requested_contract_count_by_episode.pop(episode_id, None)
         self._plan_capacity_reduced_by_episode.pop(episode_id, None)
         self._plan_missing_buckets_by_episode.pop(episode_id, None)
         self._recording_ends_by_episode.pop(episode_id, None)
         self._quotes_by_episode.pop(episode_id, None)
         self._quiet_observations.discard(episode_id)
+
+    def cancel_evicted_subscription(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        key: str,
+        replacement_key: str,
+    ) -> bool:
+        """Cancel an optional option stream shed by the shared budget registry."""
+
+        matching = tuple(
+            (active_key, active)
+            for active_key, active in self._active.items()
+            if active.subscription_key == key
+        )
+        if not matching:
+            return False
+        for active_key, active in matching:
+            self.adapter.cancel_market_data(
+                active.request_id,
+                subscription_key=active.subscription_key,
+            )
+            if self.stream_unregistration_sink is not None:
+                self.stream_unregistration_sink(active.request_id)
+            record = self.subscriptions.records.get(active.subscription_key)
+            if record is not None:
+                self.repository.record_subscription(metadata, record)
+            self.repository.record_skipped_recording(
+                metadata,
+                session=metadata.recorded_at_utc.date(),
+                episode_id=active.episode_id,
+                symbol=active.symbol,
+                recording_kind="optional_option_stream_evicted",
+                reason=f"preempted_by:{replacement_key}",
+                requested_payload={
+                    "subscription_key": active.subscription_key,
+                    "request_id": active.request_id,
+                },
+            )
+            self._active.pop(active_key)
+        return True
 
     def record_quote(
         self,
@@ -718,6 +809,7 @@ class BoundedOptionRecorder:
         self._gap_episodes.add(episode_id)
         if reset_for_restart:
             self._planned_contracts_by_episode.pop(episode_id, None)
+            self._selection_roles_by_episode.pop(episode_id, None)
             self._requested_contract_count_by_episode.pop(episode_id, None)
             self._plan_capacity_reduced_by_episode.pop(episode_id, None)
             self._plan_missing_buckets_by_episode.pop(episode_id, None)
@@ -1306,6 +1398,7 @@ class BoundedOptionRecorder:
             False,
         )
         plan_missing_buckets = self._plan_missing_buckets_by_episode.get(episode_id, ())
+        selection_roles = self._selection_roles_by_episode.get(episode_id, {})
         contracts = tuple(self._contracts_by_episode.get(episode_id, ()))
         quotes = tuple(self._quotes_by_episode.get(episode_id, ()))
         quiet_state = episode_id in self._quiet_observations
@@ -1422,16 +1515,21 @@ class BoundedOptionRecorder:
             )
             bucket_contracts = [contract for contract in contracts if contract.dte_bucket is bucket]
             if quiet_state:
-                planned_calls = [item for item in planned_bucket_contracts if item.right == "C"]
-                planned_puts = [item for item in planned_bucket_contracts if item.right == "P"]
-
                 resolved_bucket_contracts = tuple(bucket_contracts)
                 atm_call = _resolved_contract_match(
-                    planned_calls[0] if planned_calls else None,
+                    _planned_atm_contract(
+                        planned_bucket_contracts,
+                        selection_roles=selection_roles,
+                        right="C",
+                    ),
                     resolved_bucket_contracts,
                 )
                 atm_put = _resolved_contract_match(
-                    planned_puts[0] if planned_puts else None,
+                    _planned_atm_contract(
+                        planned_bucket_contracts,
+                        selection_roles=selection_roles,
+                        right="P",
+                    ),
                     resolved_bucket_contracts,
                 )
                 self._record_quiet_bucket_outcomes(
@@ -1643,6 +1741,7 @@ class BoundedOptionRecorder:
         self._gap_episodes.discard(episode_id)
         self._quiet_observations.discard(episode_id)
         self._planned_contracts_by_episode.pop(episode_id, None)
+        self._selection_roles_by_episode.pop(episode_id, None)
         self._requested_contract_count_by_episode.pop(episode_id, None)
         self._plan_capacity_reduced_by_episode.pop(episode_id, None)
         self._plan_missing_buckets_by_episode.pop(episode_id, None)

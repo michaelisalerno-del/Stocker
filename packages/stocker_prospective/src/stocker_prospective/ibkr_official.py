@@ -10,6 +10,77 @@ from stocker_prospective.ibkr import IBKRMarketDataAdapter, require_official_ibk
 from stocker_prospective.market_data import MarketDataType, RealtimeBarUpdate
 
 
+class OfficialMarketDataOnlyClient:
+    """Narrow facade over inseparable ``EClient`` market-data methods.
+
+    The official client class also defines order methods. The recorder retains
+    that object only behind this facade, whose public surface contains no
+    order, account, position, or portfolio method.
+    """
+
+    __slots__ = ("__client",)
+
+    def __init__(self, client: Any) -> None:
+        self.__client = client
+
+    def connect(self, host: str, port: int, client_id: int) -> Any:
+        return self.__client.connect(host, port, client_id)
+
+    def disconnect(self) -> None:
+        self.__client.disconnect()
+
+    def run(self) -> None:
+        self.__client.run()
+
+    def reqMktData(self, *arguments: Any) -> None:  # noqa: N802
+        self.__client.reqMktData(*arguments)
+
+    def cancelMktData(self, request_id: int) -> None:  # noqa: N802
+        self.__client.cancelMktData(request_id)
+
+    def reqSecDefOptParams(self, *arguments: Any) -> None:  # noqa: N802
+        self.__client.reqSecDefOptParams(*arguments)
+
+    def reqContractDetails(self, request_id: int, contract: Any) -> None:  # noqa: N802
+        self.__client.reqContractDetails(request_id, contract)
+
+    def reqRealTimeBars(self, *arguments: Any) -> None:  # noqa: N802
+        self.__client.reqRealTimeBars(*arguments)
+
+    def cancelRealTimeBars(self, request_id: int) -> None:  # noqa: N802
+        self.__client.cancelRealTimeBars(request_id)
+
+    def reqTickByTickData(self, *arguments: Any) -> None:  # noqa: N802
+        self.__client.reqTickByTickData(*arguments)
+
+    def cancelTickByTickData(self, request_id: int) -> None:  # noqa: N802
+        self.__client.cancelTickByTickData(request_id)
+
+    def reqMktDepth(self, *arguments: Any) -> None:  # noqa: N802
+        self.__client.reqMktDepth(*arguments)
+
+    def cancelMktDepth(self, request_id: int, smart_depth: bool) -> None:  # noqa: N802
+        self.__client.cancelMktDepth(request_id, smart_depth)
+
+    def reqMktDepthExchanges(self) -> None:  # noqa: N802
+        self.__client.reqMktDepthExchanges()
+
+    def reqHistoricalData(self, *arguments: Any) -> None:  # noqa: N802
+        self.__client.reqHistoricalData(*arguments)
+
+    def cancelHistoricalData(self, request_id: int) -> None:  # noqa: N802
+        self.__client.cancelHistoricalData(request_id)
+
+    def reqCurrentTime(self) -> None:  # noqa: N802
+        self.__client.reqCurrentTime()
+
+    def reqMarketDataType(self, market_data_type: int) -> None:  # noqa: N802
+        self.__client.reqMarketDataType(market_data_type)
+
+    def serverVersion(self) -> int:  # noqa: N802
+        return int(self.__client.serverVersion())
+
+
 def create_official_stock_contract(symbol: str) -> Any:
     """Build the narrow STK contract used for exact qualification."""
 
@@ -455,71 +526,4 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 "source": "ibkr_historical_keep_up_to_date",
             }
 
-    class _MarketDataClientFacade:
-        """Expose only the official socket and market-data calls Stocker uses."""
-
-        __slots__ = ("__client",)
-
-        def __init__(self, client: Any) -> None:
-            self.__client = client
-
-        def connect(self, host: str, port: int, client_id: int) -> Any:
-            return self.__client.connect(host, port, client_id)
-
-        def disconnect(self) -> None:
-            self.__client.disconnect()
-
-        def run(self) -> None:
-            self.__client.run()
-
-        def reqMktData(self, *arguments: Any) -> None:  # noqa: N802
-            self.__client.reqMktData(*arguments)
-
-        def cancelMktData(self, request_id: int) -> None:  # noqa: N802
-            self.__client.cancelMktData(request_id)
-
-        def reqSecDefOptParams(self, *arguments: Any) -> None:  # noqa: N802
-            self.__client.reqSecDefOptParams(*arguments)
-
-        def reqContractDetails(self, request_id: int, contract: Any) -> None:  # noqa: N802
-            self.__client.reqContractDetails(request_id, contract)
-
-        def reqRealTimeBars(self, *arguments: Any) -> None:  # noqa: N802
-            self.__client.reqRealTimeBars(*arguments)
-
-        def cancelRealTimeBars(self, request_id: int) -> None:  # noqa: N802
-            self.__client.cancelRealTimeBars(request_id)
-
-        def reqTickByTickData(self, *arguments: Any) -> None:  # noqa: N802
-            self.__client.reqTickByTickData(*arguments)
-
-        def cancelTickByTickData(self, request_id: int) -> None:  # noqa: N802
-            self.__client.cancelTickByTickData(request_id)
-
-        def reqMktDepth(self, *arguments: Any) -> None:  # noqa: N802
-            self.__client.reqMktDepth(*arguments)
-
-        def cancelMktDepth(  # noqa: N802
-            self, request_id: int, smart_depth: bool
-        ) -> None:
-            self.__client.cancelMktDepth(request_id, smart_depth)
-
-        def reqMktDepthExchanges(self) -> None:  # noqa: N802
-            self.__client.reqMktDepthExchanges()
-
-        def reqHistoricalData(self, *arguments: Any) -> None:  # noqa: N802
-            self.__client.reqHistoricalData(*arguments)
-
-        def cancelHistoricalData(self, request_id: int) -> None:  # noqa: N802
-            self.__client.cancelHistoricalData(request_id)
-
-        def reqCurrentTime(self) -> None:  # noqa: N802
-            self.__client.reqCurrentTime()
-
-        def reqMarketDataType(self, market_data_type: int) -> None:  # noqa: N802
-            self.__client.reqMarketDataType(market_data_type)
-
-        def serverVersion(self) -> int:  # noqa: N802
-            return int(self.__client.serverVersion())
-
-    return _MarketDataClientFacade(_StockerOfficialMarketDataClient())
+    return OfficialMarketDataOnlyClient(_StockerOfficialMarketDataClient())

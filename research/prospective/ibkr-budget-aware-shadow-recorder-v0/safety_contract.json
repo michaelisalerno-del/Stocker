@@ -1,6 +1,7 @@
 {
   "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
   "runtime_gate": "assert_no_broker_mutation_surface",
+  "official_eclient_boundary": "explicit_market_data_only_facade",
   "forbidden_methods": [
     "placeOrder",
     "cancelOrder",

@@ -1556,6 +1556,11 @@ class ProspectiveReadStore:
                     episode_id = str(owner).split(":", 1)[1]
                     episodes[episode_id] = episodes.get(episode_id, 0) + 1
         decoded_capacity = None if capacity is None else json.loads(str(capacity["manifest_json"]))
+        preexisting_internal = (
+            0
+            if decoded_capacity is None
+            else int(decoded_capacity.get("current_internal_level1_lines", 0))
+        )
         allocation_rows = [self._decoded(row) for row in allocations]
         oldest_optional = min(
             (str(row["occurred_at_utc"]) for row in active if int(row["subscription_class"]) >= 3),
@@ -1563,7 +1568,9 @@ class ProspectiveReadStore:
         )
         return {
             "runtime_capacity": decoded_capacity,
-            "current_internal_usage": sum(usage.values()),
+            "current_internal_usage": preexisting_internal + sum(usage.values()),
+            "preexisting_internal_usage": preexisting_internal,
+            "current_recorder_usage": sum(usage.values()),
             "current_usage": dict(sorted(usage.items())),
             "pending_requests": sum(str(row["status"]) == "pending" for row in active),
             "subscriptions_by_priority_class": dict(sorted(classes.items())),

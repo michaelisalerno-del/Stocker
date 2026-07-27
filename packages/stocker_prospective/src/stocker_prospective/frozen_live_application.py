@@ -780,6 +780,8 @@ def build_frozen_prospective_application(
             configured_max_tick_by_tick=config.ibkr.max_tick_by_tick_subscriptions,
             configured_max_depth=config.ibkr.max_depth_subscriptions,
             configured_max_concurrent_snapshots=config.ibkr.max_concurrent_snapshots,
+            configured_max_active_option_episodes=(config.ibkr.max_active_option_episodes),
+            configured_max_option_lines_per_episode=(config.ibkr.max_option_lines_per_episode),
         ),
         discovery=discovered_capacity,
         output_path=capacity_manifest_path,
@@ -906,11 +908,11 @@ def build_frozen_prospective_application(
             SubscriptionKind.LEVEL1: config.ibkr.max_high_resolution_underlyings,
             SubscriptionKind.BAR: len(identity.symbols) + len(proxy_symbols),
             SubscriptionKind.TICK_BY_TICK: min(
-                int(runtime_capacity.tick_by_tick_capacity.value),
+                runtime_capacity.available_tick_by_tick,
                 config.ibkr.tick_by_tick_active_underlyings * 2,
             ),
             SubscriptionKind.DEPTH: min(
-                int(runtime_capacity.depth_capacity.value),
+                runtime_capacity.available_depth,
                 config.ibkr.level2_active_underlyings,
             ),
             SubscriptionKind.OPTION: min(
@@ -922,6 +924,7 @@ def build_frozen_prospective_application(
         request_rate_limit=config.ibkr.request_rate_per_second,
         total_line_limit=int(runtime_capacity.total_level1_allowance.value),
         externally_reserved_lines=int(runtime_capacity.externally_reserved_lines.value),
+        preexisting_internal_lines=runtime_capacity.current_internal_level1_lines,
         future_trading_reserve_lines=int(runtime_capacity.reserved_future_trading_lines.value),
         safety_margin_lines=int(runtime_capacity.safety_margin_lines.value),
     )
@@ -955,6 +958,9 @@ def build_frozen_prospective_application(
         repository=frozen_repository,
         depth_rows=config.ibkr.level2_rows,
         enable_depth=(config.ibkr.enable_level2 and config.ibkr.level2_active_underlyings > 0),
+        depth_phase_permitted=lambda metadata: (
+            prospective_phase_at(metadata.recorded_at_utc)[0] != "engineering_transfer"
+        ),
         stream_registration_sink=live.register_stream,
         request_pacer=pace_request,
     )
@@ -1000,6 +1006,44 @@ def build_frozen_prospective_application(
         underlying_halt_provider=live.underlying_halted_in_window,
     )
     live.option_quote_sink = option_recorder.record_quote
+
+    def cancel_evicted_subscription(
+        evicted_key: str,
+        replacement_key: str,
+        observed_at: datetime,
+    ) -> bool:
+        metadata = metadata_factory(observed_at, (observed_at,))
+        try:
+            handled = option_recorder.cancel_evicted_subscription(
+                metadata,
+                key=evicted_key,
+                replacement_key=replacement_key,
+            )
+            if not handled:
+                handled = controller.cancel_evicted_subscription(
+                    metadata,
+                    key=evicted_key,
+                    replacement_key=replacement_key,
+                )
+            # An unhandled key was a pending reservation with no broker stream.
+            return True
+        except Exception as exc:
+            frozen_repository.record_skipped_recording(
+                metadata,
+                session=metadata.recorded_at_utc.date(),
+                episode_id=None,
+                symbol=None,
+                recording_kind="subscription_reconciliation_warning",
+                reason="evicted_subscription_cancellation_failed",
+                requested_payload={
+                    "evicted_key": evicted_key,
+                    "replacement_key": replacement_key,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return False
+
+    option_recorder.eviction_sink = cancel_evicted_subscription
     episode_state = BudgetAwareEpisodeStateMachine(
         budget=controller_budget,
         max_active_episodes=config.ibkr.max_active_option_episodes,
@@ -1016,6 +1060,7 @@ def build_frozen_prospective_application(
             metadata_factory(record.updated_at_utc, (record.updated_at_utc,)),
             record,
         ),
+        eviction_sink=cancel_evicted_subscription,
         phase_resolver=lambda task: prospective_phase_at(task.triggered_at_utc),
     )
     option_discovery = BoundedOptionDiscoveryService(
@@ -1098,7 +1143,8 @@ def build_frozen_prospective_application(
         quiet_phase_manager=quiet_phase_manager,
         promotion_scheduler=PromotionScheduler(
             max_tick_by_tick=0,
-            max_depth=config.ibkr.level2_active_underlyings,
+            # Tick-by-tick and depth are active-episode-only enhancements.
+            max_depth=0,
             max_level1=config.ibkr.max_high_resolution_underlyings,
             high_arming_threshold=config.ibkr.high_tail_approach_boundary,
         ),

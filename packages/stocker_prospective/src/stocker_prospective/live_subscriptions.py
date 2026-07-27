@@ -83,6 +83,7 @@ class LiveSubscriptionController:
         repository: FrozenRecorderRepository,
         depth_rows: int,
         enable_depth: bool,
+        depth_phase_permitted: Callable[[EvidenceMetadata], bool] | None = None,
         stream_registration_sink: Callable[[StreamOwner], None] | None = None,
         request_pacer: Callable[[], object] | None = None,
     ) -> None:
@@ -94,12 +95,18 @@ class LiveSubscriptionController:
         self.repository = repository
         self.depth_rows = depth_rows
         self.enable_depth = enable_depth
+        self.depth_phase_permitted = depth_phase_permitted
         self.stream_registration_sink = (
             normalizer.register if stream_registration_sink is None else stream_registration_sink
         )
         self.request_pacer = request_pacer
         self._owned: dict[str, _OwnedStream] = {}
         self._contracts: dict[str, QualifiedUnderlying] = {}
+
+    def _depth_permitted(self, metadata: EvidenceMetadata) -> bool:
+        if not self.enable_depth:
+            return False
+        return True if self.depth_phase_permitted is None else self.depth_phase_permitted(metadata)
 
     def _allocate(
         self,
@@ -376,7 +383,7 @@ class LiveSubscriptionController:
                             )
                         break
                     started.append(key)
-            elif decision.subscription_type == "depth" and self.enable_depth:
+            elif decision.subscription_type == "depth" and self._depth_permitted(metadata):
                 self._allocate(
                     metadata,
                     key=canonical_subscription_key(
@@ -491,24 +498,28 @@ class LiveSubscriptionController:
                 depth_rows=self.depth_rows,
                 smart_depth=True,
             )
-            depth = self._allocate(
-                metadata,
-                key=depth_key,
-                contract=contract,
-                budget_kind=SubscriptionKind.DEPTH,
-                stream_kind=StreamKind.UNDERLYING_DEPTH,
-                priority=SubscriptionPriority.MICROSTRUCTURE_ENHANCEMENT,
-                subscription_class=SubscriptionClass.MICROSTRUCTURE_ENHANCEMENT,
-                owner_id=owner_id,
-                owner_episode=episode_id,
-                protected=False,
-                depth_rows=self.depth_rows,
-            )
-            if depth is None:
+            if not self._depth_permitted(metadata):
                 denied.append(depth_key)
                 state = BudgetState.OPTIONAL_FEEDS_DEGRADED
             else:
-                approved.append(depth_key)
+                depth = self._allocate(
+                    metadata,
+                    key=depth_key,
+                    contract=contract,
+                    budget_kind=SubscriptionKind.DEPTH,
+                    stream_kind=StreamKind.UNDERLYING_DEPTH,
+                    priority=SubscriptionPriority.MICROSTRUCTURE_ENHANCEMENT,
+                    subscription_class=SubscriptionClass.MICROSTRUCTURE_ENHANCEMENT,
+                    owner_id=owner_id,
+                    owner_episode=episode_id,
+                    protected=False,
+                    depth_rows=self.depth_rows,
+                )
+                if depth is None:
+                    denied.append(depth_key)
+                    state = BudgetState.OPTIONAL_FEEDS_DEGRADED
+                else:
+                    approved.append(depth_key)
         result = UnderlyingPromotionResult(
             symbol=symbol,
             episode_id=episode_id,
@@ -672,6 +683,25 @@ class LiveSubscriptionController:
                 now_utc=metadata.recorded_at_utc,
             )
         self.repository.record_subscription(metadata, record)
+
+    def cancel_evicted_subscription(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        key: str,
+        replacement_key: str,
+    ) -> bool:
+        """Cancel a broker stream already shed by the shared budget registry."""
+
+        if key not in self._owned:
+            return False
+        self._cancel_upstream(
+            metadata,
+            key,
+            reason=f"preempted_by:{replacement_key}",
+            budget_already_cancelled=True,
+        )
+        return True
 
     def end_active_episode(
         self,

@@ -33,6 +33,7 @@ from stocker_prospective.transfer import (
     M1CTransferMonitor,
     ProviderM1CObservation,
     TransferBar,
+    TransferDecision,
     TransferReport,
     create_ibkr_calibration_candidate,
 )
@@ -161,8 +162,9 @@ class SourceTransferCoordinator:
         valid_sessions = self._prior_valid_sessions()
         if session_valid:
             valid_sessions.add(session)
-        aggregate_ibkr = tuple(row for row in ibkr if row.session in valid_sessions)
-        aggregate_eodhd = tuple(row for row in eodhd if row.session in valid_sessions)
+        decision_sessions = set(sorted(valid_sessions)[:20])
+        aggregate_ibkr = tuple(row for row in ibkr if row.session in decision_sessions)
+        aggregate_eodhd = tuple(row for row in eodhd if row.session in decision_sessions)
         report = (
             current_session_report
             if not aggregate_ibkr and not aggregate_eodhd
@@ -212,10 +214,13 @@ class SourceTransferCoordinator:
         )
         if (
             report.valid_session_count >= 20
-            and report.decision == "ibkr_ranking_supported_probability_scale_shifted"
+            and report.decision is TransferDecision.RANKING_SUPPORTED_SCALE_SHIFTED
         ):
             self._freeze_calibration_candidate(
-                create_ibkr_calibration_candidate(report=report, ibkr=ibkr)
+                create_ibkr_calibration_candidate(
+                    report=report,
+                    ibkr=aggregate_ibkr,
+                )
             )
         return report
 
@@ -231,6 +236,8 @@ class SourceTransferCoordinator:
             if (
                 payload.get("candidate_id") != candidate.candidate_id
                 or payload.get("source") != "ibkr_probability_distribution_only"
+                or payload.get("source_valid_sessions") != list(candidate.source_valid_sessions)
+                or payload.get("source_observation_count") != candidate.source_observation_count
                 or payload.get("outcome_fields_used") != []
                 or payload.get("option_pnl_used") is not False
             ):
@@ -353,17 +360,17 @@ class SourceTransferCoordinator:
         }
 
     @staticmethod
-    def _recommendation(decision: str) -> str:
+    def _recommendation(decision: TransferDecision) -> str:
         return {
-            "ibkr_transfer_supported_without_recalibration": "continue_v0",
-            "ibkr_ranking_supported_probability_scale_shifted": (
+            TransferDecision.SUPPORTED_WITHOUT_RECALIBRATION: "continue_v0",
+            TransferDecision.RANKING_SUPPORTED_SCALE_SHIFTED: (
                 "create_distribution_only_ibkr_threshold_calibration_candidate"
             ),
-            "ibkr_transfer_mixed_stock_or_checkpoint_failures": "repair_pipeline",
-            "ibkr_transfer_not_supported": "stop",
-            "blocked_insufficient_valid_sessions": "continue_v0",
-            "blocked_bar_semantics_failure": "repair_pipeline",
-            "blocked_m1c_runtime_parity_failure": "stop",
+            TransferDecision.MIXED_STOCK_OR_CHECKPOINT_FAILURES: "repair_pipeline",
+            TransferDecision.NOT_SUPPORTED: "stop",
+            TransferDecision.BLOCKED_INSUFFICIENT_VALID_SESSIONS: "continue_v0",
+            TransferDecision.BLOCKED_BAR_SEMANTICS_FAILURE: "repair_pipeline",
+            TransferDecision.BLOCKED_M1C_RUNTIME_PARITY_FAILURE: "stop",
         }[decision]
 
     def _eodhd_rows(self, session: date) -> dict[str, tuple[dict[str, object], ...]]:

@@ -215,6 +215,7 @@ class SubscriptionBudgetManager:
         request_rate_window_seconds: float = 1.0,
         total_line_limit: int | None = None,
         externally_reserved_lines: int = 0,
+        preexisting_internal_lines: int = 0,
         future_trading_reserve_lines: int = 0,
         safety_margin_lines: int = 0,
     ) -> None:
@@ -225,10 +226,16 @@ class SubscriptionBudgetManager:
         resolved_total = sum(limits.values()) if total_line_limit is None else total_line_limit
         if resolved_total < 0:
             raise ValueError("total subscription line limit must be nonnegative")
-        reserved = externally_reserved_lines + future_trading_reserve_lines + safety_margin_lines
+        reserved = (
+            externally_reserved_lines
+            + preexisting_internal_lines
+            + future_trading_reserve_lines
+            + safety_margin_lines
+        )
         if (
             min(
                 externally_reserved_lines,
+                preexisting_internal_lines,
                 future_trading_reserve_lines,
                 safety_margin_lines,
             )
@@ -242,6 +249,7 @@ class SubscriptionBudgetManager:
         self.request_rate_window_seconds = request_rate_window_seconds
         self.total_line_limit = resolved_total
         self.externally_reserved_lines = externally_reserved_lines
+        self.preexisting_internal_lines = preexisting_internal_lines
         self.future_trading_reserve_lines = future_trading_reserve_lines
         self.safety_margin_lines = safety_margin_lines
         self.records: dict[str, SubscriptionRecord] = {}
@@ -255,6 +263,7 @@ class SubscriptionBudgetManager:
         return (
             self.total_line_limit
             - self.externally_reserved_lines
+            - self.preexisting_internal_lines
             - self.future_trading_reserve_lines
             - self.safety_margin_lines
         )
@@ -761,10 +770,12 @@ class SubscriptionBudgetManager:
             "limits": {kind.value: value for kind, value in self.limits.items()},
             "total_line_limit": self.total_line_limit,
             "externally_reserved_lines": self.externally_reserved_lines,
+            "preexisting_internal_lines": self.preexisting_internal_lines,
             "reserved_future_trading_lines": self.future_trading_reserve_lines,
             "safety_margin_lines": self.safety_margin_lines,
             "usable_research_lines": self.usable_research_lines,
             "current_internal_usage": usage,
+            "total_current_internal_usage": self.preexisting_internal_lines + usage,
             "available_research_lines": max(0, self.usable_research_lines - usage),
             "request_rate": len(self._request_times),
             "pending_requests": sum(

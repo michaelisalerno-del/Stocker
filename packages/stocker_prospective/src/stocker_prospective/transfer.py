@@ -7,6 +7,7 @@ import statistics
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from typing import Final, Literal
 
 from stocker_prospective.contract import (
@@ -20,6 +21,16 @@ from stocker_prospective.contract import (
 
 ProviderName = Literal["ibkr", "eodhd"]
 FROZEN_CHECKPOINTS: Final[tuple[int, ...]] = tuple(range(6, 36, 2))
+
+
+class TransferDecision(StrEnum):
+    SUPPORTED_WITHOUT_RECALIBRATION = "ibkr_transfer_supported_without_recalibration"
+    RANKING_SUPPORTED_SCALE_SHIFTED = "ibkr_ranking_supported_probability_scale_shifted"
+    MIXED_STOCK_OR_CHECKPOINT_FAILURES = "ibkr_transfer_mixed_stock_or_checkpoint_failures"
+    NOT_SUPPORTED = "ibkr_transfer_not_supported"
+    BLOCKED_INSUFFICIENT_VALID_SESSIONS = "blocked_insufficient_valid_sessions"
+    BLOCKED_BAR_SEMANTICS_FAILURE = "blocked_bar_semantics_failure"
+    BLOCKED_M1C_RUNTIME_PARITY_FAILURE = "blocked_m1c_runtime_parity_failure"
 
 
 @dataclass(frozen=True)
@@ -175,7 +186,7 @@ class EpisodeMetrics:
 
 @dataclass(frozen=True)
 class TransferReport:
-    decision: str
+    decision: TransferDecision
     valid_session_count: int
     bar_semantics_passed: bool
     runtime_parity_passed: bool
@@ -199,6 +210,8 @@ class TransferReport:
 class IBKRCalibrationCandidate:
     candidate_id: str
     source: str
+    source_valid_sessions: tuple[str, ...]
+    source_observation_count: int
     thresholds: dict[str, float]
     original_v0_thresholds_continue_in_parallel: bool
     outcome_fields_used: tuple[str, ...]
@@ -709,13 +722,13 @@ class M1CTransferMonitor:
         episodes: EpisodeMetrics,
         by_stock: dict[str, ProbabilityMetrics],
         by_checkpoint: dict[str, ProbabilityMetrics],
-    ) -> str:
+    ) -> TransferDecision:
         if not runtime_parity_passed:
-            return "blocked_m1c_runtime_parity_failure"
+            return TransferDecision.BLOCKED_M1C_RUNTIME_PARITY_FAILURE
         if not bar_semantics_passed:
-            return "blocked_bar_semantics_failure"
+            return TransferDecision.BLOCKED_BAR_SEMANTICS_FAILURE
         if valid_session_count < 20:
-            return "blocked_insufficient_valid_sessions"
+            return TransferDecision.BLOCKED_INSUFFICIENT_VALID_SESSIONS
         ranking_strong = probability.spearman >= 0.90 and probability.pearson >= 0.80
         tail_agreement_high = (
             tails.bottom_10_agreement >= 0.85
@@ -740,21 +753,21 @@ class M1CTransferMonitor:
             and probability.mean_absolute_difference <= 0.05
             and abs(probability.mean_signed_bias) <= 0.03
         ):
-            return "ibkr_transfer_supported_without_recalibration"
+            return TransferDecision.SUPPORTED_WITHOUT_RECALIBRATION
         scale_shift = (
             ranking_strong
             and tails.far_from_threshold_agreement >= 0.80
             and (probability.distribution_shift_detected or not frequency_comparable)
         )
         if scale_shift:
-            return "ibkr_ranking_supported_probability_scale_shifted"
+            return TransferDecision.RANKING_SUPPORTED_SCALE_SHIFTED
         group_failures = any(
             metrics.count >= 3 and metrics.spearman < 0.70
             for metrics in (*by_stock.values(), *by_checkpoint.values())
         )
         if ranking_strong or group_failures:
-            return "ibkr_transfer_mixed_stock_or_checkpoint_failures"
-        return "ibkr_transfer_not_supported"
+            return TransferDecision.MIXED_STOCK_OR_CHECKPOINT_FAILURES
+        return TransferDecision.NOT_SUPPORTED
 
 
 def create_ibkr_calibration_candidate(
@@ -764,14 +777,19 @@ def create_ibkr_calibration_candidate(
 ) -> IBKRCalibrationCandidate:
     """Freeze IBKR percentiles only; outcome and option inputs are impossible."""
 
-    if report.decision != "ibkr_ranking_supported_probability_scale_shifted":
+    if report.decision is not TransferDecision.RANKING_SUPPORTED_SCALE_SHIFTED:
         raise ValueError("IBKR calibration candidate requires rank transfer with scale shift")
     probabilities = tuple(row.probability for row in ibkr)
     if not probabilities:
         raise ValueError("IBKR calibration requires probability observations")
+    source_sessions = tuple(sorted({row.session.isoformat() for row in ibkr}))
+    if len(source_sessions) != 20:
+        raise ValueError("IBKR calibration requires exactly twenty valid sessions")
     return IBKRCalibrationCandidate(
         candidate_id="M1C_IBKR_CALIBRATION_V1_CANDIDATE",
         source="ibkr_probability_distribution_only",
+        source_valid_sessions=source_sessions,
+        source_observation_count=len(ibkr),
         thresholds={
             "bottom_5": _quantile(probabilities, 0.05),
             "bottom_10": _quantile(probabilities, 0.10),
@@ -798,6 +816,7 @@ __all__ = [
     "ProviderM1CObservation",
     "TailMetrics",
     "TransferBar",
+    "TransferDecision",
     "TransferReport",
     "create_ibkr_calibration_candidate",
 ]

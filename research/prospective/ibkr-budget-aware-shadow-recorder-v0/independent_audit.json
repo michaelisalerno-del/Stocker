@@ -132,7 +132,9 @@
       "ibkr"
     ],
     "forbidden_adapter_methods": [],
+    "forbidden_official_facade_methods": [],
     "forbidden_routes": [],
+    "official_factory_returns_market_data_facade": true,
     "passed": true
   },
   "transfer": {

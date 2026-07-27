@@ -63,9 +63,10 @@ GET routes only.
   lease interval;
 - uses monotonic request IDs, bounded callback queues, market-data line
   headroom, and a local request-rate limit;
-- qualifies the exact `STK` contract for every registered anchor symbol, then
-  maintains at most one bounded quote and one five-second real-time-bar
-  subscription per qualified symbol;
+- qualifies the exact `STK` contract for every registered anchor symbol; the
+  frozen M1C mode then maintains one audited completed-five-minute update
+  stream per stock plus only its required market proxies, without duplicate
+  quote, trade, tick-by-tick, or depth streams;
 - aggregates exactly 60 distinct five-second callbacks into a completed
   five-minute diagnostic bar without filling gaps, and persists partial bars
   as rejections;
@@ -75,25 +76,34 @@ GET routes only.
   records any discarded buffered callbacks explicitly;
 - exposes bounded option-chain metadata, exact-contract qualification, and
   temporary-snapshot primitives without any whole-chain streaming;
-- exercises entry and 5/10/15/30-minute option captures and all shadow
-  accounting deterministically in replay; and
+- exercises diagnostic 5/10-minute and required 15/30/60-minute option
+  captures, plus session-end capture where it falls inside the bounded
+  recording window, and reconstructs all shadow accounting deterministically
+  in replay; and
 - cancels temporary market-data requests on completion, timeout, shutdown, or
   failure.
 
-The current checkout has no approved frozen model bundle and its feature
-parity gate is blocked. Consequently, deterministic replay works and the
-record-only IBKR service may use the independently hash-verified registered
-universe while persisting `blocked_missing_verified_frozen_bundle` and
-`blocked_feature_source_semantics_mismatch`. Shadow/frozen-M1 scoring refuses
-to start. Since no eligible real score can cross the gate, live
-signal-triggered option scheduling is not admitted in this deployment; the
-option capture scheduler and shadow path are replay evidence, not a claimed
-live option recorder. The optional official `ibapi` dependency is absent from
-the repository and immutable model bundle by design. A server release may
-install it only from an operator-accepted official IBKR archive; startup hashes
-the installed Python tree against an immutable provenance record. A weekly
-read-only job checks official release metadata and can raise an update-review
-blocker, but it never downloads or installs broker code.
+The frozen M1C mode loads and hash-verifies the causal feature manifest,
+preprocessing, coefficients, intercept, stock/checkpoint levels, and frozen
+thresholds. Runtime parity and completed-bar compatibility still fail closed,
+but a passing installation may score live IBKR bars and begin bounded option
+shadow recording immediately. The first 20 valid sessions remain
+`engineering_transfer` evidence only; the later EODHD reconstruction monitors
+ranking, threshold meaning, signal frequency, and episode identity without
+requiring exact vendor OHLC equality. Optional capacity exhaustion degrades,
+queues, reduces, or records a skip and does not stop Class 0–1 M1C streams.
+Only `critical_budget_unavailable` blocks signal capture. The historical
+decision remains `blocked_insufficient_low_tail_support`.
+
+The official `ibapi` dependency remains absent from the repository and
+immutable model bundle. A server release may install it only from an
+operator-accepted official IBKR archive; startup hashes the installed Python
+tree against an immutable provenance record. Because official `EClient`
+inseparably contains order methods, Stocker retains it behind an explicit
+market-data-only facade. Both the static contract and runtime attachment gate
+reject any recorder-visible order/account surface. A weekly read-only job
+checks official release metadata and can raise an update-review blocker, but
+it never downloads or installs broker code.
 
 ### `stocker-web`
 
@@ -110,6 +120,19 @@ blocker, but it never downloads or installs broker code.
   - `GET /api/shadow/{structure_id}`
   - `GET /api/audit`
   - `GET /api/config/public`
+  - `GET /api/recorder/status`
+  - `GET /api/recorder/capabilities`
+  - `GET /api/recorder/session-reports`
+  - `GET /api/market-data-budget`
+  - `GET /api/source-transfer`
+  - `GET /api/reports/daily`
+  - `GET /api/reports/daily/{session_date}/{archive_name}`
+  - `GET /api/universe/live`
+  - `GET /api/episodes`
+  - `GET /api/episodes/{episode_id}`
+  - `GET /api/episodes/{episode_id}/microstructure`
+  - `GET /api/episodes/{episode_id}/options`
+  - `GET /api/shadow-outcomes`
 - applies host validation, rate limiting, no-store and browser security
   headers, optional environment-backed authentication, and production-safe
   error responses; and

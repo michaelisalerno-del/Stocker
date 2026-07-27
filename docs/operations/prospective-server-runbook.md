@@ -711,8 +711,9 @@ Before first prospective start, set:
 - the Stocker endpoint exactly as `127.0.0.1:4003`, a dedicated non-zero client
   ID, and the paper environment (the Gateway upstream port belongs only in
   `/etc/ibgateway/loopback-proxy.env`);
-- measured line budget, reserved headroom, and a request rate no greater than
-  half that line budget;
+- measured or API-observed market-data capacity, externally consumed lines,
+  a protected future-trading reserve, and a request rate no greater than half
+  the configured line budget;
 - context-signing secret in the environment file; and
 - `parallel_validation.enabled: true` only when after-session EODHD source
   comparison is intended; and
@@ -725,6 +726,29 @@ secret-minimal `/etc/stocker/stocker-web.env`:
 STOCKER_IBKR_API_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json
 STOCKER_IBKR_API_UPDATE_STATUS=/var/lib/stocker/ibkr-api/status/update-status.json
 ```
+
+Set recorder-only market-data limits in `/etc/stocker/stocker.env`. IBKR limits
+that the API cannot expose must be explicit; the startup manifest records
+whether each value was discovered, configured by environment, or taken from
+the reviewed configuration fallback:
+
+```dotenv
+IBKR_TOTAL_MARKET_DATA_LINES=100
+IBKR_EXTERNALLY_RESERVED_LINES=0
+IBKR_RESERVED_FUTURE_TRADING_LINES=12
+IBKR_MAX_TICK_BY_TICK=2
+IBKR_MAX_DEPTH=0
+IBKR_MAX_CONCURRENT_SNAPSHOTS=2
+IBKR_MAX_ACTIVE_OPTION_EPISODES=1
+IBKR_MAX_OPTION_LINES_PER_EPISODE=8
+```
+
+Replace the example values with the account/TWS allowances actually observed
+at deployment. Never reduce the 12-line future-trading reserve to admit
+neutral controls, alternate DTEs, outer strikes, tick-by-tick, or depth. On
+startup inspect `ibkr_runtime_capacity_manifest.json`; the always-on target is
+20 stock bar streams plus only required proxies. Level II is disabled during
+the 20-session engineering-transfer phase and remains optional afterward.
 
 Put the token only in `/etc/stocker/stocker.env`:
 
@@ -912,8 +936,14 @@ sudo -u stocker-web -g stocker-readers test ! -w /var/lib/stocker/prospective
 sudo -u stocker-web -g stocker-readers test ! -r /etc/stocker/stocker.env
 ```
 
-At the current repository state, IBKR mode is expected to block rather than
-claim frozen M1 scoring.
+IBKR mode may run the hash-verified frozen causal M1C model only when the
+bundle, runtime-parity, completed-bar, signed Group O context, live-data, and
+loopback/read-only capability gates all pass. It does not require exact EODHD
+and IBKR bar equality. Optional market-data exhaustion must appear as a queued,
+partial, degraded, or skipped recording while universe scoring continues;
+only `critical_budget_unavailable` may block M1C signal recording. The service
+remains record-only and exposes no order, account, position, or portfolio
+method.
 
 ## 11. View logs and health
 

@@ -10,7 +10,9 @@
     "IBKR_MAX_DEPTH",
     "IBKR_MAX_CONCURRENT_SNAPSHOTS",
     "IBKR_MAX_ACTIVE_OPTION_EPISODES",
-    "IBKR_MAX_OPTION_LINES_PER_EPISODE"
+    "IBKR_MAX_OPTION_LINES_PER_EPISODE",
+    "IBKR_HISTORICAL_REQUESTS_PER_WINDOW",
+    "IBKR_HISTORICAL_REQUEST_WINDOW_SECONDS"
   ],
   "budget_states": [
     "budget_healthy",
@@ -27,6 +29,8 @@
     "active_option_episodes": 1,
     "continuous_option_lines_per_episode": 8,
     "concurrent_discovery_snapshots": 2,
+    "historical_requests_per_window": 60,
+    "historical_request_window_seconds": 600,
     "tick_by_tick_active_underlyings": 1,
     "level2_active_underlyings": 0
   },

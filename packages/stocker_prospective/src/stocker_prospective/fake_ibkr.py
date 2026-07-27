@@ -318,6 +318,7 @@ class FakeIBKRAdapter:
             "depth_capacity": 0,
             "snapshot_pacing_limit": 2,
             "historical_requests_per_window": 60,
+            "historical_request_window_seconds": 600,
             "option_computation_available": True,
             "market_data_status": self.market_data_type.value,
         }

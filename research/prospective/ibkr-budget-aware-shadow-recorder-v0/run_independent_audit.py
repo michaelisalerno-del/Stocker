@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "packages/stocker_prospective/src"))
 from stocker_prospective.capacity import (
     CapacityDiscovery,
     RuntimeCapacitySettings,
+    WindowedRequestPacer,
     resolve_runtime_capacity,
 )
 from stocker_prospective.config import ORDER_METHOD_NAMES
@@ -563,12 +564,27 @@ def main() -> None:
             depth_capacity=0,
             snapshot_pacing_limit=2,
             historical_requests_per_window=55,
+            historical_request_window_seconds=600,
             option_computation_available=True,
             market_data_status="live",
         ),
         environment={},
         observed_at=START,
     )
+    pacing_clock = [0.0]
+
+    def advance_pacing_clock(seconds: float) -> None:
+        pacing_clock[0] += seconds
+
+    historical_pacer = WindowedRequestPacer(
+        maximum_requests=2,
+        window_seconds=10,
+        clock=lambda: pacing_clock[0],
+        sleeper=advance_pacing_clock,
+        maximum_sleep_step_seconds=5,
+    )
+    for _ in range(3):
+        historical_pacer.acquire()
     artifact_hashes = {
         "feature_manifest": _sha256(FEATURE_MANIFEST),
         "threshold": _sha256(THRESHOLD_ARTIFACT),
@@ -609,6 +625,9 @@ def main() -> None:
         "capacity": {
             "available_research_level1_lines": (manifest.available_research_level1_lines),
             "reserved_future_trading_lines": (manifest.reserved_future_trading_lines.value),
+            "historical_requests_per_window": (manifest.historical_requests_per_window.value),
+            "historical_request_window_seconds": (manifest.historical_request_window_seconds.value),
+            "historical_pacer_wait_seconds": pacing_clock[0],
             "subscription_class_priority_reconstructions": len(allocation_a),
             "automatic_cancellation_leaks": sum(
                 int(row["usage_after_cancel"]) for row in constrained_a
@@ -665,6 +684,14 @@ def main() -> None:
         "shadow_fill_formula": option_audit_a["shadow_pnl_mismatches"] == 0,
         "shadow_fill_difference": (option_audit_a["maximum_floating_difference"] <= 1e-12),
         "future_trading_reserve": (manifest.reserved_future_trading_lines.value == 12),
+        "capacity_calculation": manifest.available_research_level1_lines == 26,
+        "historical_request_manifest": (
+            manifest.historical_requests_per_window.value == 55
+            and manifest.historical_request_window_seconds.value == 600
+        ),
+        "historical_request_pacing": (
+            pacing_clock[0] == 10.0 and historical_pacer.current_window_usage == 1
+        ),
         "automatic_cancellation": all(int(row["usage_after_cancel"]) == 0 for row in constrained_a),
         "no_order_and_calibration_safety": bool(safety["passed"]),
         "determinism": bool(determinism["passed"]),

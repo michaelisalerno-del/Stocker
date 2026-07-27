@@ -2,6 +2,9 @@
   "capacity": {
     "automatic_cancellation_leaks": 0,
     "available_research_level1_lines": 26,
+    "historical_pacer_wait_seconds": 10.0,
+    "historical_request_window_seconds": 600,
+    "historical_requests_per_window": 55,
     "reserved_future_trading_lines": 12,
     "subscription_class_priority_reconstructions": 50
   },
@@ -9,9 +12,12 @@
     "allocation_count": true,
     "artifact_hashes": true,
     "automatic_cancellation": true,
+    "capacity_calculation": true,
     "constrained_episode_count": true,
     "determinism": true,
     "future_trading_reserve": true,
+    "historical_request_manifest": true,
+    "historical_request_pacing": true,
     "manual_probability_difference": true,
     "no_order_and_calibration_safety": true,
     "option_contract_identity": true,

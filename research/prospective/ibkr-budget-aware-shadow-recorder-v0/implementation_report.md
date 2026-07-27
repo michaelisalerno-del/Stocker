@@ -6,7 +6,8 @@ The existing prospective application was extended in place. It now runs the
 exact frozen causal M1C runtime from minimal IBKR completed-bar subscriptions,
 monitors later EODHD provider transfer, begins bounded option shadow recording
 immediately, and preserves a configurable 12-line future-trading market-data
-reserve. No order, account, position, or portfolio surface was added.
+reserve. Resolved historical-bar pacing is enforced at request time. No order,
+account, position, or portfolio surface was added.
 
 The historical conclusion is unchanged:
 `blocked_insufficient_low_tail_support`.
@@ -56,11 +57,14 @@ drift, made the official-client market-data facade explicit and testable,
 normalised real IBKR field/value callbacks, coupled budget eviction to
 broker-side cancellation, reserved discovered in-use capacity, selected ATM
 comparisons by frozen roles, and restricted V1 calibration to the exact first
-20 valid sessions.
+20 valid sessions. The final correction review also verified that reported
+available lines do not double-count this client's current usage and that the
+resolved historical-bar allowance is enforced during startup and reconnect.
+Neither review has an unresolved hard finding.
 
 The feature-scoped verification suite passes:
 
-- 125 focused backend, web, fake-adapter, budget-degradation, reconnect, and
+- 116 focused backend, web, fake-adapter, budget-degradation, reconnect, and
   deterministic tests.
 - Scoped Ruff formatting and lint checks.
 - Strict mypy for all 63 prospective source files.
@@ -71,7 +75,7 @@ The feature-scoped verification suite passes:
   contract, or outcome mismatches and maximum floating difference `0.0`.
 
 A broad final run excluding only eight unrelated historical-integration files
-passes 1,247 tests with one skip. The unfiltered baseline run reached 1,291
+passes 1,249 tests with one skip. The unfiltered baseline run reached 1,291
 passes and one skip; its 13 failures and 19 setup errors were confined to those
 historical SLRNO integration files because their frozen parquet inputs are
 absent from this checkout. Those prior artifacts were not modified or

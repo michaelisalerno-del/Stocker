@@ -18,7 +18,8 @@ Startup resolves observable IBKR capacity first and then uses explicit
 environment or configured fallbacks for limits IBKR cannot expose. The result is
 written to `ibkr_runtime_capacity_manifest.json`, including provenance, external
 usage, current internal usage, a safety margin, and the 12-line future-trading
-reserve.
+reserve. The discovered or configured historical-bar allowance is enforced by
+a rolling-window pacer during startup and reconnect restoration.
 
 The always-on design requests one bar stream for each of the 20 frozen stocks
 plus only required proxies. Level I is promoted for an armed or active episode.

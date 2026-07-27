@@ -94,6 +94,8 @@ ibkr:
   market_data_line_budget: 100
   reserved_line_headroom: 10
   request_rate_per_second: 20
+  historical_requests_per_window: 60
+  historical_request_window_seconds: 600
   quote_capture_timeout_seconds: 15
   allowed_market_data_types:
     - live

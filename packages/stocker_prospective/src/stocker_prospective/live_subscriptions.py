@@ -86,6 +86,7 @@ class LiveSubscriptionController:
         depth_phase_permitted: Callable[[EvidenceMetadata], bool] | None = None,
         stream_registration_sink: Callable[[StreamOwner], None] | None = None,
         request_pacer: Callable[[], object] | None = None,
+        historical_request_pacer: Callable[[], object] | None = None,
     ) -> None:
         if depth_rows <= 0:
             raise ValueError("depth rows must be positive")
@@ -100,6 +101,7 @@ class LiveSubscriptionController:
             normalizer.register if stream_registration_sink is None else stream_registration_sink
         )
         self.request_pacer = request_pacer
+        self.historical_request_pacer = historical_request_pacer
         self._owned: dict[str, _OwnedStream] = {}
         self._contracts: dict[str, QualifiedUnderlying] = {}
 
@@ -161,6 +163,8 @@ class LiveSubscriptionController:
                     subscription_key=key,
                 )
             elif stream_kind is StreamKind.UNDERLYING_BAR:
+                if self.historical_request_pacer is not None:
+                    self.historical_request_pacer()
                 request_id = self.adapter.request_historical_five_minute_updates(
                     contract.upstream_contract,
                     subscription_key=key,

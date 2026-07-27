@@ -741,6 +741,8 @@ IBKR_MAX_DEPTH=0
 IBKR_MAX_CONCURRENT_SNAPSHOTS=2
 IBKR_MAX_ACTIVE_OPTION_EPISODES=1
 IBKR_MAX_OPTION_LINES_PER_EPISODE=8
+IBKR_HISTORICAL_REQUESTS_PER_WINDOW=60
+IBKR_HISTORICAL_REQUEST_WINDOW_SECONDS=600
 ```
 
 Replace the example values with the account/TWS allowances actually observed
@@ -748,7 +750,9 @@ at deployment. Never reduce the 12-line future-trading reserve to admit
 neutral controls, alternate DTEs, outer strikes, tick-by-tick, or depth. On
 startup inspect `ibkr_runtime_capacity_manifest.json`; the always-on target is
 20 stock bar streams plus only required proxies. Level II is disabled during
-the 20-session engineering-transfer phase and remains optional afterward.
+the 20-session engineering-transfer phase and remains optional afterward. The
+recorder enforces the resolved historical-bar request allowance as a rolling
+window during startup and reconnect restoration.
 
 Put the token only in `/etc/stocker/stocker.env`:
 

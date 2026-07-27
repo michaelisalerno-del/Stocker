@@ -22,6 +22,7 @@ from stocker_prospective.capacity import (
     CapacityDiscovery,
     RuntimeCapacityManifest,
     RuntimeCapacitySettings,
+    WindowedRequestPacer,
     resolve_runtime_capacity,
 )
 from stocker_prospective.config import ProspectiveConfig
@@ -782,9 +783,18 @@ def build_frozen_prospective_application(
             configured_max_concurrent_snapshots=config.ibkr.max_concurrent_snapshots,
             configured_max_active_option_episodes=(config.ibkr.max_active_option_episodes),
             configured_max_option_lines_per_episode=(config.ibkr.max_option_lines_per_episode),
+            configured_historical_requests_per_window=(config.ibkr.historical_requests_per_window),
+            configured_historical_request_window_seconds=(
+                config.ibkr.historical_request_window_seconds
+            ),
         ),
         discovery=discovered_capacity,
         output_path=capacity_manifest_path,
+    )
+    historical_request_pacer = WindowedRequestPacer(
+        maximum_requests=int(runtime_capacity.historical_requests_per_window.value),
+        window_seconds=float(runtime_capacity.historical_request_window_seconds.value),
+        heartbeat=heartbeat,
     )
 
     activation_ledger = ProspectiveActivationLedger(resolved_paths["recorder_activation"])
@@ -963,6 +973,7 @@ def build_frozen_prospective_application(
         ),
         stream_registration_sink=live.register_stream,
         request_pacer=pace_request,
+        historical_request_pacer=historical_request_pacer.acquire,
     )
 
     for qualified_item in qualified:

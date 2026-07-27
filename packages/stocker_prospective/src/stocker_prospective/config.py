@@ -144,6 +144,8 @@ class IBKRConfig(BaseModel):
     market_data_line_budget: int = Field(default=100, ge=1)
     reserved_line_headroom: int = Field(default=10, ge=0)
     request_rate_per_second: int = Field(default=20, ge=1)
+    historical_requests_per_window: int = Field(default=60, ge=1)
+    historical_request_window_seconds: int = Field(default=600, ge=1)
     quote_capture_timeout_seconds: float = Field(default=15.0, ge=12.0)
     allowed_market_data_types: list[MarketDataTypeName] = Field(
         default_factory=_default_market_data_types
@@ -321,6 +323,14 @@ def load_prospective_config(path: str | Path) -> ProspectiveConfig:
             "max_option_lines_per_episode",
             int,
         ),
+        "IBKR_HISTORICAL_REQUESTS_PER_WINDOW": (
+            "historical_requests_per_window",
+            int,
+        ),
+        "IBKR_HISTORICAL_REQUEST_WINDOW_SECONDS": (
+            "historical_request_window_seconds",
+            int,
+        ),
         "IBKR_CONNECTION_TIMEOUT_SECONDS": ("connect_timeout_seconds", float),
         "IBKR_RECONNECT_BACKOFF_SECONDS": ("reconnect_backoff_seconds", float),
         "IBKR_STREAM_POLL_INTERVAL_SECONDS": ("stream_poll_interval_seconds", float),
@@ -422,6 +432,8 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "max_active_option_episodes": config.ibkr.max_active_option_episodes,
             "max_option_lines_per_episode": (config.ibkr.max_option_lines_per_episode),
             "max_concurrent_snapshots": config.ibkr.max_concurrent_snapshots,
+            "historical_requests_per_window": (config.ibkr.historical_requests_per_window),
+            "historical_request_window_seconds": (config.ibkr.historical_request_window_seconds),
             "tick_by_tick_active_underlyings": (config.ibkr.tick_by_tick_active_underlyings),
             "level2_active_underlyings": config.ibkr.level2_active_underlyings,
         },

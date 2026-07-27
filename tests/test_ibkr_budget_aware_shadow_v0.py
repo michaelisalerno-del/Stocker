@@ -16,6 +16,7 @@ from stocker_prospective.budget_reports import (
 from stocker_prospective.capacity import (
     CapacityDiscovery,
     RuntimeCapacitySettings,
+    WindowedRequestPacer,
     resolve_runtime_capacity,
 )
 from stocker_prospective.contract import claims_boundary
@@ -80,6 +81,7 @@ def test_runtime_capacity_prefers_discovery_and_preserves_future_trading_reserve
             configured_max_depth=3,
             configured_max_concurrent_snapshots=2,
             configured_historical_requests_per_window=60,
+            configured_historical_request_window_seconds=600,
         ),
         discovery=CapacityDiscovery(
             total_level1_allowance=84,
@@ -93,6 +95,7 @@ def test_runtime_capacity_prefers_discovery_and_preserves_future_trading_reserve
             depth_in_use=0,
             snapshot_pacing_limit=3,
             historical_requests_per_window=55,
+            historical_request_window_seconds=540,
             option_computation_available=True,
             market_data_status="live",
         ),
@@ -111,6 +114,8 @@ def test_runtime_capacity_prefers_discovery_and_preserves_future_trading_reserve
     assert manifest.snapshot_pacing_limit.value == 3
     assert manifest.max_active_option_episodes.value == 1
     assert manifest.max_option_lines_per_episode.value == 8
+    assert manifest.historical_requests_per_window.value == 55
+    assert manifest.historical_request_window_seconds.value == 540
     assert manifest.option_computation_available.value is True
 
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -132,6 +137,8 @@ def test_runtime_capacity_uses_exact_environment_fallback_names() -> None:
             "IBKR_MAX_CONCURRENT_SNAPSHOTS": "2",
             "IBKR_MAX_ACTIVE_OPTION_EPISODES": "2",
             "IBKR_MAX_OPTION_LINES_PER_EPISODE": "7",
+            "IBKR_HISTORICAL_REQUESTS_PER_WINDOW": "45",
+            "IBKR_HISTORICAL_REQUEST_WINDOW_SECONDS": "480",
         },
         observed_at=datetime(2026, 7, 27, 14, 0, tzinfo=UTC),
     )
@@ -147,6 +154,8 @@ def test_runtime_capacity_uses_exact_environment_fallback_names() -> None:
     assert manifest.max_active_option_episodes.source == "configured_environment"
     assert manifest.max_option_lines_per_episode.value == 7
     assert manifest.max_option_lines_per_episode.source == "configured_environment"
+    assert manifest.historical_requests_per_window.value == 45
+    assert manifest.historical_request_window_seconds.value == 480
     assert manifest.available_research_level1_lines == 48
 
 
@@ -181,6 +190,62 @@ def test_discovered_available_lines_raise_effective_external_reservation() -> No
     assert manifest.externally_reserved_lines.value == 30
     assert manifest.externally_reserved_lines.source == ("ibkr_discovery_available_capacity")
     assert manifest.available_research_level1_lines == 56
+
+
+def test_discovered_available_lines_do_not_double_count_current_internal_usage() -> None:
+    manifest = resolve_runtime_capacity(
+        settings=RuntimeCapacitySettings(),
+        discovery=CapacityDiscovery(
+            total_level1_allowance=100,
+            available_level1_capacity=70,
+            externally_consumed_lines=5,
+            current_internal_level1_lines=10,
+        ),
+        environment={},
+        observed_at=datetime(2026, 7, 27, 14, 0, tzinfo=UTC),
+    )
+
+    assert manifest.externally_reserved_lines.value == 20
+    assert manifest.available_ordinary_level1_lines == 70
+    assert manifest.available_research_level1_lines == 56
+    manager = SubscriptionBudgetManager(
+        limits={SubscriptionKind.BAR: 30},
+        request_rate_limit=20,
+        total_line_limit=int(manifest.total_level1_allowance.value),
+        externally_reserved_lines=int(manifest.externally_reserved_lines.value),
+        preexisting_internal_lines=manifest.current_internal_level1_lines,
+        future_trading_reserve_lines=int(manifest.reserved_future_trading_lines.value),
+        safety_margin_lines=int(manifest.safety_margin_lines.value),
+    )
+    assert manager.usable_research_lines == manifest.available_research_level1_lines
+
+
+def test_windowed_request_pacer_enforces_discovered_rolling_window() -> None:
+    now = [0.0]
+    sleep_steps: list[float] = []
+    heartbeats: list[float] = []
+
+    def advance(seconds: float) -> None:
+        sleep_steps.append(seconds)
+        now[0] += seconds
+
+    pacer = WindowedRequestPacer(
+        maximum_requests=2,
+        window_seconds=10,
+        clock=lambda: now[0],
+        sleeper=advance,
+        heartbeat=lambda: heartbeats.append(now[0]),
+        maximum_sleep_step_seconds=5,
+    )
+
+    pacer.acquire()
+    pacer.acquire()
+    pacer.acquire()
+
+    assert sleep_steps == [5, 5]
+    assert heartbeats == [0.0, 5.0]
+    assert now[0] == 10.0
+    assert pacer.current_window_usage == 1
 
 
 def test_binding_claims_include_transfer_budget_and_no_order_boundary() -> None:
@@ -722,6 +787,7 @@ def _metadata() -> EvidenceMetadata:
 
 def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_degrades() -> None:
     adapter = _SubscriptionAdapter(fail_tick_budget=True)
+    historical_request_observations: list[int] = []
     budget = SubscriptionBudgetManager(
         limits={
             SubscriptionKind.BAR: 3,
@@ -741,6 +807,9 @@ def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_de
         repository=_SubscriptionRepository(),  # type: ignore[arg-type]
         depth_rows=5,
         enable_depth=False,
+        historical_request_pacer=lambda: historical_request_observations.append(
+            len(adapter.requests)
+        ),
     )
     contracts = tuple(
         QualifiedUnderlying(
@@ -756,8 +825,21 @@ def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_de
     controller.start_always_on(_metadata(), contracts)
     controller.start_always_on(_metadata(), contracts)
     assert adapter.requests == [("bar", 1), ("bar", 2), ("bar", 3)]
+    assert historical_request_observations == [0, 1, 2]
     assert budget.snapshot()["active"]["bar"] == 3  # type: ignore[index]
     assert budget.snapshot()["active"]["level1"] == 0  # type: ignore[index]
+
+    controller.rebuild_after_data_loss(_metadata())
+    assert adapter.requests == [
+        ("bar", 1),
+        ("bar", 2),
+        ("bar", 3),
+        ("bar", 3),
+        ("bar", 1),
+        ("bar", 2),
+    ]
+    assert historical_request_observations == [0, 1, 2, 3, 4, 5]
+    assert budget.snapshot()["active"]["bar"] == 3  # type: ignore[index]
 
     promotion = controller.promote_active_episode(
         _metadata(),

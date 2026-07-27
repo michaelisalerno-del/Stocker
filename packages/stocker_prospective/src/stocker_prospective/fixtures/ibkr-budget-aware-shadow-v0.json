@@ -12,6 +12,7 @@
     "depth_capacity": 0,
     "snapshot_pacing_limit": 2,
     "historical_requests_per_window": 55,
+    "historical_request_window_seconds": 600,
     "option_computation_available": true,
     "market_data_status": "live"
   },

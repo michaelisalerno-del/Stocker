@@ -212,11 +212,7 @@ def _resolve_spec_paths(spec_path: Path, payload: dict[str, Any]) -> dict[str, A
     runtime = result.get("feature_runtime")
     if isinstance(runtime, dict):
         result["feature_runtime"] = {
-            name: (
-                candidate
-                if candidate.is_absolute()
-                else spec_path.parent / candidate
-            )
+            name: (candidate if candidate.is_absolute() else spec_path.parent / candidate)
             for name, value in runtime.items()
             for candidate in (Path(str(value)),)
         }
@@ -579,6 +575,7 @@ def recorder_run(
 
     adapter: IBKRMarketDataAdapter | None = None
     diagnostic_recorder: Any | None = None
+    frozen_application: Any | None = None
     parallel_capture: ParallelSourceCaptureService | None = None
     repository: ProspectiveRepository | None = None
     lease_owned = False
@@ -614,7 +611,7 @@ def recorder_run(
         else:
             adapter = _ibkr_adapter(config)
             validate_runtime_safety(config, adapter)
-            require_official_ibkr_api()
+            ibkr_api_module = require_official_ibkr_api()
             deployment_identity = _validate_ibkr_scoring_inputs(config)
             repository = ProspectiveRepository(config.paths.database)
             repository.migrate()
@@ -628,23 +625,56 @@ def recorder_run(
             lease_owned = True
             from stocker_prospective.ibkr_official import (
                 create_official_callback_client,
+                create_official_option_contract,
                 create_official_stock_contract,
             )
 
             adapter.attach_official_client(create_official_callback_client(adapter))
             adapter.start()
-            diagnostic_recorder = IBKRDiagnosticRecorder(
-                config=config,
-                repository=repository,
-                adapter=adapter,
-                identity=deployment_identity,
-                contract_factory=create_official_stock_contract,
-                heartbeat=lambda: repository.heartbeat_recorder_lease(
+
+            def heartbeat() -> object:
+                return repository.heartbeat_recorder_lease(
                     run_id=config.runtime.run_id or "",
                     owner_id=owner_id or "",
                     now=datetime.now(UTC),
-                ),
-            )
+                )
+
+            if config.paths.frozen_m1c_artifact_root is not None:
+                from stocker_prospective.frozen_live_application import (
+                    build_frozen_prospective_application,
+                )
+
+                frozen_application = build_frozen_prospective_application(
+                    config=config,
+                    adapter=adapter,
+                    repository=repository,
+                    identity=deployment_identity,
+                    stock_contract_factory=create_official_stock_contract,
+                    option_contract_factory=(
+                        lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
+                            create_official_option_contract(
+                                symbol=symbol,
+                                expiry=expiry,
+                                strike=strike,
+                                right=right,
+                                multiplier=multiplier,
+                                exchange=exchange,
+                                trading_class=trading,
+                            )
+                        )
+                    ),
+                    ibkr_api_version=str(getattr(ibkr_api_module, "__version__", "unknown")),
+                    heartbeat=heartbeat,
+                )
+            else:
+                diagnostic_recorder = IBKRDiagnosticRecorder(
+                    config=config,
+                    repository=repository,
+                    adapter=adapter,
+                    identity=deployment_identity,
+                    contract_factory=create_official_stock_contract,
+                    heartbeat=heartbeat,
+                )
             if config.parallel_validation.enabled:
                 parallel_capture = build_parallel_eodhd_service(
                     config=config,
@@ -666,17 +696,23 @@ def recorder_run(
 
         signal.signal(signal.SIGTERM, request_stop)
         signal.signal(signal.SIGINT, request_stop)
+        next_lease_heartbeat = time.monotonic()
         while not stopping:
             if diagnostic_recorder is not None:
                 diagnostic_recorder.poll(now=datetime.now(UTC))
+            if frozen_application is not None:
+                frozen_application.poll(now=datetime.now(UTC))
             if parallel_capture is not None:
                 parallel_capture.poll(now=datetime.now(UTC))
-            repository.heartbeat_recorder_lease(
-                run_id=config.runtime.run_id,
-                owner_id=owner_id,
-                now=datetime.now(UTC),
-            )
-            time.sleep(config.runtime.heartbeat_seconds)
+            monotonic_now = time.monotonic()
+            if monotonic_now >= next_lease_heartbeat:
+                repository.heartbeat_recorder_lease(
+                    run_id=config.runtime.run_id,
+                    owner_id=owner_id,
+                    now=datetime.now(UTC),
+                )
+                next_lease_heartbeat = monotonic_now + config.runtime.heartbeat_seconds
+            time.sleep(config.ibkr.stream_poll_interval_seconds)
     except typer.Exit:
         raise
     except (
@@ -697,6 +733,11 @@ def recorder_run(
                 diagnostic_recorder.shutdown(now=datetime.now(UTC))
             except Exception as exc:
                 typer.echo(f"recorder shutdown cleanup failed: {exc}", err=True)
+        if frozen_application is not None:
+            try:
+                frozen_application.shutdown(now=datetime.now(UTC))
+            except Exception as exc:
+                typer.echo(f"frozen recorder shutdown cleanup failed: {exc}", err=True)
         if adapter is not None:
             try:
                 adapter.stop()

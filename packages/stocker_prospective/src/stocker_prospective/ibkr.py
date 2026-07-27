@@ -11,12 +11,14 @@ import importlib.util
 import ipaddress
 import os
 import threading
+import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Literal
 
 from stocker_prospective.config import RuntimeSafetyError
 from stocker_prospective.ibkr_api import (
@@ -129,8 +131,8 @@ class IBKRConnectionConfig:
             raise ValueError("IBKR port must be explicitly configured")
         if self.client_id < 0:
             raise ValueError("IBKR client_id must be nonnegative")
-        if self.expected_environment not in {"paper", "live_read_only"}:
-            raise ValueError("expected_environment must be paper or live_read_only")
+        if self.expected_environment not in {"read_only", "paper", "live_read_only"}:
+            raise ValueError("expected_environment must be read_only, paper, or live_read_only")
         if not self.allowed_market_data_types:
             raise ValueError("at least one market-data type must be allowed")
 
@@ -261,7 +263,10 @@ class IBKRMarketDataAdapter:
         socket_preflight: Callable[[str, int], tuple[str, ...]] = (
             require_ibkr_socket_loopback_only
         ),
+        max_stream_events: int = 65_536,
     ) -> None:
+        if max_stream_events <= 0:
+            raise ValueError("max_stream_events must be positive")
         self.config = config
         self.budget = budget
         self.request_ids = RequestIdAllocator()
@@ -277,6 +282,11 @@ class IBKRMarketDataAdapter:
         self.realtime_bars = BoundedRealtimeBarQueue(max_items=4096)
         self.subscriptions = SubscriptionRegistry()
         self._subscription_kinds: dict[int, str] = {}
+        self._depth_smart: dict[int, bool] = {}
+        self._stream_events: deque[dict[str, Any]] = deque()
+        self._stream_event_limit = max_stream_events
+        self._stream_event_sequence = 0
+        self._stream_event_lock = threading.RLock()
         self._loop_thread: threading.Thread | None = None
         self._client: Any | None = None
         self._stopping = threading.Event()
@@ -500,12 +510,222 @@ class IBKRMarketDataAdapter:
         if subscription_key is not None:
             self.subscriptions.remove(subscription_key)
 
+    def request_tick_by_tick(
+        self,
+        contract: Any,
+        *,
+        subscription_key: str,
+        tick_type: Literal["BidAsk", "Last"],
+    ) -> int:
+        """Request one bounded official BidAsk or Last stream."""
+
+        if self._client is None:
+            raise RuntimeError("blocked_ibkr_connection")
+        method = getattr(self._client, "reqTickByTickData", None)
+        if not callable(method):
+            raise RuntimeError("blocked_ibkr_market_data_subscription")
+        if tick_type not in {"BidAsk", "Last"}:
+            raise ValueError("tick_type must be BidAsk or Last")
+        request_id, existing = self._begin_stream_subscription(
+            subscription_key=subscription_key,
+            kind="tick_by_tick",
+        )
+        if existing is not None:
+            return existing
+        try:
+            method(request_id, contract, tick_type, 0, False)
+            self.budget.mark_active(str(request_id))
+        except Exception:
+            self._abort_stream_subscription(request_id, subscription_key)
+            raise
+        return request_id
+
+    def cancel_tick_by_tick(
+        self,
+        request_id: int,
+        *,
+        subscription_key: str | None = None,
+    ) -> None:
+        self._cancel_subscription(request_id, subscription_key=subscription_key)
+
+    def request_market_depth(
+        self,
+        contract: Any,
+        *,
+        subscription_key: str,
+        rows: int,
+        smart_depth: bool = True,
+    ) -> int:
+        """Request a bounded order book; Level II remains optional."""
+
+        if rows <= 0:
+            raise ValueError("depth rows must be positive")
+        if self._client is None:
+            raise RuntimeError("blocked_ibkr_connection")
+        method = getattr(self._client, "reqMktDepth", None)
+        if not callable(method):
+            raise RuntimeError("blocked_ibkr_market_data_subscription")
+        request_id, existing = self._begin_stream_subscription(
+            subscription_key=subscription_key,
+            kind="market_depth",
+        )
+        if existing is not None:
+            return existing
+        self._depth_smart[request_id] = smart_depth
+        try:
+            method(request_id, contract, rows, smart_depth, [])
+            self.budget.mark_active(str(request_id))
+        except Exception:
+            self._depth_smart.pop(request_id, None)
+            self._abort_stream_subscription(request_id, subscription_key)
+            raise
+        return request_id
+
+    def cancel_market_depth(
+        self,
+        request_id: int,
+        *,
+        subscription_key: str | None = None,
+    ) -> None:
+        self._cancel_subscription(request_id, subscription_key=subscription_key)
+
+    def request_historical_five_minute_updates(
+        self,
+        contract: Any,
+        *,
+        subscription_key: str,
+    ) -> int:
+        """Request causal completed IBKR five-minute RTH trade bars."""
+
+        if self._client is None:
+            raise RuntimeError("blocked_ibkr_connection")
+        method = getattr(self._client, "reqHistoricalData", None)
+        if not callable(method):
+            raise RuntimeError("blocked_ibkr_market_data_subscription")
+        request_id, existing = self._begin_stream_subscription(
+            subscription_key=subscription_key,
+            kind="historical_5m",
+        )
+        if existing is not None:
+            return existing
+        try:
+            method(
+                request_id,
+                contract,
+                "",
+                "1 D",
+                "5 mins",
+                "TRADES",
+                1,
+                2,
+                True,
+                [],
+            )
+            self.budget.mark_active(str(request_id))
+        except Exception:
+            self._abort_stream_subscription(request_id, subscription_key)
+            raise
+        return request_id
+
+    def cancel_historical_updates(
+        self,
+        request_id: int,
+        *,
+        subscription_key: str | None = None,
+    ) -> None:
+        self._cancel_subscription(request_id, subscription_key=subscription_key)
+
+    def request_current_time(self) -> None:
+        if self._client is None:
+            raise RuntimeError("blocked_ibkr_connection")
+        method = getattr(self._client, "reqCurrentTime", None)
+        if not callable(method):
+            raise RuntimeError("blocked_ibkr_capability_preflight")
+        method()
+
+    def request_depth_exchanges(self) -> None:
+        if self._client is None:
+            raise RuntimeError("blocked_ibkr_connection")
+        method = getattr(self._client, "reqMktDepthExchanges", None)
+        if not callable(method):
+            raise RuntimeError("blocked_ibkr_capability_preflight")
+        method()
+
+    def require_live_market_data(self) -> None:
+        if self._client is None:
+            raise RuntimeError("blocked_ibkr_connection")
+        method = getattr(self._client, "reqMarketDataType", None)
+        if not callable(method):
+            raise RuntimeError("blocked_ibkr_capability_preflight")
+        method(1)
+
+    def server_version(self) -> int | None:
+        if self._client is None:
+            return None
+        method = getattr(self._client, "serverVersion", None)
+        return None if not callable(method) else int(method())
+
+    def _begin_stream_subscription(
+        self,
+        *,
+        subscription_key: str,
+        kind: str,
+    ) -> tuple[int, int | None]:
+        request_id = self.request_ids.next()
+        key = str(request_id)
+        self.budget.reserve(key)
+        if not self.subscriptions.register(subscription_key, request_id):
+            self.budget.confirm_cancellation(key)
+            existing = self.subscriptions.remove(subscription_key)
+            if existing is None:
+                raise RuntimeError("subscription registry changed during allocation")
+            self.subscriptions.register(subscription_key, existing)
+            return request_id, existing
+        self._subscription_kinds[request_id] = kind
+        return request_id, None
+
+    def _abort_stream_subscription(self, request_id: int, subscription_key: str) -> None:
+        self.budget.confirm_cancellation(str(request_id))
+        self.subscriptions.remove(subscription_key)
+        self._subscription_kinds.pop(request_id, None)
+
+    def _cancel_subscription(
+        self,
+        request_id: int,
+        *,
+        subscription_key: str | None,
+    ) -> None:
+        key = str(request_id)
+        if not self.budget.request_cancellation(key):
+            return
+        self._cancel_upstream(request_id)
+        self.budget.confirm_cancellation(key)
+        self._subscription_kinds.pop(request_id, None)
+        self._depth_smart.pop(request_id, None)
+        if subscription_key is not None:
+            self.subscriptions.remove(subscription_key)
+
     def _cancel_upstream(self, request_id: int) -> None:
         if self._client is None:
             return
         kind = self._subscription_kinds.get(request_id)
         if kind == "realtime_bars":
             method = getattr(self._client, "cancelRealTimeBars", None)
+            if callable(method):
+                method(request_id)
+            return
+        if kind == "tick_by_tick":
+            method = getattr(self._client, "cancelTickByTickData", None)
+            if callable(method):
+                method(request_id)
+            return
+        if kind == "market_depth":
+            method = getattr(self._client, "cancelMktDepth", None)
+            if callable(method):
+                method(request_id, self._depth_smart.get(request_id, True))
+            return
+        if kind == "historical_5m":
+            method = getattr(self._client, "cancelHistoricalData", None)
             if callable(method):
                 method(request_id)
             return
@@ -650,13 +870,119 @@ class IBKRMarketDataAdapter:
                 self.callbacks.complete(request_id)
             return
         self.stream_quotes.add(request_id, payload)
+        self._append_stream_event("level1_quote_update", request_id, payload)
 
     def on_connected(self, market_data_type: MarketDataType | None) -> None:
         self.connection.connected(market_data_type)
         self._connected.set()
 
+    def on_market_data_type(
+        self,
+        request_id: int,
+        market_data_type: MarketDataType,
+    ) -> None:
+        self.connection.market_data_type_observed(market_data_type)
+        self.on_quote_update(
+            request_id,
+            {
+                "field": "market_data_type",
+                "value": market_data_type.value,
+                "market_data_type": market_data_type.value,
+            },
+        )
+
     def on_realtime_bar(self, update: RealtimeBarUpdate) -> None:
         self.realtime_bars.add(update)
+
+    def on_tick_by_tick_bidask(self, request_id: int, payload: dict[str, Any]) -> None:
+        self._append_stream_event("tick_by_tick_bidask", request_id, payload)
+
+    def on_tick_by_tick_trade(self, request_id: int, payload: dict[str, Any]) -> None:
+        self._append_stream_event("tick_by_tick_trade", request_id, payload)
+
+    def on_depth_update(self, request_id: int, payload: dict[str, Any]) -> None:
+        self._append_stream_event("depth", request_id, payload)
+
+    def on_depth_reset(self, request_id: int, reason: str) -> None:
+        self._append_stream_event(
+            "depth_reset",
+            request_id,
+            {"reason": reason, "book_valid": False},
+        )
+
+    def on_historical_bar(
+        self,
+        request_id: int,
+        payload: dict[str, Any],
+        *,
+        update: bool,
+    ) -> None:
+        self._append_stream_event(
+            "historical_bar_update" if update else "historical_bar",
+            request_id,
+            payload,
+        )
+
+    def on_historical_bar_end(
+        self,
+        request_id: int,
+        *,
+        start: str,
+        end: str,
+    ) -> None:
+        self._append_stream_event(
+            "historical_backfill_end",
+            request_id,
+            {"start": start, "end": end},
+        )
+
+    def on_current_time(self, provider_timestamp_utc: datetime) -> None:
+        self._append_stream_event(
+            "current_time",
+            -1,
+            {"provider_timestamp_utc": provider_timestamp_utc.astimezone(UTC).isoformat()},
+        )
+
+    def on_depth_exchanges(self, exchanges: tuple[dict[str, Any], ...]) -> None:
+        self._append_stream_event("depth_exchanges", -1, {"exchanges": exchanges})
+
+    def _append_stream_event(
+        self,
+        kind: str,
+        request_id: int,
+        payload: dict[str, Any],
+    ) -> None:
+        with self._stream_event_lock:
+            if len(self._stream_events) >= self._stream_event_limit:
+                raise RuntimeError("bounded_ibkr_stream_event_queue_exhausted")
+            self._stream_event_sequence += 1
+            received_at = datetime.now(UTC)
+            event = {
+                **payload,
+                "kind": kind,
+                "request_id": request_id,
+                "received_timestamp_utc": payload.get(
+                    "receive_timestamp_utc",
+                    received_at.isoformat(),
+                ),
+                "received_monotonic_ns": time.monotonic_ns(),
+                "source_sequence": self._stream_event_sequence,
+            }
+            event.pop("receive_timestamp_utc", None)
+            self._stream_events.append(event)
+
+    def drain_stream_events(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        if limit is not None and limit <= 0:
+            raise ValueError("drain limit must be positive")
+        with self._stream_event_lock:
+            count = (
+                len(self._stream_events) if limit is None else min(limit, len(self._stream_events))
+            )
+            return tuple(self._stream_events.popleft() for _ in range(count))
 
     def _clear_lost_subscriptions(self) -> None:
         self.callbacks.shutdown()
@@ -664,6 +990,7 @@ class IBKRMarketDataAdapter:
             self.budget.confirm_cancellation(str(request_id))
             self.stream_quotes.remove(request_id)
             self._subscription_kinds.pop(request_id, None)
+            self._depth_smart.pop(request_id, None)
         self.subscriptions.after_reconnect(data_maintained=False)
 
     def on_connection_closed(self) -> None:
@@ -696,7 +1023,15 @@ class IBKRMarketDataAdapter:
             self.connection.socket_port_reset(self.config.port)
             self._clear_lost_subscriptions()
             return
+        if code == 317:
+            self.on_depth_reset(request_id, "ibkr_market_depth_reset")
+            return
         reason = classify_ibkr_error(code)
+        self._append_stream_event(
+            "ibkr_error",
+            request_id,
+            {"error_code": code, "reason": reason, "message": message},
+        )
         self.connection.degraded(code=code, message=f"{reason}:{message}")
         try:
             self.callbacks.fail(request_id, reason)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -24,6 +25,17 @@ class PathsConfig(BaseModel):
     feature_parity_report: Path
     context_root: Path | None = None
     replay_universe: Path | None = None
+    raw_event_root: Path | None = None
+    recorder_activation: Path | None = None
+    m1c_live_parity_report: Path | None = None
+    direction_live_parity_report: Path | None = None
+    ibkr_capability_manifest: Path | None = None
+    prospective_phase_ledger: Path | None = None
+    frozen_m1c_artifact_root: Path | None = None
+    m1c_scaling_artifact: Path | None = None
+    direction_beta_artifact: Path | None = None
+    historical_activity_bars: Path | None = None
+    bar_compatibility_report: Path | None = None
 
 
 class RuntimeConfig(BaseModel):
@@ -96,7 +108,14 @@ class IBKRConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int | None = Field(default=None, ge=1, le=65_535)
     client_id: int = Field(default=71, ge=1)
-    expected_environment: Literal["paper"] = "paper"
+    expected_environment: Literal["read_only", "paper", "live_read_only"] = "read_only"
+    read_only: bool = True
+    market_data_type_required: Literal["live"] = "live"
+    enable_level2: bool = False
+    level2_rows: int = Field(default=5, ge=1, le=20)
+    max_depth_subscriptions: int = Field(default=3, ge=0)
+    max_tick_by_tick_subscriptions: int = Field(default=6, ge=0)
+    max_option_subscriptions: int = Field(default=60, ge=0)
     connect_timeout_seconds: float = Field(default=10.0, gt=0.0)
     request_timeout_seconds: float = Field(default=10.0, gt=0.0)
     reconnect_max_attempts: int = Field(default=5, ge=0)
@@ -108,6 +127,12 @@ class IBKRConfig(BaseModel):
     allowed_market_data_types: list[MarketDataTypeName] = Field(
         default_factory=_default_market_data_types
     )
+    tws_or_gateway_version: str | None = None
+    maximum_clock_drift_seconds: float = Field(default=2.0, gt=0.0)
+    maximum_quote_age_seconds: float = Field(default=2.0, gt=0.0)
+    stream_poll_interval_seconds: float = Field(default=0.1, gt=0.0, le=1.0)
+    option_strike_steps: int = Field(default=2, ge=0, le=10)
+    maximum_option_contracts_per_episode: int = Field(default=30, ge=0, le=100)
 
     @model_validator(mode="after")
     def _headroom_is_bounded(self) -> IBKRConfig:
@@ -117,8 +142,17 @@ class IBKRConfig(BaseModel):
             raise ValueError("IBKR host must be a literal loopback address") from exc
         if not host_address.is_loopback:
             raise ValueError("IBKR host must be a literal loopback address")
+        if not self.read_only:
+            raise ValueError("IBKR recorder must use read-only access")
         if self.reserved_line_headroom >= self.market_data_line_budget:
             raise ValueError("reserved line headroom must be below the line budget")
+        usable_level1_lines = self.market_data_line_budget - self.reserved_line_headroom
+        if usable_level1_lines < 21:
+            raise ValueError("market-data budget cannot protect the 20 stocks and VTI")
+        if self.max_option_subscriptions > usable_level1_lines - 21:
+            raise ValueError(
+                "option subscription budget would consume protected universe Level I headroom"
+            )
         if self.request_rate_per_second > self.market_data_line_budget / 2:
             raise ValueError("request-rate budget must not exceed half the configured line budget")
         return self
@@ -162,9 +196,7 @@ class ProspectiveConfig(BaseModel):
     web: WebConfig = Field(default_factory=WebConfig)
     ibkr: IBKRConfig = Field(default_factory=IBKRConfig)
     context: ContextConfig
-    parallel_validation: ParallelValidationConfig = Field(
-        default_factory=ParallelValidationConfig
-    )
+    parallel_validation: ParallelValidationConfig = Field(default_factory=ParallelValidationConfig)
 
     @model_validator(mode="after")
     def _ibkr_port_is_explicit(self) -> ProspectiveConfig:
@@ -217,6 +249,39 @@ def load_prospective_config(path: str | Path) -> ProspectiveConfig:
                 "blocked_unsafe_runtime_configuration: STOCKER_GIT_COMMIT is absent"
             )
         runtime["git_commit"] = commit
+    ibkr = payload.setdefault("ibkr", {})
+    if not isinstance(ibkr, dict):
+        raise ValueError("prospective ibkr config must be a YAML mapping")
+
+    def environment_bool(value: str) -> bool:
+        value = value.strip().lower()
+        if value not in {"true", "false"}:
+            raise ValueError("IBKR boolean environment values must be true or false")
+        return value == "true"
+
+    environment_fields: dict[str, tuple[str, Callable[[str], object]]] = {
+        "IBKR_HOST": ("host", str),
+        "IBKR_PORT": ("port", int),
+        "IBKR_CLIENT_ID": ("client_id", int),
+        "IBKR_READ_ONLY": ("read_only", environment_bool),
+        "IBKR_MARKET_DATA_TYPE_REQUIRED": ("market_data_type_required", str),
+        "IBKR_ENABLE_LEVEL2": ("enable_level2", environment_bool),
+        "IBKR_LEVEL2_ROWS": ("level2_rows", int),
+        "IBKR_MAX_DEPTH_SUBSCRIPTIONS": ("max_depth_subscriptions", int),
+        "IBKR_MAX_TICK_BY_TICK_SUBSCRIPTIONS": (
+            "max_tick_by_tick_subscriptions",
+            int,
+        ),
+        "IBKR_MAX_OPTION_SUBSCRIPTIONS": ("max_option_subscriptions", int),
+        "IBKR_CONNECTION_TIMEOUT_SECONDS": ("connect_timeout_seconds", float),
+        "IBKR_RECONNECT_BACKOFF_SECONDS": ("reconnect_backoff_seconds", float),
+        "IBKR_STREAM_POLL_INTERVAL_SECONDS": ("stream_poll_interval_seconds", float),
+        "IBKR_TWS_OR_GATEWAY_VERSION": ("tws_or_gateway_version", str),
+    }
+    for environment_name, (field_name, converter) in environment_fields.items():
+        if environment_name not in os.environ:
+            continue
+        ibkr[field_name] = converter(os.environ[environment_name])
     return ProspectiveConfig.model_validate(payload)
 
 
@@ -230,6 +295,8 @@ def validate_runtime_safety(config: ProspectiveConfig, market_data_adapter: obje
         reasons.append("recorder mode must be record_only or shadow")
     if config.runtime.prospective_start_utc is None:
         reasons.append("prospective_start_utc is required")
+    if not config.ibkr.read_only:
+        reasons.append("IBKR read-only access is required")
     exposed = sorted(name for name in ORDER_METHOD_NAMES if hasattr(market_data_adapter, name))
     if exposed:
         reasons.append(f"order-capable runtime path exposes {', '.join(exposed)}")
@@ -294,6 +361,13 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "market_data_line_budget": config.ibkr.market_data_line_budget,
             "reserved_line_headroom": config.ibkr.reserved_line_headroom,
             "allowed_market_data_types": config.ibkr.allowed_market_data_types,
+            "read_only": config.ibkr.read_only,
+            "market_data_type_required": config.ibkr.market_data_type_required,
+            "enable_level2": config.ibkr.enable_level2,
+            "level2_rows": config.ibkr.level2_rows,
+            "max_depth_subscriptions": config.ibkr.max_depth_subscriptions,
+            "max_tick_by_tick_subscriptions": (config.ibkr.max_tick_by_tick_subscriptions),
+            "max_option_subscriptions": config.ibkr.max_option_subscriptions,
         },
         "context": {"mode": config.context.mode},
         "parallel_validation": {

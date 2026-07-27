@@ -1,0 +1,235 @@
+{
+  "audit_kind": "independent_manual_reconstruction",
+  "claims_boundary": {
+    "a1_frozen_prospective_hypothesis": true,
+    "account_balance_access_required": false,
+    "broker_account_mutation_allowed": false,
+    "c1_frozen_comparison": true,
+    "execution_enabled": false,
+    "live_orders_allowed": false,
+    "m1c_frozen": true,
+    "m1c_threshold": 0.488333710794033,
+    "microstructure_direction_model_fitted": false,
+    "microstructure_features_descriptive_only": true,
+    "option_pnl_is_shadow_quote_pnl": true,
+    "option_quotes_recorded": true,
+    "paper_orders_allowed": false,
+    "place_order_method_available": false,
+    "position_access_required": false,
+    "prospective_collection": true,
+    "r1_frozen_comparison": true,
+    "record_only": true,
+    "research_only": true,
+    "strategy_promotion": false
+  },
+  "contract_version": "frozen-m1c-microstructure-recorder-v0",
+  "passed": true,
+  "report_hash": "314fe1752ae6845923d8f16c65c5c3723fea25c66691389960bffb5db4738442",
+  "sections": {
+    "artifact_and_safety_identity": {
+      "artifact_hash_mismatches": [],
+      "market_data_type_validation_present": true,
+      "passed": true
+    },
+    "direction": {
+      "action_mismatches": {
+        "A1": 0,
+        "C1": 0,
+        "R1": 0
+      },
+      "manual_formula": "stock/checkpoint transform -> frozen robust standardisation -> categorical one-hot -> logistic -> symmetric OOF boundary",
+      "maximum_probability_difference": {
+        "A1": 1.1102230246251565e-16,
+        "C1": 2.220446049250313e-16,
+        "R1": 1.1102230246251565e-16
+      },
+      "passed": true,
+      "rows_reconstructed_per_archetype": 100,
+      "total_probabilities_reconstructed": 300
+    },
+    "episode_timing": {
+      "direction_features_end": "T-1",
+      "manual_expected_episode_offsets_minutes": [
+        0,
+        35
+      ],
+      "minimum_spacing_minutes": 30,
+      "passed": true,
+      "runtime_episode_offsets_minutes": [
+        0,
+        35
+      ],
+      "trigger_bar_excluded": true
+    },
+    "m1c": {
+      "artifact_threshold": 0.4883337107940334,
+      "contaminated_features_present": [],
+      "manual_formula": "artifact vector -> median -> scale -> stock one-hot -> logistic",
+      "maximum_probability_difference": 1.1102230246251565e-16,
+      "passed": true,
+      "rows_reconstructed": 100,
+      "threshold_membership_mismatches": 0
+    },
+    "microstructure": {
+      "independently_reconstructed_fields_per_window": 9,
+      "maximum_floating_difference": 4.973799150320701e-13,
+      "passed": true,
+      "windows_reconstructed": 100
+    },
+    "option_selection": {
+      "actual_per_bucket": {
+        "0DTE": [
+          [
+            100.0,
+            "C"
+          ],
+          [
+            100.0,
+            "P"
+          ],
+          [
+            105.0,
+            "C"
+          ],
+          [
+            105.0,
+            "P"
+          ],
+          [
+            95.0,
+            "C"
+          ],
+          [
+            95.0,
+            "P"
+          ]
+        ],
+        "1DTE": [
+          [
+            100.0,
+            "C"
+          ],
+          [
+            100.0,
+            "P"
+          ],
+          [
+            105.0,
+            "C"
+          ],
+          [
+            105.0,
+            "P"
+          ],
+          [
+            95.0,
+            "C"
+          ],
+          [
+            95.0,
+            "P"
+          ]
+        ],
+        "3_TO_5_DTE": [
+          [
+            100.0,
+            "C"
+          ],
+          [
+            100.0,
+            "P"
+          ],
+          [
+            105.0,
+            "C"
+          ],
+          [
+            105.0,
+            "P"
+          ],
+          [
+            95.0,
+            "C"
+          ],
+          [
+            95.0,
+            "P"
+          ]
+        ]
+      },
+      "contract_count": 18,
+      "deduplicated_contract_identities": 18,
+      "expected_per_bucket": [
+        [
+          100.0,
+          "C"
+        ],
+        [
+          100.0,
+          "P"
+        ],
+        [
+          105.0,
+          "C"
+        ],
+        [
+          105.0,
+          "P"
+        ],
+        [
+          95.0,
+          "C"
+        ],
+        [
+          95.0,
+          "P"
+        ]
+      ],
+      "passed": true
+    },
+    "options": {
+      "entry_rule": "first valid ask at or after prospective entry",
+      "exit_rule": "last valid bid at or before frozen horizon",
+      "independently_reconstructed_fields_per_outcome": 5,
+      "maximum_floating_difference": 1.3322676295501878e-14,
+      "outcomes_reconstructed": 50,
+      "passed": true
+    },
+    "order_surface": {
+      "forbidden_callable_definitions": [],
+      "passed": true
+    },
+    "prospective_phases_and_web": {
+      "confirmation_target_dependent_selection_opened": false,
+      "forbidden_web_routes": [],
+      "passed": true,
+      "phase_counts": [
+        30,
+        100,
+        100
+      ],
+      "record_only_banner_present": true
+    },
+    "replay": {
+      "event_order_mismatches": 0,
+      "events_replayed": 200,
+      "first_digest": "f6a294d7872010bb0df7b60585fc07afdc85fd1809f3bea4b794e7c3792dd62d",
+      "ibkr_connections_attempted": 0,
+      "maximum_floating_difference": 0.0,
+      "passed": true,
+      "second_digest": "f6a294d7872010bb0df7b60585fc07afdc85fd1809f3bea4b794e7c3792dd62d"
+    },
+    "subscription_budget_and_raw_preservation": {
+      "active_episode_accepted": true,
+      "active_episode_evicted": "underlying:AAL:tbt",
+      "armed_candidate_accepted": true,
+      "passed": true,
+      "protected_level1_accepted": true,
+      "protected_level1_retained": true,
+      "raw_events_preserved": 200,
+      "raw_payload_digest": "f6a294d7872010bb0df7b60585fc07afdc85fd1809f3bea4b794e7c3792dd62d",
+      "unique_raw_event_ids": 200
+    }
+  },
+  "tolerance": 1e-12
+}

@@ -14,6 +14,7 @@ from typing import Any
 class MarketDataType(StrEnum):
     """IBKR market-data modes, kept explicit in every quote record."""
 
+    UNKNOWN = "unknown"
     LIVE = "live"
     FROZEN = "frozen"
     DELAYED = "delayed"
@@ -556,8 +557,11 @@ class ConnectionTracker:
     def connected(self, market_data_type: MarketDataType | None) -> None:
         with self._lock:
             self._market_data_type = market_data_type
-            self._requires_rebuild = False
             self._record(ConnectionState.CONNECTED, None, "connected", None)
+
+    def market_data_type_observed(self, market_data_type: MarketDataType) -> None:
+        with self._lock:
+            self._market_data_type = market_data_type
 
     def subscriptions_rebuilt(self) -> None:
         with self._lock:
@@ -565,6 +569,7 @@ class ConnectionTracker:
 
     def connection_lost(self, *, code: int, message: str) -> None:
         with self._lock:
+            self._requires_rebuild = True
             self._record(ConnectionState.DISCONNECTED, code, message, False)
 
     def connection_restored(self, *, data_maintained: bool, code: int) -> None:

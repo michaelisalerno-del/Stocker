@@ -109,11 +109,23 @@ def test_connection_tracker_distinguishes_maintained_and_lost_data_reconnects() 
     tracker.connection_lost(code=1100, message="Connectivity lost")
     tracker.connection_restored(data_maintained=False, code=1101)
     assert tracker.health().subscriptions_require_rebuild is True
+    tracker.connected(MarketDataType.LIVE)
+    assert tracker.health().subscriptions_require_rebuild is True
+    tracker.subscriptions_rebuilt()
+    assert tracker.health().subscriptions_require_rebuild is False
 
     tracker.socket_port_reset(7497)
     assert tracker.health().state is ConnectionState.PORT_RESET
     assert tracker.health().subscriptions_require_rebuild is True
-    assert [event.code for event in tracker.events] == [None, 1100, 1102, 1100, 1101, 1300]
+    assert [event.code for event in tracker.events] == [
+        None,
+        1100,
+        1102,
+        1100,
+        1101,
+        None,
+        1300,
+    ]
 
 
 @pytest.mark.parametrize("code", [2104, 2106, 2107, 2108, 2158])

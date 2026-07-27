@@ -5,150 +5,213 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Read-only prospective Stocker evidence recorder monitor."
+      content="Read-only frozen M1C signal and market microstructure recorder."
     />
-    <title>Stocker // Prospective Evidence Recorder</title>
+    <title>Stocker // Frozen M1C Recorder</title>
     <link rel="stylesheet" href="/assets/app.css" />
   </head>
   <body>
-    <a class="skip-nav" href="#main">Skip to evidence</a>
+    <a class="skip-nav" href="#main">Skip to recorder evidence</a>
     <div class="grain" aria-hidden="true"></div>
+    <div class="permanent-boundary" role="status">
+      RECORD ONLY — ORDER ROUTING DISABLED
+    </div>
     <header class="masthead">
       <div class="identity-lockup">
-        <span class="coordinate">SRV // PROSPECTIVE // 01</span>
-        <h1>STOCKER <span>EVIDENCE RECORDER</span></h1>
+        <span class="coordinate">M1C // PROSPECTIVE // RECORDER V0</span>
+        <h1>STOCKER <span>CAUSAL TAPE</span></h1>
       </div>
       <div class="safety-flag" role="status" aria-live="polite">
         <span class="pulse" aria-hidden="true"></span>
         <span>
-          RESEARCH-ONLY SYSTEM
+          RESEARCH-ONLY MARKET DATA
           <strong>LIVE TRADING DISABLED</strong>
         </span>
       </div>
     </header>
 
     <div class="command-rail">
-      <nav aria-label="Recorder screens">
+      <nav aria-label="Recorder views">
         <button class="nav-item is-active" type="button" data-screen="live-monitor">
-          <span>01</span> Live Monitor
+          <span>01</span> System
+        </button>
+        <button class="nav-item" type="button" data-screen="universe-monitor">
+          <span>02</span> Universe
         </button>
         <button class="nav-item" type="button" data-screen="signal-detail">
-          <span>02</span> Signal Detail
+          <span>03</span> Episode
+        </button>
+        <button class="nav-item" type="button" data-screen="options-recorder">
+          <span>04</span> Options
         </button>
         <button class="nav-item" type="button" data-screen="shadow-blotter">
-          <span>03</span> Shadow Blotter
+          <span>05</span> Shadow
         </button>
         <button class="nav-item" type="button" data-screen="safety-audit">
-          <span>04</span> Safety + Audit
+          <span>06</span> Audit
         </button>
       </nav>
       <div class="rail-meta">
-        <span>READ-ONLY</span>
-        <span>NO ORDER BUS</span>
+        <span>M1C 0.488333710794033</span>
         <button id="refresh" class="refresh" type="button">Refresh evidence</button>
       </div>
     </div>
 
     <main id="main">
-      <section id="live-monitor" class="screen is-active" aria-labelledby="live-title">
+      <section id="live-monitor" class="screen is-active" aria-labelledby="live-title" tabindex="-1">
         <div class="section-heading">
           <div>
-            <span class="eyebrow">01 / Runtime condition</span>
-            <h2 id="live-title">Live Monitor</h2>
+            <span class="eyebrow">01 / Live system status</span>
+            <h2 id="live-title">Recorder State</h2>
           </div>
           <p>
-            Prospective evidence health at the dedicated server boundary. A visible
-            blocker is a correct state, not a degraded presentation.
+            Connectivity, capacity, parity, bar completion, clock and evidence
+            health. Delayed data may be inspected, but it cannot become valid
+            prospective evidence.
           </p>
         </div>
         <div id="blocker-strip" class="blocker-strip" aria-live="polite"></div>
         <div id="runtime-grid" class="metric-grid" aria-live="polite">
-          <div class="loading-panel">Reading persistent runtime state…</div>
+          <div class="loading-panel">Reading persistent recorder state…</div>
         </div>
         <div class="monitor-lower">
           <article class="panel">
-            <header><span>A</span><h3>Frozen scoring checkpoint</h3></header>
+            <header><span>M</span><h3>Frozen M1C checkpoint</h3></header>
             <div id="score-panel"></div>
           </article>
           <article class="panel">
-            <header><span>B</span><h3>Anchor cohort operations</h3></header>
-            <div id="universe-panel"></div>
+            <header><span>C</span><h3>IBKR capability preflight</h3></header>
+            <div id="capability-panel"></div>
           </article>
         </div>
       </section>
 
-      <section id="signal-detail" class="screen" aria-labelledby="signal-title">
+      <section id="universe-monitor" class="screen" aria-labelledby="universe-title" tabindex="-1">
         <div class="section-heading">
           <div>
-            <span class="eyebrow">02 / Crossing evidence</span>
-            <h2 id="signal-title">Signal Detail</h2>
+            <span class="eyebrow">02 / Frozen 20-stock cohort</span>
+            <h2 id="universe-title">Universe Tape</h2>
           </div>
           <p>
-            Below-to-above episodes and every above-threshold checkpoint. Replay
-            scores remain synthetic; no option return determines direction.
+            Completed five-minute M1C state beside continuous Level I evidence.
+            High-resolution promotion is an operational scheduler, never an edge claim.
           </p>
+        </div>
+        <article class="panel wide-panel">
+          <header><span>U</span><h3>Current causal checkpoint and quote state</h3></header>
+          <div id="universe-panel" class="data-region"></div>
+        </article>
+      </section>
+
+      <section id="signal-detail" class="screen" aria-labelledby="signal-title" tabindex="-1">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">03 / Fresh movement episodes</span>
+            <h2 id="signal-title">Episode Scope</h2>
+          </div>
+          <p>
+            Frozen movement selection and frozen directional research
+            classifications remain separate from descriptive microstructure.
+          </p>
+        </div>
+        <div class="hypothesis-boundary">
+          <span>A1 — PROSPECTIVE HYPOTHESIS, NOT VALIDATED</span>
+          <span>C1 / R1 — COMPARISON ONLY, NOT VALIDATED</span>
+          <span>NO RECOMMENDATION</span>
         </div>
         <div class="split-workspace">
           <article class="panel list-panel">
-            <header><span>S</span><h3>Episode index</h3></header>
+            <header><span>E</span><h3>Episode index</h3></header>
             <div id="signal-list" class="data-region"></div>
           </article>
           <article class="panel detail-panel">
-            <header><span>D</span><h3>Selected episode evidence</h3></header>
+            <header><span>T</span><h3>Selected causal evidence</h3></header>
             <div id="signal-evidence" class="data-region">
-              <div class="empty-state">
-                Select an episode to inspect its immutable evidence chain.
-              </div>
+              <div class="empty-state">Select an episode to inspect its evidence chain.</div>
             </div>
           </article>
         </div>
       </section>
 
-      <section id="shadow-blotter" class="screen" aria-labelledby="shadow-title">
+      <section id="options-recorder" class="screen" aria-labelledby="options-title" tabindex="-1">
         <div class="section-heading">
           <div>
-            <span class="eyebrow">03 / Quoted research ledger</span>
-            <h2 id="shadow-title">Shadow Blotter</h2>
+            <span class="eyebrow">04 / Bounded option top-of-book</span>
+            <h2 id="options-title">Option Surface</h2>
           </div>
           <p>
-            Ask-side entries and bid-side exits from observed quotes. Fees are
-            separate. This ledger does not establish an options edge.
+            At most 30 contracts per episode across exact 0DTE, 1DTE and
+            3–5 DTE buckets. Updates are top-of-book market data, not true
+            tick-by-tick option trades.
           </p>
         </div>
-        <div class="ledger-banner">
-          <span>PRIMARY LEDGER</span>
-          <strong>OBSERVED EXECUTABLE-SIDE QUOTES</strong>
-          <span>PAPER LEDGER: NOT IMPLEMENTED</span>
+        <div class="episode-picker">
+          <label for="option-episode">Episode</label>
+          <select id="option-episode"></select>
         </div>
-        <article class="panel blotter-panel">
-          <header><span>Q</span><h3>Structure ledger</h3></header>
-          <div id="shadow-list" class="data-region"></div>
-        </article>
-        <article class="panel shadow-detail-panel">
-          <header><span>V</span><h3>Legs + horizon valuations</h3></header>
-          <div id="shadow-evidence" class="data-region">
-            <div class="empty-state">
-              Select a quoted structure to inspect every leg and horizon.
-            </div>
-          </div>
+        <article class="panel wide-panel">
+          <header><span>O</span><h3>Recorded bounded contracts</h3></header>
+          <div id="options-panel" class="data-region"></div>
         </article>
       </section>
 
-      <section id="safety-audit" class="screen" aria-labelledby="safety-title">
+      <section id="shadow-blotter" class="screen" aria-labelledby="shadow-title" tabindex="-1">
         <div class="section-heading">
           <div>
-            <span class="eyebrow">04 / Immutable controls</span>
-            <h2 id="safety-title">Safety + Audit</h2>
+            <span class="eyebrow">05 / Frozen quote outcome ledger</span>
+            <h2 id="shadow-title">Shadow Ledger</h2>
           </div>
           <p>
-            Bundle integrity, feature parity, lease ownership, reconnect state,
-            market-data bounds, and the ordered operator trail.
+            First valid ask after prospective entry to the last valid bid at or
+            before each horizon. Midpoint and last returns are diagnostic only.
+          </p>
+        </div>
+        <div class="ledger-banner">
+          <span>PRIMARY RETURN</span>
+          <strong>ASK ENTRY → BID EXIT</strong>
+          <span>NO PAPER LEDGER / NO ORDERS</span>
+        </div>
+        <article class="panel blotter-panel">
+          <header><span>Q</span><h3>5 / 10 / 15 / 30 minute outcomes</h3></header>
+          <div id="shadow-list" class="data-region"></div>
+        </article>
+        <div id="shadow-evidence" class="visually-hidden" aria-hidden="true"></div>
+      </section>
+
+      <section id="safety-audit" class="screen" aria-labelledby="safety-title" tabindex="-1">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">06 / Controls and replay</span>
+            <h2 id="safety-title">Audit Rail</h2>
+          </div>
+          <p>
+            Immutable partitions, subscription lifecycle, model identity and local
+            deterministic replay. Replay cannot connect to IBKR or mutate broker state.
           </p>
         </div>
         <div id="safety-grid" class="safety-grid"></div>
+        <article class="panel replay-panel">
+          <header><span>R</span><h3>Local replay control</h3></header>
+          <div class="replay-controls">
+            <label for="replay-mode">Mode</label>
+            <select id="replay-mode">
+              <option value="accelerated">Accelerated</option>
+              <option value="real_time">Real time</option>
+              <option value="step">Step-by-step</option>
+              <option value="episode_only">Episode only</option>
+            </select>
+            <button id="replay-start" class="refresh" type="button">Start replay</button>
+            <button id="replay-stop" class="refresh" type="button">Stop replay</button>
+            <output id="replay-state">STOPPED // IBKR CONNECTIONS 0</output>
+          </div>
+        </article>
         <article class="panel audit-panel">
-          <header><span>Λ</span><h3>Ordered audit log</h3></header>
+          <header><span>Λ</span><h3>Partition and subscription audit</h3></header>
           <div id="audit-log" class="data-region"></div>
+        </article>
+        <article class="panel shadow-detail-panel">
+          <header><span>D</span><h3>End-of-session data quality</h3></header>
+          <div id="session-reports-panel" class="data-region"></div>
         </article>
       </section>
     </main>
@@ -156,9 +219,9 @@
     <footer>
       <span id="last-sync">Not yet synchronized</span>
       <p>
-        Scientific scope: previous-close front-options context + current intraday H0
-        stock condition → selection of near-term underlying movement beyond
-        previous-close option-implied movement. Option profitability remains unknown.
+        Prospective collection only. M1C is a frozen movement gate; A1 is an
+        unvalidated prospective hypothesis; C1 and R1 are unvalidated comparisons.
+        Microstructure scores are descriptive and option P&amp;L is shadow quote P&amp;L.
       </p>
     </footer>
     <script src="/assets/app.js" defer></script>

@@ -1,0 +1,24 @@
+{
+  "fixture_version": "1",
+  "fixture_id": "frozen-m1c-recorder-engineering-v0",
+  "research_evidence": false,
+  "events": [
+    {"sequence": 0, "scenario": "bullish_continuation", "kind": "level1_quote", "timestamp_utc": "2026-07-24T13:55:00Z", "payload": {"symbol": "AAL", "bid": 100.0, "ask": 100.1}},
+    {"sequence": 1, "scenario": "bullish_continuation", "kind": "tick_by_tick_bidask", "timestamp_utc": "2026-07-24T13:55:00.100Z", "payload": {"symbol": "AAL", "bid": 100.1, "bid_size": 500, "ask": 100.11, "ask_size": 120}},
+    {"sequence": 2, "scenario": "bullish_continuation", "kind": "five_minute_bar", "timestamp_utc": "2026-07-24T14:00:00Z", "payload": {"symbol": "AAL", "checkpoint": 6, "m1c_probability": 0.62}},
+    {"sequence": 3, "scenario": "bullish_continuation", "kind": "episode_emitted", "timestamp_utc": "2026-07-24T14:00:00.200Z", "payload": {"symbol": "AAL", "archetype": "C1", "direction": "CALL"}},
+    {"sequence": 4, "scenario": "bearish_continuation", "kind": "last_trade", "timestamp_utc": "2026-07-24T14:05:00Z", "payload": {"symbol": "AAOI", "price": 24.9, "size": 100}},
+    {"sequence": 5, "scenario": "bearish_continuation", "kind": "episode_emitted", "timestamp_utc": "2026-07-24T14:05:00.200Z", "payload": {"symbol": "AAOI", "archetype": "C1", "direction": "PUT"}},
+    {"sequence": 6, "scenario": "bullish_absorption", "kind": "depth_update", "timestamp_utc": "2026-07-24T14:10:00Z", "payload": {"symbol": "APLD", "side": "bid", "operation": "update"}},
+    {"sequence": 7, "scenario": "bullish_absorption", "kind": "episode_emitted", "timestamp_utc": "2026-07-24T14:10:00.200Z", "payload": {"symbol": "APLD", "archetype": "A1", "direction": "CALL"}},
+    {"sequence": 8, "scenario": "bearish_absorption", "kind": "depth_update", "timestamp_utc": "2026-07-24T14:15:00Z", "payload": {"symbol": "ASTS", "side": "ask", "operation": "update"}},
+    {"sequence": 9, "scenario": "bearish_absorption", "kind": "episode_emitted", "timestamp_utc": "2026-07-24T14:15:00.200Z", "payload": {"symbol": "ASTS", "archetype": "A1", "direction": "PUT"}},
+    {"sequence": 10, "scenario": "bad_quote_quality", "kind": "option_quote", "timestamp_utc": "2026-07-24T14:20:00Z", "payload": {"symbol": "CIFR", "bid": 1.5, "ask": 1.4, "market_data_type": "delayed"}},
+    {"sequence": 11, "scenario": "ibkr_disconnect", "kind": "connection_loss", "timestamp_utc": "2026-07-24T14:21:00Z", "payload": {"code": 1100, "data_lost": true}},
+    {"sequence": 12, "scenario": "ibkr_disconnect", "kind": "reconnect", "timestamp_utc": "2026-07-24T14:22:00Z", "payload": {"code": 1101, "data_maintained": false}},
+    {"sequence": 13, "scenario": "ibkr_disconnect", "kind": "depth_reset", "timestamp_utc": "2026-07-24T14:22:01Z", "payload": {"symbol": "CIFR"}},
+    {"sequence": 14, "scenario": "unavailable_0dte", "kind": "contract_resolution", "timestamp_utc": "2026-07-24T14:25:00Z", "payload": {"symbol": "HIMS", "bucket": "0DTE", "resolved": false}},
+    {"sequence": 15, "scenario": "bad_quote_quality", "kind": "market_data_type_change", "timestamp_utc": "2026-07-24T14:26:00Z", "payload": {"market_data_type": "delayed"}},
+    {"sequence": 16, "scenario": "bad_quote_quality", "kind": "subscription_capacity_error", "timestamp_utc": "2026-07-24T14:27:00Z", "payload": {"code": 101, "kind": "option"}}
+  ]
+}

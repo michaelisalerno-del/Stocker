@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import math
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +50,18 @@ class ProspectiveReadStore:
     @staticmethod
     def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None if row is None else dict(row)
+
+    @staticmethod
+    def _decoded(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        for name, value in tuple(result.items()):
+            if name.endswith("_json") and isinstance(value, str):
+                try:
+                    result[name.removesuffix("_json")] = json.loads(value)
+                except json.JSONDecodeError:
+                    result[name.removesuffix("_json")] = None
+                del result[name]
+        return result
 
     def database_health(self) -> dict[str, Any]:
         try:
@@ -97,8 +112,10 @@ class ProspectiveReadStore:
     def runtime_projection(self) -> dict[str, Any]:
         with self._connect() as connection:
             run = self._run_row(connection)
-            lease_run_id = self.run_id if self.run_id is not None else (
-                None if run is None else str(run["run_id"])
+            lease_run_id = (
+                self.run_id
+                if self.run_id is not None
+                else (None if run is None else str(run["run_id"]))
             )
             lease = (
                 None
@@ -419,3 +436,687 @@ class ProspectiveReadStore:
                 (run_id, limit),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def recorder_status_v0(self) -> dict[str, Any]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return {
+                "run_id": None,
+                "state": "inactive",
+                "latest_checkpoint": None,
+                "latest_completed_bar": None,
+                "latest_episode": None,
+                "last_event_timestamp": None,
+                "data_gaps": 0,
+                "subscriptions": {},
+                "record_only": True,
+                "execution_enabled": False,
+            }
+        with self._connect() as connection:
+            checkpoint = connection.execute(
+                """
+                SELECT * FROM m1c_checkpoint_v0
+                WHERE run_id = ? ORDER BY bar_end_utc DESC, id DESC LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            completed_bar = connection.execute(
+                """
+                SELECT * FROM completed_bar_state_v0
+                WHERE run_id = ? ORDER BY bar_end_utc DESC, symbol LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            episode = connection.execute(
+                """
+                SELECT * FROM m1c_episode_v0
+                WHERE run_id = ? ORDER BY trigger_bar_end_utc DESC LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            partition = connection.execute(
+                """
+                SELECT MAX(maximum_timestamp_utc) AS last_event_timestamp,
+                       COALESCE(SUM(gap_count), 0) AS data_gaps
+                FROM raw_partition_manifest_v0 WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            subscriptions = connection.execute(
+                """
+                SELECT subscription_kind, COUNT(*) AS used
+                FROM subscription_lifecycle_v0
+                WHERE run_id = ? AND cancelled_at_utc IS NULL
+                GROUP BY subscription_kind
+                """,
+                (run_id,),
+            ).fetchall()
+            connection_event = connection.execute(
+                """
+                SELECT * FROM ibkr_connection_event
+                WHERE run_id = ? ORDER BY id DESC LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+        return {
+            "run_id": run_id,
+            "state": "recording",
+            "latest_checkpoint": (None if checkpoint is None else self._decoded(checkpoint)),
+            "latest_completed_bar": (
+                None if completed_bar is None else self._decoded(completed_bar)
+            ),
+            "latest_episode": None if episode is None else self._decoded(episode),
+            "last_event_timestamp": (
+                None if partition is None else partition["last_event_timestamp"]
+            ),
+            "data_gaps": 0 if partition is None else int(partition["data_gaps"]),
+            "subscriptions": {
+                str(row["subscription_kind"]): int(row["used"]) for row in subscriptions
+            },
+            "ibkr_connection": self._dict(connection_event),
+            "record_only": True,
+            "execution_enabled": False,
+            "order_routing": "disabled",
+        }
+
+    def universe_live_v0(self) -> list[dict[str, Any]]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                WITH latest_checkpoint AS (
+                    SELECT c.*
+                    FROM m1c_checkpoint_v0 c
+                    JOIN (
+                        SELECT symbol, MAX(bar_end_utc) AS maximum_bar_end
+                        FROM m1c_checkpoint_v0 WHERE run_id = ? GROUP BY symbol
+                    ) x ON x.symbol = c.symbol
+                       AND x.maximum_bar_end = c.bar_end_utc
+                    WHERE c.run_id = ?
+                ),
+                latest_episode AS (
+                    SELECT e.*
+                    FROM m1c_episode_v0 e
+                    JOIN (
+                        SELECT symbol, MAX(trigger_bar_end_utc) AS maximum_trigger
+                        FROM m1c_episode_v0 WHERE run_id = ? GROUP BY symbol
+                    ) x ON x.symbol = e.symbol
+                       AND x.maximum_trigger = e.trigger_bar_end_utc
+                    WHERE e.run_id = ?
+                ),
+                latest_legacy_quote AS (
+                    SELECT q.*
+                    FROM underlying_quote q
+                    JOIN (
+                        SELECT symbol, MAX(target_timestamp_utc) AS maximum_quote
+                        FROM underlying_quote WHERE run_id = ? GROUP BY symbol
+                    ) x ON x.symbol = q.symbol
+                       AND x.maximum_quote = q.target_timestamp_utc
+                    WHERE q.run_id = ?
+                )
+                SELECT u.symbol, u.operational_status,
+                       b.bar_end_utc AS last_completed_bar,
+                       c.probability AS m1c_probability,
+                       c.threshold AS m1c_threshold,
+                       c.threshold_passed,
+                       e.episode_id, e.completion_status AS episode_status,
+                       COALESCE(s.bid, q.bid) AS bid,
+                       COALESCE(s.ask, q.ask) AS ask,
+                       COALESCE(s.bid_size, q.bid_size) AS bid_size,
+                       COALESCE(s.ask_size, q.ask_size) AS ask_size,
+                       COALESCE(
+                         s.received_timestamp_utc,
+                         q.receive_timestamp_utc
+                       ) AS quote_timestamp_utc,
+                       s.microprice_edge_bps,
+                       s.tick_by_tick_status,
+                       s.depth_status,
+                       s.market_data_type,
+                       (
+                         SELECT action FROM direction_classification_v0 d
+                         WHERE d.episode_id = e.episode_id AND d.archetype = 'A1'
+                       ) AS a1_classification,
+                       (
+                         SELECT action FROM direction_classification_v0 d
+                         WHERE d.episode_id = e.episode_id AND d.archetype = 'C1'
+                       ) AS c1_classification,
+                       (
+                         SELECT action FROM direction_classification_v0 d
+                         WHERE d.episode_id = e.episode_id AND d.archetype = 'R1'
+                       ) AS r1_classification
+                FROM universe_membership u
+                LEFT JOIN latest_checkpoint c ON c.symbol = u.symbol
+                LEFT JOIN latest_episode e ON e.symbol = u.symbol
+                LEFT JOIN completed_bar_state_v0 b
+                  ON b.symbol = u.symbol AND b.run_id = u.run_id
+                LEFT JOIN latest_legacy_quote q ON q.symbol = u.symbol
+                LEFT JOIN underlying_live_state_v0 s
+                  ON s.symbol = u.symbol AND s.run_id = u.run_id
+                WHERE u.run_id = ?
+                ORDER BY u.symbol
+                """,
+                (run_id, run_id, run_id, run_id, run_id, run_id, run_id),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            probability = item.get("m1c_probability")
+            threshold = item.get("m1c_threshold")
+            item["distance_from_threshold"] = (
+                None
+                if probability is None or threshold is None
+                else float(probability) - float(threshold)
+            )
+            bid = item.get("bid")
+            ask = item.get("ask")
+            bid_size = item.get("bid_size")
+            ask_size = item.get("ask_size")
+            item["spread"] = None if bid is None or ask is None else float(ask) - float(bid)
+            item["quote_imbalance"] = (
+                None
+                if bid_size is None or ask_size is None
+                else (float(bid_size) - float(ask_size))
+                / (float(bid_size) + float(ask_size) + 1e-12)
+            )
+            item["fresh_episode"] = item.get("episode_id") is not None
+            items.append(item)
+        return items
+
+    def episodes_v0(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT e.*,
+                       MAX(CASE WHEN d.archetype = 'A1' THEN d.action END) AS a1_action,
+                       MAX(CASE WHEN d.archetype = 'C1' THEN d.action END) AS c1_action,
+                       MAX(CASE WHEN d.archetype = 'R1' THEN d.action END) AS r1_action
+                FROM m1c_episode_v0 e
+                LEFT JOIN direction_classification_v0 d ON d.episode_id = e.episode_id
+                WHERE e.run_id = ?
+                GROUP BY e.episode_id
+                ORDER BY e.trigger_bar_end_utc DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]
+
+    def episode_v0(self, episode_id: str) -> dict[str, Any] | None:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return None
+        with self._connect() as connection:
+            episode = connection.execute(
+                """
+                SELECT e.*, c.feature_values_json, c.model_hash,
+                       c.feature_hash, c.session_context_hash
+                FROM m1c_episode_v0 e
+                JOIN m1c_checkpoint_v0 c ON c.id = e.checkpoint_id
+                WHERE e.episode_id = ? AND e.run_id = ?
+                """,
+                (episode_id, run_id),
+            ).fetchone()
+            if episode is None:
+                return None
+            directions = connection.execute(
+                """
+                SELECT * FROM direction_classification_v0
+                WHERE episode_id = ? ORDER BY archetype
+                """,
+                (episode_id,),
+            ).fetchall()
+        return {
+            "episode": self._decoded(episode),
+            "directional_research_classifications": [self._decoded(row) for row in directions],
+        }
+
+    def episode_microstructure_v0(
+        self,
+        episode_id: str,
+    ) -> list[dict[str, Any]]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM microstructure_summary_v0
+                WHERE run_id = ? AND episode_id = ?
+                ORDER BY window_end_utc, window_name
+                """,
+                (run_id, episode_id),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]
+
+    def episode_quote_series_v0(
+        self,
+        episode_id: str,
+        *,
+        maximum_points: int = 600,
+    ) -> list[dict[str, Any]]:
+        """Read a bounded chart projection from immutable quote partitions."""
+
+        if maximum_points <= 0:
+            raise ValueError("maximum quote-series points must be positive")
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            episode = connection.execute(
+                """
+                SELECT symbol, trigger_bar_end_utc, prospective_entry_timestamp_utc
+                FROM m1c_episode_v0
+                WHERE run_id = ? AND episode_id = ?
+                """,
+                (run_id, episode_id),
+            ).fetchone()
+            if episode is None:
+                return []
+            start = datetime.fromisoformat(str(episode["trigger_bar_end_utc"])) - timedelta(
+                minutes=15
+            )
+            end = datetime.fromisoformat(
+                str(episode["prospective_entry_timestamp_utc"])
+            ) + timedelta(minutes=30)
+            partitions = connection.execute(
+                """
+                SELECT file_path, event_type
+                FROM raw_partition_manifest_v0
+                WHERE run_id = ? AND symbol = ?
+                  AND event_type IN (
+                    'underlying_level1_quote_event',
+                    'underlying_tick_bidask_event'
+                  )
+                  AND maximum_timestamp_utc >= ?
+                  AND minimum_timestamp_utc <= ?
+                ORDER BY minimum_timestamp_utc, content_hash
+                """,
+                (run_id, str(episode["symbol"]), start.isoformat(), end.isoformat()),
+            ).fetchall()
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            return []
+        points: dict[str, dict[str, Any]] = {}
+        for partition in partitions:
+            path = Path(str(partition["file_path"]))
+            if not path.is_file():
+                continue
+            table = pq.ParquetFile(path).read()  # type: ignore[no-untyped-call]
+            for row in table.to_pylist():
+                raw_timestamp = row.get("provider_timestamp_utc") or row.get(
+                    "received_timestamp_utc"
+                )
+                if raw_timestamp is None:
+                    continue
+                observed = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
+                if observed.tzinfo is None or observed.utcoffset() is None:
+                    continue
+                observed = observed.astimezone(UTC)
+                bid = row.get("bid")
+                ask = row.get("ask")
+                if not start <= observed <= end or bid is None or ask is None:
+                    continue
+                bid_value = float(bid)
+                ask_value = float(ask)
+                if bid_value <= 0.0 or ask_value < bid_value:
+                    continue
+                bid_size = row.get("bid_size")
+                ask_size = row.get("ask_size")
+                total_size = (
+                    None
+                    if bid_size is None or ask_size is None
+                    else float(bid_size) + float(ask_size)
+                )
+                microprice = (
+                    None
+                    if total_size is None or total_size <= 0.0
+                    else (ask_value * float(bid_size) + bid_value * float(ask_size)) / total_size
+                )
+                points[str(row.get("event_id"))] = {
+                    "event_id": row.get("event_id"),
+                    "timestamp_utc": observed.isoformat(),
+                    "bid": bid_value,
+                    "ask": ask_value,
+                    "midpoint": (bid_value + ask_value) / 2.0,
+                    "microprice": microprice,
+                    "event_type": str(partition["event_type"]),
+                }
+        ordered = sorted(
+            points.values(),
+            key=lambda item: (str(item["timestamp_utc"]), str(item["event_id"])),
+        )
+        stride = max(1, math.ceil(len(ordered) / maximum_points))
+        sampled = ordered[::stride]
+        if ordered and sampled[-1] != ordered[-1]:
+            sampled.append(ordered[-1])
+        return sampled[:maximum_points]
+
+    def episode_depth_snapshot_v0(self, episode_id: str) -> dict[str, Any] | None:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return None
+        with self._connect() as connection:
+            episode = connection.execute(
+                """
+                SELECT symbol, trigger_bar_end_utc, prospective_entry_timestamp_utc
+                FROM m1c_episode_v0
+                WHERE run_id = ? AND episode_id = ?
+                """,
+                (run_id, episode_id),
+            ).fetchone()
+            if episode is None:
+                return None
+            start = datetime.fromisoformat(str(episode["trigger_bar_end_utc"])) - timedelta(
+                minutes=15
+            )
+            end = datetime.fromisoformat(
+                str(episode["prospective_entry_timestamp_utc"])
+            ) + timedelta(minutes=30)
+            partitions = connection.execute(
+                """
+                SELECT file_path FROM raw_partition_manifest_v0
+                WHERE run_id = ? AND symbol = ?
+                  AND event_type = 'underlying_depth_snapshot'
+                  AND maximum_timestamp_utc >= ?
+                  AND minimum_timestamp_utc <= ?
+                ORDER BY minimum_timestamp_utc, content_hash
+                """,
+                (run_id, str(episode["symbol"]), start.isoformat(), end.isoformat()),
+            ).fetchall()
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            return None
+        candidates: list[dict[str, Any]] = []
+        for partition in partitions:
+            path = Path(str(partition["file_path"]))
+            if not path.is_file():
+                continue
+            table = pq.ParquetFile(path).read()  # type: ignore[no-untyped-call]
+            for row in table.to_pylist():
+                raw_timestamp = row.get("received_timestamp_utc")
+                snapshot = row.get("snapshot")
+                if raw_timestamp is None or snapshot is None:
+                    continue
+                observed = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
+                if observed.tzinfo is None or observed.utcoffset() is None:
+                    continue
+                if not start <= observed <= end:
+                    continue
+                decoded = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+                if isinstance(decoded, dict):
+                    candidates.append(
+                        {
+                            **decoded,
+                            "received_timestamp_utc": observed.astimezone(UTC).isoformat(),
+                        }
+                    )
+        return (
+            None
+            if not candidates
+            else max(candidates, key=lambda item: str(item["received_timestamp_utc"]))
+        )
+
+    def episode_options_v0(self, episode_id: str) -> list[dict[str, Any]]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT c.*, q.provider_timestamp_utc, q.received_timestamp_utc,
+                       q.bid, q.bid_size, q.ask, q.ask_size, q.last, q.last_size,
+                       q.market_data_type, q.option_model_price,
+                       q.implied_volatility, q.delta, q.gamma, q.theta, q.vega,
+                       q.underlying_reference_price, q.volume, q.open_interest,
+                       q.recording_status, q.quote_quality_flags_json
+                FROM episode_option_contract_v0 c
+                LEFT JOIN option_quote_state_v0 q ON q.option_contract_id = c.id
+                WHERE c.run_id = ? AND c.episode_id = ?
+                ORDER BY c.dte, c.selection_rank, c.right
+                """,
+                (run_id, episode_id),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]
+
+    def shadow_outcomes_v0(self, *, limit: int = 1000) -> list[dict[str, Any]]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT s.*, e.symbol, e.trigger_bar_end_utc
+                FROM shadow_quote_outcome_v0 s
+                JOIN m1c_episode_v0 e ON e.episode_id = s.episode_id
+                WHERE s.run_id = ?
+                ORDER BY s.target_timestamp_utc DESC, s.id DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+            structures = connection.execute(
+                """
+                SELECT s.*, e.symbol, e.trigger_bar_end_utc
+                FROM shadow_structure_outcome_v0 s
+                JOIN m1c_episode_v0 e ON e.episode_id = s.episode_id
+                WHERE s.run_id = ?
+                ORDER BY e.trigger_bar_end_utc DESC, s.id DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        output = [self._decoded(row) for row in rows]
+        for raw in structures:
+            item = self._decoded(raw)
+            payload = item.get("payload")
+            details = payload if isinstance(payload, dict) else {}
+            structure_type = str(item["structure_type"])
+            output.append(
+                {
+                    **item,
+                    "archetype": (
+                        "ATM straddle"
+                        if structure_type == "ATM_STRADDLE"
+                        else "retrospective oracle — not tradeable"
+                    ),
+                    "direction": "NEUTRAL" if structure_type == "ATM_STRADDLE" else "ORACLE",
+                    "contract_identity": "ATM call + ATM put",
+                    "entry_ask": details.get("entry_call_ask_plus_put_ask"),
+                    "exit_bid": details.get("exit_call_bid_plus_put_bid"),
+                    "ask_to_bid_return": details.get("ask_to_bid_return"),
+                    "dollar_pnl_per_contract": None,
+                    "quality_flags": [],
+                }
+            )
+        return sorted(
+            output,
+            key=lambda item: (
+                str(item.get("trigger_bar_end_utc", "")),
+                int(item.get("horizon_minutes", 0)),
+            ),
+            reverse=True,
+        )[:limit]
+
+    def raw_event_sample_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return a bounded recent sample for audit inspection, never broker state."""
+
+        if limit <= 0:
+            return []
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            partitions = connection.execute(
+                """
+                SELECT file_path, event_type
+                FROM raw_partition_manifest_v0
+                WHERE run_id = ?
+                ORDER BY maximum_timestamp_utc DESC, content_hash DESC
+                LIMIT 12
+                """,
+                (run_id,),
+            ).fetchall()
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            return []
+        sample: list[dict[str, Any]] = []
+        for partition in partitions:
+            path = Path(str(partition["file_path"]))
+            if not path.is_file():
+                continue
+            rows = pq.ParquetFile(path).read().to_pylist()  # type: ignore[no-untyped-call]
+            for row in rows[-limit:]:
+                timestamp = row.get("provider_timestamp_utc") or row.get("received_timestamp_utc")
+                detail = {
+                    key: row.get(key)
+                    for key in (
+                        "bid",
+                        "ask",
+                        "last",
+                        "price",
+                        "size",
+                        "operation",
+                        "side",
+                        "position",
+                        "checkpoint",
+                        "market_data_type",
+                    )
+                    if row.get(key) is not None
+                }
+                sample.append(
+                    {
+                        "audit_type": "raw_event",
+                        "identity": row.get("event_id"),
+                        "recorded_at_utc": timestamp,
+                        "details": json.dumps(
+                            {
+                                "event_type": str(partition["event_type"]),
+                                "symbol": row.get("symbol"),
+                                "source_sequence": row.get("source_sequence"),
+                                **detail,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    }
+                )
+        return sorted(
+            sample,
+            key=lambda item: str(item["recorded_at_utc"]),
+            reverse=True,
+        )[:limit]
+
+    def audit_events_v0(self, *, limit: int = 1000) -> list[dict[str, Any]]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            partitions = connection.execute(
+                """
+                SELECT 'raw_partition' AS audit_type, content_hash AS identity,
+                       maximum_timestamp_utc AS recorded_at_utc,
+                       file_path AS details
+                FROM raw_partition_manifest_v0 WHERE run_id = ?
+                ORDER BY maximum_timestamp_utc DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+            lifecycle = connection.execute(
+                """
+                SELECT 'subscription' AS audit_type,
+                       subscription_key AS identity,
+                       started_at_utc AS recorded_at_utc,
+                       cancellation_reason AS details
+                FROM subscription_lifecycle_v0 WHERE run_id = ?
+                ORDER BY started_at_utc DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+            model_events = connection.execute(
+                """
+                SELECT 'm1c_prediction' AS audit_type,
+                       feature_hash AS identity,
+                       bar_end_utc AS recorded_at_utc,
+                       json_object(
+                         'symbol', symbol,
+                         'checkpoint', checkpoint,
+                         'model_hash', model_hash,
+                         'probability', probability,
+                         'threshold', threshold,
+                         'threshold_passed', threshold_passed,
+                         'eligible', eligible,
+                         'rejection_reasons', rejection_reasons_json
+                       ) AS details
+                FROM m1c_checkpoint_v0 WHERE run_id = ?
+                ORDER BY bar_end_utc DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+            episode_events = connection.execute(
+                """
+                SELECT 'episode_decision' AS audit_type,
+                       episode_id AS identity,
+                       trigger_bar_end_utc AS recorded_at_utc,
+                       json_object(
+                         'symbol', symbol,
+                         'checkpoint', trigger_checkpoint,
+                         'entry', prospective_entry_timestamp_utc,
+                         'probability', m1c_probability,
+                         'previous_probability', previous_m1c_probability,
+                         'scientific_recording_valid', scientific_recording_valid,
+                         'rejection_reasons', rejection_reasons_json
+                       ) AS details
+                FROM m1c_episode_v0 WHERE run_id = ?
+                ORDER BY trigger_bar_end_utc DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+            shadow_events = connection.execute(
+                """
+                SELECT 'shadow_quote_selection' AS audit_type,
+                       episode_id || ':' || archetype || ':' ||
+                         contract_identity || ':' || horizon_minutes AS identity,
+                       target_timestamp_utc AS recorded_at_utc,
+                       payload_json AS details
+                FROM shadow_quote_outcome_v0 WHERE run_id = ?
+                ORDER BY target_timestamp_utc DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        combined = [
+            *self.raw_event_sample_v0(limit=min(limit, 100)),
+            *(
+                dict(row)
+                for row in (
+                    *partitions,
+                    *lifecycle,
+                    *model_events,
+                    *episode_events,
+                    *shadow_events,
+                )
+            ),
+        ]
+        return sorted(
+            combined,
+            key=lambda item: str(item["recorded_at_utc"]),
+            reverse=True,
+        )[:limit]
+
+    def session_reports_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM recorder_session_report_v0
+                WHERE run_id = ? ORDER BY session_date DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]

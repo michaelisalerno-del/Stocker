@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from stocker_prospective.config import ProspectiveConfig
+from stocker_prospective.contract import claims_boundary
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
@@ -127,6 +128,7 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         api_response = client.get(endpoint)
         assert api_response.status_code == 200, endpoint
         assert api_response.headers["content-type"].startswith("application/json")
+        assert api_response.json()["claims_boundary"] == claims_boundary()
     health = client.get("/api/health").json()
     assert None not in health["blockers"]
     assert health["no_order_path_verified"] is True
@@ -229,13 +231,67 @@ def test_runtime_projection_ignores_informational_ibkr_event_for_latest_health(
 def test_no_order_account_threshold_or_upload_endpoint_exists(tmp_path: Path) -> None:
     client = seeded_app(tmp_path)
     paths = client.get("/openapi.json").json()["paths"]
-    lowered = " ".join(paths).lower()
 
-    assert all(set(methods) <= {"get"} for methods in paths.values())
-    for forbidden in ("order", "account", "threshold", "upload", "credential", "trade"):
-        assert forbidden not in lowered
+    mutation_paths = {
+        path: set(methods) for path, methods in paths.items() if not set(methods) <= {"get"}
+    }
+    assert mutation_paths == {
+        "/api/replay/start": {"post"},
+        "/api/replay/stop": {"post"},
+    }
+    forbidden_segments = {
+        "order",
+        "orders",
+        "account",
+        "accounts",
+        "position",
+        "positions",
+        "trade",
+        "buy",
+        "sell",
+        "upload",
+        "credential",
+    }
+    assert not any(
+        forbidden_segments.intersection(segment for segment in path.lower().split("/") if segment)
+        for path in paths
+    )
     assert client.post("/api/recorder/start").status_code == 404
     assert client.post("/api/orders").status_code == 404
+    assert client.post("/api/replay/start", json={"mode": "accelerated"}).status_code == 200
+    assert client.post("/api/replay/stop").status_code == 200
+
+
+def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "RECORD ONLY — ORDER ROUTING DISABLED" in page.text
+    assert "A1 — PROSPECTIVE HYPOTHESIS, NOT VALIDATED" in page.text
+    assert "retrospective oracle" not in page.text.lower()
+
+    for path in (
+        "/api/recorder/status",
+        "/api/recorder/capabilities",
+        "/api/recorder/session-reports",
+        "/api/universe/live",
+        "/api/episodes",
+        "/api/shadow-outcomes",
+        "/api/audit/events",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.json()["claims_boundary"] == claims_boundary()
+
+    for path in ("/api/replay/start", "/api/replay/stop"):
+        response = client.post(
+            path,
+            json={"mode": "accelerated"} if path.endswith("start") else None,
+        )
+        assert response.status_code == 200
+        assert response.json()["claims_boundary"] == claims_boundary()
 
 
 def test_web_sqlite_connections_cannot_write_domain_records(tmp_path: Path) -> None:
@@ -487,9 +543,7 @@ def test_parallel_vendor_credential_blocker_is_boolean_only(
     assert "EODHD_API_TOKEN" not in str(public)
 
     monkeypatch.setenv("EODHD_API_TOKEN", "must-not-enter-web-process")
-    assert client.get("/api/health").json()["parallel_validation"][
-        "credential_configured"
-    ] is False
+    assert client.get("/api/health").json()["parallel_validation"]["credential_configured"] is False
 
     monkeypatch.setenv("STOCKER_EODHD_TOKEN_CONFIGURED", "1")
     projected = client.get("/api/health").json()

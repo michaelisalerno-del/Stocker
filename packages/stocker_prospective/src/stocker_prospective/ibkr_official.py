@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from stocker_prospective.ibkr import IBKRMarketDataAdapter, require_official_ibkr_api
@@ -21,6 +21,36 @@ def create_official_stock_contract(symbol: str) -> Any:
     contract.secType = "STK"
     contract.exchange = "SMART"
     contract.currency = "USD"
+    return contract
+
+
+def create_official_option_contract(
+    *,
+    symbol: str,
+    expiry: date,
+    strike: float,
+    right: str,
+    multiplier: int,
+    exchange: str,
+    trading_class: str,
+) -> Any:
+    """Build one exact bounded OPT contract; no chain streaming is involved."""
+
+    if right not in {"C", "P"}:
+        raise ValueError("option right must be C or P")
+    require_official_ibkr_api()
+    from ibapi.contract import Contract
+
+    contract = Contract()
+    contract.symbol = symbol
+    contract.secType = "OPT"
+    contract.lastTradeDateOrContractMonth = expiry.strftime("%Y%m%d")
+    contract.strike = strike
+    contract.right = right
+    contract.multiplier = str(multiplier)
+    contract.exchange = exchange
+    contract.currency = "USD"
+    contract.tradingClass = trading_class
     return contract
 
 
@@ -62,19 +92,157 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
 
         def marketDataType(self, reqId: int, marketDataType: int) -> None:  # noqa: N802
             mapped = {
-                1: MarketDataType.LIVE.value,
-                2: MarketDataType.FROZEN.value,
-                3: MarketDataType.DELAYED.value,
-                4: MarketDataType.DELAYED_FROZEN.value,
-            }.get(marketDataType, f"unknown_{marketDataType}")
-            self._market_data_types[reqId] = mapped
-            adapter.on_quote_update(
+                1: MarketDataType.LIVE,
+                2: MarketDataType.FROZEN,
+                3: MarketDataType.DELAYED,
+                4: MarketDataType.DELAYED_FROZEN,
+            }.get(marketDataType)
+            if mapped is None:
+                adapter.on_error(
+                    reqId,
+                    marketDataType,
+                    "unknown_market_data_type",
+                )
+                return
+            self._market_data_types[reqId] = mapped.value
+            adapter.on_market_data_type(reqId, mapped)
+
+        def currentTime(self, time: int) -> None:  # noqa: N802
+            adapter.on_current_time(datetime.fromtimestamp(time, tz=UTC))
+
+        def tickByTickBidAsk(  # noqa: N802
+            self,
+            reqId: int,
+            time: int,
+            bidPrice: float,
+            askPrice: float,
+            bidSize: Any,
+            askSize: Any,
+            tickAttribBidAsk: Any,
+        ) -> None:
+            adapter.on_tick_by_tick_bidask(
                 reqId,
                 {
-                    "field": "market_data_type",
-                    "value": mapped,
-                    "receive_timestamp_utc": datetime.now(UTC).isoformat(),
+                    "provider_timestamp_utc": datetime.fromtimestamp(time, tz=UTC).isoformat(),
+                    "bid": float(bidPrice),
+                    "ask": float(askPrice),
+                    "bid_size": float(bidSize),
+                    "ask_size": float(askSize),
+                    "bid_past_low": getattr(tickAttribBidAsk, "bidPastLow", None),
+                    "ask_past_high": getattr(tickAttribBidAsk, "askPastHigh", None),
+                    "market_data_type": self._market_data_types.get(reqId),
                 },
+            )
+
+        def tickByTickAllLast(  # noqa: N802
+            self,
+            reqId: int,
+            tickType: int,
+            time: int,
+            price: float,
+            size: Any,
+            tickAttribLast: Any,
+            exchange: str,
+            specialConditions: str,
+        ) -> None:
+            adapter.on_tick_by_tick_trade(
+                reqId,
+                {
+                    "provider_timestamp_utc": datetime.fromtimestamp(time, tz=UTC).isoformat(),
+                    "tick_type": tickType,
+                    "price": float(price),
+                    "size": float(size),
+                    "past_limit": getattr(tickAttribLast, "pastLimit", None),
+                    "unreported": getattr(tickAttribLast, "unreported", None),
+                    "exchange": exchange or None,
+                    "conditions": tuple(item for item in specialConditions.split(",") if item),
+                    "market_data_type": self._market_data_types.get(reqId),
+                },
+            )
+
+        def updateMktDepth(  # noqa: N802
+            self,
+            reqId: int,
+            position: int,
+            operation: int,
+            side: int,
+            price: float,
+            size: Any,
+        ) -> None:
+            adapter.on_depth_update(
+                reqId,
+                self._depth_payload(
+                    position=position,
+                    operation=operation,
+                    side=side,
+                    price=price,
+                    size=size,
+                    market_maker=None,
+                    smart_depth=False,
+                ),
+            )
+
+        def updateMktDepthL2(  # noqa: N802
+            self,
+            reqId: int,
+            position: int,
+            marketMaker: str,
+            operation: int,
+            side: int,
+            price: float,
+            size: Any,
+            isSmartDepth: bool,
+        ) -> None:
+            adapter.on_depth_update(
+                reqId,
+                self._depth_payload(
+                    position=position,
+                    operation=operation,
+                    side=side,
+                    price=price,
+                    size=size,
+                    market_maker=marketMaker or None,
+                    smart_depth=isSmartDepth,
+                ),
+            )
+
+        @staticmethod
+        def _depth_payload(
+            *,
+            position: int,
+            operation: int,
+            side: int,
+            price: float,
+            size: Any,
+            market_maker: str | None,
+            smart_depth: bool,
+        ) -> dict[str, Any]:
+            return {
+                "position": position,
+                "operation": {
+                    0: "insert",
+                    1: "update",
+                    2: "remove",
+                }.get(operation, f"unknown_{operation}"),
+                "side": {0: "ask", 1: "bid"}.get(side, f"unknown_{side}"),
+                "price": float(price),
+                "size": float(size),
+                "market_maker_or_exchange": market_maker,
+                "smart_depth": smart_depth,
+            }
+
+        def mktDepthExchanges(self, descriptions: list[Any]) -> None:  # noqa: N802
+            adapter.on_depth_exchanges(
+                tuple(
+                    {
+                        "exchange": getattr(item, "exchange", None),
+                        "security_type": getattr(item, "secType", None),
+                        "listing_exchange": getattr(item, "listingExch", None),
+                        "service_data_type": getattr(item, "serviceDataType", None),
+                        "aggregated_group": getattr(item, "aggGroup", None),
+                    }
+                    for item in descriptions
+                )
             )
 
         def securityDefinitionOptionParameter(  # noqa: N802
@@ -250,6 +418,43 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 )
             )
 
+        def historicalData(self, reqId: int, bar: Any) -> None:  # noqa: N802
+            adapter.on_historical_bar(
+                reqId,
+                self._historical_bar_payload(bar),
+                update=False,
+            )
+
+        def historicalDataUpdate(self, reqId: int, bar: Any) -> None:  # noqa: N802
+            adapter.on_historical_bar(
+                reqId,
+                self._historical_bar_payload(bar),
+                update=True,
+            )
+
+        def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:  # noqa: N802
+            adapter.on_historical_bar_end(reqId, start=start, end=end)
+
+        @staticmethod
+        def _historical_bar_payload(bar: Any) -> dict[str, Any]:
+            raw_timestamp = str(getattr(bar, "date", ""))
+            try:
+                bar_start = datetime.fromtimestamp(int(raw_timestamp), tz=UTC)
+            except ValueError:
+                bar_start = None
+            return {
+                "provider_bar_timestamp": raw_timestamp,
+                "bar_start_utc": (None if bar_start is None else bar_start.isoformat()),
+                "open": float(bar.open),
+                "high": float(bar.high),
+                "low": float(bar.low),
+                "close": float(bar.close),
+                "volume": float(bar.volume),
+                "wap": float(bar.wap),
+                "trade_count": int(bar.barCount),
+                "source": "ibkr_historical_keep_up_to_date",
+            }
+
     class _MarketDataClientFacade:
         """Expose only the official socket and market-data calls Stocker uses."""
 
@@ -284,5 +489,37 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
 
         def cancelRealTimeBars(self, request_id: int) -> None:  # noqa: N802
             self.__client.cancelRealTimeBars(request_id)
+
+        def reqTickByTickData(self, *arguments: Any) -> None:  # noqa: N802
+            self.__client.reqTickByTickData(*arguments)
+
+        def cancelTickByTickData(self, request_id: int) -> None:  # noqa: N802
+            self.__client.cancelTickByTickData(request_id)
+
+        def reqMktDepth(self, *arguments: Any) -> None:  # noqa: N802
+            self.__client.reqMktDepth(*arguments)
+
+        def cancelMktDepth(  # noqa: N802
+            self, request_id: int, smart_depth: bool
+        ) -> None:
+            self.__client.cancelMktDepth(request_id, smart_depth)
+
+        def reqMktDepthExchanges(self) -> None:  # noqa: N802
+            self.__client.reqMktDepthExchanges()
+
+        def reqHistoricalData(self, *arguments: Any) -> None:  # noqa: N802
+            self.__client.reqHistoricalData(*arguments)
+
+        def cancelHistoricalData(self, request_id: int) -> None:  # noqa: N802
+            self.__client.cancelHistoricalData(request_id)
+
+        def reqCurrentTime(self) -> None:  # noqa: N802
+            self.__client.reqCurrentTime()
+
+        def reqMarketDataType(self, market_data_type: int) -> None:  # noqa: N802
+            self.__client.reqMarketDataType(market_data_type)
+
+        def serverVersion(self) -> int:  # noqa: N802
+            return int(self.__client.serverVersion())
 
     return _MarketDataClientFacade(_StockerOfficialMarketDataClient())

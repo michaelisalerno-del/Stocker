@@ -6,6 +6,17 @@ paths:
   # Also supplies the verified anchor identity for record-only diagnostics
   # when serialized scoring artifacts are not yet installed.
   replay_universe: /opt/stocker/current/configs/prospective/anchor-frozen-20.json
+  raw_event_root: /var/lib/stocker/prospective/raw-events
+  recorder_activation: /var/lib/stocker/prospective/frozen-m1c-v0-activation.json
+  m1c_live_parity_report: /opt/stocker/current/research/prospective/frozen-m1c-microstructure-recorder-v0/m1c_live_parity_report.json
+  direction_live_parity_report: /opt/stocker/current/research/prospective/frozen-m1c-microstructure-recorder-v0/direction_live_parity_report.json
+  ibkr_capability_manifest: /var/lib/stocker/prospective/ibkr_capability_manifest.json
+  prospective_phase_ledger: /var/lib/stocker/prospective/frozen-m1c-v0-phases.jsonl
+  frozen_m1c_artifact_root: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary
+  m1c_scaling_artifact: /opt/stocker/current/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json
+  direction_beta_artifact: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/stock_market_beta_parameters.csv
+  historical_activity_bars: /var/lib/stocker/preprocessing/prior-session-five-minute-bars.parquet
+  bar_compatibility_report: /var/lib/stocker/prospective/bar_compatibility_report.json
 
 runtime:
   # Set both values deliberately before first service start.
@@ -41,9 +52,24 @@ ibkr:
   host: 127.0.0.1
   # Frozen internal deployment contract: connect only to the Stocker loopback proxy.
   # The Gateway's separate upstream API socket is never configured here.
+  # Frozen local proxy endpoint, not an IBKR paper/live port. IBKR_PORT may
+  # override it; the recorder never infers execution mode from a port.
   port: 4003
   client_id: 71
-  expected_environment: paper
+  expected_environment: read_only
+  read_only: true
+  market_data_type_required: live
+  enable_level2: false
+  level2_rows: 5
+  max_depth_subscriptions: 3
+  max_tick_by_tick_subscriptions: 6
+  max_option_subscriptions: 60
+  maximum_option_contracts_per_episode: 30
+  option_strike_steps: 2
+  maximum_quote_age_seconds: 2
+  stream_poll_interval_seconds: 0.1
+  maximum_clock_drift_seconds: 2
+  tws_or_gateway_version: null
   connect_timeout_seconds: 10
   request_timeout_seconds: 10
   reconnect_max_attempts: 5

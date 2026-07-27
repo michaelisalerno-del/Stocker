@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
+import threading
 import time
 from collections import OrderedDict, defaultdict, deque
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +25,12 @@ from stocker_prospective.config import (
     public_config,
     validate_runtime_safety,
 )
+from stocker_prospective.contract import claims_boundary
+from stocker_prospective.evidence_replay import replay_persisted_evidence
 from stocker_prospective.ibkr import official_ibkr_api_projection
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.read_store import ProspectiveReadStore
+from stocker_prospective.replay_control import ReplayController, ReplayStartRequest
 
 
 def _active_bundle_projection(config: ProspectiveConfig) -> dict[str, Any]:
@@ -105,11 +110,69 @@ def _recorder_operational_status(
     return "active"
 
 
+def _json_artifact(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _path_exposes_forbidden_broker_resource(path: str) -> bool:
+    segments = {
+        segment.lower() for segment in path.split("/") if segment and not segment.startswith("{")
+    }
+    return bool(
+        segments.intersection(
+            {
+                "order",
+                "orders",
+                "account",
+                "accounts",
+                "position",
+                "positions",
+                "trade",
+                "buy",
+                "sell",
+                "credential",
+                "credentials",
+                "upload",
+            }
+        )
+    )
+
+
 def create_web_app(config: ProspectiveConfig) -> FastAPI:
     """Create a web app that receives no recorder or broker object."""
 
     validate_runtime_safety(config, object())
     store = ProspectiveReadStore(config.paths.database, run_id=config.runtime.run_id)
+
+    def run_replay(
+        request: ReplayStartRequest,
+        stop_event: threading.Event,
+    ) -> Any:
+        artifact_root = config.paths.frozen_m1c_artifact_root
+        return replay_persisted_evidence(
+            database_path=config.paths.database,
+            run_id=config.runtime.run_id,
+            mode=request.mode,
+            speed=request.speed,
+            episode_id=request.episode_id,
+            m1c_feature_manifest_path=(
+                None
+                if artifact_root is None
+                else artifact_root / "causal_movement_feature_manifest.json"
+            ),
+            m1c_threshold_path=(
+                None if artifact_root is None else artifact_root / "causal_movement_threshold.json"
+            ),
+            stop_event=stop_event,
+        )
+
+    replay_controller = ReplayController(runner=run_replay)
     static_root = Path(__file__).with_name("web_static")
     authentication_token: str | None = None
     if config.web.authentication_enabled:
@@ -140,9 +203,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     app.mount("/assets", StaticFiles(directory=static_root), name="assets")
     rate_windows: OrderedDict[str, deque[float]] = OrderedDict()
     maximum_rate_limit_identities = 4096
+    replay_control_paths = {"/api/replay/start", "/api/replay/stop"}
 
     @app.middleware("http")
     async def security_boundary(request: Request, call_next: Any) -> Any:
+        if (
+            request.url.path.startswith("/api/")
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and not (request.method == "POST" and request.url.path in replay_control_paths)
+        ):
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "not_found"},
+            )
         if authentication_token is not None:
             authorization = request.headers.get("authorization", "")
             bearer = (
@@ -216,8 +289,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         )
         parallel_blocker = (
             "blocked_missing_eodhd_server_token"
-            if config.parallel_validation.enabled
-            and not parallel_credential_configured
+            if config.parallel_validation.enabled and not parallel_credential_configured
             else None
         )
         blocker_candidates = [
@@ -265,9 +337,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "enabled": config.parallel_validation.enabled,
                 "provider": config.parallel_validation.provider,
                 "credential_configured": parallel_credential_configured,
-                "capture_delay_seconds": (
-                    config.parallel_validation.capture_delay_seconds
-                ),
+                "capture_delay_seconds": (config.parallel_validation.capture_delay_seconds),
                 "latest_capture": runtime["parallel_source_capture"],
                 "scoring_allowed": False,
                 "blocker": parallel_blocker,
@@ -279,14 +349,18 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "blockers": blockers,
             "no_order_path_verified": config.risk.trading_enabled is False
             and all(
-                not any(
-                    forbidden in str(getattr(route, "path", "")).lower()
-                    for forbidden in ("order", "account", "credential", "threshold", "upload")
+                not _path_exposes_forbidden_broker_resource(str(getattr(route, "path", "")))
+                and (
+                    set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
+                    or (
+                        str(getattr(route, "path", "")) in replay_control_paths
+                        and set(getattr(route, "methods", set()) or set()) == {"POST"}
+                    )
                 )
-                and set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
                 for route in app.routes
                 if str(getattr(route, "path", "")).startswith("/api/")
             ),
+            "claims_boundary": claims_boundary(),
         }
 
     @app.get("/api/runtime")
@@ -297,6 +371,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         projection["scientific_claim_limit"] = (
             "underlying_movement_selection_not_option_profitability"
         )
+        projection["claims_boundary"] = claims_boundary()
         return projection
 
     @app.get("/api/universe")
@@ -307,6 +382,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "anchor_count": len(cohorts["anchor_frozen_20"]),
             "exploratory_count": len(cohorts["prospective_external_universe_exploratory"]),
             "pooled": False,
+            "claims_boundary": claims_boundary(),
         }
 
     @app.get("/api/signals")
@@ -314,6 +390,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         return {
             "items": store.signals(),
             "score_claim": "synthetic replay or underlying movement selection only",
+            "claims_boundary": claims_boundary(),
         }
 
     @app.get("/api/signals/{signal_id}")
@@ -322,6 +399,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="not_found")
         result["feature_parity"] = _parity_projection(config)
+        result["claims_boundary"] = claims_boundary()
         return result
 
     @app.get("/api/shadow")
@@ -331,6 +409,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "items": store.shadow(),
             "paper_ledger": {"implemented": False, "items": []},
             "claim_limit": "observed_quotes_not_proof_of_option_profitability",
+            "claims_boundary": claims_boundary(),
         }
 
     @app.get("/api/shadow/{structure_id}")
@@ -338,14 +417,216 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         result = store.shadow_detail(structure_id)
         if result is None:
             raise HTTPException(status_code=404, detail="not_found")
+        result["claims_boundary"] = claims_boundary()
         return result
 
     @app.get("/api/audit")
     def audit() -> dict[str, Any]:
-        return {"ordered": True, "items": store.audit()}
+        return {
+            "ordered": True,
+            "items": store.audit(),
+            "claims_boundary": claims_boundary(),
+        }
 
     @app.get("/api/config/public")
     def safe_config() -> dict[str, object]:
-        return public_config(config)
+        return {
+            **public_config(config),
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/recorder/status")
+    def recorder_status() -> dict[str, Any]:
+        status = store.recorder_status_v0()
+        m1c_parity = _json_artifact(config.paths.m1c_live_parity_report)
+        direction_parity = _json_artifact(config.paths.direction_live_parity_report)
+        completed_bar = status["latest_completed_bar"]
+        last_completed = None if completed_bar is None else completed_bar["bar_end_utc"]
+        next_expected = (
+            None
+            if last_completed is None
+            else (
+                datetime.fromisoformat(str(last_completed)).astimezone(UTC) + timedelta(minutes=5)
+            ).isoformat()
+        )
+        status.update(
+            {
+                "banner": "RECORD ONLY — ORDER ROUTING DISABLED",
+                "market_data_type_required": config.ibkr.market_data_type_required,
+                "capacity": {
+                    "level1": {
+                        "used": status["subscriptions"].get("level1", 0),
+                        "available": config.ibkr.market_data_line_budget,
+                    },
+                    "tick_by_tick": {
+                        "used": status["subscriptions"].get("tick_by_tick", 0),
+                        "available": config.ibkr.max_tick_by_tick_subscriptions,
+                    },
+                    "depth": {
+                        "used": status["subscriptions"].get("depth", 0),
+                        "available": config.ibkr.max_depth_subscriptions,
+                    },
+                    "option": {
+                        "used": status["subscriptions"].get("option", 0),
+                        "available": config.ibkr.max_option_subscriptions,
+                    },
+                },
+                "model_parity": {
+                    "m1c": (
+                        "not_run"
+                        if m1c_parity is None
+                        else "passed"
+                        if m1c_parity.get("passed") is True
+                        else "failed"
+                    ),
+                    "direction": (
+                        "not_run"
+                        if direction_parity is None
+                        else "passed"
+                        if direction_parity.get("passed") is True
+                        else "failed"
+                    ),
+                },
+                "bar": {
+                    "source": (None if completed_bar is None else completed_bar["source"]),
+                    "last_completed": (last_completed),
+                    "next_expected_completion": next_expected,
+                    "freshness_seconds": (
+                        None
+                        if last_completed is None
+                        else max(
+                            0.0,
+                            (
+                                datetime.now(UTC)
+                                - datetime.fromisoformat(str(last_completed)).astimezone(UTC)
+                            ).total_seconds(),
+                        )
+                    ),
+                    "source_completeness": (
+                        None if completed_bar is None else completed_bar["source_completeness"]
+                    ),
+                    "compatibility_status": "parity_gated",
+                },
+                "replay": replay_controller.status().model_dump(mode="json"),
+                "claims_boundary": claims_boundary(),
+            }
+        )
+        return status
+
+    @app.get("/api/recorder/capabilities")
+    def recorder_capabilities() -> dict[str, Any]:
+        artifact = _json_artifact(config.paths.ibkr_capability_manifest)
+        observation = (
+            None
+            if artifact is None or not isinstance(artifact.get("observation"), dict)
+            else artifact["observation"]
+        )
+        manifest = (
+            None
+            if artifact is None
+            else {
+                **artifact,
+                **({} if observation is None else observation),
+            }
+        )
+        return {
+            "manifest": manifest,
+            "scientific_recording_valid": (
+                False if artifact is None else artifact.get("scientific_recording_valid") is True
+            ),
+            "diagnostic_display_allowed": True,
+            "required_market_data_type": "live",
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/recorder/session-reports")
+    def recorder_session_reports() -> dict[str, Any]:
+        return {
+            "items": store.session_reports_v0(),
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/universe/live")
+    def universe_live() -> dict[str, Any]:
+        return {
+            "items": store.universe_live_v0(),
+            "classification_label": "directional research classification",
+            "recommendations": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/episodes")
+    def episodes() -> dict[str, Any]:
+        return {
+            "items": store.episodes_v0(),
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/episodes/{episode_id}")
+    def episode(episode_id: str) -> dict[str, Any]:
+        result = store.episode_v0(episode_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="not_found")
+        result["claims_boundary"] = claims_boundary()
+        return result
+
+    @app.get("/api/episodes/{episode_id}/microstructure")
+    def episode_microstructure(episode_id: str) -> dict[str, Any]:
+        return {
+            "items": store.episode_microstructure_v0(episode_id),
+            "quote_series": store.episode_quote_series_v0(episode_id),
+            "latest_depth_snapshot": store.episode_depth_snapshot_v0(episode_id),
+            "label": "microstructure descriptive score",
+            "direction_model_fitted": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/episodes/{episode_id}/options")
+    def episode_options(episode_id: str) -> dict[str, Any]:
+        return {
+            "items": store.episode_options_v0(episode_id),
+            "top_of_book_updates": True,
+            "true_tick_by_tick_options_claimed": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/shadow-outcomes")
+    def shadow_outcomes() -> dict[str, Any]:
+        return {
+            "items": store.shadow_outcomes_v0(),
+            "primary_return": "ask_entry_to_bid_exit",
+            "option_pnl_is_shadow_quote_pnl": True,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/audit/events")
+    def audit_events() -> dict[str, Any]:
+        return {
+            "ordered": True,
+            "items": store.audit_events_v0(),
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.post("/api/replay/start")
+    def replay_start(request: ReplayStartRequest) -> dict[str, Any]:
+        try:
+            state = replay_controller.start(request)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            **state.model_dump(mode="json"),
+            "record_only": True,
+            "ibkr_connections_attempted": 0,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.post("/api/replay/stop")
+    def replay_stop() -> dict[str, Any]:
+        return {
+            **replay_controller.stop().model_dump(mode="json"),
+            "record_only": True,
+            "ibkr_connections_attempted": 0,
+            "claims_boundary": claims_boundary(),
+        }
 
     return app

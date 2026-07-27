@@ -1,0 +1,58 @@
+{
+  "claims_contract": "contract.json",
+  "contract_version": "frozen-m1c-microstructure-recorder-v0",
+  "episode_scientific_validity_requires": [
+    "M1C parity passed",
+    "direction parity passed",
+    "live market data",
+    "valid previous-close Group O",
+    "complete trigger bar",
+    "clock drift inside configured tolerance",
+    "fresh underlying quote",
+    "no unresolved bar gap before trigger",
+    "deterministic episode identity",
+    "writable raw event storage"
+  ],
+  "fail_closed": true,
+  "forbidden_api_resources": [
+    "orders",
+    "positions",
+    "accounts",
+    "trade",
+    "buy",
+    "sell"
+  ],
+  "invalid_rows_retained_with_reasons": true,
+  "option_shadow_validity_requires": [
+    "resolved exact contract",
+    "live option market-data type",
+    "valid entry ask",
+    "valid exit bid",
+    "recorded quote freshness",
+    "no subscription gap spanning horizon"
+  ],
+  "read_only_broker_access_required": true,
+  "replay_broker_connections_allowed": false,
+  "claims_boundary": {
+    "a1_frozen_prospective_hypothesis": true,
+    "account_balance_access_required": false,
+    "broker_account_mutation_allowed": false,
+    "c1_frozen_comparison": true,
+    "execution_enabled": false,
+    "live_orders_allowed": false,
+    "m1c_frozen": true,
+    "m1c_threshold": 0.488333710794033,
+    "microstructure_direction_model_fitted": false,
+    "microstructure_features_descriptive_only": true,
+    "option_pnl_is_shadow_quote_pnl": true,
+    "option_quotes_recorded": true,
+    "paper_orders_allowed": false,
+    "place_order_method_available": false,
+    "position_access_required": false,
+    "prospective_collection": true,
+    "r1_frozen_comparison": true,
+    "record_only": true,
+    "research_only": true,
+    "strategy_promotion": false
+  }
+}

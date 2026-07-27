@@ -1,0 +1,4663 @@
+{
+  "broker_required": false,
+  "defined_risk_cases": 50,
+  "defined_risk_inputs": [
+    {
+      "case": 0,
+      "contracts": [
+        {
+          "con_id": 10001,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10002,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10003,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10004,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10005,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10006,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.0,
+      "underlying_path": [
+        100.0,
+        101.5,
+        98.5
+      ]
+    },
+    {
+      "case": 1,
+      "contracts": [
+        {
+          "con_id": 10011,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10012,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10013,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10014,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10015,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10016,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.01,
+      "underlying_path": [
+        100.01,
+        101.51,
+        98.51
+      ]
+    },
+    {
+      "case": 2,
+      "contracts": [
+        {
+          "con_id": 10021,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10022,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10023,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10024,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10025,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10026,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.02,
+      "underlying_path": [
+        100.02,
+        101.52,
+        98.52
+      ]
+    },
+    {
+      "case": 3,
+      "contracts": [
+        {
+          "con_id": 10031,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10032,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10033,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10034,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10035,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10036,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.03,
+      "underlying_path": [
+        100.03,
+        101.53,
+        98.53
+      ]
+    },
+    {
+      "case": 4,
+      "contracts": [
+        {
+          "con_id": 10041,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10042,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10043,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10044,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10045,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10046,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.04,
+      "underlying_path": [
+        100.04,
+        101.54,
+        98.54
+      ]
+    },
+    {
+      "case": 5,
+      "contracts": [
+        {
+          "con_id": 10051,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10052,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10053,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10054,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10055,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10056,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.05,
+      "underlying_path": [
+        100.05,
+        101.55,
+        98.55
+      ]
+    },
+    {
+      "case": 6,
+      "contracts": [
+        {
+          "con_id": 10061,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10062,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10063,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10064,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10065,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10066,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.06,
+      "underlying_path": [
+        100.06,
+        101.56,
+        98.56
+      ]
+    },
+    {
+      "case": 7,
+      "contracts": [
+        {
+          "con_id": 10071,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10072,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10073,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10074,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10075,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10076,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.07,
+      "underlying_path": [
+        100.07,
+        101.57,
+        98.57
+      ]
+    },
+    {
+      "case": 8,
+      "contracts": [
+        {
+          "con_id": 10081,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10082,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10083,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10084,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10085,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10086,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.08,
+      "underlying_path": [
+        100.08,
+        101.58,
+        98.58
+      ]
+    },
+    {
+      "case": 9,
+      "contracts": [
+        {
+          "con_id": 10091,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10092,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10093,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10094,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10095,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10096,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.09,
+      "underlying_path": [
+        100.09,
+        101.59,
+        98.59
+      ]
+    },
+    {
+      "case": 10,
+      "contracts": [
+        {
+          "con_id": 10101,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10102,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10103,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10104,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10105,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10106,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.1,
+      "underlying_path": [
+        100.1,
+        101.6,
+        98.6
+      ]
+    },
+    {
+      "case": 11,
+      "contracts": [
+        {
+          "con_id": 10111,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10112,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10113,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10114,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10115,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10116,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.11,
+      "underlying_path": [
+        100.11,
+        101.61,
+        98.61
+      ]
+    },
+    {
+      "case": 12,
+      "contracts": [
+        {
+          "con_id": 10121,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10122,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10123,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10124,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10125,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10126,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.12,
+      "underlying_path": [
+        100.12,
+        101.62,
+        98.62
+      ]
+    },
+    {
+      "case": 13,
+      "contracts": [
+        {
+          "con_id": 10131,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10132,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10133,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10134,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10135,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10136,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.13,
+      "underlying_path": [
+        100.13,
+        101.63,
+        98.63
+      ]
+    },
+    {
+      "case": 14,
+      "contracts": [
+        {
+          "con_id": 10141,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10142,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10143,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10144,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10145,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10146,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.14,
+      "underlying_path": [
+        100.14,
+        101.64,
+        98.64
+      ]
+    },
+    {
+      "case": 15,
+      "contracts": [
+        {
+          "con_id": 10151,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10152,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10153,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10154,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10155,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10156,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.15,
+      "underlying_path": [
+        100.15,
+        101.65,
+        98.65
+      ]
+    },
+    {
+      "case": 16,
+      "contracts": [
+        {
+          "con_id": 10161,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10162,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10163,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10164,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10165,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10166,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.16,
+      "underlying_path": [
+        100.16,
+        101.66,
+        98.66
+      ]
+    },
+    {
+      "case": 17,
+      "contracts": [
+        {
+          "con_id": 10171,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10172,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10173,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10174,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10175,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10176,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.17,
+      "underlying_path": [
+        100.17,
+        101.67,
+        98.67
+      ]
+    },
+    {
+      "case": 18,
+      "contracts": [
+        {
+          "con_id": 10181,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10182,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10183,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10184,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10185,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10186,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.18,
+      "underlying_path": [
+        100.18,
+        101.68,
+        98.68
+      ]
+    },
+    {
+      "case": 19,
+      "contracts": [
+        {
+          "con_id": 10191,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10192,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10193,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10194,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10195,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10196,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.19,
+      "underlying_path": [
+        100.19,
+        101.69,
+        98.69
+      ]
+    },
+    {
+      "case": 20,
+      "contracts": [
+        {
+          "con_id": 10201,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10202,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10203,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10204,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10205,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10206,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.2,
+      "underlying_path": [
+        100.2,
+        101.7,
+        98.7
+      ]
+    },
+    {
+      "case": 21,
+      "contracts": [
+        {
+          "con_id": 10211,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10212,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10213,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10214,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10215,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10216,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.21,
+      "underlying_path": [
+        100.21,
+        101.71,
+        98.71
+      ]
+    },
+    {
+      "case": 22,
+      "contracts": [
+        {
+          "con_id": 10221,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10222,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10223,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10224,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10225,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10226,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.22,
+      "underlying_path": [
+        100.22,
+        101.72,
+        98.72
+      ]
+    },
+    {
+      "case": 23,
+      "contracts": [
+        {
+          "con_id": 10231,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10232,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10233,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10234,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10235,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10236,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.23,
+      "underlying_path": [
+        100.23,
+        101.73,
+        98.73
+      ]
+    },
+    {
+      "case": 24,
+      "contracts": [
+        {
+          "con_id": 10241,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10242,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10243,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10244,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10245,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10246,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.24,
+      "underlying_path": [
+        100.24,
+        101.74,
+        98.74
+      ]
+    },
+    {
+      "case": 25,
+      "contracts": [
+        {
+          "con_id": 10251,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10252,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10253,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10254,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10255,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10256,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.25,
+      "underlying_path": [
+        100.25,
+        101.75,
+        98.75
+      ]
+    },
+    {
+      "case": 26,
+      "contracts": [
+        {
+          "con_id": 10261,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10262,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10263,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10264,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10265,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10266,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.26,
+      "underlying_path": [
+        100.26,
+        101.76,
+        98.76
+      ]
+    },
+    {
+      "case": 27,
+      "contracts": [
+        {
+          "con_id": 10271,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10272,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10273,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10274,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10275,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10276,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.27,
+      "underlying_path": [
+        100.27,
+        101.77,
+        98.77
+      ]
+    },
+    {
+      "case": 28,
+      "contracts": [
+        {
+          "con_id": 10281,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10282,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10283,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10284,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10285,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10286,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.28,
+      "underlying_path": [
+        100.28,
+        101.78,
+        98.78
+      ]
+    },
+    {
+      "case": 29,
+      "contracts": [
+        {
+          "con_id": 10291,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10292,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10293,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10294,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10295,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10296,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.29,
+      "underlying_path": [
+        100.29,
+        101.79,
+        98.79
+      ]
+    },
+    {
+      "case": 30,
+      "contracts": [
+        {
+          "con_id": 10301,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10302,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10303,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10304,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10305,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10306,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.3,
+      "underlying_path": [
+        100.3,
+        101.8,
+        98.8
+      ]
+    },
+    {
+      "case": 31,
+      "contracts": [
+        {
+          "con_id": 10311,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10312,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10313,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10314,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10315,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10316,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.31,
+      "underlying_path": [
+        100.31,
+        101.81,
+        98.81
+      ]
+    },
+    {
+      "case": 32,
+      "contracts": [
+        {
+          "con_id": 10321,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10322,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10323,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10324,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10325,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10326,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.32,
+      "underlying_path": [
+        100.32,
+        101.82,
+        98.82
+      ]
+    },
+    {
+      "case": 33,
+      "contracts": [
+        {
+          "con_id": 10331,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10332,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10333,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10334,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10335,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10336,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.33,
+      "underlying_path": [
+        100.33,
+        101.83,
+        98.83
+      ]
+    },
+    {
+      "case": 34,
+      "contracts": [
+        {
+          "con_id": 10341,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10342,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10343,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10344,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10345,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10346,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.34,
+      "underlying_path": [
+        100.34,
+        101.84,
+        98.84
+      ]
+    },
+    {
+      "case": 35,
+      "contracts": [
+        {
+          "con_id": 10351,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10352,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10353,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10354,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10355,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10356,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.35,
+      "underlying_path": [
+        100.35,
+        101.85,
+        98.85
+      ]
+    },
+    {
+      "case": 36,
+      "contracts": [
+        {
+          "con_id": 10361,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10362,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10363,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10364,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10365,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10366,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.36,
+      "underlying_path": [
+        100.36,
+        101.86,
+        98.86
+      ]
+    },
+    {
+      "case": 37,
+      "contracts": [
+        {
+          "con_id": 10371,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10372,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10373,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10374,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10375,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10376,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.37,
+      "underlying_path": [
+        100.37,
+        101.87,
+        98.87
+      ]
+    },
+    {
+      "case": 38,
+      "contracts": [
+        {
+          "con_id": 10381,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10382,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10383,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10384,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10385,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10386,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.38,
+      "underlying_path": [
+        100.38,
+        101.88,
+        98.88
+      ]
+    },
+    {
+      "case": 39,
+      "contracts": [
+        {
+          "con_id": 10391,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10392,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10393,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10394,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10395,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10396,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.39,
+      "underlying_path": [
+        100.39,
+        101.89,
+        98.89
+      ]
+    },
+    {
+      "case": 40,
+      "contracts": [
+        {
+          "con_id": 10401,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10402,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10403,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10404,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10405,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10406,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.4,
+      "underlying_path": [
+        100.4,
+        101.9,
+        98.9
+      ]
+    },
+    {
+      "case": 41,
+      "contracts": [
+        {
+          "con_id": 10411,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10412,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10413,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10414,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10415,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10416,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.41,
+      "underlying_path": [
+        100.41,
+        101.91,
+        98.91
+      ]
+    },
+    {
+      "case": 42,
+      "contracts": [
+        {
+          "con_id": 10421,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10422,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10423,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10424,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10425,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10426,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.42,
+      "underlying_path": [
+        100.42,
+        101.92,
+        98.92
+      ]
+    },
+    {
+      "case": 43,
+      "contracts": [
+        {
+          "con_id": 10431,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10432,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10433,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10434,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10435,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10436,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.43,
+      "underlying_path": [
+        100.43,
+        101.93,
+        98.93
+      ]
+    },
+    {
+      "case": 44,
+      "contracts": [
+        {
+          "con_id": 10441,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10442,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10443,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10444,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10445,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10446,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.44,
+      "underlying_path": [
+        100.44,
+        101.94,
+        98.94
+      ]
+    },
+    {
+      "case": 45,
+      "contracts": [
+        {
+          "con_id": 10451,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10452,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10453,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10454,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10455,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10456,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.45,
+      "underlying_path": [
+        100.45,
+        101.95,
+        98.95
+      ]
+    },
+    {
+      "case": 46,
+      "contracts": [
+        {
+          "con_id": 10461,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10462,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10463,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10464,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10465,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10466,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.46,
+      "underlying_path": [
+        100.46,
+        101.96,
+        98.96
+      ]
+    },
+    {
+      "case": 47,
+      "contracts": [
+        {
+          "con_id": 10471,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10472,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10473,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10474,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10475,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10476,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.47,
+      "underlying_path": [
+        100.47,
+        101.97,
+        98.97
+      ]
+    },
+    {
+      "case": 48,
+      "contracts": [
+        {
+          "con_id": 10481,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10482,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10483,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10484,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10485,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10486,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.48,
+      "underlying_path": [
+        100.48,
+        101.98,
+        98.98
+      ]
+    },
+    {
+      "case": 49,
+      "contracts": [
+        {
+          "con_id": 10491,
+          "delta": -0.1,
+          "entry_ask": 0.35,
+          "entry_bid": 0.3,
+          "exit_ask": 0.26249999999999996,
+          "exit_bid": 0.22499999999999998,
+          "right": "P",
+          "strike": 95.0
+        },
+        {
+          "con_id": 10492,
+          "delta": -0.25,
+          "entry_ask": 0.95,
+          "entry_bid": 0.85,
+          "exit_ask": 0.7124999999999999,
+          "exit_bid": 0.6375,
+          "right": "P",
+          "strike": 98.0
+        },
+        {
+          "con_id": 10493,
+          "delta": -0.5,
+          "entry_ask": 1.85,
+          "entry_bid": 1.7,
+          "exit_ask": 1.3875000000000002,
+          "exit_bid": 1.275,
+          "right": "P",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10494,
+          "delta": 0.5,
+          "entry_ask": 1.8,
+          "entry_bid": 1.65,
+          "exit_ask": 1.35,
+          "exit_bid": 1.2374999999999998,
+          "right": "C",
+          "strike": 100.0
+        },
+        {
+          "con_id": 10495,
+          "delta": 0.25,
+          "entry_ask": 0.9,
+          "entry_bid": 0.8,
+          "exit_ask": 0.675,
+          "exit_bid": 0.6000000000000001,
+          "right": "C",
+          "strike": 102.0
+        },
+        {
+          "con_id": 10496,
+          "delta": 0.1,
+          "entry_ask": 0.3,
+          "entry_bid": 0.25,
+          "exit_ask": 0.22499999999999998,
+          "exit_bid": 0.1875,
+          "right": "C",
+          "strike": 105.0
+        }
+      ],
+      "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+      "exit_timestamp_utc": "2026-07-27T14:15:00+00:00",
+      "underlying_entry": 100.49,
+      "underlying_path": [
+        100.49,
+        101.99,
+        98.99
+      ]
+    }
+  ],
+  "entry_timestamp_utc": "2026-07-27T14:00:00+00:00",
+  "fixture_version": "m1c-quiet-state-replay-fixture-v0",
+  "prediction_inputs": [
+    {
+      "checkpoint": 6,
+      "eligible": true,
+      "feature_offset_seed": 0,
+      "missing_feature_index": 0,
+      "row": 0,
+      "session": "2026-07-27",
+      "symbol": "AAL",
+      "timestamp_utc": "2026-07-27T14:00:00+00:00"
+    },
+    {
+      "checkpoint": 8,
+      "eligible": true,
+      "feature_offset_seed": 1,
+      "missing_feature_index": null,
+      "row": 1,
+      "session": "2026-07-27",
+      "symbol": "AAOI",
+      "timestamp_utc": "2026-07-27T14:05:00+00:00"
+    },
+    {
+      "checkpoint": 10,
+      "eligible": true,
+      "feature_offset_seed": 2,
+      "missing_feature_index": null,
+      "row": 2,
+      "session": "2026-07-27",
+      "symbol": "APLD",
+      "timestamp_utc": "2026-07-27T14:10:00+00:00"
+    },
+    {
+      "checkpoint": 12,
+      "eligible": true,
+      "feature_offset_seed": 3,
+      "missing_feature_index": null,
+      "row": 3,
+      "session": "2026-07-27",
+      "symbol": "ASTS",
+      "timestamp_utc": "2026-07-27T14:15:00+00:00"
+    },
+    {
+      "checkpoint": 14,
+      "eligible": true,
+      "feature_offset_seed": 4,
+      "missing_feature_index": null,
+      "row": 4,
+      "session": "2026-07-27",
+      "symbol": "CIFR",
+      "timestamp_utc": "2026-07-27T14:20:00+00:00"
+    },
+    {
+      "checkpoint": 16,
+      "eligible": true,
+      "feature_offset_seed": 5,
+      "missing_feature_index": null,
+      "row": 5,
+      "session": "2026-07-27",
+      "symbol": "HIMS",
+      "timestamp_utc": "2026-07-27T14:25:00+00:00"
+    },
+    {
+      "checkpoint": 18,
+      "eligible": true,
+      "feature_offset_seed": 6,
+      "missing_feature_index": null,
+      "row": 6,
+      "session": "2026-07-27",
+      "symbol": "IONQ",
+      "timestamp_utc": "2026-07-27T14:30:00+00:00"
+    },
+    {
+      "checkpoint": 20,
+      "eligible": true,
+      "feature_offset_seed": 7,
+      "missing_feature_index": null,
+      "row": 7,
+      "session": "2026-07-27",
+      "symbol": "IREN",
+      "timestamp_utc": "2026-07-27T14:35:00+00:00"
+    },
+    {
+      "checkpoint": 22,
+      "eligible": true,
+      "feature_offset_seed": 8,
+      "missing_feature_index": null,
+      "row": 8,
+      "session": "2026-07-27",
+      "symbol": "MARA",
+      "timestamp_utc": "2026-07-27T14:40:00+00:00"
+    },
+    {
+      "checkpoint": 24,
+      "eligible": true,
+      "feature_offset_seed": 9,
+      "missing_feature_index": null,
+      "row": 9,
+      "session": "2026-07-27",
+      "symbol": "MP",
+      "timestamp_utc": "2026-07-27T14:45:00+00:00"
+    },
+    {
+      "checkpoint": 26,
+      "eligible": true,
+      "feature_offset_seed": 10,
+      "missing_feature_index": null,
+      "row": 10,
+      "session": "2026-07-27",
+      "symbol": "MRNA",
+      "timestamp_utc": "2026-07-27T14:50:00+00:00"
+    },
+    {
+      "checkpoint": 28,
+      "eligible": true,
+      "feature_offset_seed": 11,
+      "missing_feature_index": null,
+      "row": 11,
+      "session": "2026-07-27",
+      "symbol": "MSTR",
+      "timestamp_utc": "2026-07-27T14:55:00+00:00"
+    },
+    {
+      "checkpoint": 30,
+      "eligible": true,
+      "feature_offset_seed": 12,
+      "missing_feature_index": null,
+      "row": 12,
+      "session": "2026-07-27",
+      "symbol": "NVTS",
+      "timestamp_utc": "2026-07-27T15:00:00+00:00"
+    },
+    {
+      "checkpoint": 32,
+      "eligible": true,
+      "feature_offset_seed": 13,
+      "missing_feature_index": null,
+      "row": 13,
+      "session": "2026-07-27",
+      "symbol": "QBTS",
+      "timestamp_utc": "2026-07-27T15:05:00+00:00"
+    },
+    {
+      "checkpoint": 34,
+      "eligible": true,
+      "feature_offset_seed": 14,
+      "missing_feature_index": null,
+      "row": 14,
+      "session": "2026-07-27",
+      "symbol": "RGTI",
+      "timestamp_utc": "2026-07-27T15:10:00+00:00"
+    },
+    {
+      "checkpoint": 6,
+      "eligible": true,
+      "feature_offset_seed": 15,
+      "missing_feature_index": null,
+      "row": 15,
+      "session": "2026-07-27",
+      "symbol": "RIOT",
+      "timestamp_utc": "2026-07-27T15:15:00+00:00"
+    },
+    {
+      "checkpoint": 8,
+      "eligible": true,
+      "feature_offset_seed": 16,
+      "missing_feature_index": null,
+      "row": 16,
+      "session": "2026-07-27",
+      "symbol": "RIVN",
+      "timestamp_utc": "2026-07-27T15:20:00+00:00"
+    },
+    {
+      "checkpoint": 10,
+      "eligible": true,
+      "feature_offset_seed": 17,
+      "missing_feature_index": null,
+      "row": 17,
+      "session": "2026-07-27",
+      "symbol": "SMCI",
+      "timestamp_utc": "2026-07-27T15:25:00+00:00"
+    },
+    {
+      "checkpoint": 12,
+      "eligible": true,
+      "feature_offset_seed": 18,
+      "missing_feature_index": null,
+      "row": 18,
+      "session": "2026-07-27",
+      "symbol": "SOFI",
+      "timestamp_utc": "2026-07-27T15:30:00+00:00"
+    },
+    {
+      "checkpoint": 14,
+      "eligible": true,
+      "feature_offset_seed": 19,
+      "missing_feature_index": 19,
+      "row": 19,
+      "session": "2026-07-27",
+      "symbol": "WULF",
+      "timestamp_utc": "2026-07-27T15:35:00+00:00"
+    },
+    {
+      "checkpoint": 16,
+      "eligible": true,
+      "feature_offset_seed": 20,
+      "missing_feature_index": null,
+      "row": 20,
+      "session": "2026-07-28",
+      "symbol": "AAL",
+      "timestamp_utc": "2026-07-28T14:00:00+00:00"
+    },
+    {
+      "checkpoint": 18,
+      "eligible": true,
+      "feature_offset_seed": 21,
+      "missing_feature_index": null,
+      "row": 21,
+      "session": "2026-07-28",
+      "symbol": "AAOI",
+      "timestamp_utc": "2026-07-28T14:05:00+00:00"
+    },
+    {
+      "checkpoint": 20,
+      "eligible": true,
+      "feature_offset_seed": 22,
+      "missing_feature_index": null,
+      "row": 22,
+      "session": "2026-07-28",
+      "symbol": "APLD",
+      "timestamp_utc": "2026-07-28T14:10:00+00:00"
+    },
+    {
+      "checkpoint": 22,
+      "eligible": true,
+      "feature_offset_seed": 23,
+      "missing_feature_index": null,
+      "row": 23,
+      "session": "2026-07-28",
+      "symbol": "ASTS",
+      "timestamp_utc": "2026-07-28T14:15:00+00:00"
+    },
+    {
+      "checkpoint": 24,
+      "eligible": true,
+      "feature_offset_seed": 24,
+      "missing_feature_index": null,
+      "row": 24,
+      "session": "2026-07-28",
+      "symbol": "CIFR",
+      "timestamp_utc": "2026-07-28T14:20:00+00:00"
+    },
+    {
+      "checkpoint": 26,
+      "eligible": true,
+      "feature_offset_seed": 25,
+      "missing_feature_index": null,
+      "row": 25,
+      "session": "2026-07-28",
+      "symbol": "HIMS",
+      "timestamp_utc": "2026-07-28T14:25:00+00:00"
+    },
+    {
+      "checkpoint": 28,
+      "eligible": true,
+      "feature_offset_seed": 26,
+      "missing_feature_index": null,
+      "row": 26,
+      "session": "2026-07-28",
+      "symbol": "IONQ",
+      "timestamp_utc": "2026-07-28T14:30:00+00:00"
+    },
+    {
+      "checkpoint": 30,
+      "eligible": true,
+      "feature_offset_seed": 27,
+      "missing_feature_index": null,
+      "row": 27,
+      "session": "2026-07-28",
+      "symbol": "IREN",
+      "timestamp_utc": "2026-07-28T14:35:00+00:00"
+    },
+    {
+      "checkpoint": 32,
+      "eligible": true,
+      "feature_offset_seed": 28,
+      "missing_feature_index": null,
+      "row": 28,
+      "session": "2026-07-28",
+      "symbol": "MARA",
+      "timestamp_utc": "2026-07-28T14:40:00+00:00"
+    },
+    {
+      "checkpoint": 34,
+      "eligible": true,
+      "feature_offset_seed": 29,
+      "missing_feature_index": null,
+      "row": 29,
+      "session": "2026-07-28",
+      "symbol": "MP",
+      "timestamp_utc": "2026-07-28T14:45:00+00:00"
+    },
+    {
+      "checkpoint": 6,
+      "eligible": true,
+      "feature_offset_seed": 30,
+      "missing_feature_index": null,
+      "row": 30,
+      "session": "2026-07-28",
+      "symbol": "MRNA",
+      "timestamp_utc": "2026-07-28T14:50:00+00:00"
+    },
+    {
+      "checkpoint": 8,
+      "eligible": true,
+      "feature_offset_seed": 31,
+      "missing_feature_index": null,
+      "row": 31,
+      "session": "2026-07-28",
+      "symbol": "MSTR",
+      "timestamp_utc": "2026-07-28T14:55:00+00:00"
+    },
+    {
+      "checkpoint": 10,
+      "eligible": true,
+      "feature_offset_seed": 32,
+      "missing_feature_index": null,
+      "row": 32,
+      "session": "2026-07-28",
+      "symbol": "NVTS",
+      "timestamp_utc": "2026-07-28T15:00:00+00:00"
+    },
+    {
+      "checkpoint": 12,
+      "eligible": true,
+      "feature_offset_seed": 33,
+      "missing_feature_index": null,
+      "row": 33,
+      "session": "2026-07-28",
+      "symbol": "QBTS",
+      "timestamp_utc": "2026-07-28T15:05:00+00:00"
+    },
+    {
+      "checkpoint": 14,
+      "eligible": true,
+      "feature_offset_seed": 34,
+      "missing_feature_index": null,
+      "row": 34,
+      "session": "2026-07-28",
+      "symbol": "RGTI",
+      "timestamp_utc": "2026-07-28T15:10:00+00:00"
+    },
+    {
+      "checkpoint": 16,
+      "eligible": true,
+      "feature_offset_seed": 35,
+      "missing_feature_index": null,
+      "row": 35,
+      "session": "2026-07-28",
+      "symbol": "RIOT",
+      "timestamp_utc": "2026-07-28T15:15:00+00:00"
+    },
+    {
+      "checkpoint": 18,
+      "eligible": true,
+      "feature_offset_seed": 36,
+      "missing_feature_index": null,
+      "row": 36,
+      "session": "2026-07-28",
+      "symbol": "RIVN",
+      "timestamp_utc": "2026-07-28T15:20:00+00:00"
+    },
+    {
+      "checkpoint": 20,
+      "eligible": true,
+      "feature_offset_seed": 37,
+      "missing_feature_index": null,
+      "row": 37,
+      "session": "2026-07-28",
+      "symbol": "SMCI",
+      "timestamp_utc": "2026-07-28T15:25:00+00:00"
+    },
+    {
+      "checkpoint": 22,
+      "eligible": true,
+      "feature_offset_seed": 38,
+      "missing_feature_index": 38,
+      "row": 38,
+      "session": "2026-07-28",
+      "symbol": "SOFI",
+      "timestamp_utc": "2026-07-28T15:30:00+00:00"
+    },
+    {
+      "checkpoint": 24,
+      "eligible": true,
+      "feature_offset_seed": 39,
+      "missing_feature_index": null,
+      "row": 39,
+      "session": "2026-07-28",
+      "symbol": "WULF",
+      "timestamp_utc": "2026-07-28T15:35:00+00:00"
+    },
+    {
+      "checkpoint": 26,
+      "eligible": true,
+      "feature_offset_seed": 40,
+      "missing_feature_index": null,
+      "row": 40,
+      "session": "2026-07-29",
+      "symbol": "AAL",
+      "timestamp_utc": "2026-07-29T14:00:00+00:00"
+    },
+    {
+      "checkpoint": 28,
+      "eligible": true,
+      "feature_offset_seed": 41,
+      "missing_feature_index": null,
+      "row": 41,
+      "session": "2026-07-29",
+      "symbol": "AAOI",
+      "timestamp_utc": "2026-07-29T14:05:00+00:00"
+    },
+    {
+      "checkpoint": 30,
+      "eligible": true,
+      "feature_offset_seed": 42,
+      "missing_feature_index": null,
+      "row": 42,
+      "session": "2026-07-29",
+      "symbol": "APLD",
+      "timestamp_utc": "2026-07-29T14:10:00+00:00"
+    },
+    {
+      "checkpoint": 32,
+      "eligible": true,
+      "feature_offset_seed": 43,
+      "missing_feature_index": null,
+      "row": 43,
+      "session": "2026-07-29",
+      "symbol": "ASTS",
+      "timestamp_utc": "2026-07-29T14:15:00+00:00"
+    },
+    {
+      "checkpoint": 34,
+      "eligible": true,
+      "feature_offset_seed": 44,
+      "missing_feature_index": null,
+      "row": 44,
+      "session": "2026-07-29",
+      "symbol": "CIFR",
+      "timestamp_utc": "2026-07-29T14:20:00+00:00"
+    },
+    {
+      "checkpoint": 6,
+      "eligible": true,
+      "feature_offset_seed": 45,
+      "missing_feature_index": null,
+      "row": 45,
+      "session": "2026-07-29",
+      "symbol": "HIMS",
+      "timestamp_utc": "2026-07-29T14:25:00+00:00"
+    },
+    {
+      "checkpoint": 8,
+      "eligible": true,
+      "feature_offset_seed": 46,
+      "missing_feature_index": null,
+      "row": 46,
+      "session": "2026-07-29",
+      "symbol": "IONQ",
+      "timestamp_utc": "2026-07-29T14:30:00+00:00"
+    },
+    {
+      "checkpoint": 10,
+      "eligible": true,
+      "feature_offset_seed": 47,
+      "missing_feature_index": null,
+      "row": 47,
+      "session": "2026-07-29",
+      "symbol": "IREN",
+      "timestamp_utc": "2026-07-29T14:35:00+00:00"
+    },
+    {
+      "checkpoint": 12,
+      "eligible": true,
+      "feature_offset_seed": 48,
+      "missing_feature_index": null,
+      "row": 48,
+      "session": "2026-07-29",
+      "symbol": "MARA",
+      "timestamp_utc": "2026-07-29T14:40:00+00:00"
+    },
+    {
+      "checkpoint": 14,
+      "eligible": true,
+      "feature_offset_seed": 49,
+      "missing_feature_index": null,
+      "row": 49,
+      "session": "2026-07-29",
+      "symbol": "MP",
+      "timestamp_utc": "2026-07-29T14:45:00+00:00"
+    },
+    {
+      "checkpoint": 16,
+      "eligible": true,
+      "feature_offset_seed": 50,
+      "missing_feature_index": null,
+      "row": 50,
+      "session": "2026-07-29",
+      "symbol": "MRNA",
+      "timestamp_utc": "2026-07-29T14:50:00+00:00"
+    },
+    {
+      "checkpoint": 18,
+      "eligible": true,
+      "feature_offset_seed": 51,
+      "missing_feature_index": null,
+      "row": 51,
+      "session": "2026-07-29",
+      "symbol": "MSTR",
+      "timestamp_utc": "2026-07-29T14:55:00+00:00"
+    },
+    {
+      "checkpoint": 20,
+      "eligible": true,
+      "feature_offset_seed": 52,
+      "missing_feature_index": null,
+      "row": 52,
+      "session": "2026-07-29",
+      "symbol": "NVTS",
+      "timestamp_utc": "2026-07-29T15:00:00+00:00"
+    },
+    {
+      "checkpoint": 22,
+      "eligible": true,
+      "feature_offset_seed": 53,
+      "missing_feature_index": null,
+      "row": 53,
+      "session": "2026-07-29",
+      "symbol": "QBTS",
+      "timestamp_utc": "2026-07-29T15:05:00+00:00"
+    },
+    {
+      "checkpoint": 24,
+      "eligible": true,
+      "feature_offset_seed": 54,
+      "missing_feature_index": null,
+      "row": 54,
+      "session": "2026-07-29",
+      "symbol": "RGTI",
+      "timestamp_utc": "2026-07-29T15:10:00+00:00"
+    },
+    {
+      "checkpoint": 26,
+      "eligible": true,
+      "feature_offset_seed": 55,
+      "missing_feature_index": null,
+      "row": 55,
+      "session": "2026-07-29",
+      "symbol": "RIOT",
+      "timestamp_utc": "2026-07-29T15:15:00+00:00"
+    },
+    {
+      "checkpoint": 28,
+      "eligible": true,
+      "feature_offset_seed": 56,
+      "missing_feature_index": null,
+      "row": 56,
+      "session": "2026-07-29",
+      "symbol": "RIVN",
+      "timestamp_utc": "2026-07-29T15:20:00+00:00"
+    },
+    {
+      "checkpoint": 30,
+      "eligible": true,
+      "feature_offset_seed": 57,
+      "missing_feature_index": 14,
+      "row": 57,
+      "session": "2026-07-29",
+      "symbol": "SMCI",
+      "timestamp_utc": "2026-07-29T15:25:00+00:00"
+    },
+    {
+      "checkpoint": 32,
+      "eligible": true,
+      "feature_offset_seed": 58,
+      "missing_feature_index": null,
+      "row": 58,
+      "session": "2026-07-29",
+      "symbol": "SOFI",
+      "timestamp_utc": "2026-07-29T15:30:00+00:00"
+    },
+    {
+      "checkpoint": 34,
+      "eligible": true,
+      "feature_offset_seed": 59,
+      "missing_feature_index": null,
+      "row": 59,
+      "session": "2026-07-29",
+      "symbol": "WULF",
+      "timestamp_utc": "2026-07-29T15:35:00+00:00"
+    },
+    {
+      "checkpoint": 6,
+      "eligible": true,
+      "feature_offset_seed": 60,
+      "missing_feature_index": null,
+      "row": 60,
+      "session": "2026-07-30",
+      "symbol": "AAL",
+      "timestamp_utc": "2026-07-30T14:00:00+00:00"
+    },
+    {
+      "checkpoint": 8,
+      "eligible": true,
+      "feature_offset_seed": 61,
+      "missing_feature_index": null,
+      "row": 61,
+      "session": "2026-07-30",
+      "symbol": "AAOI",
+      "timestamp_utc": "2026-07-30T14:05:00+00:00"
+    },
+    {
+      "checkpoint": 10,
+      "eligible": true,
+      "feature_offset_seed": 62,
+      "missing_feature_index": null,
+      "row": 62,
+      "session": "2026-07-30",
+      "symbol": "APLD",
+      "timestamp_utc": "2026-07-30T14:10:00+00:00"
+    },
+    {
+      "checkpoint": 12,
+      "eligible": true,
+      "feature_offset_seed": 63,
+      "missing_feature_index": null,
+      "row": 63,
+      "session": "2026-07-30",
+      "symbol": "ASTS",
+      "timestamp_utc": "2026-07-30T14:15:00+00:00"
+    },
+    {
+      "checkpoint": 14,
+      "eligible": true,
+      "feature_offset_seed": 64,
+      "missing_feature_index": null,
+      "row": 64,
+      "session": "2026-07-30",
+      "symbol": "CIFR",
+      "timestamp_utc": "2026-07-30T14:20:00+00:00"
+    },
+    {
+      "checkpoint": 16,
+      "eligible": true,
+      "feature_offset_seed": 65,
+      "missing_feature_index": null,
+      "row": 65,
+      "session": "2026-07-30",
+      "symbol": "HIMS",
+      "timestamp_utc": "2026-07-30T14:25:00+00:00"
+    },
+    {
+      "checkpoint": 18,
+      "eligible": true,
+      "feature_offset_seed": 66,
+      "missing_feature_index": null,
+      "row": 66,
+      "session": "2026-07-30",
+      "symbol": "IONQ",
+      "timestamp_utc": "2026-07-30T14:30:00+00:00"
+    },
+    {
+      "checkpoint": 20,
+      "eligible": true,
+      "feature_offset_seed": 67,
+      "missing_feature_index": null,
+      "row": 67,
+      "session": "2026-07-30",
+      "symbol": "IREN",
+      "timestamp_utc": "2026-07-30T14:35:00+00:00"
+    },
+    {
+      "checkpoint": 22,
+      "eligible": true,
+      "feature_offset_seed": 68,
+      "missing_feature_index": null,
+      "row": 68,
+      "session": "2026-07-30",
+      "symbol": "MARA",
+      "timestamp_utc": "2026-07-30T14:40:00+00:00"
+    },
+    {
+      "checkpoint": 24,
+      "eligible": true,
+      "feature_offset_seed": 69,
+      "missing_feature_index": null,
+      "row": 69,
+      "session": "2026-07-30",
+      "symbol": "MP",
+      "timestamp_utc": "2026-07-30T14:45:00+00:00"
+    },
+    {
+      "checkpoint": 26,
+      "eligible": true,
+      "feature_offset_seed": 70,
+      "missing_feature_index": null,
+      "row": 70,
+      "session": "2026-07-30",
+      "symbol": "MRNA",
+      "timestamp_utc": "2026-07-30T14:50:00+00:00"
+    },
+    {
+      "checkpoint": 28,
+      "eligible": true,
+      "feature_offset_seed": 71,
+      "missing_feature_index": null,
+      "row": 71,
+      "session": "2026-07-30",
+      "symbol": "MSTR",
+      "timestamp_utc": "2026-07-30T14:55:00+00:00"
+    },
+    {
+      "checkpoint": 30,
+      "eligible": true,
+      "feature_offset_seed": 72,
+      "missing_feature_index": null,
+      "row": 72,
+      "session": "2026-07-30",
+      "symbol": "NVTS",
+      "timestamp_utc": "2026-07-30T15:00:00+00:00"
+    },
+    {
+      "checkpoint": 32,
+      "eligible": true,
+      "feature_offset_seed": 73,
+      "missing_feature_index": null,
+      "row": 73,
+      "session": "2026-07-30",
+      "symbol": "QBTS",
+      "timestamp_utc": "2026-07-30T15:05:00+00:00"
+    },
+    {
+      "checkpoint": 34,
+      "eligible": true,
+      "feature_offset_seed": 74,
+      "missing_feature_index": null,
+      "row": 74,
+      "session": "2026-07-30",
+      "symbol": "RGTI",
+      "timestamp_utc": "2026-07-30T15:10:00+00:00"
+    },
+    {
+      "checkpoint": 6,
+      "eligible": true,
+      "feature_offset_seed": 75,
+      "missing_feature_index": null,
+      "row": 75,
+      "session": "2026-07-30",
+      "symbol": "RIOT",
+      "timestamp_utc": "2026-07-30T15:15:00+00:00"
+    },
+    {
+      "checkpoint": 8,
+      "eligible": true,
+      "feature_offset_seed": 76,
+      "missing_feature_index": 33,
+      "row": 76,
+      "session": "2026-07-30",
+      "symbol": "RIVN",
+      "timestamp_utc": "2026-07-30T15:20:00+00:00"
+    },
+    {
+      "checkpoint": 10,
+      "eligible": true,
+      "feature_offset_seed": 77,
+      "missing_feature_index": null,
+      "row": 77,
+      "session": "2026-07-30",
+      "symbol": "SMCI",
+      "timestamp_utc": "2026-07-30T15:25:00+00:00"
+    },
+    {
+      "checkpoint": 12,
+      "eligible": true,
+      "feature_offset_seed": 78,
+      "missing_feature_index": null,
+      "row": 78,
+      "session": "2026-07-30",
+      "symbol": "SOFI",
+      "timestamp_utc": "2026-07-30T15:30:00+00:00"
+    },
+    {
+      "checkpoint": 14,
+      "eligible": true,
+      "feature_offset_seed": 79,
+      "missing_feature_index": null,
+      "row": 79,
+      "session": "2026-07-30",
+      "symbol": "WULF",
+      "timestamp_utc": "2026-07-30T15:35:00+00:00"
+    },
+    {
+      "checkpoint": 16,
+      "eligible": true,
+      "feature_offset_seed": 80,
+      "missing_feature_index": null,
+      "row": 80,
+      "session": "2026-07-31",
+      "symbol": "AAL",
+      "timestamp_utc": "2026-07-31T14:00:00+00:00"
+    },
+    {
+      "checkpoint": 18,
+      "eligible": true,
+      "feature_offset_seed": 81,
+      "missing_feature_index": null,
+      "row": 81,
+      "session": "2026-07-31",
+      "symbol": "AAOI",
+      "timestamp_utc": "2026-07-31T14:05:00+00:00"
+    },
+    {
+      "checkpoint": 20,
+      "eligible": true,
+      "feature_offset_seed": 82,
+      "missing_feature_index": null,
+      "row": 82,
+      "session": "2026-07-31",
+      "symbol": "APLD",
+      "timestamp_utc": "2026-07-31T14:10:00+00:00"
+    },
+    {
+      "checkpoint": 22,
+      "eligible": true,
+      "feature_offset_seed": 83,
+      "missing_feature_index": null,
+      "row": 83,
+      "session": "2026-07-31",
+      "symbol": "ASTS",
+      "timestamp_utc": "2026-07-31T14:15:00+00:00"
+    },
+    {
+      "checkpoint": 24,
+      "eligible": true,
+      "feature_offset_seed": 84,
+      "missing_feature_index": null,
+      "row": 84,
+      "session": "2026-07-31",
+      "symbol": "CIFR",
+      "timestamp_utc": "2026-07-31T14:20:00+00:00"
+    },
+    {
+      "checkpoint": 26,
+      "eligible": true,
+      "feature_offset_seed": 85,
+      "missing_feature_index": null,
+      "row": 85,
+      "session": "2026-07-31",
+      "symbol": "HIMS",
+      "timestamp_utc": "2026-07-31T14:25:00+00:00"
+    },
+    {
+      "checkpoint": 28,
+      "eligible": true,
+      "feature_offset_seed": 86,
+      "missing_feature_index": null,
+      "row": 86,
+      "session": "2026-07-31",
+      "symbol": "IONQ",
+      "timestamp_utc": "2026-07-31T14:30:00+00:00"
+    },
+    {
+      "checkpoint": 30,
+      "eligible": true,
+      "feature_offset_seed": 87,
+      "missing_feature_index": null,
+      "row": 87,
+      "session": "2026-07-31",
+      "symbol": "IREN",
+      "timestamp_utc": "2026-07-31T14:35:00+00:00"
+    },
+    {
+      "checkpoint": 32,
+      "eligible": true,
+      "feature_offset_seed": 88,
+      "missing_feature_index": null,
+      "row": 88,
+      "session": "2026-07-31",
+      "symbol": "MARA",
+      "timestamp_utc": "2026-07-31T14:40:00+00:00"
+    },
+    {
+      "checkpoint": 34,
+      "eligible": true,
+      "feature_offset_seed": 89,
+      "missing_feature_index": null,
+      "row": 89,
+      "session": "2026-07-31",
+      "symbol": "MP",
+      "timestamp_utc": "2026-07-31T14:45:00+00:00"
+    },
+    {
+      "checkpoint": 6,
+      "eligible": true,
+      "feature_offset_seed": 90,
+      "missing_feature_index": null,
+      "row": 90,
+      "session": "2026-07-31",
+      "symbol": "MRNA",
+      "timestamp_utc": "2026-07-31T14:50:00+00:00"
+    },
+    {
+      "checkpoint": 8,
+      "eligible": true,
+      "feature_offset_seed": 91,
+      "missing_feature_index": null,
+      "row": 91,
+      "session": "2026-07-31",
+      "symbol": "MSTR",
+      "timestamp_utc": "2026-07-31T14:55:00+00:00"
+    },
+    {
+      "checkpoint": 10,
+      "eligible": true,
+      "feature_offset_seed": 92,
+      "missing_feature_index": null,
+      "row": 92,
+      "session": "2026-07-31",
+      "symbol": "NVTS",
+      "timestamp_utc": "2026-07-31T15:00:00+00:00"
+    },
+    {
+      "checkpoint": 12,
+      "eligible": true,
+      "feature_offset_seed": 93,
+      "missing_feature_index": null,
+      "row": 93,
+      "session": "2026-07-31",
+      "symbol": "QBTS",
+      "timestamp_utc": "2026-07-31T15:05:00+00:00"
+    },
+    {
+      "checkpoint": 14,
+      "eligible": true,
+      "feature_offset_seed": 94,
+      "missing_feature_index": null,
+      "row": 94,
+      "session": "2026-07-31",
+      "symbol": "RGTI",
+      "timestamp_utc": "2026-07-31T15:10:00+00:00"
+    },
+    {
+      "checkpoint": 16,
+      "eligible": true,
+      "feature_offset_seed": 95,
+      "missing_feature_index": 9,
+      "row": 95,
+      "session": "2026-07-31",
+      "symbol": "RIOT",
+      "timestamp_utc": "2026-07-31T15:15:00+00:00"
+    },
+    {
+      "checkpoint": 18,
+      "eligible": true,
+      "feature_offset_seed": 96,
+      "missing_feature_index": null,
+      "row": 96,
+      "session": "2026-07-31",
+      "symbol": "RIVN",
+      "timestamp_utc": "2026-07-31T15:20:00+00:00"
+    },
+    {
+      "checkpoint": 20,
+      "eligible": true,
+      "feature_offset_seed": 97,
+      "missing_feature_index": null,
+      "row": 97,
+      "session": "2026-07-31",
+      "symbol": "SMCI",
+      "timestamp_utc": "2026-07-31T15:25:00+00:00"
+    },
+    {
+      "checkpoint": 22,
+      "eligible": true,
+      "feature_offset_seed": 98,
+      "missing_feature_index": null,
+      "row": 98,
+      "session": "2026-07-31",
+      "symbol": "SOFI",
+      "timestamp_utc": "2026-07-31T15:30:00+00:00"
+    },
+    {
+      "checkpoint": 24,
+      "eligible": true,
+      "feature_offset_seed": 99,
+      "missing_feature_index": null,
+      "row": 99,
+      "session": "2026-07-31",
+      "symbol": "WULF",
+      "timestamp_utc": "2026-07-31T15:35:00+00:00"
+    }
+  ],
+  "prediction_rows": 100,
+  "research_only": true,
+  "session": "2026-07-27"
+}

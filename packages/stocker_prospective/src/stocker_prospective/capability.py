@@ -42,7 +42,7 @@ class IBKRCapabilityManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: str
-    claims_boundary: dict[str, bool | float]
+    claims_boundary: dict[str, bool | float | str]
     observed_at_utc: datetime
     observation: CapabilityObservation
     required_underlyings: tuple[str, ...]

@@ -355,7 +355,7 @@ def _last_valid_exit(
         )
         if (
             quote.bid is not None
-            and quote.bid > 0.0
+            and quote.bid >= 0.0
             and not flags.crossed_quote
             and not flags.stale_quote
             and not flags.market_data_not_live

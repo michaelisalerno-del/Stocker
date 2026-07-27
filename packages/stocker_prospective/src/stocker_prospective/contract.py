@@ -7,14 +7,58 @@ import json
 from typing import Final
 
 M1C_FROZEN_THRESHOLD: Final[float] = 0.488333710794033
+M1C_BOTTOM_5_THRESHOLD: Final[float] = 0.115697407847643
+M1C_BOTTOM_10_THRESHOLD: Final[float] = 0.135896965695626
+M1C_BOTTOM_20_THRESHOLD: Final[float] = 0.167095528962669
+M1C_FEATURE_MANIFEST_SHA256: Final[str] = (
+    "6f59177a58973d33a24741e3c265e1831bfb6dc07afac17ae371501019bdc5cc"
+)
+M1C_THRESHOLD_ARTIFACT_SHA256: Final[str] = (
+    "1aae6b7b28bf0f51b914d069bb31ac2e209b43ddaaa938fd373c55a2e65cbabe"
+)
+M1C_SCALING_ARTIFACT_SHA256: Final[str] = (
+    "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2"
+)
+SECTOR_PROXY_BY_SYMBOL: Final[dict[str, str]] = {
+    "AAL": "XLI",
+    "AAOI": "XLK",
+    "APLD": "XLK",
+    "ASTS": "XLC",
+    "CIFR": "XLK",
+    "HIMS": "XLV",
+    "IONQ": "XLK",
+    "IREN": "XLK",
+    "MARA": "XLK",
+    "MP": "XLB",
+    "MRNA": "XLV",
+    "MSTR": "XLK",
+    "NVTS": "XLK",
+    "QBTS": "XLK",
+    "RGTI": "XLK",
+    "RIOT": "XLK",
+    "RIVN": "XLY",
+    "SMCI": "XLK",
+    "SOFI": "XLF",
+    "WULF": "XLK",
+}
 CONTRACT_VERSION: Final[str] = "frozen-m1c-microstructure-recorder-v0"
+ORIGINAL_LOW_MOVEMENT_DECISION: Final[str] = "blocked_insufficient_low_tail_support"
+type ClaimValue = bool | float | str
 
-CLAIMS_BOUNDARY: Final[dict[str, bool | float]] = {
+CLAIMS_BOUNDARY: Final[dict[str, ClaimValue]] = {
     "research_only": True,
+    "original_low_movement_decision_preserved": True,
+    "original_decision": ORIGINAL_LOW_MOVEMENT_DECISION,
+    "retrospective_gate_relaxation_allowed": False,
     "prospective_collection": True,
+    "prospective_record_only": True,
     "record_only": True,
     "m1c_frozen": True,
     "m1c_threshold": M1C_FROZEN_THRESHOLD,
+    "m1c_bottom_5_threshold": M1C_BOTTOM_5_THRESHOLD,
+    "m1c_bottom_10_threshold": M1C_BOTTOM_10_THRESHOLD,
+    "m1c_bottom_20_threshold": M1C_BOTTOM_20_THRESHOLD,
+    "primary_quiet_state": "bottom_10_percent",
     "a1_frozen_prospective_hypothesis": True,
     "c1_frozen_comparison": True,
     "r1_frozen_comparison": True,
@@ -22,14 +66,19 @@ CLAIMS_BOUNDARY: Final[dict[str, bool | float]] = {
     "microstructure_direction_model_fitted": False,
     "option_quotes_recorded": True,
     "option_pnl_is_shadow_quote_pnl": True,
+    "option_shadow_outcomes_only": True,
+    "defined_risk_short_premium_only": True,
+    "naked_short_options_allowed": False,
     "paper_orders_allowed": False,
     "live_orders_allowed": False,
+    "broker_order_methods_allowed": False,
     "place_order_method_available": False,
     "broker_account_mutation_allowed": False,
     "position_access_required": False,
     "account_balance_access_required": False,
     "execution_enabled": False,
     "strategy_promotion": False,
+    "protected_historical_start": "2026-01-01",
 }
 
 FORBIDDEN_BROKER_METHODS: Final[frozenset[str]] = frozenset(
@@ -46,7 +95,7 @@ FORBIDDEN_BROKER_METHODS: Final[frozenset[str]] = frozenset(
 )
 
 
-def claims_boundary() -> dict[str, bool | float]:
+def claims_boundary() -> dict[str, ClaimValue]:
     """Return a fresh JSON-safe copy for contracts and exported datasets."""
 
     return dict(CLAIMS_BOUNDARY)

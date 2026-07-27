@@ -387,6 +387,99 @@ def test_option_discovery_replaces_invalid_near_strikes_with_valid_common_pairs(
     assert selected == (95.0, 105.0, 110.0)
 
 
+def test_quiet_option_discovery_uses_bounded_broad_symmetric_offsets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = BoundedOptionDiscoveryService(
+        adapter=cast(Any, object()),
+        option_recorder=cast(Any, object()),
+        budget=SubscriptionBudgetManager(
+            limits={kind: 0 for kind in SubscriptionKind},
+            request_rate_limit=100,
+        ),
+        underlying_contracts={},
+        contract_factory=lambda *_args: object(),
+        metadata_factory=lambda _observed, _sources: cast(Any, None),
+        reference_quote_provider=lambda _symbol, _timestamp: None,
+        common_strike_fallback_attempts=3,
+    )
+    monkeypatch.setattr(service, "_qualify_pair", lambda **_kwargs: True)
+    episode = _PendingEpisode(
+        episode_id="quiet-common",
+        symbol="AAL",
+        session=date(2026, 7, 24),
+        entry_timestamp=ENTRY,
+        underlying=QualifiedUnderlying(
+            symbol="AAL",
+            con_id=123,
+            upstream_contract=object(),
+            exchange="SMART",
+        ),
+        directional_actions={},
+        quiet_state=True,
+        strike_steps=4,
+        maximum_contracts=54,
+    )
+
+    selected = service._qualify_valid_common_strikes(
+        episode=episode,
+        expiry=date(2026, 7, 24),
+        candidate_strikes=tuple(float(value) for value in range(90, 111)),
+        underlying_reference=100.0,
+        exchange="SMART",
+        trading_class="AAL",
+    )
+
+    assert selected == (90.0, 94.0, 97.0, 99.0, 100.0, 101.0, 103.0, 106.0, 110.0)
+    assert len(selected) * 2 == 18
+
+
+def test_quiet_option_discovery_excludes_sub_one_percent_fly_wings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = BoundedOptionDiscoveryService(
+        adapter=cast(Any, object()),
+        option_recorder=cast(Any, object()),
+        budget=SubscriptionBudgetManager(
+            limits={kind: 0 for kind in SubscriptionKind},
+            request_rate_limit=100,
+        ),
+        underlying_contracts={},
+        contract_factory=lambda *_args: object(),
+        metadata_factory=lambda _observed, _sources: cast(Any, None),
+        reference_quote_provider=lambda _symbol, _timestamp: None,
+        common_strike_fallback_attempts=2,
+    )
+    monkeypatch.setattr(service, "_qualify_pair", lambda **_kwargs: True)
+    episode = _PendingEpisode(
+        episode_id="quiet-minimum-wing",
+        symbol="AAL",
+        session=date(2026, 7, 24),
+        entry_timestamp=ENTRY,
+        underlying=QualifiedUnderlying(
+            symbol="AAL",
+            con_id=123,
+            upstream_contract=object(),
+            exchange="SMART",
+        ),
+        directional_actions={},
+        quiet_state=True,
+        strike_steps=1,
+        maximum_contracts=6,
+    )
+
+    selected = service._qualify_valid_common_strikes(
+        episode=episode,
+        expiry=date(2026, 7, 24),
+        candidate_strikes=(98.5, 99.5, 100.0, 100.5, 101.5),
+        underlying_reference=100.0,
+        exchange="SMART",
+        trading_class="AAL",
+    )
+
+    assert selected == (98.5, 100.0, 101.5)
+
+
 def option_quote(
     contract: OptionContract,
     seconds: int,

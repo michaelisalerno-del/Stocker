@@ -48,6 +48,12 @@ def config(
                 "database": str(tmp_path / "shared/data/prospective.sqlite3"),
                 "bundle_root": str(tmp_path / "shared/bundles"),
                 "feature_parity_report": str(ROOT / "configs/prospective/feature-parity-m1.json"),
+                "quiet_state_concentration_audit_root": str(
+                    ROOT
+                    / "research/options-feasibility"
+                    / "20260727-m1c-quiet-state-concentration-audit-v0"
+                    / "artifacts/primary"
+                ),
             },
             "runtime": {
                 "mode": "shadow",
@@ -268,9 +274,18 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     client = seeded_app(tmp_path)
     page = client.get("/")
     assert page.status_code == 200
-    assert "RECORD ONLY — ORDER ROUTING DISABLED" in page.text
+    assert "RESEARCH ONLY — RECORD ONLY — NO ORDERS" in page.text
     assert "A1 — PROSPECTIVE HYPOTHESIS, NOT VALIDATED" in page.text
+    assert 'id="quiet-universe"' in page.text
+    assert 'id="quiet-episode"' in page.text
+    assert 'id="quiet-shadow"' in page.text
+    assert 'id="concentration-audit"' in page.text
+    assert "BLOCKED_INSUFFICIENT_LOW_TAIL_SUPPORT" in page.text
+    assert "SHORT BID / LONG ASK OPEN" in page.text
     assert "retrospective oracle" not in page.text.lower()
+    script = client.get("/assets/app.js").text
+    assert "/api/quiet-state/universe" in script
+    assert "renderConcentrationAudit" in script
 
     for path in (
         "/api/recorder/status",
@@ -292,6 +307,39 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
         )
         assert response.status_code == 200
         assert response.json()["claims_boundary"] == claims_boundary()
+
+
+def test_quiet_state_read_only_api_preserves_frozen_decision(tmp_path: Path) -> None:
+    client = seeded_app(tmp_path)
+
+    for path in (
+        "/api/quiet-state/status",
+        "/api/quiet-state/universe",
+        "/api/quiet-state/episodes",
+        "/api/quiet-state/shadow-structures",
+        "/api/quiet-state/concentration-audit",
+        "/api/quiet-state/session-quality",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.json()["claims_boundary"] == claims_boundary()
+
+    status = client.get("/api/quiet-state/status").json()
+    assert status["banner"] == "RESEARCH ONLY — RECORD ONLY — NO ORDERS"
+    assert status["thresholds"] == {
+        "bottom_5": 0.115697407847643,
+        "bottom_10": 0.135896965695626,
+        "bottom_20": 0.167095528962669,
+        "high_tail": 0.488333710794033,
+    }
+    assert status["order_path"] == "absent"
+
+    audit = client.get("/api/quiet-state/concentration-audit").json()
+    assert audit["available"] is True
+    assert audit["original_gate_passed"] is False
+    assert audit["original_decision"] == "blocked_insufficient_low_tail_support"
+    assert audit["month_explanation"]["failed_stress_month"] == "2025-10"
+    assert audit["month_explanation"]["exact_failed_share"] == pytest.approx(0.3709677419354839)
 
 
 def test_web_sqlite_connections_cannot_write_domain_records(tmp_path: Path) -> None:

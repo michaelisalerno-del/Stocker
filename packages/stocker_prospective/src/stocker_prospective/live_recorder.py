@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
@@ -155,6 +155,7 @@ class FrozenM1CLiveRecorder:
         metadata_factory: MetadataFactory,
         universe_symbols: tuple[str, ...],
         market_proxy_symbol: str,
+        sector_proxy_by_symbol: Mapping[str, str] | None = None,
         readiness: ScientificReadiness,
         maximum_quote_age: timedelta,
         maximum_clock_drift_seconds: float = 2.0,
@@ -168,6 +169,11 @@ class FrozenM1CLiveRecorder:
             raise ValueError("frozen M1C live recorder requires the exact 20-stock cohort")
         if market_proxy_symbol in universe_symbols:
             raise ValueError("market proxy must remain outside the stock cohort")
+        sector_proxies = dict(sector_proxy_by_symbol or {})
+        if sector_proxies and set(sector_proxies) != set(universe_symbols):
+            raise ValueError("sector proxy map must cover the exact stock cohort")
+        if set(sector_proxies.values()).intersection((*universe_symbols, market_proxy_symbol)):
+            raise ValueError("sector proxies must remain outside stocks and the market proxy")
         if maximum_quote_age <= timedelta(0):
             raise ValueError("maximum quote age must be positive")
         if maximum_clock_drift_seconds <= 0.0:
@@ -188,6 +194,8 @@ class FrozenM1CLiveRecorder:
         self.metadata_factory = metadata_factory
         self.universe_symbols = universe_symbols
         self.market_proxy_symbol = market_proxy_symbol
+        self.sector_proxy_by_symbol = sector_proxies
+        self.context_proxy_symbols = frozenset((market_proxy_symbol, *sector_proxies.values()))
         self.readiness = readiness
         self.maximum_quote_age = maximum_quote_age
         self.maximum_clock_drift_seconds = maximum_clock_drift_seconds
@@ -214,6 +222,7 @@ class FrozenM1CLiveRecorder:
         self._bar_order: dict[tuple[int, datetime], tuple[int, int]] = {}
         self._episode_windows: dict[tuple[str, str], tuple[str, datetime, datetime]] = {}
         self._episode_actions: dict[str, dict[str, str]] = {}
+        self._quiet_observation_ids: set[str] = set()
         self._completed_episode_windows: set[tuple[str, str]] = set()
         self._gap_symbols: set[str] = set()
         self._gap_intervals: dict[
@@ -243,7 +252,7 @@ class FrozenM1CLiveRecorder:
             self._last_depth_validity.pop(owner.symbol, None)
 
     def mark_gap(self, symbol: str, *, started_at: datetime) -> None:
-        if symbol in self.universe_symbols or symbol == self.market_proxy_symbol:
+        if symbol in self.universe_symbols or symbol in self.context_proxy_symbols:
             observed = started_at.astimezone(UTC)
             self._gap_symbols.add(symbol)
             intervals = self._gap_intervals.setdefault(symbol, [])
@@ -311,6 +320,90 @@ class FrozenM1CLiveRecorder:
 
     def episode_window_completed(self, episode_id: str, window_name: str) -> bool:
         return (episode_id, window_name) in self._completed_episode_windows
+
+    def underlying_price_path(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[float, ...]:
+        """Return the retained Level-I/trade path in deterministic event order."""
+
+        if (
+            start.tzinfo is None
+            or start.utcoffset() is None
+            or end.tzinfo is None
+            or end.utcoffset() is None
+        ):
+            raise ValueError("underlying path timestamps must be timezone-aware")
+        if end < start:
+            raise ValueError("underlying path cannot end before it starts")
+        points: list[tuple[datetime, int, str, float]] = []
+        for quote in self._quotes.get(symbol, ()):
+            if not start <= quote.ordering_timestamp <= end:
+                continue
+            price: float | None = None
+            if (
+                quote.quote_valid
+                and quote.bid is not None
+                and quote.ask is not None
+                and math.isfinite(quote.bid)
+                and math.isfinite(quote.ask)
+                and 0.0 < quote.bid <= quote.ask
+            ):
+                price = (quote.bid + quote.ask) / 2.0
+            elif quote.last is not None and math.isfinite(quote.last) and quote.last > 0.0:
+                price = quote.last
+            if price is not None:
+                points.append(
+                    (
+                        quote.ordering_timestamp,
+                        quote.source_sequence,
+                        "level_i",
+                        float(price),
+                    )
+                )
+        for trade in self._trades.get(symbol, ()):
+            if (
+                start <= trade.ordering_timestamp <= end
+                and math.isfinite(trade.price)
+                and trade.price > 0.0
+            ):
+                points.append(
+                    (
+                        trade.ordering_timestamp,
+                        trade.source_sequence,
+                        "tick_trade",
+                        float(trade.price),
+                    )
+                )
+        points.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+        return tuple(point[3] for point in points)
+
+    def underlying_halted_in_window(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> bool:
+        """Return whether retained Level-I or trade evidence reports a halt."""
+
+        if (
+            start.tzinfo is None
+            or start.utcoffset() is None
+            or end.tzinfo is None
+            or end.utcoffset() is None
+        ):
+            raise ValueError("underlying halt timestamps must be timezone-aware")
+        if end < start:
+            raise ValueError("underlying halt window cannot end before it starts")
+        return any(
+            start <= event.ordering_timestamp <= end and event.halted is True
+            for event in (
+                *self._quotes.get(symbol, ()),
+                *self._trades.get(symbol, ()),
+            )
+        )
 
     @property
     def latest_quotes(self) -> dict[str, UnderlyingLevel1QuoteEvent]:
@@ -820,6 +913,12 @@ class FrozenM1CLiveRecorder:
                         self._arm_episode_windows(result)
                         if self.episode_callback is not None:
                             self.episode_callback(result)
+                    if (
+                        result.quiet_observation_id is not None
+                        or result.neutral_control_id is not None
+                        or result.high_tail_control_id is not None
+                    ):
+                        self._arm_quiet_windows(result)
         return tuple(results)
 
     def _record_standard_windows(
@@ -881,6 +980,204 @@ class FrozenM1CLiveRecorder:
                 end,
             )
 
+    def _arm_quiet_windows(self, result: RecorderCheckpointResult) -> None:
+        decision = result.quiet_episode_decision
+        identities = tuple(
+            value
+            for value in (
+                result.quiet_observation_id,
+                result.neutral_control_id,
+                result.high_tail_control_id,
+            )
+            if value is not None
+        )
+        windows = {
+            **episode_relative_windows(
+                trigger_timestamp=decision.trigger_timestamp,
+                entry_timestamp=decision.prospective_entry_timestamp,
+            ),
+            "entry_to_+60m": (
+                decision.prospective_entry_timestamp,
+                decision.prospective_entry_timestamp + timedelta(minutes=60),
+            ),
+        }
+        for observation_id in identities:
+            self._quiet_observation_ids.add(observation_id)
+            for name, (start, end) in windows.items():
+                self._episode_windows[(observation_id, name)] = (
+                    decision.symbol,
+                    start,
+                    end,
+                )
+
+    @staticmethod
+    def _proxy_path_projection(
+        symbol: str,
+        prices: tuple[float, ...],
+    ) -> dict[str, object]:
+        entry = prices[0] if prices else None
+        terminal = prices[-1] if prices else None
+        minimum = min(prices) if prices else None
+        maximum = max(prices) if prices else None
+        return {
+            "symbol": symbol,
+            "entry_reference_price": entry,
+            "terminal_reference_price": terminal,
+            "minimum_reference_price": minimum,
+            "maximum_reference_price": maximum,
+            "maximum_absolute_excursion": (
+                None if entry is None else max(abs(price - entry) for price in prices)
+            ),
+            "maximum_up_return": (
+                None if entry is None or maximum is None else maximum / entry - 1.0
+            ),
+            "maximum_down_return": (
+                None if entry is None or minimum is None else minimum / entry - 1.0
+            ),
+            "terminal_return": (
+                None if entry is None or terminal is None else terminal / entry - 1.0
+            ),
+            "path_point_count": len(prices),
+        }
+
+    def _quiet_underlying_path(
+        self,
+        *,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        quality_flags: tuple[str, ...],
+    ) -> tuple[dict[str, object], tuple[str, ...]]:
+        """Build a directionless path projection from retained Level I and trades."""
+
+        quotes = tuple(
+            quote
+            for quote in self._quotes.get(symbol, ())
+            if start <= quote.ordering_timestamp <= end
+        )
+        trades = tuple(
+            trade
+            for trade in self._trades.get(symbol, ())
+            if start <= trade.ordering_timestamp <= end
+        )
+        points: list[tuple[datetime, int, str, float]] = []
+        for quote in quotes:
+            price: float | None = None
+            if (
+                quote.quote_valid
+                and quote.bid is not None
+                and quote.ask is not None
+                and math.isfinite(quote.bid)
+                and math.isfinite(quote.ask)
+                and 0.0 < quote.bid <= quote.ask
+            ):
+                price = (quote.bid + quote.ask) / 2.0
+            elif quote.last is not None and math.isfinite(quote.last) and quote.last > 0.0:
+                price = quote.last
+            if price is not None:
+                points.append(
+                    (
+                        quote.ordering_timestamp,
+                        quote.source_sequence,
+                        "level_i",
+                        float(price),
+                    )
+                )
+        for trade in trades:
+            if math.isfinite(trade.price) and trade.price > 0.0:
+                points.append(
+                    (
+                        trade.ordering_timestamp,
+                        trade.source_sequence,
+                        "tick_trade",
+                        float(trade.price),
+                    )
+                )
+        points.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+        flags = set(quality_flags)
+        if not quotes:
+            flags.add("underlying_quote_unavailable")
+        if not points:
+            flags.add("underlying_path_unavailable")
+        if any(quote.market_data_type is not MarketDataType.LIVE for quote in quotes) or any(
+            trade.market_data_type is not MarketDataType.LIVE for trade in trades
+        ):
+            flags.add("market_data_not_live")
+        halted = any(quote.halted is True for quote in quotes) or any(
+            trade.halted is True for trade in trades
+        )
+        if halted:
+            flags.add("underlying_halted")
+        prices = tuple(point[3] for point in points)
+        entry = prices[0] if prices else None
+        terminal = prices[-1] if prices else None
+        minimum = min(prices) if prices else None
+        maximum = max(prices) if prices else None
+        payload: dict[str, object] = {
+            "source": "retained_underlying_level_i_and_tick_trades",
+            "window_start_utc": start.isoformat(),
+            "window_end_utc": end.isoformat(),
+            "entry_reference_price": entry,
+            "terminal_reference_price": terminal,
+            "minimum_reference_price": minimum,
+            "maximum_reference_price": maximum,
+            "maximum_absolute_excursion": (
+                None if entry is None else max(abs(price - entry) for price in prices)
+            ),
+            "maximum_up_return": (
+                None if entry is None or maximum is None else maximum / entry - 1.0
+            ),
+            "maximum_down_return": (
+                None if entry is None or minimum is None else minimum / entry - 1.0
+            ),
+            "terminal_return": (
+                None if entry is None or terminal is None else terminal / entry - 1.0
+            ),
+            "quote_observation_count": len(quotes),
+            "trade_observation_count": len(trades),
+            "path_point_count": len(points),
+            "first_observation_timestamp_utc": (None if not points else points[0][0].isoformat()),
+            "last_observation_timestamp_utc": (None if not points else points[-1][0].isoformat()),
+            "underlying_halted": halted,
+        }
+        market_prices = self.underlying_price_path(
+            self.market_proxy_symbol,
+            start,
+            end,
+        )
+        sector_proxy_symbol = self.sector_proxy_by_symbol.get(symbol)
+        sector_prices = (
+            ()
+            if sector_proxy_symbol is None
+            else self.underlying_price_path(sector_proxy_symbol, start, end)
+        )
+        payload["market_proxy_path"] = self._proxy_path_projection(
+            self.market_proxy_symbol,
+            market_prices,
+        )
+        payload["sector_proxy_path"] = (
+            None
+            if sector_proxy_symbol is None
+            else self._proxy_path_projection(sector_proxy_symbol, sector_prices)
+        )
+        if not market_prices:
+            flags.add("market_proxy_path_unavailable")
+        if sector_proxy_symbol is None or not sector_prices:
+            flags.add("sector_proxy_path_unavailable")
+        if self.gap_overlaps(
+            self.market_proxy_symbol,
+            window_start=start,
+            window_end=end,
+        ):
+            flags.add("market_proxy_data_gap")
+        if sector_proxy_symbol is not None and self.gap_overlaps(
+            sector_proxy_symbol,
+            window_start=start,
+            window_end=end,
+        ):
+            flags.add("sector_proxy_data_gap")
+        return payload, tuple(sorted(flags))
+
     def _record_due_episode_windows(self, now: datetime) -> None:
         for identity, (symbol, start, end) in sorted(self._episode_windows.items()):
             if identity in self._completed_episode_windows or end > now:
@@ -898,31 +1195,62 @@ class FrozenM1CLiveRecorder:
                     self.minimum_trade_classification_valid_fraction
                 ),
             )
-            self.repository.record_microstructure_summary(
-                metadata,
-                episode_id=episode_id,
-                window_name=name,
-                summary=summary,
-                level1_valid=bool(self._quotes.get(symbol)),
-                tick_valid=summary.trade_flow.classification_valid_fraction
-                >= self.minimum_trade_classification_valid_fraction,
-                depth_valid=(
-                    symbol in self._books and self._books[symbol].snapshot(end).book_valid
-                ),
-                quality_flags=(
-                    ("data_gap",)
-                    if self.gap_overlaps(
-                        symbol,
-                        window_start=start,
-                        window_end=end,
-                    )
-                    else ()
-                ),
-                archetype_relationships=compare_frozen_archetypes(
-                    actions=self._episode_actions.get(episode_id, {}),
-                    summary=summary,
-                ),
+            level1_valid = bool(self._quotes.get(symbol))
+            tick_valid = (
+                summary.trade_flow.classification_valid_fraction
+                >= self.minimum_trade_classification_valid_fraction
             )
+            depth_valid = symbol in self._books and self._books[symbol].snapshot(end).book_valid
+            quality_flags = (
+                ("data_gap",)
+                if self.gap_overlaps(
+                    symbol,
+                    window_start=start,
+                    window_end=end,
+                )
+                else ()
+            )
+            if episode_id in self._quiet_observation_ids:
+                self.repository.record_quiet_microstructure_summary(
+                    metadata,
+                    observation_id=episode_id,
+                    window_name=name,
+                    summary=summary,
+                    level1_valid=level1_valid,
+                    tick_valid=tick_valid,
+                    depth_valid=depth_valid,
+                    quality_flags=quality_flags,
+                )
+                if name.startswith("entry_to_+"):
+                    path_payload, path_quality = self._quiet_underlying_path(
+                        symbol=symbol,
+                        start=start,
+                        end=end,
+                        quality_flags=quality_flags,
+                    )
+                    self.repository.record_quiet_underlying_path(
+                        metadata,
+                        observation_id=episode_id,
+                        horizon_label=name.removeprefix("entry_to_+"),
+                        target_timestamp_utc=end,
+                        payload=path_payload,
+                        quality_flags=path_quality,
+                    )
+            else:
+                self.repository.record_microstructure_summary(
+                    metadata,
+                    episode_id=episode_id,
+                    window_name=name,
+                    summary=summary,
+                    level1_valid=level1_valid,
+                    tick_valid=tick_valid,
+                    depth_valid=depth_valid,
+                    quality_flags=quality_flags,
+                    archetype_relationships=compare_frozen_archetypes(
+                        actions=self._episode_actions.get(episode_id, {}),
+                        summary=summary,
+                    ),
+                )
             self._completed_episode_windows.add(identity)
 
 

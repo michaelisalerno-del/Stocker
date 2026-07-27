@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -22,6 +22,14 @@ from stocker_prospective.frozen_m1c import (
 from stocker_prospective.group_o import FrozenGroupOContext
 from stocker_prospective.m1c_features import LiveFeatureBar, M1CCausalFeatureBuilder
 from stocker_prospective.market_data import MarketDataType
+from stocker_prospective.quiet_state import (
+    NeutralControlDecision,
+    NeutralControlSampler,
+    QuietEpisodeDecision,
+    QuietEpisodeTracker,
+    QuietStateSnapshot,
+    classify_quiet_state,
+)
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.safety import (
     EpisodeSafetyDecision,
@@ -57,6 +65,12 @@ class RecorderCheckpointResult(BaseModel):
     checkpoint_id: int
     score: FrozenM1CScore
     episode_decision: EpisodeDecision
+    quiet_state: QuietStateSnapshot
+    quiet_episode_decision: QuietEpisodeDecision
+    quiet_observation_id: str | None
+    neutral_control_decision: NeutralControlDecision
+    neutral_control_id: str | None
+    high_tail_control_id: str | None
     episode_safety: EpisodeSafetyDecision | None
     directional_classifications: dict[str, DirectionClassification]
     direction_display_allowed: bool
@@ -75,6 +89,8 @@ class FrozenM1CRecorderEngine:
         direction_features: FrozenDirectionFeatureBuilder,
         repository: FrozenRecorderRepository,
         tracker: FreshEpisodeTracker | None = None,
+        quiet_tracker: QuietEpisodeTracker | None = None,
+        neutral_sampler: NeutralControlSampler | None = None,
     ) -> None:
         self.m1c_runtime = m1c_runtime
         self.m1c_features = m1c_features
@@ -82,7 +98,15 @@ class FrozenM1CRecorderEngine:
         self.direction_features = direction_features
         self.repository = repository
         self.tracker = FreshEpisodeTracker() if tracker is None else tracker
+        self.quiet_tracker = QuietEpisodeTracker() if quiet_tracker is None else quiet_tracker
+        self.neutral_sampler = (
+            NeutralControlSampler() if neutral_sampler is None else neutral_sampler
+        )
         self._restored_sessions: set[tuple[str, date]] = set()
+        self._high_tail_episode_timestamps: dict[
+            tuple[str, date],
+            list[datetime],
+        ] = {}
 
     def _restore_session(self, item: RecorderCheckpointInput) -> None:
         key = (item.symbol, item.session)
@@ -100,6 +124,20 @@ class FrozenM1CRecorderEngine:
             previous_episode_timestamp=previous_episode,
             episode_count=count,
         )
+        quiet_probability, quiet_episode, quiet_count = self.repository.quiet_session_state(
+            run_id=item.metadata.run_id,
+            symbol=item.symbol,
+            session=item.session,
+        )
+        self.quiet_tracker.restore_session(
+            symbol=item.symbol,
+            session=item.session,
+            previous_eligible_probability=quiet_probability,
+            previous_episode_timestamp=quiet_episode,
+            episode_count=quiet_count,
+        )
+        if previous_episode is not None:
+            self._high_tail_episode_timestamps.setdefault(key, []).append(previous_episode)
         self._restored_sessions.add(key)
 
     def process_checkpoint(
@@ -205,6 +243,64 @@ class FrozenM1CRecorderEngine:
             feature_freshness=item.feature_freshness,
             rejection_reasons=rejection_reasons,
         )
+        key = (item.symbol, item.session)
+        previous_high_tail_nearby = any(
+            0.0 < (trigger.bar_complete_timestamp - high_timestamp).total_seconds() / 60.0 <= 60.0
+            for high_timestamp in self._high_tail_episode_timestamps.get(key, ())
+        )
+        quiet_episode = self.quiet_tracker.evaluate(
+            symbol=item.symbol,
+            session=item.session,
+            checkpoint=checkpoint,
+            trigger_bar_end=trigger.bar_complete_timestamp,
+            probability=score.probability,
+            eligible=signal_inputs_eligible,
+            data_quality_flags=rejection_reasons,
+            previous_high_tail_within_60_minutes=previous_high_tail_nearby,
+            rejection_reason=(None if not rejection_reasons else ";".join(rejection_reasons)),
+        )
+        quiet_state = classify_quiet_state(
+            probability=score.probability,
+            previous_probability=quiet_episode.previous_probability,
+            model_hash=score.model_hash,
+            feature_hash=score.feature_hash,
+            data_quality_status=("valid" if signal_inputs_eligible else "invalid"),
+            data_quality_flags=rejection_reasons,
+        )
+        quiet_checkpoint_id = self.repository.record_quiet_checkpoint(
+            item.metadata,
+            checkpoint_id=checkpoint_id,
+            symbol=item.symbol,
+            session=item.session,
+            checkpoint=checkpoint,
+            snapshot=quiet_state,
+            eligible=signal_inputs_eligible,
+        )
+        quiet_observation_id: str | None = None
+        if quiet_episode.fresh_episode:
+            quiet_observation_id = self.repository.record_quiet_episode(
+                item.metadata,
+                quiet_checkpoint_id=quiet_checkpoint_id,
+                decision=quiet_episode,
+                scientific_recording_valid=signal_inputs_eligible,
+            )
+        neutral_control = self.neutral_sampler.evaluate(
+            session=item.session,
+            symbol=item.symbol,
+            checkpoint=checkpoint,
+            model_hash=score.model_hash,
+            probability=score.probability,
+            eligible=signal_inputs_eligible,
+        )
+        neutral_control_id: str | None = None
+        if neutral_control.selected:
+            neutral_control_id = self.repository.record_neutral_control(
+                item.metadata,
+                quiet_checkpoint_id=quiet_checkpoint_id,
+                decision=neutral_control,
+                trigger_timestamp=trigger.bar_complete_timestamp,
+                data_quality_flags=rejection_reasons,
+            )
         episode = self.tracker.evaluate(
             symbol=item.symbol,
             session=item.session,
@@ -214,7 +310,18 @@ class FrozenM1CRecorderEngine:
             eligible=signal_inputs_eligible,
             rejection_reason=(None if not rejection_reasons else ";".join(rejection_reasons)),
         )
+        if episode.fresh_episode:
+            self.repository.mark_following_high_tail_proximity(
+                run_id=item.metadata.run_id,
+                symbol=item.symbol,
+                session=item.session,
+                high_tail_timestamp=trigger.bar_complete_timestamp,
+            )
+            self._high_tail_episode_timestamps.setdefault(key, []).append(
+                trigger.bar_complete_timestamp
+            )
         safety: EpisodeSafetyDecision | None = None
+        high_tail_control_id: str | None = None
         classifications: dict[str, DirectionClassification] = {}
         display_allowed = False
         if episode.fresh_episode:
@@ -238,6 +345,15 @@ class FrozenM1CRecorderEngine:
                 checkpoint_id=checkpoint_id,
                 decision=episode,
                 safety=safety,
+            )
+            high_tail_control_id = self.repository.record_high_tail_control(
+                item.metadata,
+                quiet_checkpoint_id=quiet_checkpoint_id,
+                decision=episode,
+                scientific_recording_valid=safety.scientific_recording_valid,
+                data_quality_flags=tuple(
+                    dict.fromkeys((*rejection_reasons, *safety.rejection_reasons))
+                ),
             )
             if item.direction_parity_passed and item.market_data_type is MarketDataType.LIVE:
                 direction_features = self.direction_features.build(
@@ -272,6 +388,12 @@ class FrozenM1CRecorderEngine:
             checkpoint_id=checkpoint_id,
             score=score,
             episode_decision=episode,
+            quiet_state=quiet_state,
+            quiet_episode_decision=quiet_episode,
+            quiet_observation_id=quiet_observation_id,
+            neutral_control_decision=neutral_control,
+            neutral_control_id=neutral_control_id,
+            high_tail_control_id=high_tail_control_id,
             episode_safety=safety,
             directional_classifications=classifications,
             direction_display_allowed=display_allowed,

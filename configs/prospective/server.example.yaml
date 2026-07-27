@@ -17,6 +17,7 @@ paths:
   direction_beta_artifact: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/stock_market_beta_parameters.csv
   historical_activity_bars: /var/lib/stocker/preprocessing/prior-session-five-minute-bars.parquet
   bar_compatibility_report: /var/lib/stocker/prospective/bar_compatibility_report.json
+  quiet_state_concentration_audit_root: /opt/stocker/current/research/options-feasibility/20260727-m1c-quiet-state-concentration-audit-v0/artifacts/primary
 
 runtime:
   # Set both values deliberately before first service start.

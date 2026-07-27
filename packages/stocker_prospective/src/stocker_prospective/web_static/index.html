@@ -14,7 +14,7 @@
     <a class="skip-nav" href="#main">Skip to recorder evidence</a>
     <div class="grain" aria-hidden="true"></div>
     <div class="permanent-boundary" role="status">
-      RECORD ONLY — ORDER ROUTING DISABLED
+      RESEARCH ONLY — RECORD ONLY — NO ORDERS
     </div>
     <header class="masthead">
       <div class="identity-lockup">
@@ -49,6 +49,18 @@
         </button>
         <button class="nav-item" type="button" data-screen="safety-audit">
           <span>06</span> Audit
+        </button>
+        <button class="nav-item" type="button" data-screen="quiet-universe">
+          <span>07</span> Quiet tape
+        </button>
+        <button class="nav-item" type="button" data-screen="quiet-episode">
+          <span>08</span> Quiet episode
+        </button>
+        <button class="nav-item" type="button" data-screen="quiet-shadow">
+          <span>09</span> Risk ledger
+        </button>
+        <button class="nav-item" type="button" data-screen="concentration-audit">
+          <span>10</span> Concentration
         </button>
       </nav>
       <div class="rail-meta">
@@ -214,6 +226,126 @@
           <div id="session-reports-panel" class="data-region"></div>
         </article>
       </section>
+
+      <section id="quiet-universe" class="screen" aria-labelledby="quiet-universe-title" tabindex="-1">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">07 / Frozen M1C low tail</span>
+            <h2 id="quiet-universe-title">Quiet Tape</h2>
+          </div>
+          <p>
+            Inclusive bottom-5, bottom-10 and bottom-20 classifications from the
+            exact frozen causal M1C artifact. Quiet is an observation label, not
+            a recommendation or an order instruction.
+          </p>
+        </div>
+        <div class="quiet-boundary">
+          <strong>BOTTOM-10 PRIMARY</strong>
+          <span>0.135896965695626</span>
+          <span>FROZEN / NOT RECALIBRATED</span>
+        </div>
+        <div id="quiet-status-grid" class="metric-grid" aria-live="polite"></div>
+        <article class="panel wide-panel quiet-table-panel">
+          <header><span>Q</span><h3>Current quiet-state and underlying quote context</h3></header>
+          <div id="quiet-universe-panel" class="data-region"></div>
+        </article>
+      </section>
+
+      <section id="quiet-episode" class="screen" aria-labelledby="quiet-episode-title" tabindex="-1">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">08 / Quiet episodes and controls</span>
+            <h2 id="quiet-episode-title">Quiet Scope</h2>
+          </div>
+          <p>
+            Frozen downward crossings are spaced by thirty minutes. The entry is
+            a research timestamp at the next five-minute bar boundary; no broker
+            action is attached to it.
+          </p>
+        </div>
+        <div class="hypothesis-boundary">
+          <span>QUIET BOTTOM-10</span>
+          <span>DETERMINISTIC NEUTRAL 10%</span>
+          <span>EVERY FRESH HIGH-TAIL CONTROL</span>
+          <span>COHORTS NEVER MERGED</span>
+        </div>
+        <div class="split-workspace">
+          <article class="panel list-panel">
+            <header><span>Ξ</span><h3>Observation index</h3></header>
+            <div id="quiet-episode-list" class="data-region"></div>
+          </article>
+          <article class="panel detail-panel">
+            <header><span>τ</span><h3>Selected quiet evidence</h3></header>
+            <div id="quiet-episode-evidence" class="data-region">
+              <div class="empty-state">Select a quiet episode or control to inspect it.</div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="quiet-shadow" class="screen" aria-labelledby="quiet-shadow-title" tabindex="-1">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">09 / Conservative bounded structures</span>
+            <h2 id="quiet-shadow-title">Risk Ledger</h2>
+          </div>
+          <p>
+            Long-premium and defined-risk short-premium quote outcomes use
+            observed executable sides. Midpoints remain diagnostic and no
+            structure is selected as a strategy.
+          </p>
+        </div>
+        <div class="ledger-banner">
+          <span>SHORT BID / LONG ASK OPEN</span>
+          <strong>DEFINED RISK ONLY</strong>
+          <span>SHORT ASK / LONG BID CLOSE</span>
+        </div>
+        <article class="panel blotter-panel">
+          <header><span>S</span><h3>5 / 10 / 15 / 30 / 60 minute shadow outcomes</h3></header>
+          <div id="quiet-shadow-list" class="data-region"></div>
+        </article>
+        <article class="panel shadow-detail-panel">
+          <header><span>✓</span><h3>Session quote-quality cohorts</h3></header>
+          <div id="quiet-session-quality" class="data-region"></div>
+        </article>
+      </section>
+
+      <section
+        id="concentration-audit"
+        class="screen"
+        aria-labelledby="concentration-title"
+        tabindex="-1"
+      >
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">10 / Retrospective explanatory audit</span>
+            <h2 id="concentration-title">Concentration</h2>
+          </div>
+          <p>
+            Source exposure, low-tail incidence and checkpoint persistence are
+            separated. Deduplicated descriptions never replace the frozen
+            checkpoint support gate.
+          </p>
+        </div>
+        <div id="frozen-failure-lock" class="failure-lock">
+          <span>ORIGINAL FROZEN DECISION</span>
+          <strong>BLOCKED_INSUFFICIENT_LOW_TAIL_SUPPORT</strong>
+          <span>35% MONTH GATE DID NOT PASS</span>
+        </div>
+        <div id="concentration-summary" class="metric-grid"></div>
+        <article class="panel wide-panel">
+          <header><span>M</span><h3>Stress-month exposure versus bottom-tail composition</h3></header>
+          <div id="month-audit-panel" class="data-region"></div>
+        </article>
+        <article class="panel wide-panel stacked-panel">
+          <header><span>R</span><h3>Raw checkpoints versus deduplicated representations</h3></header>
+          <div id="representation-audit-panel" class="data-region"></div>
+        </article>
+        <article class="panel wide-panel stacked-panel">
+          <header><span>L</span><h3>Leave-one-month-out sensitivity — descriptive only</h3></header>
+          <div id="leave-month-panel" class="data-region"></div>
+        </article>
+      </section>
     </main>
 
     <footer>
@@ -221,7 +353,8 @@
       <p>
         Prospective collection only. M1C is a frozen movement gate; A1 is an
         unvalidated prospective hypothesis; C1 and R1 are unvalidated comparisons.
-        Microstructure scores are descriptive and option P&amp;L is shadow quote P&amp;L.
+        Quiet-state structures are defined-risk shadow outcomes only. Microstructure
+        scores are descriptive and option P&amp;L is shadow quote P&amp;L.
       </p>
     </footer>
     <script src="/assets/app.js" defer></script>

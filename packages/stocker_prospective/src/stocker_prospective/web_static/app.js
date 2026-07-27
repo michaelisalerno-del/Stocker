@@ -10,6 +10,13 @@ const state = {
   audit: [],
   sessionReports: [],
   selectedEpisode: null,
+  quietStatus: null,
+  quietUniverse: [],
+  quietEpisodes: [],
+  quietShadow: [],
+  quietSessionQuality: [],
+  concentrationAudit: null,
+  selectedQuietEpisode: null,
 };
 
 function node(tag, className = "", text = null) {
@@ -34,6 +41,12 @@ function clock(value) {
   return Number.isNaN(parsed.valueOf())
     ? clean(value)
     : parsed.toISOString().replace(".000Z", "Z");
+}
+
+function percent(value, digits = 2) {
+  if (value === null || value === undefined || value === "") return "—";
+  const observed = Number(value);
+  return Number.isFinite(observed) ? `${(observed * 100).toFixed(digits)}%` : clean(value);
 }
 
 function age(value) {
@@ -534,6 +547,305 @@ function renderShadow() {
   ));
 }
 
+function renderQuietUniverse() {
+  const status = state.quietStatus;
+  const thresholds = status.thresholds || {};
+  const counts = status.observation_counts || {};
+  const statusGrid = document.createDocumentFragment();
+  [
+    metric("Bottom 5%", thresholds.bottom_5, "Inclusive frozen threshold"),
+    metric("Bottom 10%", thresholds.bottom_10, "Primary frozen quiet state", "warn"),
+    metric("Bottom 20%", thresholds.bottom_20, "Inclusive secondary threshold"),
+    metric("Fresh quiet episodes", counts.quiet_bottom_10 || 0, `${status.complete_quiet_episodes || 0} complete`),
+    metric("Neutral controls", counts.neutral_control || 0, "Frozen deterministic 10% hash sample"),
+    metric("High-tail controls", counts.high_tail_control || 0, `Every fresh p ≥ ${clean(thresholds.high_tail, 6)}`),
+    metric("Phase boundary", "30 / 150 / 150", "Shakedown / development / unopened confirmation"),
+    metric("Order path", String(status.order_path || "absent").toUpperCase(), status.banner, "ok"),
+  ].forEach((item) => statusGrid.append(item));
+  replace("quiet-status-grid", statusGrid);
+
+  replace("quiet-universe-panel", table(
+    [
+      { label: "Symbol", value: "symbol" },
+      { label: "M1C p", value: "m1c_probability" },
+      { label: "B5", value: "bottom_5" },
+      { label: "B10", value: "bottom_10" },
+      { label: "B20", value: "bottom_20" },
+      { label: "Distance B10", value: "distance_from_bottom_10" },
+      { label: "Fresh quiet", value: "fresh_quiet_episode" },
+      { label: "Previous p", value: "previous_m1c_probability" },
+      { label: "Option context", value: "option_context_valid" },
+      { label: "Bid", value: "bid" },
+      { label: "Ask", value: "ask" },
+      { label: "Spread", value: "spread" },
+      { label: "Microprice edge", value: "microprice_edge_bps" },
+      { label: "Quote received", value: "received_timestamp_utc", format: clock },
+      { label: "Freshness", value: "received_timestamp_utc", format: age },
+      { label: "Quality", value: "data_quality_status" },
+    ],
+    state.quietUniverse,
+  ));
+}
+
+function renderQuietEpisodeIndex() {
+  replace("quiet-episode-list", table(
+    [
+      { label: "Symbol", value: "symbol" },
+      { label: "Kind", value: "observation_kind" },
+      { label: "Trigger", value: "trigger_timestamp_utc", format: clock },
+      { label: "M1C", value: "m1c_probability" },
+      { label: "B5", value: "bottom_5" },
+      { label: "B10", value: "bottom_10" },
+      { label: "B20", value: "bottom_20" },
+      { label: "Phase", value: "phase" },
+      { label: "Complete", value: "completion_status" },
+    ],
+    state.quietEpisodes,
+    (row) => loadQuietEpisode(row.observation_id),
+  ));
+}
+
+function quietEvidenceTimeline(episode) {
+  const rail = node("div", "evidence-timeline");
+  const sixtyMinuteExit = episode.prospective_entry_timestamp_utc
+    ? new Date(
+      new Date(episode.prospective_entry_timestamp_utc).valueOf() + 60 * 60 * 1000,
+    ).toISOString()
+    : null;
+  [
+    ["Previous eligible p", episode.previous_m1c_probability],
+    ["Quiet trigger", episode.trigger_timestamp_utc],
+    ["Research entry", episode.prospective_entry_timestamp_utc],
+    ["Final bounded horizon", sixtyMinuteExit],
+  ].forEach(([label, value], index) => {
+    const cell = node("div", "timeline-cell");
+    cell.append(
+      node("span", "", label),
+      node("strong", "", index === 0 ? clean(value, 8) : clock(value)),
+    );
+    rail.append(cell);
+  });
+  return rail;
+}
+
+function quietOptionTable(items) {
+  return table(
+    [
+      { label: "Bucket", value: "dte_bucket" },
+      { label: "Expiry", value: "expiry" },
+      { label: "DTE", value: "dte" },
+      { label: "Strike", value: "strike" },
+      { label: "Right", value: "right" },
+      { label: "Bid / ask", value: (row) => `${clean(row.bid)} / ${clean(row.ask)}` },
+      { label: "Sizes", value: (row) => `${clean(row.bid_size)} / ${clean(row.ask_size)}` },
+      { label: "IV", value: "implied_volatility" },
+      { label: "Delta", value: "delta" },
+      { label: "Γ / Θ / V", value: (row) => `${clean(row.gamma)} / ${clean(row.theta)} / ${clean(row.vega)}` },
+      { label: "Volume / OI", value: (row) => `${clean(row.volume)} / ${clean(row.open_interest)}` },
+      { label: "Received", value: "received_timestamp_utc", format: clock },
+      { label: "Quality", value: (row) => (row.quote_quality_flags || []).join(", ") },
+    ],
+    items,
+  );
+}
+
+async function loadQuietEpisode(observationId) {
+  replace("quiet-episode-evidence", node("div", "empty-state", "Reading quiet-state evidence…"));
+  try {
+    const [detail, options] = await Promise.all([
+      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}`),
+      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}/options`),
+    ]);
+    state.selectedQuietEpisode = observationId;
+    const episode = detail.episode;
+    const stack = node("div", "detail-stack");
+    stack.append(
+      quietEvidenceTimeline(episode),
+      subsection("Frozen quiet identity", kvGrid([
+        ["Observation ID", episode.observation_id],
+        ["Kind", episode.observation_kind],
+        ["Symbol / session", `${episode.symbol} / ${episode.session_date}`],
+        ["Trigger checkpoint", episode.trigger_checkpoint],
+        ["M1C probability", episode.m1c_probability],
+        ["Previous probability", episode.previous_m1c_probability],
+        ["Bottom 5 / 10 / 20", `${clean(episode.bottom_5)} / ${clean(episode.bottom_10)} / ${clean(episode.bottom_20)}`],
+        ["Episode number", episode.episode_number],
+        ["Minutes since previous", episode.minutes_since_previous_quiet_episode],
+        ["High tail ±60m", `${clean(episode.previous_high_tail_within_60_minutes)} / ${clean(episode.following_high_tail_within_60_minutes)}`],
+        ["Option context valid", episode.option_context_valid],
+        ["Cohort phase", episode.phase],
+        ["Completion", episode.completion_status],
+        ["Model hash", short(episode.model_hash)],
+        ["Feature hash", short(episode.feature_hash)],
+        ["Quality flags", (episode.data_quality_flags || []).join(", ")],
+      ])),
+      subsection("Underlying path and maximum excursion", table(
+        [
+          { label: "Horizon", value: "horizon_label" },
+          { label: "Target", value: "target_timestamp_utc", format: clock },
+          { label: "Path evidence", value: (row) => short(JSON.stringify(row.payload || {}), 84) },
+          { label: "Quality", value: (row) => (row.quality_flags || []).join(", ") },
+        ],
+        detail.underlying_path || [],
+      )),
+      subsection("Microstructure windows", table(
+        [
+          { label: "Window", value: "window_name" },
+          { label: "Start", value: "window_start_utc", format: clock },
+          { label: "End", value: "window_end_utc", format: clock },
+          { label: "Evidence", value: (row) => short(JSON.stringify(row.summary || {}), 84) },
+          { label: "Quality", value: (row) => (row.quality_flags || []).join(", ") },
+        ],
+        detail.microstructure || [],
+      )),
+      subsection("Bounded option contracts", quietOptionTable(options.items || [])),
+      subsection("Conservative shadow structures", table(
+        [
+          { label: "Bucket", value: "dte_bucket" },
+          { label: "Structure", value: "structure_type" },
+          { label: "Horizon", value: "horizon_label" },
+          { label: "Opening", value: "opening_credit_or_debit" },
+          { label: "Max risk", value: "maximum_defined_risk" },
+          { label: "P&L", value: "conservative_pnl" },
+          { label: "Return / risk", value: "return_on_maximum_risk" },
+          { label: "Short touched", value: "short_strike_touched" },
+          { label: "Wing touched", value: "protective_wing_touched" },
+          { label: "Quality", value: "quality_status" },
+        ],
+        detail.shadow_structures || [],
+      )),
+      subsection("Frozen thresholds", jsonBlock(detail.frozen_thresholds || {})),
+    );
+    replace("quiet-episode-evidence", stack);
+  } catch (error) {
+    replace(
+      "quiet-episode-evidence",
+      node("div", "empty-state value-danger", "Quiet-state evidence is unavailable."),
+    );
+  }
+}
+
+function renderQuietShadow() {
+  replace("quiet-shadow-list", table(
+    [
+      { label: "Episode", value: "observation_id", format: short },
+      { label: "Cohort phase", value: "phase" },
+      { label: "Symbol", value: "symbol" },
+      { label: "M1C p", value: "m1c_probability" },
+      { label: "DTE bucket", value: "dte_bucket" },
+      { label: "Structure", value: "structure_type" },
+      { label: "Opening credit/debit", value: "opening_credit_or_debit" },
+      { label: "Maximum risk", value: "maximum_defined_risk" },
+      { label: "Exit", value: "horizon_label" },
+      { label: "Conservative P&L", value: "conservative_pnl" },
+      { label: "Return / risk", value: "return_on_maximum_risk" },
+      { label: "Short touched", value: "short_strike_touched" },
+      { label: "Wing touched", value: "protective_wing_touched" },
+      { label: "Quote quality", value: "quality_status" },
+    ],
+    state.quietShadow,
+  ));
+  replace("quiet-session-quality", table(
+    [
+      { label: "Session", value: "session_date" },
+      { label: "Observations", value: "observations" },
+      { label: "Quiet", value: "quiet_episodes" },
+      { label: "Neutral", value: "neutral_controls" },
+      { label: "High tail", value: "high_tail_controls" },
+      { label: "Complete observations", value: "complete_observations" },
+      { label: "Attempted structures", value: "attempted_structures" },
+      { label: "Complete quote quality", value: "complete_quote_quality_structures" },
+      { label: "Strict quality", value: "strict_quote_quality_structures" },
+    ],
+    state.quietSessionQuality,
+  ));
+}
+
+function renderConcentrationAudit() {
+  const audit = state.concentrationAudit || {};
+  const explanation = audit.month_explanation || {};
+  const surprise = audit.surprise_explanation || {};
+  const failedMonth = explanation.failed_stress_month || "2025-10";
+  const monthTail = (audit.stress_month_tail_incidence || [])
+    .find((row) => row.month === failedMonth) || {};
+  const monthExposure = (audit.stress_month_exposure || [])
+    .find((row) => row.month === failedMonth) || {};
+  const summary = document.createDocumentFragment();
+  [
+    metric("Frozen decision", audit.original_decision, "Unchanged", "danger"),
+    metric("Failed stress month", failedMonth, "October 2025"),
+    metric("Source sessions", monthExposure.trading_sessions_in_source_calendar, `${clean(monthExposure.sessions_represented_in_joined_panel)} represented`),
+    metric("Eligible-row share", percent(monthExposure.source_exposure_share), `${clean(monthExposure.eligible_checkpoint_rows)} eligible rows`),
+    metric("Bottom-tail incidence", percent(monthTail.bottom_tail_incidence), "Within-month probability"),
+    metric("Tail composition", percent(monthTail.bottom_tail_composition_share, 6), "529 / 1,426 frozen rows", "danger"),
+    metric("Month explanation", explanation.month_concentration_explanation || explanation.explanation || "multiple causes", "Descriptive only"),
+    metric("Surprise explanation", surprise.surprise_concentration_explanation || surprise.explanation || "small-count fragile", "Gate not waived"),
+  ].forEach((item) => summary.append(item));
+  replace("concentration-summary", summary);
+
+  replace("month-audit-panel", table(
+    [
+      { label: "Month", value: "month" },
+      { label: "Source sessions", value: "trading_sessions_in_source_calendar" },
+      { label: "Joined sessions", value: "sessions_represented_in_joined_panel" },
+      { label: "Planned stock-sessions", value: "planned_stock_sessions" },
+      { label: "Valid option pairs", value: "valid_option_pairs" },
+      { label: "Option coverage", value: "option_pair_coverage_rate", format: percent },
+      { label: "Eligible rows", value: "eligible_checkpoint_rows" },
+      { label: "Exposure share", value: "source_exposure_share", format: percent },
+      { label: "Tail incidence", value: (row) => {
+        const tail = (audit.stress_month_tail_incidence || [])
+          .find((item) => item.month === row.month);
+        return percent(tail?.bottom_tail_incidence);
+      } },
+      { label: "Tail composition", value: (row) => {
+        const tail = (audit.stress_month_tail_incidence || [])
+          .find((item) => item.month === row.month);
+        return percent(tail?.bottom_tail_composition_share, 6);
+      } },
+      { label: "Fresh share", value: (row) => {
+        const tail = (audit.stress_month_tail_incidence || [])
+          .find((item) => item.month === row.month);
+        return percent(tail?.fresh_episode_share);
+      } },
+    ],
+    audit.stress_month_exposure || [],
+  ));
+
+  replace("representation-audit-panel", table(
+    [
+      { label: "Representation", value: "representation" },
+      { label: "Month", value: "entity" },
+      { label: "Rows", value: "rows" },
+      { label: "Share", value: "share", format: percent },
+      { label: "Below IV", value: "remains_below_iv_rate", format: percent },
+      { label: "Mean residual", value: "mean_iv_residual" },
+      { label: "1.5σ breach", value: "breach_1_5_sigma_rate", format: percent },
+      { label: "2.0σ breach", value: "breach_2_0_sigma_rate", format: percent },
+      { label: "1.5σ surprises", value: "surprise_1_5_count" },
+      { label: "2.0σ surprises", value: "surprise_2_0_count" },
+    ],
+    audit.representation_month_concentration || [],
+  ));
+
+  replace("leave-month-panel", table(
+    [
+      { label: "Omitted month", value: "omitted_month" },
+      { label: "Rows", value: "rows" },
+      { label: "Sessions", value: "sessions" },
+      { label: "Below IV", value: "remains_below_iv_rate", format: percent },
+      { label: "NPV lift", value: "npv_lift", format: percent },
+      { label: "Mean residual", value: "mean_iv_residual" },
+      { label: "1.5σ breach", value: "breach_1_5_sigma_rate", format: percent },
+      { label: "2.0σ breach", value: "breach_2_0_sigma_rate", format: percent },
+      { label: "Fresh containment", value: "fresh_episode_1_5_sigma_containment", format: percent },
+      { label: "Δ below IV", value: "difference_remains_below_iv_rate", format: percent },
+      { label: "Status", value: "status" },
+    ],
+    audit.leave_one_month_out || [],
+  ));
+}
+
 function safetyCard(label, value, description, tone = "") {
   const card = node("article", "safety-card");
   card.append(
@@ -597,7 +909,22 @@ async function refreshAll() {
   button.disabled = true;
   button.textContent = "Reading…";
   try {
-    const [health, status, capabilities, universe, episodes, shadow, audit, reports] = await Promise.all([
+    const [
+      health,
+      status,
+      capabilities,
+      universe,
+      episodes,
+      shadow,
+      audit,
+      reports,
+      quietStatus,
+      quietUniverse,
+      quietEpisodes,
+      quietShadow,
+      quietSessionQuality,
+      concentrationAudit,
+    ] = await Promise.all([
       api("/api/health"),
       api("/api/recorder/status"),
       api("/api/recorder/capabilities"),
@@ -606,6 +933,12 @@ async function refreshAll() {
       api("/api/shadow-outcomes"),
       api("/api/audit/events"),
       api("/api/recorder/session-reports"),
+      api("/api/quiet-state/status"),
+      api("/api/quiet-state/universe"),
+      api("/api/quiet-state/episodes"),
+      api("/api/quiet-state/shadow-structures"),
+      api("/api/quiet-state/session-quality"),
+      api("/api/quiet-state/concentration-audit"),
     ]);
     state.health = health;
     state.status = status;
@@ -615,16 +948,28 @@ async function refreshAll() {
     state.shadow = shadow.items || [];
     state.audit = audit.items || [];
     state.sessionReports = reports.items || [];
+    state.quietStatus = quietStatus;
+    state.quietUniverse = quietUniverse.items || [];
+    state.quietEpisodes = quietEpisodes.items || [];
+    state.quietShadow = quietShadow.items || [];
+    state.quietSessionQuality = quietSessionQuality.items || [];
+    state.concentrationAudit = concentrationAudit;
     renderStatus();
     renderUniverse();
     renderEpisodeIndex();
     renderShadow();
     renderAudit();
-    if (!state.selectedEpisode && state.episodes.length) {
-      await loadEpisode(state.episodes[0].episode_id);
-    } else {
-      await loadSelectedOptions();
-    }
+    renderQuietUniverse();
+    renderQuietEpisodeIndex();
+    renderQuietShadow();
+    renderConcentrationAudit();
+    const legacyEvidence = !state.selectedEpisode && state.episodes.length
+      ? loadEpisode(state.episodes[0].episode_id)
+      : loadSelectedOptions();
+    const quietEvidence = !state.selectedQuietEpisode && state.quietEpisodes.length
+      ? loadQuietEpisode(state.quietEpisodes[0].observation_id)
+      : Promise.resolve();
+    await Promise.all([legacyEvidence, quietEvidence]);
     document.getElementById("last-sync").textContent =
       `SYNCHRONIZED ${new Date().toISOString()}`;
   } catch (error) {

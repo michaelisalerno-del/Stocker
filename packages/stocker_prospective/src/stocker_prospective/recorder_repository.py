@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -20,9 +22,18 @@ from stocker_prospective.events import (
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import FrozenGroupOContext
 from stocker_prospective.microstructure import MicrostructureWindowSummary
-from stocker_prospective.option_ledger import OptionContract, ShadowOptionOutcome
+from stocker_prospective.option_ledger import (
+    OptionContract,
+    OptionContractPlan,
+    ShadowOptionOutcome,
+)
 from stocker_prospective.partition_store import PartitionWriteResult
 from stocker_prospective.quality_report import SessionQualityReport
+from stocker_prospective.quiet_state import (
+    NeutralControlDecision,
+    QuietEpisodeDecision,
+    QuietStateSnapshot,
+)
 from stocker_prospective.safety import EpisodeSafetyDecision
 from stocker_prospective.subscriptions import PromotionDecision, SubscriptionRecord
 
@@ -37,6 +48,17 @@ def _json(value: object) -> str:
         allow_nan=False,
         default=str,
     )
+
+
+def _assert_immutable_observation(
+    existing: sqlite3.Row,
+    *,
+    expected: Mapping[str, object],
+    label: str,
+) -> None:
+    mismatches = tuple(key for key, value in expected.items() if existing[key] != value)
+    if mismatches:
+        raise ValueError(f"immutable {label} differs: {','.join(sorted(mismatches))}")
 
 
 class FrozenRecorderRepository:
@@ -243,6 +265,541 @@ class FrozenRecorderRepository:
             ),
             0 if episode is None else int(episode["episode_number"]),
         )
+
+    def quiet_session_state(
+        self,
+        *,
+        run_id: str,
+        symbol: str,
+        session: date,
+    ) -> tuple[float | None, datetime | None, int]:
+        """Return the persisted state needed by the bottom-10 crossing tracker."""
+
+        with self.repository._connect() as connection:
+            checkpoint = connection.execute(
+                """
+                SELECT m1c_probability FROM quiet_state_checkpoint_v0
+                WHERE run_id = ? AND symbol = ? AND session_date = ? AND eligible = 1
+                ORDER BY checkpoint DESC LIMIT 1
+                """,
+                (run_id, symbol, session.isoformat()),
+            ).fetchone()
+            episode = connection.execute(
+                """
+                SELECT trigger_timestamp_utc, episode_number
+                FROM quiet_state_observation_v0
+                WHERE run_id = ? AND symbol = ? AND session_date = ?
+                  AND observation_kind = 'quiet_bottom_10'
+                ORDER BY episode_number DESC LIMIT 1
+                """,
+                (run_id, symbol, session.isoformat()),
+            ).fetchone()
+        return (
+            None if checkpoint is None else float(checkpoint["m1c_probability"]),
+            (
+                None
+                if episode is None
+                else datetime.fromisoformat(str(episode["trigger_timestamp_utc"]))
+            ),
+            0 if episode is None else int(episode["episode_number"]),
+        )
+
+    def record_quiet_checkpoint(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        checkpoint_id: int,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        snapshot: QuietStateSnapshot,
+        eligible: bool,
+    ) -> int:
+        """Persist every frozen quiet-tail membership beside the original score."""
+
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            source = connection.execute(
+                """
+                SELECT run_id, symbol, session_date, checkpoint, probability,
+                       model_hash, feature_hash
+                FROM m1c_checkpoint_v0 WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if source is None:
+                raise KeyError(checkpoint_id)
+            identity = (
+                str(source["run_id"]),
+                str(source["symbol"]),
+                str(source["session_date"]),
+                int(source["checkpoint"]),
+            )
+            if identity != (
+                metadata.run_id,
+                symbol,
+                session.isoformat(),
+                int(checkpoint),
+            ):
+                raise ValueError("quiet checkpoint identity differs from M1C checkpoint")
+            if (
+                float(source["probability"]) != snapshot.probability
+                or str(source["model_hash"]) != snapshot.model_hash
+                or str(source["feature_hash"]) != snapshot.feature_hash
+            ):
+                raise ValueError("quiet checkpoint frozen artifact identity differs")
+            existing = connection.execute(
+                """
+                SELECT id, m1c_probability, previous_m1c_probability,
+                       data_quality_flags_json
+                FROM quiet_state_checkpoint_v0 WHERE checkpoint_id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            encoded_flags = _json(snapshot.data_quality_flags)
+            if existing is not None:
+                if (
+                    float(existing["m1c_probability"]) != snapshot.probability
+                    or (
+                        None
+                        if existing["previous_m1c_probability"] is None
+                        else float(existing["previous_m1c_probability"])
+                    )
+                    != snapshot.previous_probability
+                    or str(existing["data_quality_flags_json"]) != encoded_flags
+                ):
+                    raise ValueError("immutable quiet checkpoint differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_state_checkpoint_v0(
+                    envelope_id, checkpoint_id, run_id, symbol, session_date,
+                    checkpoint, m1c_probability, previous_m1c_probability,
+                    bottom_5, bottom_10, bottom_20, high_tail,
+                    distance_from_bottom_10, model_hash, feature_hash, eligible,
+                    data_quality_status, data_quality_flags_json, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    checkpoint_id,
+                    metadata.run_id,
+                    symbol,
+                    session.isoformat(),
+                    int(checkpoint),
+                    snapshot.probability,
+                    snapshot.previous_probability,
+                    int(snapshot.bottom_5),
+                    int(snapshot.bottom_10),
+                    int(snapshot.bottom_20),
+                    int(snapshot.high_tail),
+                    snapshot.distance_from_bottom_10,
+                    snapshot.model_hash,
+                    snapshot.feature_hash,
+                    int(eligible),
+                    snapshot.data_quality_status,
+                    encoded_flags,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def _quiet_checkpoint_row(
+        self,
+        connection: sqlite3.Connection,
+        quiet_checkpoint_id: int,
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT * FROM quiet_state_checkpoint_v0 WHERE id = ?",
+            (quiet_checkpoint_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(quiet_checkpoint_id)
+        return cast(sqlite3.Row, row)
+
+    def record_quiet_episode(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        quiet_checkpoint_id: int,
+        decision: QuietEpisodeDecision,
+        scientific_recording_valid: bool,
+    ) -> str:
+        self._validate(metadata)
+        if (
+            not decision.fresh_episode
+            or decision.quiet_episode_id is None
+            or decision.episode_number is None
+        ):
+            raise ValueError("only fresh bottom-10 quiet episodes may be persisted")
+        with self.repository._connect() as connection:
+            source = self._quiet_checkpoint_row(connection, quiet_checkpoint_id)
+            if (
+                str(source["run_id"]) != metadata.run_id
+                or str(source["symbol"]) != decision.symbol
+                or str(source["session_date"]) != decision.session.isoformat()
+                or int(source["checkpoint"]) != decision.checkpoint
+            ):
+                raise ValueError("quiet episode does not match its checkpoint")
+            existing = connection.execute(
+                """
+                SELECT *
+                FROM quiet_state_observation_v0 WHERE observation_id = ?
+                """,
+                (decision.quiet_episode_id,),
+            ).fetchone()
+            if existing is not None:
+                _assert_immutable_observation(
+                    cast(sqlite3.Row, existing),
+                    expected={
+                        "quiet_checkpoint_id": quiet_checkpoint_id,
+                        "run_id": metadata.run_id,
+                        "observation_kind": "quiet_bottom_10",
+                        "symbol": decision.symbol,
+                        "session_date": decision.session.isoformat(),
+                        "trigger_checkpoint": decision.checkpoint,
+                        "trigger_timestamp_utc": decision.trigger_timestamp.isoformat(),
+                        "prospective_entry_timestamp_utc": (
+                            decision.prospective_entry_timestamp.isoformat()
+                        ),
+                        "m1c_probability": decision.probability,
+                        "previous_m1c_probability": decision.previous_probability,
+                        "bottom_5": int(decision.bottom_5),
+                        "bottom_10": int(decision.bottom_10),
+                        "bottom_20": int(decision.bottom_20),
+                        "high_tail": int(decision.high_tail),
+                        "episode_number": decision.episode_number,
+                        "minutes_since_previous_quiet_episode": (
+                            decision.minutes_since_previous_episode
+                        ),
+                        "previous_high_tail_within_60_minutes": int(
+                            decision.previous_high_tail_within_60_minutes
+                        ),
+                        "neutral_hash_hex": None,
+                        "neutral_hash_fraction": None,
+                        "neutral_sampling_fraction": None,
+                        "neutral_salt_id": None,
+                        "scientific_recording_valid": int(scientific_recording_valid),
+                        "data_quality_flags_json": _json(decision.data_quality_flags),
+                        "claims_json": self.claims_json,
+                    },
+                    label="quiet episode",
+                )
+                return str(existing["observation_id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            connection.execute(
+                """
+                INSERT INTO quiet_state_observation_v0(
+                    observation_id, envelope_id, quiet_checkpoint_id, run_id,
+                    observation_kind, symbol, session_date, trigger_checkpoint,
+                    trigger_timestamp_utc, prospective_entry_timestamp_utc,
+                    m1c_probability, previous_m1c_probability, bottom_5,
+                    bottom_10, bottom_20, high_tail, episode_number,
+                    minutes_since_previous_quiet_episode,
+                    previous_high_tail_within_60_minutes,
+                    following_high_tail_within_60_minutes, neutral_hash_hex,
+                    neutral_hash_fraction, neutral_sampling_fraction,
+                    neutral_salt_id, option_context_valid,
+                    scientific_recording_valid, data_quality_flags_json, phase,
+                    completion_status, completed_at_utc, claims_json
+                ) VALUES (
+                    ?, ?, ?, ?, 'quiet_bottom_10', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, ?, ?, 'pending_completion',
+                    'active', NULL, ?
+                )
+                """,
+                (
+                    decision.quiet_episode_id,
+                    envelope_id,
+                    quiet_checkpoint_id,
+                    metadata.run_id,
+                    decision.symbol,
+                    decision.session.isoformat(),
+                    decision.checkpoint,
+                    decision.trigger_timestamp.isoformat(),
+                    decision.prospective_entry_timestamp.isoformat(),
+                    decision.probability,
+                    decision.previous_probability,
+                    int(decision.bottom_5),
+                    int(decision.bottom_10),
+                    int(decision.bottom_20),
+                    int(decision.high_tail),
+                    decision.episode_number,
+                    decision.minutes_since_previous_episode,
+                    int(decision.previous_high_tail_within_60_minutes),
+                    int(decision.following_high_tail_within_60_minutes),
+                    int(scientific_recording_valid),
+                    _json(decision.data_quality_flags),
+                    self.claims_json,
+                ),
+            )
+        return decision.quiet_episode_id
+
+    def record_neutral_control(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        quiet_checkpoint_id: int,
+        decision: NeutralControlDecision,
+        trigger_timestamp: datetime,
+        data_quality_flags: tuple[str, ...],
+    ) -> str:
+        """Persist only a deterministic ten-percent neutral selection."""
+
+        self._validate(metadata)
+        if not decision.selected or not decision.population_eligible:
+            raise ValueError("only selected neutral controls may be persisted")
+        if trigger_timestamp.tzinfo is None or trigger_timestamp.utcoffset() is None:
+            raise ValueError("neutral-control timestamp must be timezone-aware")
+        observation_id = f"m1c-neutral-{decision.hash_hex[:24]}"
+        with self.repository._connect() as connection:
+            source = self._quiet_checkpoint_row(connection, quiet_checkpoint_id)
+            if (
+                str(source["run_id"]) != metadata.run_id
+                or str(source["symbol"]) != decision.symbol
+                or str(source["session_date"]) != decision.session.isoformat()
+                or int(source["checkpoint"]) != decision.checkpoint
+            ):
+                raise ValueError("neutral control does not match its checkpoint")
+            existing = connection.execute(
+                """
+                SELECT *
+                FROM quiet_state_observation_v0 WHERE observation_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+            if existing is not None:
+                observed = trigger_timestamp.astimezone(UTC).isoformat()
+                _assert_immutable_observation(
+                    cast(sqlite3.Row, existing),
+                    expected={
+                        "quiet_checkpoint_id": quiet_checkpoint_id,
+                        "run_id": metadata.run_id,
+                        "observation_kind": "neutral_control",
+                        "symbol": decision.symbol,
+                        "session_date": decision.session.isoformat(),
+                        "trigger_checkpoint": decision.checkpoint,
+                        "trigger_timestamp_utc": observed,
+                        "prospective_entry_timestamp_utc": observed,
+                        "m1c_probability": decision.probability,
+                        "previous_m1c_probability": (
+                            None
+                            if source["previous_m1c_probability"] is None
+                            else float(source["previous_m1c_probability"])
+                        ),
+                        "bottom_5": 0,
+                        "bottom_10": 0,
+                        "bottom_20": 0,
+                        "high_tail": 0,
+                        "episode_number": None,
+                        "minutes_since_previous_quiet_episode": None,
+                        "previous_high_tail_within_60_minutes": 0,
+                        "neutral_hash_hex": decision.hash_hex,
+                        "neutral_hash_fraction": decision.hash_fraction,
+                        "neutral_sampling_fraction": decision.sampling_fraction,
+                        "neutral_salt_id": decision.salt_id,
+                        "scientific_recording_valid": 1,
+                        "data_quality_flags_json": _json(tuple(sorted(set(data_quality_flags)))),
+                        "claims_json": self.claims_json,
+                    },
+                    label="neutral control",
+                )
+                return str(existing["observation_id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            observed = trigger_timestamp.astimezone(UTC).isoformat()
+            connection.execute(
+                """
+                INSERT INTO quiet_state_observation_v0(
+                    observation_id, envelope_id, quiet_checkpoint_id, run_id,
+                    observation_kind, symbol, session_date, trigger_checkpoint,
+                    trigger_timestamp_utc, prospective_entry_timestamp_utc,
+                    m1c_probability, previous_m1c_probability, bottom_5,
+                    bottom_10, bottom_20, high_tail, episode_number,
+                    minutes_since_previous_quiet_episode,
+                    previous_high_tail_within_60_minutes,
+                    following_high_tail_within_60_minutes, neutral_hash_hex,
+                    neutral_hash_fraction, neutral_sampling_fraction,
+                    neutral_salt_id, option_context_valid,
+                    scientific_recording_valid, data_quality_flags_json, phase,
+                    completion_status, completed_at_utc, claims_json
+                ) VALUES (
+                    ?, ?, ?, ?, 'neutral_control', ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0,
+                    NULL, NULL, 0, 0, ?, ?, ?, ?, 0, 1, ?, 'pending_completion',
+                    'active', NULL, ?
+                )
+                """,
+                (
+                    observation_id,
+                    envelope_id,
+                    quiet_checkpoint_id,
+                    metadata.run_id,
+                    decision.symbol,
+                    decision.session.isoformat(),
+                    decision.checkpoint,
+                    observed,
+                    observed,
+                    decision.probability,
+                    (
+                        None
+                        if source["previous_m1c_probability"] is None
+                        else float(source["previous_m1c_probability"])
+                    ),
+                    decision.hash_hex,
+                    decision.hash_fraction,
+                    decision.sampling_fraction,
+                    decision.salt_id,
+                    _json(tuple(sorted(set(data_quality_flags)))),
+                    self.claims_json,
+                ),
+            )
+        return observation_id
+
+    def record_high_tail_control(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        quiet_checkpoint_id: int,
+        decision: EpisodeDecision,
+        scientific_recording_valid: bool,
+        data_quality_flags: tuple[str, ...],
+    ) -> str:
+        """Mirror each already-authorised fresh high episode into the comparison cohort."""
+
+        self._validate(metadata)
+        if (
+            not decision.fresh_episode
+            or decision.episode_id is None
+            or decision.episode_number is None
+        ):
+            raise ValueError("only fresh frozen high-tail episodes may be controls")
+        with self.repository._connect() as connection:
+            source = self._quiet_checkpoint_row(connection, quiet_checkpoint_id)
+            if (
+                str(source["run_id"]) != metadata.run_id
+                or str(source["symbol"]) != decision.symbol
+                or str(source["session_date"]) != decision.session.isoformat()
+                or int(source["checkpoint"]) != decision.checkpoint
+            ):
+                raise ValueError("high-tail control does not match its checkpoint")
+            existing = connection.execute(
+                """
+                SELECT *
+                FROM quiet_state_observation_v0 WHERE observation_id = ?
+                """,
+                (decision.episode_id,),
+            ).fetchone()
+            if existing is not None:
+                _assert_immutable_observation(
+                    cast(sqlite3.Row, existing),
+                    expected={
+                        "quiet_checkpoint_id": quiet_checkpoint_id,
+                        "run_id": metadata.run_id,
+                        "observation_kind": "high_tail_control",
+                        "symbol": decision.symbol,
+                        "session_date": decision.session.isoformat(),
+                        "trigger_checkpoint": decision.checkpoint,
+                        "trigger_timestamp_utc": decision.trigger_bar_end.isoformat(),
+                        "prospective_entry_timestamp_utc": (
+                            decision.prospective_entry_timestamp.isoformat()
+                        ),
+                        "m1c_probability": decision.probability,
+                        "previous_m1c_probability": decision.previous_probability,
+                        "bottom_5": 0,
+                        "bottom_10": 0,
+                        "bottom_20": 0,
+                        "high_tail": 1,
+                        "episode_number": decision.episode_number,
+                        "minutes_since_previous_quiet_episode": None,
+                        "previous_high_tail_within_60_minutes": 0,
+                        "neutral_hash_hex": None,
+                        "neutral_hash_fraction": None,
+                        "neutral_sampling_fraction": None,
+                        "neutral_salt_id": None,
+                        "scientific_recording_valid": int(scientific_recording_valid),
+                        "data_quality_flags_json": _json(tuple(sorted(set(data_quality_flags)))),
+                        "claims_json": self.claims_json,
+                    },
+                    label="high-tail control",
+                )
+                return str(existing["observation_id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            connection.execute(
+                """
+                INSERT INTO quiet_state_observation_v0(
+                    observation_id, envelope_id, quiet_checkpoint_id, run_id,
+                    observation_kind, symbol, session_date, trigger_checkpoint,
+                    trigger_timestamp_utc, prospective_entry_timestamp_utc,
+                    m1c_probability, previous_m1c_probability, bottom_5,
+                    bottom_10, bottom_20, high_tail, episode_number,
+                    minutes_since_previous_quiet_episode,
+                    previous_high_tail_within_60_minutes,
+                    following_high_tail_within_60_minutes, neutral_hash_hex,
+                    neutral_hash_fraction, neutral_sampling_fraction,
+                    neutral_salt_id, option_context_valid,
+                    scientific_recording_valid, data_quality_flags_json, phase,
+                    completion_status, completed_at_utc, claims_json
+                ) VALUES (
+                    ?, ?, ?, ?, 'high_tail_control', ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 1,
+                    ?, NULL, 0, 0, NULL, NULL, NULL, NULL, 0, ?, ?,
+                    'pending_completion', 'active', NULL, ?
+                )
+                """,
+                (
+                    decision.episode_id,
+                    envelope_id,
+                    quiet_checkpoint_id,
+                    metadata.run_id,
+                    decision.symbol,
+                    decision.session.isoformat(),
+                    decision.checkpoint,
+                    decision.trigger_bar_end.isoformat(),
+                    decision.prospective_entry_timestamp.isoformat(),
+                    decision.probability,
+                    decision.previous_probability,
+                    decision.episode_number,
+                    int(scientific_recording_valid),
+                    _json(tuple(sorted(set(data_quality_flags)))),
+                    self.claims_json,
+                ),
+            )
+        return decision.episode_id
+
+    def mark_following_high_tail_proximity(
+        self,
+        *,
+        run_id: str,
+        symbol: str,
+        session: date,
+        high_tail_timestamp: datetime,
+    ) -> int:
+        """Complete the descriptive following-60-minute flag after a high episode."""
+
+        if high_tail_timestamp.tzinfo is None or high_tail_timestamp.utcoffset() is None:
+            raise ValueError("high-tail timestamp must be timezone-aware")
+        high = high_tail_timestamp.astimezone(UTC)
+        lower = high - timedelta(minutes=60)
+        with self.repository._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE quiet_state_observation_v0
+                SET following_high_tail_within_60_minutes = 1
+                WHERE run_id = ? AND symbol = ? AND session_date = ?
+                  AND observation_kind = 'quiet_bottom_10'
+                  AND trigger_timestamp_utc < ?
+                  AND trigger_timestamp_utc >= ?
+                  AND following_high_tail_within_60_minutes = 0
+                """,
+                (
+                    run_id,
+                    symbol,
+                    session.isoformat(),
+                    high.isoformat(),
+                    lower.isoformat(),
+                ),
+            )
+            return int(cursor.rowcount)
 
     def record_checkpoint(
         self,
@@ -525,6 +1082,131 @@ class FrozenRecorderRepository:
                     encoded_summary,
                     encoded_components,
                     encoded_relationships,
+                    encoded_quality,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_quiet_microstructure_summary(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        window_name: str,
+        summary: MicrostructureWindowSummary,
+        level1_valid: bool,
+        tick_valid: bool,
+        depth_valid: bool,
+        quality_flags: tuple[str, ...],
+    ) -> int:
+        """Persist a quiet/control window without a directional-model relationship."""
+
+        self._validate(metadata)
+        payload = {
+            **summary.model_dump(mode="json"),
+            "level1_valid": level1_valid,
+            "tick_valid": tick_valid,
+            "depth_valid": depth_valid,
+        }
+        encoded = _json(payload)
+        encoded_quality = _json(quality_flags)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, summary_json, quality_flags_json
+                FROM quiet_state_microstructure_v0
+                WHERE observation_id = ? AND window_name = ? AND window_end_utc = ?
+                """,
+                (
+                    observation_id,
+                    window_name,
+                    summary.window_end.isoformat(),
+                ),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["summary_json"]) != encoded
+                    or str(existing["quality_flags_json"]) != encoded_quality
+                ):
+                    raise ValueError("immutable quiet microstructure summary differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_state_microstructure_v0(
+                    envelope_id, run_id, observation_id, window_name,
+                    window_start_utc, window_end_utc, summary_json,
+                    quality_flags_json, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    window_name,
+                    summary.window_start.isoformat(),
+                    summary.window_end.isoformat(),
+                    encoded,
+                    encoded_quality,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_quiet_underlying_path(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        horizon_label: str,
+        target_timestamp_utc: datetime,
+        payload: dict[str, object],
+        quality_flags: tuple[str, ...],
+    ) -> int:
+        """Persist one deterministic Level-I/trade path projection for a horizon."""
+
+        self._validate(metadata)
+        if target_timestamp_utc.tzinfo is None or target_timestamp_utc.utcoffset() is None:
+            raise ValueError("quiet underlying-path timestamp must be timezone-aware")
+        encoded_payload = _json(payload)
+        encoded_quality = _json(tuple(sorted(set(quality_flags))))
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, target_timestamp_utc, payload_json, quality_flags_json
+                FROM quiet_state_underlying_path_v0
+                WHERE observation_id = ? AND horizon_label = ?
+                """,
+                (observation_id, horizon_label),
+            ).fetchone()
+            observed_target = target_timestamp_utc.astimezone(UTC).isoformat()
+            if existing is not None:
+                if (
+                    str(existing["target_timestamp_utc"]) != observed_target
+                    or str(existing["payload_json"]) != encoded_payload
+                    or str(existing["quality_flags_json"]) != encoded_quality
+                ):
+                    raise ValueError("immutable quiet underlying path differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_state_underlying_path_v0(
+                    envelope_id, run_id, observation_id, horizon_label,
+                    target_timestamp_utc, payload_json, quality_flags_json,
+                    claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    horizon_label,
+                    observed_target,
+                    encoded_payload,
                     encoded_quality,
                     self.claims_json,
                 ),
@@ -1103,6 +1785,452 @@ class FrozenRecorderRepository:
             )
             assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
+
+    def record_quiet_option_plan(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        plan: OptionContractPlan,
+    ) -> None:
+        """Freeze capacity and bucket completeness before recording selected contracts."""
+
+        self._validate(metadata)
+        missing_buckets_json = _json(plan.missing_buckets)
+        expected = (
+            plan.requested_contract_count,
+            len(plan.contracts),
+            int(plan.capacity_reduced),
+            missing_buckets_json,
+        )
+        with self.repository._connect() as connection:
+            observation = connection.execute(
+                """
+                SELECT run_id, option_plan_recorded,
+                       option_plan_requested_contract_count,
+                       option_plan_selected_contract_count,
+                       option_plan_capacity_reduced,
+                       option_plan_missing_buckets_json
+                FROM quiet_state_observation_v0
+                WHERE observation_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+            if observation is None or str(observation["run_id"]) != metadata.run_id:
+                raise KeyError(observation_id)
+            if bool(observation["option_plan_recorded"]):
+                actual = (
+                    int(observation["option_plan_requested_contract_count"]),
+                    int(observation["option_plan_selected_contract_count"]),
+                    int(observation["option_plan_capacity_reduced"]),
+                    str(observation["option_plan_missing_buckets_json"]),
+                )
+                if actual != expected:
+                    raise ValueError("immutable quiet option plan differs")
+                return
+            connection.execute(
+                """
+                UPDATE quiet_state_observation_v0
+                SET option_plan_recorded = 1,
+                    option_plan_requested_contract_count = ?,
+                    option_plan_selected_contract_count = ?,
+                    option_plan_capacity_reduced = ?,
+                    option_plan_missing_buckets_json = ?,
+                    option_context_valid = 0
+                WHERE observation_id = ?
+                """,
+                (*expected, observation_id),
+            )
+
+    def record_quiet_option_contract(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        contract: OptionContract,
+        selection_rank: int,
+        selection_roles: tuple[str, ...],
+        resolution_status: str,
+        rejection_reason: str | None,
+        recording_started_at_utc: datetime | None,
+        recording_ends_at_utc: datetime | None,
+    ) -> int:
+        """Persist one exact bounded contract for quiet/control observations."""
+
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            observation = connection.execute(
+                """
+                SELECT run_id FROM quiet_state_observation_v0
+                WHERE observation_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+            if observation is None or str(observation["run_id"]) != metadata.run_id:
+                raise KeyError(observation_id)
+            existing = connection.execute(
+                """
+                SELECT id, underlying_con_id, con_id, dte, dte_bucket,
+                       multiplier, exchange, trading_class, selection_rank,
+                       selection_roles_json, resolution_status, rejection_reason,
+                       recording_started_at_utc, recording_ends_at_utc
+                FROM quiet_state_option_contract_v0
+                WHERE observation_id = ? AND expiry = ? AND strike = ? AND right = ?
+                """,
+                (
+                    observation_id,
+                    contract.expiry.isoformat(),
+                    contract.strike,
+                    contract.right,
+                ),
+            ).fetchone()
+            encoded_roles = _json(tuple(sorted(set(selection_roles))))
+            started = (
+                None
+                if recording_started_at_utc is None
+                else recording_started_at_utc.astimezone(UTC).isoformat()
+            )
+            ends = (
+                None
+                if recording_ends_at_utc is None
+                else recording_ends_at_utc.astimezone(UTC).isoformat()
+            )
+            if existing is not None:
+                expected = (
+                    contract.underlying_con_id,
+                    contract.con_id,
+                    contract.dte,
+                    contract.dte_bucket.value,
+                    contract.multiplier,
+                    contract.exchange,
+                    contract.trading_class,
+                    selection_rank,
+                    encoded_roles,
+                    resolution_status,
+                    rejection_reason,
+                    started,
+                    ends,
+                )
+                actual = tuple(
+                    existing[name]
+                    for name in (
+                        "underlying_con_id",
+                        "con_id",
+                        "dte",
+                        "dte_bucket",
+                        "multiplier",
+                        "exchange",
+                        "trading_class",
+                        "selection_rank",
+                        "selection_roles_json",
+                        "resolution_status",
+                        "rejection_reason",
+                        "recording_started_at_utc",
+                        "recording_ends_at_utc",
+                    )
+                )
+                if actual != expected:
+                    raise ValueError("immutable quiet option contract differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_state_option_contract_v0(
+                    envelope_id, run_id, observation_id, underlying_con_id,
+                    con_id, expiry, dte, dte_bucket, strike, right, multiplier,
+                    exchange, trading_class, selection_rank,
+                    selection_roles_json, resolution_status, rejection_reason,
+                    recording_started_at_utc, recording_ends_at_utc, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    contract.underlying_con_id,
+                    contract.con_id,
+                    contract.expiry.isoformat(),
+                    contract.dte,
+                    contract.dte_bucket.value,
+                    contract.strike,
+                    contract.right,
+                    contract.multiplier,
+                    contract.exchange,
+                    contract.trading_class,
+                    selection_rank,
+                    encoded_roles,
+                    resolution_status,
+                    rejection_reason,
+                    started,
+                    ends,
+                    self.claims_json,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE quiet_state_observation_v0
+                SET option_context_valid = CASE
+                    WHEN option_plan_recorded = 1
+                    AND option_plan_capacity_reduced = 0
+                    AND option_plan_selected_contract_count > 0
+                    AND option_plan_selected_contract_count =
+                        option_plan_requested_contract_count
+                    AND option_plan_selected_contract_count = (
+                        SELECT COUNT(*)
+                        FROM quiet_state_option_contract_v0 AS selected
+                        WHERE selected.observation_id = ?
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM quiet_state_option_contract_v0 AS candidate
+                        WHERE candidate.observation_id = ?
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM quiet_state_option_contract_v0 AS failed
+                        WHERE failed.observation_id = ?
+                          AND failed.resolution_status <> 'recording'
+                    )
+                    THEN 1 ELSE 0 END
+                WHERE observation_id = ?
+                """,
+                (
+                    observation_id,
+                    observation_id,
+                    observation_id,
+                    observation_id,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def update_quiet_option_quote_projection(
+        self,
+        *,
+        option_contract_id: int,
+        event: OptionQuoteEvent,
+        recording_status: str,
+        quote_quality_flags: tuple[str, ...],
+    ) -> None:
+        """Update only the quiet-option UI projection; raw quotes remain append-only."""
+
+        with self.repository._connect() as connection:
+            contract = connection.execute(
+                """
+                SELECT run_id, observation_id
+                FROM quiet_state_option_contract_v0 WHERE id = ?
+                """,
+                (option_contract_id,),
+            ).fetchone()
+            if contract is None:
+                raise KeyError(option_contract_id)
+            observed = event.received_timestamp_utc.isoformat()
+            existing = connection.execute(
+                """
+                SELECT received_timestamp_utc
+                FROM quiet_state_option_quote_state_v0
+                WHERE option_contract_id = ?
+                """,
+                (option_contract_id,),
+            ).fetchone()
+            if existing is not None and str(existing["received_timestamp_utc"]) > observed:
+                raise ValueError("quiet option quote projection cannot move backwards")
+            connection.execute(
+                """
+                INSERT INTO quiet_state_option_quote_state_v0(
+                    option_contract_id, run_id, observation_id,
+                    provider_timestamp_utc, received_timestamp_utc, bid,
+                    bid_size, ask, ask_size, last, last_size, market_data_type,
+                    option_model_price, implied_volatility, delta, gamma, theta,
+                    vega, underlying_reference_price, volume, open_interest,
+                    quote_attributes_json, recording_status,
+                    quote_quality_flags_json, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(option_contract_id) DO UPDATE SET
+                    provider_timestamp_utc = excluded.provider_timestamp_utc,
+                    received_timestamp_utc = excluded.received_timestamp_utc,
+                    bid = excluded.bid,
+                    bid_size = excluded.bid_size,
+                    ask = excluded.ask,
+                    ask_size = excluded.ask_size,
+                    last = excluded.last,
+                    last_size = excluded.last_size,
+                    market_data_type = excluded.market_data_type,
+                    option_model_price = excluded.option_model_price,
+                    implied_volatility = excluded.implied_volatility,
+                    delta = excluded.delta,
+                    gamma = excluded.gamma,
+                    theta = excluded.theta,
+                    vega = excluded.vega,
+                    underlying_reference_price = excluded.underlying_reference_price,
+                    volume = excluded.volume,
+                    open_interest = excluded.open_interest,
+                    quote_attributes_json = excluded.quote_attributes_json,
+                    recording_status = excluded.recording_status,
+                    quote_quality_flags_json = excluded.quote_quality_flags_json,
+                    claims_json = excluded.claims_json
+                """,
+                (
+                    option_contract_id,
+                    str(contract["run_id"]),
+                    str(contract["observation_id"]),
+                    (
+                        None
+                        if event.provider_timestamp_utc is None
+                        else event.provider_timestamp_utc.isoformat()
+                    ),
+                    observed,
+                    event.bid,
+                    event.bid_size,
+                    event.ask,
+                    event.ask_size,
+                    event.last,
+                    event.last_size,
+                    event.market_data_type.value,
+                    event.option_model_price,
+                    event.implied_volatility,
+                    event.delta,
+                    event.gamma,
+                    event.theta,
+                    event.vega,
+                    event.underlying_reference_price,
+                    event.volume,
+                    event.open_interest,
+                    _json(event.quote_attributes),
+                    recording_status,
+                    _json(quote_quality_flags),
+                    self.claims_json,
+                ),
+            )
+
+    def record_quiet_shadow_structure(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        structure_type: str,
+        dte_bucket: str,
+        horizon_label: str,
+        horizon_minutes: int | None,
+        payload: Mapping[str, object],
+        opening_credit_or_debit: float | None,
+        maximum_defined_risk: float | None,
+        conservative_pnl: float | None,
+        return_on_maximum_risk: float | None,
+        short_strike_touched: bool | None,
+        protective_wing_touched: bool | None,
+        attempted: bool,
+        complete_quote_quality: bool,
+        strict_quote_quality: bool,
+        quality_status: str,
+        quality_flags: tuple[str, ...],
+    ) -> int:
+        """Persist long and defined-risk shadow structures outside any decision panel."""
+
+        self._validate(metadata)
+        allowed = {
+            "LONG_CALL",
+            "LONG_PUT",
+            "ATM_STRADDLE",
+            "ATM_IRON_BUTTERFLY",
+            "DELTA_IRON_CONDOR",
+            "CALL_CREDIT_SPREAD",
+            "PUT_CREDIT_SPREAD",
+        }
+        if structure_type not in allowed:
+            raise ValueError("quiet shadow structure type is invalid")
+        if horizon_label not in {"5m", "10m", "15m", "30m", "60m", "session_end"}:
+            raise ValueError("quiet shadow horizon is not frozen")
+        encoded = _json(dict(payload))
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, payload_json FROM quiet_state_shadow_outcome_v0
+                WHERE observation_id = ? AND structure_type = ?
+                  AND dte_bucket = ? AND horizon_label = ?
+                """,
+                (observation_id, structure_type, dte_bucket, horizon_label),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["payload_json"]) != encoded:
+                    raise ValueError("immutable quiet shadow outcome differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_state_shadow_outcome_v0(
+                    envelope_id, run_id, observation_id, structure_type,
+                    dte_bucket, horizon_label, horizon_minutes,
+                    opening_credit_or_debit, maximum_defined_risk,
+                    conservative_pnl, return_on_maximum_risk,
+                    short_strike_touched, protective_wing_touched, attempted,
+                    complete_quote_quality, strict_quote_quality, quality_status,
+                    quality_flags_json, payload_json,
+                    live_decision_panel_visible, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    structure_type,
+                    dte_bucket,
+                    horizon_label,
+                    horizon_minutes,
+                    opening_credit_or_debit,
+                    maximum_defined_risk,
+                    conservative_pnl,
+                    return_on_maximum_risk,
+                    (None if short_strike_touched is None else int(short_strike_touched)),
+                    (None if protective_wing_touched is None else int(protective_wing_touched)),
+                    int(attempted),
+                    int(complete_quote_quality),
+                    int(strict_quote_quality),
+                    quality_status,
+                    _json(quality_flags),
+                    encoded,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def finalise_quiet_observation(
+        self,
+        *,
+        observation_id: str,
+        phase: str,
+        completion_status: str,
+        completed_at_utc: datetime,
+    ) -> None:
+        if completed_at_utc.tzinfo is None or completed_at_utc.utcoffset() is None:
+            raise ValueError("quiet completion timestamp must be timezone-aware")
+        completed = completed_at_utc.astimezone(UTC).isoformat()
+        with self.repository._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT phase, completion_status, completed_at_utc
+                FROM quiet_state_observation_v0 WHERE observation_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(observation_id)
+            if row["completed_at_utc"] is not None:
+                if (
+                    str(row["phase"]) != phase
+                    or str(row["completion_status"]) != completion_status
+                    or str(row["completed_at_utc"]) != completed
+                ):
+                    raise ValueError("quiet observation finalisation is immutable")
+                return
+            connection.execute(
+                """
+                UPDATE quiet_state_observation_v0
+                SET phase = ?, completion_status = ?, completed_at_utc = ?
+                WHERE observation_id = ? AND completed_at_utc IS NULL
+                """,
+                (phase, completion_status, completed, observation_id),
+            )
 
     def finalise_episode(
         self,

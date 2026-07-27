@@ -36,6 +36,7 @@ class PathsConfig(BaseModel):
     direction_beta_artifact: Path | None = None
     historical_activity_bars: Path | None = None
     bar_compatibility_report: Path | None = None
+    quiet_state_concentration_audit_root: Path | None = None
 
 
 class RuntimeConfig(BaseModel):

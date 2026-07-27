@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from stocker_prospective.quiet_state import (
+    BOTTOM_5_THRESHOLD,
+    BOTTOM_10_THRESHOLD,
+    BOTTOM_20_THRESHOLD,
+    HIGH_TAIL_THRESHOLD,
+    NEUTRAL_CONTROL_SALT,
+    NEUTRAL_CONTROL_SAMPLING_FRACTION,
+)
 
 
 class ProspectiveReadStore:
@@ -1106,6 +1116,355 @@ class ProspectiveReadStore:
             key=lambda item: str(item["recorded_at_utc"]),
             reverse=True,
         )[:limit]
+
+    def quiet_state_status_v0(self) -> dict[str, Any]:
+        """Project frozen quiet-state collection status without broker access."""
+
+        run_id = self._selected_run_id()
+        empty: dict[str, Any] = {
+            "latest_checkpoint": None,
+            "checkpoint_count": 0,
+            "observation_counts": {},
+            "phase_counts": {},
+            "complete_quiet_episodes": 0,
+        }
+        projection: dict[str, Any]
+        if run_id is None:
+            projection = empty
+        else:
+            with self._connect() as connection:
+                latest = connection.execute(
+                    """
+                    SELECT q.*, m.bar_end_utc
+                    FROM quiet_state_checkpoint_v0 q
+                    JOIN m1c_checkpoint_v0 m ON m.id = q.checkpoint_id
+                    WHERE q.run_id = ?
+                    ORDER BY m.bar_end_utc DESC, q.id DESC LIMIT 1
+                    """,
+                    (run_id,),
+                ).fetchone()
+                checkpoint_count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM quiet_state_checkpoint_v0 WHERE run_id = ?",
+                        (run_id,),
+                    ).fetchone()[0]
+                )
+                observation_counts = connection.execute(
+                    """
+                    SELECT observation_kind, COUNT(*) AS count
+                    FROM quiet_state_observation_v0
+                    WHERE run_id = ? GROUP BY observation_kind
+                    """,
+                    (run_id,),
+                ).fetchall()
+                phase_counts = connection.execute(
+                    """
+                    SELECT phase, observation_kind, COUNT(*) AS count
+                    FROM quiet_state_observation_v0
+                    WHERE run_id = ? GROUP BY phase, observation_kind
+                    ORDER BY phase, observation_kind
+                    """,
+                    (run_id,),
+                ).fetchall()
+                complete_quiet = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM quiet_state_observation_v0
+                        WHERE run_id = ? AND observation_kind = 'quiet_bottom_10'
+                          AND completion_status = 'complete'
+                        """,
+                        (run_id,),
+                    ).fetchone()[0]
+                )
+            projection = {
+                "latest_checkpoint": (None if latest is None else self._decoded(latest)),
+                "checkpoint_count": checkpoint_count,
+                "observation_counts": {
+                    str(row["observation_kind"]): int(row["count"]) for row in observation_counts
+                },
+                "phase_counts": [dict(row) for row in phase_counts],
+                "complete_quiet_episodes": complete_quiet,
+            }
+        return {
+            **projection,
+            "thresholds": {
+                "bottom_5": BOTTOM_5_THRESHOLD,
+                "bottom_10": BOTTOM_10_THRESHOLD,
+                "bottom_20": BOTTOM_20_THRESHOLD,
+                "high_tail": HIGH_TAIL_THRESHOLD,
+            },
+            "neutral_control": {
+                "sampling_fraction": NEUTRAL_CONTROL_SAMPLING_FRACTION,
+                "salt_sha256": hashlib.sha256(NEUTRAL_CONTROL_SALT.encode()).hexdigest(),
+            },
+            "phase_boundaries": {
+                "engineering_shakedown": 30,
+                "quiet_state_development": 150,
+                "quiet_state_confirmation": 150,
+            },
+            "record_only": True,
+            "order_path": "absent",
+            "original_decision": "blocked_insufficient_low_tail_support",
+        }
+
+    def quiet_state_universe_v0(self) -> list[dict[str, Any]]:
+        """Return the latest quiet classification and Level I state per symbol."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                WITH latest_quiet AS (
+                    SELECT q.*
+                    FROM quiet_state_checkpoint_v0 q
+                    JOIN (
+                        SELECT symbol, MAX(id) AS maximum_id
+                        FROM quiet_state_checkpoint_v0
+                        WHERE run_id = ? GROUP BY symbol
+                    ) x ON x.maximum_id = q.id
+                ),
+                latest_observation AS (
+                    SELECT o.*
+                    FROM quiet_state_observation_v0 o
+                    JOIN (
+                        SELECT symbol, MAX(trigger_timestamp_utc) AS maximum_trigger
+                        FROM quiet_state_observation_v0
+                        WHERE run_id = ? GROUP BY symbol
+                    ) x ON x.symbol = o.symbol
+                       AND x.maximum_trigger = o.trigger_timestamp_utc
+                    WHERE o.run_id = ?
+                )
+                SELECT u.symbol, u.operational_status,
+                       q.session_date, q.checkpoint, q.m1c_probability,
+                       q.previous_m1c_probability, q.bottom_5, q.bottom_10,
+                       q.bottom_20, q.high_tail, q.distance_from_bottom_10,
+                       q.data_quality_status, q.data_quality_flags_json,
+                       o.observation_id, o.observation_kind,
+                       o.session_date AS observation_session_date,
+                       o.trigger_checkpoint AS observation_trigger_checkpoint,
+                       o.trigger_timestamp_utc, o.completion_status,
+                       o.option_context_valid,
+                       s.bid, s.bid_size, s.ask, s.ask_size, s.last, s.last_size,
+                       s.spread, s.midpoint, s.quote_size_imbalance,
+                       s.microprice_edge_bps, s.received_timestamp_utc,
+                       s.market_data_type, s.quote_valid
+                FROM universe_membership u
+                LEFT JOIN latest_quiet q ON q.symbol = u.symbol
+                LEFT JOIN latest_observation o ON o.symbol = u.symbol
+                LEFT JOIN underlying_live_state_v0 s
+                  ON s.run_id = u.run_id AND s.symbol = u.symbol
+                WHERE u.run_id = ?
+                ORDER BY u.symbol
+                """,
+                (run_id, run_id, run_id, run_id),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = self._decoded(row)
+            item["fresh_quiet_episode"] = (
+                item.get("observation_kind") == "quiet_bottom_10"
+                and item.get("checkpoint") == item.get("observation_trigger_checkpoint")
+                and item.get("session_date") == item.get("observation_session_date")
+            )
+            result.append(item)
+        return result
+
+    def quiet_state_episodes_v0(
+        self,
+        *,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """List quiet episodes and deterministic controls in reverse chronology."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT o.*,
+                       COUNT(DISTINCT c.id) AS option_contract_count,
+                       COUNT(DISTINCT s.id) AS shadow_outcome_count
+                FROM quiet_state_observation_v0 o
+                LEFT JOIN quiet_state_option_contract_v0 c
+                  ON c.observation_id = o.observation_id
+                LEFT JOIN quiet_state_shadow_outcome_v0 s
+                  ON s.observation_id = o.observation_id
+                WHERE o.run_id = ?
+                GROUP BY o.observation_id
+                ORDER BY o.trigger_timestamp_utc DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]
+
+    def quiet_state_episode_v0(
+        self,
+        observation_id: str,
+    ) -> dict[str, Any] | None:
+        """Return one complete quiet/control evidence projection."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return None
+        with self._connect() as connection:
+            observation = connection.execute(
+                """
+                SELECT o.*, q.model_hash, q.feature_hash,
+                       q.data_quality_status AS checkpoint_data_quality_status
+                FROM quiet_state_observation_v0 o
+                JOIN quiet_state_checkpoint_v0 q ON q.id = o.quiet_checkpoint_id
+                WHERE o.run_id = ? AND o.observation_id = ?
+                """,
+                (run_id, observation_id),
+            ).fetchone()
+            if observation is None:
+                return None
+            microstructure = connection.execute(
+                """
+                SELECT * FROM quiet_state_microstructure_v0
+                WHERE run_id = ? AND observation_id = ?
+                ORDER BY window_end_utc, window_name
+                """,
+                (run_id, observation_id),
+            ).fetchall()
+            underlying_path = connection.execute(
+                """
+                SELECT * FROM quiet_state_underlying_path_v0
+                WHERE run_id = ? AND observation_id = ?
+                ORDER BY target_timestamp_utc
+                """,
+                (run_id, observation_id),
+            ).fetchall()
+            shadows = connection.execute(
+                """
+                SELECT * FROM quiet_state_shadow_outcome_v0
+                WHERE run_id = ? AND observation_id = ?
+                ORDER BY dte_bucket, structure_type, horizon_minutes
+                """,
+                (run_id, observation_id),
+            ).fetchall()
+        return {
+            "episode": self._decoded(observation),
+            "frozen_thresholds": {
+                "bottom_5": BOTTOM_5_THRESHOLD,
+                "bottom_10": BOTTOM_10_THRESHOLD,
+                "bottom_20": BOTTOM_20_THRESHOLD,
+                "high_tail": HIGH_TAIL_THRESHOLD,
+            },
+            "underlying_path": [self._decoded(row) for row in underlying_path],
+            "microstructure": [self._decoded(row) for row in microstructure],
+            "shadow_structures": [self._decoded(row) for row in shadows],
+        }
+
+    def quiet_state_episode_options_v0(
+        self,
+        observation_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return the bounded contract set and latest recorded option quote state."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT c.*, q.provider_timestamp_utc, q.received_timestamp_utc,
+                       q.bid, q.bid_size, q.ask, q.ask_size, q.last, q.last_size,
+                       q.market_data_type, q.option_model_price,
+                       q.implied_volatility, q.delta, q.gamma, q.theta, q.vega,
+                       q.underlying_reference_price, q.volume, q.open_interest,
+                       q.recording_status, q.quote_quality_flags_json
+                FROM quiet_state_option_contract_v0 c
+                LEFT JOIN quiet_state_option_quote_state_v0 q
+                  ON q.option_contract_id = c.id
+                WHERE c.run_id = ? AND c.observation_id = ?
+                ORDER BY c.dte, c.selection_rank, c.strike, c.right
+                """,
+                (run_id, observation_id),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]
+
+    def quiet_state_shadow_structures_v0(
+        self,
+        *,
+        limit: int = 2000,
+    ) -> list[dict[str, Any]]:
+        """Return conservative long- and defined-risk shadow outcomes."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT s.*, o.phase, o.observation_kind, o.symbol,
+                       o.m1c_probability, o.trigger_timestamp_utc
+                FROM quiet_state_shadow_outcome_v0 s
+                JOIN quiet_state_observation_v0 o
+                  ON o.observation_id = s.observation_id
+                WHERE s.run_id = ?
+                ORDER BY o.trigger_timestamp_utc DESC,
+                         s.horizon_minutes, s.id DESC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]
+
+    def quiet_state_session_quality_v0(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Aggregate attempted and quality-complete structures by session."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                WITH observation_counts AS (
+                    SELECT session_date, COUNT(*) AS observations,
+                           SUM(CASE WHEN observation_kind = 'quiet_bottom_10'
+                                    THEN 1 ELSE 0 END) AS quiet_episodes,
+                           SUM(CASE WHEN observation_kind = 'neutral_control'
+                                    THEN 1 ELSE 0 END) AS neutral_controls,
+                           SUM(CASE WHEN observation_kind = 'high_tail_control'
+                                    THEN 1 ELSE 0 END) AS high_tail_controls,
+                           SUM(CASE WHEN completion_status = 'complete'
+                                    THEN 1 ELSE 0 END) AS complete_observations
+                    FROM quiet_state_observation_v0
+                    WHERE run_id = ?
+                    GROUP BY session_date
+                ),
+                shadow_counts AS (
+                    SELECT o.session_date, COUNT(s.id) AS attempted_structures,
+                           COALESCE(SUM(s.complete_quote_quality), 0)
+                               AS complete_quote_quality_structures,
+                           COALESCE(SUM(s.strict_quote_quality), 0)
+                               AS strict_quote_quality_structures
+                    FROM quiet_state_observation_v0 o
+                    JOIN quiet_state_shadow_outcome_v0 s
+                      ON s.observation_id = o.observation_id
+                    WHERE o.run_id = ?
+                    GROUP BY o.session_date
+                )
+                SELECT o.*, COALESCE(s.attempted_structures, 0)
+                           AS attempted_structures,
+                       COALESCE(s.complete_quote_quality_structures, 0)
+                           AS complete_quote_quality_structures,
+                       COALESCE(s.strict_quote_quality_structures, 0)
+                           AS strict_quote_quality_structures
+                FROM observation_counts o
+                LEFT JOIN shadow_counts s USING (session_date)
+                ORDER BY o.session_date DESC LIMIT ?
+                """,
+                (run_id, run_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def session_reports_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
         run_id = self._selected_run_id()

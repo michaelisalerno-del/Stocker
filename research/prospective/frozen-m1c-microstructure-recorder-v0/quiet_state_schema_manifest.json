@@ -1,0 +1,43 @@
+{
+  "contract_version": "m1c-quiet-state-schema-v0",
+  "research_only": true,
+  "original_low_movement_decision_preserved": true,
+  "original_decision": "blocked_insufficient_low_tail_support",
+  "retrospective_gate_relaxation_allowed": false,
+  "m1c_frozen": true,
+  "m1c_bottom_5_threshold": 0.115697407847643,
+  "m1c_bottom_10_threshold": 0.135896965695626,
+  "m1c_bottom_20_threshold": 0.167095528962669,
+  "primary_quiet_state": "bottom_10_percent",
+  "prospective_record_only": true,
+  "option_shadow_outcomes_only": true,
+  "defined_risk_short_premium_only": true,
+  "naked_short_options_allowed": false,
+  "paper_orders_allowed": false,
+  "live_orders_allowed": false,
+  "broker_order_methods_allowed": false,
+  "strategy_promotion": false,
+  "protected_historical_start": "2026-01-01",
+  "migration": "0009_quiet_state_options_shadow_v0.sql",
+  "tables": {
+    "quiet_state_checkpoint_v0": "all frozen tail memberships and exact model identities",
+    "quiet_state_observation_v0": "quiet, neutral and high-tail observation identities, immutable option-plan capacity metadata and phases",
+    "quiet_state_microstructure_v0": "bounded completed quote, trade and depth summaries",
+    "quiet_state_underlying_path_v0": "horizon path and excursion projections",
+    "quiet_state_option_contract_v0": "bounded exact option contract identities",
+    "quiet_state_option_quote_state_v0": "latest top-of-book, Greeks, volume and open interest",
+    "quiet_state_shadow_outcome_v0": "long-premium and defined-risk conservative shadow outcomes"
+  },
+  "immutable_raw_evidence": {
+    "completed_five_minute_bars": true,
+    "underlying_level_i": true,
+    "protected_market_and_sector_proxy_level_i_and_bars": true,
+    "tick_by_tick_trade_and_quote_where_capacity_permits": true,
+    "level_ii_where_enabled": true,
+    "option_top_of_book_and_computations": true,
+    "subscription_lifecycle_and_gaps": true,
+    "append_only_parquet_reused": true
+  },
+  "live_market_data_committed_to_repository": false,
+  "account_identifiers_recorded": false
+}

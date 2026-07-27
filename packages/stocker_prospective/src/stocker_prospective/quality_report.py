@@ -43,7 +43,7 @@ class SessionQualityReport(BaseModel):
     raw_event_partition_hashes: tuple[str, ...]
     complete_shadow_horizons: int = Field(ge=0)
     complete: bool
-    claims: dict[str, bool | float]
+    claims: dict[str, bool | float | str]
 
     @field_validator("generated_at_utc")
     @classmethod

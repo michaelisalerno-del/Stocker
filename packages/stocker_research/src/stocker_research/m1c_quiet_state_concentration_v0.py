@@ -201,7 +201,7 @@ def cluster_quiet_state_runs(
             return
         first = members[0]
         last = members[-1]
-        record = first.to_dict()
+        record: dict[str, Any] = {str(key): value for key, value in first.to_dict().items()}
         record.pop("_quiet", None)
         member_ids = tuple(str(member["row_id"]) for member in members)
         record.update(
@@ -298,7 +298,7 @@ def fresh_quiet_episodes(
             )
             if crossing and (not math.isfinite(elapsed) or elapsed >= 30.0):
                 episode_number += 1
-                record = row.to_dict()
+                record: dict[str, Any] = {str(key): value for key, value in row.to_dict().items()}
                 record.update(
                     {
                         "quiet_episode_id": _event_identity(
@@ -363,7 +363,7 @@ def cluster_surprise_events(
         )
         maximum_index = int(np.argmax(ratios_array))
         maximum_row = members[maximum_index]
-        record = maximum_row.to_dict()
+        record: dict[str, Any] = {str(key): value for key, value in maximum_row.to_dict().items()}
         member_ids = tuple(str(member["row_id"]) for member in members)
         first_timestamp = pd.Timestamp(first["entry_timestamp"])
         last_timestamp = pd.Timestamp(members[-1]["entry_timestamp"])

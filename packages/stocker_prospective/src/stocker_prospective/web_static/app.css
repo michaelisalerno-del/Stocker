@@ -17,6 +17,7 @@
   --body: "Barlow", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
   --display: "Archivo Black", Impact, "Arial Black", sans-serif;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --boundary-height: 34px;
 }
 
 * {
@@ -200,7 +201,7 @@ h1 span {
 .command-rail {
   position: sticky;
   z-index: 50;
-  top: 0;
+  top: var(--boundary-height);
   display: flex;
   align-items: stretch;
   justify-content: space-between;
@@ -213,14 +214,17 @@ h1 span {
 
 .command-rail nav {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
 }
 
 .nav-item {
   position: relative;
-  min-width: 156px;
+  flex: 1 1 100px;
+  min-width: 100px;
   min-height: 58px;
-  padding: 0 22px;
+  padding: 0 clamp(10px, 1.25vw, 22px);
   border: 0;
   border-right: 1px solid var(--line);
   color: var(--muted);
@@ -266,6 +270,7 @@ h1 span {
 
 .rail-meta {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 16px;
   padding-right: 20px;
@@ -415,6 +420,21 @@ h2 {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.66rem;
+}
+
+#concentration-summary .metric:first-child {
+  grid-column: span 2;
+}
+
+#concentration-summary .metric:first-child strong {
+  overflow-wrap: break-word;
+  font-size: clamp(0.82rem, 1.35vw, 1.15rem);
+}
+
+#concentration-summary .metric:nth-child(7) strong,
+#concentration-summary .metric:nth-child(8) strong {
+  font-size: clamp(0.78rem, 1vw, 1rem);
+  line-height: 1.25;
 }
 
 .value-danger {
@@ -783,6 +803,12 @@ a:focus-visible {
   outline-offset: 3px;
 }
 
+@media (max-width: 1400px) {
+  .rail-meta span {
+    display: none;
+  }
+}
+
 @media (max-width: 1100px) {
   .metric-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -875,6 +901,10 @@ a:focus-visible {
     font-size: 0.57rem;
   }
 
+  #concentration-summary .metric:first-child {
+    grid-column: auto;
+  }
+
   .audit-item {
     grid-template-columns: 42px 1fr;
   }
@@ -896,8 +926,12 @@ a:focus-visible {
 }
 
 .permanent-boundary {
-  position: relative;
+  position: sticky;
   z-index: 110;
+  top: 0;
+  display: grid;
+  min-height: var(--boundary-height);
+  place-items: center;
   padding: 8px 18px;
   border-bottom: 1px solid #ffe1a3;
   color: #14100a;
@@ -907,6 +941,67 @@ a:focus-visible {
   font-weight: 900;
   letter-spacing: 0.16em;
   text-align: center;
+}
+
+.quiet-boundary,
+.failure-lock {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--teal-dim);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(53, 208, 186, 0.05) 0,
+      rgba(53, 208, 186, 0.05) 8px,
+      transparent 8px,
+      transparent 16px
+    ),
+    var(--surface);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.quiet-boundary strong {
+  color: var(--teal);
+}
+
+.quiet-boundary span:nth-child(2) {
+  color: var(--text);
+  font-size: clamp(1rem, 2vw, 1.45rem);
+  font-weight: 700;
+  text-align: center;
+}
+
+.failure-lock {
+  border-color: rgba(255, 98, 92, 0.65);
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 98, 92, 0.075) 0,
+      rgba(255, 98, 92, 0.075) 8px,
+      transparent 8px,
+      transparent 16px
+    ),
+    var(--surface);
+}
+
+.failure-lock strong {
+  color: var(--danger);
+  text-align: center;
+}
+
+.quiet-table-panel {
+  margin-top: 18px;
+}
+
+.stacked-panel {
+  margin-top: 18px;
 }
 
 .wide-panel {
@@ -1081,6 +1176,17 @@ a:focus-visible {
   .replay-controls output {
     width: 100%;
     margin-left: 0;
+  }
+
+  .quiet-boundary,
+  .failure-lock {
+    grid-template-columns: 1fr;
+    text-align: left;
+  }
+
+  .quiet-boundary span:nth-child(2),
+  .failure-lock strong {
+    text-align: left;
   }
 }
 

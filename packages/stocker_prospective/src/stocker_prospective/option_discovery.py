@@ -38,6 +38,9 @@ ReferenceQuoteProvider = Callable[
     [str, datetime],
     UnderlyingLevel1QuoteEvent | None,
 ]
+QUIET_OPTION_STRIKE_STEPS = 4
+QUIET_MAXIMUM_CONTRACTS_PER_OBSERVATION = 54
+QUIET_WING_TARGET_FRACTIONS = (0.01, 0.03, 0.06, 0.10)
 
 
 def _attribute(value: Any, *names: str) -> Any:
@@ -71,6 +74,10 @@ class _PendingEpisode:
     entry_timestamp: datetime
     underlying: QualifiedUnderlying
     directional_actions: dict[str, str]
+    quiet_state: bool = False
+    recording_duration: timedelta = timedelta(minutes=30)
+    strike_steps: int = 2
+    maximum_contracts: int = 30
     started: bool = False
     finalised: bool = False
 
@@ -138,8 +145,52 @@ class BoundedOptionDiscoveryService:
                 entry_timestamp=decision.prospective_entry_timestamp,
                 underlying=underlying,
                 directional_actions=actions,
+                quiet_state=False,
+                recording_duration=timedelta(minutes=30),
+                strike_steps=self.strike_steps,
+                maximum_contracts=self.maximum_contracts_per_episode,
             ),
         )
+
+    def schedule_quiet_state(self, result: RecorderCheckpointResult) -> None:
+        """Schedule the same bounded 60-minute panel for all comparison cohorts."""
+
+        decision = result.quiet_episode_decision
+        observation_ids = tuple(
+            value
+            for value in (
+                result.quiet_observation_id,
+                result.neutral_control_id,
+                result.high_tail_control_id,
+            )
+            if value is not None
+        )
+        underlying = self.underlying_contracts.get(decision.symbol)
+        for observation_id in observation_ids:
+            if underlying is None:
+                self._rejections[observation_id] = "underlying_contract_not_resolved"
+                continue
+            existing = self._pending.get(observation_id)
+            if existing is not None:
+                if existing.started:
+                    raise RuntimeError("quiet comparison upgrade occurred after option start")
+                existing.quiet_state = True
+                existing.recording_duration = timedelta(minutes=60)
+                existing.strike_steps = QUIET_OPTION_STRIKE_STEPS
+                existing.maximum_contracts = QUIET_MAXIMUM_CONTRACTS_PER_OBSERVATION
+                continue
+            self._pending[observation_id] = _PendingEpisode(
+                episode_id=observation_id,
+                symbol=decision.symbol,
+                session=decision.session,
+                entry_timestamp=decision.prospective_entry_timestamp,
+                underlying=underlying,
+                directional_actions={},
+                quiet_state=True,
+                recording_duration=timedelta(minutes=60),
+                strike_steps=QUIET_OPTION_STRIKE_STEPS,
+                maximum_contracts=QUIET_MAXIMUM_CONTRACTS_PER_OBSERVATION,
+            )
 
     def poll(self, *, now: datetime) -> None:
         for episode in tuple(self._pending.values()):
@@ -174,13 +225,15 @@ class BoundedOptionDiscoveryService:
                         entry_timestamp=episode.entry_timestamp,
                         plan=plan,
                         resolver=partial(self._resolve, episode.symbol),
+                        quiet_state=episode.quiet_state,
+                        recording_duration=episode.recording_duration,
                     )
                 except (RuntimeError, ValueError) as exc:
                     self._rejections[episode.episode_id] = str(exc)
                     episode.finalised = True
                     continue
                 episode.started = True
-            finish_at = episode.entry_timestamp + timedelta(minutes=30) + self.sensitivity_wait
+            finish_at = episode.entry_timestamp + episode.recording_duration + self.sensitivity_wait
             if episode.started and now >= finish_at:
                 metadata = self.metadata_factory(now, (finish_at,))
                 self._finalizations[episode.episode_id] = self.option_recorder.finalise_episode(
@@ -254,7 +307,7 @@ class BoundedOptionDiscoveryService:
             0,
             self.budget.limits.get(SubscriptionKind.OPTION, 0) - active_options,
         )
-        maximum = min(self.maximum_contracts_per_episode, available)
+        maximum = min(episode.maximum_contracts, available)
         exchange = str(_attribute(selected, "exchange") or "SMART")
         trading_class = str(_attribute(selected, "trading_class", "tradingClass") or episode.symbol)
         strikes_by_expiry_right: dict[tuple[date, str], tuple[float, ...]] = {}
@@ -278,7 +331,7 @@ class BoundedOptionDiscoveryService:
             underlying_reference=underlying_reference,
             expiries=chosen_expiries,
             strikes_by_expiry_right=strikes_by_expiry_right,
-            strike_steps=self.strike_steps,
+            strike_steps=episode.strike_steps,
             maximum_contracts=maximum,
             exchange=exchange,
             trading_class=trading_class,
@@ -321,8 +374,19 @@ class BoundedOptionDiscoveryService:
         if atm is None:
             return ()
 
+        if episode.quiet_state:
+            return self._qualify_quiet_symmetric_strikes(
+                episode=episode,
+                expiry=expiry,
+                available=tuple(available),
+                atm=atm,
+                underlying_reference=underlying_reference,
+                exchange=exchange,
+                trading_class=trading_class,
+            )
+
         selected = [atm]
-        side_limit = self.strike_steps + self.common_strike_fallback_attempts
+        side_limit = episode.strike_steps + self.common_strike_fallback_attempts
         for side_candidates in (
             sorted(strike for strike in available if strike > atm),
             sorted((strike for strike in available if strike < atm), reverse=True),
@@ -338,8 +402,79 @@ class BoundedOptionDiscoveryService:
                 ):
                     selected.append(strike)
                     found += 1
-                    if found >= self.strike_steps:
+                    if found >= episode.strike_steps:
                         break
+        return tuple(sorted(selected))
+
+    def _qualify_quiet_symmetric_strikes(
+        self,
+        *,
+        episode: _PendingEpisode,
+        expiry: date,
+        available: tuple[float, ...],
+        atm: float,
+        underlying_reference: float,
+        exchange: str,
+        trading_class: str,
+    ) -> tuple[float, ...]:
+        """Select frozen broad offsets while preserving exact symmetric fly wings."""
+
+        upper = {round(strike - atm, 10): strike for strike in available if strike > atm}
+        lower = {round(atm - strike, 10): strike for strike in available if strike < atm}
+        remaining = set(upper).intersection(lower)
+        ordered_distances: list[float] = []
+        minimum_distance = QUIET_WING_TARGET_FRACTIONS[0] * underlying_reference
+        eligible_wings = {
+            distance for distance in remaining if distance + 1e-12 >= minimum_distance
+        }
+        if eligible_wings:
+            nearest_valid_wing = min(eligible_wings)
+            ordered_distances.append(nearest_valid_wing)
+            remaining.remove(nearest_valid_wing)
+        for fraction in QUIET_WING_TARGET_FRACTIONS[1:]:
+            if not remaining:
+                break
+            target = fraction * underlying_reference
+            eligible_remaining = {
+                distance for distance in remaining if distance + 1e-12 >= minimum_distance
+            }
+            if not eligible_remaining:
+                break
+            distance = min(
+                eligible_remaining,
+                key=lambda value: (abs(value - target), value),
+            )
+            ordered_distances.append(distance)
+            remaining.remove(distance)
+        ordered_distances.extend(
+            sorted(distance for distance in remaining if distance + 1e-12 >= minimum_distance)
+        )
+        attempt_limit = episode.strike_steps + self.common_strike_fallback_attempts
+        selected = [atm]
+        selected_pairs = 0
+        for distance in ordered_distances[:attempt_limit]:
+            upper_strike = upper[distance]
+            lower_strike = lower[distance]
+            upper_valid = self._qualify_pair(
+                episode=episode,
+                expiry=expiry,
+                strike=upper_strike,
+                exchange=exchange,
+                trading_class=trading_class,
+            )
+            lower_valid = self._qualify_pair(
+                episode=episode,
+                expiry=expiry,
+                strike=lower_strike,
+                exchange=exchange,
+                trading_class=trading_class,
+            )
+            if not upper_valid or not lower_valid:
+                continue
+            selected.extend((lower_strike, upper_strike))
+            selected_pairs += 1
+            if selected_pairs >= episode.strike_steps:
+                break
         return tuple(sorted(selected))
 
     def _qualify_pair(

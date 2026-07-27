@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,12 @@ from stocker_prospective.capability import (
 )
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.context import previous_xnys_session
+from stocker_prospective.contract import (
+    M1C_FEATURE_MANIFEST_SHA256,
+    M1C_SCALING_ARTIFACT_SHA256,
+    M1C_THRESHOLD_ARTIFACT_SHA256,
+    SECTOR_PROXY_BY_SYMBOL,
+)
 from stocker_prospective.database import (
     EvidenceMetadata,
     ProspectiveRepository,
@@ -60,6 +66,12 @@ from stocker_prospective.quality_report import (
     build_session_quality_report,
     write_session_quality_report,
 )
+from stocker_prospective.quiet_state_phase import (
+    QuietObservationCompletion,
+    QuietObservationKind,
+    QuietStatePhaseLedger,
+    QuietStatePhaseManager,
+)
 from stocker_prospective.recorder import RecorderDeploymentIdentity
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.recorder_v0 import (
@@ -74,6 +86,7 @@ from stocker_prospective.subscriptions import (
 
 NEW_YORK = ZoneInfo("America/New_York")
 MARKET_PROXY = "VTI"
+SECTOR_PROXY_SYMBOLS = tuple(sorted(set(SECTOR_PROXY_BY_SYMBOL.values())))
 
 
 def _sha256(path: Path) -> str:
@@ -104,6 +117,23 @@ def _passed(path: Path, *, label: str) -> bool:
     return payload.get("passed") is True
 
 
+def _assert_frozen_m1c_artifact_hashes(artifact_files: Mapping[str, Path]) -> None:
+    """Fail closed unless the exact preregistered M1C artifacts are loaded."""
+
+    expected = {
+        "m1c_feature_manifest": M1C_FEATURE_MANIFEST_SHA256,
+        "m1c_threshold": M1C_THRESHOLD_ARTIFACT_SHA256,
+        "m1c_scaling": M1C_SCALING_ARTIFACT_SHA256,
+    }
+    mismatches = sorted(
+        name
+        for name, expected_hash in expected.items()
+        if name not in artifact_files or _sha256(artifact_files[name]) != expected_hash
+    )
+    if mismatches:
+        raise ValueError("blocked_frozen_artifact_hash_mismatch: " + ",".join(mismatches))
+
+
 class FrozenProspectiveApplication:
     """Poll and recover one market-data-only process; no broker mutation exists."""
 
@@ -122,6 +152,7 @@ class FrozenProspectiveApplication:
         subscription_budget: SubscriptionBudgetManager,
         option_discovery: BoundedOptionDiscoveryService,
         phase_manager: ProspectivePhaseManager,
+        quiet_phase_manager: QuietStatePhaseManager,
         promotion_scheduler: PromotionScheduler,
         resolved_contracts: tuple[QualifiedUnderlying, ...],
         ibkr_api_version: str,
@@ -137,6 +168,7 @@ class FrozenProspectiveApplication:
         self.subscription_budget = subscription_budget
         self.option_discovery = option_discovery
         self.phase_manager = phase_manager
+        self.quiet_phase_manager = quiet_phase_manager
         self.promotion_scheduler = promotion_scheduler
         self.resolved_contracts = resolved_contracts
         self.ibkr_api_version = ibkr_api_version
@@ -147,6 +179,11 @@ class FrozenProspectiveApplication:
         self._active_episode_end: dict[str, tuple[str, datetime]] = {}
         self._episode_results: dict[str, RecorderCheckpointResult] = {}
         self._phase_finalised: set[str] = set()
+        self._quiet_observation_results: dict[
+            str,
+            tuple[RecorderCheckpointResult, QuietObservationKind],
+        ] = {}
+        self._quiet_phase_finalised: set[str] = set()
         self._sessions_seen: set[date] = set()
         self._session_reports_written: set[date] = set()
         self._session_context_checked: set[date] = set()
@@ -209,6 +246,34 @@ class FrozenProspectiveApplication:
                     symbol,
                     checkpoint.episode_decision.prospective_entry_timestamp + timedelta(minutes=30),
                 )
+            self.option_discovery.schedule_quiet_state(checkpoint)
+            quiet_observations: tuple[
+                tuple[str | None, QuietObservationKind],
+                ...,
+            ] = (
+                (checkpoint.quiet_observation_id, "quiet_bottom_10"),
+                (checkpoint.neutral_control_id, "neutral_control"),
+                (checkpoint.high_tail_control_id, "high_tail_control"),
+            )
+            for observation_id, kind in quiet_observations:
+                if observation_id is None:
+                    continue
+                self._quiet_observation_results[observation_id] = (checkpoint, kind)
+                metadata = self.metadata_factory(
+                    observed,
+                    (checkpoint.quiet_episode_decision.trigger_timestamp,),
+                )
+                if kind != "high_tail_control":
+                    self.subscriptions.promote_active_episode(
+                        metadata,
+                        symbol=symbol,
+                        episode_id=observation_id,
+                    )
+                self._active_episode_end[observation_id] = (
+                    symbol,
+                    checkpoint.quiet_episode_decision.prospective_entry_timestamp
+                    + timedelta(minutes=60),
+                )
         if result.checkpoint_results:
             metadata = self.metadata_factory(observed, (observed,))
             active_symbols = {symbol for symbol, _ in self._active_episode_end.values()}
@@ -221,6 +286,7 @@ class FrozenProspectiveApplication:
             self.subscriptions.apply_checkpoint_promotions(metadata, decisions)
         self.option_discovery.poll(now=observed)
         self._finalise_due_phases(observed)
+        self._finalise_due_quiet_phases(observed)
         self._write_due_session_reports(observed)
         metadata = self.metadata_factory(observed, (observed,))
         for episode_id, (_, end) in tuple(self._active_episode_end.items()):
@@ -246,7 +312,7 @@ class FrozenProspectiveApplication:
             if episode_id in self._phase_finalised:
                 continue
             decision = result.episode_decision
-            if observed < decision.prospective_entry_timestamp + timedelta(minutes=31):
+            if observed < decision.prospective_entry_timestamp + timedelta(minutes=61):
                 continue
             safety = result.episode_safety
             option_finalization = finalizations.get(episode_id)
@@ -280,6 +346,50 @@ class FrozenProspectiveApplication:
                 completion=completion,
             )
             self._phase_finalised.add(episode_id)
+
+    def _finalise_due_quiet_phases(self, observed: datetime) -> None:
+        finalizations = self.option_discovery.finalizations
+        rejections = self.option_discovery.rejections
+        for observation_id, (result, kind) in sorted(
+            self._quiet_observation_results.items(),
+            key=lambda item: (
+                item[1][0].quiet_episode_decision.prospective_entry_timestamp,
+                item[0],
+            ),
+        ):
+            if observation_id in self._quiet_phase_finalised:
+                continue
+            decision = result.quiet_episode_decision
+            if observed < decision.prospective_entry_timestamp + timedelta(minutes=61):
+                continue
+            option_finalization = finalizations.get(observation_id)
+            entry_quote = self.live_recorder.first_valid_quote_at_or_after(
+                decision.symbol,
+                decision.prospective_entry_timestamp,
+            )
+            completion = QuietObservationCompletion(
+                frozen_m1c_prediction_valid=not result.rejection_reasons,
+                underlying_entry_observed=entry_quote is not None,
+                underlying_quote_window_finalised=self.live_recorder.episode_window_completed(
+                    observation_id,
+                    "entry_to_+60m",
+                ),
+                option_selection_attempted=(
+                    option_finalization is not None or observation_id in rejections
+                ),
+                required_option_quote_windows_finalised=(
+                    option_finalization is not None
+                    and option_finalization.required_option_quote_windows_finalised
+                ),
+                data_gaps_accounted_for=not self.live_recorder.episode_has_gap(observation_id),
+            )
+            self.quiet_phase_manager.finalise(
+                observation_id=observation_id,
+                observation_kind=kind,
+                occurred_at=observed,
+                completion=completion,
+            )
+            self._quiet_phase_finalised.add(observation_id)
 
     def _write_due_session_reports(self, observed: datetime) -> None:
         for session in sorted(self._sessions_seen):
@@ -350,7 +460,8 @@ class FrozenProspectiveApplication:
         else:
             market_data_type = MarketDataType.UNKNOWN
         resolved = tuple(sorted(item.symbol for item in self.resolved_contracts))
-        stock_symbols = tuple(symbol for symbol in resolved if symbol != MARKET_PROXY)
+        required_proxy_symbols = (MARKET_PROXY, *SECTOR_PROXY_SYMBOLS)
+        stock_symbols = tuple(symbol for symbol in resolved if symbol not in required_proxy_symbols)
         clock_drift = self.live_recorder.clock_drift_seconds
         try:
             observed_session = observed_at.astimezone(NEW_YORK).date()
@@ -370,7 +481,9 @@ class FrozenProspectiveApplication:
             tws_or_gateway_version=self.tws_or_gateway_version,
             market_data_type=market_data_type,
             underlying_level1_symbols=tuple(sorted(set(stock_symbols).intersection(quotes))),
-            market_proxy_level1_symbols=((MARKET_PROXY,) if MARKET_PROXY in quotes else ()),
+            market_proxy_level1_symbols=tuple(
+                sorted(set(required_proxy_symbols).intersection(quotes))
+            ),
             option_level1_available=self.option_discovery.live_option_quote_seen,
             option_computation_fields_available=(self.option_discovery.option_computation_seen),
             tick_by_tick_capacity=self.config.ibkr.max_tick_by_tick_subscriptions,
@@ -395,7 +508,7 @@ class FrozenProspectiveApplication:
             required_underlyings=tuple(
                 item.symbol for item in self.resolved_contracts if not item.market_proxy
             ),
-            required_market_proxies=(MARKET_PROXY,),
+            required_market_proxies=required_proxy_symbols,
             maximum_clock_drift_seconds=(self.config.ibkr.maximum_clock_drift_seconds),
             output_path=self.config.paths.ibkr_capability_manifest,
             observed_at=observed_at,
@@ -448,6 +561,8 @@ def build_frozen_prospective_application(
         assert value is not None
         resolved_paths[name] = Path(value)
     artifact_root = resolved_paths["frozen_m1c_artifact_root"]
+    if set(SECTOR_PROXY_BY_SYMBOL) != set(identity.symbols):
+        raise ValueError("frozen sector-proxy map differs from the exact 20-stock cohort")
     artifact_files = {
         "m1c_feature_manifest": artifact_root / "causal_movement_feature_manifest.json",
         "m1c_threshold": artifact_root / "causal_movement_threshold.json",
@@ -460,6 +575,7 @@ def build_frozen_prospective_application(
     if any(not path.is_file() for path in artifact_files.values()):
         absent = sorted(name for name, path in artifact_files.items() if not path.is_file())
         raise ValueError("frozen recorder artifact absent: " + ",".join(absent))
+    _assert_frozen_m1c_artifact_hashes(artifact_files)
     m1c_runtime = FrozenM1CRuntime.from_artifacts(
         feature_manifest_path=artifact_files["m1c_feature_manifest"],
         threshold_path=artifact_files["m1c_threshold"],
@@ -506,7 +622,8 @@ def build_frozen_prospective_application(
     # evidence.
     qualified: list[QualifiedUnderlying] = []
     statuses: dict[str, tuple[str, str | None]] = {}
-    for symbol in (*identity.symbols, MARKET_PROXY):
+    proxy_symbols = (MARKET_PROXY, *SECTOR_PROXY_SYMBOLS)
+    for symbol in (*identity.symbols, *proxy_symbols):
         result = adapter.qualify_exact_contract(stock_contract_factory(symbol))
         pace_request()
         matches = [
@@ -544,16 +661,16 @@ def build_frozen_prospective_application(
                 con_id=int(_attribute(contract, "conId", "con_id")),
                 upstream_contract=contract,
                 exchange=str(_attribute(contract, "exchange") or "SMART"),
-                market_proxy=symbol == MARKET_PROXY,
+                market_proxy=symbol in proxy_symbols,
             )
         )
         if symbol in identity.symbols:
             statuses[symbol] = ("recording", None)
     if {item.symbol for item in qualified} != {
         *identity.symbols,
-        MARKET_PROXY,
+        *proxy_symbols,
     }:
-        raise ValueError("required underlying or market-proxy contract unresolved")
+        raise ValueError("required underlying or context-proxy contract unresolved")
     adapter.require_live_market_data()
 
     activation_ledger = ProspectiveActivationLedger(resolved_paths["recorder_activation"])
@@ -595,6 +712,12 @@ def build_frozen_prospective_application(
     frozen_repository = FrozenRecorderRepository(repository)
     phase_manager = ProspectivePhaseManager(
         ledger=ProspectivePhaseLedger(resolved_paths["prospective_phase_ledger"]),
+        repository=frozen_repository,
+    )
+    quiet_phase_manager = QuietStatePhaseManager(
+        ledger=QuietStatePhaseLedger(
+            resolved_paths["prospective_phase_ledger"].with_name("quiet_state_phases_v0.jsonl")
+        ),
         repository=frozen_repository,
     )
     session = datetime.now(NEW_YORK).date()
@@ -652,8 +775,8 @@ def build_frozen_prospective_application(
     )
     controller_budget = SubscriptionBudgetManager(
         limits={
-            SubscriptionKind.LEVEL1: len(identity.symbols) + 1,
-            SubscriptionKind.BAR: len(identity.symbols) + 1,
+            SubscriptionKind.LEVEL1: len(identity.symbols) + len(proxy_symbols),
+            SubscriptionKind.BAR: len(identity.symbols) + len(proxy_symbols),
             SubscriptionKind.TICK_BY_TICK: (config.ibkr.max_tick_by_tick_subscriptions),
             SubscriptionKind.DEPTH: config.ibkr.max_depth_subscriptions,
             SubscriptionKind.OPTION: config.ibkr.max_option_subscriptions,
@@ -672,6 +795,7 @@ def build_frozen_prospective_application(
         metadata_factory=metadata_factory,
         universe_symbols=identity.symbols,
         market_proxy_symbol=MARKET_PROXY,
+        sector_proxy_by_symbol=SECTOR_PROXY_BY_SYMBOL,
         readiness=ScientificReadiness(
             m1c_parity_passed=m1c_parity,
             direction_parity_passed=direction_parity,
@@ -731,6 +855,8 @@ def build_frozen_prospective_application(
         stream_registration_sink=live.register_stream,
         stream_unregistration_sink=normalizer.unregister,
         request_pacer=pace_request,
+        underlying_path_provider=live.underlying_price_path,
+        underlying_halt_provider=live.underlying_halted_in_window,
     )
     live.option_quote_sink = option_recorder.record_quote
     option_discovery = BoundedOptionDiscoveryService(
@@ -765,6 +891,7 @@ def build_frozen_prospective_application(
         subscription_budget=controller_budget,
         option_discovery=option_discovery,
         phase_manager=phase_manager,
+        quiet_phase_manager=quiet_phase_manager,
         promotion_scheduler=PromotionScheduler(
             max_tick_by_tick=config.ibkr.max_tick_by_tick_subscriptions // 2,
             max_depth=config.ibkr.max_depth_subscriptions,

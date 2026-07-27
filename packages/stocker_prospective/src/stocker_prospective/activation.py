@@ -20,7 +20,7 @@ class ActivationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: str = CONTRACT_VERSION
-    claims_boundary: dict[str, bool | float]
+    claims_boundary: dict[str, bool | float | str]
     prospective_collection_start_utc: datetime
     prospective_collection_start_new_york: datetime
     git_sha: str = Field(pattern=r"^[a-f0-9]{7,64}$")

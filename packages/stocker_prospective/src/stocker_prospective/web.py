@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import secrets
@@ -118,6 +119,68 @@ def _json_artifact(path: Path | None) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _coerce_csv_value(value: str | None) -> str | int | float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+
+def _csv_artifact(path: Path | None) -> list[dict[str, str | int | float | None]]:
+    if path is None or not path.is_file():
+        return []
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            return [
+                {key: _coerce_csv_value(value) for key, value in row.items()}
+                for row in csv.DictReader(handle)
+            ]
+    except (OSError, csv.Error):
+        return []
+
+
+def _concentration_audit_projection(root: Path | None) -> dict[str, Any]:
+    """Load only committed retrospective artifacts; never recompute or relax the gate."""
+
+    if root is None:
+        return {
+            "available": False,
+            "original_decision": "blocked_insufficient_low_tail_support",
+            "original_gate_passed": False,
+        }
+    decision = _json_artifact(root / "decision.json")
+    month_explanation = _json_artifact(root / "stress_month_concentration_explanation.json")
+    surprise_explanation = _json_artifact(root / "surprise_concentration_explanation.json")
+    small_count = _json_artifact(root / "small_count_feasibility.json")
+    representations = [
+        row
+        for row in _csv_artifact(root / "checkpoint_vs_episode_concentration.csv")
+        if row.get("period") == "stress" and row.get("dimension") == "month"
+    ]
+    available = all(
+        artifact is not None
+        for artifact in (decision, month_explanation, surprise_explanation, small_count)
+    )
+    return {
+        "available": available,
+        "original_decision": "blocked_insufficient_low_tail_support",
+        "original_gate_passed": False,
+        "decision": decision,
+        "month_explanation": month_explanation,
+        "surprise_explanation": surprise_explanation,
+        "small_count_feasibility": small_count,
+        "stress_month_exposure": _csv_artifact(root / "stress_month_exposure_audit.csv"),
+        "stress_month_tail_incidence": _csv_artifact(root / "stress_month_tail_incidence.csv"),
+        "representation_month_concentration": representations,
+        "leave_one_month_out": _csv_artifact(root / "leave_one_month_out.csv"),
+    }
 
 
 def _path_exposes_forbidden_broker_resource(path: str) -> bool:
@@ -604,6 +667,76 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         return {
             "ordered": True,
             "items": store.audit_events_v0(),
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/quiet-state/status")
+    def quiet_state_status() -> dict[str, Any]:
+        return {
+            **store.quiet_state_status_v0(),
+            "banner": "RESEARCH ONLY — RECORD ONLY — NO ORDERS",
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/quiet-state/universe")
+    def quiet_state_universe() -> dict[str, Any]:
+        return {
+            "items": store.quiet_state_universe_v0(),
+            "directional_model_required": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/quiet-state/episodes")
+    def quiet_state_episodes() -> dict[str, Any]:
+        return {
+            "items": store.quiet_state_episodes_v0(),
+            "cohorts_merged": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/quiet-state/episodes/{episode_id}")
+    def quiet_state_episode(episode_id: str) -> dict[str, Any]:
+        result = store.quiet_state_episode_v0(episode_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="not_found")
+        result["claims_boundary"] = claims_boundary()
+        return result
+
+    @app.get("/api/quiet-state/episodes/{episode_id}/options")
+    def quiet_state_episode_options(episode_id: str) -> dict[str, Any]:
+        return {
+            "items": store.quiet_state_episode_options_v0(episode_id),
+            "bounded_chain": True,
+            "full_chain_streamed": False,
+            "expiry_substitution_allowed": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/quiet-state/shadow-structures")
+    def quiet_state_shadow_structures() -> dict[str, Any]:
+        return {
+            "items": store.quiet_state_shadow_structures_v0(),
+            "primary_fill_convention": "conservative_observed_bid_ask",
+            "strategy_selection_allowed": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/quiet-state/concentration-audit")
+    def quiet_state_concentration_audit() -> dict[str, Any]:
+        return {
+            **_concentration_audit_projection(config.paths.quiet_state_concentration_audit_root),
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/quiet-state/session-quality")
+    def quiet_state_session_quality() -> dict[str, Any]:
+        return {
+            "items": store.quiet_state_session_quality_v0(),
+            "quality_cohorts": [
+                "all_attempted_structures",
+                "complete_quote_quality_structures",
+                "strict_quote_quality_structures",
+            ],
             "claims_boundary": claims_boundary(),
         }
 

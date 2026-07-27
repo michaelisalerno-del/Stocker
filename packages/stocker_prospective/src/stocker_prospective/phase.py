@@ -51,7 +51,7 @@ class PhaseAssignment(BaseModel):
     scientific_evidence_claim_allowed: bool
     target_dependent_selection_opened: bool
     completion: EpisodeCompletion
-    claims_boundary: dict[str, bool | float]
+    claims_boundary: dict[str, bool | float | str]
 
     @field_validator("occurred_at_utc")
     @classmethod

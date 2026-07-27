@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -26,11 +27,19 @@ from stocker_prospective.option_ledger import (
     retrospective_oracle,
     straddle_outcome,
 )
+from stocker_prospective.options import DteBucket
 from stocker_prospective.partition_store import PartitionedEventStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.safety import (
     OptionOutcomeSafetyInputs,
     evaluate_option_outcome_safety,
+)
+from stocker_prospective.short_premium_shadow import (
+    CreditShadowOutcome,
+    calculate_credit_shadow,
+    select_delta_iron_condor,
+    select_fixed_width_credit_spread,
+    select_iron_butterfly,
 )
 from stocker_prospective.subscriptions import (
     SubscriptionBudgetManager,
@@ -55,6 +64,56 @@ class _ActiveOption:
     request_id: int
     subscription_key: str
     recording_ends_at_utc: datetime
+    quiet_state: bool
+
+
+def _resolved_contract_match(
+    planned: OptionContract | None,
+    resolved_contracts: tuple[OptionContract, ...],
+) -> OptionContract | None:
+    if planned is None:
+        return None
+    return next(
+        (
+            contract
+            for contract in resolved_contracts
+            if contract.expiry == planned.expiry
+            and contract.strike == planned.strike
+            and contract.right == planned.right
+        ),
+        None,
+    )
+
+
+def _required_quote_matrix_completion(
+    *,
+    planned_contracts: tuple[OptionContract, ...],
+    requested_contract_count: int,
+    plan_capacity_reduced: bool,
+    outcomes: tuple[ShadowOptionOutcome, ...],
+    horizon_minutes: tuple[int, ...],
+    subscription_gap_spans_horizon: bool,
+) -> tuple[int, int, bool]:
+    required = {
+        (contract.expiry, contract.strike, contract.right, minutes)
+        for contract in planned_contracts
+        for minutes in horizon_minutes
+    }
+    complete = {
+        (outcome.expiry, outcome.strike, outcome.right, outcome.horizon_minutes)
+        for outcome in outcomes
+        if outcome.entry_ask is not None and outcome.exit_bid is not None
+    }
+    complete_required = required.intersection(complete)
+    return (
+        requested_contract_count * len(horizon_minutes),
+        len(complete_required),
+        bool(required)
+        and len(planned_contracts) == requested_contract_count
+        and not plan_capacity_reduced
+        and complete_required == required
+        and not subscription_gap_spans_horizon,
+    )
 
 
 class OptionEpisodeFinalization(BaseModel):
@@ -65,6 +124,14 @@ class OptionEpisodeFinalization(BaseModel):
     directional_selections: tuple[DirectionalShadowSelection, ...]
     straddles: tuple[dict[str, object], ...]
     oracle_diagnostics: tuple[DirectionalShadowSelection, ...]
+    defined_risk_outcomes: tuple[CreditShadowOutcome, ...] = ()
+    planned_contract_count: int = 0
+    requested_contract_count: int = 0
+    option_plan_capacity_reduced: bool = False
+    option_plan_missing_buckets: tuple[str, ...] = ()
+    required_contract_horizon_count: int = 0
+    complete_contract_horizon_count: int = 0
+    required_option_quote_windows_finalised: bool = False
     oracle_live_panel_visible: bool = False
     orders_placed: int = 0
 
@@ -84,6 +151,10 @@ class BoundedOptionRecorder:
         stream_registration_sink: Callable[[StreamOwner], None] | None = None,
         stream_unregistration_sink: Callable[[int], None] | None = None,
         request_pacer: Callable[[], object] | None = None,
+        underlying_path_provider: (
+            Callable[[str, datetime, datetime], tuple[float, ...]] | None
+        ) = None,
+        underlying_halt_provider: Callable[[str, datetime, datetime], bool] | None = None,
     ) -> None:
         if maximum_quote_age <= timedelta(0):
             raise ValueError("maximum_quote_age must be positive")
@@ -98,11 +169,22 @@ class BoundedOptionRecorder:
         self.stream_registration_sink = stream_registration_sink
         self.stream_unregistration_sink = stream_unregistration_sink
         self.request_pacer = request_pacer
+        self.underlying_path_provider = underlying_path_provider
+        self.underlying_halt_provider = underlying_halt_provider
         self._active: dict[tuple[str, int], _ActiveOption] = {}
+        self._planned_contracts_by_episode: dict[str, tuple[OptionContract, ...]] = {}
+        self._requested_contract_count_by_episode: dict[str, int] = {}
+        self._plan_capacity_reduced_by_episode: dict[str, bool] = {}
+        self._plan_missing_buckets_by_episode: dict[str, tuple[str, ...]] = {}
         self._contracts_by_episode: dict[str, list[OptionContract]] = {}
         self._quotes_by_episode: dict[str, list[OptionQuoteEvent]] = {}
         self._raw_flushed_event_ids: set[str] = set()
         self._gap_episodes: set[str] = set()
+        self._quiet_observations: set[str] = set()
+        self._quiet_defined_risk_outcomes: dict[
+            str,
+            list[CreditShadowOutcome],
+        ] = {}
         self._live_option_quote_seen = False
         self._option_computation_seen = False
 
@@ -115,27 +197,58 @@ class BoundedOptionRecorder:
         entry_timestamp: datetime,
         plan: OptionContractPlan,
         resolver: Callable[[OptionContract], ResolvedOptionContract | None],
+        quiet_state: bool = False,
+        recording_duration: timedelta | None = None,
     ) -> tuple[OptionContract, ...]:
         """Qualify only the bounded plan and start exact top-of-book streams."""
 
         if entry_timestamp.tzinfo is None or entry_timestamp.utcoffset() is None:
             raise ValueError("option entry timestamp must be timezone-aware")
         started_at = metadata.recorded_at_utc.astimezone(UTC)
-        recording_ends = entry_timestamp.astimezone(UTC) + self.recording_duration
+        duration = self.recording_duration if recording_duration is None else recording_duration
+        if duration < timedelta(minutes=30):
+            raise ValueError("option recording must continue for at least thirty minutes")
+        if quiet_state and duration < timedelta(minutes=60):
+            raise ValueError("quiet option recording must continue for sixty minutes")
+        recording_ends = entry_timestamp.astimezone(UTC) + duration
+        if quiet_state:
+            self.repository.record_quiet_option_plan(
+                metadata,
+                observation_id=episode_id,
+                plan=plan,
+            )
+            self._quiet_observations.add(episode_id)
+        self._planned_contracts_by_episode[episode_id] = plan.contracts
+        self._requested_contract_count_by_episode[episode_id] = plan.requested_contract_count
+        self._plan_capacity_reduced_by_episode[episode_id] = plan.capacity_reduced
+        self._plan_missing_buckets_by_episode[episode_id] = plan.missing_buckets
         selected: list[OptionContract] = []
         for rank, unresolved in enumerate(plan.contracts, start=1):
             resolved = resolver(unresolved)
             if resolved is None or resolved.contract.con_id is None:
-                self.repository.record_option_contract(
-                    metadata,
-                    episode_id=episode_id,
-                    contract=unresolved,
-                    selection_rank=rank,
-                    resolution_status="contract_not_resolved",
-                    rejection_reason="contract_not_resolved",
-                    recording_started_at_utc=None,
-                    recording_ends_at_utc=recording_ends,
-                )
+                if quiet_state:
+                    self.repository.record_quiet_option_contract(
+                        metadata,
+                        observation_id=episode_id,
+                        contract=unresolved,
+                        selection_rank=rank,
+                        selection_roles=(),
+                        resolution_status="contract_not_resolved",
+                        rejection_reason="contract_not_resolved",
+                        recording_started_at_utc=None,
+                        recording_ends_at_utc=recording_ends,
+                    )
+                else:
+                    self.repository.record_option_contract(
+                        metadata,
+                        episode_id=episode_id,
+                        contract=unresolved,
+                        selection_rank=rank,
+                        resolution_status="contract_not_resolved",
+                        rejection_reason="contract_not_resolved",
+                        recording_started_at_utc=None,
+                        recording_ends_at_utc=recording_ends,
+                    )
                 continue
             contract = resolved.contract
             con_id = contract.con_id
@@ -154,16 +267,29 @@ class BoundedOptionRecorder:
                 now_utc=started_at,
             )
             if not decision.accepted:
-                self.repository.record_option_contract(
-                    metadata,
-                    episode_id=episode_id,
-                    contract=contract,
-                    selection_rank=rank,
-                    resolution_status="subscription_capacity_denied",
-                    rejection_reason=decision.reason,
-                    recording_started_at_utc=None,
-                    recording_ends_at_utc=recording_ends,
-                )
+                if quiet_state:
+                    self.repository.record_quiet_option_contract(
+                        metadata,
+                        observation_id=episode_id,
+                        contract=contract,
+                        selection_rank=rank,
+                        selection_roles=(),
+                        resolution_status="subscription_capacity_denied",
+                        rejection_reason=decision.reason,
+                        recording_started_at_utc=None,
+                        recording_ends_at_utc=recording_ends,
+                    )
+                else:
+                    self.repository.record_option_contract(
+                        metadata,
+                        episode_id=episode_id,
+                        contract=contract,
+                        selection_rank=rank,
+                        resolution_status="subscription_capacity_denied",
+                        rejection_reason=decision.reason,
+                        recording_started_at_utc=None,
+                        recording_ends_at_utc=recording_ends,
+                    )
                 continue
             request_id: int | None = None
             try:
@@ -189,16 +315,29 @@ class BoundedOptionRecorder:
                             option_contract=contract,
                         )
                     )
-                database_id = self.repository.record_option_contract(
-                    metadata,
-                    episode_id=episode_id,
-                    contract=contract,
-                    selection_rank=rank,
-                    resolution_status="recording",
-                    rejection_reason=None,
-                    recording_started_at_utc=started_at,
-                    recording_ends_at_utc=recording_ends,
-                )
+                if quiet_state:
+                    database_id = self.repository.record_quiet_option_contract(
+                        metadata,
+                        observation_id=episode_id,
+                        contract=contract,
+                        selection_rank=rank,
+                        selection_roles=(),
+                        resolution_status="recording",
+                        rejection_reason=None,
+                        recording_started_at_utc=started_at,
+                        recording_ends_at_utc=recording_ends,
+                    )
+                else:
+                    database_id = self.repository.record_option_contract(
+                        metadata,
+                        episode_id=episode_id,
+                        contract=contract,
+                        selection_rank=rank,
+                        resolution_status="recording",
+                        rejection_reason=None,
+                        recording_started_at_utc=started_at,
+                        recording_ends_at_utc=recording_ends,
+                    )
                 self.repository.record_subscription(metadata, record)
                 self._active[(episode_id, con_id)] = _ActiveOption(
                     database_id=database_id,
@@ -209,6 +348,7 @@ class BoundedOptionRecorder:
                     request_id=request_id,
                     subscription_key=subscription_key,
                     recording_ends_at_utc=recording_ends,
+                    quiet_state=quiet_state,
                 )
             except Exception:
                 if request_id is not None:
@@ -266,7 +406,12 @@ class BoundedOptionRecorder:
             )
             self._active.pop(active_key)
         self._contracts_by_episode.pop(episode_id, None)
+        self._planned_contracts_by_episode.pop(episode_id, None)
+        self._requested_contract_count_by_episode.pop(episode_id, None)
+        self._plan_capacity_reduced_by_episode.pop(episode_id, None)
+        self._plan_missing_buckets_by_episode.pop(episode_id, None)
         self._quotes_by_episode.pop(episode_id, None)
+        self._quiet_observations.discard(episode_id)
 
     def record_quote(
         self,
@@ -299,12 +444,20 @@ class BoundedOptionRecorder:
         names = tuple(
             name for name, value in flags.model_dump().items() if isinstance(value, bool) and value
         )
-        self.repository.update_option_quote_projection(
-            option_contract_id=active.database_id,
-            event=event,
-            recording_status="recording",
-            quote_quality_flags=names,
-        )
+        if active.quiet_state:
+            self.repository.update_quiet_option_quote_projection(
+                option_contract_id=active.database_id,
+                event=event,
+                recording_status="recording",
+                quote_quality_flags=names,
+            )
+        else:
+            self.repository.update_option_quote_projection(
+                option_contract_id=active.database_id,
+                event=event,
+                recording_status="recording",
+                quote_quality_flags=names,
+            )
 
     def flush_raw(
         self,
@@ -465,6 +618,481 @@ class BoundedOptionRecorder:
             )
             self._active.pop(active_key)
 
+    def _surface_at(
+        self,
+        quotes: tuple[OptionQuoteEvent, ...],
+        *,
+        target: datetime,
+        entry: bool,
+    ) -> tuple[OptionQuoteEvent, ...]:
+        by_contract: dict[int, list[OptionQuoteEvent]] = {}
+        for quote in quotes:
+            by_contract.setdefault(quote.con_id, []).append(quote)
+        surface: list[OptionQuoteEvent] = []
+        for con_id in sorted(by_contract):
+            ordered = sorted(
+                by_contract[con_id],
+                key=lambda item: (
+                    item.ordering_timestamp,
+                    item.received_monotonic_ns,
+                    item.source_sequence,
+                    item.event_id,
+                ),
+            )
+            if entry:
+                candidate = next(
+                    (
+                        quote
+                        for quote in ordered
+                        if target <= quote.ordering_timestamp <= target + self.maximum_quote_age
+                    ),
+                    None,
+                )
+            else:
+                candidate = next(
+                    (
+                        quote
+                        for quote in reversed(ordered)
+                        if target - self.maximum_quote_age <= quote.ordering_timestamp <= target
+                    ),
+                    None,
+                )
+            if candidate is not None:
+                surface.append(candidate)
+        return tuple(surface)
+
+    def _record_quiet_long_outcome(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        structure_type: Literal["LONG_CALL", "LONG_PUT"],
+        outcome: ShadowOptionOutcome,
+        subscription_gap_spans_horizon: bool,
+        additional_quality_flags: tuple[str, ...] = (),
+    ) -> None:
+        flags = set((*outcome.quote_quality_flags, *additional_quality_flags))
+        if subscription_gap_spans_horizon:
+            flags.add("subscription_gap_spans_horizon")
+        complete = outcome.entry_ask is not None and outcome.exit_bid is not None
+        strict = complete and not flags
+        self.repository.record_quiet_shadow_structure(
+            metadata,
+            observation_id=observation_id,
+            structure_type=structure_type,
+            dte_bucket=outcome.dte_bucket.value,
+            horizon_label=f"{outcome.horizon_minutes}m",
+            horizon_minutes=outcome.horizon_minutes,
+            payload=outcome.model_dump(mode="json"),
+            opening_credit_or_debit=outcome.premium_at_risk,
+            maximum_defined_risk=outcome.premium_at_risk,
+            conservative_pnl=outcome.dollar_pnl_per_contract,
+            return_on_maximum_risk=outcome.ask_to_bid_return,
+            short_strike_touched=None,
+            protective_wing_touched=None,
+            attempted=True,
+            complete_quote_quality=complete,
+            strict_quote_quality=strict,
+            quality_status=(
+                "strict_quality"
+                if strict
+                else "complete_quote_quality"
+                if complete
+                else "incomplete"
+            ),
+            quality_flags=tuple(sorted(flags)),
+        )
+
+    def _record_missing_quiet_long_attempt(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        structure_type: Literal["LONG_CALL", "LONG_PUT"],
+        bucket: DteBucket,
+        horizon_minutes: int,
+        subscription_gap_spans_horizon: bool,
+        additional_quality_flags: tuple[str, ...] = (),
+    ) -> None:
+        flags = {"missing_leg_quote", *additional_quality_flags}
+        if subscription_gap_spans_horizon:
+            flags.add("subscription_gap_spans_horizon")
+        self.repository.record_quiet_shadow_structure(
+            metadata,
+            observation_id=observation_id,
+            structure_type=structure_type,
+            dte_bucket=bucket.value,
+            horizon_label=f"{horizon_minutes}m",
+            horizon_minutes=horizon_minutes,
+            payload={
+                "attempted": True,
+                "dte_bucket": bucket.value,
+                "horizon_minutes": horizon_minutes,
+                "reason": "atm_contract_or_quote_outcome_unavailable",
+            },
+            opening_credit_or_debit=None,
+            maximum_defined_risk=None,
+            conservative_pnl=None,
+            return_on_maximum_risk=None,
+            short_strike_touched=None,
+            protective_wing_touched=None,
+            attempted=True,
+            complete_quote_quality=False,
+            strict_quote_quality=False,
+            quality_status="incomplete",
+            quality_flags=tuple(sorted(flags)),
+        )
+
+    def _record_quiet_bucket_outcomes(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        symbol: str,
+        entry_timestamp: datetime,
+        bucket: DteBucket,
+        planned_bucket_contracts: tuple[OptionContract, ...],
+        bucket_contracts: tuple[OptionContract, ...],
+        atm_call: OptionContract | None,
+        atm_put: OptionContract | None,
+        quotes: tuple[OptionQuoteEvent, ...],
+        outcomes: tuple[ShadowOptionOutcome, ...],
+        horizon_minutes: tuple[int, ...],
+        subscription_gap_spans_horizon: bool,
+        plan_capacity_reduced: bool,
+    ) -> None:
+        entry_surface = self._surface_at(quotes, target=entry_timestamp, entry=True)
+        underlying_entry_path = (
+            ()
+            if self.underlying_path_provider is None
+            else self.underlying_path_provider(
+                symbol,
+                entry_timestamp,
+                entry_timestamp + self.maximum_quote_age,
+            )
+        )
+        if underlying_entry_path:
+            underlying_entry = underlying_entry_path[0]
+        else:
+            references = [
+                quote.underlying_reference_price
+                for quote in entry_surface
+                if quote.underlying_reference_price is not None
+                and math.isfinite(quote.underlying_reference_price)
+                and quote.underlying_reference_price > 0.0
+            ]
+            underlying_entry = references[0] if references else math.nan
+        first_quote_by_contract: dict[int, datetime] = {}
+        for quote in sorted(
+            quotes,
+            key=lambda item: (
+                item.ordering_timestamp,
+                item.received_monotonic_ns,
+                item.source_sequence,
+                item.event_id,
+            ),
+        ):
+            if quote.ordering_timestamp >= entry_timestamp:
+                first_quote_by_contract.setdefault(
+                    quote.con_id,
+                    quote.ordering_timestamp,
+                )
+        subscription_started_late = any(
+            first_quote_by_contract.get(int(contract.con_id or 0)) is not None
+            and (first_quote_by_contract[int(contract.con_id or 0)] - entry_timestamp)
+            > self.maximum_quote_age
+            for contract in bucket_contracts
+        )
+        planned_contract_missing = len(bucket_contracts) < len(planned_bucket_contracts)
+        structures = (
+            select_iron_butterfly(
+                contracts=bucket_contracts,
+                underlying_entry_price=underlying_entry,
+            ),
+            select_delta_iron_condor(
+                contracts=bucket_contracts,
+                entry_quotes=entry_surface,
+            ),
+            select_fixed_width_credit_spread(
+                contracts=bucket_contracts,
+                underlying_entry_price=underlying_entry,
+                right="C",
+            ),
+            select_fixed_width_credit_spread(
+                contracts=bucket_contracts,
+                underlying_entry_price=underlying_entry,
+                right="P",
+            ),
+        )
+        defined_risk = self._quiet_defined_risk_outcomes.setdefault(
+            observation_id,
+            [],
+        )
+        for minutes in horizon_minutes:
+            target = entry_timestamp + timedelta(minutes=minutes)
+            path = (
+                ()
+                if self.underlying_path_provider is None
+                else self.underlying_path_provider(symbol, entry_timestamp, target)
+            )
+            underlying_halted = (
+                False
+                if self.underlying_halt_provider is None
+                else self.underlying_halt_provider(symbol, entry_timestamp, target)
+            )
+            observation_quality_flags = tuple(
+                flag
+                for flag, present in (
+                    ("underlying_path_unavailable", not path),
+                    ("underlying_halted", underlying_halted),
+                    ("option_plan_capacity_reduced", plan_capacity_reduced),
+                )
+                if present
+            )
+            call = (
+                None
+                if atm_call is None
+                else next(
+                    (
+                        item
+                        for item in outcomes
+                        if item.con_id == atm_call.con_id and item.horizon_minutes == minutes
+                    ),
+                    None,
+                )
+            )
+            put = (
+                None
+                if atm_put is None
+                else next(
+                    (
+                        item
+                        for item in outcomes
+                        if item.con_id == atm_put.con_id and item.horizon_minutes == minutes
+                    ),
+                    None,
+                )
+            )
+            if call is not None:
+                self._record_quiet_long_outcome(
+                    metadata,
+                    observation_id=observation_id,
+                    structure_type="LONG_CALL",
+                    outcome=call,
+                    subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    additional_quality_flags=observation_quality_flags,
+                )
+            else:
+                self._record_missing_quiet_long_attempt(
+                    metadata,
+                    observation_id=observation_id,
+                    structure_type="LONG_CALL",
+                    bucket=bucket,
+                    horizon_minutes=minutes,
+                    subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    additional_quality_flags=observation_quality_flags,
+                )
+            if put is not None:
+                self._record_quiet_long_outcome(
+                    metadata,
+                    observation_id=observation_id,
+                    structure_type="LONG_PUT",
+                    outcome=put,
+                    subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    additional_quality_flags=observation_quality_flags,
+                )
+            else:
+                self._record_missing_quiet_long_attempt(
+                    metadata,
+                    observation_id=observation_id,
+                    structure_type="LONG_PUT",
+                    bucket=bucket,
+                    horizon_minutes=minutes,
+                    subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    additional_quality_flags=observation_quality_flags,
+                )
+            if call is not None and put is not None:
+                assert atm_call is not None
+                straddle = straddle_outcome(call, put)
+                entry_value = straddle["entry_call_ask_plus_put_ask"]
+                exit_value = straddle["exit_call_bid_plus_put_bid"]
+                flags = set(
+                    (
+                        *call.quote_quality_flags,
+                        *put.quote_quality_flags,
+                        *observation_quality_flags,
+                    )
+                )
+                if subscription_gap_spans_horizon:
+                    flags.add("subscription_gap_spans_horizon")
+                complete = entry_value is not None and exit_value is not None
+                strict = complete and not flags
+                entry_debit = (
+                    None if entry_value is None else float(entry_value) * atm_call.multiplier
+                )
+                pnl = (
+                    None
+                    if entry_value is None or exit_value is None
+                    else (float(exit_value) - float(entry_value)) * atm_call.multiplier
+                )
+                self.repository.record_quiet_shadow_structure(
+                    metadata,
+                    observation_id=observation_id,
+                    structure_type="ATM_STRADDLE",
+                    dte_bucket=bucket.value,
+                    horizon_label=f"{minutes}m",
+                    horizon_minutes=minutes,
+                    payload={
+                        "dte_bucket": bucket.value,
+                        "horizon_minutes": minutes,
+                        **straddle,
+                    },
+                    opening_credit_or_debit=entry_debit,
+                    maximum_defined_risk=entry_debit,
+                    conservative_pnl=pnl,
+                    return_on_maximum_risk=(
+                        None
+                        if entry_debit is None or pnl is None or entry_debit <= 0.0
+                        else pnl / entry_debit
+                    ),
+                    short_strike_touched=None,
+                    protective_wing_touched=None,
+                    attempted=True,
+                    complete_quote_quality=complete,
+                    strict_quote_quality=strict,
+                    quality_status=(
+                        "strict_quality"
+                        if strict
+                        else "complete_quote_quality"
+                        if complete
+                        else "incomplete"
+                    ),
+                    quality_flags=tuple(sorted(flags)),
+                )
+            else:
+                flags = {"missing_leg_quote", *observation_quality_flags}
+                if subscription_gap_spans_horizon:
+                    flags.add("subscription_gap_spans_horizon")
+                self.repository.record_quiet_shadow_structure(
+                    metadata,
+                    observation_id=observation_id,
+                    structure_type="ATM_STRADDLE",
+                    dte_bucket=bucket.value,
+                    horizon_label=f"{minutes}m",
+                    horizon_minutes=minutes,
+                    payload={
+                        "attempted": True,
+                        "dte_bucket": bucket.value,
+                        "horizon_minutes": minutes,
+                        "reason": "atm_call_or_put_outcome_unavailable",
+                    },
+                    opening_credit_or_debit=None,
+                    maximum_defined_risk=None,
+                    conservative_pnl=None,
+                    return_on_maximum_risk=None,
+                    short_strike_touched=None,
+                    protective_wing_touched=None,
+                    attempted=True,
+                    complete_quote_quality=False,
+                    strict_quote_quality=False,
+                    quality_status="incomplete",
+                    quality_flags=tuple(sorted(flags)),
+                )
+            exit_surface = self._surface_at(quotes, target=target, entry=False)
+            mark_surfaces = tuple(
+                self._surface_at(quotes, target=mark_timestamp, entry=False)
+                for mark_timestamp in sorted(
+                    {
+                        quote.ordering_timestamp
+                        for quote in quotes
+                        if entry_timestamp <= quote.ordering_timestamp <= target
+                    }
+                )
+            )
+            for structure in structures:
+                outcome = calculate_credit_shadow(
+                    structure=structure,
+                    entry_quotes=entry_surface,
+                    exit_quotes=exit_surface,
+                    entry_timestamp=entry_timestamp,
+                    exit_timestamp=target,
+                    underlying_path=path,
+                    mark_quote_surfaces=mark_surfaces,
+                    additional_quality_flags=tuple(
+                        flag
+                        for flag, present in (
+                            (
+                                "subscription_gap_spans_horizon",
+                                subscription_gap_spans_horizon,
+                            ),
+                            (
+                                "subscription_started_late",
+                                subscription_started_late,
+                            ),
+                            (
+                                "missing_leg_quote",
+                                planned_contract_missing,
+                            ),
+                            (
+                                "underlying_path_unavailable",
+                                not path,
+                            ),
+                            (
+                                "underlying_halted",
+                                underlying_halted,
+                            ),
+                            (
+                                "option_plan_capacity_reduced",
+                                plan_capacity_reduced,
+                            ),
+                        )
+                        if present
+                    ),
+                )
+                defined_risk.append(outcome)
+                flags = set(outcome.quote_quality_flags)
+                if subscription_gap_spans_horizon:
+                    flags.add("subscription_gap_spans_horizon")
+                payload: dict[str, object] = {
+                    **outcome.model_dump(mode="json"),
+                    "legs": [
+                        {
+                            "side": leg.side,
+                            "con_id": leg.contract.con_id,
+                            "strike": leg.contract.strike,
+                            "right": leg.contract.right,
+                            "target_delta": leg.target_delta,
+                        }
+                        for leg in structure.legs
+                    ],
+                }
+                self.repository.record_quiet_shadow_structure(
+                    metadata,
+                    observation_id=observation_id,
+                    structure_type=structure.structure_type.value,
+                    dte_bucket=bucket.value,
+                    horizon_label=f"{minutes}m",
+                    horizon_minutes=minutes,
+                    payload=payload,
+                    opening_credit_or_debit=outcome.opening_net_credit,
+                    maximum_defined_risk=outcome.maximum_defined_risk,
+                    conservative_pnl=outcome.commission_free_pnl,
+                    return_on_maximum_risk=outcome.return_on_maximum_risk,
+                    short_strike_touched=outcome.short_strike_touched,
+                    protective_wing_touched=outcome.protective_wing_touched,
+                    attempted=outcome.attempted,
+                    complete_quote_quality=outcome.complete_quote_quality,
+                    strict_quote_quality=(
+                        outcome.strict_quote_quality and not subscription_gap_spans_horizon
+                    ),
+                    quality_status=(
+                        "strict_quality"
+                        if outcome.strict_quote_quality and not subscription_gap_spans_horizon
+                        else outcome.quote_quality_status
+                    ),
+                    quality_flags=tuple(sorted(flags)),
+                )
+
     def finalise_episode(
         self,
         metadata: EvidenceMetadata,
@@ -483,16 +1111,40 @@ class BoundedOptionRecorder:
             complete=True,
             gap_count=int(subscription_gap_spans_horizon),
         )
+        planned_contracts = self._planned_contracts_by_episode.get(episode_id, ())
+        requested_contract_count = self._requested_contract_count_by_episode.get(
+            episode_id,
+            len(planned_contracts),
+        )
+        plan_capacity_reduced = self._plan_capacity_reduced_by_episode.get(
+            episode_id,
+            False,
+        )
+        plan_missing_buckets = self._plan_missing_buckets_by_episode.get(episode_id, ())
         contracts = tuple(self._contracts_by_episode.get(episode_id, ()))
         quotes = tuple(self._quotes_by_episode.get(episode_id, ()))
+        quiet_state = episode_id in self._quiet_observations
+        horizon_minutes = (5, 10, 15, 30, 60) if quiet_state else (5, 10, 15, 30)
         outcomes = build_shadow_outcomes(
             episode_id=episode_id,
             symbol=symbol,
             entry_timestamp=entry_timestamp,
             contracts=contracts,
             quotes=quotes,
-            horizons=tuple(timedelta(minutes=value) for value in (5, 10, 15, 30)),
+            horizons=tuple(timedelta(minutes=value) for value in horizon_minutes),
             maximum_quote_age=self.maximum_quote_age,
+        )
+        (
+            required_contract_horizon_count,
+            complete_contract_horizon_count,
+            required_option_quote_windows_finalised,
+        ) = _required_quote_matrix_completion(
+            planned_contracts=planned_contracts,
+            requested_contract_count=requested_contract_count,
+            plan_capacity_reduced=plan_capacity_reduced,
+            outcomes=outcomes,
+            horizon_minutes=horizon_minutes,
+            subscription_gap_spans_horizon=subscription_gap_spans_horizon,
         )
         outcome_validity: dict[tuple[int | None, int], bool] = {}
         for outcome in outcomes:
@@ -520,18 +1172,96 @@ class BoundedOptionRecorder:
                 )
             ).scientific_recording_valid
             outcome_validity[(outcome.con_id, outcome.horizon_minutes)] = valid
-            self.repository.record_shadow_outcome(
-                metadata,
-                archetype="raw_contract",
-                direction="CALL" if outcome.right == "C" else "PUT",
-                outcome=outcome,
-                valid=valid,
-            )
+            if not quiet_state or directional_actions:
+                self.repository.record_shadow_outcome(
+                    metadata,
+                    archetype="raw_contract",
+                    direction="CALL" if outcome.right == "C" else "PUT",
+                    outcome=outcome,
+                    valid=valid,
+                )
         selections: list[DirectionalShadowSelection] = []
         straddles: list[dict[str, object]] = []
         oracles: list[DirectionalShadowSelection] = []
-        for bucket in sorted({contract.dte_bucket for contract in contracts}, key=str):
+        bucket_source = (
+            (
+                DteBucket.ZERO_DTE,
+                DteBucket.ONE_DTE,
+                DteBucket.THREE_TO_FIVE_DTE,
+            )
+            if quiet_state
+            else tuple(sorted({contract.dte_bucket for contract in contracts}, key=str))
+        )
+        for bucket in bucket_source:
+            planned_bucket_contracts = tuple(
+                contract for contract in planned_contracts if contract.dte_bucket is bucket
+            )
             bucket_contracts = [contract for contract in contracts if contract.dte_bucket is bucket]
+            if quiet_state:
+                planned_calls = [item for item in planned_bucket_contracts if item.right == "C"]
+                planned_puts = [item for item in planned_bucket_contracts if item.right == "P"]
+
+                resolved_bucket_contracts = tuple(bucket_contracts)
+                atm_call = _resolved_contract_match(
+                    planned_calls[0] if planned_calls else None,
+                    resolved_bucket_contracts,
+                )
+                atm_put = _resolved_contract_match(
+                    planned_puts[0] if planned_puts else None,
+                    resolved_bucket_contracts,
+                )
+                self._record_quiet_bucket_outcomes(
+                    metadata,
+                    observation_id=episode_id,
+                    symbol=symbol,
+                    entry_timestamp=entry_timestamp,
+                    bucket=bucket,
+                    planned_bucket_contracts=planned_bucket_contracts,
+                    bucket_contracts=tuple(bucket_contracts),
+                    atm_call=atm_call,
+                    atm_put=atm_put,
+                    quotes=quotes,
+                    outcomes=outcomes,
+                    horizon_minutes=horizon_minutes,
+                    subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    plan_capacity_reduced=plan_capacity_reduced,
+                )
+                for minutes in horizon_minutes:
+                    call = (
+                        None
+                        if atm_call is None
+                        else next(
+                            (
+                                item
+                                for item in outcomes
+                                if item.con_id == atm_call.con_id
+                                and item.horizon_minutes == minutes
+                            ),
+                            None,
+                        )
+                    )
+                    put = (
+                        None
+                        if atm_put is None
+                        else next(
+                            (
+                                item
+                                for item in outcomes
+                                if item.con_id == atm_put.con_id and item.horizon_minutes == minutes
+                            ),
+                            None,
+                        )
+                    )
+                    if call is not None and put is not None and not directional_actions:
+                        straddles.append(
+                            {
+                                "dte_bucket": bucket.value,
+                                "horizon_minutes": minutes,
+                                **straddle_outcome(call, put),
+                            }
+                        )
+                if not directional_actions:
+                    continue
             calls = [item for item in bucket_contracts if item.right == "C"]
             puts = [item for item in bucket_contracts if item.right == "P"]
             if not calls or not puts:
@@ -665,12 +1395,27 @@ class BoundedOptionRecorder:
             self.repository.record_subscription(metadata, record)
             self._active.pop(active_key)
         self._gap_episodes.discard(episode_id)
+        self._quiet_observations.discard(episode_id)
+        self._planned_contracts_by_episode.pop(episode_id, None)
+        self._requested_contract_count_by_episode.pop(episode_id, None)
+        self._plan_capacity_reduced_by_episode.pop(episode_id, None)
+        self._plan_missing_buckets_by_episode.pop(episode_id, None)
+        self._contracts_by_episode.pop(episode_id, None)
+        self._quotes_by_episode.pop(episode_id, None)
         return OptionEpisodeFinalization(
             episode_id=episode_id,
             raw_contract_outcomes=outcomes,
             directional_selections=tuple(selections),
             straddles=tuple(straddles),
             oracle_diagnostics=tuple(oracles),
+            defined_risk_outcomes=tuple(self._quiet_defined_risk_outcomes.pop(episode_id, ())),
+            planned_contract_count=len(planned_contracts),
+            requested_contract_count=requested_contract_count,
+            option_plan_capacity_reduced=plan_capacity_reduced,
+            option_plan_missing_buckets=plan_missing_buckets,
+            required_contract_horizon_count=required_contract_horizon_count,
+            complete_contract_horizon_count=complete_contract_horizon_count,
+            required_option_quote_windows_finalised=(required_option_quote_windows_finalised),
         )
 
 

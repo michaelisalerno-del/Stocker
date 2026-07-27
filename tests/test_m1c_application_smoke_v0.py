@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from stocker_prospective.config import ProspectiveConfig
+from stocker_prospective.contract import SECTOR_PROXY_BY_SYMBOL
 from stocker_prospective.database import ProspectiveRepository
 from stocker_prospective.fake_ibkr import FakeIBKRAdapter
 from stocker_prospective.frozen_live_application import (
@@ -166,8 +167,8 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
                 "SELECT DISTINCT symbol FROM underlying_contract"
             ).fetchall()
         }
-    assert recorded_symbols == {*symbols, "VTI"}
-    assert len(adapter.active_subscriptions) == 42
+    assert recorded_symbols == {*symbols, "VTI", *SECTOR_PROXY_BY_SYMBOL.values()}
+    assert len(adapter.active_subscriptions) == 2 * len(recorded_symbols)
     assert (
         json.loads((tmp_path / "capability.json").read_text(encoding="utf-8"))[
             "scientific_recording_valid"

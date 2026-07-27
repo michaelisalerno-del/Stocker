@@ -1,0 +1,171 @@
+{
+  "bootstrap_identity": {
+    "assessment_seed": 2026072751,
+    "draws_per_period": 100,
+    "stress_seed": 2026072752
+  },
+  "broker_connections": 0,
+  "broker_order_methods_allowed": false,
+  "defined_risk_short_premium_only": true,
+  "live_orders_allowed": false,
+  "m1c_bottom_10_threshold": 0.135896965695626,
+  "m1c_bottom_20_threshold": 0.167095528962669,
+  "m1c_bottom_5_threshold": 0.115697407847643,
+  "m1c_frozen": true,
+  "matched_null_identity": {
+    "draws_per_period": 20,
+    "seeds": [
+      2026072701,
+      2026072702,
+      2026072703,
+      2026072704,
+      2026072705,
+      2026072706,
+      2026072707,
+      2026072708,
+      2026072709,
+      2026072710,
+      2026072711,
+      2026072712,
+      2026072713,
+      2026072714,
+      2026072715,
+      2026072716,
+      2026072717,
+      2026072718,
+      2026072719,
+      2026072720
+    ]
+  },
+  "maximum_historical_session_read": "2025-12-31",
+  "naked_short_options_allowed": false,
+  "network_requests": 0,
+  "option_shadow_outcomes_only": true,
+  "original_decision": "blocked_insufficient_low_tail_support",
+  "original_low_movement_decision_preserved": true,
+  "paper_orders_allowed": false,
+  "primary_quiet_state": "bottom_10_percent",
+  "probability_permutation_identity": {
+    "draws_per_period": 10,
+    "seeds": [
+      2026072731,
+      2026072732,
+      2026072733,
+      2026072734,
+      2026072735,
+      2026072736,
+      2026072737,
+      2026072738,
+      2026072739,
+      2026072740
+    ]
+  },
+  "prospective_record_only": true,
+  "protected_historical_start": "2026-01-01",
+  "protected_rows_read": 0,
+  "research_only": true,
+  "retrospective_gate_relaxation_allowed": false,
+  "sources": [
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/checkpoint_predictions.parquet",
+      "sha256": "7c448c02422f1803356a8fcb7ca4bd6b91fdb0da4c447b1e706eb30dbf6f1653",
+      "size_bytes": 8446592
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/raw_low_tail_checkpoint_rows.parquet",
+      "sha256": "c6e7a90ed341dad19a6451855668e6b45544c2d2fb8c54ee0627692ae8551231",
+      "size_bytes": 2101339
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/fresh_quiet_episodes.parquet",
+      "sha256": "545af68c945f7ef073bf7f420ce4edf5cffbc0b79dc9b8408208ed2a0f71161a",
+      "size_bytes": 2741295
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/movement_outcomes.parquet",
+      "sha256": "6311674b62c363223a80c3bf24af188adf7a12028f0581166bfbc718ae48145e",
+      "size_bytes": 10919345
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/path_excursion_outcomes.parquet",
+      "sha256": "42e0e729e8cd7925633d8b725c277ba601595d1a15aa151e74e74f1dc387aa1f",
+      "size_bytes": 16296894
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/decision.json",
+      "sha256": "1c9b80960f80e667186bb9b22aa1ab6a6d31022c0c019165b3920a159dd50949",
+      "size_bytes": 7918
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/concentration_metrics.csv",
+      "sha256": "2a74a30a12e7ce9792c77c3a4f85ca8eda15cb71b37e96573dd95323e6fc3520",
+      "size_bytes": 24708
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/surprise_mover_rows.csv",
+      "sha256": "6514fac814ac186aef5535c97771df89de5eeca5e0836f83726182400021e7e9",
+      "size_bytes": 4266
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/surprise_mover_summary.json",
+      "sha256": "332b2b5739800a85f3f54d4014b0b5d8be169c30c95773f7b17177dcfaa778e3",
+      "size_bytes": 1880
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/monthly_metrics.csv",
+      "sha256": "93353aa3f18802ee7f9f3d25331901e1ca9904e482b201bd053395cea0a821c5",
+      "size_bytes": 9094
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/stock_metrics.csv",
+      "sha256": "3075cc0e85f9c8f77f5e868154dc20d24a9347cc307587f7e280faed5021f23a",
+      "size_bytes": 24216
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/containment_metrics.csv",
+      "sha256": "451ce1083f3a3218e494230523d3ce88c59c43b00ae1b338b8c0905b79e0e963",
+      "size_bytes": 14967
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/bootstrap_metrics.csv",
+      "sha256": "b0f510c2a49aa7cd1fcb9ff12641a9d061e73d2381cdd5d64b77f98d2ca7a95e",
+      "size_bytes": 5769
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/matched_random_null_metrics.csv",
+      "sha256": "849eb62fce9e2f74414e0f1c98c835abc9bbe62ce569c17f2229bde754532f84",
+      "size_bytes": 9177
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/probability_permutation_null_metrics.csv",
+      "sha256": "a89ef2ee787ded81451a5dcc27b339166f014c5f33e187a30dca5fe2fd11d691",
+      "size_bytes": 4523
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/frozen_resampling_plan.json",
+      "sha256": "f2e5dcdc28fc640b000b053bde36294b41cbb25137ba731953e4a05631b3c124",
+      "size_bytes": 2624048
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/m1c_feature_manifest.json",
+      "sha256": "a95bf4f8272d3fb8475a0fc2a0cc41747b5f946d82300ab508900392af67658c",
+      "size_bytes": 19488
+    },
+    {
+      "path": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/frozen_low_tail_thresholds.json",
+      "sha256": "b4836c99a15aaccdbe04f10658e659c6966a509680b28802074b0014af678dda",
+      "size_bytes": 1548
+    },
+    {
+      "path": "research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/holdout_selected_option_pairs.parquet",
+      "sha256": "0b3f16cb06ae00df06dc34041a87d78b17478f1245810f54b5cc2d0f38d27e97",
+      "size_bytes": 268969
+    },
+    {
+      "path": "research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/causal_movement_feature_manifest.json",
+      "sha256": "6f59177a58973d33a24741e3c265e1831bfb6dc07afac17ae371501019bdc5cc",
+      "size_bytes": 17952
+    }
+  ],
+  "strategy_promotion": false
+}

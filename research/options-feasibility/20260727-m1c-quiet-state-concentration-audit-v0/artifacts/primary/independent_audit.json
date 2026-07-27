@@ -1,0 +1,55 @@
+{
+  "binding_october_share": 0.3709677419354839,
+  "bottom_tail_incidence_verified": true,
+  "broker_order_methods_allowed": false,
+  "concentration_explanations_verified": true,
+  "defined_risk_short_premium_only": true,
+  "equal_exposure_audit": {
+    "maximum_floating_difference": 1.1102230246251565e-16,
+    "passed": true,
+    "weighting_schemes_checked": 4
+  },
+  "fresh_episode_identity_mismatches": 0,
+  "leave_one_group_out_audit": {
+    "leave_one_month_cases_checked": 4,
+    "leave_one_stock_cases_checked": 20,
+    "passed": true
+  },
+  "live_orders_allowed": false,
+  "m1c_bottom_10_threshold": 0.135896965695626,
+  "m1c_bottom_20_threshold": 0.167095528962669,
+  "m1c_bottom_5_threshold": 0.115697407847643,
+  "m1c_frozen": true,
+  "maximum_manual_m1c_probability_difference": 0.0,
+  "naked_short_options_allowed": false,
+  "option_shadow_outcomes_only": true,
+  "original_decision": "blocked_insufficient_low_tail_support",
+  "original_decision_verified": true,
+  "original_low_movement_decision_preserved": true,
+  "paper_orders_allowed": false,
+  "passed": true,
+  "primary_quiet_state": "bottom_10_percent",
+  "prospective_record_only": true,
+  "protected_historical_start": "2026-01-01",
+  "quiet_run_audit": {
+    "maximum_within_run_gap_minutes": 10.0,
+    "passed": true,
+    "run_member_rows_checked": 2166,
+    "runs_checked": 933
+  },
+  "research_only": true,
+  "retrospective_bottom_tail_rows_manually_reconstructed": 100,
+  "retrospective_gate_relaxation_allowed": false,
+  "source_exposure_verified": true,
+  "source_hashes_checked": 20,
+  "strategy_promotion": false,
+  "surprise_event_audit": {
+    "clustered_surprise_events_available": 134,
+    "clustered_surprise_events_manually_checked": 50,
+    "maximum_checked_member_count": 1,
+    "passed": true
+  },
+  "surprise_row_definition_verified": true,
+  "tail_membership_mismatches": 0,
+  "unexplained_discrepancies": 0
+}

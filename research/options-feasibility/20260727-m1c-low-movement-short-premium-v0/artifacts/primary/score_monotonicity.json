@@ -1,0 +1,90 @@
+{
+  "archived_contaminated_m1_excluded": true,
+  "broker_access": false,
+  "correct_overall_direction": true,
+  "cross_sectional_future_filtered_features_excluded": true,
+  "defined_risk_structures_only_for_future_recording": true,
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "low_tail_thresholds_fit_on_2024_only": true,
+  "m1c_causal_feature_surface": true,
+  "m1c_frozen": true,
+  "naked_short_options_authorised": false,
+  "option_pnl_calculated": false,
+  "paper_orders_allowed": false,
+  "periods": {
+    "assessment": {
+      "correct_overall_direction": true,
+      "metrics": {
+        "mean_maximum_excursion": {
+          "linear_slope": 0.0009813954721150338,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.009967994477625877,
+          "top_minus_bottom_quintile": 0.007886853353558484,
+          "weighted_spearman": 1.0
+        },
+        "mean_terminal_iv_residual": {
+          "linear_slope": 0.0006580805952271992,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.007245021584887562,
+          "top_minus_bottom_quintile": 0.005420423496440355,
+          "weighted_spearman": 1.0
+        },
+        "movement_exceeds_iv_rate": {
+          "linear_slope": 0.039130060415283635,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.37239382239382235,
+          "top_minus_bottom_quintile": 0.3136546609243062,
+          "weighted_spearman": 1.0
+        },
+        "surprise_1_5_sigma_rate": {
+          "linear_slope": 0.03659201992077981,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.3702127659574469,
+          "top_minus_bottom_quintile": 0.2909595688128816,
+          "weighted_spearman": 1.0
+        }
+      }
+    },
+    "stress": {
+      "correct_overall_direction": true,
+      "metrics": {
+        "mean_maximum_excursion": {
+          "linear_slope": 0.0010852857902279745,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.011206151312625756,
+          "top_minus_bottom_quintile": 0.008782234732175917,
+          "weighted_spearman": 1.0
+        },
+        "mean_terminal_iv_residual": {
+          "linear_slope": 0.0006262703527665731,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.006608379892681321,
+          "top_minus_bottom_quintile": 0.0050529994116228555,
+          "weighted_spearman": 1.0
+        },
+        "movement_exceeds_iv_rate": {
+          "linear_slope": 0.038874036611705354,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.3843816474162651,
+          "top_minus_bottom_quintile": 0.30936542191134475,
+          "weighted_spearman": 1.0
+        },
+        "surprise_1_5_sigma_rate": {
+          "linear_slope": 0.03642038969763995,
+          "monotonic_adjacent_steps": 9,
+          "top_minus_bottom_decile": 0.37464500450270327,
+          "top_minus_bottom_quintile": 0.2905443031093864,
+          "weighted_spearman": 1.0
+        }
+      }
+    }
+  },
+  "primary_horizon_minutes": 15,
+  "primary_low_tail": "bottom_10_percent",
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "retrospective_low_movement_screen": true,
+  "short_option_pnl_claim": false,
+  "strategy_promotion": false
+}

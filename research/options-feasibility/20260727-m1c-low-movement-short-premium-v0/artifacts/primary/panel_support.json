@@ -1,0 +1,266 @@
+{
+  "archived_contaminated_m1_excluded": true,
+  "broker_access": false,
+  "checkpoint_bottom_10_percent": {
+    "assessment": {
+      "checks": {
+        "every_period_month_represented": true,
+        "maximum_month_share": true,
+        "maximum_session_share": true,
+        "maximum_stock_share": true,
+        "minimum_rows": true,
+        "minimum_sessions": true,
+        "minimum_stocks": true
+      },
+      "maximum_month_share": 0.21756756756756757,
+      "maximum_session_share": 0.03648648648648649,
+      "maximum_stock_share": 0.12567567567567567,
+      "months": 8,
+      "passed": true,
+      "period": "assessment",
+      "population": "checkpoint",
+      "rows": 740,
+      "sessions": 123,
+      "stocks": 20
+    },
+    "stress": {
+      "checks": {
+        "every_period_month_represented": true,
+        "maximum_month_share": false,
+        "maximum_session_share": true,
+        "maximum_stock_share": true,
+        "minimum_rows": true,
+        "minimum_sessions": true,
+        "minimum_stocks": true
+      },
+      "maximum_month_share": 0.3709677419354839,
+      "maximum_session_share": 0.04978962131837307,
+      "maximum_stock_share": 0.13253856942496495,
+      "months": 4,
+      "passed": false,
+      "period": "stress",
+      "population": "checkpoint",
+      "rows": 1426,
+      "sessions": 63,
+      "stocks": 20
+    }
+  },
+  "cross_sectional_future_filtered_features_excluded": true,
+  "defined_risk_structures_only_for_future_recording": true,
+  "fresh_bottom_10_percent": {
+    "assessment": {
+      "checks": {
+        "every_period_month_represented": true,
+        "maximum_month_share": true,
+        "maximum_session_share": true,
+        "maximum_stock_share": true,
+        "minimum_rows": true,
+        "minimum_sessions": true,
+        "minimum_stocks": true
+      },
+      "maximum_month_share": 0.20454545454545456,
+      "maximum_session_share": 0.032467532467532464,
+      "maximum_stock_share": 0.11038961038961038,
+      "months": 8,
+      "passed": true,
+      "period": "assessment",
+      "population": "fresh_episode",
+      "rows": 308,
+      "sessions": 123,
+      "stocks": 20
+    },
+    "stress": {
+      "checks": {
+        "every_period_month_represented": true,
+        "maximum_month_share": true,
+        "maximum_session_share": true,
+        "maximum_stock_share": true,
+        "minimum_rows": true,
+        "minimum_sessions": true,
+        "minimum_stocks": true
+      },
+      "maximum_month_share": 0.33086876155268025,
+      "maximum_session_share": 0.033271719038817,
+      "maximum_stock_share": 0.10536044362292052,
+      "months": 4,
+      "passed": true,
+      "period": "stress",
+      "population": "fresh_episode",
+      "rows": 541,
+      "sessions": 63,
+      "stocks": 20
+    }
+  },
+  "full_population": {
+    "assessment": {
+      "months": 8,
+      "rows": 13914,
+      "sessions": 154,
+      "stocks": 20
+    },
+    "stress": {
+      "months": 4,
+      "rows": 18136,
+      "sessions": 68,
+      "stocks": 20
+    }
+  },
+  "intraday_option_quotes_used": false,
+  "late_checkpoints_excluded_for_longer_horizon_support": false,
+  "live_orders_allowed": false,
+  "longer_horizon_support": {
+    "assessment": {
+      "10": {
+        "checkpoint": {
+          "rows": 740,
+          "sessions": 123,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 308,
+          "sessions": 123,
+          "stocks": 20
+        }
+      },
+      "15": {
+        "checkpoint": {
+          "rows": 740,
+          "sessions": 123,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 308,
+          "sessions": 123,
+          "stocks": 20
+        }
+      },
+      "30": {
+        "checkpoint": {
+          "rows": 740,
+          "sessions": 123,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 308,
+          "sessions": 123,
+          "stocks": 20
+        }
+      },
+      "5": {
+        "checkpoint": {
+          "rows": 740,
+          "sessions": 123,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 308,
+          "sessions": 123,
+          "stocks": 20
+        }
+      },
+      "60": {
+        "checkpoint": {
+          "rows": 241,
+          "sessions": 65,
+          "stocks": 18
+        },
+        "fresh_episode": {
+          "rows": 106,
+          "sessions": 65,
+          "stocks": 18
+        }
+      }
+    },
+    "stress": {
+      "10": {
+        "checkpoint": {
+          "rows": 1426,
+          "sessions": 63,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 541,
+          "sessions": 63,
+          "stocks": 20
+        }
+      },
+      "15": {
+        "checkpoint": {
+          "rows": 1426,
+          "sessions": 63,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 541,
+          "sessions": 63,
+          "stocks": 20
+        }
+      },
+      "30": {
+        "checkpoint": {
+          "rows": 1426,
+          "sessions": 63,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 541,
+          "sessions": 63,
+          "stocks": 20
+        }
+      },
+      "5": {
+        "checkpoint": {
+          "rows": 1426,
+          "sessions": 63,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 541,
+          "sessions": 63,
+          "stocks": 20
+        }
+      },
+      "60": {
+        "checkpoint": {
+          "rows": 517,
+          "sessions": 59,
+          "stocks": 20
+        },
+        "fresh_episode": {
+          "rows": 247,
+          "sessions": 59,
+          "stocks": 20
+        }
+      }
+    }
+  },
+  "low_tail_thresholds_fit_on_2024_only": true,
+  "m1c_causal_feature_surface": true,
+  "m1c_frozen": true,
+  "naked_short_options_authorised": false,
+  "option_pnl_calculated": false,
+  "optional_market_context_fallback": {
+    "market_return_through_checkpoint": {
+      "assessment_rows": 2,
+      "development_rows": 203,
+      "frozen_source_period": "2024",
+      "rows": 205,
+      "stress_rows": 0
+    },
+    "market_volatility": {
+      "assessment_rows": 2,
+      "development_rows": 57,
+      "frozen_source_period": "2024",
+      "rows": 59,
+      "stress_rows": 0
+    }
+  },
+  "paper_orders_allowed": false,
+  "primary_horizon_minutes": 15,
+  "primary_low_tail": "bottom_10_percent",
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "retrospective_low_movement_screen": true,
+  "short_option_pnl_claim": false,
+  "strategy_promotion": false
+}

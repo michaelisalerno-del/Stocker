@@ -1,0 +1,76 @@
+{
+  "archived_contaminated_m1_excluded": true,
+  "broker_access": false,
+  "cross_sectional_future_filtered_features_excluded": true,
+  "defined_risk_structures_only_for_future_recording": true,
+  "exact_date_eodhd_receipts_inspected_via_frozen_manifests": true,
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "low_tail_thresholds_fit_on_2024_only": true,
+  "m1c_causal_feature_surface": true,
+  "m1c_frozen": true,
+  "maximum_session_read": "2025-12-31",
+  "naked_short_options_authorised": false,
+  "network_requests": 0,
+  "option_pnl_calculated": false,
+  "options_downloaded": false,
+  "paper_orders_allowed": false,
+  "predecessor_feature_manifest": {
+    "path": "research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/causal_movement_feature_manifest.json",
+    "sha256": "6f59177a58973d33a24741e3c265e1831bfb6dc07afac17ae371501019bdc5cc"
+  },
+  "predecessor_runner": {
+    "path": "research/directional-readiness/20260726-stock-local-directional-archetypes-v0/run_screen_v0.py",
+    "sha256": "3e9bfc0f3fe67aaa03a3a7a156f862fc99f61dc4090066cd15788a3eb9711c3b"
+  },
+  "primary_horizon_minutes": 15,
+  "primary_low_tail": "bottom_10_percent",
+  "protected_rows_read": 0,
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "retrospective_low_movement_screen": true,
+  "short_option_pnl_claim": false,
+  "sources": [
+    {
+      "columns_read_exclude_archived_signed_pressure": true,
+      "columns_read_exclude_future_labels_and_eligibility": true,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/dense_advance_panel.parquet",
+      "role": "unfiltered_dense_causal_checkpoint_surface",
+      "rows_read": 119395,
+      "sha256": "a916b792e15e8630dadc09bed64d71be5533ce9f3b2bd93af06605d0faaa0cc3"
+    },
+    {
+      "maximum_reconstruction_difference": 0.0,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json",
+      "role": "frozen_causal_group_i_scaling_definitions",
+      "sha256": "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2"
+    },
+    {
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_dimensions.parquet",
+      "role": "exact_previous_close_historical_options_context",
+      "sha256": "4bc6fd0ce6972210949a5447fd06ca0ffaa258cb953d5e3447c1c07afab85b40",
+      "stock_sessions": 2179
+    },
+    {
+      "maximum_session_read": "2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+      "role": "completed_five_minute_stock_and_market_bars",
+      "rows_read": 401232,
+      "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+    },
+    {
+      "maximum_session": "2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-27-you-are-working-in-the-github/research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/holdout_selected_option_pairs.parquet",
+      "role": "exact_previous_close_opened_stress_options_context",
+      "sha256": "0b3f16cb06ae00df06dc34041a87d78b17478f1245810f54b5cc2d0f38d27e97",
+      "stock_sessions": 1214
+    },
+    {
+      "archived_pressure_values_read": false,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-27-you-are-working-in-the-github/research/directional-readiness/20260726-movement-qualified-direction-screen-v0/artifacts/primary/movement_signal_episodes.parquet",
+      "role": "archived_episode_identities_for_impact_comparison_only",
+      "sha256": "8db3debfbbd360f94f8b171d0bac02d673bfc31b951c15a6713ba5ccaf939aba"
+    }
+  ],
+  "strategy_promotion": false
+}

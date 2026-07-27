@@ -1,0 +1,396 @@
+{
+  "archived_contaminated_m1_excluded": true,
+  "audit_implementation": "independent_no_runner_import",
+  "bootstrap_audit": {
+    "draws_per_period": 100,
+    "maximum_bootstrap_metric_difference": 1.1102230246251565e-16,
+    "whole_session_plan_mismatches": 0
+  },
+  "broker_access": false,
+  "chronology_audit": {
+    "completed_bar_timing_mismatches": 0,
+    "maximum_checkpoint_session": "2025-12-31",
+    "option_dte_mismatches": 0,
+    "previous_close_date_mismatches": 0,
+    "protected_rows_read": 0
+  },
+  "claims_and_protected_boundary_audit": {
+    "contract_claims_passed": true,
+    "maximum_generated_session": "2025-12-31",
+    "prospective_artifact": "research/options-feasibility/20260727-m1c-low-movement-short-premium-v0/artifacts/primary/prospective_short_premium_recording_blocker.json",
+    "protected_rows_read": 0
+  },
+  "containment_audit": {
+    "maximum_containment_metric_difference": 1.1102230246251565e-16,
+    "rows_recomputed": 54
+  },
+  "cross_sectional_future_filtered_features_excluded": true,
+  "defined_risk_structures_only_for_future_recording": true,
+  "determinism_artifact_passed": true,
+  "feature_manifest_audit": {
+    "coefficients_and_preprocessing_match_predecessor": true,
+    "contaminated_features_excluded": [
+      "signed_pressure",
+      "tension",
+      "posterior_entropy",
+      "transition_probability",
+      "persistence_probability",
+      "expected_state_age",
+      "top_state_probability",
+      "top_second_margin",
+      "any_registered_completion_prior_6",
+      "any_registered_completion_prior_12",
+      "same_identity_active_prefix_with_prior_completion",
+      "any_hidden_event_prior_6",
+      "hidden_2_3_2_prior_6",
+      "bars_since_latest_registered_completion"
+    ],
+    "feature_order": [
+      "front_options_implied_tension",
+      "front_options_premium_richness",
+      "front_options_downside_asymmetry",
+      "front_options_liquidity_stress",
+      "front_options_positioning_concentration",
+      "front_options_directional_positioning",
+      "front_options_surface_disagreement",
+      "front_options_regime_p_0",
+      "front_options_regime_p_1",
+      "front_options_regime_p_2",
+      "front_options_regime_p_3",
+      "front_options_regime_entropy",
+      "front_options_regime_margin",
+      "skew_25d_missing",
+      "near_spot_oi_concentration_missing",
+      "call_put_oi_imbalance_missing",
+      "checkpoint_6",
+      "checkpoint_8",
+      "checkpoint_10",
+      "checkpoint_12",
+      "checkpoint_14",
+      "checkpoint_16",
+      "checkpoint_18",
+      "checkpoint_20",
+      "checkpoint_22",
+      "checkpoint_24",
+      "checkpoint_26",
+      "checkpoint_28",
+      "checkpoint_30",
+      "checkpoint_32",
+      "checkpoint_34",
+      "arousal",
+      "conviction",
+      "prior_6_mean_range",
+      "prior_6_price_travel",
+      "prior_6_absolute_net_movement",
+      "prior_6_activity_proxy",
+      "recent_vs_earlier_range_ratio",
+      "recent_vs_earlier_activity_ratio",
+      "current_bar_range_vs_prior_6",
+      "current_bar_activity_vs_prior_6",
+      "current_bar_body_fraction",
+      "current_bar_extreme_wick_fraction"
+    ]
+  },
+  "fresh_quiet_episode_audit": {
+    "all_tail_episode_identity_mismatches": 0,
+    "manual_fresh_episode_field_mismatches": 0,
+    "manual_fresh_quiet_episodes": 50,
+    "maximum_episode_probability_difference": 0.0,
+    "maximum_episode_spacing_difference": 0.0,
+    "minimum_noninitial_spacing_minutes": 30.0
+  },
+  "gate_and_decision_audit": {
+    "component_statuses": {
+      "checkpoint_low_movement_status": "promising",
+      "fresh_quiet_episode_status": "supported",
+      "long_premium_veto_status": "descriptive_only",
+      "low_tail_threshold_status": "supported",
+      "m0_comparison_status": "supported",
+      "m1c_reconstruction_status": "supported",
+      "range_containment_status": "promising",
+      "score_monotonicity_status": "supported",
+      "short_premium_recorder_priority": "not_supported",
+      "surprise_mover_status": "descriptive_only"
+    },
+    "overall_decision": "blocked_insufficient_low_tail_support",
+    "readiness_gate": {
+      "checks": {
+        "assessment_bootstrap_80_1_5_sigma_difference_upper_below_zero": true,
+        "assessment_fresh_1_5_sigma_lower_than_full": true,
+        "assessment_fresh_1_5_sigma_lower_than_m0": true,
+        "assessment_fresh_2_sigma_lower_than_full": true,
+        "assessment_support_passed": true,
+        "assessment_two_sigma_containment_at_least_80_percent": true,
+        "binding_low_movement_veto_passed": false,
+        "stress_bootstrap_80_1_5_sigma_difference_upper_below_zero": true,
+        "stress_fresh_1_5_sigma_lower_than_full": true,
+        "stress_fresh_1_5_sigma_lower_than_m0": true,
+        "stress_fresh_2_sigma_lower_than_full": true,
+        "stress_support_passed": true,
+        "stress_two_sigma_containment_at_least_80_percent": true,
+        "surprise_movers_not_concentrated": false,
+        "thirty_minute_containment_favourable": true
+      },
+      "passed": false
+    },
+    "score_monotonicity": {
+      "assessment": {
+        "correct_overall_direction": true,
+        "linear_slope": 0.039130060415283635,
+        "monotonic_adjacent_steps": 9,
+        "top_minus_bottom_decile": 0.37239382239382235,
+        "weighted_spearman": 1.0
+      },
+      "stress": {
+        "correct_overall_direction": true,
+        "linear_slope": 0.038874036611705354,
+        "monotonic_adjacent_steps": 9,
+        "top_minus_bottom_decile": 0.3843816474162651,
+        "weighted_spearman": 1.0
+      }
+    },
+    "veto_gate": {
+      "checks": {
+        "assessment_bootstrap_80_mean_residual_upper_below_zero": true,
+        "assessment_bootstrap_80_npv_lift_lower_above_zero": true,
+        "assessment_m1c_beats_m0_1_5_sigma_breach": true,
+        "assessment_m1c_beats_m0_mean_residual": true,
+        "assessment_m1c_beats_m0_remains_below": true,
+        "assessment_matched_mean_residual_wins": true,
+        "assessment_matched_npv_lift_wins": true,
+        "assessment_mean_residual_negative": true,
+        "assessment_median_residual_negative": true,
+        "assessment_monthly_negative_residual_support": true,
+        "assessment_not_dependent_on_one_stock": true,
+        "assessment_npv_lift_at_least_8_points": true,
+        "assessment_permutation_mean_residual_wins": true,
+        "assessment_permutation_npv_lift_wins": true,
+        "assessment_remains_below_at_least_85_percent": true,
+        "assessment_support_and_concentration": true,
+        "chronology_audit_passed": true,
+        "protected_boundary_passed": true,
+        "score_decile_direction_correct": true,
+        "stress_bootstrap_80_mean_residual_upper_below_zero": true,
+        "stress_bootstrap_80_npv_lift_lower_above_zero": true,
+        "stress_m1c_beats_m0_1_5_sigma_breach": true,
+        "stress_m1c_beats_m0_mean_residual": true,
+        "stress_m1c_beats_m0_remains_below": true,
+        "stress_matched_mean_residual_wins": true,
+        "stress_matched_npv_lift_wins": true,
+        "stress_mean_residual_negative": true,
+        "stress_median_residual_negative": true,
+        "stress_monthly_negative_residual_support": true,
+        "stress_not_dependent_on_one_stock": true,
+        "stress_npv_lift_at_least_8_points": true,
+        "stress_permutation_mean_residual_wins": true,
+        "stress_permutation_npv_lift_wins": true,
+        "stress_remains_below_at_least_85_percent": true,
+        "stress_support_and_concentration": false
+      },
+      "passed": false
+    }
+  },
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "low_tail_thresholds_fit_on_2024_only": true,
+  "m1c_causal_feature_surface": true,
+  "m1c_frozen": true,
+  "naked_short_options_authorised": false,
+  "null_audit": {
+    "matched_draws_per_period": 20,
+    "matched_identity_mismatches": 0,
+    "maximum_matched_metric_difference": 9.93129189996722e-17,
+    "maximum_permutation_metric_difference": 9.8879238130678e-17,
+    "permutation_draws_per_period": 10,
+    "permutation_identity_mismatches": 0
+  },
+  "option_pnl_calculated": false,
+  "outcome_and_excursion_audit": {
+    "availability_mismatches": 0,
+    "classification_mismatches": 0,
+    "manual_fifteen_minute_outcomes": 100,
+    "manual_iv_residuals": 100,
+    "manual_maximum_excursion_outcomes": 100,
+    "manual_probabilistic_outcome_rows": 100,
+    "maximum_differences": {
+      "entry_price": 0.0,
+      "entry_timestamp": 0.0,
+      "excursion_sigma_ratio": 0.0,
+      "iv_expected_absolute": 0.0,
+      "iv_sigma": 0.0,
+      "maximum_absolute_excursion": 0.0,
+      "maximum_down_excursion": 0.0,
+      "maximum_up_excursion": 0.0,
+      "path_range_sigma_ratio": 0.0,
+      "realised_path_range": 0.0,
+      "terminal_iv_residual": 0.0,
+      "terminal_return": 0.0
+    },
+    "verified_available_outcomes_by_horizon": {
+      "10": 100,
+      "15": 100,
+      "30": 100,
+      "5": 100,
+      "60": 83
+    }
+  },
+  "paper_orders_allowed": false,
+  "passed": true,
+  "primary_horizon_minutes": 15,
+  "primary_low_tail": "bottom_10_percent",
+  "probability_audit": {
+    "manual_m0_probabilities": 100,
+    "manual_m1c_probabilities": 100,
+    "maximum_full_comparison_difference": 0.0,
+    "maximum_m0_probability_difference": 0.0,
+    "maximum_m1c_probability_difference": 0.0,
+    "maximum_row_weight_difference": 0.0,
+    "maximum_stock_session_weight_sum_difference": 0.0
+  },
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "retrospective_low_movement_screen": true,
+  "short_option_pnl_claim": false,
+  "source_audit": {
+    "sources": [
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/dense_advance_panel.parquet",
+        "sha256": "a916b792e15e8630dadc09bed64d71be5533ce9f3b2bd93af06605d0faaa0cc3"
+      },
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json",
+        "sha256": "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2"
+      },
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_dimensions.parquet",
+        "sha256": "4bc6fd0ce6972210949a5447fd06ca0ffaa258cb953d5e3447c1c07afab85b40"
+      },
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+        "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+      },
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-27-you-are-working-in-the-github/research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/holdout_selected_option_pairs.parquet",
+        "sha256": "0b3f16cb06ae00df06dc34041a87d78b17478f1245810f54b5cc2d0f38d27e97"
+      },
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-27-you-are-working-in-the-github/research/directional-readiness/20260726-movement-qualified-direction-screen-v0/artifacts/primary/movement_signal_episodes.parquet",
+        "sha256": "8db3debfbbd360f94f8b171d0bac02d673bfc31b951c15a6713ba5ccaf939aba"
+      },
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-27-you-are-working-in-the-github/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/run_screen_v0.py",
+        "sha256": "3e9bfc0f3fe67aaa03a3a7a156f862fc99f61dc4090066cd15788a3eb9711c3b"
+      },
+      {
+        "path": "/Users/michaelsalerno/Documents/Codex/2026-07-27-you-are-working-in-the-github/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/causal_movement_feature_manifest.json",
+        "sha256": "6f59177a58973d33a24741e3c265e1831bfb6dc07afac17ae371501019bdc5cc"
+      }
+    ],
+    "sources_checked": 8
+  },
+  "status": "supported",
+  "strategy_promotion": false,
+  "support_gate_audit": {
+    "checkpoint_support": {
+      "assessment": {
+        "checks": {
+          "every_period_month_represented": true,
+          "maximum_month_share": true,
+          "maximum_session_share": true,
+          "maximum_stock_share": true,
+          "minimum_rows": true,
+          "minimum_sessions": true,
+          "minimum_stocks": true
+        },
+        "maximum_month_share": 0.21756756756756757,
+        "maximum_session_share": 0.03648648648648649,
+        "maximum_stock_share": 0.12567567567567567,
+        "months": 8,
+        "passed": true,
+        "period": "assessment",
+        "population": "checkpoint",
+        "rows": 740,
+        "sessions": 123,
+        "stocks": 20
+      },
+      "stress": {
+        "checks": {
+          "every_period_month_represented": true,
+          "maximum_month_share": false,
+          "maximum_session_share": true,
+          "maximum_stock_share": true,
+          "minimum_rows": true,
+          "minimum_sessions": true,
+          "minimum_stocks": true
+        },
+        "maximum_month_share": 0.3709677419354839,
+        "maximum_session_share": 0.04978962131837307,
+        "maximum_stock_share": 0.13253856942496495,
+        "months": 4,
+        "passed": false,
+        "period": "stress",
+        "population": "checkpoint",
+        "rows": 1426,
+        "sessions": 63,
+        "stocks": 20
+      }
+    },
+    "fresh_episode_support": {
+      "assessment": {
+        "checks": {
+          "every_period_month_represented": true,
+          "maximum_month_share": true,
+          "maximum_session_share": true,
+          "maximum_stock_share": true,
+          "minimum_rows": true,
+          "minimum_sessions": true,
+          "minimum_stocks": true
+        },
+        "maximum_month_share": 0.20454545454545456,
+        "maximum_session_share": 0.032467532467532464,
+        "maximum_stock_share": 0.11038961038961038,
+        "months": 8,
+        "passed": true,
+        "period": "assessment",
+        "population": "fresh_episode",
+        "rows": 308,
+        "sessions": 123,
+        "stocks": 20
+      },
+      "stress": {
+        "checks": {
+          "every_period_month_represented": true,
+          "maximum_month_share": true,
+          "maximum_session_share": true,
+          "maximum_stock_share": true,
+          "minimum_rows": true,
+          "minimum_sessions": true,
+          "minimum_stocks": true
+        },
+        "maximum_month_share": 0.33086876155268025,
+        "maximum_session_share": 0.033271719038817,
+        "maximum_stock_share": 0.10536044362292052,
+        "months": 4,
+        "passed": true,
+        "period": "stress",
+        "population": "fresh_episode",
+        "rows": 541,
+        "sessions": 63,
+        "stocks": 20
+      }
+    },
+    "maximum_support_share_difference": 0.0
+  },
+  "threshold_and_membership_audit": {
+    "all_decile_membership_mismatches": 0,
+    "all_tail_membership_mismatches": 0,
+    "fit_end": "2024-12-31",
+    "fit_rows": 18596,
+    "fit_start": "2024-01-25",
+    "manual_bottom_tail_membership_mismatches": 0,
+    "manual_bottom_tail_memberships": 100,
+    "maximum_decile_boundary_difference": 0.0,
+    "maximum_threshold_difference": 0.0
+  },
+  "unexplained_discrepancies": 0
+}

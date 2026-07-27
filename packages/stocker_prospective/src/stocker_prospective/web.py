@@ -183,6 +183,33 @@ def _concentration_audit_projection(root: Path | None) -> dict[str, Any]:
     }
 
 
+def _daily_report_packages(root: Path | None) -> list[dict[str, Any]]:
+    if root is None or not root.is_dir():
+        return []
+    packages: list[dict[str, Any]] = []
+    for metadata_path in sorted(root.glob("????-??-??/package-*.json"), reverse=True):
+        payload = _json_artifact(metadata_path)
+        if payload is None:
+            continue
+        archive_name = str(payload.get("archive", ""))
+        archive = metadata_path.parent / archive_name
+        if (
+            not archive_name
+            or Path(archive_name).name != archive_name
+            or archive.suffix != ".zip"
+            or not archive.is_file()
+        ):
+            continue
+        packages.append(
+            {
+                **payload,
+                "download_path": (f"/api/reports/daily/{metadata_path.parent.name}/{archive_name}"),
+                "archive_size_bytes": archive.stat().st_size,
+            }
+        )
+    return packages
+
+
 def _path_exposes_forbidden_broker_resource(path: str) -> bool:
     segments = {
         segment.lower() for segment in path.split("/") if segment and not segment.startswith("{")
@@ -514,7 +541,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         )
         status.update(
             {
-                "banner": "RECORD ONLY — ORDER ROUTING DISABLED",
+                "banner": "RECORD ONLY — NO ORDERS",
                 "market_data_type_required": config.ibkr.market_data_type_required,
                 "capacity": {
                     "level1": {
@@ -575,6 +602,75 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             }
         )
         return status
+
+    @app.get("/api/market-data-budget")
+    def market_data_budget() -> dict[str, Any]:
+        return {
+            **store.market_data_budget_dashboard_v0(),
+            "banner": "RECORD ONLY — NO ORDERS",
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/source-transfer")
+    def source_transfer() -> dict[str, Any]:
+        aggregate = _json_artifact(config.paths.aggregate_transfer_report)
+        return {
+            **store.source_transfer_status_v0(),
+            "aggregate": aggregate,
+            "exact_vendor_bar_equality_required": False,
+            "historical_decision": "blocked_insufficient_low_tail_support",
+            "strategy_profitability_decision_allowed": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/reports/daily")
+    def daily_report_packages() -> dict[str, Any]:
+        return {
+            "items": _daily_report_packages(config.paths.prospective_report_root),
+            "package_contents": [
+                "session_summary.json",
+                "ibkr_bar_quality.csv",
+                "m1c_ibkr_predictions.csv",
+                "eodhd_ibkr_bar_comparison.csv",
+                "eodhd_ibkr_feature_comparison.csv",
+                "eodhd_ibkr_probability_comparison.csv",
+                "tail_membership_comparison.csv",
+                "episode_comparison.csv",
+                "market_data_budget_report.json",
+                "subscription_lifecycle.csv",
+                "option_episode_quality.csv",
+                "shadow_outcomes.csv",
+                "skipped_recordings.csv",
+                "report.md",
+            ],
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/reports/daily/{session_date}/{archive_name}")
+    def download_daily_report(
+        session_date: str,
+        archive_name: str,
+    ) -> FileResponse:
+        root = config.paths.prospective_report_root
+        try:
+            datetime.strptime(session_date, "%Y-%m-%d")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="not_found") from exc
+        if (
+            root is None
+            or Path(archive_name).name != archive_name
+            or not archive_name.startswith("chatgpt-report-package-")
+            or not archive_name.endswith(".zip")
+        ):
+            raise HTTPException(status_code=404, detail="not_found")
+        archive = root / session_date / archive_name
+        if not archive.is_file():
+            raise HTTPException(status_code=404, detail="not_found")
+        return FileResponse(
+            archive,
+            media_type="application/zip",
+            filename=archive.name,
+        )
 
     @app.get("/api/recorder/capabilities")
     def recorder_capabilities() -> dict[str, Any]:

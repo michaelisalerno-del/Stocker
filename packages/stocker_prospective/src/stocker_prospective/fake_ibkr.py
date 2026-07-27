@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from stocker_prospective.capacity import CapacityDiscovery
 from stocker_prospective.contract import assert_no_broker_mutation_surface
 from stocker_prospective.market_data import (
     ConnectionTracker,
@@ -39,7 +40,13 @@ class FakeRequestResult:
 class FakeIBKRAdapter:
     """Replay market-data callbacks and failures with no network or credentials."""
 
-    def __init__(self, *, fixture_id: str, events: tuple[FakeIBKREvent, ...]) -> None:
+    def __init__(
+        self,
+        *,
+        fixture_id: str,
+        events: tuple[FakeIBKREvent, ...],
+        capacity: dict[str, object] | None = None,
+    ) -> None:
         self.fixture_id = fixture_id
         self._events = tuple(sorted(events, key=lambda item: item.sequence))
         if [item.sequence for item in self._events] != list(range(len(self._events))):
@@ -50,6 +57,7 @@ class FakeIBKRAdapter:
         self.active_subscriptions: dict[int, tuple[str, str]] = {}
         self._fixture_cursor = 0
         self._control_events: list[dict[str, Any]] = []
+        self._capacity = dict(capacity or {})
         assert_no_broker_mutation_surface(self)
 
     @classmethod
@@ -58,7 +66,11 @@ class FakeIBKRAdapter:
         if payload.get("fixture_version") != "1":
             raise ValueError("unsupported fake IBKR fixture")
         events = tuple(FakeIBKREvent.model_validate(item) for item in payload["events"])
-        return cls(fixture_id=str(payload["fixture_id"]), events=events)
+        return cls(
+            fixture_id=str(payload["fixture_id"]),
+            events=events,
+            capacity=cast(dict[str, object], payload.get("capacity", {})),
+        )
 
     @property
     def scenarios(self) -> frozenset[str]:
@@ -214,6 +226,12 @@ class FakeIBKRAdapter:
     def cancel_market_depth(self, request_id: int, **_kwargs: object) -> None:
         self._cancel(request_id)
 
+    def actual_subscription_request_ids(self) -> set[int]:
+        return set(self.active_subscriptions)
+
+    def cancel_orphaned_market_data_request(self, request_id: int) -> None:
+        self._cancel(request_id)
+
     def require_live_market_data(self) -> None:
         self.market_data_type = MarketDataType.LIVE
         self.connection.market_data_type_observed(MarketDataType.LIVE)
@@ -252,7 +270,59 @@ class FakeIBKRAdapter:
         return request_id
 
     def request_option_chain_metadata(self, **_kwargs: object) -> FakeRequestResult:
-        return FakeRequestResult(self.request_ids.next(), ())
+        symbol = str(_kwargs.get("underlying_symbol", "FAKE"))
+        return FakeRequestResult(
+            self.request_ids.next(),
+            (
+                SimpleNamespace(
+                    underlyingConId=int(str(_kwargs.get("underlying_contract_id", 0))),
+                    exchange="SMART",
+                    tradingClass=symbol,
+                    expirations={"20260724", "20260725", "20260728"},
+                    strikes={float(value) for value in range(90, 111)},
+                ),
+            ),
+        )
+
+    def capture_temporary_quote(
+        self,
+        *,
+        contract: object,
+        **_kwargs: object,
+    ) -> FakeRequestResult:
+        strike = self._floating(self._attribute(contract, "strike"), default=100.0)
+        right = str(self._attribute(contract, "right") or "C")
+        call_delta = max(0.02, min(0.98, 0.5 - (strike - 100.0) * 0.08))
+        delta = call_delta if right == "C" else call_delta - 1.0
+        premium = max(0.05, 0.2 + 2.5 * abs(delta))
+        return FakeRequestResult(
+            self.request_ids.next(),
+            (
+                {
+                    "bid": round(max(0.01, premium - 0.05), 4),
+                    "ask": round(premium + 0.05, 4),
+                    "delta": delta,
+                    "market_data_type": "live",
+                },
+            ),
+        )
+
+    def discover_market_data_capacity(self) -> CapacityDiscovery:
+        defaults: dict[str, object] = {
+            "total_level1_allowance": 100,
+            "available_level1_capacity": 100,
+            "externally_consumed_lines": 0,
+            "tws_watchlist_lines": 0,
+            "other_api_client_lines": 0,
+            "tick_by_tick_capacity": 2,
+            "depth_capacity": 0,
+            "snapshot_pacing_limit": 2,
+            "historical_requests_per_window": 60,
+            "option_computation_available": True,
+            "market_data_status": self.market_data_type.value,
+        }
+        defaults.update(self._capacity)
+        return CapacityDiscovery(**cast(Any, defaults))
 
     def server_version(self) -> int:
         return 187

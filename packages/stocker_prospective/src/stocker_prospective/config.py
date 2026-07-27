@@ -30,6 +30,9 @@ class PathsConfig(BaseModel):
     m1c_live_parity_report: Path | None = None
     direction_live_parity_report: Path | None = None
     ibkr_capability_manifest: Path | None = None
+    ibkr_runtime_capacity_manifest: Path | None = None
+    prospective_report_root: Path | None = None
+    aggregate_transfer_report: Path | None = None
     prospective_phase_ledger: Path | None = None
     frozen_m1c_artifact_root: Path | None = None
     m1c_scaling_artifact: Path | None = None
@@ -114,9 +117,26 @@ class IBKRConfig(BaseModel):
     market_data_type_required: Literal["live"] = "live"
     enable_level2: bool = False
     level2_rows: int = Field(default=5, ge=1, le=20)
-    max_depth_subscriptions: int = Field(default=3, ge=0)
-    max_tick_by_tick_subscriptions: int = Field(default=6, ge=0)
-    max_option_subscriptions: int = Field(default=60, ge=0)
+    max_depth_subscriptions: int = Field(default=0, ge=0)
+    max_tick_by_tick_subscriptions: int = Field(default=2, ge=0)
+    max_option_subscriptions: int = Field(default=8, ge=0)
+    externally_reserved_lines: int = Field(default=0, ge=0)
+    reserved_future_trading_lines: int = Field(default=12, ge=1)
+    safety_margin_lines: int = Field(default=2, ge=0)
+    max_concurrent_snapshots: int = Field(default=2, ge=1)
+    max_active_option_episodes: int = Field(default=1, ge=1, le=2)
+    max_option_lines_per_episode: int = Field(default=8, ge=4, le=16)
+    tick_by_tick_active_underlyings: int = Field(default=1, ge=0, le=2)
+    level2_active_underlyings: int = Field(default=0, ge=0, le=1)
+    max_high_resolution_underlyings: int = Field(default=1, ge=1, le=2)
+    high_tail_approach_boundary: float = Field(default=0.40, ge=0.167095528962669, le=1.0)
+    pending_subscription_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    subscription_reconciliation_interval_seconds: float = Field(
+        default=30.0,
+        ge=5.0,
+        le=300.0,
+    )
+    option_episode_maximum_minutes: int = Field(default=65, ge=30, le=90)
     connect_timeout_seconds: float = Field(default=10.0, gt=0.0)
     request_timeout_seconds: float = Field(default=10.0, gt=0.0)
     reconnect_max_attempts: int = Field(default=5, ge=0)
@@ -145,15 +165,28 @@ class IBKRConfig(BaseModel):
             raise ValueError("IBKR host must be a literal loopback address")
         if not self.read_only:
             raise ValueError("IBKR recorder must use read-only access")
-        if self.reserved_line_headroom >= self.market_data_line_budget:
-            raise ValueError("reserved line headroom must be below the line budget")
-        usable_level1_lines = self.market_data_line_budget - self.reserved_line_headroom
+        runtime_reserved = (
+            self.externally_reserved_lines
+            + self.reserved_future_trading_lines
+            + self.safety_margin_lines
+        )
+        if runtime_reserved >= self.market_data_line_budget:
+            raise ValueError("runtime reservations must be below the line budget")
+        usable_level1_lines = self.market_data_line_budget - runtime_reserved
         if usable_level1_lines < 21:
             raise ValueError("market-data budget cannot protect the 20 stocks and VTI")
-        if self.max_option_subscriptions > usable_level1_lines - 21:
+        bounded_option_lines = min(
+            self.max_option_subscriptions,
+            self.max_active_option_episodes * self.max_option_lines_per_episode,
+        )
+        if bounded_option_lines > usable_level1_lines - 21:
             raise ValueError(
                 "option subscription budget would consume protected universe Level I headroom"
             )
+        if self.level2_active_underlyings > 0 and not self.enable_level2:
+            raise ValueError("level2 active underlyings require enable_level2")
+        if self.tick_by_tick_active_underlyings * 2 > self.max_tick_by_tick_subscriptions:
+            raise ValueError("tick-by-tick active-underlying count exceeds stream capacity")
         if self.request_rate_per_second > self.market_data_line_budget / 2:
             raise ValueError("request-rate budget must not exceed half the configured line budget")
         return self
@@ -269,11 +302,25 @@ def load_prospective_config(path: str | Path) -> ProspectiveConfig:
         "IBKR_ENABLE_LEVEL2": ("enable_level2", environment_bool),
         "IBKR_LEVEL2_ROWS": ("level2_rows", int),
         "IBKR_MAX_DEPTH_SUBSCRIPTIONS": ("max_depth_subscriptions", int),
+        "IBKR_MAX_DEPTH": ("max_depth_subscriptions", int),
         "IBKR_MAX_TICK_BY_TICK_SUBSCRIPTIONS": (
             "max_tick_by_tick_subscriptions",
             int,
         ),
+        "IBKR_MAX_TICK_BY_TICK": ("max_tick_by_tick_subscriptions", int),
         "IBKR_MAX_OPTION_SUBSCRIPTIONS": ("max_option_subscriptions", int),
+        "IBKR_TOTAL_MARKET_DATA_LINES": ("market_data_line_budget", int),
+        "IBKR_EXTERNALLY_RESERVED_LINES": ("externally_reserved_lines", int),
+        "IBKR_RESERVED_FUTURE_TRADING_LINES": (
+            "reserved_future_trading_lines",
+            int,
+        ),
+        "IBKR_MAX_CONCURRENT_SNAPSHOTS": ("max_concurrent_snapshots", int),
+        "IBKR_MAX_ACTIVE_OPTION_EPISODES": ("max_active_option_episodes", int),
+        "IBKR_MAX_OPTION_LINES_PER_EPISODE": (
+            "max_option_lines_per_episode",
+            int,
+        ),
         "IBKR_CONNECTION_TIMEOUT_SECONDS": ("connect_timeout_seconds", float),
         "IBKR_RECONNECT_BACKOFF_SECONDS": ("reconnect_backoff_seconds", float),
         "IBKR_STREAM_POLL_INTERVAL_SECONDS": ("stream_poll_interval_seconds", float),
@@ -361,6 +408,9 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "expected_environment": config.ibkr.expected_environment,
             "market_data_line_budget": config.ibkr.market_data_line_budget,
             "reserved_line_headroom": config.ibkr.reserved_line_headroom,
+            "externally_reserved_lines": config.ibkr.externally_reserved_lines,
+            "reserved_future_trading_lines": (config.ibkr.reserved_future_trading_lines),
+            "safety_margin_lines": config.ibkr.safety_margin_lines,
             "allowed_market_data_types": config.ibkr.allowed_market_data_types,
             "read_only": config.ibkr.read_only,
             "market_data_type_required": config.ibkr.market_data_type_required,
@@ -369,6 +419,11 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "max_depth_subscriptions": config.ibkr.max_depth_subscriptions,
             "max_tick_by_tick_subscriptions": (config.ibkr.max_tick_by_tick_subscriptions),
             "max_option_subscriptions": config.ibkr.max_option_subscriptions,
+            "max_active_option_episodes": config.ibkr.max_active_option_episodes,
+            "max_option_lines_per_episode": (config.ibkr.max_option_lines_per_episode),
+            "max_concurrent_snapshots": config.ibkr.max_concurrent_snapshots,
+            "tick_by_tick_active_underlyings": (config.ibkr.tick_by_tick_active_underlyings),
+            "level2_active_underlyings": config.ibkr.level2_active_underlyings,
         },
         "context": {"mode": config.context.mode},
         "parallel_validation": {

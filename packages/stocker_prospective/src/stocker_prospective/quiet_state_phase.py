@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -108,6 +109,7 @@ class QuietStatePhaseLedger:
         observation_kind: QuietObservationKind,
         occurred_at: datetime,
         completion: QuietObservationCompletion,
+        cohort_phase: tuple[str, bool] | None = None,
     ) -> QuietPhaseAssignment:
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("quiet phase timestamp must be timezone-aware")
@@ -126,15 +128,35 @@ class QuietStatePhaseLedger:
             return existing
         if self._assignments and observed < self._assignments[-1].occurred_at_utc:
             raise ValueError("quiet phase ledger must be chronological")
-        completed_quiet = sum(
-            row.complete_quiet_episode_ordinal is not None for row in self._assignments
-        )
-        if observation_kind == "quiet_bottom_10" and completion.complete:
-            ordinal = completed_quiet + 1
-            phase = self._phase(ordinal)
+        if cohort_phase is not None:
+            phase, evidence_allowed = cohort_phase
+            if phase == "engineering_transfer" and evidence_allowed:
+                raise ValueError("engineering-transfer observations cannot be scientific evidence")
+            if (
+                observation_kind == "quiet_bottom_10"
+                and completion.complete
+                and phase != "engineering_transfer"
+            ):
+                ordinal = (
+                    sum(
+                        row.complete_quiet_episode_ordinal is not None and row.phase == phase
+                        for row in self._assignments
+                    )
+                    + 1
+                )
+            else:
+                ordinal = None
         else:
-            ordinal = None
-            phase = self._phase(completed_quiet + 1)
+            completed_quiet = sum(
+                row.complete_quiet_episode_ordinal is not None for row in self._assignments
+            )
+            if observation_kind == "quiet_bottom_10" and completion.complete:
+                ordinal = completed_quiet + 1
+                phase = self._phase(ordinal)
+            else:
+                ordinal = None
+                phase = self._phase(completed_quiet + 1)
+            evidence_allowed = False
         assignment = QuietPhaseAssignment(
             observation_id=observation_id,
             observation_kind=observation_kind,
@@ -142,7 +164,7 @@ class QuietStatePhaseLedger:
             complete_quiet_episode_ordinal=ordinal,
             phase=phase,
             target_dependent_selection_opened=False,
-            scientific_evidence_claim_allowed=False,
+            scientific_evidence_claim_allowed=evidence_allowed,
             completion=completion,
             claims_boundary=claims_boundary(),
         )
@@ -170,9 +192,11 @@ class QuietStatePhaseManager:
         *,
         ledger: QuietStatePhaseLedger,
         repository: FrozenRecorderRepository,
+        phase_resolver: Callable[[datetime], tuple[str, bool]] | None = None,
     ) -> None:
         self.ledger = ledger
         self.repository = repository
+        self.phase_resolver = phase_resolver
 
     def finalise(
         self,
@@ -187,6 +211,9 @@ class QuietStatePhaseManager:
             observation_kind=observation_kind,
             occurred_at=occurred_at,
             completion=completion,
+            cohort_phase=(
+                None if self.phase_resolver is None else self.phase_resolver(occurred_at)
+            ),
         )
         self.repository.finalise_quiet_observation(
             observation_id=observation_id,

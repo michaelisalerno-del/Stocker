@@ -1198,9 +1198,9 @@ class ProspectiveReadStore:
                 "salt_sha256": hashlib.sha256(NEUTRAL_CONTROL_SALT.encode()).hexdigest(),
             },
             "phase_boundaries": {
-                "engineering_shakedown": 30,
-                "quiet_state_development": 150,
-                "quiet_state_confirmation": 150,
+                "engineering_transfer_valid_sessions": 20,
+                "option_development_complete_quiet_episodes": 150,
+                "untouched_confirmation_complete_quiet_episodes": 150,
             },
             "record_only": True,
             "order_path": "absent",
@@ -1479,3 +1479,121 @@ class ProspectiveReadStore:
                 (run_id, limit),
             ).fetchall()
         return [self._decoded(row) for row in rows]
+
+    def market_data_budget_dashboard_v0(self) -> dict[str, Any]:
+        """Return current capacity, ownership, queue, and reconciliation state."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return {
+                "runtime_capacity": None,
+                "current_usage": {},
+                "subscriptions_by_priority_class": {},
+                "subscriptions_by_symbol": {},
+                "subscriptions_by_episode": {},
+                "queued_episodes": 0,
+                "degraded_episodes": 0,
+                "reconciliation_warnings": [],
+            }
+        with self._connect() as connection:
+            capacity = connection.execute(
+                """
+                SELECT * FROM ibkr_runtime_capacity_v0
+                WHERE run_id = ? ORDER BY observed_at_utc DESC, id DESC LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            lifecycle = connection.execute(
+                """
+                WITH latest AS (
+                    SELECT subscription_key, MAX(id) AS id
+                    FROM subscription_lifecycle_event_v0
+                    WHERE run_id = ? GROUP BY subscription_key
+                )
+                SELECT e.* FROM subscription_lifecycle_event_v0 e
+                JOIN latest l ON l.id = e.id
+                ORDER BY e.subscription_class, e.symbol, e.subscription_key
+                """,
+                (run_id,),
+            ).fetchall()
+            allocations = connection.execute(
+                """
+                WITH latest AS (
+                    SELECT episode_id, MAX(id) AS id
+                    FROM option_episode_allocation_v0
+                    WHERE run_id = ? GROUP BY episode_id
+                )
+                SELECT e.* FROM option_episode_allocation_v0 e
+                JOIN latest l ON l.id = e.id
+                ORDER BY e.updated_at_utc, e.episode_id
+                """,
+                (run_id,),
+            ).fetchall()
+            warnings = connection.execute(
+                """
+                SELECT * FROM skipped_recording_v0
+                WHERE run_id = ?
+                  AND recording_kind = 'subscription_reconciliation_warning'
+                ORDER BY occurred_at_utc DESC, id DESC LIMIT 100
+                """,
+                (run_id,),
+            ).fetchall()
+        active_statuses = {"pending", "active", "cancellation_requested"}
+        active = [row for row in lifecycle if str(row["status"]) in active_statuses]
+        usage: dict[str, int] = {}
+        classes: dict[str, int] = {}
+        symbols: dict[str, int] = {}
+        episodes: dict[str, int] = {}
+        for row in active:
+            kind = str(row["subscription_kind"])
+            class_name = f"class_{int(row['subscription_class'])}"
+            symbol = str(row["symbol"])
+            usage[kind] = usage.get(kind, 0) + 1
+            classes[class_name] = classes.get(class_name, 0) + 1
+            symbols[symbol] = symbols.get(symbol, 0) + 1
+            for owner in json.loads(str(row["owner_ids_json"])):
+                if str(owner).startswith("episode:"):
+                    episode_id = str(owner).split(":", 1)[1]
+                    episodes[episode_id] = episodes.get(episode_id, 0) + 1
+        decoded_capacity = None if capacity is None else json.loads(str(capacity["manifest_json"]))
+        allocation_rows = [self._decoded(row) for row in allocations]
+        oldest_optional = min(
+            (str(row["occurred_at_utc"]) for row in active if int(row["subscription_class"]) >= 3),
+            default=None,
+        )
+        return {
+            "runtime_capacity": decoded_capacity,
+            "current_internal_usage": sum(usage.values()),
+            "current_usage": dict(sorted(usage.items())),
+            "pending_requests": sum(str(row["status"]) == "pending" for row in active),
+            "subscriptions_by_priority_class": dict(sorted(classes.items())),
+            "subscriptions_by_symbol": dict(sorted(symbols.items())),
+            "subscriptions_by_episode": dict(sorted(episodes.items())),
+            "queued_episodes": sum(row.get("state") == "EPISODE_QUEUED" for row in allocation_rows),
+            "degraded_episodes": sum(row.get("state") == "DEGRADED" for row in allocation_rows),
+            "episode_allocations": allocation_rows,
+            "oldest_active_optional_subscription": oldest_optional,
+            "reconciliation_warnings": [self._decoded(row) for row in warnings],
+            "optional_exhaustion_is_fatal": False,
+            "fatal_budget_state": "critical_budget_unavailable",
+        }
+
+    def source_transfer_status_v0(self) -> dict[str, Any]:
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return {"sessions": [], "valid_session_count": 0, "decision": None}
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_transfer_session_v0
+                WHERE run_id = ? ORDER BY session_date
+                """,
+                (run_id,),
+            ).fetchall()
+        sessions = [self._decoded(row) for row in rows]
+        latest = None if not sessions else sessions[-1]
+        return {
+            "sessions": sessions,
+            "valid_session_count": sum(bool(row.get("valid")) for row in sessions),
+            "decision": None if latest is None else latest.get("decision"),
+        }

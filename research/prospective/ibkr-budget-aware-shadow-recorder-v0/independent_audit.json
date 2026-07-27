@@ -1,0 +1,144 @@
+{
+  "capacity": {
+    "automatic_cancellation_leaks": 0,
+    "available_research_level1_lines": 26,
+    "reserved_future_trading_lines": 12,
+    "subscription_class_priority_reconstructions": 50
+  },
+  "checks": {
+    "allocation_count": true,
+    "artifact_hashes": true,
+    "automatic_cancellation": true,
+    "constrained_episode_count": true,
+    "determinism": true,
+    "future_trading_reserve": true,
+    "manual_probability_difference": true,
+    "no_order_and_calibration_safety": true,
+    "option_contract_identity": true,
+    "option_replay_audit": true,
+    "option_structure_legs": true,
+    "prediction_count": true,
+    "prediction_replay_audit": true,
+    "shadow_fill_difference": true,
+    "shadow_fill_formula": true,
+    "shadow_outcome_count": true,
+    "threshold_membership": true,
+    "transfer_bar_semantics": true,
+    "transfer_comparison_count": true,
+    "transfer_manual_metric": true
+  },
+  "claims_boundary": {
+    "a1_frozen_prospective_hypothesis": true,
+    "account_access_required": false,
+    "account_balance_access_required": false,
+    "broker_account_mutation_allowed": false,
+    "broker_order_methods_allowed": false,
+    "c1_frozen_comparison": true,
+    "defined_risk_short_premium_only": true,
+    "engineering_phase_sessions": 20,
+    "exact_vendor_bar_equality_required": false,
+    "execution_enabled": false,
+    "frozen_m1c": true,
+    "full_option_chain_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "live_orders_allowed": false,
+    "m1c_bottom_10_threshold": 0.135896965695626,
+    "m1c_bottom_20_threshold": 0.167095528962669,
+    "m1c_bottom_5_threshold": 0.115697407847643,
+    "m1c_frozen": true,
+    "m1c_threshold": 0.488333710794033,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "microstructure_direction_model_fitted": false,
+    "microstructure_features_descriptive_only": true,
+    "naked_short_options_allowed": false,
+    "option_pnl_is_shadow_quote_pnl": true,
+    "option_quotes_recorded": true,
+    "option_shadow_outcomes_only": true,
+    "order_methods_available": false,
+    "original_decision": "blocked_insufficient_low_tail_support",
+    "original_low_movement_decision_preserved": true,
+    "paper_orders_allowed": false,
+    "place_order_method_available": false,
+    "position_access_required": false,
+    "primary_quiet_state": "bottom_10_percent",
+    "prospective_collection": true,
+    "prospective_record_only": true,
+    "protected_historical_start": "2026-01-01",
+    "r1_frozen_comparison": true,
+    "record_only": true,
+    "research_only": true,
+    "reserved_future_trading_capacity": true,
+    "retrospective_gate_relaxation_allowed": false,
+    "source_transfer_monitoring": true,
+    "strategy_promotion": false,
+    "tick_by_tick_universe_streaming_allowed": false
+  },
+  "contract_version": "ibkr-budget-aware-shadow-recorder-independent-audit-v0",
+  "determinism": {
+    "artifact": "determinism_check.json",
+    "passed": true
+  },
+  "fail_closed": true,
+  "historical_decision": "blocked_insufficient_low_tail_support",
+  "historical_validation_gate_passed": false,
+  "m1c": {
+    "artifact_hashes": {
+      "feature_manifest": "6f59177a58973d33a24741e3c265e1831bfb6dc07afac17ae371501019bdc5cc",
+      "scaling": "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2",
+      "threshold": "1aae6b7b28bf0f51b914d069bb31ac2e209b43ddaaa938fd373c55a2e65cbabe"
+    },
+    "contaminated_features_present": [],
+    "expected_artifact_hashes": {
+      "feature_manifest": "6f59177a58973d33a24741e3c265e1831bfb6dc07afac17ae371501019bdc5cc",
+      "scaling": "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2",
+      "threshold": "1aae6b7b28bf0f51b914d069bb31ac2e209b43ddaaa938fd373c55a2e65cbabe"
+    },
+    "manual_formula_maximum_difference": 5.551115123125783e-17,
+    "threshold_membership_mismatches": 0,
+    "thresholds": {
+      "bottom_10": 0.135896965695626,
+      "bottom_20": 0.167095528962669,
+      "bottom_5": 0.115697407847643,
+      "high_tail": 0.488333710794033
+    }
+  },
+  "manual_reconstruction_counts": {
+    "constrained_option_episodes": 25,
+    "eodhd_ibkr_probability_comparisons": 100,
+    "m1c_ibkr_replay_probabilities": 100,
+    "shadow_outcomes": 50,
+    "subscription_allocation_decisions": 50
+  },
+  "option": {
+    "conservative_fill_formula_verified": true,
+    "constrained_episode_count": 25,
+    "contract_mismatches": 0,
+    "maximum_fill_difference": 2.842170943040401e-14,
+    "naked_short_structures": [],
+    "shadow_outcome_mismatches": 0
+  },
+  "passed": true,
+  "phase": {
+    "engineering_option_evidence": false,
+    "engineering_sessions": 20,
+    "v1_outcome_dependent_calibration": false
+  },
+  "safety": {
+    "calibration_mentions_future_outcome": false,
+    "calibration_mentions_option_pnl": true,
+    "calibration_parameters": [
+      "report",
+      "ibkr"
+    ],
+    "forbidden_adapter_methods": [],
+    "forbidden_routes": [],
+    "passed": true
+  },
+  "transfer": {
+    "bar_semantics_passed": true,
+    "comparison_count": 100,
+    "exact_vendor_bar_equality_required": false,
+    "maximum_manual_metric_difference": 0.0
+  }
+}

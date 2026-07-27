@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from stocker_prospective.events import OptionQuoteEvent
 from stocker_prospective.market_data import MarketDataType
@@ -47,12 +47,13 @@ class OptionContractPlan(BaseModel):
     capacity_reduced: bool
     missing_buckets: tuple[str, ...]
     selection_rule: str = "nearest_atm_common_strike_then_symmetric_wings_v0"
+    selection_roles: dict[str, tuple[str, ...]] = Field(default_factory=dict)
 
 
 def _bucket_priority() -> tuple[DteBucket, ...]:
     return (
-        DteBucket.ZERO_DTE,
         DteBucket.ONE_DTE,
+        DteBucket.ZERO_DTE,
         DteBucket.THREE_TO_FIVE_DTE,
     )
 

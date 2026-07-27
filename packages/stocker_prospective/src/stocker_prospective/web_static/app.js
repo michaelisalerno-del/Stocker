@@ -16,6 +16,9 @@ const state = {
   quietShadow: [],
   quietSessionQuality: [],
   concentrationAudit: null,
+  budget: null,
+  transfer: null,
+  reportPackages: [],
   selectedQuietEpisode: null,
 };
 
@@ -227,6 +230,71 @@ function renderStatus() {
     ["Resolved contracts", (manifest.resolved_contracts || []).length],
     ["Permission errors", (manifest.permission_errors || []).join(", ")],
   ]));
+}
+
+function capacityValue(value) {
+  return value && typeof value === "object" ? value.value : value;
+}
+
+function renderBudgetTransfer() {
+  const budget = state.budget || {};
+  const capacity = budget.runtime_capacity || {};
+  replace("budget-panel", kvGrid([
+    ["Configured / discovered total lines", capacityValue(capacity.total_level1_allowance)],
+    ["Available ordinary Level I", capacity.available_ordinary_level1_lines],
+    ["Externally reserved", capacityValue(capacity.externally_reserved_lines)],
+    ["Future-trading reserve", capacityValue(capacity.reserved_future_trading_lines)],
+    ["Safety margin", capacityValue(capacity.safety_margin_lines)],
+    ["Current internal usage", budget.current_internal_usage],
+    ["Bar streams", budget.current_usage?.bar || 0],
+    ["Level I streams", budget.current_usage?.level1 || 0],
+    ["Option streams", budget.current_usage?.option || 0],
+    ["Tick-by-tick streams", budget.current_usage?.tick_by_tick || 0],
+    ["Depth streams", budget.current_usage?.depth || 0],
+    ["Pending requests", budget.pending_requests],
+    ["Queued episodes", budget.queued_episodes],
+    ["Degraded episodes", budget.degraded_episodes],
+    ["Oldest optional stream", clock(budget.oldest_active_optional_subscription)],
+    ["Reconciliation warnings", (budget.reconciliation_warnings || []).length],
+    ["Fatal state", budget.fatal_budget_state],
+  ]));
+
+  const transfer = state.transfer || {};
+  const aggregate = transfer.aggregate || {};
+  const probability = aggregate.probability_metrics || {};
+  const tails = aggregate.tail_metrics || {};
+  const episodes = aggregate.episode_metrics || {};
+  replace("transfer-panel", kvGrid([
+    ["Decision", transfer.decision || "blocked_insufficient_valid_sessions"],
+    ["Valid sessions", transfer.valid_session_count || 0],
+    ["Exact vendor equality required", false],
+    ["Pearson / Spearman", `${clean(probability.pearson)} / ${clean(probability.spearman)}`],
+    ["Mean probability bias", probability.mean_signed_bias],
+    ["Bottom-10 agreement", tails.bottom_10_agreement],
+    ["High-tail agreement", tails.high_tail_agreement],
+    ["Quiet exact / ±1 checkpoint", `${clean(episodes.quiet_exact_checkpoint_matches)} / ${clean(episodes.quiet_matches_within_one_checkpoint)}`],
+    ["High exact / ±1 checkpoint", `${clean(episodes.high_exact_checkpoint_matches)} / ${clean(episodes.high_matches_within_one_checkpoint)}`],
+    ["Historical decision", transfer.historical_decision],
+    ["Profitability decision", "NOT ALLOWED"],
+  ]));
+
+  const packageRegion = node("div", "report-package-list");
+  if (!state.reportPackages.length) {
+    packageRegion.append(node("div", "empty-state", "No completed daily report package yet."));
+  }
+  state.reportPackages.forEach((item) => {
+    const row = node("div", "audit-item");
+    row.append(
+      node("div", "audit-sequence", item.session),
+      node("div", "audit-type", clock(item.generated_at_utc)),
+    );
+    const link = node("a", "refresh", "Download package");
+    link.href = item.download_path;
+    link.setAttribute("download", "");
+    row.append(link);
+    packageRegion.append(row);
+  });
+  replace("report-packages-panel", packageRegion);
 }
 
 function micropriceEdge(row) {
@@ -559,7 +627,7 @@ function renderQuietUniverse() {
     metric("Fresh quiet episodes", counts.quiet_bottom_10 || 0, `${status.complete_quiet_episodes || 0} complete`),
     metric("Neutral controls", counts.neutral_control || 0, "Frozen deterministic 10% hash sample"),
     metric("High-tail controls", counts.high_tail_control || 0, `Every fresh p ≥ ${clean(thresholds.high_tail, 6)}`),
-    metric("Phase boundary", "30 / 150 / 150", "Shakedown / development / unopened confirmation"),
+    metric("Phase boundary", "20 sessions / 150 / 150", "Engineering transfer / development / untouched confirmation"),
     metric("Order path", String(status.order_path || "absent").toUpperCase(), status.banner, "ok"),
   ].forEach((item) => statusGrid.append(item));
   replace("quiet-status-grid", statusGrid);
@@ -924,6 +992,9 @@ async function refreshAll() {
       quietShadow,
       quietSessionQuality,
       concentrationAudit,
+      budget,
+      transfer,
+      reportPackages,
     ] = await Promise.all([
       api("/api/health"),
       api("/api/recorder/status"),
@@ -939,6 +1010,9 @@ async function refreshAll() {
       api("/api/quiet-state/shadow-structures"),
       api("/api/quiet-state/session-quality"),
       api("/api/quiet-state/concentration-audit"),
+      api("/api/market-data-budget"),
+      api("/api/source-transfer"),
+      api("/api/reports/daily"),
     ]);
     state.health = health;
     state.status = status;
@@ -954,6 +1028,9 @@ async function refreshAll() {
     state.quietShadow = quietShadow.items || [];
     state.quietSessionQuality = quietSessionQuality.items || [];
     state.concentrationAudit = concentrationAudit;
+    state.budget = budget;
+    state.transfer = transfer;
+    state.reportPackages = reportPackages.items || [];
     renderStatus();
     renderUniverse();
     renderEpisodeIndex();
@@ -963,6 +1040,7 @@ async function refreshAll() {
     renderQuietEpisodeIndex();
     renderQuietShadow();
     renderConcentrationAudit();
+    renderBudgetTransfer();
     const legacyEvidence = !state.selectedEpisode && state.episodes.length
       ? loadEpisode(state.episodes[0].episode_id)
       : loadSelectedOptions();

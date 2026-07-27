@@ -485,7 +485,11 @@ def _ibkr_adapter(config: ProspectiveConfig) -> IBKRMarketDataAdapter:
         config=connection_config,
         budget=MarketDataBudget(
             line_limit=config.ibkr.market_data_line_budget,
-            reserved_headroom=config.ibkr.reserved_line_headroom,
+            reserved_headroom=(
+                config.ibkr.externally_reserved_lines
+                + config.ibkr.reserved_future_trading_lines
+                + config.ibkr.safety_margin_lines
+            ),
             request_rate_limit=config.ibkr.request_rate_per_second,
         ),
         socket_preflight=require_ibkr_socket_loopback_only,
@@ -684,6 +688,11 @@ def recorder_run(
                         run_id=config.runtime.run_id or "",
                         owner_id=owner_id or "",
                         now=datetime.now(UTC),
+                    ),
+                    completion_sink=(
+                        None
+                        if frozen_application is None
+                        else frozen_application.process_source_transfer
                     ),
                 )
 

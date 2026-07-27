@@ -1,0 +1,28 @@
+{
+  "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
+  "historical_decision": "blocked_insufficient_low_tail_support",
+  "historical_validation_gate_passed": false,
+  "primary_quiet_state_rule": "m1c_probability <= 0.135896965695626",
+  "high_tail_threshold": 0.488333710794033,
+  "claims_boundary": {
+    "research_only": true,
+    "record_only": true,
+    "frozen_m1c": true,
+    "source_transfer_monitoring": true,
+    "exact_vendor_bar_equality_required": false,
+    "option_shadow_outcomes_only": true,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "full_option_chain_streaming_allowed": false,
+    "tick_by_tick_universe_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "reserved_future_trading_capacity": true,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_methods_available": false,
+    "account_access_required": false,
+    "position_access_required": false,
+    "strategy_promotion": false
+  }
+}

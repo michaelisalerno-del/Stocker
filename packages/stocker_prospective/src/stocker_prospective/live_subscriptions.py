@@ -16,11 +16,15 @@ from stocker_prospective.event_ingest import (
 from stocker_prospective.ibkr import IBKRMarketDataAdapter
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.subscriptions import (
+    BudgetState,
     PromotionDecision,
+    ReconciliationResult,
     SubscriptionBudgetManager,
+    SubscriptionClass,
     SubscriptionKind,
     SubscriptionPriority,
     SubscriptionRecord,
+    canonical_subscription_key,
 )
 
 TICK_STREAMS: tuple[
@@ -55,6 +59,16 @@ class _OwnedStream:
     contract: QualifiedUnderlying
     tick_type: Literal["BidAsk", "Last"] | None
     depth_rows: int | None
+
+
+@dataclass(frozen=True)
+class UnderlyingPromotionResult:
+    symbol: str
+    episode_id: str
+    level1_started: bool
+    approved_keys: tuple[str, ...]
+    denied_keys: tuple[str, ...]
+    budget_state: BudgetState
 
 
 class LiveSubscriptionController:
@@ -96,22 +110,14 @@ class LiveSubscriptionController:
         budget_kind: SubscriptionKind,
         stream_kind: StreamKind,
         priority: SubscriptionPriority,
+        subscription_class: SubscriptionClass,
+        owner_id: str,
         owner_episode: str | None,
         protected: bool,
         tick_type: Literal["BidAsk", "Last"] | None = None,
         depth_rows: int | None = None,
     ) -> SubscriptionRecord | None:
         existing = self.budget.get(key)
-        if existing is not None:
-            if priority > existing.priority or owner_episode is not None:
-                self.budget.upgrade(
-                    key,
-                    priority=priority,
-                    owner_episode=owner_episode,
-                    protected=protected,
-                )
-                self.repository.record_subscription(metadata, existing)
-            return existing
         decision = self.budget.allocate(
             key=key,
             kind=budget_kind,
@@ -120,16 +126,21 @@ class LiveSubscriptionController:
             request_id=-1,
             priority=priority,
             owner_episode=owner_episode,
+            owner_id=owner_id,
+            subscription_class=subscription_class,
             protected=protected,
             now_monotonic=time.monotonic(),
             now_utc=metadata.recorded_at_utc,
         )
         if not decision.accepted:
             return None
-        if decision.evicted_key is not None:
+        if existing is not None:
+            self.repository.record_subscription(metadata, existing)
+            return existing
+        for evicted_key in decision.evicted_keys:
             self._cancel_upstream(
                 metadata,
-                decision.evicted_key,
+                evicted_key,
                 reason=f"preempted_by:{key}",
                 budget_already_cancelled=True,
             )
@@ -169,16 +180,27 @@ class LiveSubscriptionController:
                 raise ValueError("unsupported live stream kind")
             if self.request_pacer is not None:
                 self.request_pacer()
-        except Exception:
+        except Exception as exc:
             self.budget.cancel(
                 key,
                 reason="upstream_subscription_failed",
                 now_utc=metadata.recorded_at_utc,
             )
+            capacity_failure = (
+                "market_data_budget" in str(exc)
+                or "capacity" in str(exc)
+                or "market_data_lines" in str(exc)
+            )
+            if capacity_failure and subscription_class >= SubscriptionClass.ACTIVE_EPISODE:
+                return None
+            if capacity_failure:
+                raise RuntimeError(f"critical_budget_unavailable:upstream:{key}") from exc
             raise
         record = self.budget.get(key)
         assert record is not None
-        record.request_id = request_id
+        if not self.budget.mark_active(key, request_id=request_id):
+            self._cancel_request(stream_kind, request_id, key)
+            return None
         owned = _OwnedStream(
             key=key,
             symbol=contract.symbol,
@@ -202,6 +224,24 @@ class LiveSubscriptionController:
         self.repository.record_subscription(metadata, record)
         return record
 
+    def _cancel_request(
+        self,
+        stream_kind: StreamKind,
+        request_id: int,
+        key: str,
+    ) -> None:
+        if stream_kind in {StreamKind.UNDERLYING_LEVEL1, StreamKind.OPTION_LEVEL1}:
+            self.adapter.cancel_market_data(request_id, subscription_key=key)
+        elif stream_kind is StreamKind.UNDERLYING_BAR:
+            self.adapter.cancel_historical_updates(request_id, subscription_key=key)
+        elif stream_kind in {
+            StreamKind.UNDERLYING_TICK_BIDASK,
+            StreamKind.UNDERLYING_TICK_LAST,
+        }:
+            self.adapter.cancel_tick_by_tick(request_id, subscription_key=key)
+        elif stream_kind is StreamKind.UNDERLYING_DEPTH:
+            self.adapter.cancel_market_depth(request_id, subscription_key=key)
+
     def start_always_on(
         self,
         metadata: EvidenceMetadata,
@@ -210,7 +250,6 @@ class LiveSubscriptionController:
         if len({item.symbol for item in contracts}) != len(contracts):
             raise ValueError("qualified underlying symbols are not unique")
         self._contracts.update({item.symbol: item for item in contracts})
-        failed_level1: list[str] = []
         failed_bars: list[str] = []
         for contract in sorted(contracts, key=lambda item: item.symbol):
             priority = (
@@ -218,38 +257,38 @@ class LiveSubscriptionController:
                 if contract.market_proxy
                 else SubscriptionPriority.UNIVERSE_LEVEL1
             )
-            level1 = self._allocate(
-                metadata,
-                key=f"underlying:{contract.symbol}:level1",
-                contract=contract,
-                budget_kind=SubscriptionKind.LEVEL1,
-                stream_kind=StreamKind.UNDERLYING_LEVEL1,
-                priority=priority,
-                owner_episode=None,
-                protected=True,
+            subscription_class = (
+                SubscriptionClass.CRITICAL_SYSTEM
+                if contract.market_proxy
+                else SubscriptionClass.FROZEN_UNIVERSE_SIGNAL
             )
-            if level1 is None:
-                failed_level1.append(contract.symbol)
-                continue
             bar = self._allocate(
                 metadata,
-                key=f"underlying:{contract.symbol}:bar",
+                key=canonical_subscription_key(
+                    SubscriptionKind.BAR,
+                    con_id=contract.con_id,
+                    bar_size="5m",
+                    use_rth=True,
+                ),
                 contract=contract,
                 budget_kind=SubscriptionKind.BAR,
                 stream_kind=StreamKind.UNDERLYING_BAR,
                 priority=priority,
+                subscription_class=subscription_class,
+                owner_id=(
+                    f"system:market_proxy:{contract.symbol}"
+                    if contract.market_proxy
+                    else f"universe:{contract.symbol}"
+                ),
                 owner_episode=None,
                 protected=True,
             )
             if bar is None:
                 failed_bars.append(contract.symbol)
-        if failed_level1:
-            raise RuntimeError(
-                "blocked_universe_level1_capacity:" + ",".join(sorted(failed_level1))
-            )
         if failed_bars:
             raise RuntimeError(
-                "blocked_required_five_minute_bar_capacity:" + ",".join(sorted(failed_bars))
+                "critical_budget_unavailable:required_five_minute_bars:"
+                + ",".join(sorted(failed_bars))
             )
 
     def apply_checkpoint_promotions(
@@ -264,31 +303,56 @@ class LiveSubscriptionController:
             record = self.budget.get(key)
             if (
                 record is not None
-                and record.priority is SubscriptionPriority.ARMED_CANDIDATE
+                and f"arming:{stream.symbol}" in record.owners
                 and stream.stream_kind
                 in {
+                    StreamKind.UNDERLYING_LEVEL1,
                     StreamKind.UNDERLYING_TICK_BIDASK,
                     StreamKind.UNDERLYING_TICK_LAST,
                     StreamKind.UNDERLYING_DEPTH,
                 }
             ):
-                family = (
-                    "depth" if stream.stream_kind is StreamKind.UNDERLYING_DEPTH else "tick_by_tick"
-                )
+                if stream.stream_kind is StreamKind.UNDERLYING_LEVEL1:
+                    family = "level1"
+                elif stream.stream_kind is StreamKind.UNDERLYING_DEPTH:
+                    family = "depth"
+                else:
+                    family = "tick_by_tick"
                 if (stream.symbol, family) not in desired:
-                    self.cancel(
+                    self._release_owner(
                         metadata,
                         key,
+                        owner_id=f"arming:{stream.symbol}",
                         reason="next_checkpoint_rank_replaced",
                     )
         for decision in decisions:
             contract = self._contracts.get(decision.symbol)
             if contract is None:
                 continue
-            if decision.subscription_type == "tick_by_tick":
+            if decision.subscription_type == "level1":
+                self._allocate(
+                    metadata,
+                    key=canonical_subscription_key(
+                        SubscriptionKind.LEVEL1,
+                        con_id=contract.con_id,
+                    ),
+                    contract=contract,
+                    budget_kind=SubscriptionKind.LEVEL1,
+                    stream_kind=StreamKind.UNDERLYING_LEVEL1,
+                    priority=SubscriptionPriority.EPISODE_ENGINEERING,
+                    subscription_class=SubscriptionClass.EPISODE_ENGINEERING,
+                    owner_id=f"arming:{contract.symbol}",
+                    owner_episode=None,
+                    protected=False,
+                )
+            elif decision.subscription_type == "tick_by_tick":
                 started: list[str] = []
-                for suffix, stream_kind, tick_type in TICK_STREAMS:
-                    key = f"underlying:{contract.symbol}:tbt:{suffix}"
+                for _suffix, stream_kind, tick_type in TICK_STREAMS:
+                    key = canonical_subscription_key(
+                        SubscriptionKind.TICK_BY_TICK,
+                        con_id=contract.con_id,
+                        tick_type=tick_type,
+                    )
                     record = self._allocate(
                         metadata,
                         key=key,
@@ -296,15 +360,18 @@ class LiveSubscriptionController:
                         budget_kind=SubscriptionKind.TICK_BY_TICK,
                         stream_kind=stream_kind,
                         priority=SubscriptionPriority.ARMED_CANDIDATE,
+                        subscription_class=SubscriptionClass.MICROSTRUCTURE_ENHANCEMENT,
+                        owner_id=f"arming:{contract.symbol}",
                         owner_episode=None,
                         protected=False,
                         tick_type=tick_type,
                     )
                     if record is None:
                         for started_key in started:
-                            self.cancel(
+                            self._release_owner(
                                 metadata,
                                 started_key,
+                                owner_id=f"arming:{contract.symbol}",
                                 reason="paired_tick_capacity_denied",
                             )
                         break
@@ -312,11 +379,18 @@ class LiveSubscriptionController:
             elif decision.subscription_type == "depth" and self.enable_depth:
                 self._allocate(
                     metadata,
-                    key=f"underlying:{contract.symbol}:depth",
+                    key=canonical_subscription_key(
+                        SubscriptionKind.DEPTH,
+                        con_id=contract.con_id,
+                        depth_rows=self.depth_rows,
+                        smart_depth=True,
+                    ),
                     contract=contract,
                     budget_kind=SubscriptionKind.DEPTH,
                     stream_kind=StreamKind.UNDERLYING_DEPTH,
                     priority=SubscriptionPriority.ARMED_CANDIDATE,
+                    subscription_class=SubscriptionClass.MICROSTRUCTURE_ENHANCEMENT,
+                    owner_id=f"arming:{contract.symbol}",
                     owner_episode=None,
                     protected=False,
                     depth_rows=self.depth_rows,
@@ -328,43 +402,141 @@ class LiveSubscriptionController:
         *,
         symbol: str,
         episode_id: str,
-    ) -> None:
+    ) -> UnderlyingPromotionResult:
         contract = self._contracts[symbol]
+        owner_id = f"episode:{episode_id}"
+        approved: list[str] = []
+        denied: list[str] = []
+        level1_key = canonical_subscription_key(
+            SubscriptionKind.LEVEL1,
+            con_id=contract.con_id,
+        )
+        level1 = self._allocate(
+            metadata,
+            key=level1_key,
+            contract=contract,
+            budget_kind=SubscriptionKind.LEVEL1,
+            stream_kind=StreamKind.UNDERLYING_LEVEL1,
+            priority=SubscriptionPriority.ACTIVE_EPISODE,
+            subscription_class=SubscriptionClass.ACTIVE_EPISODE,
+            owner_id=owner_id,
+            owner_episode=episode_id,
+            protected=True,
+        )
+        if level1 is None:
+            record_skipped = getattr(
+                self.repository,
+                "record_skipped_recording",
+                None,
+            )
+            if callable(record_skipped):
+                record_skipped(
+                    metadata,
+                    session=metadata.recorded_at_utc.date(),
+                    episode_id=episode_id,
+                    symbol=symbol,
+                    recording_kind="underlying_level1_promotion",
+                    reason="option_episode_queued:underlying_level1_capacity",
+                    requested_payload={"requested_subscriptions": [level1_key]},
+                )
+            return UnderlyingPromotionResult(
+                symbol=symbol,
+                episode_id=episode_id,
+                level1_started=False,
+                approved_keys=(),
+                denied_keys=(level1_key,),
+                budget_state=BudgetState.OPTION_EPISODE_QUEUED,
+            )
+        approved.append(level1_key)
+        state = BudgetState.BUDGET_HEALTHY
         started: list[str] = []
-        for suffix, stream_kind, tick_type in TICK_STREAMS:
-            key = f"underlying:{symbol}:tbt:{suffix}"
+        for _suffix, stream_kind, tick_type in TICK_STREAMS:
+            key = canonical_subscription_key(
+                SubscriptionKind.TICK_BY_TICK,
+                con_id=contract.con_id,
+                tick_type=tick_type,
+            )
             record = self._allocate(
                 metadata,
                 key=key,
                 contract=contract,
                 budget_kind=SubscriptionKind.TICK_BY_TICK,
                 stream_kind=stream_kind,
-                priority=SubscriptionPriority.ACTIVE_EPISODE,
+                priority=SubscriptionPriority.MICROSTRUCTURE_ENHANCEMENT,
+                subscription_class=SubscriptionClass.MICROSTRUCTURE_ENHANCEMENT,
+                owner_id=owner_id,
                 owner_episode=episode_id,
-                protected=True,
+                protected=False,
                 tick_type=tick_type,
             )
             if record is None:
+                denied.append(key)
+                state = BudgetState.OPTIONAL_FEEDS_DEGRADED
                 for started_key in started:
-                    self.cancel(
+                    self._release_owner(
                         metadata,
                         started_key,
+                        owner_id=owner_id,
                         reason="active_episode_paired_tick_capacity_denied",
                     )
+                    if started_key in approved:
+                        approved.remove(started_key)
                 break
             started.append(key)
+            approved.append(key)
         if self.enable_depth:
-            self._allocate(
+            depth_key = canonical_subscription_key(
+                SubscriptionKind.DEPTH,
+                con_id=contract.con_id,
+                depth_rows=self.depth_rows,
+                smart_depth=True,
+            )
+            depth = self._allocate(
                 metadata,
-                key=f"underlying:{symbol}:depth",
+                key=depth_key,
                 contract=contract,
                 budget_kind=SubscriptionKind.DEPTH,
                 stream_kind=StreamKind.UNDERLYING_DEPTH,
-                priority=SubscriptionPriority.ACTIVE_EPISODE,
+                priority=SubscriptionPriority.MICROSTRUCTURE_ENHANCEMENT,
+                subscription_class=SubscriptionClass.MICROSTRUCTURE_ENHANCEMENT,
+                owner_id=owner_id,
                 owner_episode=episode_id,
-                protected=True,
+                protected=False,
                 depth_rows=self.depth_rows,
             )
+            if depth is None:
+                denied.append(depth_key)
+                state = BudgetState.OPTIONAL_FEEDS_DEGRADED
+            else:
+                approved.append(depth_key)
+        result = UnderlyingPromotionResult(
+            symbol=symbol,
+            episode_id=episode_id,
+            level1_started=True,
+            approved_keys=tuple(approved),
+            denied_keys=tuple(denied),
+            budget_state=state,
+        )
+        if denied:
+            record_skipped = getattr(
+                self.repository,
+                "record_skipped_recording",
+                None,
+            )
+            if callable(record_skipped):
+                record_skipped(
+                    metadata,
+                    session=metadata.recorded_at_utc.date(),
+                    episode_id=episode_id,
+                    symbol=symbol,
+                    recording_kind="optional_microstructure_promotion",
+                    reason="optional_feeds_degraded",
+                    requested_payload={
+                        "approved_subscriptions": approved,
+                        "denied_subscriptions": denied,
+                    },
+                )
+        return result
 
     def resubscribe_depth(
         self,
@@ -374,30 +546,49 @@ class LiveSubscriptionController:
     ) -> bool:
         """Discard an invalid book stream and request a fresh deterministic book."""
 
-        key = f"underlying:{symbol}:depth"
+        contract = self._contracts.get(symbol)
+        if contract is None:
+            return False
+        key = canonical_subscription_key(
+            SubscriptionKind.DEPTH,
+            con_id=contract.con_id,
+            depth_rows=self.depth_rows,
+            smart_depth=True,
+        )
         owned = self._owned.get(key)
         record = self.budget.get(key)
         if owned is None or record is None:
             return False
-        priority = record.priority
+        owners = tuple(
+            (
+                owner_id,
+                owner_class,
+                record.owner_priorities[owner_id],
+                owner_id in record.protected_owners,
+            )
+            for owner_id, owner_class in sorted(record.owners.items())
+        )
         owner_episode = record.owner_episode
-        protected = record.protected
-        contract = owned.contract
         self.cancel(metadata, key, reason="depth_reset_resubscribe")
-        return (
-            self._allocate(
+        restored = False
+        for owner_id, owner_class, priority, protected in owners:
+            restored_record = self._allocate(
                 metadata,
                 key=key,
-                contract=contract,
+                contract=owned.contract,
                 budget_kind=SubscriptionKind.DEPTH,
                 stream_kind=StreamKind.UNDERLYING_DEPTH,
                 priority=priority,
+                subscription_class=owner_class,
+                owner_id=owner_id,
                 owner_episode=owner_episode,
                 protected=protected,
                 depth_rows=self.depth_rows,
             )
-            is not None
-        )
+            if restored_record is None:
+                return False
+            restored = True
+        return restored
 
     def record_ibkr_error(
         self,
@@ -435,6 +626,31 @@ class LiveSubscriptionController:
             budget_already_cancelled=False,
         )
 
+    def _release_owner(
+        self,
+        metadata: EvidenceMetadata,
+        key: str,
+        *,
+        owner_id: str,
+        reason: str,
+    ) -> None:
+        decision = self.budget.release(
+            key,
+            owner_id=owner_id,
+            reason=reason,
+            now_utc=metadata.recorded_at_utc,
+        )
+        record = self.budget.records.get(key)
+        if decision.cancel_upstream:
+            self._cancel_upstream(
+                metadata,
+                key,
+                reason=reason,
+                budget_already_cancelled=True,
+            )
+        elif record is not None:
+            self.repository.record_subscription(metadata, record)
+
     def _cancel_upstream(
         self,
         metadata: EvidenceMetadata,
@@ -447,29 +663,7 @@ class LiveSubscriptionController:
         record = self.budget.records.get(key)
         if owned is None or record is None:
             return
-        if owned.stream_kind is StreamKind.UNDERLYING_LEVEL1:
-            self.adapter.cancel_market_data(
-                owned.request_id,
-                subscription_key=key,
-            )
-        elif owned.stream_kind is StreamKind.UNDERLYING_BAR:
-            self.adapter.cancel_historical_updates(
-                owned.request_id,
-                subscription_key=key,
-            )
-        elif owned.stream_kind in {
-            StreamKind.UNDERLYING_TICK_BIDASK,
-            StreamKind.UNDERLYING_TICK_LAST,
-        }:
-            self.adapter.cancel_tick_by_tick(
-                owned.request_id,
-                subscription_key=key,
-            )
-        elif owned.stream_kind is StreamKind.UNDERLYING_DEPTH:
-            self.adapter.cancel_market_depth(
-                owned.request_id,
-                subscription_key=key,
-            )
+        self._cancel_request(owned.stream_kind, owned.request_id, key)
         self.normalizer.unregister(owned.request_id)
         if not budget_already_cancelled:
             self.budget.cancel(
@@ -485,11 +679,13 @@ class LiveSubscriptionController:
         *,
         episode_id: str,
     ) -> None:
+        owner_id = f"episode:{episode_id}"
         for key, record in tuple(self.budget.records.items()):
-            if record.cancelled_at_utc is None and record.owner_episode == episode_id:
-                self.cancel(
+            if record.active and owner_id in record.owners:
+                self._release_owner(
                     metadata,
                     key,
+                    owner_id=owner_id,
                     reason="active_episode_T_plus_30_complete",
                 )
 
@@ -497,15 +693,26 @@ class LiveSubscriptionController:
         self,
         metadata: EvidenceMetadata,
     ) -> None:
-        specifications = tuple(
-            (
-                owned,
-                self.budget.records[owned.key].priority,
-                self.budget.records[owned.key].owner_episode,
-                self.budget.records[owned.key].protected,
+        specifications = []
+        for owned in self._owned.values():
+            record = self.budget.records[owned.key]
+            specifications.append(
+                (
+                    owned,
+                    tuple(
+                        (
+                            owner_id,
+                            owner_class,
+                            record.owner_priorities[owner_id],
+                            owner_id in record.protected_owners,
+                        )
+                        for owner_id, owner_class in sorted(record.owners.items())
+                    ),
+                    record.owner_episode,
+                    record.subscription_class,
+                )
             )
-            for owned in self._owned.values()
-        )
+        specifications.sort(key=lambda item: (int(item[3]), item[0].key))
         for owned, _, _, _ in specifications:
             self.normalizer.unregister(owned.request_id)
             self.budget.cancel(
@@ -518,23 +725,85 @@ class LiveSubscriptionController:
                 self.budget.records[owned.key],
             )
             self._owned.pop(owned.key, None)
-        for owned, priority, owner_episode, protected in specifications:
-            self._allocate(
-                metadata,
-                key=owned.key,
-                contract=owned.contract,
-                budget_kind=owned.budget_kind,
-                stream_kind=owned.stream_kind,
-                priority=priority,
-                owner_episode=owner_episode,
-                protected=protected,
-                tick_type=owned.tick_type,
-                depth_rows=owned.depth_rows,
+        for owned, owners, owner_episode, _ in specifications:
+            for owner_id, owner_class, priority, protected in owners:
+                if (
+                    self._allocate(
+                        metadata,
+                        key=owned.key,
+                        contract=owned.contract,
+                        budget_kind=owned.budget_kind,
+                        stream_kind=owned.stream_kind,
+                        priority=priority,
+                        subscription_class=owner_class,
+                        owner_id=owner_id,
+                        owner_episode=owner_episode,
+                        protected=protected,
+                        tick_type=owned.tick_type,
+                        depth_rows=owned.depth_rows,
+                    )
+                    is None
+                ):
+                    break
+
+    def reconcile(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        actual_request_ids: set[int],
+        pending_timeout_seconds: float,
+    ) -> ReconciliationResult:
+        """Repair stale reservations and cancel adapter-local orphan requests."""
+
+        result = self.budget.reconcile(
+            actual_request_ids=actual_request_ids,
+            now_monotonic=time.monotonic(),
+            pending_timeout_seconds=pending_timeout_seconds,
+        )
+        for key in result.released_keys:
+            if key in self._owned:
+                self._cancel_upstream(
+                    metadata,
+                    key,
+                    reason="periodic_reconciliation_repair",
+                    budget_already_cancelled=True,
+                )
+        cancel_orphan = getattr(
+            self.adapter,
+            "cancel_orphaned_market_data_request",
+            None,
+        )
+        if callable(cancel_orphan):
+            for request_id in result.orphan_request_ids:
+                cancel_orphan(request_id)
+                self.normalizer.unregister(request_id)
+        for warning in result.warnings:
+            record_skipped = getattr(
+                self.repository,
+                "record_skipped_recording",
+                None,
             )
+            if callable(record_skipped):
+                record_skipped(
+                    metadata,
+                    session=metadata.recorded_at_utc.date(),
+                    recording_kind="subscription_reconciliation_warning",
+                    reason=warning.code,
+                    requested_payload={
+                        "subscription_key": warning.key,
+                        "request_id": warning.request_id,
+                        "repaired": warning.repaired,
+                    },
+                )
+        return result
 
     def shutdown(self, metadata: EvidenceMetadata) -> None:
         for key in tuple(self._owned):
             self.cancel(metadata, key, reason="recorder_shutdown")
 
 
-__all__ = ["LiveSubscriptionController", "QualifiedUnderlying"]
+__all__ = [
+    "LiveSubscriptionController",
+    "QualifiedUnderlying",
+    "UnderlyingPromotionResult",
+]

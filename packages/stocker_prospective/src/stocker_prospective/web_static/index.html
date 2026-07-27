@@ -96,6 +96,20 @@
             <div id="capability-panel"></div>
           </article>
         </div>
+        <div class="monitor-lower budget-monitor">
+          <article class="panel">
+            <header><span>B</span><h3>Market-data budget and ownership</h3></header>
+            <div id="budget-panel" class="data-region"></div>
+          </article>
+          <article class="panel">
+            <header><span>X</span><h3>Twenty-session source transfer</h3></header>
+            <div id="transfer-panel" class="data-region"></div>
+          </article>
+        </div>
+        <article class="panel wide-panel report-download-panel">
+          <header><span>↓</span><h3>Daily ChatGPT report packages</h3></header>
+          <div id="report-packages-panel" class="data-region"></div>
+        </article>
       </section>
 
       <section id="universe-monitor" class="screen" aria-labelledby="universe-title" tabindex="-1">
@@ -152,9 +166,9 @@
             <h2 id="options-title">Option Surface</h2>
           </div>
           <p>
-            At most 30 contracts per episode across exact 0DTE, 1DTE and
-            3–5 DTE buckets. Updates are top-of-book market data, not true
-            tick-by-tick option trades.
+            At most eight continuous option lines per episode. The primary 1DTE
+            condor is secured first; one alternate DTE is optional. A complete
+            chain is never streamed.
           </p>
         </div>
         <div class="episode-picker">
@@ -184,7 +198,7 @@
           <span>NO PAPER LEDGER / NO ORDERS</span>
         </div>
         <article class="panel blotter-panel">
-          <header><span>Q</span><h3>5 / 10 / 15 / 30 minute outcomes</h3></header>
+          <header><span>Q</span><h3>15 / 30 / 60 minute and supported session-end outcomes</h3></header>
           <div id="shadow-list" class="data-region"></div>
         </article>
         <div id="shadow-evidence" class="visually-hidden" aria-hidden="true"></div>

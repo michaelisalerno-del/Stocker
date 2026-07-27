@@ -42,17 +42,35 @@ SECTOR_PROXY_BY_SYMBOL: Final[dict[str, str]] = {
     "WULF": "XLK",
 }
 CONTRACT_VERSION: Final[str] = "frozen-m1c-microstructure-recorder-v0"
+BUDGET_AWARE_RECORDER_CONTRACT_VERSION: Final[str] = "ibkr-budget-aware-shadow-recorder-v0"
 ORIGINAL_LOW_MOVEMENT_DECISION: Final[str] = "blocked_insufficient_low_tail_support"
 type ClaimValue = bool | float | str
 
 CLAIMS_BOUNDARY: Final[dict[str, ClaimValue]] = {
     "research_only": True,
+    "record_only": True,
+    "frozen_m1c": True,
+    "source_transfer_monitoring": True,
+    "exact_vendor_bar_equality_required": False,
+    "option_shadow_outcomes_only": True,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": True,
+    "market_data_limits_runtime_discovered": True,
+    "full_option_chain_streaming_allowed": False,
+    "tick_by_tick_universe_streaming_allowed": False,
+    "level2_universe_streaming_allowed": False,
+    "reserved_future_trading_capacity": True,
+    "paper_orders_allowed": False,
+    "live_orders_allowed": False,
+    "order_methods_available": False,
+    "account_access_required": False,
+    "position_access_required": False,
+    "strategy_promotion": False,
     "original_low_movement_decision_preserved": True,
     "original_decision": ORIGINAL_LOW_MOVEMENT_DECISION,
     "retrospective_gate_relaxation_allowed": False,
     "prospective_collection": True,
     "prospective_record_only": True,
-    "record_only": True,
     "m1c_frozen": True,
     "m1c_threshold": M1C_FROZEN_THRESHOLD,
     "m1c_bottom_5_threshold": M1C_BOTTOM_5_THRESHOLD,
@@ -66,18 +84,13 @@ CLAIMS_BOUNDARY: Final[dict[str, ClaimValue]] = {
     "microstructure_direction_model_fitted": False,
     "option_quotes_recorded": True,
     "option_pnl_is_shadow_quote_pnl": True,
-    "option_shadow_outcomes_only": True,
     "defined_risk_short_premium_only": True,
     "naked_short_options_allowed": False,
-    "paper_orders_allowed": False,
-    "live_orders_allowed": False,
     "broker_order_methods_allowed": False,
     "place_order_method_available": False,
     "broker_account_mutation_allowed": False,
-    "position_access_required": False,
     "account_balance_access_required": False,
     "execution_enabled": False,
-    "strategy_promotion": False,
     "protected_historical_start": "2026-01-01",
 }
 

@@ -82,6 +82,8 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
                 ),
                 "ibkr_capability_manifest": tmp_path / "capability.json",
                 "prospective_phase_ledger": tmp_path / "phases.jsonl",
+                "prospective_report_root": tmp_path / "reports",
+                "aggregate_transfer_report": tmp_path / "reports" / "aggregate.json",
                 "frozen_m1c_artifact_root": ARCHETYPE_ROOT,
                 "m1c_scaling_artifact": SCALING_ARTIFACT,
                 "direction_beta_artifact": (ARCHETYPE_ROOT / "stock_market_beta_parameters.csv"),
@@ -168,7 +170,9 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
             ).fetchall()
         }
     assert recorded_symbols == {*symbols, "VTI", *SECTOR_PROXY_BY_SYMBOL.values()}
-    assert len(adapter.active_subscriptions) == 2 * len(recorded_symbols)
+    assert len(adapter.active_subscriptions) == len(recorded_symbols)
+    assert {kind for kind, _symbol in adapter.active_subscriptions.values()} == {"bar"}
+    assert (tmp_path / "ibkr_runtime_capacity_manifest.json").is_file()
     assert (
         json.loads((tmp_path / "capability.json").read_text(encoding="utf-8"))[
             "scientific_recording_valid"

@@ -24,6 +24,8 @@ class CapabilityObservation(BaseModel):
     market_data_type: MarketDataType | None
     underlying_level1_symbols: tuple[str, ...]
     market_proxy_level1_symbols: tuple[str, ...]
+    underlying_bar_symbols: tuple[str, ...] = ()
+    market_proxy_bar_symbols: tuple[str, ...] = ()
     option_level1_available: bool
     option_computation_fields_available: bool
     tick_by_tick_capacity: int | None
@@ -72,12 +74,10 @@ def run_capability_preflight(
 ) -> IBKRCapabilityManifest:
     """Preserve diagnostic states while allowing science only on complete live inputs."""
 
-    missing_underlyings = sorted(
-        set(required_underlyings).difference(observation.underlying_level1_symbols)
-    )
-    missing_proxies = sorted(
-        set(required_market_proxies).difference(observation.market_proxy_level1_symbols)
-    )
+    underlying_sources = observation.underlying_bar_symbols or observation.underlying_level1_symbols
+    proxy_sources = observation.market_proxy_bar_symbols or observation.market_proxy_level1_symbols
+    missing_underlyings = sorted(set(required_underlyings).difference(underlying_sources))
+    missing_proxies = sorted(set(required_market_proxies).difference(proxy_sources))
     checks: list[tuple[bool, str]] = [
         (observation.connected, "ibkr_not_connected"),
         (observation.api_server_version is not None, "api_server_version_missing"),
@@ -85,8 +85,8 @@ def run_capability_preflight(
             observation.market_data_type is MarketDataType.LIVE,
             "market_data_not_live",
         ),
-        (not missing_underlyings, "underlying_level1_unavailable"),
-        (not missing_proxies, "market_proxy_level1_unavailable"),
+        (not missing_underlyings, "required_live_bar_source_unavailable"),
+        (not missing_proxies, "required_market_proxy_bar_source_unavailable"),
         (not observation.permission_errors, "market_data_permission_error"),
         (not observation.unresolved_contracts, "contract_resolution_failed"),
         (observation.new_york_calendar_valid, "new_york_calendar_invalid"),

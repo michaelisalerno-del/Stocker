@@ -140,9 +140,7 @@ class EODHDParallelBarProvider:
             raise ParallelCaptureError(
                 f"blocked_parallel_source_capture: {symbol} EODHD payload is invalid"
             ) from exc
-        frame = frame.loc[
-            frame["timestamp"].ge(opened) & frame["timestamp"].lt(closed)
-        ].copy()
+        frame = frame.loc[frame["timestamp"].ge(opened) & frame["timestamp"].lt(closed)].copy()
         output: list[ParallelSourceBar] = []
         for row in frame.itertuples(index=False):
             if not isinstance(row.timestamp, datetime):
@@ -207,6 +205,7 @@ class ParallelSourceCaptureService:
         provider: ParallelBarProvider,
         sleep: Callable[[float], None] = time.sleep,
         heartbeat: Callable[[], object] | None = None,
+        completion_sink: Callable[[date, datetime], object] | None = None,
     ) -> None:
         if len(identity.symbols) != 20 or len(set(identity.symbols)) != 20:
             raise ValueError("blocked_frozen_universe_mismatch")
@@ -216,6 +215,7 @@ class ParallelSourceCaptureService:
         self.provider = provider
         self._sleep = sleep
         self._heartbeat = heartbeat
+        self._completion_sink = completion_sink
         self._last_credential_failure_date: date | None = None
 
     def _metadata(
@@ -232,9 +232,7 @@ class ParallelSourceCaptureService:
             model_artifact_id=self.identity.model_artifact_id,
             universe_id=self.identity.universe_id,
             cohort=ANCHOR_COHORT,
-            source_timestamps=[
-                value.astimezone(UTC).isoformat() for value in source_timestamps
-            ],
+            source_timestamps=[value.astimezone(UTC).isoformat() for value in source_timestamps],
             recorded_at_utc=max(
                 now.astimezone(UTC),
                 self.config.runtime.prospective_start_utc.astimezone(UTC),
@@ -288,9 +286,7 @@ class ParallelSourceCaptureService:
         try:
             while True:
                 try:
-                    return future.result(
-                        timeout=float(self.config.runtime.heartbeat_seconds)
-                    )
+                    return future.result(timeout=float(self.config.runtime.heartbeat_seconds))
                 except FutureTimeoutError:
                     if self._heartbeat is not None:
                         self._heartbeat()
@@ -458,6 +454,8 @@ class ParallelSourceCaptureService:
                 "outcomes_read": False,
             },
         )
+        if not missing and self._completion_sink is not None:
+            self._completion_sink(session_date, now.astimezone(UTC))
 
 
 def build_parallel_eodhd_service(
@@ -466,6 +464,7 @@ def build_parallel_eodhd_service(
     repository: ProspectiveRepository,
     identity: RecorderDeploymentIdentity,
     heartbeat: Callable[[], object] | None = None,
+    completion_sink: Callable[[date, datetime], object] | None = None,
 ) -> ParallelSourceCaptureService:
     """Construct the trusted adapter without reading or exposing its environment token."""
 
@@ -476,9 +475,7 @@ def build_parallel_eodhd_service(
             enabled=True,
             base_url=config.parallel_validation.base_url,
             api_token_env=config.parallel_validation.api_token_env,
-            request_timeout_seconds=(
-                config.parallel_validation.request_timeout_seconds
-            ),
+            request_timeout_seconds=(config.parallel_validation.request_timeout_seconds),
             max_retries=config.parallel_validation.max_retries,
             save_raw_by_default=False,
         )
@@ -489,6 +486,7 @@ def build_parallel_eodhd_service(
         identity=identity,
         provider=EODHDParallelBarProvider(client=client),
         heartbeat=heartbeat,
+        completion_sink=completion_sink,
     )
 
 

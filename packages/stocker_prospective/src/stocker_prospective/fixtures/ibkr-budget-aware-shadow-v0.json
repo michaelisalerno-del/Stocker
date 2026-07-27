@@ -1,0 +1,132 @@
+{
+  "fixture_version": "1",
+  "fixture_id": "ibkr-budget-aware-shadow-recorder-v0-scenarios",
+  "research_evidence": false,
+  "capacity": {
+    "total_level1_allowance": 72,
+    "available_level1_capacity": 61,
+    "externally_consumed_lines": 11,
+    "tws_watchlist_lines": 6,
+    "other_api_client_lines": 5,
+    "tick_by_tick_capacity": 2,
+    "depth_capacity": 0,
+    "snapshot_pacing_limit": 2,
+    "historical_requests_per_window": 55,
+    "option_computation_available": true,
+    "market_data_status": "live"
+  },
+  "events": [
+    {
+      "sequence": 0,
+      "scenario": "normal_universe_operation",
+      "kind": "five_minute_bar",
+      "timestamp_utc": "2026-07-27T14:00:00Z",
+      "payload": {"symbol": "AAL", "checkpoint": 6}
+    },
+    {
+      "sequence": 1,
+      "scenario": "one_quiet_episode",
+      "kind": "episode_emitted",
+      "timestamp_utc": "2026-07-27T14:00:00.100Z",
+      "payload": {"symbol": "AAL", "episode_kind": "quiet", "probability": 0.13}
+    },
+    {
+      "sequence": 2,
+      "scenario": "two_simultaneous_quiet_episodes",
+      "kind": "episode_emitted",
+      "timestamp_utc": "2026-07-27T14:10:00Z",
+      "payload": {"symbols": ["AAL", "AAOI"], "episode_kind": "quiet"}
+    },
+    {
+      "sequence": 3,
+      "scenario": "quiet_and_high_tail_conflict",
+      "kind": "episode_emitted",
+      "timestamp_utc": "2026-07-27T14:20:00Z",
+      "payload": {"quiet_symbol": "AAL", "high_tail_symbol": "MSTR"}
+    },
+    {
+      "sequence": 4,
+      "scenario": "capacity_nearly_full_before_episode",
+      "kind": "capacity_state",
+      "timestamp_utc": "2026-07-27T14:30:00Z",
+      "payload": {"research_lines_available": 4}
+    },
+    {
+      "sequence": 5,
+      "scenario": "optional_lines_exhausted",
+      "kind": "subscription_capacity_error",
+      "timestamp_utc": "2026-07-27T14:31:00Z",
+      "payload": {"subscription_class": 5, "fatal": false}
+    },
+    {
+      "sequence": 6,
+      "scenario": "critical_lines_unavailable",
+      "kind": "subscription_capacity_error",
+      "timestamp_utc": "2026-07-27T14:32:00Z",
+      "payload": {"subscription_class": 1, "fatal": true}
+    },
+    {
+      "sequence": 7,
+      "scenario": "duplicate_contract_requested_twice",
+      "kind": "duplicate_subscription_request",
+      "timestamp_utc": "2026-07-27T14:33:00Z",
+      "payload": {"canonical_key": "OPTION_LEVEL1|9001", "owners": 2}
+    },
+    {
+      "sequence": 8,
+      "scenario": "subscription_not_released",
+      "kind": "orphaned_subscription",
+      "timestamp_utc": "2026-07-27T14:34:00Z",
+      "payload": {"canonical_key": "OPTION_LEVEL1|9002"}
+    },
+    {
+      "sequence": 9,
+      "scenario": "reconnect_with_active_option_episode",
+      "kind": "connection_loss",
+      "timestamp_utc": "2026-07-27T14:35:00Z",
+      "payload": {"code": 1100, "data_lost": true}
+    },
+    {
+      "sequence": 10,
+      "scenario": "reconnect_with_active_option_episode",
+      "kind": "reconnect",
+      "timestamp_utc": "2026-07-27T14:36:00Z",
+      "payload": {"code": 1101, "data_maintained": false}
+    },
+    {
+      "sequence": 11,
+      "scenario": "delayed_data",
+      "kind": "market_data_type_change",
+      "timestamp_utc": "2026-07-27T14:37:00Z",
+      "payload": {"market_data_type": "delayed"}
+    },
+    {
+      "sequence": 12,
+      "scenario": "no_1dte_expiry",
+      "kind": "contract_resolution",
+      "timestamp_utc": "2026-07-27T14:38:00Z",
+      "payload": {"symbol": "AAL", "bucket": "1DTE", "resolved": false}
+    },
+    {
+      "sequence": 13,
+      "scenario": "missing_option_leg",
+      "kind": "contract_resolution",
+      "timestamp_utc": "2026-07-27T14:39:00Z",
+      "payload": {"symbol": "AAL", "role": "long_put_010", "resolved": false}
+    },
+    {
+      "sequence": 14,
+      "scenario": "one_queued_neutral_control",
+      "kind": "episode_queued",
+      "timestamp_utc": "2026-07-27T14:40:00Z",
+      "payload": {"symbol": "AAL", "episode_kind": "neutral_control"}
+    },
+    {
+      "sequence": 15,
+      "scenario": "tws_external_line_use_reducing_available_budget",
+      "kind": "capacity_state",
+      "timestamp_utc": "2026-07-27T14:41:00Z",
+      "payload": {"tws_watchlist_lines": 6, "other_api_client_lines": 5}
+    }
+  ]
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -101,6 +102,7 @@ class ProspectivePhaseLedger:
         episode_id: str,
         occurred_at: datetime,
         completion: EpisodeCompletion,
+        cohort_phase: tuple[str, bool] | None = None,
     ) -> PhaseAssignment:
         existing = next(
             (row for row in self._assignments if row.episode_id == episode_id),
@@ -114,7 +116,23 @@ class ProspectivePhaseLedger:
         observed = occurred_at.astimezone(UTC)
         if self._assignments and observed < self._assignments[-1].occurred_at_utc:
             raise ValueError("phase ledger must be chronological")
-        if completion.complete:
+        if cohort_phase is not None:
+            phase, evidence_allowed = cohort_phase
+            if phase == "engineering_transfer" and evidence_allowed:
+                raise ValueError("engineering-transfer episodes cannot be scientific evidence")
+            ordinal = (
+                sum(
+                    item.complete_episode_ordinal is not None and item.phase == phase
+                    for item in self._assignments
+                )
+                + 1
+                if completion.complete and phase != "engineering_transfer"
+                else None
+            )
+            if not completion.complete:
+                phase = "incomplete"
+                evidence_allowed = False
+        elif completion.complete:
             ordinal = (
                 sum(item.complete_episode_ordinal is not None for item in self._assignments) + 1
             )
@@ -157,9 +175,11 @@ class ProspectivePhaseManager:
         *,
         ledger: ProspectivePhaseLedger,
         repository: FrozenRecorderRepository,
+        phase_resolver: Callable[[datetime], tuple[str, bool]] | None = None,
     ) -> None:
         self.ledger = ledger
         self.repository = repository
+        self.phase_resolver = phase_resolver
 
     def finalise(
         self,
@@ -172,6 +192,9 @@ class ProspectivePhaseManager:
             episode_id=episode_id,
             occurred_at=occurred_at,
             completion=completion,
+            cohort_phase=(
+                None if self.phase_resolver is None else self.phase_resolver(occurred_at)
+            ),
         )
         self.repository.finalise_episode(
             episode_id=episode_id,

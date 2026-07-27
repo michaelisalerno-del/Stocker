@@ -1,0 +1,32 @@
+{
+  "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
+  "quiet_priority": ["1DTE", "0DTE", "3-5DTE"],
+  "primary": "1DTE iron condor",
+  "secondary_allowed_when_capacity_remains": true,
+  "all_buckets_required_for_engineering_complete": false,
+  "missing_primary_1dte_substitution_allowed": false,
+  "neutral_controls": "deterministic round-robin across available frozen buckets",
+  "high_tail": "one DTE selected from an episode-id hash",
+  "outcome_dependent_allocation_allowed": false,
+  "claims_boundary": {
+    "research_only": true,
+    "record_only": true,
+    "frozen_m1c": true,
+    "source_transfer_monitoring": true,
+    "exact_vendor_bar_equality_required": false,
+    "option_shadow_outcomes_only": true,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "full_option_chain_streaming_allowed": false,
+    "tick_by_tick_universe_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "reserved_future_trading_capacity": true,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_methods_available": false,
+    "account_access_required": false,
+    "position_access_required": false,
+    "strategy_promotion": false
+  }
+}

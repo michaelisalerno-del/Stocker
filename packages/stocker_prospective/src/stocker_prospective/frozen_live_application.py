@@ -12,14 +12,22 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from stocker_prospective.activation import ProspectiveActivationLedger
+from stocker_prospective.budget_reports import BudgetAwareDailyReportWriter
 from stocker_prospective.capability import (
     CapabilityObservation,
     IBKRCapabilityManifest,
     run_capability_preflight,
 )
+from stocker_prospective.capacity import (
+    CapacityDiscovery,
+    RuntimeCapacityManifest,
+    RuntimeCapacitySettings,
+    resolve_runtime_capacity,
+)
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.contract import (
+    BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
     M1C_FEATURE_MANIFEST_SHA256,
     M1C_SCALING_ARTIFACT_SHA256,
     M1C_THRESHOLD_ARTIFACT_SHA256,
@@ -54,6 +62,7 @@ from stocker_prospective.m1c_features import (
     M1CCausalFeatureBuilder,
 )
 from stocker_prospective.market_data import ConnectionState, MarketDataType
+from stocker_prospective.option_budget import BudgetAwareEpisodeStateMachine
 from stocker_prospective.option_discovery import BoundedOptionDiscoveryService
 from stocker_prospective.option_recorder import BoundedOptionRecorder
 from stocker_prospective.partition_store import PartitionedEventStore
@@ -78,6 +87,7 @@ from stocker_prospective.recorder_v0 import (
     FrozenM1CRecorderEngine,
     RecorderCheckpointResult,
 )
+from stocker_prospective.source_transfer import SourceTransferCoordinator
 from stocker_prospective.subscriptions import (
     PromotionScheduler,
     SubscriptionBudgetManager,
@@ -154,6 +164,9 @@ class FrozenProspectiveApplication:
         phase_manager: ProspectivePhaseManager,
         quiet_phase_manager: QuietStatePhaseManager,
         promotion_scheduler: PromotionScheduler,
+        runtime_capacity: RuntimeCapacityManifest,
+        source_transfer: SourceTransferCoordinator,
+        daily_report_writer: BudgetAwareDailyReportWriter,
         resolved_contracts: tuple[QualifiedUnderlying, ...],
         ibkr_api_version: str,
         tws_or_gateway_version: str,
@@ -170,6 +183,9 @@ class FrozenProspectiveApplication:
         self.phase_manager = phase_manager
         self.quiet_phase_manager = quiet_phase_manager
         self.promotion_scheduler = promotion_scheduler
+        self.runtime_capacity = runtime_capacity
+        self.source_transfer = source_transfer
+        self.daily_report_writer = daily_report_writer
         self.resolved_contracts = resolved_contracts
         self.ibkr_api_version = ibkr_api_version
         self.tws_or_gateway_version = tws_or_gateway_version
@@ -190,6 +206,22 @@ class FrozenProspectiveApplication:
         self._session_context_failures: dict[date, str] = {}
         self._reconnect_attempts = 0
         self._next_reconnect_at: datetime | None = None
+        self._last_reconciliation_monotonic = 0.0
+
+    def process_source_transfer(self, session: date, observed_at: datetime) -> None:
+        """Rescore completed EODHD bars without changing live V0 decisions."""
+
+        report = self.source_transfer.process_session(
+            session=session,
+            observed_at=observed_at,
+        )
+        self.daily_report_writer.write(
+            session=session,
+            generated_at=observed_at,
+            capacity_manifest=self.runtime_capacity.to_dict(),
+            budget_snapshot=self.subscription_budget.snapshot(),
+            transfer_report=report,
+        )
 
     def poll(self, *, now: datetime) -> LivePollResult:
         observed = now.astimezone(UTC)
@@ -244,7 +276,7 @@ class FrozenProspectiveApplication:
                 self.option_discovery.schedule(checkpoint)
                 self._active_episode_end[episode_id] = (
                     symbol,
-                    checkpoint.episode_decision.prospective_entry_timestamp + timedelta(minutes=30),
+                    checkpoint.episode_decision.prospective_entry_timestamp + timedelta(minutes=60),
                 )
             self.option_discovery.schedule_quiet_state(checkpoint)
             quiet_observations: tuple[
@@ -263,7 +295,7 @@ class FrozenProspectiveApplication:
                     observed,
                     (checkpoint.quiet_episode_decision.trigger_timestamp,),
                 )
-                if kind != "high_tail_control":
+                if kind == "quiet_bottom_10":
                     self.subscriptions.promote_active_episode(
                         metadata,
                         symbol=symbol,
@@ -285,6 +317,7 @@ class FrozenProspectiveApplication:
             )
             self.subscriptions.apply_checkpoint_promotions(metadata, decisions)
         self.option_discovery.poll(now=observed)
+        self._reconcile_subscriptions(observed)
         self._finalise_due_phases(observed)
         self._finalise_due_quiet_phases(observed)
         self._write_due_session_reports(observed)
@@ -299,6 +332,33 @@ class FrozenProspectiveApplication:
         capability = self._write_capability_manifest(observed)
         self.live_recorder.set_capability_preflight(passed=capability.scientific_recording_valid)
         return result
+
+    def _reconcile_subscriptions(self, observed: datetime) -> None:
+        monotonic_now = time.monotonic()
+        if (
+            monotonic_now - self._last_reconciliation_monotonic
+            < self.config.ibkr.subscription_reconciliation_interval_seconds
+        ):
+            return
+        actual_provider = getattr(
+            self.adapter,
+            "actual_subscription_request_ids",
+            None,
+        )
+        if not callable(actual_provider):
+            return
+        actual = set(actual_provider())
+        metadata = self.metadata_factory(observed, (observed,))
+        self.subscriptions.reconcile(
+            metadata,
+            actual_request_ids=actual,
+            pending_timeout_seconds=(self.config.ibkr.pending_subscription_timeout_seconds),
+        )
+        self.option_discovery.reconcile(
+            metadata,
+            actual_request_ids=actual,
+        )
+        self._last_reconciliation_monotonic = monotonic_now
 
     def _finalise_due_phases(self, observed: datetime) -> None:
         finalizations = self.option_discovery.finalizations
@@ -415,6 +475,12 @@ class FrozenProspectiveApplication:
                 / f"{session.isoformat()}.json",
                 report,
             )
+            self.daily_report_writer.write(
+                session=session,
+                generated_at=observed,
+                capacity_manifest=self.runtime_capacity.to_dict(),
+                budget_snapshot=self.subscription_budget.snapshot(),
+            )
             self._session_reports_written.add(session)
 
     def _recover_if_required(self, now: datetime) -> None:
@@ -458,7 +524,9 @@ class FrozenProspectiveApplication:
         elif len(quote_types) == 1:
             market_data_type = next(iter(quote_types))
         else:
-            market_data_type = MarketDataType.UNKNOWN
+            market_data_type = (
+                self.adapter.connection.health().market_data_type or MarketDataType.UNKNOWN
+            )
         resolved = tuple(sorted(item.symbol for item in self.resolved_contracts))
         required_proxy_symbols = (MARKET_PROXY, *SECTOR_PROXY_SYMBOLS)
         stock_symbols = tuple(symbol for symbol in resolved if symbol not in required_proxy_symbols)
@@ -474,6 +542,11 @@ class FrozenProspectiveApplication:
             for code in record.ibkr_error_codes
             if code in {354, 10089, 10090, 10186, 10197}
         }
+        active_bar_symbols = {
+            record.symbol
+            for record in self.subscription_budget.records.values()
+            if record.active and record.kind is SubscriptionKind.BAR
+        }
         observation = CapabilityObservation(
             connected=self.adapter.connection.health().state is ConnectionState.CONNECTED,
             api_server_version=self.adapter.server_version(),
@@ -484,11 +557,21 @@ class FrozenProspectiveApplication:
             market_proxy_level1_symbols=tuple(
                 sorted(set(required_proxy_symbols).intersection(quotes))
             ),
+            underlying_bar_symbols=tuple(
+                sorted(set(stock_symbols).intersection(active_bar_symbols))
+            ),
+            market_proxy_bar_symbols=tuple(
+                sorted(set(required_proxy_symbols).intersection(active_bar_symbols))
+            ),
             option_level1_available=self.option_discovery.live_option_quote_seen,
             option_computation_fields_available=(self.option_discovery.option_computation_seen),
-            tick_by_tick_capacity=self.config.ibkr.max_tick_by_tick_subscriptions,
-            depth_capacity=self.config.ibkr.max_depth_subscriptions,
-            option_capacity=self.config.ibkr.max_option_subscriptions,
+            tick_by_tick_capacity=int(self.runtime_capacity.tick_by_tick_capacity.value),
+            depth_capacity=int(self.runtime_capacity.depth_capacity.value),
+            option_capacity=min(
+                self.config.ibkr.max_option_subscriptions,
+                self.config.ibkr.max_active_option_episodes
+                * self.config.ibkr.max_option_lines_per_episode,
+            ),
             depth_exchanges=self.live_recorder.depth_exchanges,
             resolved_contracts=resolved,
             unresolved_contracts=(),
@@ -552,6 +635,8 @@ def build_frozen_prospective_application(
         "context_root": paths.context_root,
         "ibkr_capability_manifest": paths.ibkr_capability_manifest,
         "prospective_phase_ledger": paths.prospective_phase_ledger,
+        "prospective_report_root": paths.prospective_report_root,
+        "aggregate_transfer_report": paths.aggregate_transfer_report,
     }
     missing = sorted(name for name, value in required_paths.items() if value is None)
     if missing:
@@ -672,6 +757,33 @@ def build_frozen_prospective_application(
     }:
         raise ValueError("required underlying or context-proxy contract unresolved")
     adapter.require_live_market_data()
+    capacity_observer = getattr(adapter, "discover_market_data_capacity", None)
+    discovered_capacity = (
+        capacity_observer()
+        if callable(capacity_observer)
+        else CapacityDiscovery(market_data_status="live")
+    )
+    if not isinstance(discovered_capacity, CapacityDiscovery):
+        raise TypeError("IBKR capacity discovery must return CapacityDiscovery")
+    capability_manifest_path = resolved_paths["ibkr_capability_manifest"]
+    capacity_manifest_path = (
+        Path(paths.ibkr_runtime_capacity_manifest)
+        if paths.ibkr_runtime_capacity_manifest is not None
+        else capability_manifest_path.with_name("ibkr_runtime_capacity_manifest.json")
+    )
+    runtime_capacity = resolve_runtime_capacity(
+        settings=RuntimeCapacitySettings(
+            configured_total_market_data_lines=config.ibkr.market_data_line_budget,
+            configured_externally_reserved_lines=config.ibkr.externally_reserved_lines,
+            reserved_future_trading_lines=config.ibkr.reserved_future_trading_lines,
+            safety_margin_lines=config.ibkr.safety_margin_lines,
+            configured_max_tick_by_tick=config.ibkr.max_tick_by_tick_subscriptions,
+            configured_max_depth=config.ibkr.max_depth_subscriptions,
+            configured_max_concurrent_snapshots=config.ibkr.max_concurrent_snapshots,
+        ),
+        discovery=discovered_capacity,
+        output_path=capacity_manifest_path,
+    )
 
     activation_ledger = ProspectiveActivationLedger(resolved_paths["recorder_activation"])
     existing_activation = activation_ledger.load()
@@ -709,16 +821,32 @@ def build_frozen_prospective_application(
 
     initial_metadata = metadata_factory(prospective_start, (prospective_start,))
     repository.create_run(initial_metadata, mode="record_only")
-    frozen_repository = FrozenRecorderRepository(repository)
+    frozen_repository = FrozenRecorderRepository(
+        repository,
+        configuration_hash=configuration_hash,
+    )
+
+    def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:
+        return frozen_repository.prospective_phase_for_session(
+            run_id=config.runtime.run_id or "",
+            session=observed_at.astimezone(NEW_YORK).date(),
+        )
+
+    frozen_repository.record_runtime_capacity(
+        initial_metadata,
+        manifest=runtime_capacity.to_dict(),
+    )
     phase_manager = ProspectivePhaseManager(
         ledger=ProspectivePhaseLedger(resolved_paths["prospective_phase_ledger"]),
         repository=frozen_repository,
+        phase_resolver=prospective_phase_at,
     )
     quiet_phase_manager = QuietStatePhaseManager(
         ledger=QuietStatePhaseLedger(
             resolved_paths["prospective_phase_ledger"].with_name("quiet_state_phases_v0.jsonl")
         ),
         repository=frozen_repository,
+        phase_resolver=prospective_phase_at,
     )
     session = datetime.now(NEW_YORK).date()
     activity = HistoricalActivityBaseline.from_parquet(
@@ -730,7 +858,7 @@ def build_frozen_prospective_application(
         root=resolved_paths["raw_event_root"],
         prospective_collection_start=prospective_start,
         recorder_version=config.runtime.app_version,
-        contract_version="frozen-m1c-microstructure-recorder-v0",
+        contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
     )
     group_packages: dict[date, FrozenGroupOSessionPackage] = {}
 
@@ -775,14 +903,27 @@ def build_frozen_prospective_application(
     )
     controller_budget = SubscriptionBudgetManager(
         limits={
-            SubscriptionKind.LEVEL1: len(identity.symbols) + len(proxy_symbols),
+            SubscriptionKind.LEVEL1: config.ibkr.max_high_resolution_underlyings,
             SubscriptionKind.BAR: len(identity.symbols) + len(proxy_symbols),
-            SubscriptionKind.TICK_BY_TICK: (config.ibkr.max_tick_by_tick_subscriptions),
-            SubscriptionKind.DEPTH: config.ibkr.max_depth_subscriptions,
-            SubscriptionKind.OPTION: config.ibkr.max_option_subscriptions,
+            SubscriptionKind.TICK_BY_TICK: min(
+                int(runtime_capacity.tick_by_tick_capacity.value),
+                config.ibkr.tick_by_tick_active_underlyings * 2,
+            ),
+            SubscriptionKind.DEPTH: min(
+                int(runtime_capacity.depth_capacity.value),
+                config.ibkr.level2_active_underlyings,
+            ),
+            SubscriptionKind.OPTION: min(
+                config.ibkr.max_option_subscriptions,
+                config.ibkr.max_active_option_episodes * config.ibkr.max_option_lines_per_episode,
+            ),
             SubscriptionKind.MARKET_PROXY: 0,
         },
         request_rate_limit=config.ibkr.request_rate_per_second,
+        total_line_limit=int(runtime_capacity.total_level1_allowance.value),
+        externally_reserved_lines=int(runtime_capacity.externally_reserved_lines.value),
+        future_trading_reserve_lines=int(runtime_capacity.reserved_future_trading_lines.value),
+        safety_margin_lines=int(runtime_capacity.safety_margin_lines.value),
     )
     live = FrozenM1CLiveRecorder(
         adapter=adapter,
@@ -813,7 +954,7 @@ def build_frozen_prospective_application(
         normalizer=normalizer,
         repository=frozen_repository,
         depth_rows=config.ibkr.level2_rows,
-        enable_depth=config.ibkr.enable_level2,
+        enable_depth=(config.ibkr.enable_level2 and config.ibkr.level2_active_underlyings > 0),
         stream_registration_sink=live.register_stream,
         request_pacer=pace_request,
     )
@@ -859,6 +1000,24 @@ def build_frozen_prospective_application(
         underlying_halt_provider=live.underlying_halted_in_window,
     )
     live.option_quote_sink = option_recorder.record_quote
+    episode_state = BudgetAwareEpisodeStateMachine(
+        budget=controller_budget,
+        max_active_episodes=config.ibkr.max_active_option_episodes,
+        max_option_lines_per_episode=config.ibkr.max_option_lines_per_episode,
+        max_concurrent_snapshots=max(
+            1,
+            min(
+                config.ibkr.max_concurrent_snapshots,
+                int(runtime_capacity.snapshot_pacing_limit.value),
+            ),
+        ),
+        maximum_recording_duration=timedelta(minutes=config.ibkr.option_episode_maximum_minutes),
+        persistence_sink=lambda record: frozen_repository.record_option_episode_allocation(
+            metadata_factory(record.updated_at_utc, (record.updated_at_utc,)),
+            record,
+        ),
+        phase_resolver=lambda task: prospective_phase_at(task.triggered_at_utc),
+    )
     option_discovery = BoundedOptionDiscoveryService(
         adapter=adapter,
         option_recorder=option_recorder,
@@ -880,6 +1039,51 @@ def build_frozen_prospective_application(
         strike_steps=config.ibkr.option_strike_steps,
         maximum_contracts_per_episode=(config.ibkr.maximum_option_contracts_per_episode),
         heartbeat=pace_request,
+        episode_state_machine=episode_state,
+        maximum_continuous_lines=config.ibkr.max_option_lines_per_episode,
+    )
+
+    def displace_option_episode(
+        episode_id: str,
+        replacement_episode_id: str,
+        observed_at: datetime,
+    ) -> None:
+        metadata = metadata_factory(observed_at, (observed_at,))
+        option_discovery.handle_displacement(
+            episode_id,
+            replacement_episode_id,
+            observed_at,
+        )
+        controller.end_active_episode(
+            metadata,
+            episode_id=episode_id,
+        )
+        replacement_symbol = option_discovery.pending_symbol(replacement_episode_id)
+        if replacement_symbol is not None:
+            controller.promote_active_episode(
+                metadata,
+                symbol=replacement_symbol,
+                episode_id=replacement_episode_id,
+            )
+
+    episode_state.displacement_sink = displace_option_episode
+    source_transfer = SourceTransferCoordinator(
+        repository=repository,
+        frozen_repository=frozen_repository,
+        run_id=config.runtime.run_id or "",
+        model=m1c_runtime,
+        features=m1c_features,
+        activity_baseline=activity,
+        group_o_provider=group_o_provider,
+        metadata_factory=metadata_factory,
+        aggregate_report_path=resolved_paths["aggregate_transfer_report"],
+        runtime_parity_passed=m1c_parity,
+        expected_symbols=identity.symbols,
+    )
+    daily_report_writer = BudgetAwareDailyReportWriter(
+        database_path=repository.database_path,
+        run_id=config.runtime.run_id or "",
+        report_root=resolved_paths["prospective_report_root"],
     )
     return FrozenProspectiveApplication(
         config=config,
@@ -893,9 +1097,14 @@ def build_frozen_prospective_application(
         phase_manager=phase_manager,
         quiet_phase_manager=quiet_phase_manager,
         promotion_scheduler=PromotionScheduler(
-            max_tick_by_tick=config.ibkr.max_tick_by_tick_subscriptions // 2,
-            max_depth=config.ibkr.max_depth_subscriptions,
+            max_tick_by_tick=0,
+            max_depth=config.ibkr.level2_active_underlyings,
+            max_level1=config.ibkr.max_high_resolution_underlyings,
+            high_arming_threshold=config.ibkr.high_tail_approach_boundary,
         ),
+        runtime_capacity=runtime_capacity,
+        source_transfer=source_transfer,
+        daily_report_writer=daily_report_writer,
         resolved_contracts=tuple(qualified),
         ibkr_api_version=ibkr_api_version,
         tws_or_gateway_version=gateway_version,

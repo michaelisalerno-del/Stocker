@@ -15,6 +15,7 @@ from stocker_prospective.database import EvidenceMetadata
 from stocker_prospective.event_ingest import StreamKind, StreamOwner
 from stocker_prospective.events import OptionQuoteEvent
 from stocker_prospective.ibkr import IBKRMarketDataAdapter
+from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.option_ledger import (
     DirectionalShadowSelection,
@@ -43,8 +44,10 @@ from stocker_prospective.short_premium_shadow import (
 )
 from stocker_prospective.subscriptions import (
     SubscriptionBudgetManager,
+    SubscriptionClass,
     SubscriptionKind,
     SubscriptionPriority,
+    canonical_subscription_key,
 )
 
 
@@ -63,6 +66,7 @@ class _ActiveOption:
     upstream_contract: Any
     request_id: int
     subscription_key: str
+    subscription_class: SubscriptionClass
     recording_ends_at_utc: datetime
     quiet_state: bool
 
@@ -176,6 +180,7 @@ class BoundedOptionRecorder:
         self._requested_contract_count_by_episode: dict[str, int] = {}
         self._plan_capacity_reduced_by_episode: dict[str, bool] = {}
         self._plan_missing_buckets_by_episode: dict[str, tuple[str, ...]] = {}
+        self._recording_ends_by_episode: dict[str, datetime] = {}
         self._contracts_by_episode: dict[str, list[OptionContract]] = {}
         self._quotes_by_episode: dict[str, list[OptionQuoteEvent]] = {}
         self._raw_flushed_event_ids: set[str] = set()
@@ -211,6 +216,7 @@ class BoundedOptionRecorder:
         if quiet_state and duration < timedelta(minutes=60):
             raise ValueError("quiet option recording must continue for sixty minutes")
         recording_ends = entry_timestamp.astimezone(UTC) + duration
+        self._recording_ends_by_episode[episode_id] = recording_ends
         if quiet_state:
             self.repository.record_quiet_option_plan(
                 metadata,
@@ -232,7 +238,10 @@ class BoundedOptionRecorder:
                         observation_id=episode_id,
                         contract=unresolved,
                         selection_rank=rank,
-                        selection_roles=(),
+                        selection_roles=plan.selection_roles.get(
+                            unresolved.con_id_key,
+                            (),
+                        ),
                         resolution_status="contract_not_resolved",
                         rejection_reason="contract_not_resolved",
                         recording_started_at_utc=None,
@@ -253,16 +262,32 @@ class BoundedOptionRecorder:
             contract = resolved.contract
             con_id = contract.con_id
             assert con_id is not None
-            subscription_key = f"option:{episode_id}:{contract.con_id_key}"
+            subscription_key = canonical_subscription_key(
+                SubscriptionKind.OPTION,
+                con_id=con_id,
+            )
+            owner_id = f"episode:{episode_id}"
+            selection_roles = plan.selection_roles.get(
+                unresolved.con_id_key,
+                (),
+            )
+            if selection_roles and all(role.startswith("neutral_") for role in selection_roles):
+                subscription_class = SubscriptionClass.OPTIONAL_RESEARCH
+            elif any(role.startswith("primary_") for role in selection_roles):
+                subscription_class = SubscriptionClass.ACTIVE_EPISODE
+            else:
+                subscription_class = SubscriptionClass.EPISODE_ENGINEERING
             decision = self.subscriptions.allocate(
                 key=subscription_key,
                 kind=SubscriptionKind.OPTION,
                 symbol=metadata.run_id + ":" + episode_id,
                 con_id=con_id,
                 request_id=-1,
-                priority=SubscriptionPriority.ACTIVE_OPTION,
+                priority=SubscriptionPriority.from_class(subscription_class),
                 owner_episode=episode_id,
-                protected=False,
+                owner_id=owner_id,
+                subscription_class=subscription_class,
+                protected=subscription_class is SubscriptionClass.ACTIVE_EPISODE,
                 now_monotonic=time.monotonic(),
                 now_utc=started_at,
             )
@@ -273,7 +298,7 @@ class BoundedOptionRecorder:
                         observation_id=episode_id,
                         contract=contract,
                         selection_rank=rank,
-                        selection_roles=(),
+                        selection_roles=selection_roles,
                         resolution_status="subscription_capacity_denied",
                         rejection_reason=decision.reason,
                         recording_started_at_utc=None,
@@ -291,6 +316,46 @@ class BoundedOptionRecorder:
                         recording_ends_at_utc=recording_ends,
                     )
                 continue
+            shared_active = next(
+                (
+                    active
+                    for active in self._active.values()
+                    if active.subscription_key == subscription_key
+                    and active.episode_id != episode_id
+                ),
+                None,
+            )
+            if shared_active is not None:
+                self.subscriptions.release(
+                    subscription_key,
+                    owner_id=owner_id,
+                    reason="canonical_option_stream_owned_by_active_episode",
+                    now_utc=started_at,
+                )
+                if quiet_state:
+                    self.repository.record_quiet_option_contract(
+                        metadata,
+                        observation_id=episode_id,
+                        contract=contract,
+                        selection_rank=rank,
+                        selection_roles=selection_roles,
+                        resolution_status="subscription_capacity_denied",
+                        rejection_reason="canonical_stream_already_owned_by_active_episode",
+                        recording_started_at_utc=None,
+                        recording_ends_at_utc=recording_ends,
+                    )
+                else:
+                    self.repository.record_option_contract(
+                        metadata,
+                        episode_id=episode_id,
+                        contract=contract,
+                        selection_rank=rank,
+                        resolution_status="subscription_capacity_denied",
+                        rejection_reason="canonical_stream_already_owned_by_active_episode",
+                        recording_started_at_utc=None,
+                        recording_ends_at_utc=recording_ends,
+                    )
+                continue
             request_id: int | None = None
             try:
                 request_id = self.adapter.request_market_data(
@@ -302,7 +367,11 @@ class BoundedOptionRecorder:
                     self.request_pacer()
                 record = self.subscriptions.get(subscription_key)
                 assert record is not None
-                record.request_id = request_id
+                if not self.subscriptions.mark_active(
+                    subscription_key,
+                    request_id=request_id,
+                ):
+                    raise RuntimeError("duplicate option request ID")
                 if self.stream_registration_sink is not None:
                     self.stream_registration_sink(
                         StreamOwner(
@@ -321,7 +390,7 @@ class BoundedOptionRecorder:
                         observation_id=episode_id,
                         contract=contract,
                         selection_rank=rank,
-                        selection_roles=(),
+                        selection_roles=selection_roles,
                         resolution_status="recording",
                         rejection_reason=None,
                         recording_started_at_utc=started_at,
@@ -347,6 +416,7 @@ class BoundedOptionRecorder:
                     upstream_contract=resolved.upstream_contract,
                     request_id=request_id,
                     subscription_key=subscription_key,
+                    subscription_class=subscription_class,
                     recording_ends_at_utc=recording_ends,
                     quiet_state=quiet_state,
                 )
@@ -358,8 +428,9 @@ class BoundedOptionRecorder:
                     )
                     if self.stream_unregistration_sink is not None:
                         self.stream_unregistration_sink(request_id)
-                self.subscriptions.cancel(
+                self.subscriptions.release(
                     subscription_key,
+                    owner_id=owner_id,
                     reason="upstream_subscription_failed",
                     now_utc=started_at,
                 )
@@ -395,8 +466,9 @@ class BoundedOptionRecorder:
             )
             if self.stream_unregistration_sink is not None:
                 self.stream_unregistration_sink(active.request_id)
-            self.subscriptions.cancel(
+            self.subscriptions.release(
                 active.subscription_key,
+                owner_id=f"episode:{episode_id}",
                 reason=reason,
                 now_utc=metadata.recorded_at_utc,
             )
@@ -410,6 +482,7 @@ class BoundedOptionRecorder:
         self._requested_contract_count_by_episode.pop(episode_id, None)
         self._plan_capacity_reduced_by_episode.pop(episode_id, None)
         self._plan_missing_buckets_by_episode.pop(episode_id, None)
+        self._recording_ends_by_episode.pop(episode_id, None)
         self._quotes_by_episode.pop(episode_id, None)
         self._quiet_observations.discard(episode_id)
 
@@ -522,6 +595,19 @@ class BoundedOptionRecorder:
 
         self.mark_data_gap()
         for active_key, active in tuple(self._active.items()):
+            if metadata.recorded_at_utc >= active.recording_ends_at_utc:
+                self.subscriptions.release(
+                    active.subscription_key,
+                    owner_id=f"episode:{active.episode_id}",
+                    reason="expired_episode_not_restored",
+                    now_utc=metadata.recorded_at_utc,
+                )
+                self.repository.record_subscription(
+                    metadata,
+                    self.subscriptions.records[active.subscription_key],
+                )
+                self._active.pop(active_key)
+                continue
             if self.stream_unregistration_sink is not None:
                 self.stream_unregistration_sink(active.request_id)
             self.subscriptions.cancel(
@@ -539,9 +625,11 @@ class BoundedOptionRecorder:
                 symbol=metadata.run_id + ":" + active.episode_id,
                 con_id=active.contract.con_id or 0,
                 request_id=-1,
-                priority=SubscriptionPriority.ACTIVE_OPTION,
+                priority=SubscriptionPriority.from_class(active.subscription_class),
                 owner_episode=active.episode_id,
-                protected=False,
+                owner_id=f"episode:{active.episode_id}",
+                subscription_class=active.subscription_class,
+                protected=(active.subscription_class is SubscriptionClass.ACTIVE_EPISODE),
                 now_monotonic=time.monotonic(),
                 now_utc=metadata.recorded_at_utc,
             )
@@ -570,7 +658,12 @@ class BoundedOptionRecorder:
                 continue
             record = self.subscriptions.get(active.subscription_key)
             assert record is not None
-            record.request_id = request_id
+            if not self.subscriptions.mark_active(
+                active.subscription_key,
+                request_id=request_id,
+            ):
+                self._active.pop(active_key)
+                continue
             active.request_id = request_id
             if self.stream_registration_sink is not None:
                 self.stream_registration_sink(
@@ -585,6 +678,85 @@ class BoundedOptionRecorder:
                     )
                 )
             self.repository.record_subscription(metadata, record)
+
+    def cancel_episode(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        episode_id: str,
+        reason: str,
+        reset_for_restart: bool = False,
+    ) -> None:
+        """Cancel one displaced or timed-out episode without touching other streams."""
+
+        self.flush_raw(
+            metadata,
+            episode_id=episode_id,
+            complete=False,
+            gap_count=1,
+        )
+        for active_key, active in tuple(self._active.items()):
+            if active.episode_id != episode_id:
+                continue
+            self.adapter.cancel_market_data(
+                active.request_id,
+                subscription_key=active.subscription_key,
+            )
+            if self.stream_unregistration_sink is not None:
+                self.stream_unregistration_sink(active.request_id)
+            self.subscriptions.release(
+                active.subscription_key,
+                owner_id=f"episode:{episode_id}",
+                reason=reason,
+                now_utc=metadata.recorded_at_utc,
+            )
+            self.repository.record_subscription(
+                metadata,
+                self.subscriptions.records[active.subscription_key],
+            )
+            self._active.pop(active_key)
+        self._gap_episodes.add(episode_id)
+        if reset_for_restart:
+            self._planned_contracts_by_episode.pop(episode_id, None)
+            self._requested_contract_count_by_episode.pop(episode_id, None)
+            self._plan_capacity_reduced_by_episode.pop(episode_id, None)
+            self._plan_missing_buckets_by_episode.pop(episode_id, None)
+            self._recording_ends_by_episode.pop(episode_id, None)
+            self._contracts_by_episode.pop(episode_id, None)
+            self._quotes_by_episode.pop(episode_id, None)
+            self._quiet_observations.discard(episode_id)
+
+    def reconcile(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        actual_request_ids: set[int],
+    ) -> tuple[str, ...]:
+        """Drop option stream projections whose broker request no longer exists."""
+
+        repaired: list[str] = []
+        for active_key, active in tuple(self._active.items()):
+            record = self.subscriptions.get(active.subscription_key)
+            if record is not None and active.request_id in actual_request_ids:
+                continue
+            if self.stream_unregistration_sink is not None:
+                self.stream_unregistration_sink(active.request_id)
+            self._active.pop(active_key)
+            self._gap_episodes.add(active.episode_id)
+            repaired.append(active.subscription_key)
+            self.repository.record_skipped_recording(
+                metadata,
+                session=metadata.recorded_at_utc.date(),
+                episode_id=active.episode_id,
+                symbol=active.symbol,
+                recording_kind="orphaned_option_line",
+                reason="reconciled_missing_upstream_option_request",
+                requested_payload={
+                    "subscription_key": active.subscription_key,
+                    "request_id": active.request_id,
+                },
+            )
+        return tuple(sorted(repaired))
 
     @property
     def live_option_quote_seen(self) -> bool:
@@ -607,8 +779,9 @@ class BoundedOptionRecorder:
             )
             if self.stream_unregistration_sink is not None:
                 self.stream_unregistration_sink(active.request_id)
-            self.subscriptions.cancel(
+            self.subscriptions.release(
                 active.subscription_key,
+                owner_id=f"episode:{active.episode_id}",
                 reason="recorder_shutdown",
                 now_utc=metadata.recorded_at_utc,
             )
@@ -669,6 +842,7 @@ class BoundedOptionRecorder:
         structure_type: Literal["LONG_CALL", "LONG_PUT"],
         outcome: ShadowOptionOutcome,
         subscription_gap_spans_horizon: bool,
+        horizon_label: str | None = None,
         additional_quality_flags: tuple[str, ...] = (),
     ) -> None:
         flags = set((*outcome.quote_quality_flags, *additional_quality_flags))
@@ -681,7 +855,7 @@ class BoundedOptionRecorder:
             observation_id=observation_id,
             structure_type=structure_type,
             dte_bucket=outcome.dte_bucket.value,
-            horizon_label=f"{outcome.horizon_minutes}m",
+            horizon_label=horizon_label or f"{outcome.horizon_minutes}m",
             horizon_minutes=outcome.horizon_minutes,
             payload=outcome.model_dump(mode="json"),
             opening_credit_or_debit=outcome.premium_at_risk,
@@ -712,6 +886,7 @@ class BoundedOptionRecorder:
         bucket: DteBucket,
         horizon_minutes: int,
         subscription_gap_spans_horizon: bool,
+        horizon_label: str | None = None,
         additional_quality_flags: tuple[str, ...] = (),
     ) -> None:
         flags = {"missing_leg_quote", *additional_quality_flags}
@@ -722,7 +897,7 @@ class BoundedOptionRecorder:
             observation_id=observation_id,
             structure_type=structure_type,
             dte_bucket=bucket.value,
-            horizon_label=f"{horizon_minutes}m",
+            horizon_label=horizon_label or f"{horizon_minutes}m",
             horizon_minutes=horizon_minutes,
             payload={
                 "attempted": True,
@@ -760,6 +935,7 @@ class BoundedOptionRecorder:
         horizon_minutes: tuple[int, ...],
         subscription_gap_spans_horizon: bool,
         plan_capacity_reduced: bool,
+        horizon_labels: Mapping[int, str] | None = None,
     ) -> None:
         entry_surface = self._surface_at(quotes, target=entry_timestamp, entry=True)
         underlying_entry_path = (
@@ -829,6 +1005,11 @@ class BoundedOptionRecorder:
             [],
         )
         for minutes in horizon_minutes:
+            horizon_label = (
+                f"{minutes}m"
+                if horizon_labels is None
+                else horizon_labels.get(minutes, f"{minutes}m")
+            )
             target = entry_timestamp + timedelta(minutes=minutes)
             path = (
                 ()
@@ -880,6 +1061,7 @@ class BoundedOptionRecorder:
                     structure_type="LONG_CALL",
                     outcome=call,
                     subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    horizon_label=horizon_label,
                     additional_quality_flags=observation_quality_flags,
                 )
             else:
@@ -890,6 +1072,7 @@ class BoundedOptionRecorder:
                     bucket=bucket,
                     horizon_minutes=minutes,
                     subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    horizon_label=horizon_label,
                     additional_quality_flags=observation_quality_flags,
                 )
             if put is not None:
@@ -899,6 +1082,7 @@ class BoundedOptionRecorder:
                     structure_type="LONG_PUT",
                     outcome=put,
                     subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    horizon_label=horizon_label,
                     additional_quality_flags=observation_quality_flags,
                 )
             else:
@@ -909,6 +1093,7 @@ class BoundedOptionRecorder:
                     bucket=bucket,
                     horizon_minutes=minutes,
                     subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+                    horizon_label=horizon_label,
                     additional_quality_flags=observation_quality_flags,
                 )
             if call is not None and put is not None:
@@ -940,7 +1125,7 @@ class BoundedOptionRecorder:
                     observation_id=observation_id,
                     structure_type="ATM_STRADDLE",
                     dte_bucket=bucket.value,
-                    horizon_label=f"{minutes}m",
+                    horizon_label=horizon_label,
                     horizon_minutes=minutes,
                     payload={
                         "dte_bucket": bucket.value,
@@ -978,7 +1163,7 @@ class BoundedOptionRecorder:
                     observation_id=observation_id,
                     structure_type="ATM_STRADDLE",
                     dte_bucket=bucket.value,
-                    horizon_label=f"{minutes}m",
+                    horizon_label=horizon_label,
                     horizon_minutes=minutes,
                     payload={
                         "attempted": True,
@@ -1071,7 +1256,7 @@ class BoundedOptionRecorder:
                     observation_id=observation_id,
                     structure_type=structure.structure_type.value,
                     dte_bucket=bucket.value,
-                    horizon_label=f"{minutes}m",
+                    horizon_label=horizon_label,
                     horizon_minutes=minutes,
                     payload=payload,
                     opening_credit_or_debit=outcome.opening_net_credit,
@@ -1124,7 +1309,46 @@ class BoundedOptionRecorder:
         contracts = tuple(self._contracts_by_episode.get(episode_id, ()))
         quotes = tuple(self._quotes_by_episode.get(episode_id, ()))
         quiet_state = episode_id in self._quiet_observations
-        horizon_minutes = (5, 10, 15, 30, 60) if quiet_state else (5, 10, 15, 30)
+        fixed_horizons = (5, 10, 15, 30, 60)
+        horizon_labels = {minutes: f"{minutes}m" for minutes in fixed_horizons}
+        recording_ends = self._recording_ends_by_episode.get(
+            episode_id,
+            entry_timestamp + timedelta(minutes=60),
+        )
+        try:
+            _market_open, market_close = xnys_session_bounds(entry_timestamp.date())
+        except ValueError:
+            market_close = None
+        session_end_minutes: int | None = None
+        if market_close is not None and entry_timestamp < market_close <= recording_ends:
+            session_end_minutes = int((market_close - entry_timestamp).total_seconds() // 60)
+            if session_end_minutes > 0 and session_end_minutes not in horizon_labels:
+                horizon_labels[session_end_minutes] = "session_end"
+        else:
+            skip_sink = getattr(self.repository, "record_skipped_recording", None)
+            if callable(skip_sink):
+                skip_sink(
+                    metadata,
+                    session=entry_timestamp.date(),
+                    episode_id=episode_id,
+                    symbol=symbol,
+                    recording_kind="session_end_shadow_outcome",
+                    reason=(
+                        "session_end_outside_bounded_recording_horizon"
+                        if market_close is not None
+                        else "session_end_calendar_unavailable"
+                    ),
+                    requested_payload={
+                        "entry_timestamp_utc": (entry_timestamp.astimezone(UTC).isoformat()),
+                        "recording_ends_at_utc": (recording_ends.astimezone(UTC).isoformat()),
+                        "session_end_utc": (
+                            None
+                            if market_close is None
+                            else market_close.astimezone(UTC).isoformat()
+                        ),
+                    },
+                )
+        horizon_minutes = tuple(sorted(horizon_labels))
         outcomes = build_shadow_outcomes(
             episode_id=episode_id,
             symbol=symbol,
@@ -1223,9 +1447,28 @@ class BoundedOptionRecorder:
                     quotes=quotes,
                     outcomes=outcomes,
                     horizon_minutes=horizon_minutes,
+                    horizon_labels=horizon_labels,
                     subscription_gap_spans_horizon=subscription_gap_spans_horizon,
                     plan_capacity_reduced=plan_capacity_reduced,
                 )
+                if session_end_minutes is not None and session_end_minutes in fixed_horizons:
+                    self._record_quiet_bucket_outcomes(
+                        metadata,
+                        observation_id=episode_id,
+                        symbol=symbol,
+                        entry_timestamp=entry_timestamp,
+                        bucket=bucket,
+                        planned_bucket_contracts=planned_bucket_contracts,
+                        bucket_contracts=tuple(bucket_contracts),
+                        atm_call=atm_call,
+                        atm_put=atm_put,
+                        quotes=quotes,
+                        outcomes=outcomes,
+                        horizon_minutes=(session_end_minutes,),
+                        horizon_labels={session_end_minutes: "session_end"},
+                        subscription_gap_spans_horizon=(subscription_gap_spans_horizon),
+                        plan_capacity_reduced=plan_capacity_reduced,
+                    )
                 for minutes in horizon_minutes:
                     call = (
                         None
@@ -1306,7 +1549,7 @@ class BoundedOptionRecorder:
                                     and not outcome.quote_quality_flags
                                 ),
                             )
-            for minutes in (5, 10, 15, 30):
+            for minutes in horizon_minutes:
                 call = next(
                     (
                         item
@@ -1327,6 +1570,7 @@ class BoundedOptionRecorder:
                     straddle: dict[str, object] = {
                         "dte_bucket": bucket.value,
                         "horizon_minutes": minutes,
+                        "horizon_label": horizon_labels[minutes],
                         **straddle_outcome(call, put),
                     }
                     straddles.append(straddle)
@@ -1362,6 +1606,7 @@ class BoundedOptionRecorder:
                         horizon_minutes=minutes,
                         payload={
                             **oracle.model_dump(mode="json"),
+                            "horizon_label": horizon_labels[minutes],
                             "call_ask_to_bid_return": call.ask_to_bid_return,
                             "put_ask_to_bid_return": put.ask_to_bid_return,
                         },
@@ -1386,8 +1631,9 @@ class BoundedOptionRecorder:
             )
             if self.stream_unregistration_sink is not None:
                 self.stream_unregistration_sink(active.request_id)
-            self.subscriptions.cancel(
+            self.subscriptions.release(
                 active.subscription_key,
+                owner_id=f"episode:{episode_id}",
                 reason="episode_recording_horizon_complete",
                 now_utc=metadata.recorded_at_utc,
             )

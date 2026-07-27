@@ -780,6 +780,23 @@ class IBKRMarketDataAdapter:
             self._client.cancelMktData(request_id)
             self.budget.confirm_cancellation(key)
 
+    def actual_subscription_request_ids(self) -> set[int]:
+        """Expose only this adapter's request IDs for registry reconciliation."""
+
+        return {request_id for _key, request_id in self.subscriptions.active_items()}
+
+    def cancel_orphaned_market_data_request(self, request_id: int) -> None:
+        """Repair a request that has no higher-level internal owner."""
+
+        self._cancel_upstream(request_id)
+        self.budget.request_cancellation(str(request_id))
+        self.budget.confirm_cancellation(str(request_id))
+        self._subscription_kinds.pop(request_id, None)
+        self._depth_smart.pop(request_id, None)
+        for key, candidate in self.subscriptions.active_items():
+            if candidate == request_id:
+                self.subscriptions.remove(key)
+
     def request_option_chain_metadata(
         self,
         *,

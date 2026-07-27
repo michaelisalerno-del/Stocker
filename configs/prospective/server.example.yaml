@@ -11,6 +11,9 @@ paths:
   m1c_live_parity_report: /opt/stocker/current/research/prospective/frozen-m1c-microstructure-recorder-v0/m1c_live_parity_report.json
   direction_live_parity_report: /opt/stocker/current/research/prospective/frozen-m1c-microstructure-recorder-v0/direction_live_parity_report.json
   ibkr_capability_manifest: /var/lib/stocker/prospective/ibkr_capability_manifest.json
+  ibkr_runtime_capacity_manifest: /var/lib/stocker/prospective/ibkr_runtime_capacity_manifest.json
+  prospective_report_root: /var/lib/stocker/prospective/ibkr-budget-aware-shadow-recorder-v0/reports
+  aggregate_transfer_report: /var/lib/stocker/prospective/ibkr-budget-aware-shadow-recorder-v0/twenty_session_transfer_report.json
   prospective_phase_ledger: /var/lib/stocker/prospective/frozen-m1c-v0-phases.jsonl
   frozen_m1c_artifact_root: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary
   m1c_scaling_artifact: /opt/stocker/current/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json
@@ -62,10 +65,23 @@ ibkr:
   market_data_type_required: live
   enable_level2: false
   level2_rows: 5
-  max_depth_subscriptions: 3
-  max_tick_by_tick_subscriptions: 6
-  max_option_subscriptions: 60
-  maximum_option_contracts_per_episode: 30
+  max_depth_subscriptions: 0
+  max_tick_by_tick_subscriptions: 2
+  max_option_subscriptions: 8
+  externally_reserved_lines: 0
+  reserved_future_trading_lines: 12
+  safety_margin_lines: 2
+  max_concurrent_snapshots: 2
+  max_active_option_episodes: 1
+  max_option_lines_per_episode: 8
+  tick_by_tick_active_underlyings: 1
+  level2_active_underlyings: 0
+  max_high_resolution_underlyings: 1
+  high_tail_approach_boundary: 0.40
+  pending_subscription_timeout_seconds: 15
+  subscription_reconciliation_interval_seconds: 30
+  option_episode_maximum_minutes: 65
+  maximum_option_contracts_per_episode: 20
   option_strike_steps: 2
   maximum_quote_age_seconds: 2
   stream_poll_interval_seconds: 0.1

@@ -1,0 +1,56 @@
+{
+  "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
+  "full_chain_streaming": false,
+  "metadata_then_bounded_snapshots": true,
+  "default_active_option_episodes": 1,
+  "maximum_active_option_episodes": 2,
+  "default_continuous_lines_per_episode": 8,
+  "default_concurrent_discovery_snapshots": 2,
+  "quiet_priority": [
+    "four primary 1DTE iron-condor legs",
+    "ATM call and ATM put",
+    "one alternate condor",
+    "iron butterfly",
+    "outer strikes and additional DTEs"
+  ],
+  "primary_condor_delta_targets": {
+    "short_call": 0.25,
+    "short_put": -0.25,
+    "long_call": 0.10,
+    "long_put": -0.10
+  },
+  "primary_requirements": [
+    "same expiry",
+    "correct strike ordering",
+    "delta tolerance",
+    "live bid and ask per leg",
+    "positive opening credit"
+  ],
+  "high_tail_minimal_set": ["ATM call", "ATM put", "one deterministic DTE"],
+  "neutral_control_sampling": {
+    "fraction": 0.1,
+    "method": "frozen hash sampler",
+    "may_skip_for_class_0_to_2_capacity": true
+  },
+  "claims_boundary": {
+    "research_only": true,
+    "record_only": true,
+    "frozen_m1c": true,
+    "source_transfer_monitoring": true,
+    "exact_vendor_bar_equality_required": false,
+    "option_shadow_outcomes_only": true,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "full_option_chain_streaming_allowed": false,
+    "tick_by_tick_universe_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "reserved_future_trading_capacity": true,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_methods_available": false,
+    "account_access_required": false,
+    "position_access_required": false,
+    "strategy_promotion": false
+  }
+}

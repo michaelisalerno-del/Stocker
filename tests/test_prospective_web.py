@@ -10,6 +10,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from stocker_prospective.budget_reports import BudgetAwareDailyReportWriter
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.contract import claims_boundary
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
@@ -47,6 +48,10 @@ def config(
             "paths": {
                 "database": str(tmp_path / "shared/data/prospective.sqlite3"),
                 "bundle_root": str(tmp_path / "shared/bundles"),
+                "prospective_report_root": str(tmp_path / "shared/daily-reports"),
+                "aggregate_transfer_report": str(
+                    tmp_path / "shared/twenty-session-transfer-report.json"
+                ),
                 "feature_parity_report": str(ROOT / "configs/prospective/feature-parity-m1.json"),
                 "quiet_state_concentration_audit_root": str(
                     ROOT
@@ -129,6 +134,9 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         "/api/shadow",
         "/api/audit",
         "/api/config/public",
+        "/api/market-data-budget",
+        "/api/source-transfer",
+        "/api/reports/daily",
     )
     for endpoint in endpoints:
         api_response = client.get(endpoint)
@@ -141,6 +149,7 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     assert health["market_data"]["current_budget"]["rejected_signals"] == 1
     assert health["ibkr_api"]["verified"] is False
     assert health["ibkr_api"]["automatic_installation"] is False
+    assert client.get("/api/market-data-budget").json()["banner"] == ("RECORD ONLY — NO ORDERS")
 
     signal_id = client.get("/api/signals").json()["items"][0]["id"]
     structure_id = client.get("/api/shadow").json()["items"][0]["id"]
@@ -340,6 +349,35 @@ def test_quiet_state_read_only_api_preserves_frozen_decision(tmp_path: Path) -> 
     assert audit["original_decision"] == "blocked_insufficient_low_tail_support"
     assert audit["month_explanation"]["failed_stress_month"] == "2025-10"
     assert audit["month_explanation"]["exact_failed_share"] == pytest.approx(0.3709677419354839)
+
+
+def test_daily_chatgpt_report_package_is_listed_and_downloadable(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+    session = datetime(2026, 7, 24, tzinfo=UTC).date()
+    package = BudgetAwareDailyReportWriter(
+        database_path=cfg.paths.database,
+        run_id=cfg.runtime.run_id or "",
+        report_root=cfg.paths.prospective_report_root or tmp_path / "reports",
+    ).write(
+        session=session,
+        generated_at=datetime(2026, 7, 24, 22, 0, tzinfo=UTC),
+        capacity_manifest={"claims_boundary": claims_boundary()},
+        budget_snapshot={"budget_state": "budget_healthy"},
+    )
+
+    listing = client.get("/api/reports/daily")
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["session"] == session.isoformat()
+    download = client.get(f"/api/reports/daily/{session.isoformat()}/{package.archive_path.name}")
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "application/zip"
+    assert (
+        client.get(f"/api/reports/daily/{session.isoformat()}/../prospective.sqlite3").status_code
+        == 404
+    )
 
 
 def test_web_sqlite_connections_cannot_write_domain_records(tmp_path: Path) -> None:

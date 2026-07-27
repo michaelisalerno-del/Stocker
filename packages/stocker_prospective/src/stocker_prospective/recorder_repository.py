@@ -6,7 +6,7 @@ import json
 import sqlite3
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
-from typing import cast
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -22,6 +22,7 @@ from stocker_prospective.events import (
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import FrozenGroupOContext
 from stocker_prospective.microstructure import MicrostructureWindowSummary
+from stocker_prospective.option_budget import EpisodeAllocationRecord
 from stocker_prospective.option_ledger import (
     OptionContract,
     OptionContractPlan,
@@ -36,6 +37,13 @@ from stocker_prospective.quiet_state import (
 )
 from stocker_prospective.safety import EpisodeSafetyDecision
 from stocker_prospective.subscriptions import PromotionDecision, SubscriptionRecord
+
+TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT = frozenset(
+    {
+        "ibkr_transfer_supported_without_recalibration",
+        "ibkr_ranking_supported_probability_scale_shifted",
+    }
+)
 
 
 def _json(value: object) -> str:
@@ -64,9 +72,93 @@ def _assert_immutable_observation(
 class FrozenRecorderRepository:
     """Use the existing SQLite database for bounded recorder metadata."""
 
-    def __init__(self, repository: ProspectiveRepository) -> None:
+    def __init__(
+        self,
+        repository: ProspectiveRepository,
+        *,
+        configuration_hash: str = "configuration_hash_unavailable",
+    ) -> None:
         self.repository = repository
         self.claims_json = _json(claims_boundary())
+        self.configuration_hash = configuration_hash
+
+    def prospective_phase_for_session(
+        self,
+        *,
+        run_id: str,
+        session: date,
+        connection: sqlite3.Connection | None = None,
+    ) -> tuple[str, bool]:
+        """Resolve the immutable cohort phase without consulting any outcome value."""
+
+        owns_connection = connection is None
+        active_connection = self.repository._connect() if connection is None else connection
+        try:
+            transfer_rows = active_connection.execute(
+                """
+                SELECT session_date, decision
+                FROM source_transfer_session_v0
+                WHERE run_id = ? AND valid = 1 AND session_date < ?
+                ORDER BY session_date
+                """,
+                (run_id, session.isoformat()),
+            ).fetchall()
+            if (
+                len(transfer_rows) < 20
+                or str(transfer_rows[-1]["decision"])
+                not in TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT
+            ):
+                return "engineering_transfer", False
+            completed_development = int(
+                active_connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM quiet_state_observation_v0
+                    WHERE run_id = ? AND observation_kind = 'quiet_bottom_10'
+                      AND phase = 'option_development'
+                      AND completion_status = 'complete'
+                    """,
+                    (run_id,),
+                ).fetchone()[0]
+            )
+            if completed_development < 150:
+                return "option_development", True
+            return "untouched_confirmation", True
+        finally:
+            if owns_connection:
+                active_connection.close()
+
+    def _parent_phase(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        run_id: str,
+        parent_table: str,
+        parent_id_column: str,
+        parent_id: str,
+    ) -> tuple[str, bool]:
+        if (
+            parent_table,
+            parent_id_column,
+        ) not in {
+            ("m1c_episode_v0", "episode_id"),
+            ("quiet_state_observation_v0", "observation_id"),
+        }:
+            raise ValueError("unsupported prospective phase parent")
+        row = connection.execute(
+            f"""
+            SELECT session_date FROM {parent_table}
+            WHERE run_id = ? AND {parent_id_column} = ?
+            """,
+            (run_id, parent_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(parent_id)
+        return self.prospective_phase_for_session(
+            run_id=run_id,
+            session=date.fromisoformat(str(row["session_date"])),
+            connection=connection,
+        )
 
     @staticmethod
     def _validate(metadata: EvidenceMetadata) -> None:
@@ -845,8 +937,10 @@ class FrozenRecorderRepository:
                     model_id, model_version, model_hash, feature_hash,
                     session_context_hash, feature_values_json, probability,
                     threshold, threshold_passed, eligible, feature_freshness,
-                    missing_feature_count, rejection_reasons_json, claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'M1C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    missing_feature_count, rejection_reasons_json, claims_json,
+                    bar_identity, configuration_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'M1C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?)
                 """,
                 (
                     envelope_id,
@@ -870,6 +964,12 @@ class FrozenRecorderRepository:
                     score.missing_feature_count,
                     _json(rejection_reasons),
                     self.claims_json,
+                    (
+                        f"IBKR|{symbol}|{session.isoformat()}|"
+                        f"{bar_start_utc.astimezone(UTC).isoformat()}|"
+                        f"{bar_end_utc.astimezone(UTC).isoformat()}"
+                    ),
+                    self.configuration_hash,
                 ),
             )
             assert cursor.lastrowid is not None
@@ -1284,6 +1384,13 @@ class FrozenRecorderRepository:
         encoded_outcome = _json(outcome)
         encoded_quality = _json(outcome.quote_quality_flags)
         with self.repository._connect() as connection:
+            cohort_phase, scientific_option_evidence = self._parent_phase(
+                connection,
+                run_id=metadata.run_id,
+                parent_table="m1c_episode_v0",
+                parent_id_column="episode_id",
+                parent_id=outcome.episode_id,
+            )
             existing = connection.execute(
                 """
                 SELECT * FROM shadow_quote_outcome_v0
@@ -1338,8 +1445,12 @@ class FrozenRecorderRepository:
                     dte_bucket, con_id, contract_identity, horizon_minutes,
                     target_timestamp_utc, entry_ask, entry_bid, exit_bid,
                     exit_ask, ask_to_bid_return, dollar_pnl_per_contract,
-                    payload_json, quality_flags_json, valid, claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    payload_json, quality_flags_json, valid, cohort_phase,
+                    scientific_option_evidence, claims_json
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?
+                )
                 """,
                 (
                     envelope_id,
@@ -1361,6 +1472,8 @@ class FrozenRecorderRepository:
                     encoded_outcome,
                     encoded_quality,
                     int(valid),
+                    cohort_phase,
+                    int(scientific_option_evidence),
                     self.claims_json,
                 ),
             )
@@ -1383,9 +1496,17 @@ class FrozenRecorderRepository:
         self._validate(metadata)
         if structure_type not in {"ATM_STRADDLE", "RETROSPECTIVE_ORACLE"}:
             raise ValueError("shadow structure type is invalid")
-        if horizon_minutes not in {5, 10, 15, 30}:
+        horizon_label = payload.get("horizon_label")
+        if horizon_minutes not in {5, 10, 15, 30, 60} and horizon_label != "session_end":
             raise ValueError("shadow structure horizon is not frozen")
         with self.repository._connect() as connection:
+            cohort_phase, scientific_option_evidence = self._parent_phase(
+                connection,
+                run_id=metadata.run_id,
+                parent_table="m1c_episode_v0",
+                parent_id_column="episode_id",
+                parent_id=episode_id,
+            )
             existing = connection.execute(
                 """
                 SELECT id, payload_json FROM shadow_structure_outcome_v0
@@ -1405,8 +1526,9 @@ class FrozenRecorderRepository:
                 INSERT INTO shadow_structure_outcome_v0(
                     envelope_id, run_id, episode_id, structure_type,
                     dte_bucket, horizon_minutes, payload_json, valid,
-                    live_decision_panel_visible, claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    live_decision_panel_visible, cohort_phase,
+                    scientific_option_evidence, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
                     envelope_id,
@@ -1417,6 +1539,8 @@ class FrozenRecorderRepository:
                     horizon_minutes,
                     encoded,
                     int(valid),
+                    cohort_phase,
+                    int(scientific_option_evidence),
                     self.claims_json,
                 ),
             )
@@ -1687,6 +1811,11 @@ class FrozenRecorderRepository:
                             int(existing["id"]),
                         ),
                     )
+                self._insert_subscription_lifecycle_event(
+                    connection,
+                    metadata=metadata,
+                    record=record,
+                )
                 return int(existing["id"])
             envelope_id = self.repository._insert_envelope(connection, metadata)
             cursor = connection.execute(
@@ -1721,7 +1850,59 @@ class FrozenRecorderRepository:
                 ),
             )
             assert cursor.lastrowid is not None
+            self._insert_subscription_lifecycle_event(
+                connection,
+                metadata=metadata,
+                record=record,
+            )
             return int(cursor.lastrowid)
+
+    def _insert_subscription_lifecycle_event(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        metadata: EvidenceMetadata,
+        record: SubscriptionRecord,
+    ) -> None:
+        occurred = (
+            record.cancelled_at_utc or record.last_callback_at_utc or metadata.recorded_at_utc
+        )
+        envelope_id = self.repository._insert_envelope(connection, metadata)
+        connection.execute(
+            """
+            INSERT INTO subscription_lifecycle_event_v0(
+                envelope_id, run_id, occurred_at_utc, subscription_key,
+                request_id, subscription_kind, subscription_class, symbol,
+                con_id, status, owner_ids_json, owner_count, generation,
+                reason, payload_json, claims_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                envelope_id,
+                metadata.run_id,
+                occurred.astimezone(UTC).isoformat(),
+                record.key,
+                record.request_id,
+                record.kind.value,
+                int(record.subscription_class),
+                record.symbol,
+                record.con_id,
+                record.status.value,
+                _json(tuple(sorted(record.owners))),
+                record.owner_count,
+                record.generation,
+                record.cancellation_reason,
+                _json(
+                    {
+                        "priority": int(record.priority),
+                        "protected": record.protected,
+                        "capacity_denied": record.capacity_denied,
+                        "ibkr_error_codes": record.ibkr_error_codes,
+                    }
+                ),
+                self.claims_json,
+            ),
+        )
 
     def record_promotion_decision(
         self,
@@ -2142,6 +2323,13 @@ class FrozenRecorderRepository:
             raise ValueError("quiet shadow horizon is not frozen")
         encoded = _json(dict(payload))
         with self.repository._connect() as connection:
+            cohort_phase, scientific_option_evidence = self._parent_phase(
+                connection,
+                run_id=metadata.run_id,
+                parent_table="quiet_state_observation_v0",
+                parent_id_column="observation_id",
+                parent_id=observation_id,
+            )
             existing = connection.execute(
                 """
                 SELECT id, payload_json FROM quiet_state_shadow_outcome_v0
@@ -2165,8 +2353,12 @@ class FrozenRecorderRepository:
                     short_strike_touched, protective_wing_touched, attempted,
                     complete_quote_quality, strict_quote_quality, quality_status,
                     quality_flags_json, payload_json,
-                    live_decision_panel_visible, claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    live_decision_panel_visible, cohort_phase,
+                    scientific_option_evidence, claims_json
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    0, ?, ?, ?
+                )
                 """,
                 (
                     envelope_id,
@@ -2188,6 +2380,8 @@ class FrozenRecorderRepository:
                     quality_status,
                     _json(quality_flags),
                     encoded,
+                    cohort_phase,
+                    int(scientific_option_evidence),
                     self.claims_json,
                 ),
             )
@@ -2311,6 +2505,350 @@ class FrozenRecorderRepository:
                     _json(report.raw_event_partition_hashes),
                     int(report.complete),
                     report.generated_at_utc.isoformat(),
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_runtime_capacity(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        manifest: Mapping[str, object],
+    ) -> int:
+        """Persist the startup capacity fact with the same evidence envelope."""
+
+        self._validate(metadata)
+        observed = str(manifest["observed_at_utc"])
+        encoded = _json(dict(manifest))
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, manifest_json FROM ibkr_runtime_capacity_v0
+                WHERE run_id = ? AND observed_at_utc = ?
+                """,
+                (metadata.run_id, observed),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["manifest_json"]) != encoded:
+                    raise ValueError("runtime capacity manifest is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO ibkr_runtime_capacity_v0(
+                    envelope_id, run_id, observed_at_utc, manifest_json, claims_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observed,
+                    encoded,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_option_episode_allocation(
+        self,
+        metadata: EvidenceMetadata,
+        record: EpisodeAllocationRecord,
+    ) -> int:
+        """Append one explicit queue, degradation, streaming, or release transition."""
+
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id FROM option_episode_allocation_v0
+                WHERE run_id = ? AND episode_id = ? AND state = ? AND updated_at_utc = ?
+                """,
+                (
+                    metadata.run_id,
+                    record.episode_id,
+                    record.state.value,
+                    record.updated_at_utc.astimezone(UTC).isoformat(),
+                ),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO option_episode_allocation_v0(
+                    envelope_id, run_id, episode_id, symbol, episode_kind, state,
+                    requested_subscriptions_json, approved_subscriptions_json,
+                    queued_subscriptions_json, denied_subscriptions_json,
+                    degradation_reason, capacity_before_json, capacity_after_json,
+                    cohort_phase, scientific_option_evidence, updated_at_utc,
+                    claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    record.episode_id,
+                    record.symbol,
+                    record.kind.value,
+                    record.state.value,
+                    _json(record.requested_subscriptions),
+                    _json(record.approved_subscriptions),
+                    _json(record.queued_subscriptions),
+                    _json(record.denied_subscriptions),
+                    record.degradation_reason,
+                    _json(record.capacity_before),
+                    _json(record.capacity_after),
+                    record.cohort_phase,
+                    int(record.scientific_option_evidence),
+                    record.updated_at_utc.astimezone(UTC).isoformat(),
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_skipped_recording(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        session: date,
+        recording_kind: str,
+        reason: str,
+        requested_payload: Mapping[str, object],
+        episode_id: str | None = None,
+        symbol: str | None = None,
+        cohort_phase: str | None = None,
+        scientific_option_evidence: bool | None = None,
+    ) -> int:
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            resolved_phase, resolved_evidence = self.prospective_phase_for_session(
+                run_id=metadata.run_id,
+                session=session,
+                connection=connection,
+            )
+            if cohort_phase is not None:
+                resolved_phase = cohort_phase
+            if scientific_option_evidence is not None:
+                resolved_evidence = scientific_option_evidence
+            if resolved_phase == "engineering_transfer" and resolved_evidence:
+                raise ValueError(
+                    "engineering-transfer option records cannot be scientific evidence"
+                )
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO skipped_recording_v0(
+                    envelope_id, run_id, session_date, episode_id, symbol,
+                    recording_kind, reason, requested_payload_json,
+                    occurred_at_utc, cohort_phase, scientific_option_evidence,
+                    claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    session.isoformat(),
+                    episode_id,
+                    symbol,
+                    recording_kind,
+                    reason,
+                    _json(dict(requested_payload)),
+                    metadata.recorded_at_utc.isoformat(),
+                    resolved_phase,
+                    int(resolved_evidence),
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_provider_m1c_observation(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        provider: str,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        bar: Mapping[str, object],
+        feature_values: Mapping[str, float],
+        probability: float,
+        quiet_episode: bool,
+        high_tail_episode: bool,
+        data_quality_status: str,
+        model_hash: str,
+    ) -> int:
+        """Persist one provider-specific score without changing frozen V0 state."""
+
+        self._validate(metadata)
+        if provider not in {"ibkr", "eodhd"}:
+            raise ValueError("provider M1C observation has an unsupported provider")
+        immutable = {
+            "bar_identity": str(bar["identity"]),
+            "probability": probability,
+            "feature_values_json": _json(dict(feature_values)),
+        }
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, bar_identity, probability, feature_values_json
+                FROM provider_m1c_observation_v0
+                WHERE run_id = ? AND provider = ? AND symbol = ?
+                  AND session_date = ? AND checkpoint = ?
+                """,
+                (
+                    metadata.run_id,
+                    provider,
+                    symbol,
+                    session.isoformat(),
+                    checkpoint,
+                ),
+            ).fetchone()
+            if existing is not None:
+                _assert_immutable_observation(
+                    existing,
+                    expected=immutable,
+                    label="provider M1C observation",
+                )
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO provider_m1c_observation_v0(
+                    envelope_id, run_id, provider, symbol, session_date,
+                    checkpoint, bar_identity, bar_start_utc, bar_end_utc,
+                    open, high, low, close, feature_values_json, probability,
+                    quiet_episode, high_tail_episode, data_quality_status,
+                    model_hash, configuration_hash, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    provider,
+                    symbol,
+                    session.isoformat(),
+                    checkpoint,
+                    str(bar["identity"]),
+                    str(bar["start_utc"]),
+                    str(bar["end_utc"]),
+                    float(cast(Any, bar["open"])),
+                    float(cast(Any, bar["high"])),
+                    float(cast(Any, bar["low"])),
+                    float(cast(Any, bar["close"])),
+                    immutable["feature_values_json"],
+                    probability,
+                    int(quiet_episode),
+                    int(high_tail_episode),
+                    data_quality_status,
+                    model_hash,
+                    self.configuration_hash,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_source_transfer_session(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        session: date,
+        valid: bool,
+        decision: str,
+        report: Mapping[str, object],
+    ) -> int:
+        self._validate(metadata)
+        encoded = _json(dict(report))
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, report_json FROM source_transfer_session_v0
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (metadata.run_id, session.isoformat()),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["report_json"]) != encoded:
+                    raise ValueError("source transfer session report is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO source_transfer_session_v0(
+                    envelope_id, run_id, session_date, valid, decision,
+                    report_json, generated_at_utc, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    session.isoformat(),
+                    int(valid),
+                    decision,
+                    encoded,
+                    metadata.recorded_at_utc.isoformat(),
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_prospective_session_phase(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        session: date,
+        valid: bool,
+        valid_session_ordinal: int | None,
+        phase: str,
+        source_transfer_decision: str | None,
+    ) -> int:
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, valid, valid_session_ordinal, phase, source_transfer_decision
+                FROM prospective_session_phase_v0
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (metadata.run_id, session.isoformat()),
+            ).fetchone()
+            expected = {
+                "valid": int(valid),
+                "valid_session_ordinal": valid_session_ordinal,
+                "phase": phase,
+                "source_transfer_decision": source_transfer_decision,
+            }
+            if existing is not None:
+                _assert_immutable_observation(
+                    existing,
+                    expected=expected,
+                    label="prospective session phase",
+                )
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO prospective_session_phase_v0(
+                    envelope_id, run_id, session_date, valid_session_ordinal,
+                    phase, valid, source_transfer_decision,
+                    strategy_rule_changes_allowed, recorded_at_utc, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    session.isoformat(),
+                    valid_session_ordinal,
+                    phase,
+                    int(valid),
+                    source_transfer_decision,
+                    metadata.recorded_at_utc.isoformat(),
                     self.claims_json,
                 ),
             )

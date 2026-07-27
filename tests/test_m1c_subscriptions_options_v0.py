@@ -167,7 +167,7 @@ def test_always_on_bar_capacity_and_active_tick_pair_fail_closed(tmp_path: Path)
         exchange="SMART",
     )
     blocked, _, _, metadata = controller_fixture(tmp_path / "blocked", tick_limit=2, bar_limit=0)
-    with pytest.raises(RuntimeError, match="five_minute_bar_capacity"):
+    with pytest.raises(RuntimeError, match="critical_budget_unavailable"):
         blocked.start_always_on(metadata, (contract,))
 
     controller, budget, upstream, metadata = controller_fixture(
@@ -177,8 +177,8 @@ def test_always_on_bar_capacity_and_active_tick_pair_fail_closed(tmp_path: Path)
     controller.start_always_on(metadata, (contract,))
     controller.promote_active_episode(metadata, symbol="AAL", episode_id="episode-1")
 
-    assert budget.get("underlying:AAL:tbt:bidask") is None
-    assert budget.get("underlying:AAL:tbt:last") is None
+    assert budget.get("TBT_BIDASK|1") is None
+    assert budget.get("TBT_LAST|1") is None
     assert any(kind == "tick" for kind, _ in upstream.cancelled)
 
 
@@ -192,12 +192,12 @@ def test_depth_reset_resubscription_replaces_the_exact_request(tmp_path: Path) -
     )
     controller.start_always_on(metadata, (contract,))
     controller.promote_active_episode(metadata, symbol="AAL", episode_id="episode-1")
-    first = budget.get("underlying:AAL:depth")
+    first = budget.get("DEPTH|1|5|1")
     assert first is not None
     first_request_id = first.request_id
 
     assert controller.resubscribe_depth(metadata, symbol="AAL") is True
-    replacement = budget.get("underlying:AAL:depth")
+    replacement = budget.get("DEPTH|1|5|1")
     assert replacement is not None
     assert replacement.request_id != first_request_id
     assert ("depth", first_request_id) in upstream.cancelled

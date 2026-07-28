@@ -58,7 +58,10 @@ subscription transitions, explicit option allocation/degradation, skipped
 recordings, provider observations, transfer-session decisions, and prospective
 session phases. Migration `0011_m1c_checkpoint_completion_v0.sql` adds a final
 checkpoint marker so reconnect replay skips only fully applied signal and
-option-scheduling side effects. The read-only web app adds budget, source-transfer, and report
+option-scheduling side effects. Migration
+`0012_option_schedule_degradation_v0.sql` records an explicit degradation
+reason when interrupted option quote continuity cannot be reconstructed. The
+read-only web app adds budget, source-transfer, and report
 download endpoints plus a permanent no-orders banner.
 
 ## Scientific controls

@@ -202,11 +202,30 @@ class BoundedOptionDiscoveryService:
             entry = datetime.fromisoformat(str(row["entry_timestamp_utc"])).astimezone(UTC)
             duration = timedelta(seconds=int(row["recording_duration_seconds"]))
             metadata = self.metadata_factory(now, (entry,))
+            if str(row["status"]) == "streaming":
+                reason = "process_restart_quote_continuity_lost"
+                self.option_recorder.repository.update_option_episode_schedule_status(
+                    metadata,
+                    episode_id=episode_id,
+                    status="rejected",
+                    degradation_reason=reason,
+                )
+                self.option_recorder.repository.record_skipped_recording(
+                    metadata,
+                    session=date.fromisoformat(str(row["session_date"])),
+                    episode_id=episode_id,
+                    symbol=symbol,
+                    recording_kind="option_episode",
+                    reason=reason,
+                    requested_payload={"restored_status": "streaming"},
+                )
+                continue
             if entry + duration + self.sensitivity_wait <= now:
                 self.option_recorder.repository.update_option_episode_schedule_status(
                     metadata,
                     episode_id=episode_id,
                     status="expired",
+                    degradation_reason="expired_before_process_restore",
                 )
                 continue
             underlying = self.underlying_contracts.get(symbol)
@@ -215,6 +234,7 @@ class BoundedOptionDiscoveryService:
                     metadata,
                     episode_id=episode_id,
                     status="rejected",
+                    degradation_reason="underlying_contract_not_resolved_after_restart",
                 )
                 continue
             self._pending[episode_id] = _PendingEpisode(
@@ -285,6 +305,11 @@ class BoundedOptionDiscoveryService:
             self._record_unscheduled_rejection(
                 result,
                 episode_id=decision.episode_id,
+                episode_kind=EpisodeKind.HIGH_TAIL,
+                quiet_state=False,
+                recording_duration=timedelta(minutes=60),
+                strike_steps=self.strike_steps,
+                maximum_contracts=self.maximum_contracts_per_episode,
                 reason="underlying_contract_not_resolved",
             )
             return
@@ -331,6 +356,11 @@ class BoundedOptionDiscoveryService:
                 self._record_unscheduled_rejection(
                     result,
                     episode_id=observation_id,
+                    episode_kind=episode_kind,
+                    quiet_state=True,
+                    recording_duration=timedelta(minutes=60),
+                    strike_steps=QUIET_OPTION_STRIKE_STEPS,
+                    maximum_contracts=QUIET_MAXIMUM_CONTRACTS_PER_OBSERVATION,
                     reason="underlying_contract_not_resolved",
                 )
                 continue
@@ -478,6 +508,7 @@ class BoundedOptionDiscoveryService:
             metadata,
             episode_id=episode.episode_id,
             status="rejected",
+            degradation_reason=reason,
         )
         self.option_recorder.repository.record_skipped_recording(
             metadata,
@@ -501,11 +532,37 @@ class BoundedOptionDiscoveryService:
         result: RecorderCheckpointResult,
         *,
         episode_id: str,
+        episode_kind: EpisodeKind,
+        quiet_state: bool,
+        recording_duration: timedelta,
+        strike_steps: int,
+        maximum_contracts: int,
         reason: str,
     ) -> None:
         metadata = self.metadata_factory(
             result.episode_decision.trigger_bar_end,
             (result.episode_decision.trigger_bar_end,),
+        )
+        self.option_recorder.repository.record_option_episode_schedule(
+            metadata,
+            episode_id=episode_id,
+            checkpoint_id=result.checkpoint_id,
+            symbol=result.episode_decision.symbol,
+            session=result.episode_decision.session,
+            entry_timestamp=result.episode_decision.prospective_entry_timestamp,
+            episode_kind=episode_kind.value,
+            probability=result.score.probability,
+            quiet_state=quiet_state,
+            directional_actions={},
+            recording_duration=recording_duration,
+            strike_steps=strike_steps,
+            maximum_contracts=maximum_contracts,
+        )
+        self.option_recorder.repository.update_option_episode_schedule_status(
+            metadata,
+            episode_id=episode_id,
+            status="rejected",
+            degradation_reason=reason,
         )
         self.option_recorder.repository.record_skipped_recording(
             metadata,

@@ -280,6 +280,7 @@ class FrozenRecorderRepository:
         *,
         episode_id: str,
         status: str,
+        degradation_reason: str | None = None,
     ) -> None:
         """Persist the bounded lifecycle needed for safe process reconstruction."""
 
@@ -299,11 +300,12 @@ class FrozenRecorderRepository:
             connection.execute(
                 """
                 UPDATE option_episode_schedule_v0
-                SET status = ?, updated_at_utc = ?
+                SET status = ?, degradation_reason = ?, updated_at_utc = ?
                 WHERE episode_id = ?
                 """,
                 (
                     status,
+                    degradation_reason,
                     metadata.recorded_at_utc.astimezone(UTC).isoformat(),
                     episode_id,
                 ),
@@ -2890,6 +2892,22 @@ class FrozenRecorderRepository:
     ) -> int:
         self._validate(metadata)
         with self.repository._connect() as connection:
+            if episode_id is not None:
+                existing = connection.execute(
+                    """
+                    SELECT id FROM skipped_recording_v0
+                    WHERE run_id = ? AND episode_id = ? AND recording_kind = ?
+                      AND reason = ?
+                    """,
+                    (
+                        metadata.run_id,
+                        episode_id,
+                        recording_kind,
+                        reason,
+                    ),
+                ).fetchone()
+                if existing is not None:
+                    return int(existing["id"])
             resolved_phase, resolved_evidence = self.prospective_phase_for_session(
                 run_id=metadata.run_id,
                 session=session,

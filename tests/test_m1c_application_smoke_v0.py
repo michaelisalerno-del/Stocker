@@ -43,27 +43,31 @@ FAKE_FIXTURE = (
 )
 
 
-def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
+def _build_fake_application(
     tmp_path: Path,
-) -> None:
+    *,
+    include_scientific_prerequisites: bool,
+) -> tuple[object, ProspectiveConfig, FakeIBKRAdapter, tuple[str, ...]]:
     universe = json.loads(
         (ROOT / "configs/prospective/anchor-frozen-20.json").read_text(encoding="utf-8")
     )
     symbols = tuple(str(value) for value in universe["symbols"])
     activity_path = tmp_path / "historical-activity.parquet"
-    pd.DataFrame(
-        [
-            {
-                "symbol": symbol,
-                "session": "2026-07-23",
-                "bar_ordinal": 0,
-                "volume": 1_000.0,
-            }
-            for symbol in symbols
-        ]
-    ).to_parquet(activity_path, index=False)
+    if include_scientific_prerequisites:
+        pd.DataFrame(
+            [
+                {
+                    "symbol": symbol,
+                    "session": "2026-07-23",
+                    "bar_ordinal": 0,
+                    "volume": 1_000.0,
+                }
+                for symbol in symbols
+            ]
+        ).to_parquet(activity_path, index=False)
     bar_report = tmp_path / "bar-compatibility.json"
-    bar_report.write_text('{"passed":true}\n', encoding="utf-8")
+    if include_scientific_prerequisites:
+        bar_report.write_text('{"passed":true}\n', encoding="utf-8")
     context_root = tmp_path / "context"
     context_root.mkdir()
 
@@ -130,31 +134,47 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
     repository = ProspectiveRepository(config.paths.database)
     repository.migrate()
 
-    application = build_frozen_prospective_application(
-        config=config,
-        adapter=adapter,
-        repository=repository,
-        identity=identity,
-        stock_contract_factory=lambda symbol: SimpleNamespace(
-            symbol=symbol,
-            secType="STK",
-            exchange="SMART",
-            currency="USD",
-        ),
-        option_contract_factory=(
-            lambda symbol, expiry, strike, right, multiplier, exchange, trading: SimpleNamespace(
+    return (
+        build_frozen_prospective_application(
+            config=config,
+            adapter=adapter,
+            repository=repository,
+            identity=identity,
+            stock_contract_factory=lambda symbol: SimpleNamespace(
                 symbol=symbol,
-                secType="OPT",
-                lastTradeDateOrContractMonth=expiry.strftime("%Y%m%d"),
-                strike=strike,
-                right=right,
-                multiplier=str(multiplier),
-                exchange=exchange,
-                tradingClass=trading,
+                secType="STK",
+                exchange="SMART",
                 currency="USD",
-            )
+            ),
+            option_contract_factory=(
+                lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
+                    SimpleNamespace(
+                        symbol=symbol,
+                        secType="OPT",
+                        lastTradeDateOrContractMonth=expiry.strftime("%Y%m%d"),
+                        strike=strike,
+                        right=right,
+                        multiplier=str(multiplier),
+                        exchange=exchange,
+                        tradingClass=trading,
+                        currency="USD",
+                    )
+                )
+            ),
+            ibkr_api_version="fake-10.37",
         ),
-        ibkr_api_version="fake-10.37",
+        config,
+        adapter,
+        symbols,
+    )
+
+
+def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
+    tmp_path: Path,
+) -> None:
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
     )
     polled_at = datetime.now(UTC)
     result = application.poll(now=polled_at)
@@ -179,6 +199,44 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
         ]
         is False
     )
+
+    application.shutdown(now=datetime.now(UTC))
+    assert adapter.active_subscriptions == {}
+
+
+def test_missing_scientific_inputs_degrade_to_live_acquisition(
+    tmp_path: Path,
+) -> None:
+    application, config, adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=False,
+    )
+
+    result = application.poll(now=datetime.now(UTC))
+
+    assert result.checkpoint_results == ()
+    assert adapter.active_subscriptions
+    assert {kind for kind, _symbol in adapter.active_subscriptions.values()} == {"bar"}
+    with sqlite3.connect(config.paths.database) as connection:
+        connection.row_factory = sqlite3.Row
+        blockers = {
+            str(row["blocker_code"])
+            for row in connection.execute(
+                "SELECT blocker_code FROM data_health_event WHERE run_id = ?",
+                (config.runtime.run_id,),
+            )
+        }
+        connection_state = connection.execute(
+            "SELECT state FROM ibkr_connection_event WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+            (config.runtime.run_id,),
+        ).fetchone()
+    assert blockers == {
+        "blocked_bar_compatibility_report_absent",
+        "blocked_historical_activity_baseline_absent",
+        "blocked_missing_previous_session_options_context",
+    }
+    assert connection_state is not None
+    assert connection_state["state"] == "connected"
 
     application.shutdown(now=datetime.now(UTC))
     assert adapter.active_subscriptions == {}

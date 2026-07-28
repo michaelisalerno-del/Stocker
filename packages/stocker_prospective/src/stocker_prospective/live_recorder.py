@@ -71,6 +71,7 @@ class ScientificReadiness:
     direction_parity_passed: bool
     bar_compatibility_passed: bool
     clock_drift_within_tolerance: bool
+    historical_activity_baseline_available: bool = True
     capability_preflight_passed: bool = False
 
 
@@ -230,7 +231,16 @@ class FrozenM1CLiveRecorder:
             list[tuple[datetime, datetime | None]],
         ] = {}
         self._capability_preflight_passed = readiness.capability_preflight_passed
-        self._scientific_scoring_enabled = readiness.capability_preflight_passed
+        self._scientific_prerequisites_passed = (
+            readiness.m1c_parity_passed
+            and readiness.direction_parity_passed
+            and readiness.bar_compatibility_passed
+            and readiness.historical_activity_baseline_available
+            and readiness.clock_drift_within_tolerance
+        )
+        self._scientific_scoring_enabled = (
+            readiness.capability_preflight_passed and self._scientific_prerequisites_passed
+        )
         self._clock_drift_seconds: float | None = None
         self._depth_exchanges: tuple[str, ...] = ()
 
@@ -295,7 +305,7 @@ class FrozenM1CLiveRecorder:
         """Enable scoring only after the live capability manifest passes."""
 
         self._capability_preflight_passed = passed
-        self._scientific_scoring_enabled = passed
+        self._scientific_scoring_enabled = passed and self._scientific_prerequisites_passed
 
     def first_valid_quote_at_or_after(
         self,

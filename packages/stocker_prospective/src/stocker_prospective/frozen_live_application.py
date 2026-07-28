@@ -128,6 +128,16 @@ def _passed(path: Path, *, label: str) -> bool:
     return payload.get("passed") is True
 
 
+class ScientificPrerequisiteError(ValueError):
+    """Carry a stable blocker identity independently of operator-facing text."""
+
+    def __init__(self, blocker_code: str, message: str) -> None:
+        if not blocker_code.startswith("blocked_"):
+            raise ValueError("scientific prerequisite blocker code is invalid")
+        super().__init__(message)
+        self.blocker_code = blocker_code
+
+
 def _assert_frozen_m1c_artifact_hashes(artifact_files: Mapping[str, Path]) -> None:
     """Fail closed unless the exact preregistered M1C artifacts are loaded."""
 
@@ -224,8 +234,30 @@ class FrozenProspectiveApplication:
             transfer_report=report,
         )
 
+    def _persist_connection_events(self, observed_at: datetime) -> None:
+        for event in self.adapter.connection.drain_events():
+            if event.recorded_at < self.config.runtime.prospective_start_utc:
+                continue
+            metadata = self.metadata_factory(
+                max(observed_at, event.recorded_at),
+                (event.recorded_at,),
+            )
+            self.repository.record_ibkr_connection_event(
+                metadata,
+                state=event.state.value,
+                error_code=event.code,
+                message=event.message,
+                data_maintained=event.data_maintained,
+                reconnect_attempt=None,
+                details={
+                    "source": "official_ibkr_callback",
+                    "event_kind": event.event_kind.value,
+                },
+            )
+
     def poll(self, *, now: datetime) -> LivePollResult:
         observed = now.astimezone(UTC)
+        self._persist_connection_events(observed)
         observed_session = observed.astimezone(NEW_YORK).date()
         try:
             xnys_session_bounds(observed_session)
@@ -236,10 +268,30 @@ class FrozenProspectiveApplication:
             if observed_session not in self._session_context_checked:
                 try:
                     self.session_context_preflight(observed_session, observed)
-                except ValueError as exc:
-                    self._session_context_failures[observed_session] = str(exc)
+                except (ScientificPrerequisiteError, ValueError) as exc:
+                    message = str(exc)
+                    self._session_context_failures[observed_session] = message
+                    blocker_code = (
+                        exc.blocker_code
+                        if isinstance(exc, ScientificPrerequisiteError)
+                        else "blocked_previous_session_options_context_invalid"
+                    )
+                    metadata = self.metadata_factory(observed, (observed,))
+                    self.repository.record_data_health_event(
+                        metadata,
+                        severity="blocker",
+                        blocker_code=blocker_code,
+                        component="previous_session_options_context",
+                        message=message,
+                        details={
+                            "signal_session": observed_session.isoformat(),
+                            "m1c_scoring_allowed": False,
+                            "option_episode_capture_allowed": False,
+                        },
+                    )
                 self._session_context_checked.add(observed_session)
         self._recover_if_required(observed)
+        self._persist_connection_events(observed)
         result = self.live_recorder.poll(now=observed)
         callback_metadata = self.metadata_factory(observed, (observed,))
         for request_id, code in result.ibkr_errors:
@@ -683,9 +735,15 @@ def build_frozen_prospective_application(
         resolved_paths["direction_live_parity_report"],
         label="direction live parity",
     )
-    bar_compatibility = _passed(
-        resolved_paths["bar_compatibility_report"],
-        label="bar compatibility",
+    bar_compatibility_path = resolved_paths["bar_compatibility_report"]
+    bar_compatibility_available = bar_compatibility_path.is_file()
+    bar_compatibility = (
+        _passed(
+            bar_compatibility_path,
+            label="bar compatibility",
+        )
+        if bar_compatibility_available
+        else False
     )
     gateway_version = config.ibkr.tws_or_gateway_version
     if not gateway_version:
@@ -837,6 +895,40 @@ def build_frozen_prospective_application(
         repository,
         configuration_hash=configuration_hash,
     )
+    historical_activity_path = resolved_paths["historical_activity_bars"]
+    historical_activity_available = historical_activity_path.is_file()
+    if not bar_compatibility_available:
+        repository.record_data_health_event(
+            initial_metadata,
+            severity="blocker",
+            blocker_code="blocked_bar_compatibility_report_absent",
+            component="bar_compatibility",
+            message=(
+                "IBKR acquisition remains active; M1C scoring is blocked until "
+                "bar-compatibility evidence exists"
+            ),
+            details={
+                "path": str(bar_compatibility_path),
+                "m1c_scoring_allowed": False,
+                "raw_ibkr_acquisition_allowed": True,
+            },
+        )
+    if not historical_activity_available:
+        repository.record_data_health_event(
+            initial_metadata,
+            severity="blocker",
+            blocker_code="blocked_historical_activity_baseline_absent",
+            component="historical_activity_baseline",
+            message=(
+                "IBKR acquisition remains active; M1C scoring is blocked until "
+                "the frozen prior-session activity baseline exists"
+            ),
+            details={
+                "path": str(historical_activity_path),
+                "m1c_scoring_allowed": False,
+                "raw_ibkr_acquisition_allowed": True,
+            },
+        )
 
     def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:
         return frozen_repository.prospective_phase_for_session(
@@ -861,9 +953,13 @@ def build_frozen_prospective_application(
         phase_resolver=prospective_phase_at,
     )
     session = datetime.now(NEW_YORK).date()
-    activity = HistoricalActivityBaseline.from_parquet(
-        resolved_paths["historical_activity_bars"],
-        latest_authorised_session=previous_xnys_session(session),
+    activity = (
+        HistoricalActivityBaseline.from_parquet(
+            historical_activity_path,
+            latest_authorised_session=previous_xnys_session(session),
+        )
+        if historical_activity_available
+        else HistoricalActivityBaseline()
     )
     normalizer = IBKRCallbackNormalizer(prospective_collection_start=prospective_start)
     raw_store = PartitionedEventStore(
@@ -887,22 +983,41 @@ def build_frozen_prospective_application(
     def session_context_preflight(signal_session: date, observed_at: datetime) -> None:
         package = group_packages.get(signal_session)
         if package is None:
-            package = load_group_o_session_package(
-                context_root=resolved_paths["context_root"],
-                signal_session=signal_session,
+            package_path = (
+                resolved_paths["context_root"] / "group-o" / f"{signal_session.isoformat()}.json"
             )
+            if not package_path.is_file():
+                raise ScientificPrerequisiteError(
+                    "blocked_missing_previous_session_options_context",
+                    "exact previous-session Group O package is absent for "
+                    f"{signal_session.isoformat()}",
+                )
+            try:
+                package = load_group_o_session_package(
+                    context_root=resolved_paths["context_root"],
+                    signal_session=signal_session,
+                )
+            except ValueError as exc:
+                raise ScientificPrerequisiteError(
+                    "blocked_previous_session_options_context_invalid",
+                    str(exc),
+                ) from exc
             group_packages[signal_session] = package
         package_symbols = {context.symbol for context in package.contexts}
         if package_symbols != set(identity.symbols):
-            raise ValueError("Group O package does not contain the exact frozen cohort")
+            raise ScientificPrerequisiteError(
+                "blocked_previous_session_options_context_invalid",
+                "Group O package does not contain the exact frozen cohort",
+            )
         metadata = metadata_factory(observed_at, (observed_at,))
         for symbol in identity.symbols:
             context = package.for_symbol(symbol)
             missing_features = m1c_runtime.missing_group_o_features(context.features)
             if missing_features:
-                raise ValueError(
+                raise ScientificPrerequisiteError(
+                    "blocked_previous_session_options_context_invalid",
                     "Group O context missing frozen feature keys for "
-                    f"{symbol}: {','.join(missing_features)}"
+                    f"{symbol}: {','.join(missing_features)}",
                 )
             frozen_repository.record_group_o_context(metadata, context)
 
@@ -954,6 +1069,7 @@ def build_frozen_prospective_application(
             m1c_parity_passed=m1c_parity,
             direction_parity_passed=direction_parity,
             bar_compatibility_passed=bar_compatibility,
+            historical_activity_baseline_available=historical_activity_available,
             clock_drift_within_tolerance=True,
         ),
         maximum_quote_age=timedelta(seconds=config.ibkr.maximum_quote_age_seconds),

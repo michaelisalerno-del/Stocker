@@ -29,6 +29,14 @@ is disabled. Optional classes 5, 4, then 3 are shed before critical signal
 streams; optional exhaustion queues, reduces, records, or skips work without
 stopping frozen M1C recording.
 
+Missing external scientific inputs do not make the IBKR acquisition process
+disappear. When the production bar-compatibility report, historical activity
+baseline, or exact previous-session Group O package is absent, the process keeps
+the minimal bar streams and connection audit online while persisting a specific
+scientific blocker. M1C scoring and episode-triggered option recording remain
+disabled; a missing input is never replaced with a fabricated pass artifact,
+stale context, or an outcome-informed substitute.
+
 ## Scientific tracks
 
 - Track A compares IBKR and later EODHD bar semantics, causal features,

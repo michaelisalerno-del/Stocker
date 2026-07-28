@@ -9,6 +9,13 @@ immediately, and preserves a configurable 12-line future-trading market-data
 reserve. Resolved historical-bar pacing is enforced at request time. No order,
 account, position, or portfolio surface was added.
 
+The deployed-process boundary also distinguishes transport acquisition from
+scientific readiness. Missing external bar-compatibility, historical-activity,
+or previous-session Group O inputs are persisted as explicit blockers while
+IBKR connection events and minimal bars continue. They still block M1C scoring
+and episode-driven option capture and are never synthesized or treated as
+passing evidence.
+
 The historical conclusion is unchanged:
 `blocked_insufficient_low_tail_support`.
 

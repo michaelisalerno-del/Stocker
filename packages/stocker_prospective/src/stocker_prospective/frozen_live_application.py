@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from stocker_prospective.activation import ProspectiveActivationLedger
@@ -119,6 +119,39 @@ def _attribute(value: Any, *names: str) -> Any:
         if candidate is not None:
             return candidate
     return None
+
+
+def _probe_required_market_data_type(
+    adapter: Any,
+    *,
+    contract: Any,
+    timeout_seconds: float,
+) -> MarketDataType | None:
+    """Observe IBKR's authoritative data type with one cancelled snapshot."""
+
+    try:
+        result = adapter.capture_temporary_quote(
+            contract=contract,
+            timeout_seconds=timeout_seconds,
+        )
+    except RuntimeError:
+        return cast(MarketDataType | None, adapter.connection.health().market_data_type)
+    observed: set[MarketDataType] = set()
+    for item in result.items:
+        raw = _attribute(item, "market_data_type")
+        if raw is None and _attribute(item, "field") == "market_data_type":
+            raw = _attribute(item, "value")
+        if raw is None:
+            continue
+        try:
+            observed.add(MarketDataType(str(raw)))
+        except ValueError:
+            continue
+    if len(observed) != 1:
+        return cast(MarketDataType | None, adapter.connection.health().market_data_type)
+    market_data_type = next(iter(observed))
+    adapter.connection.market_data_type_observed(market_data_type)
+    return market_data_type
 
 
 def _passed(path: Path, *, label: str) -> bool:
@@ -857,11 +890,24 @@ def build_frozen_prospective_application(
     }:
         raise ValueError("required underlying or context-proxy contract unresolved")
     adapter.require_live_market_data()
+    market_data_probe_contract = next(
+        item.upstream_contract for item in qualified if item.symbol == MARKET_PROXY
+    )
+    _probe_required_market_data_type(
+        adapter,
+        contract=market_data_probe_contract,
+        timeout_seconds=config.ibkr.quote_capture_timeout_seconds,
+    )
+    pace_request()
     capacity_observer = getattr(adapter, "discover_market_data_capacity", None)
     discovered_capacity = (
         capacity_observer()
         if callable(capacity_observer)
-        else CapacityDiscovery(market_data_status="live")
+        else CapacityDiscovery(
+            market_data_status=(
+                adapter.connection.health().market_data_type or MarketDataType.UNKNOWN
+            ).value
+        )
     )
     if not isinstance(discovered_capacity, CapacityDiscovery):
         raise TypeError("IBKR capacity discovery must return CapacityDiscovery")

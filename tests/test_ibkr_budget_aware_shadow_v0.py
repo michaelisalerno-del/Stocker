@@ -25,11 +25,15 @@ from stocker_prospective.database import (
     ProspectiveRepository,
 )
 from stocker_prospective.fake_ibkr import FakeIBKRAdapter
+from stocker_prospective.frozen_live_application import (
+    _probe_required_market_data_type,
+)
 from stocker_prospective.ibkr_official import OfficialMarketDataOnlyClient
 from stocker_prospective.live_subscriptions import (
     LiveSubscriptionController,
     QualifiedUnderlying,
 )
+from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.option_budget import (
     BudgetAwareEpisodeStateMachine,
     DteAllocator,
@@ -157,6 +161,22 @@ def test_runtime_capacity_uses_exact_environment_fallback_names() -> None:
     assert manifest.historical_requests_per_window.value == 45
     assert manifest.historical_request_window_seconds.value == 480
     assert manifest.available_research_level1_lines == 48
+
+
+def test_bounded_startup_probe_observes_live_market_data_type() -> None:
+    adapter = FakeIBKRAdapter(
+        fixture_id="live-market-data-type-probe",
+        events=(),
+    )
+
+    observed = _probe_required_market_data_type(
+        adapter,
+        contract=SimpleNamespace(symbol="VTI"),
+        timeout_seconds=1,
+    )
+
+    assert observed is MarketDataType.LIVE
+    assert adapter.connection.health().market_data_type is MarketDataType.LIVE
 
 
 def test_preexisting_internal_usage_is_reserved_from_new_research_allocations() -> None:

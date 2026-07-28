@@ -94,6 +94,7 @@ from stocker_prospective.subscriptions import (
     SubscriptionBudgetManager,
     SubscriptionKind,
 )
+from stocker_prospective.tail_phase_v1 import load_tail_phase_frozen_config_v1
 
 NEW_YORK = ZoneInfo("America/New_York")
 MARKET_PROXY = "VTI"
@@ -658,6 +659,20 @@ def build_frozen_prospective_application(
         "direction_beta": resolved_paths["direction_beta_artifact"],
         "m1c_scaling": resolved_paths["m1c_scaling_artifact"],
     }
+    tail_phase_config = None
+    tail_phase_activation_status_v1 = "not_configured"
+    if paths.m1c_tail_phase_v1_config is not None:
+        tail_phase_path = Path(paths.m1c_tail_phase_v1_config)
+        if not tail_phase_path.is_file():
+            tail_phase_activation_status_v1 = "unavailable:config_absent"
+        else:
+            try:
+                tail_phase_config = load_tail_phase_frozen_config_v1(tail_phase_path)
+            except (OSError, ValueError):
+                tail_phase_activation_status_v1 = "unavailable:config_invalid"
+            else:
+                tail_phase_activation_status_v1 = "available"
+                artifact_files["m1c_tail_phase_v1_config"] = tail_phase_path
     if any(not path.is_file() for path in artifact_files.values()):
         absent = sorted(name for name, path in artifact_files.items() if not path.is_file())
         raise ValueError("frozen recorder artifact absent: " + ",".join(absent))
@@ -912,6 +927,10 @@ def build_frozen_prospective_application(
         direction_runtime=direction_runtime,
         direction_features=direction_features,
         repository=frozen_repository,
+        movement_consumed_median_v1=(
+            None if tail_phase_config is None else tail_phase_config.movement_consumed_median_2024
+        ),
+        tail_phase_activation_status_v1=tail_phase_activation_status_v1,
     )
     controller_budget = SubscriptionBudgetManager(
         limits={

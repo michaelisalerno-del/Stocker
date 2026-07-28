@@ -36,6 +36,15 @@ from stocker_prospective.safety import (
     EpisodeSafetyInputs,
     evaluate_episode_safety,
 )
+from stocker_prospective.tail_phase_v1 import (
+    MovementConsumedBarV1,
+    MovementConsumedBucketV1,
+    MovementConsumedStateV1,
+    TailPhaseStateV1,
+    TailPhaseTrackerV1,
+    assign_movement_consumed_bucket_v1,
+    calculate_movement_consumed_v1,
+)
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,9 @@ class RecorderCheckpointResult(BaseModel):
 
     checkpoint_id: int
     score: FrozenM1CScore
+    tail_phase_v1: TailPhaseStateV1
+    movement_consumed_state_v1: MovementConsumedStateV1
+    movement_consumed_bucket_v1: MovementConsumedBucketV1
     episode_decision: EpisodeDecision
     quiet_state: QuietStateSnapshot
     quiet_episode_decision: QuietEpisodeDecision
@@ -91,6 +103,9 @@ class FrozenM1CRecorderEngine:
         tracker: FreshEpisodeTracker | None = None,
         quiet_tracker: QuietEpisodeTracker | None = None,
         neutral_sampler: NeutralControlSampler | None = None,
+        tail_phase_tracker_v1: TailPhaseTrackerV1 | None = None,
+        movement_consumed_median_v1: float | None = None,
+        tail_phase_activation_status_v1: str = "not_configured",
     ) -> None:
         self.m1c_runtime = m1c_runtime
         self.m1c_features = m1c_features
@@ -102,6 +117,11 @@ class FrozenM1CRecorderEngine:
         self.neutral_sampler = (
             NeutralControlSampler() if neutral_sampler is None else neutral_sampler
         )
+        self.tail_phase_tracker_v1 = (
+            TailPhaseTrackerV1() if tail_phase_tracker_v1 is None else tail_phase_tracker_v1
+        )
+        self.movement_consumed_median_v1 = movement_consumed_median_v1
+        self.tail_phase_activation_status_v1 = tail_phase_activation_status_v1
         self._restored_sessions: set[tuple[str, date]] = set()
         self._high_tail_episode_timestamps: dict[
             tuple[str, date],
@@ -136,6 +156,26 @@ class FrozenM1CRecorderEngine:
             previous_episode_timestamp=quiet_episode,
             episode_count=quiet_count,
         )
+        for (
+            checkpoint,
+            timestamp,
+            probability,
+            eligible,
+            invalid_reason,
+        ) in self.repository.session_tail_phase_history(
+            run_id=item.metadata.run_id,
+            symbol=item.symbol,
+            session=item.session,
+        ):
+            self.tail_phase_tracker_v1.evaluate(
+                symbol=item.symbol,
+                session=item.session,
+                checkpoint=checkpoint,
+                causal_timestamp=timestamp,
+                probability=probability,
+                valid=eligible,
+                invalid_reason=invalid_reason,
+            )
         if previous_episode is not None:
             self._high_tail_episode_timestamps.setdefault(key, []).append(previous_episode)
         self._restored_sessions.add(key)
@@ -225,6 +265,40 @@ class FrozenM1CRecorderEngine:
             and not item.unresolved_bar_gap
             and item.raw_event_storage_writable
         )
+        tail_phase_v1 = self.tail_phase_tracker_v1.evaluate(
+            symbol=item.symbol,
+            session=item.session,
+            checkpoint=checkpoint,
+            causal_timestamp=trigger.bar_complete_timestamp,
+            probability=score.probability,
+            valid=signal_inputs_eligible,
+            invalid_reason=(None if not rejection_reasons else ";".join(rejection_reasons)),
+        )
+        movement_consumed_state_v1 = calculate_movement_consumed_v1(
+            symbol=item.symbol,
+            session=item.session,
+            checkpoint=checkpoint,
+            completed_bars=tuple(
+                MovementConsumedBarV1(
+                    symbol=bar.symbol,
+                    session=bar.session,
+                    bar_ordinal=bar.bar_ordinal,
+                    bar_start_timestamp=bar.bar_start_timestamp,
+                    bar_complete_timestamp=bar.bar_complete_timestamp,
+                    high=bar.high,
+                    low=bar.low,
+                    finalised=bar.finalised,
+                )
+                for bar in item.completed_m1c_bars
+            ),
+            previous_close_implied_movement_15m=(
+                item.group_o_context.previous_close_implied_movement_15m
+            ),
+        )
+        movement_consumed_bucket_v1 = assign_movement_consumed_bucket_v1(
+            movement_consumed_state_v1.movement_consumed_v1,
+            frozen_median=self.movement_consumed_median_v1,
+        )
         checkpoint_id = self.repository.record_checkpoint(
             item.metadata,
             symbol=item.symbol,
@@ -242,6 +316,11 @@ class FrozenM1CRecorderEngine:
             eligible=signal_inputs_eligible,
             feature_freshness=item.feature_freshness,
             rejection_reasons=rejection_reasons,
+            tail_phase_v1=tail_phase_v1,
+            movement_consumed_v1=movement_consumed_state_v1,
+            movement_consumed_bucket_v1=movement_consumed_bucket_v1,
+            movement_consumed_frozen_median_v1=self.movement_consumed_median_v1,
+            tail_phase_activation_status_v1=self.tail_phase_activation_status_v1,
         )
         key = (item.symbol, item.session)
         previous_high_tail_nearby = any(
@@ -387,6 +466,9 @@ class FrozenM1CRecorderEngine:
         return RecorderCheckpointResult(
             checkpoint_id=checkpoint_id,
             score=score,
+            tail_phase_v1=tail_phase_v1,
+            movement_consumed_state_v1=movement_consumed_state_v1,
+            movement_consumed_bucket_v1=movement_consumed_bucket_v1,
             episode_decision=episode,
             quiet_state=quiet_state,
             quiet_episode_decision=quiet_episode,

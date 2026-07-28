@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
-from stocker_prospective.contract import claims_boundary
+from stocker_prospective.contract import M1C_FROZEN_THRESHOLD, claims_boundary
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.direction import DirectionClassification
 from stocker_prospective.direction_features import DirectionFeatureResult
@@ -37,6 +37,15 @@ from stocker_prospective.quiet_state import (
 )
 from stocker_prospective.safety import EpisodeSafetyDecision
 from stocker_prospective.subscriptions import PromotionDecision, SubscriptionRecord
+from stocker_prospective.tail_phase_v1 import (
+    M1C_TAIL_PHASE_V1_VERSION,
+    MOVEMENT_CONSUMED_LOOKBACK_MINUTES_V1,
+    MOVEMENT_CONSUMED_MEDIAN_2024_V1,
+    MovementConsumedBucketV1,
+    MovementConsumedStateV1,
+    TailPhaseStateV1,
+    assign_movement_consumed_bucket_v1,
+)
 
 TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT = frozenset(
     {
@@ -190,10 +199,11 @@ class FrozenRecorderRepository:
                     envelope_id, run_id, symbol, signal_session,
                     required_option_observation_session,
                     actual_option_observation_session, front_expiry, dte,
-                    atm_strike, features_json, missing_indicators_json,
+                    atm_strike, previous_close_implied_movement_15m,
+                    features_json, missing_indicators_json,
                     quality_status, source_receipt_hashes_json, context_hash,
                     claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     envelope_id,
@@ -209,6 +219,7 @@ class FrozenRecorderRepository:
                     None if context.front_expiry is None else context.front_expiry.isoformat(),
                     context.dte,
                     context.atm_strike,
+                    context.previous_close_implied_movement_15m,
                     _json(context.features),
                     _json(context.missing_indicators),
                     context.quality_status,
@@ -357,6 +368,40 @@ class FrozenRecorderRepository:
             ),
             0 if episode is None else int(episode["episode_number"]),
         )
+
+    def session_tail_phase_history(
+        self,
+        *,
+        run_id: str,
+        symbol: str,
+        session: date,
+    ) -> tuple[tuple[int, datetime, float, bool, str | None], ...]:
+        """Return chronological checkpoint inputs needed to restore Tail Phase V1."""
+
+        with self.repository._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT checkpoint, bar_end_utc, probability, eligible,
+                       rejection_reasons_json
+                FROM m1c_checkpoint_v0
+                WHERE run_id = ? AND symbol = ? AND session_date = ?
+                ORDER BY checkpoint
+                """,
+                (run_id, symbol, session.isoformat()),
+            ).fetchall()
+        output: list[tuple[int, datetime, float, bool, str | None]] = []
+        for row in rows:
+            reasons = cast(list[object], json.loads(str(row["rejection_reasons_json"])))
+            output.append(
+                (
+                    int(row["checkpoint"]),
+                    datetime.fromisoformat(str(row["bar_end_utc"])),
+                    float(row["probability"]),
+                    bool(row["eligible"]),
+                    None if not reasons else ";".join(str(value) for value in reasons),
+                )
+            )
+        return tuple(output)
 
     def quiet_session_state(
         self,
@@ -909,14 +954,53 @@ class FrozenRecorderRepository:
         feature_freshness: str,
         rejection_reasons: tuple[str, ...],
         model_version: str = "frozen-m1c-v0",
+        tail_phase_v1: TailPhaseStateV1 | None = None,
+        movement_consumed_v1: MovementConsumedStateV1 | None = None,
+        movement_consumed_bucket_v1: MovementConsumedBucketV1 | None = None,
+        movement_consumed_frozen_median_v1: float | None = None,
+        tail_phase_activation_status_v1: str = "not_configured",
     ) -> int:
         self._validate(metadata)
         if score.threshold_passed != (score.probability >= score.threshold):
             raise ValueError("M1C threshold membership differs")
+        if score.threshold != M1C_FROZEN_THRESHOLD:
+            raise ValueError("M1C threshold differs from the frozen contract")
+        if tail_phase_v1 is not None:
+            if tail_phase_v1.m1c_high_tail_v1 is not score.threshold_passed:
+                raise ValueError("Tail Phase membership differs from frozen M1C")
+            if (score.threshold_passed and tail_phase_v1.m1c_tail_phase_v1 == "OUTSIDE_TAIL") or (
+                not score.threshold_passed
+                and tail_phase_v1.m1c_tail_phase_v1 in {"FIRST_ENTRY", "PERSISTENT", "RE_ENTRY"}
+            ):
+                raise ValueError("Tail Phase state differs from frozen M1C")
+        if (
+            movement_consumed_frozen_median_v1 is not None
+            and movement_consumed_frozen_median_v1 != MOVEMENT_CONSUMED_MEDIAN_2024_V1
+        ):
+            raise ValueError("movement-consumed frozen median differs")
+        if movement_consumed_v1 is not None and movement_consumed_bucket_v1 is not None:
+            expected_bucket = assign_movement_consumed_bucket_v1(
+                movement_consumed_v1.movement_consumed_v1,
+                frozen_median=movement_consumed_frozen_median_v1,
+            )
+            if movement_consumed_bucket_v1 != expected_bucket:
+                raise ValueError("movement-consumed bucket differs from frozen median")
         with self.repository._connect() as connection:
             existing = connection.execute(
                 """
-                SELECT id, feature_hash, probability FROM m1c_checkpoint_v0
+                SELECT id, feature_hash, probability, threshold,
+                       m1c_high_tail_v1, m1c_tail_phase_v1,
+                       tail_entry_number_v1, tail_run_length_checkpoints_v1,
+                       tail_run_age_minutes_v1, prior_tail_entries_v1,
+                       previous_checkpoint_above_tail_v1,
+                       minutes_since_previous_tail_exit_v1,
+                       phase_history_complete_v1, phase_missing_reason_v1,
+                       movement_consumed_v1, movement_consumed_numerator_v1,
+                       movement_consumed_denominator_v1,
+                       movement_consumed_complete_v1,
+                       movement_consumed_missing_reason_v1,
+                       movement_consumed_bucket_v1, tail_phase_source_v1_json
+                FROM m1c_checkpoint_v0
                 WHERE run_id = ? AND symbol = ? AND session_date = ? AND checkpoint = ?
                 """,
                 (metadata.run_id, symbol, session.isoformat(), checkpoint),
@@ -925,8 +1009,72 @@ class FrozenRecorderRepository:
                 if (
                     str(existing["feature_hash"]) != score.feature_hash
                     or float(existing["probability"]) != score.probability
+                    or float(existing["threshold"]) != score.threshold
                 ):
                     raise ValueError("immutable M1C checkpoint differs")
+                if tail_phase_v1 is not None:
+                    persisted_phase = {
+                        "m1c_high_tail_v1": (
+                            None
+                            if existing["m1c_high_tail_v1"] is None
+                            else bool(existing["m1c_high_tail_v1"])
+                        ),
+                        "m1c_tail_phase_v1": existing["m1c_tail_phase_v1"],
+                        "tail_entry_number_v1": existing["tail_entry_number_v1"],
+                        "tail_run_length_checkpoints_v1": existing[
+                            "tail_run_length_checkpoints_v1"
+                        ],
+                        "tail_run_age_minutes_v1": existing["tail_run_age_minutes_v1"],
+                        "prior_tail_entries_v1": existing["prior_tail_entries_v1"],
+                        "previous_checkpoint_above_tail_v1": (
+                            None
+                            if existing["previous_checkpoint_above_tail_v1"] is None
+                            else bool(existing["previous_checkpoint_above_tail_v1"])
+                        ),
+                        "minutes_since_previous_tail_exit_v1": existing[
+                            "minutes_since_previous_tail_exit_v1"
+                        ],
+                        "phase_history_complete_v1": bool(existing["phase_history_complete_v1"]),
+                        "phase_missing_reason_v1": existing["phase_missing_reason_v1"],
+                    }
+                    if persisted_phase != tail_phase_v1.model_dump(mode="python"):
+                        raise ValueError("immutable Tail Phase checkpoint differs")
+                    source = json.loads(str(existing["tail_phase_source_v1_json"]))
+                    if (
+                        source.get("tail_phase_activation_status_v1")
+                        != tail_phase_activation_status_v1
+                    ):
+                        raise ValueError("immutable Tail Phase activation differs")
+                if movement_consumed_v1 is not None:
+                    persisted_consumed = {
+                        "movement_consumed_v1": existing["movement_consumed_v1"],
+                        "movement_consumed_numerator_v1": existing[
+                            "movement_consumed_numerator_v1"
+                        ],
+                        "movement_consumed_denominator_v1": existing[
+                            "movement_consumed_denominator_v1"
+                        ],
+                        "movement_consumed_complete_v1": bool(
+                            existing["movement_consumed_complete_v1"]
+                        ),
+                        "movement_consumed_missing_reason_v1": existing[
+                            "movement_consumed_missing_reason_v1"
+                        ],
+                    }
+                    if persisted_consumed != movement_consumed_v1.model_dump(mode="python"):
+                        raise ValueError("immutable movement-consumed checkpoint differs")
+                if (
+                    movement_consumed_bucket_v1 is not None
+                    and existing["movement_consumed_bucket_v1"] != movement_consumed_bucket_v1
+                ):
+                    raise ValueError("immutable movement-consumed bucket differs")
+                if movement_consumed_frozen_median_v1 is not None:
+                    source = json.loads(str(existing["tail_phase_source_v1_json"]))
+                    if (
+                        source.get("movement_consumed_frozen_median_v1")
+                        != movement_consumed_frozen_median_v1
+                    ):
+                        raise ValueError("immutable Tail Phase source differs")
                 return int(existing["id"])
             envelope_id = self.repository._insert_envelope(connection, metadata)
             cursor = connection.execute(
@@ -973,7 +1121,113 @@ class FrozenRecorderRepository:
                 ),
             )
             assert cursor.lastrowid is not None
-            return int(cursor.lastrowid)
+            checkpoint_id = int(cursor.lastrowid)
+            if (
+                tail_phase_v1 is not None
+                or movement_consumed_v1 is not None
+                or movement_consumed_bucket_v1 is not None
+            ):
+                phase = (
+                    TailPhaseStateV1(
+                        m1c_high_tail_v1=None,
+                        m1c_tail_phase_v1="UNKNOWN_INCOMPLETE",
+                        tail_entry_number_v1=None,
+                        tail_run_length_checkpoints_v1=None,
+                        tail_run_age_minutes_v1=None,
+                        prior_tail_entries_v1=None,
+                        previous_checkpoint_above_tail_v1=None,
+                        minutes_since_previous_tail_exit_v1=None,
+                        phase_history_complete_v1=False,
+                        phase_missing_reason_v1="tail_phase_not_supplied",
+                    )
+                    if tail_phase_v1 is None
+                    else tail_phase_v1
+                )
+                consumed = (
+                    MovementConsumedStateV1(
+                        movement_consumed_v1=None,
+                        movement_consumed_numerator_v1=None,
+                        movement_consumed_denominator_v1=None,
+                        movement_consumed_complete_v1=False,
+                        movement_consumed_missing_reason_v1=("movement_consumed_not_supplied"),
+                    )
+                    if movement_consumed_v1 is None
+                    else movement_consumed_v1
+                )
+                bucket: MovementConsumedBucketV1 = (
+                    "UNKNOWN_INCOMPLETE"
+                    if movement_consumed_bucket_v1 is None
+                    else movement_consumed_bucket_v1
+                )
+                source = {
+                    "schema_version": M1C_TAIL_PHASE_V1_VERSION,
+                    "m1c_threshold": score.threshold,
+                    "movement_consumed_lookback_minutes": (MOVEMENT_CONSUMED_LOOKBACK_MINUTES_V1),
+                    "movement_consumed_frozen_median_v1": (movement_consumed_frozen_median_v1),
+                    "tail_phase_activation_status_v1": (tail_phase_activation_status_v1),
+                    "previous_close_implied_movement_15m_status": (
+                        "available"
+                        if consumed.movement_consumed_denominator_v1 is not None
+                        else consumed.movement_consumed_missing_reason_v1
+                    ),
+                    "movement_consumed_median_provenance": {
+                        "start": "2024-01-01",
+                        "end": "2024-12-31",
+                        "predictor_values_only": True,
+                    },
+                    "stock_local": True,
+                    "peer_normalisation_used": False,
+                    "causal_timestamp": bar_end_utc.astimezone(UTC).isoformat(),
+                    "recorder_configuration_hash": self.configuration_hash,
+                }
+                connection.execute(
+                    """
+                    UPDATE m1c_checkpoint_v0
+                    SET m1c_high_tail_v1 = ?,
+                        m1c_tail_phase_v1 = ?,
+                        tail_entry_number_v1 = ?,
+                        tail_run_length_checkpoints_v1 = ?,
+                        tail_run_age_minutes_v1 = ?,
+                        prior_tail_entries_v1 = ?,
+                        previous_checkpoint_above_tail_v1 = ?,
+                        minutes_since_previous_tail_exit_v1 = ?,
+                        phase_history_complete_v1 = ?,
+                        phase_missing_reason_v1 = ?,
+                        movement_consumed_v1 = ?,
+                        movement_consumed_numerator_v1 = ?,
+                        movement_consumed_denominator_v1 = ?,
+                        movement_consumed_complete_v1 = ?,
+                        movement_consumed_missing_reason_v1 = ?,
+                        movement_consumed_bucket_v1 = ?,
+                        tail_phase_source_v1_json = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        (None if phase.m1c_high_tail_v1 is None else int(phase.m1c_high_tail_v1)),
+                        phase.m1c_tail_phase_v1,
+                        phase.tail_entry_number_v1,
+                        phase.tail_run_length_checkpoints_v1,
+                        phase.tail_run_age_minutes_v1,
+                        phase.prior_tail_entries_v1,
+                        (
+                            None
+                            if phase.previous_checkpoint_above_tail_v1 is None
+                            else int(phase.previous_checkpoint_above_tail_v1)
+                        ),
+                        phase.minutes_since_previous_tail_exit_v1,
+                        int(phase.phase_history_complete_v1),
+                        phase.phase_missing_reason_v1,
+                        consumed.movement_consumed_v1,
+                        consumed.movement_consumed_numerator_v1,
+                        consumed.movement_consumed_denominator_v1,
+                        int(consumed.movement_consumed_complete_v1),
+                        consumed.movement_consumed_missing_reason_v1,
+                        bucket,
+                        _json(source),
+                        checkpoint_id,
+                    ),
+                )
+            return checkpoint_id
 
     def record_episode(
         self,
@@ -994,6 +1248,28 @@ class FrozenRecorderRepository:
             ).fetchone()
             if existing is not None:
                 return str(existing["episode_id"])
+            checkpoint = connection.execute(
+                """
+                SELECT model_version, threshold, probability,
+                       m1c_tail_phase_v1, tail_entry_number_v1,
+                       tail_run_length_checkpoints_v1, tail_run_age_minutes_v1,
+                       prior_tail_entries_v1, previous_checkpoint_above_tail_v1,
+                       minutes_since_previous_tail_exit_v1,
+                       phase_history_complete_v1, phase_missing_reason_v1,
+                       movement_consumed_v1, movement_consumed_numerator_v1,
+                       movement_consumed_denominator_v1,
+                       movement_consumed_complete_v1,
+                       movement_consumed_missing_reason_v1,
+                       movement_consumed_bucket_v1, tail_phase_source_v1_json
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if checkpoint is None:
+                raise KeyError(checkpoint_id)
+            if float(checkpoint["probability"]) != decision.probability:
+                raise ValueError("episode M1C probability differs from checkpoint")
             envelope_id = self.repository._insert_envelope(connection, metadata)
             connection.execute(
                 """
@@ -1025,6 +1301,51 @@ class FrozenRecorderRepository:
                     int(safety.scientific_recording_valid),
                     _json(safety.rejection_reasons),
                     self.claims_json,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE m1c_episode_v0
+                SET m1c_model_version_v1 = ?,
+                    m1c_high_tail_threshold_v1 = ?,
+                    phase_at_trigger_v1 = ?,
+                    tail_entry_number_v1 = ?,
+                    tail_run_length_checkpoints_v1 = ?,
+                    tail_run_age_at_trigger_v1 = ?,
+                    prior_tail_entries_v1 = ?,
+                    previous_checkpoint_above_tail_v1 = ?,
+                    minutes_since_previous_tail_exit_v1 = ?,
+                    phase_history_complete_v1 = ?,
+                    phase_missing_reason_v1 = ?,
+                    movement_consumed_at_trigger_v1 = ?,
+                    movement_consumed_numerator_v1 = ?,
+                    movement_consumed_denominator_v1 = ?,
+                    movement_consumed_complete_v1 = ?,
+                    movement_consumed_missing_reason_v1 = ?,
+                    movement_consumed_bucket_v1 = ?,
+                    tail_phase_source_v1_json = ?
+                WHERE episode_id = ?
+                """,
+                (
+                    str(checkpoint["model_version"]),
+                    float(checkpoint["threshold"]),
+                    checkpoint["m1c_tail_phase_v1"],
+                    checkpoint["tail_entry_number_v1"],
+                    checkpoint["tail_run_length_checkpoints_v1"],
+                    checkpoint["tail_run_age_minutes_v1"],
+                    checkpoint["prior_tail_entries_v1"],
+                    checkpoint["previous_checkpoint_above_tail_v1"],
+                    checkpoint["minutes_since_previous_tail_exit_v1"],
+                    checkpoint["phase_history_complete_v1"],
+                    checkpoint["phase_missing_reason_v1"],
+                    checkpoint["movement_consumed_v1"],
+                    checkpoint["movement_consumed_numerator_v1"],
+                    checkpoint["movement_consumed_denominator_v1"],
+                    checkpoint["movement_consumed_complete_v1"],
+                    checkpoint["movement_consumed_missing_reason_v1"],
+                    checkpoint["movement_consumed_bucket_v1"],
+                    checkpoint["tail_phase_source_v1_json"],
+                    decision.episode_id,
                 ),
             )
         return decision.episode_id

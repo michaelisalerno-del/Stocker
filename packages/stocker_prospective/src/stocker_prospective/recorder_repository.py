@@ -22,6 +22,12 @@ from stocker_prospective.events import (
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import FrozenGroupOContext
 from stocker_prospective.microstructure import MicrostructureWindowSummary
+from stocker_prospective.opening_market_transition_v1 import (
+    OpeningMarketTransitionStateResultV1,
+    OpeningPreEntryWindowV1,
+    OpeningTransitionThresholdsV1,
+    StockOpeningResponseResultV1,
+)
 from stocker_prospective.option_budget import EpisodeAllocationRecord
 from stocker_prospective.option_ledger import (
     OptionContract,
@@ -78,6 +84,32 @@ SIGNED_MARKET_SHOCK_COLUMNS_V1: Final[tuple[str, ...]] = (
     "shock_response_complete_v1",
     "market_shock_missing_reasons_v1_json",
     "shock_response_missing_reasons_v1_json",
+)
+OPENING_MARKET_TRANSITION_COLUMNS_V1: Final[tuple[str, ...]] = (
+    "opening_market_proxy_v1",
+    "vti_session_open_v1",
+    "vti_prior_regular_session_close_v1",
+    "opening_expected_bar_count_v1",
+    "opening_observed_bar_count_v1",
+    "market_opening_return_v1",
+    "market_opening_range_v1",
+    "market_overnight_gap_v1",
+    "market_total_transition_v1",
+    "market_gap_open_alignment_v1",
+    "opening_thresholds_v1_json",
+    "opening_market_transition_state_v1",
+    "opening_transition_sign_v1",
+    "opening_transition_event_id_v1",
+    "stock_opening_return_v1",
+    "stock_opening_range_v1",
+    "stock_opening_alignment_v1",
+    "stock_relative_opening_response_v1",
+    "stock_opening_response_class_v1",
+    "stock_opening_resisting_subtype_v1",
+    "opening_market_complete_v1",
+    "stock_opening_response_complete_v1",
+    "opening_market_missing_reasons_v1_json",
+    "stock_opening_response_missing_reasons_v1_json",
 )
 
 
@@ -151,6 +183,86 @@ def _signed_market_shock_values_v1(
     }
     if tuple(values) != SIGNED_MARKET_SHOCK_COLUMNS_V1:
         raise AssertionError("signed market-shock persistence column order drifted")
+    return values
+
+
+def _opening_market_transition_values_v1(
+    *,
+    opening_window_v1: OpeningPreEntryWindowV1,
+    opening_transition_state_v1: OpeningMarketTransitionStateResultV1,
+    stock_opening_response_v1: StockOpeningResponseResultV1,
+    opening_thresholds_v1: OpeningTransitionThresholdsV1 | None,
+) -> dict[str, object]:
+    """Serialise opening-transition logging once for insert and retry checks."""
+
+    values: dict[str, object] = {
+        "opening_market_proxy_v1": opening_window_v1.market_proxy_v1,
+        "vti_session_open_v1": opening_window_v1.market_session_open_v1,
+        "vti_prior_regular_session_close_v1": (
+            opening_window_v1.market_prior_regular_session_close_v1
+        ),
+        "opening_expected_bar_count_v1": (
+            opening_window_v1.expected_opening_bar_count_v1
+        ),
+        "opening_observed_bar_count_v1": (
+            opening_window_v1.observed_opening_bar_count_v1
+        ),
+        "market_opening_return_v1": opening_window_v1.market_opening_return_v1,
+        "market_opening_range_v1": opening_window_v1.market_opening_range_v1,
+        "market_overnight_gap_v1": opening_window_v1.market_overnight_gap_v1,
+        "market_total_transition_v1": (
+            opening_window_v1.market_total_transition_v1
+        ),
+        "market_gap_open_alignment_v1": (
+            opening_window_v1.market_gap_open_alignment_v1
+        ),
+        "opening_thresholds_v1_json": (
+            None
+            if opening_thresholds_v1 is None
+            else _json(opening_thresholds_v1)
+        ),
+        "opening_market_transition_state_v1": (
+            opening_transition_state_v1.opening_market_transition_state_v1
+        ),
+        "opening_transition_sign_v1": (
+            opening_transition_state_v1.opening_transition_sign_v1
+        ),
+        "opening_transition_event_id_v1": (
+            opening_transition_state_v1.opening_transition_event_id_v1
+        ),
+        "stock_opening_return_v1": (
+            stock_opening_response_v1.stock_opening_return_v1
+        ),
+        "stock_opening_range_v1": (
+            stock_opening_response_v1.stock_opening_range_v1
+        ),
+        "stock_opening_alignment_v1": (
+            stock_opening_response_v1.stock_opening_alignment_v1
+        ),
+        "stock_relative_opening_response_v1": (
+            stock_opening_response_v1.stock_relative_opening_response_v1
+        ),
+        "stock_opening_response_class_v1": (
+            stock_opening_response_v1.stock_opening_response_class_v1
+        ),
+        "stock_opening_resisting_subtype_v1": (
+            stock_opening_response_v1.resisting_subtype_v1
+        ),
+        "opening_market_complete_v1": int(
+            opening_transition_state_v1.complete_v1
+        ),
+        "stock_opening_response_complete_v1": int(
+            stock_opening_response_v1.complete_v1
+        ),
+        "opening_market_missing_reasons_v1_json": _json(
+            opening_transition_state_v1.missing_reasons_v1
+        ),
+        "stock_opening_response_missing_reasons_v1_json": _json(
+            stock_opening_response_v1.missing_reasons_v1
+        ),
+    }
+    if tuple(values) != OPENING_MARKET_TRANSITION_COLUMNS_V1:
+        raise AssertionError("opening-transition persistence column order drifted")
     return values
 
 
@@ -1435,6 +1547,179 @@ class FrozenRecorderRepository:
                     *(
                         expected[column]
                         for column in SIGNED_MARKET_SHOCK_COLUMNS_V1
+                    ),
+                    source_json,
+                    checkpoint_id,
+                ),
+            )
+
+    def record_opening_market_transition_checkpoint_v1(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        checkpoint_id: int,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        opening_window_v1: OpeningPreEntryWindowV1,
+        opening_transition_state_v1: OpeningMarketTransitionStateResultV1,
+        stock_opening_response_v1: StockOpeningResponseResultV1,
+        opening_thresholds_v1: OpeningTransitionThresholdsV1 | None,
+        activation_status_v1: str,
+    ) -> None:
+        """Attach optional opening evidence after core episode promotion."""
+
+        self._validate(metadata)
+        expected = _opening_market_transition_values_v1(
+            opening_window_v1=opening_window_v1,
+            opening_transition_state_v1=opening_transition_state_v1,
+            stock_opening_response_v1=stock_opening_response_v1,
+            opening_thresholds_v1=opening_thresholds_v1,
+        )
+        source = {
+            "schema_version": "m1c-opening-market-transition-v1",
+            "activation_status_v1": activation_status_v1,
+            "threshold_configuration": (
+                None
+                if opening_thresholds_v1 is None
+                else opening_thresholds_v1.model_dump(mode="json")
+            ),
+            "previous_session_v1": opening_window_v1.previous_session_v1,
+            "session_open_timestamp_v1": (
+                opening_window_v1.session_open_timestamp_v1
+            ),
+            "signal_timestamp_v1": opening_window_v1.signal_timestamp_v1,
+            "entry_timestamp_v1": opening_window_v1.entry_timestamp_v1,
+            "opening_bar_ordinals_v1": (
+                opening_window_v1.opening_bar_ordinals_v1
+            ),
+            "expected_opening_bar_count_v1": (
+                opening_window_v1.expected_opening_bar_count_v1
+            ),
+            "observed_opening_bar_count_v1": (
+                opening_window_v1.observed_opening_bar_count_v1
+            ),
+            "entry_bar_included_v1": (
+                opening_window_v1.entry_bar_included_v1
+            ),
+            "maximum_market_timestamp_v1": (
+                opening_window_v1.maximum_market_timestamp_v1
+            ),
+            "maximum_stock_timestamp_v1": (
+                stock_opening_response_v1.maximum_stock_timestamp_v1
+            ),
+            "recorder_configuration_hash": self.configuration_hash,
+            "logging_only": True,
+            "m1c_scoring_changed": False,
+            "episode_promotion_changed": False,
+            "recorder_priority_changed": False,
+            "subscription_allocation_changed": False,
+            "option_contract_selection_changed": False,
+            "direction_decision_changed": False,
+            "episode_inclusion_changed": False,
+            "recorder_capacity_changed": False,
+            "order_routing_changed": False,
+        }
+        source_json = _json(source)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT run_id, symbol, session_date, checkpoint,
+                       opening_market_proxy_v1,
+                       vti_session_open_v1,
+                       vti_prior_regular_session_close_v1,
+                       opening_expected_bar_count_v1,
+                       opening_observed_bar_count_v1,
+                       market_opening_return_v1,
+                       market_opening_range_v1,
+                       market_overnight_gap_v1,
+                       market_total_transition_v1,
+                       market_gap_open_alignment_v1,
+                       opening_thresholds_v1_json,
+                       opening_market_transition_state_v1,
+                       opening_transition_sign_v1,
+                       opening_transition_event_id_v1,
+                       stock_opening_return_v1,
+                       stock_opening_range_v1,
+                       stock_opening_alignment_v1,
+                       stock_relative_opening_response_v1,
+                       stock_opening_response_class_v1,
+                       stock_opening_resisting_subtype_v1,
+                       opening_market_complete_v1,
+                       stock_opening_response_complete_v1,
+                       opening_market_missing_reasons_v1_json,
+                       stock_opening_response_missing_reasons_v1_json,
+                       opening_market_transition_source_v1_json
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if existing is None:
+                raise ValueError("opening-transition checkpoint does not exist")
+            if (
+                str(existing["run_id"]) != metadata.run_id
+                or str(existing["symbol"]) != symbol
+                or str(existing["session_date"]) != session.isoformat()
+                or int(existing["checkpoint"]) != checkpoint
+                or opening_window_v1.session != session
+                or opening_window_v1.checkpoint_v1 != checkpoint
+            ):
+                raise ValueError("opening-transition checkpoint identity differs")
+            if (
+                existing["opening_market_transition_source_v1_json"]
+                is not None
+            ):
+                _assert_immutable_observation(
+                    existing,
+                    expected={
+                        **expected,
+                        "opening_market_transition_source_v1_json": source_json,
+                    },
+                    label="opening market-transition checkpoint",
+                )
+                return
+            if any(
+                existing[column] is not None
+                for column in OPENING_MARKET_TRANSITION_COLUMNS_V1
+            ):
+                raise ValueError(
+                    "opening market-transition checkpoint is partially populated"
+                )
+            connection.execute(
+                """
+                UPDATE m1c_checkpoint_v0
+                SET opening_market_proxy_v1 = ?,
+                    vti_session_open_v1 = ?,
+                    vti_prior_regular_session_close_v1 = ?,
+                    opening_expected_bar_count_v1 = ?,
+                    opening_observed_bar_count_v1 = ?,
+                    market_opening_return_v1 = ?,
+                    market_opening_range_v1 = ?,
+                    market_overnight_gap_v1 = ?,
+                    market_total_transition_v1 = ?,
+                    market_gap_open_alignment_v1 = ?,
+                    opening_thresholds_v1_json = ?,
+                    opening_market_transition_state_v1 = ?,
+                    opening_transition_sign_v1 = ?,
+                    opening_transition_event_id_v1 = ?,
+                    stock_opening_return_v1 = ?,
+                    stock_opening_range_v1 = ?,
+                    stock_opening_alignment_v1 = ?,
+                    stock_relative_opening_response_v1 = ?,
+                    stock_opening_response_class_v1 = ?,
+                    stock_opening_resisting_subtype_v1 = ?,
+                    opening_market_complete_v1 = ?,
+                    stock_opening_response_complete_v1 = ?,
+                    opening_market_missing_reasons_v1_json = ?,
+                    stock_opening_response_missing_reasons_v1_json = ?,
+                    opening_market_transition_source_v1_json = ?
+                WHERE id = ?
+                """,
+                (
+                    *(
+                        expected[column]
+                        for column in OPENING_MARKET_TRANSITION_COLUMNS_V1
                     ),
                     source_json,
                     checkpoint_id,

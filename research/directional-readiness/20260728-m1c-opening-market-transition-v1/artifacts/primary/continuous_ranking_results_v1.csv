@@ -1,0 +1,3 @@
+period,material_episode_count,session_count,transition_event_count,roc_auc_followed_opening_transition_v1,spearman_stock_relative_response_vs_market_follow_return,spearman_p_value_descriptive,probability_model_fitted,score_calibrated,session_cluster_auc_lower_95,session_cluster_auc_upper_95,event_cluster_auc_lower_95,event_cluster_auc_upper_95
+assessment,66,34,34,0.3599624060150376,-0.16404725456768027,0.06217899048310093,False,False,0.2034579241896315,0.5384615384615384,0.2071382783882784,0.5335927960927959
+stress,57,13,13,0.35106382978723405,-0.32768782760629,0.0008225502016269076,False,False,0.13991452991452996,0.5728749451032055,0.1505221151216844,0.5603902867965364

@@ -1,0 +1,89 @@
+{
+  "alternative_placebo_designs_tested": false,
+  "holm_adjusted_response_mechanism_p_values": {
+    "amplification_continuation": 0.8031968031968032,
+    "resistance_reversal": 0.6313686313686314
+  },
+  "null_design_selected_after_outcomes": false,
+  "observed_assessment_null_p_values": {
+    "amplification_continuation": 0.8031968031968032,
+    "market_following": 0.8411588411588412,
+    "resistance_reversal": 0.3156843156843157
+  },
+  "primary_null": {
+    "assessment": {
+      "draw_count": 1000,
+      "preserved_fields": [
+        "stock",
+        "checkpoint_6",
+        "period",
+        "outcome_completeness"
+      ],
+      "same_session_reassignment_allowed": false,
+      "seed": 2026072808
+    },
+    "stress": {
+      "draw_count": 1000,
+      "preserved_fields": [
+        "stock",
+        "checkpoint_6",
+        "period",
+        "outcome_completeness"
+      ],
+      "same_session_reassignment_allowed": false,
+      "seed": 2026072808
+    }
+  },
+  "temporal_placebo": {
+    "assessment": {
+      "chronology_crossed": false,
+      "pair_count": 336,
+      "period": "assessment",
+      "protected_boundary_crossed": false,
+      "same_checkpoint": true,
+      "same_period": true,
+      "same_stock": true,
+      "source_episode_count": 356,
+      "statistics": {
+        "amplification_accuracy_including_no_move": 0.24675324675324675,
+        "amplification_material_direction_accuracy": 0.4418604651162791,
+        "amplification_mean_aligned_return": -0.0008158144064303169,
+        "amplifying_minus_resisting_follow_rate": 0.06686046511627908,
+        "continuous_ranking_auc": 0.5787545787545787,
+        "market_follow_accuracy_including_no_move": 0.22764227642276422,
+        "market_follow_material_direction_accuracy": 0.417910447761194,
+        "market_follow_mean_aligned_return": -0.0015155926561428279,
+        "resistance_accuracy_including_no_move": 0.32608695652173914,
+        "resistance_material_direction_accuracy": 0.625,
+        "resistance_mean_aligned_return": 0.0026869605958789876,
+        "severe_minus_normal_accuracy_including_no_move": -0.05440900562851783,
+        "severe_minus_normal_mean_market_aligned_return": -0.0035816777322874227
+      }
+    },
+    "stress": {
+      "chronology_crossed": false,
+      "pair_count": 417,
+      "period": "stress",
+      "protected_boundary_crossed": false,
+      "same_checkpoint": true,
+      "same_period": true,
+      "same_stock": true,
+      "source_episode_count": 437,
+      "statistics": {
+        "amplification_accuracy_including_no_move": 0.19117647058823528,
+        "amplification_material_direction_accuracy": 0.38235294117647056,
+        "amplification_mean_aligned_return": -0.0027089736341101797,
+        "amplifying_minus_resisting_follow_rate": -0.1470588235294118,
+        "continuous_ranking_auc": 0.42946708463949845,
+        "market_follow_accuracy_including_no_move": 0.2222222222222222,
+        "market_follow_material_direction_accuracy": 0.43137254901960786,
+        "market_follow_mean_aligned_return": -0.0014515998001699741,
+        "resistance_accuracy_including_no_move": 0.25806451612903225,
+        "resistance_material_direction_accuracy": 0.47058823529411764,
+        "resistance_mean_aligned_return": -0.001306510545247252,
+        "severe_minus_normal_accuracy_including_no_move": -0.08977777777777779,
+        "severe_minus_normal_mean_market_aligned_return": -0.003399837377401884
+      }
+    }
+  }
+}

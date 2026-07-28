@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict
 
+from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.database import EvidenceMetadata
 from stocker_prospective.direction_features import DirectionFeatureBar
 from stocker_prospective.event_ingest import (
@@ -36,6 +37,7 @@ from stocker_prospective.live_bars import (
     AuditedLiveBar,
     HistoricalBarUpdate,
     KeepUpToDateBarFinalizer,
+    xnys_session_bounds,
 )
 from stocker_prospective.m1c_features import (
     FROZEN_CHECKPOINTS,
@@ -840,6 +842,31 @@ class FrozenM1CLiveRecorder:
             if (bar := bars.get(expected)) is not None
         )
 
+    def _market_opening_reference_v1(
+        self,
+        *,
+        session: date,
+    ) -> tuple[date | None, float | None]:
+        """Use only an already-retained final prior-session VTI close."""
+
+        try:
+            previous_session = previous_xnys_session(session)
+            _, previous_close_timestamp = xnys_session_bounds(previous_session)
+        except (RuntimeError, ValueError):
+            return None, None
+        bars = self._bars.get((self.market_proxy_symbol, previous_session), {})
+        completed = [
+            bar
+            for bar in bars.values()
+            if bar.finalised and bar.close > 0.0
+        ]
+        if not completed:
+            return previous_session, None
+        final = max(completed, key=lambda bar: bar.bar_end_utc)
+        if final.bar_end_utc != previous_close_timestamp:
+            return previous_session, None
+        return previous_session, float(final.close)
+
     def _score_ready(self) -> tuple[RecorderCheckpointResult, ...]:
         if not self._scientific_scoring_enabled:
             return ()
@@ -888,6 +915,10 @@ class FrozenM1CLiveRecorder:
                             ),
                         )
                         self.repository.record_group_o_context(metadata, context)
+                        (
+                            market_previous_session_v1,
+                            market_prior_regular_session_close_v1,
+                        ) = self._market_opening_reference_v1(session=session)
                         result = self.engine.process_checkpoint(
                             RecorderCheckpointInput(
                                 metadata=metadata,
@@ -927,6 +958,12 @@ class FrozenM1CLiveRecorder:
                                         session=session,
                                         checkpoint=checkpoint,
                                     )
+                                ),
+                                market_previous_session_v1=(
+                                    market_previous_session_v1
+                                ),
+                                market_prior_regular_session_close_v1=(
+                                    market_prior_regular_session_close_v1
                                 ),
                             )
                         )

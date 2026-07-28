@@ -38,6 +38,7 @@ class PathsConfig(BaseModel):
     m1c_scaling_artifact: Path | None = None
     m1c_tail_phase_v1_config: Path | None = None
     m1c_signed_market_shock_v1_config: Path | None = None
+    m1c_opening_market_transition_v1_config: Path | None = None
     direction_beta_artifact: Path | None = None
     historical_activity_bars: Path | None = None
     bar_compatibility_report: Path | None = None

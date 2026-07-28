@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict
 
@@ -22,6 +22,17 @@ from stocker_prospective.frozen_m1c import (
 from stocker_prospective.group_o import FrozenGroupOContext
 from stocker_prospective.m1c_features import LiveFeatureBar, M1CCausalFeatureBuilder
 from stocker_prospective.market_data import MarketDataType
+from stocker_prospective.opening_market_transition_v1 import (
+    EXPECTED_OPENING_BAR_COUNT_V1,
+    OPENING_MARKET_PROXY_V1,
+    OpeningMarketTransitionStateResultV1,
+    OpeningPreEntryWindowV1,
+    OpeningTransitionThresholdsV1,
+    StockOpeningResponseResultV1,
+    calculate_opening_preentry_window_v1,
+    calculate_stock_opening_response_v1,
+    classify_opening_market_transition_v1,
+)
 from stocker_prospective.quiet_state import (
     NeutralControlDecision,
     NeutralControlSampler,
@@ -107,6 +118,73 @@ def _unknown_signed_market_shock_logging_v1(
     return windows, state, response
 
 
+def _unknown_opening_market_transition_logging_v1(
+    *,
+    session: date,
+    previous_session: date | None,
+    signal_timestamp: datetime,
+    reason: str,
+) -> tuple[
+    OpeningPreEntryWindowV1,
+    OpeningMarketTransitionStateResultV1,
+    StockOpeningResponseResultV1,
+]:
+    """Represent optional opening logging failure without changing core flow."""
+
+    session_open = signal_timestamp - timedelta(minutes=30)
+    window = OpeningPreEntryWindowV1(
+        market_proxy_v1=OPENING_MARKET_PROXY_V1,
+        session=session,
+        previous_session_v1=(
+            session if previous_session is None else previous_session
+        ),
+        checkpoint_v1=6,
+        session_open_timestamp_v1=session_open,
+        signal_timestamp_v1=signal_timestamp,
+        entry_timestamp_v1=signal_timestamp,
+        opening_bar_ordinals_v1=tuple(
+            range(EXPECTED_OPENING_BAR_COUNT_V1)
+        ),
+        expected_opening_bar_count_v1=EXPECTED_OPENING_BAR_COUNT_V1,
+        observed_opening_bar_count_v1=0,
+        final_complete_pre_entry_bar_start_v1=None,
+        entry_bar_ordinal_v1=EXPECTED_OPENING_BAR_COUNT_V1,
+        entry_bar_included_v1=False,
+        market_session_open_v1=None,
+        market_prior_regular_session_close_v1=None,
+        market_last_complete_pre_entry_close_v1=None,
+        market_opening_return_v1=None,
+        market_opening_range_v1=None,
+        market_overnight_gap_v1=None,
+        market_total_transition_v1=None,
+        market_gap_open_alignment_v1="UNKNOWN_INCOMPLETE",
+        maximum_market_timestamp_v1=None,
+        complete_v1=False,
+        missing_reasons_v1=(reason,),
+    )
+    state = OpeningMarketTransitionStateResultV1(
+        opening_market_transition_state_v1="UNKNOWN_INCOMPLETE",
+        opening_transition_sign_v1=None,
+        opening_transition_event_id_v1=None,
+        complete_v1=False,
+        missing_reasons_v1=(reason,),
+    )
+    response = StockOpeningResponseResultV1(
+        stock_opening_return_v1=None,
+        stock_opening_range_v1=None,
+        stock_opening_alignment_v1=None,
+        stock_relative_opening_response_v1=None,
+        stock_opening_response_class_v1="UNKNOWN_INCOMPLETE",
+        resisting_subtype_v1=None,
+        expected_opening_bar_count_v1=EXPECTED_OPENING_BAR_COUNT_V1,
+        observed_opening_bar_count_v1=0,
+        maximum_stock_timestamp_v1=None,
+        complete_v1=False,
+        missing_reasons_v1=(reason,),
+    )
+    return window, state, response
+
+
 @dataclass(frozen=True)
 class RecorderCheckpointInput:
     metadata: EvidenceMetadata
@@ -125,6 +203,8 @@ class RecorderCheckpointInput:
     raw_event_storage_writable: bool
     feature_freshness: str = "fresh"
     completed_market_shock_bars_v1: tuple[MarketShockBarV1, ...] = ()
+    market_previous_session_v1: date | None = None
+    market_prior_regular_session_close_v1: float | None = None
 
 
 class RecorderCheckpointResult(BaseModel):
@@ -140,6 +220,9 @@ class RecorderCheckpointResult(BaseModel):
     market_windows_v1: PreentryMarketWindowsV1
     market_shock_state_v1: MarketShockStateResultV1
     stock_shock_response_v1: StockShockResponseResultV1
+    opening_window_v1: OpeningPreEntryWindowV1
+    opening_transition_state_v1: OpeningMarketTransitionStateResultV1
+    stock_opening_response_v1: StockOpeningResponseResultV1
     episode_decision: EpisodeDecision
     quiet_state: QuietStateSnapshot
     quiet_episode_decision: QuietEpisodeDecision
@@ -174,6 +257,10 @@ class FrozenM1CRecorderEngine:
             SignedMarketShockThresholdManifestV1 | None
         ) = None,
         signed_market_shock_activation_status_v1: str = "not_configured",
+        opening_transition_thresholds_v1: (
+            OpeningTransitionThresholdsV1 | None
+        ) = None,
+        opening_transition_activation_status_v1: str = "not_configured",
     ) -> None:
         self.m1c_runtime = m1c_runtime
         self.m1c_features = m1c_features
@@ -193,6 +280,12 @@ class FrozenM1CRecorderEngine:
         self.signed_market_shock_thresholds_v1 = signed_market_shock_thresholds_v1
         self.signed_market_shock_activation_status_v1 = (
             signed_market_shock_activation_status_v1
+        )
+        self.opening_transition_thresholds_v1 = (
+            opening_transition_thresholds_v1
+        )
+        self.opening_transition_activation_status_v1 = (
+            opening_transition_activation_status_v1
         )
         self._restored_sessions: set[tuple[str, date]] = set()
         self._high_tail_episode_timestamps: dict[
@@ -272,6 +365,96 @@ class FrozenM1CRecorderEngine:
                 reason=reason,
             )
             return windows, state, response, thresholds
+
+    def _opening_market_transition_logging_v1(
+        self,
+        *,
+        item: RecorderCheckpointInput,
+        checkpoint: int,
+        signal_timestamp: datetime,
+    ) -> tuple[
+        OpeningPreEntryWindowV1,
+        OpeningMarketTransitionStateResultV1,
+        StockOpeningResponseResultV1,
+    ]:
+        """Calculate optional checkpoint-6 opening evidence, failure-contained."""
+
+        if checkpoint != 6:
+            return _unknown_opening_market_transition_logging_v1(
+                session=item.session,
+                previous_session=item.market_previous_session_v1,
+                signal_timestamp=signal_timestamp,
+                reason="opening_transition_not_checkpoint_6",
+            )
+        try:
+            market_bars = item.completed_market_shock_bars_v1
+            session_open = next(
+                (
+                    bar.bar_start_timestamp
+                    for bar in market_bars
+                    if bar.symbol == OPENING_MARKET_PROXY_V1
+                    and bar.session == item.session
+                    and bar.bar_ordinal == 0
+                ),
+                signal_timestamp - timedelta(minutes=30),
+            )
+            window = calculate_opening_preentry_window_v1(
+                market_proxy=OPENING_MARKET_PROXY_V1,
+                session=item.session,
+                previous_session=(
+                    item.session
+                    if item.market_previous_session_v1 is None
+                    else item.market_previous_session_v1
+                ),
+                session_open_timestamp=session_open,
+                signal_timestamp=signal_timestamp,
+                entry_timestamp=signal_timestamp,
+                completed_bars=market_bars,
+                prior_regular_session_close=(
+                    item.market_prior_regular_session_close_v1
+                ),
+            )
+            state = classify_opening_market_transition_v1(
+                window=window,
+                thresholds=self.opening_transition_thresholds_v1,
+            )
+            response = calculate_stock_opening_response_v1(
+                symbol=item.symbol,
+                session=item.session,
+                session_open_timestamp=session_open,
+                signal_timestamp=signal_timestamp,
+                completed_stock_bars=tuple(
+                    MarketShockBarV1(
+                        symbol=bar.symbol,
+                        session=bar.session,
+                        bar_ordinal=bar.bar_ordinal,
+                        bar_start_timestamp=bar.bar_start_timestamp,
+                        bar_complete_timestamp=bar.bar_complete_timestamp,
+                        open=bar.open,
+                        high=bar.high,
+                        low=bar.low,
+                        close=bar.close,
+                        finalised=bar.finalised,
+                    )
+                    for bar in item.completed_m1c_bars
+                ),
+                market_opening_return_v1=window.market_opening_return_v1,
+                opening_transition_state_v1=state,
+                threshold_15m=(
+                    item.group_o_context.previous_close_implied_movement_15m
+                ),
+            )
+            return window, state, response
+        except Exception as error:
+            return _unknown_opening_market_transition_logging_v1(
+                session=item.session,
+                previous_session=item.market_previous_session_v1,
+                signal_timestamp=signal_timestamp,
+                reason=(
+                    "opening_market_transition_logging_calculation_error:"
+                    f"{type(error).__name__}"
+                ),
+            )
 
     def _restore_session(self, item: RecorderCheckpointInput) -> None:
         key = (item.symbol, item.session)
@@ -450,6 +633,15 @@ class FrozenM1CRecorderEngine:
             stock_shock_response_v1,
             checkpoint_thresholds_v1,
         ) = self._signed_market_shock_logging_v1(
+            item=item,
+            checkpoint=checkpoint,
+            signal_timestamp=trigger.bar_complete_timestamp,
+        )
+        (
+            opening_window_v1,
+            opening_transition_state_v1,
+            stock_opening_response_v1,
+        ) = self._opening_market_transition_logging_v1(
             item=item,
             checkpoint=checkpoint,
             signal_timestamp=trigger.bar_complete_timestamp,
@@ -639,6 +831,35 @@ class FrozenM1CRecorderEngine:
                     f"{type(error).__name__}"
                 ),
             )
+        try:
+            self.repository.record_opening_market_transition_checkpoint_v1(
+                item.metadata,
+                checkpoint_id=checkpoint_id,
+                symbol=item.symbol,
+                session=item.session,
+                checkpoint=checkpoint,
+                opening_window_v1=opening_window_v1,
+                opening_transition_state_v1=opening_transition_state_v1,
+                stock_opening_response_v1=stock_opening_response_v1,
+                opening_thresholds_v1=self.opening_transition_thresholds_v1,
+                activation_status_v1=(
+                    self.opening_transition_activation_status_v1
+                ),
+            )
+        except Exception as error:
+            (
+                opening_window_v1,
+                opening_transition_state_v1,
+                stock_opening_response_v1,
+            ) = _unknown_opening_market_transition_logging_v1(
+                session=item.session,
+                previous_session=item.market_previous_session_v1,
+                signal_timestamp=trigger.bar_complete_timestamp,
+                reason=(
+                    "opening_market_transition_logging_persistence_error:"
+                    f"{type(error).__name__}"
+                ),
+            )
         all_reasons = tuple(
             dict.fromkeys(
                 (
@@ -656,6 +877,9 @@ class FrozenM1CRecorderEngine:
             market_windows_v1=market_windows_v1,
             market_shock_state_v1=market_shock_state_v1,
             stock_shock_response_v1=stock_shock_response_v1,
+            opening_window_v1=opening_window_v1,
+            opening_transition_state_v1=opening_transition_state_v1,
+            stock_opening_response_v1=stock_opening_response_v1,
             episode_decision=episode,
             quiet_state=quiet_state,
             quiet_episode_decision=quiet_episode,

@@ -63,6 +63,9 @@ from stocker_prospective.m1c_features import (
     M1CCausalFeatureBuilder,
 )
 from stocker_prospective.market_data import ConnectionState, MarketDataType
+from stocker_prospective.opening_market_transition_v1 import (
+    load_opening_transition_threshold_manifest_v1,
+)
 from stocker_prospective.option_budget import BudgetAwareEpisodeStateMachine
 from stocker_prospective.option_discovery import BoundedOptionDiscoveryService
 from stocker_prospective.option_recorder import BoundedOptionRecorder
@@ -694,6 +697,29 @@ def build_frozen_prospective_application(
             else:
                 signed_market_shock_activation_status_v1 = "available"
                 artifact_files["m1c_signed_market_shock_v1_config"] = shock_path
+    opening_transition_thresholds_v1 = None
+    opening_transition_activation_status_v1 = "not_configured"
+    if paths.m1c_opening_market_transition_v1_config is not None:
+        opening_path = Path(paths.m1c_opening_market_transition_v1_config)
+        if not opening_path.is_file():
+            opening_transition_activation_status_v1 = (
+                "unavailable:config_absent"
+            )
+        else:
+            try:
+                opening_manifest = (
+                    load_opening_transition_threshold_manifest_v1(opening_path)
+                )
+            except (OSError, ValueError):
+                opening_transition_activation_status_v1 = (
+                    "unavailable:config_invalid"
+                )
+            else:
+                opening_transition_thresholds_v1 = opening_manifest.thresholds
+                opening_transition_activation_status_v1 = "available"
+                artifact_files[
+                    "m1c_opening_market_transition_v1_config"
+                ] = opening_path
     if any(not path.is_file() for path in artifact_files.values()):
         absent = sorted(name for name, path in artifact_files.items() if not path.is_file())
         raise ValueError("frozen recorder artifact absent: " + ",".join(absent))
@@ -955,6 +981,10 @@ def build_frozen_prospective_application(
         signed_market_shock_thresholds_v1=signed_market_shock_thresholds_v1,
         signed_market_shock_activation_status_v1=(
             signed_market_shock_activation_status_v1
+        ),
+        opening_transition_thresholds_v1=opening_transition_thresholds_v1,
+        opening_transition_activation_status_v1=(
+            opening_transition_activation_status_v1
         ),
     )
     controller_budget = SubscriptionBudgetManager(

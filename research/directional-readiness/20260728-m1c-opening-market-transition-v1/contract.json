@@ -1,0 +1,82 @@
+{
+  "schema_version": "m1c-opening-market-transition-contract-v1",
+  "experiment": "M1C Opening Market Transition V1",
+  "research_only": true,
+  "market_proxy": "VTI",
+  "checkpoint": 6,
+  "expected_opening_bar_count": 6,
+  "cohort": "frozen_20_stock_us_cohort",
+  "bar_frequency": "5m",
+  "m1c_probability_threshold": 0.488333710794033,
+  "population": {
+    "fresh_episode_definition": "unchanged_frozen_minimum_30_minute_spacing",
+    "tail_phase": "FIRST_ENTRY",
+    "later_checkpoints_in_primary_population": false,
+    "persistent_rows_independent_support": false,
+    "re_entry_rows_included": false
+  },
+  "chronology": {
+    "development": ["2024-01-01", "2024-12-31"],
+    "assessment": ["2025-01-01", "2025-08-22"],
+    "stress": ["2025-09-01", "2025-12-31"],
+    "protected_start": "2026-01-01"
+  },
+  "opening_window": {
+    "start": "current_nyse_regular_session_open",
+    "end": "final_complete_bar_available_at_checkpoint_6_signal",
+    "entry_bar_excluded": true,
+    "partial_bars_excluded": true,
+    "session_crossing": false,
+    "imputation": false
+  },
+  "threshold_quantiles": {
+    "opening_return_lower": 0.1,
+    "opening_return_upper": 0.9,
+    "opening_range": 0.75,
+    "overnight_gap_descriptive_lower": 0.1,
+    "overnight_gap_descriptive_upper": 0.9,
+    "total_transition_descriptive_lower": 0.1,
+    "total_transition_descriptive_upper": 0.9,
+    "method": "numpy_linear",
+    "predictor_year": 2024
+  },
+  "primary_state_inputs": [
+    "market_opening_return_v1",
+    "market_opening_range_v1"
+  ],
+  "mechanisms": [
+    "market_transition_following",
+    "amplification_continuation",
+    "resistance_reversal"
+  ],
+  "bootstrap": {
+    "replications": 5000,
+    "session_seed": 2026072806,
+    "opening_transition_event_seed": 2026072807
+  },
+  "null": {
+    "replications": 1000,
+    "seed": 2026072808,
+    "same_session_forbidden": true,
+    "preserve": ["stock", "checkpoint", "period", "outcome_completeness"]
+  },
+  "support": {
+    "minimum_stock_episodes": 30,
+    "minimum_sessions": 15,
+    "minimum_transition_events": 15,
+    "minimum_positive_transition_episodes": 8,
+    "minimum_negative_transition_episodes": 8,
+    "minimum_call_predictions": 8,
+    "minimum_put_predictions": 8,
+    "minimum_stocks": 8,
+    "maximum_stock_share": 0.25,
+    "maximum_session_share": 0.2,
+    "maximum_event_share": 0.2
+  },
+  "execution_boundaries": {
+    "broker_access": false,
+    "order_routing": false,
+    "orders": false,
+    "option_profitability": "Not tested"
+  }
+}

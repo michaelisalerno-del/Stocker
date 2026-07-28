@@ -44,7 +44,7 @@ from stocker_prospective.market_data import (
 IBKR_DEPENDENCY_BLOCKER = "blocked_official_ibkr_api_not_installed"
 IBKR_PROVENANCE_BLOCKER = "blocked_unverified_official_ibkr_api"
 IBKR_API_UPDATE_MAX_AGE = timedelta(days=14)
-IBKR_INFORMATIONAL_NOTIFICATION_CODES = frozenset({2104, 2106, 2107, 2108, 2158})
+IBKR_INFORMATIONAL_NOTIFICATION_CODES = frozenset({2104, 2106, 2107, 2108, 2119, 2158})
 
 
 class OfficialIBKRDependencyError(RuntimeError):

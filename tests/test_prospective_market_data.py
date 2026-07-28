@@ -128,7 +128,7 @@ def test_connection_tracker_distinguishes_maintained_and_lost_data_reconnects() 
     ]
 
 
-@pytest.mark.parametrize("code", [2104, 2106, 2107, 2108, 2158])
+@pytest.mark.parametrize("code", [2104, 2106, 2107, 2108, 2119, 2158])
 def test_ibkr_connection_notifications_do_not_degrade_or_fail_requests(code: int) -> None:
     from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
 

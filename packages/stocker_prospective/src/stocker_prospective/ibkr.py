@@ -753,6 +753,7 @@ class IBKRMarketDataAdapter:
         key = str(request_id)
         self.budget.reserve(key)
         self.callbacks.begin(request_id, kind="temporary_quote")
+        broker_snapshot_complete = False
         try:
             try:
                 self._client.reqMktData(
@@ -767,7 +768,7 @@ class IBKRMarketDataAdapter:
                 self.callbacks.abort(request_id, "upstream_quote_request_failed")
                 raise
             self.budget.mark_active(key)
-            return self.callbacks.wait(
+            result = self.callbacks.wait(
                 request_id,
                 timeout_seconds=(
                     self.config.quote_capture_timeout_seconds
@@ -775,9 +776,12 @@ class IBKRMarketDataAdapter:
                     else timeout_seconds
                 ),
             )
+            broker_snapshot_complete = result.complete
+            return result
         finally:
             self.budget.request_cancellation(key)
-            self._client.cancelMktData(request_id)
+            if not broker_snapshot_complete:
+                self._client.cancelMktData(request_id)
             self.budget.confirm_cancellation(key)
 
     def actual_subscription_request_ids(self) -> set[int]:

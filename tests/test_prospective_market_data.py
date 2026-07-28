@@ -163,8 +163,7 @@ def test_ibkr_connection_notifications_do_not_degrade_or_fail_requests(code: int
     assert adapter.connection.events[-1].message == "official connectivity notification"
     assert adapter.connection.events[-1].state is ConnectionState.CONNECTED
     assert (
-        adapter.connection.events[-1].event_kind
-        is ConnectionEventKind.INFORMATIONAL_NOTIFICATION
+        adapter.connection.events[-1].event_kind is ConnectionEventKind.INFORMATIONAL_NOTIFICATION
     )
 
 
@@ -416,7 +415,7 @@ def test_ibkr_errors_are_actionable(code: int, expected: str) -> None:
     assert classify_ibkr_error(code) == expected
 
 
-def test_temporary_quote_capture_is_cancelled_and_missing_values_remain_none() -> None:
+def test_completed_temporary_quote_avoids_redundant_broker_cancel() -> None:
     from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
 
     budget = MarketDataBudget(
@@ -459,7 +458,7 @@ def test_temporary_quote_capture_is_cancelled_and_missing_values_remain_none() -
     result = adapter.capture_temporary_quote(contract=object(), timeout_seconds=0)
 
     assert result.items == ({"bid": 1.25, "ask": None, "market_data_type": "live"},)
-    assert client.cancelled == [result.request_id]
+    assert client.cancelled == []
     assert client.snapshot_flags == [True]
     assert budget.snapshot().active_lines == 0
 

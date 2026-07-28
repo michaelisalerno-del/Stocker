@@ -145,6 +145,7 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         assert api_response.json()["claims_boundary"] == claims_boundary()
     health = client.get("/api/health").json()
     assert None not in health["blockers"]
+    assert health["feature_parity"]["blocker"] == "blocked_feature_source_semantics_mismatch"
     assert health["no_order_path_verified"] is True
     assert health["market_data"]["current_budget"]["rejected_signals"] == 1
     assert health["ibkr_api"]["verified"] is False
@@ -161,6 +162,33 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         "model",
     }
     assert client.get(f"/api/shadow/{structure_id}").status_code == 200
+
+
+def test_health_does_not_apply_legacy_m1_parity_gate_to_frozen_m1c(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path).model_copy(
+        update={
+            "paths": config(tmp_path).paths.model_copy(
+                update={
+                    "frozen_m1c_artifact_root": (
+                        ROOT
+                        / "research"
+                        / "directional-readiness"
+                        / "20260726-stock-local-directional-archetypes-v0"
+                        / "artifacts"
+                        / "primary"
+                    )
+                }
+            )
+        }
+    )
+    ProspectiveRepository(cfg.paths.database).migrate()
+
+    health = TestClient(create_web_app(cfg)).get("/api/health").json()
+
+    assert health["feature_parity"]["blocker"] == "blocked_feature_source_semantics_mismatch"
+    assert "blocked_feature_source_semantics_mismatch" not in health["blockers"]
 
 
 def test_health_reports_live_recorder_waiting_for_prospective_start(

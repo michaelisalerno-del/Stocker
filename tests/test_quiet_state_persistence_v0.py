@@ -382,6 +382,13 @@ def test_quiet_session_state_restores_last_eligible_and_episode(tmp_path: Path) 
         decision=decision,
         scientific_recording_valid=True,
     )
+    repository.mark_checkpoint_complete(
+        metadata,
+        checkpoint_id=checkpoint_id,
+        symbol="AAL",
+        session=SESSION,
+        checkpoint=6,
+    )
 
     probability, timestamp, count = repository.quiet_session_state(
         run_id=metadata.run_id,

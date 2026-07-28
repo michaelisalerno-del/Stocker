@@ -270,26 +270,49 @@ class FrozenProspectiveApplication:
                     self.session_context_preflight(observed_session, observed)
                 except (ScientificPrerequisiteError, ValueError) as exc:
                     message = str(exc)
-                    self._session_context_failures[observed_session] = message
+                    self.live_recorder.set_session_context_ready(passed=False)
                     blocker_code = (
                         exc.blocker_code
                         if isinstance(exc, ScientificPrerequisiteError)
                         else "blocked_previous_session_options_context_invalid"
                     )
-                    metadata = self.metadata_factory(observed, (observed,))
-                    self.repository.record_data_health_event(
-                        metadata,
-                        severity="blocker",
-                        blocker_code=blocker_code,
-                        component="previous_session_options_context",
-                        message=message,
-                        details={
-                            "signal_session": observed_session.isoformat(),
-                            "m1c_scoring_allowed": False,
-                            "option_episode_capture_allowed": False,
-                        },
-                    )
-                self._session_context_checked.add(observed_session)
+                    if self._session_context_failures.get(observed_session) != message:
+                        metadata = self.metadata_factory(observed, (observed,))
+                        self.repository.record_data_health_event(
+                            metadata,
+                            severity="blocker",
+                            blocker_code=blocker_code,
+                            component="previous_session_options_context",
+                            message=message,
+                            details={
+                                "signal_session": observed_session.isoformat(),
+                                "m1c_scoring_allowed": False,
+                                "option_episode_capture_allowed": False,
+                                "retrying": True,
+                            },
+                        )
+                    self._session_context_failures[observed_session] = message
+                else:
+                    self.live_recorder.set_session_context_ready(passed=True)
+                    self._session_context_checked.add(observed_session)
+                    if observed_session in self._session_context_failures:
+                        metadata = self.metadata_factory(observed, (observed,))
+                        self.repository.record_data_health_event(
+                            metadata,
+                            severity="info",
+                            blocker_code=None,
+                            component="previous_session_options_context",
+                            message="previous_session_options_context_ready",
+                            details={
+                                "signal_session": observed_session.isoformat(),
+                                "m1c_scoring_allowed": True,
+                                "option_episode_capture_allowed": True,
+                                "resolved_blocker": (
+                                    "blocked_missing_previous_session_options_context"
+                                ),
+                            },
+                        )
+                        self._session_context_failures.pop(observed_session, None)
         self._recover_if_required(observed)
         self._persist_connection_events(observed)
         result = self.live_recorder.poll(now=observed)
@@ -305,6 +328,7 @@ class FrozenProspectiveApplication:
                 callback_metadata,
                 symbol=symbol,
             )
+        checkpoints_to_complete: list[RecorderCheckpointResult] = []
         for checkpoint in result.checkpoint_results:
             symbol = checkpoint.episode_decision.symbol
             self._sessions_seen.add(checkpoint.episode_decision.session)
@@ -359,6 +383,8 @@ class FrozenProspectiveApplication:
                     checkpoint.quiet_episode_decision.prospective_entry_timestamp
                     + timedelta(minutes=60),
                 )
+            self.option_discovery.persist_checkpoint_schedules(checkpoint)
+            checkpoints_to_complete.append(checkpoint)
         if result.checkpoint_results:
             metadata = self.metadata_factory(observed, (observed,))
             active_symbols = {symbol for symbol, _ in self._active_episode_end.values()}
@@ -370,6 +396,19 @@ class FrozenProspectiveApplication:
             )
             self.subscriptions.apply_checkpoint_promotions(metadata, decisions)
         self.option_discovery.poll(now=observed)
+        for checkpoint in checkpoints_to_complete:
+            completion_metadata = self.metadata_factory(
+                observed,
+                (checkpoint.episode_decision.trigger_bar_end,),
+            )
+            self.live_recorder.repository.mark_checkpoint_complete(
+                completion_metadata,
+                checkpoint_id=checkpoint.checkpoint_id,
+                symbol=checkpoint.episode_decision.symbol,
+                session=checkpoint.episode_decision.session,
+                checkpoint=checkpoint.episode_decision.checkpoint,
+            )
+            self.live_recorder.acknowledge_checkpoint(checkpoint)
         self._reconcile_subscriptions(observed)
         self._finalise_due_phases(observed)
         self._finalise_due_quiet_phases(observed)
@@ -674,6 +713,8 @@ def build_frozen_prospective_application(
 ) -> FrozenProspectiveApplication:
     """Build the live service only after all frozen artifact identities verify."""
 
+    if config.runtime.run_id is None:
+        raise ValueError("frozen M1C application requires runtime.run_id")
     paths = config.paths
     required_paths = {
         "raw_event_root": paths.raw_event_root,
@@ -743,7 +784,7 @@ def build_frozen_prospective_application(
             label="bar compatibility",
         )
         if bar_compatibility_available
-        else False
+        else True
     )
     gateway_version = config.ibkr.tws_or_gateway_version
     if not gateway_version:
@@ -900,17 +941,19 @@ def build_frozen_prospective_application(
     if not bar_compatibility_available:
         repository.record_data_health_event(
             initial_metadata,
-            severity="blocker",
-            blocker_code="blocked_bar_compatibility_report_absent",
+            severity="info",
+            blocker_code=None,
             component="bar_compatibility",
             message=(
-                "IBKR acquisition remains active; M1C scoring is blocked until "
-                "bar-compatibility evidence exists"
+                "EODHD-to-IBKR bar compatibility is pending and will be monitored "
+                "prospectively; exact vendor equality is not required"
             ),
             details={
                 "path": str(bar_compatibility_path),
-                "m1c_scoring_allowed": False,
+                "m1c_scoring_allowed": True,
                 "raw_ibkr_acquisition_allowed": True,
+                "source_transfer_monitoring": True,
+                "exact_vendor_bar_equality_required": False,
             },
         )
     if not historical_activity_available:
@@ -1062,6 +1105,7 @@ def build_frozen_prospective_application(
         activity_baseline=activity,
         group_o_provider=group_o_provider,
         metadata_factory=metadata_factory,
+        run_id=config.runtime.run_id,
         universe_symbols=identity.symbols,
         market_proxy_symbol=MARKET_PROXY,
         sector_proxy_by_symbol=SECTOR_PROXY_BY_SYMBOL,
@@ -1208,6 +1252,7 @@ def build_frozen_prospective_application(
         ),
         metadata_factory=metadata_factory,
         reference_quote_provider=live.first_valid_quote_at_or_after,
+        run_id=config.runtime.run_id,
         strike_steps=config.ibkr.option_strike_steps,
         maximum_contracts_per_episode=(config.ibkr.maximum_option_contracts_per_episode),
         heartbeat=pace_request,

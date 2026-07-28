@@ -76,6 +76,7 @@ def test_cli_exposes_operational_commands_and_no_order_command() -> None:
     assert "web" in result.stdout
     assert "replay" in result.stdout
     assert "ibkr-api" in result.stdout
+    assert "scientific-inputs" in result.stdout
     lowered = result.stdout.lower()
     assert "place-order" not in lowered
     assert "cancel-order" not in lowered
@@ -229,6 +230,49 @@ def test_record_only_can_use_verified_registered_universe_when_bundle_is_missing
     assert identity.bundle_verified is False
     assert identity.model_artifact_id == "blocked_missing_verified_frozen_bundle"
     assert len(identity.symbols) == 20
+
+
+def test_activity_baseline_command_uses_exact_registered_universe_and_cutoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = write_ibkr_config(tmp_path)
+    payload = yaml.safe_load(config.read_text(encoding="utf-8"))
+    output = tmp_path / "preprocessing/activity.parquet"
+    payload["paths"]["historical_activity_bars"] = str(output)
+    config.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    def acquire(**kwargs: object) -> dict[str, object]:
+        observed.update(kwargs)
+        return {"output_path": str(output), "row_count": 1}
+
+    monkeypatch.setattr(
+        cli_module,
+        "acquire_eodhd_historical_activity_baseline",
+        acquire,
+    )
+    result = RUNNER.invoke(
+        app,
+        [
+            "scientific-inputs",
+            "build-activity-baseline",
+            "--config",
+            str(config),
+            "--from-session",
+            "2024-01-02",
+            "--latest-authorised-session",
+            "2026-06-29",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    symbols = observed["symbols"]
+    assert isinstance(symbols, tuple)
+    assert len(symbols) == 20
+    assert observed["from_session"] == date(2024, 1, 2)
+    assert observed["latest_authorised_session"] == date(2026, 6, 29)
+    assert observed["output_path"] == output
 
 
 def test_example_config_requires_explicit_deployed_git_commit(

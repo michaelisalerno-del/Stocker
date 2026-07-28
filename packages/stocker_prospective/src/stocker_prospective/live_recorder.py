@@ -154,6 +154,7 @@ class FrozenM1CLiveRecorder:
         activity_baseline: HistoricalActivityBaseline,
         group_o_provider: GroupOProvider,
         metadata_factory: MetadataFactory,
+        run_id: str,
         universe_symbols: tuple[str, ...],
         market_proxy_symbol: str,
         sector_proxy_by_symbol: Mapping[str, str] | None = None,
@@ -193,6 +194,7 @@ class FrozenM1CLiveRecorder:
         self.activity_baseline = activity_baseline
         self.group_o_provider = group_o_provider
         self.metadata_factory = metadata_factory
+        self.run_id = run_id
         self.universe_symbols = universe_symbols
         self.market_proxy_symbol = market_proxy_symbol
         self.sector_proxy_by_symbol = sector_proxies
@@ -212,7 +214,7 @@ class FrozenM1CLiveRecorder:
         )
         self._bar_adapter = AuditedFiveMinuteBarAdapter()
         self._bars: dict[tuple[str, date], dict[int, AuditedLiveBar]] = {}
-        self._processed: set[tuple[str, date, int]] = set()
+        self._processed = repository.recorded_checkpoint_identities(run_id=run_id)
         self._blocked: dict[tuple[str, date, int], str] = {}
         self._latest_quotes: dict[str, UnderlyingLevel1QuoteEvent] = {}
         self._quotes: dict[str, deque[UnderlyingLevel1QuoteEvent]] = {}
@@ -231,6 +233,7 @@ class FrozenM1CLiveRecorder:
             list[tuple[datetime, datetime | None]],
         ] = {}
         self._capability_preflight_passed = readiness.capability_preflight_passed
+        self._session_context_ready = True
         self._scientific_prerequisites_passed = (
             readiness.m1c_parity_passed
             and readiness.direction_parity_passed
@@ -239,7 +242,9 @@ class FrozenM1CLiveRecorder:
             and readiness.clock_drift_within_tolerance
         )
         self._scientific_scoring_enabled = (
-            readiness.capability_preflight_passed and self._scientific_prerequisites_passed
+            readiness.capability_preflight_passed
+            and self._scientific_prerequisites_passed
+            and self._session_context_ready
         )
         self._clock_drift_seconds: float | None = None
         self._depth_exchanges: tuple[str, ...] = ()
@@ -305,7 +310,25 @@ class FrozenM1CLiveRecorder:
         """Enable scoring only after the live capability manifest passes."""
 
         self._capability_preflight_passed = passed
-        self._scientific_scoring_enabled = passed and self._scientific_prerequisites_passed
+        self._scientific_scoring_enabled = (
+            passed and self._scientific_prerequisites_passed and self._session_context_ready
+        )
+
+    def set_session_context_ready(self, *, passed: bool) -> None:
+        """Keep missing D-1 context retryable without consuming checkpoints."""
+
+        self._session_context_ready = passed
+        self._scientific_scoring_enabled = (
+            self._capability_preflight_passed
+            and self._scientific_prerequisites_passed
+            and self._session_context_ready
+        )
+
+    def acknowledge_checkpoint(self, result: RecorderCheckpointResult) -> None:
+        """Suppress replay only after the application commits all side effects."""
+
+        decision = result.episode_decision
+        self._processed.add((decision.symbol, decision.session, decision.checkpoint))
 
     def first_valid_quote_at_or_after(
         self,
@@ -911,7 +934,6 @@ class FrozenM1CLiveRecorder:
                         self._blocked[key] = str(exc)
                         self._processed.add(key)
                         continue
-                    self._processed.add(key)
                     self._blocked.pop(key, None)
                     results.append(result)
                     self._record_standard_windows(

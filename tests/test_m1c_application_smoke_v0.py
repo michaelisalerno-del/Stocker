@@ -2,19 +2,28 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 
 from stocker_prospective.config import ProspectiveConfig
+from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.contract import SECTOR_PROXY_BY_SYMBOL
 from stocker_prospective.database import ProspectiveRepository
 from stocker_prospective.fake_ibkr import FakeIBKRAdapter
 from stocker_prospective.frozen_live_application import (
     build_frozen_prospective_application,
 )
+from stocker_prospective.frozen_m1c import FrozenM1CRuntime
+from stocker_prospective.group_o import (
+    GROUP_O_FEATURE_MANIFEST_SHA256,
+    GROUP_O_REGIME_MAPPING_SHA256,
+    FrozenGroupOSessionPackage,
+    build_group_o_context,
+)
+from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder import RecorderDeploymentIdentity
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -207,12 +216,13 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
 def test_missing_scientific_inputs_degrade_to_live_acquisition(
     tmp_path: Path,
 ) -> None:
-    application, config, adapter, _symbols = _build_fake_application(
+    application, config, adapter, symbols = _build_fake_application(
         tmp_path,
         include_scientific_prerequisites=False,
     )
+    observed = datetime(2026, 7, 28, 15, 0, tzinfo=UTC)
 
-    result = application.poll(now=datetime.now(UTC))
+    result = application.poll(now=observed)
 
     assert result.checkpoint_results == ()
     assert adapter.active_subscriptions
@@ -222,7 +232,10 @@ def test_missing_scientific_inputs_degrade_to_live_acquisition(
         blockers = {
             str(row["blocker_code"])
             for row in connection.execute(
-                "SELECT blocker_code FROM data_health_event WHERE run_id = ?",
+                """
+                    SELECT blocker_code FROM data_health_event
+                    WHERE run_id = ? AND blocker_code IS NOT NULL
+                    """,
                 (config.runtime.run_id,),
             )
         }
@@ -231,12 +244,56 @@ def test_missing_scientific_inputs_degrade_to_live_acquisition(
             (config.runtime.run_id,),
         ).fetchone()
     assert blockers == {
-        "blocked_bar_compatibility_report_absent",
         "blocked_historical_activity_baseline_absent",
         "blocked_missing_previous_session_options_context",
     }
     assert connection_state is not None
     assert connection_state["state"] == "connected"
+
+    runtime = FrozenM1CRuntime.from_artifacts(
+        feature_manifest_path=ARCHETYPE_ROOT / "causal_movement_feature_manifest.json",
+        threshold_path=ARCHETYPE_ROOT / "causal_movement_threshold.json",
+    )
+    signal_session = observed.date()
+    observation_session = previous_xnys_session(signal_session)
+    package = FrozenGroupOSessionPackage(
+        contract_version="frozen-m1c-microstructure-recorder-v0/group-o-session-v0",
+        signal_session=signal_session,
+        generated_from_authorised_cache=True,
+        feature_manifest_hash=GROUP_O_FEATURE_MANIFEST_SHA256,
+        regime_mapping_hash=GROUP_O_REGIME_MAPPING_SHA256,
+        contexts=tuple(
+            build_group_o_context(
+                symbol=symbol,
+                signal_session=signal_session,
+                actual_option_observation_session=observation_session,
+                front_expiry=signal_session + timedelta(days=3),
+                dte=3,
+                atm_strike=10.0,
+                features={name: 0.0 for name in runtime.required_group_o_features},
+                missing_indicators={},
+                quality_status="valid",
+                source_receipt_hashes=("a" * 64,),
+            )
+            for symbol in symbols
+        ),
+    )
+    output = config.paths.context_root / "group-o" / f"{signal_session.isoformat()}.json"
+    output.parent.mkdir(parents=True)
+    output.write_text(package.model_dump_json(indent=2), encoding="utf-8")
+    adapter.active_subscriptions.clear()
+    application.poll(now=observed + timedelta(seconds=1))
+
+    runtime_projection = ProspectiveReadStore(
+        config.paths.database,
+        run_id=config.runtime.run_id,
+    ).runtime_projection()
+    unresolved = {
+        str(item["blocker_code"])
+        for item in runtime_projection["blockers"]
+        if item["blocker_code"] is not None
+    }
+    assert unresolved == {"blocked_historical_activity_baseline_absent"}
 
     application.shutdown(now=datetime.now(UTC))
     assert adapter.active_subscriptions == {}

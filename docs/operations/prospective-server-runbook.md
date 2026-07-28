@@ -715,8 +715,8 @@ Before first prospective start, set:
   a protected future-trading reserve, and a request rate no greater than half
   the configured line budget;
 - context-signing secret in the environment file; and
-- `parallel_validation.enabled: true` only when after-session EODHD source
-  comparison is intended; and
+- `parallel_validation.enabled: true` for the required first-20-session EODHD
+  source-transfer comparison; and
 - optional web auth token only when `authentication_enabled: true`.
 
 Keep these server paths in both `/etc/stocker/stocker.env` and the
@@ -757,7 +757,8 @@ window during startup and reconnect restoration.
 Put the token only in `/etc/stocker/stocker.env`:
 
 ```dotenv
-# Required only when parallel_validation.enabled is true. Set the value with
+# Required for the frozen activity baseline, D-1 Group O preparation, and
+# source-transfer capture. Set the value with
 # sudoedit; never put a real token in this runbook or a shell command.
 EODHD_API_TOKEN=REPLACE_IN_EDITOR
 ```
@@ -779,6 +780,26 @@ separate service. The recorder makes bounded requests after the session and
 stores source-labelled evidence that is permanently ineligible for scoring.
 Never put IBKR username, password, or 2FA material in any Stocker file. Stocker
 has no fields for them.
+
+Before the first recorder start, create the immutable frozen activity baseline:
+
+```bash
+sudo install -d -o stocker -g stocker -m 0750 /var/lib/stocker/preprocessing
+sudo -u stocker sh -c '
+  set -a
+  . /etc/stocker/stocker.env
+  exec /opt/stocker/current/.venv/bin/stocker-prospective \
+    scientific-inputs build-activity-baseline \
+    --config /etc/stocker/prospective.yaml \
+    --from-session 2024-01-02 \
+    --latest-authorised-session 2026-06-29
+'
+```
+
+The command validates the exact registered 20-stock cohort, rejects missing
+bar-ordinal support, and refuses to replace a different existing baseline. The
+subshell loads the recorder-only environment without copying its secrets onto
+the command line or exposing them to the web process.
 
 ## 7. Migrate the database
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import Any, Literal, cast
 
@@ -119,6 +120,7 @@ class _PendingEpisode:
     entry_timestamp: datetime
     underlying: QualifiedUnderlying
     directional_actions: dict[str, str]
+    checkpoint_id: int = -1
     episode_kind: EpisodeKind = EpisodeKind.HIGH_TAIL
     probability: float = 0.5
     quiet_state: bool = False
@@ -143,6 +145,7 @@ class BoundedOptionDiscoveryService:
         contract_factory: OptionContractFactory,
         metadata_factory: MetadataFactory,
         reference_quote_provider: ReferenceQuoteProvider,
+        run_id: str | None = None,
         strike_steps: int = 2,
         maximum_contracts_per_episode: int = 30,
         maximum_entry_delay: timedelta = timedelta(minutes=2),
@@ -168,6 +171,7 @@ class BoundedOptionDiscoveryService:
         self.underlying_contracts = dict(underlying_contracts)
         self.contract_factory = contract_factory
         self.metadata_factory = metadata_factory
+        self.run_id = run_id
         self.reference_quote_provider = reference_quote_provider
         self.strike_steps = strike_steps
         self.maximum_contracts_per_episode = maximum_contracts_per_episode
@@ -184,6 +188,92 @@ class BoundedOptionDiscoveryService:
         self._finalizations: dict[str, OptionEpisodeFinalization] = {}
         self._rejections: dict[str, str] = {}
         self._resolved_contracts: dict[str, ResolvedOptionContract] = {}
+        if run_id is not None:
+            self._restore_schedules()
+
+    def _restore_schedules(self) -> None:
+        assert self.run_id is not None
+        now = datetime.now(UTC)
+        for row in self.option_recorder.repository.restorable_option_episode_schedules(
+            run_id=self.run_id
+        ):
+            episode_id = str(row["episode_id"])
+            symbol = str(row["symbol"])
+            entry = datetime.fromisoformat(str(row["entry_timestamp_utc"])).astimezone(UTC)
+            duration = timedelta(seconds=int(row["recording_duration_seconds"]))
+            metadata = self.metadata_factory(now, (entry,))
+            if entry + duration + self.sensitivity_wait <= now:
+                self.option_recorder.repository.update_option_episode_schedule_status(
+                    metadata,
+                    episode_id=episode_id,
+                    status="expired",
+                )
+                continue
+            underlying = self.underlying_contracts.get(symbol)
+            if underlying is None:
+                self.option_recorder.repository.update_option_episode_schedule_status(
+                    metadata,
+                    episode_id=episode_id,
+                    status="rejected",
+                )
+                continue
+            self._pending[episode_id] = _PendingEpisode(
+                episode_id=episode_id,
+                checkpoint_id=int(row["checkpoint_id"]),
+                symbol=symbol,
+                session=date.fromisoformat(str(row["session_date"])),
+                entry_timestamp=entry,
+                underlying=underlying,
+                directional_actions=cast(
+                    dict[str, str],
+                    json.loads(str(row["directional_actions_json"])),
+                ),
+                episode_kind=EpisodeKind(str(row["episode_kind"])),
+                probability=float(row["probability"]),
+                quiet_state=bool(row["quiet_state"]),
+                recording_duration=duration,
+                strike_steps=int(row["strike_steps"]),
+                maximum_contracts=int(row["maximum_contracts"]),
+            )
+
+    def persist_checkpoint_schedules(self, result: RecorderCheckpointResult) -> None:
+        """Durably admit every in-memory task before checkpoint completion."""
+
+        identities = {
+            value
+            for value in (
+                result.episode_decision.episode_id,
+                result.quiet_observation_id,
+                result.neutral_control_id,
+                result.high_tail_control_id,
+            )
+            if value is not None
+        }
+        metadata = self.metadata_factory(
+            result.episode_decision.trigger_bar_end,
+            (result.episode_decision.trigger_bar_end,),
+        )
+        for episode_id in sorted(identities):
+            episode = self._pending.get(episode_id)
+            if episode is None:
+                if episode_id not in self._rejections:
+                    raise RuntimeError("option episode was neither scheduled nor rejected")
+                continue
+            self.option_recorder.repository.record_option_episode_schedule(
+                metadata,
+                episode_id=episode.episode_id,
+                checkpoint_id=episode.checkpoint_id,
+                symbol=episode.symbol,
+                session=episode.session,
+                entry_timestamp=episode.entry_timestamp,
+                episode_kind=episode.episode_kind.value,
+                probability=episode.probability,
+                quiet_state=episode.quiet_state,
+                directional_actions=episode.directional_actions,
+                recording_duration=episode.recording_duration,
+                strike_steps=episode.strike_steps,
+                maximum_contracts=episode.maximum_contracts,
+            )
 
     def schedule(self, result: RecorderCheckpointResult) -> None:
         decision = result.episode_decision
@@ -192,6 +282,11 @@ class BoundedOptionDiscoveryService:
         underlying = self.underlying_contracts.get(decision.symbol)
         if underlying is None:
             self._rejections[decision.episode_id] = "underlying_contract_not_resolved"
+            self._record_unscheduled_rejection(
+                result,
+                episode_id=decision.episode_id,
+                reason="underlying_contract_not_resolved",
+            )
             return
         actions: dict[str, str] = {
             model_id: classification.action
@@ -201,6 +296,7 @@ class BoundedOptionDiscoveryService:
             decision.episode_id,
             _PendingEpisode(
                 episode_id=decision.episode_id,
+                checkpoint_id=result.checkpoint_id,
                 symbol=decision.symbol,
                 session=decision.session,
                 entry_timestamp=decision.prospective_entry_timestamp,
@@ -232,6 +328,11 @@ class BoundedOptionDiscoveryService:
         for observation_id, episode_kind in observations:
             if underlying is None:
                 self._rejections[observation_id] = "underlying_contract_not_resolved"
+                self._record_unscheduled_rejection(
+                    result,
+                    episode_id=observation_id,
+                    reason="underlying_contract_not_resolved",
+                )
                 continue
             existing = self._pending.get(observation_id)
             if existing is not None:
@@ -246,6 +347,7 @@ class BoundedOptionDiscoveryService:
                 continue
             self._pending[observation_id] = _PendingEpisode(
                 episode_id=observation_id,
+                checkpoint_id=result.checkpoint_id,
                 symbol=decision.symbol,
                 session=decision.session,
                 entry_timestamp=decision.prospective_entry_timestamp,
@@ -333,6 +435,11 @@ class BoundedOptionDiscoveryService:
                     )
                     continue
                 episode.started = True
+                self.option_recorder.repository.update_option_episode_schedule_status(
+                    metadata,
+                    episode_id=episode.episode_id,
+                    status="streaming",
+                )
             finish_at = episode.entry_timestamp + episode.recording_duration + self.sensitivity_wait
             if episode.started and now >= finish_at:
                 metadata = self.metadata_factory(now, (finish_at,))
@@ -349,6 +456,11 @@ class BoundedOptionDiscoveryService:
                         now=now,
                     )
                 episode.finalised = True
+                self.option_recorder.repository.update_option_episode_schedule_status(
+                    metadata,
+                    episode_id=episode.episode_id,
+                    status="complete",
+                )
         if self.episode_state_machine is not None:
             self.episode_state_machine.poll(now=now)
         self.option_recorder.flush_pending(self.metadata_factory(now, (now,)))
@@ -362,6 +474,11 @@ class BoundedOptionDiscoveryService:
     ) -> None:
         self._rejections[episode.episode_id] = reason
         metadata = self.metadata_factory(now, (episode.entry_timestamp,))
+        self.option_recorder.repository.update_option_episode_schedule_status(
+            metadata,
+            episode_id=episode.episode_id,
+            status="rejected",
+        )
         self.option_recorder.repository.record_skipped_recording(
             metadata,
             session=episode.session,
@@ -378,6 +495,27 @@ class BoundedOptionDiscoveryService:
             },
         )
         episode.finalised = True
+
+    def _record_unscheduled_rejection(
+        self,
+        result: RecorderCheckpointResult,
+        *,
+        episode_id: str,
+        reason: str,
+    ) -> None:
+        metadata = self.metadata_factory(
+            result.episode_decision.trigger_bar_end,
+            (result.episode_decision.trigger_bar_end,),
+        )
+        self.option_recorder.repository.record_skipped_recording(
+            metadata,
+            session=result.episode_decision.session,
+            episode_id=episode_id,
+            symbol=result.episode_decision.symbol,
+            recording_kind="option_episode",
+            reason=reason,
+            requested_payload={"durable_rejection": True},
+        )
 
     def _episode_task(
         self,

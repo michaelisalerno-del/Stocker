@@ -13,6 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from stocker_prospective.context import previous_xnys_session
 
+GROUP_O_FEATURE_MANIFEST_SHA256 = "fb2b734ce84e545d6839dc6d537aa73532d733f0e2206e0e0a402f96786f3499"
+GROUP_O_REGIME_MAPPING_SHA256 = "a73c7e2c0b9220ac598c7051e7ced77ea0e0cf0a71b769e4a4b42ae7885d2985"
+
 
 class FrozenGroupOContext(BaseModel):
     """One stock/session context; invalid chronology can be retained but not scored."""
@@ -119,6 +122,8 @@ class FrozenGroupOSessionPackage(BaseModel):
     contract_version: str
     signal_session: date
     generated_from_authorised_cache: bool
+    feature_manifest_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    regime_mapping_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     contexts: tuple[FrozenGroupOContext, ...]
 
     @model_validator(mode="after")
@@ -127,6 +132,10 @@ class FrozenGroupOSessionPackage(BaseModel):
             raise ValueError("Group O session package version differs")
         if not self.generated_from_authorised_cache:
             raise ValueError("Group O package is not from the authorised cache")
+        if self.feature_manifest_hash != GROUP_O_FEATURE_MANIFEST_SHA256:
+            raise ValueError("Group O package feature manifest hash differs")
+        if self.regime_mapping_hash != GROUP_O_REGIME_MAPPING_SHA256:
+            raise ValueError("Group O package regime mapping hash differs")
         if any(item.signal_session != self.signal_session for item in self.contexts):
             raise ValueError("Group O package mixes signal sessions")
         symbols = [item.symbol for item in self.contexts]
@@ -163,6 +172,8 @@ def load_group_o_session_package(
 __all__ = [
     "FrozenGroupOContext",
     "FrozenGroupOSessionPackage",
+    "GROUP_O_FEATURE_MANIFEST_SHA256",
+    "GROUP_O_REGIME_MAPPING_SHA256",
     "build_group_o_context",
     "load_group_o_session_package",
 ]

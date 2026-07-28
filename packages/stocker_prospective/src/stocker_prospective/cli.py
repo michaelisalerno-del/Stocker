@@ -75,6 +75,10 @@ from stocker_prospective.recorder import (
     RecorderDeploymentIdentity,
 )
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
+from stocker_prospective.scientific_inputs import (
+    EODHDGroupOPreparationService,
+    acquire_eodhd_historical_activity_baseline,
+)
 from stocker_prospective.universe import UniverseError, load_registered_universe
 from stocker_prospective.web import create_web_app
 
@@ -88,6 +92,7 @@ context_app = typer.Typer(help="Create and import exact signed daily context pac
 database_app = typer.Typer(help="Manage the prospective database schema.")
 replay_app = typer.Typer(help="Run the deterministic synthetic vertical slice.")
 recorder_app = typer.Typer(help="Run the market-data recorder process.")
+scientific_inputs_app = typer.Typer(help="Prepare immutable causal scientific inputs.")
 web_app = typer.Typer(help="Run the read-only web process.")
 ibkr_api_app = typer.Typer(help="Verify first-party IBKR API provenance and check for updates.")
 app.add_typer(bundle_app, name="bundle")
@@ -95,6 +100,7 @@ app.add_typer(context_app, name="context")
 app.add_typer(database_app, name="db")
 app.add_typer(replay_app, name="replay")
 app.add_typer(recorder_app, name="recorder")
+app.add_typer(scientific_inputs_app, name="scientific-inputs")
 app.add_typer(web_app, name="web")
 app.add_typer(ibkr_api_app, name="ibkr-api")
 
@@ -536,6 +542,33 @@ def _validate_ibkr_scoring_inputs(
     return identity
 
 
+@scientific_inputs_app.command("build-activity-baseline")
+def build_activity_baseline(
+    config_path: Path = typer.Option(..., "--config", exists=True),
+    from_session: str = typer.Option(..., "--from-session"),
+    latest_authorised_session: str = typer.Option(..., "--latest-authorised-session"),
+    minimum_sessions: int = typer.Option(10, min=10),
+) -> None:
+    """Acquire and create the exact 20-stock EODHD activity baseline once."""
+
+    try:
+        config = load_prospective_config(config_path)
+        identity = _validate_ibkr_scoring_inputs(config)
+        output = config.paths.historical_activity_bars
+        if output is None:
+            raise RuntimeSafetyError("historical_activity_bars path is required")
+        result = acquire_eodhd_historical_activity_baseline(
+            symbols=identity.symbols,
+            from_session=date.fromisoformat(from_session),
+            latest_authorised_session=date.fromisoformat(latest_authorised_session),
+            output_path=output,
+            minimum_sessions=minimum_sessions,
+        )
+        _emit(result)
+    except Exception as exc:
+        _fatal(str(exc))
+
+
 @replay_app.command("run")
 def replay_run(config_path: Path = typer.Option(..., "--config", exists=True)) -> None:
     """Run the deterministic fixture and exit."""
@@ -581,6 +614,8 @@ def recorder_run(
     diagnostic_recorder: Any | None = None
     frozen_application: Any | None = None
     parallel_capture: ParallelSourceCaptureService | None = None
+    group_o_preparer: EODHDGroupOPreparationService | None = None
+    reported_group_o_error: str | None = None
     repository: ProspectiveRepository | None = None
     lease_owned = False
     config: ProspectiveConfig | None = None
@@ -634,7 +669,6 @@ def recorder_run(
             )
 
             adapter.attach_official_client(create_official_callback_client(adapter))
-            adapter.start()
 
             def heartbeat() -> object:
                 return repository.heartbeat_recorder_lease(
@@ -643,6 +677,7 @@ def recorder_run(
                     now=datetime.now(UTC),
                 )
 
+            adapter.start()
             if config.paths.frozen_m1c_artifact_root is not None:
                 from stocker_prospective.frozen_live_application import (
                     build_frozen_prospective_application,
@@ -695,6 +730,27 @@ def recorder_run(
                         else frozen_application.process_source_transfer
                     ),
                 )
+            if frozen_application is not None and config.paths.context_root is not None:
+                group_o_artifacts = (
+                    release_directory
+                    / "research"
+                    / "cross-market-context"
+                    / "20260723-daily-stock-front-options-context-v01"
+                    / "artifacts"
+                    / "primary"
+                )
+                group_o_preparer = EODHDGroupOPreparationService(
+                    symbols=deployment_identity.symbols,
+                    context_root=config.paths.context_root,
+                    cache_root=(Path(config.paths.context_root) / "source-cache" / "eodhd-group-o"),
+                    feature_manifest_path=(
+                        group_o_artifacts / "front_options_feature_manifest.json"
+                    ),
+                    regime_mapping_path=(group_o_artifacts / "front_options_regime_mapping.json"),
+                    capture_delay_seconds=(config.parallel_validation.capture_delay_seconds),
+                    heartbeat=heartbeat,
+                )
+                group_o_preparer.poll(now=datetime.now(UTC))
 
         assert repository is not None
         stopping = False
@@ -711,6 +767,17 @@ def recorder_run(
                 diagnostic_recorder.poll(now=datetime.now(UTC))
             if frozen_application is not None:
                 frozen_application.poll(now=datetime.now(UTC))
+                if group_o_preparer is not None:
+                    group_o_preparer.poll(now=datetime.now(UTC))
+                    if (
+                        group_o_preparer.last_error is not None
+                        and group_o_preparer.last_error != reported_group_o_error
+                    ):
+                        reported_group_o_error = group_o_preparer.last_error
+                        typer.echo(
+                            f"Group O preparation deferred: {reported_group_o_error}",
+                            err=True,
+                        )
             if parallel_capture is not None:
                 parallel_capture.poll(now=datetime.now(UTC))
             monotonic_now = time.monotonic()
@@ -737,6 +804,11 @@ def recorder_run(
     except Exception as exc:
         _fatal(str(exc), exit_code=75)
     finally:
+        if group_o_preparer is not None:
+            try:
+                group_o_preparer.shutdown()
+            except Exception as exc:
+                typer.echo(f"Group O preparation cleanup failed: {exc}", err=True)
         if diagnostic_recorder is not None:
             try:
                 diagnostic_recorder.shutdown(now=datetime.now(UTC))

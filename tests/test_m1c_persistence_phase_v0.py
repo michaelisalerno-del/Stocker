@@ -11,7 +11,11 @@ import pytest
 from stocker_prospective.activation import ProspectiveActivationLedger
 from stocker_prospective.contract import CLAIMS_BOUNDARY
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
-from stocker_prospective.events import OptionQuoteEvent, UnderlyingLevel1QuoteEvent
+from stocker_prospective.events import (
+    FiveMinuteBarEvent,
+    OptionQuoteEvent,
+    UnderlyingLevel1QuoteEvent,
+)
 from stocker_prospective.evidence_replay import replay_persisted_evidence
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import build_group_o_context
@@ -57,6 +61,149 @@ def raw_event(sequence: int) -> UnderlyingLevel1QuoteEvent:
         tick_type="state_change",
         exchange="SMART",
     )
+
+
+def completed_bar(sequence: int) -> FiveMinuteBarEvent:
+    bar_end = START + timedelta(minutes=5 * sequence)
+    return FiveMinuteBarEvent(
+        event_id=f"bar-{sequence}",
+        received_timestamp_utc=bar_end,
+        received_monotonic_ns=sequence + 2_000,
+        provider_timestamp_utc=bar_end,
+        source_sequence=sequence + 2_000,
+        session=date(2026, 7, 24),
+        symbol="AAL",
+        con_id=1,
+        request_id=10,
+        bar_start_utc=bar_end - timedelta(minutes=5),
+        bar_end_utc=bar_end,
+        checkpoint=sequence,
+        open=10.0,
+        high=10.2,
+        low=9.9,
+        close=10.1,
+        volume_or_activity_field=1_000.0,
+        wap_where_available=10.05,
+        trade_count_where_available=100,
+        source="fake_ibkr",
+        source_completeness="complete",
+        finalised=True,
+    )
+
+
+def test_stale_completed_bar_replay_does_not_move_projection_backwards(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="run-bars",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    recorder = FrozenRecorderRepository(database)
+
+    recorder.update_completed_bar_projection(metadata, completed_bar(2))
+    recorder.update_completed_bar_projection(metadata, completed_bar(1))
+
+    with database._connect() as connection:
+        projected = connection.execute(
+            """
+            SELECT checkpoint, bar_end_utc
+            FROM completed_bar_state_v0
+            WHERE run_id = ? AND symbol = ?
+            """,
+            (metadata.run_id, "AAL"),
+        ).fetchone()
+    assert projected is not None
+    assert int(projected["checkpoint"]) == 2
+    assert str(projected["bar_end_utc"]) == completed_bar(2).bar_end_utc.isoformat()
+
+
+def test_option_schedule_is_durable_before_checkpoint_completion(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="run-option-schedule",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    recorder = FrozenRecorderRepository(database)
+    checkpoint_id = recorder.record_checkpoint(
+        metadata,
+        symbol="AAL",
+        session=START.date(),
+        checkpoint=6,
+        bar_start_utc=START - timedelta(minutes=5),
+        bar_end_utc=START,
+        score=FrozenM1CScore(
+            model_hash="b" * 64,
+            probability=0.12,
+            threshold=0.488333710794033,
+            threshold_passed=False,
+            feature_order=("feature",),
+            feature_values=(0.0,),
+            transformed_values=(0.0,),
+            feature_hash="c" * 64,
+            missing_feature_count=0,
+        ),
+        session_context_hash="d" * 64,
+        feature_values={"feature": 0.0},
+        eligible=True,
+        feature_freshness="exact_previous_session",
+        rejection_reasons=(),
+    )
+    recorder.record_option_episode_schedule(
+        metadata,
+        episode_id="quiet-option-1",
+        checkpoint_id=checkpoint_id,
+        symbol="AAL",
+        session=START.date(),
+        entry_timestamp=START + timedelta(minutes=5),
+        episode_kind="quiet",
+        probability=0.12,
+        quiet_state=True,
+        directional_actions={},
+        recording_duration=timedelta(minutes=60),
+        strike_steps=4,
+        maximum_contracts=8,
+    )
+
+    restored = recorder.restorable_option_episode_schedules(
+        run_id=metadata.run_id,
+    )
+    assert [row["episode_id"] for row in restored] == ["quiet-option-1"]
+    assert recorder.recorded_checkpoint_identities(run_id=metadata.run_id) == set()
+
+    recorder.mark_checkpoint_complete(
+        metadata,
+        checkpoint_id=checkpoint_id,
+        symbol="AAL",
+        session=START.date(),
+        checkpoint=6,
+    )
+    recorder.update_option_episode_schedule_status(
+        metadata,
+        episode_id="quiet-option-1",
+        status="complete",
+    )
+    assert recorder.restorable_option_episode_schedules(run_id=metadata.run_id) == []
 
 
 def test_activation_is_first_write_immutable_and_carries_required_identity(tmp_path: Path) -> None:

@@ -82,6 +82,251 @@ class FrozenRecorderRepository:
         self.claims_json = _json(claims_boundary())
         self.configuration_hash = configuration_hash
 
+    def recorded_checkpoint_identities(
+        self,
+        *,
+        run_id: str,
+    ) -> set[tuple[str, date, int]]:
+        """Return immutable checkpoints already recorded for restart deduplication."""
+
+        with self.repository._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT symbol, session_date, checkpoint
+                FROM m1c_checkpoint_completion_v0
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchall()
+        return {
+            (
+                str(row["symbol"]),
+                date.fromisoformat(str(row["session_date"])),
+                int(row["checkpoint"]),
+            )
+            for row in rows
+        }
+
+    def mark_checkpoint_complete(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        checkpoint_id: int,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+    ) -> None:
+        """Commit the restart marker only after all checkpoint side effects succeed."""
+
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            source = connection.execute(
+                """
+                SELECT run_id, symbol, session_date, checkpoint
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if source is None:
+                raise KeyError(checkpoint_id)
+            identity = (
+                str(source["run_id"]),
+                str(source["symbol"]),
+                str(source["session_date"]),
+                int(source["checkpoint"]),
+            )
+            expected = (
+                metadata.run_id,
+                symbol,
+                session.isoformat(),
+                checkpoint,
+            )
+            if identity != expected:
+                raise ValueError("checkpoint completion identity differs")
+            existing = connection.execute(
+                """
+                SELECT run_id, symbol, session_date, checkpoint
+                FROM m1c_checkpoint_completion_v0
+                WHERE checkpoint_id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if existing is not None:
+                completed_identity = (
+                    str(existing["run_id"]),
+                    str(existing["symbol"]),
+                    str(existing["session_date"]),
+                    int(existing["checkpoint"]),
+                )
+                if completed_identity != expected:
+                    raise ValueError("immutable checkpoint completion differs")
+                return
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            connection.execute(
+                """
+                INSERT INTO m1c_checkpoint_completion_v0(
+                    checkpoint_id, envelope_id, run_id, symbol, session_date,
+                    checkpoint, completed_at_utc, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    checkpoint_id,
+                    envelope_id,
+                    metadata.run_id,
+                    symbol,
+                    session.isoformat(),
+                    checkpoint,
+                    metadata.recorded_at_utc.astimezone(UTC).isoformat(),
+                    self.claims_json,
+                ),
+            )
+
+    def record_option_episode_schedule(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        episode_id: str,
+        checkpoint_id: int,
+        symbol: str,
+        session: date,
+        entry_timestamp: datetime,
+        episode_kind: str,
+        probability: float,
+        quiet_state: bool,
+        directional_actions: Mapping[str, str],
+        recording_duration: timedelta,
+        strike_steps: int,
+        maximum_contracts: int,
+    ) -> None:
+        """Persist option admission inputs before checkpoint completion is marked."""
+
+        self._validate(metadata)
+        expected = {
+            "run_id": metadata.run_id,
+            "symbol": symbol,
+            "session_date": session.isoformat(),
+            "entry_timestamp_utc": entry_timestamp.astimezone(UTC).isoformat(),
+            "episode_kind": episode_kind,
+            "probability": probability,
+            "quiet_state": int(quiet_state),
+            "directional_actions_json": _json(dict(directional_actions)),
+            "recording_duration_seconds": int(recording_duration.total_seconds()),
+            "strike_steps": strike_steps,
+            "maximum_contracts": maximum_contracts,
+        }
+        with self.repository._connect() as connection:
+            source = connection.execute(
+                """
+                SELECT run_id, symbol, session_date
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if source is None:
+                raise KeyError(checkpoint_id)
+            if (
+                str(source["run_id"]),
+                str(source["symbol"]),
+                str(source["session_date"]),
+            ) != (metadata.run_id, symbol, session.isoformat()):
+                raise ValueError("option schedule checkpoint identity differs")
+            existing = connection.execute(
+                "SELECT * FROM option_episode_schedule_v0 WHERE episode_id = ?",
+                (episode_id,),
+            ).fetchone()
+            if existing is not None:
+                _assert_immutable_observation(
+                    existing,
+                    expected={**expected, "checkpoint_id": checkpoint_id},
+                    label="option episode schedule",
+                )
+                return
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            connection.execute(
+                """
+                INSERT INTO option_episode_schedule_v0(
+                    episode_id, checkpoint_id, envelope_id, run_id, symbol,
+                    session_date, entry_timestamp_utc, episode_kind, probability,
+                    quiet_state, directional_actions_json,
+                    recording_duration_seconds, strike_steps, maximum_contracts,
+                    status, updated_at_utc, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)
+                """,
+                (
+                    episode_id,
+                    checkpoint_id,
+                    envelope_id,
+                    expected["run_id"],
+                    expected["symbol"],
+                    expected["session_date"],
+                    expected["entry_timestamp_utc"],
+                    expected["episode_kind"],
+                    expected["probability"],
+                    expected["quiet_state"],
+                    expected["directional_actions_json"],
+                    expected["recording_duration_seconds"],
+                    expected["strike_steps"],
+                    expected["maximum_contracts"],
+                    metadata.recorded_at_utc.astimezone(UTC).isoformat(),
+                    self.claims_json,
+                ),
+            )
+
+    def update_option_episode_schedule_status(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        episode_id: str,
+        status: str,
+    ) -> None:
+        """Persist the bounded lifecycle needed for safe process reconstruction."""
+
+        if status not in {"scheduled", "streaming", "complete", "rejected", "expired"}:
+            raise ValueError("option episode schedule status is invalid")
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                "SELECT status FROM option_episode_schedule_v0 WHERE episode_id = ?",
+                (episode_id,),
+            ).fetchone()
+            if existing is None:
+                raise KeyError(episode_id)
+            current = str(existing["status"])
+            if current in {"complete", "rejected", "expired"} and current != status:
+                raise ValueError("terminal option episode schedule status differs")
+            connection.execute(
+                """
+                UPDATE option_episode_schedule_v0
+                SET status = ?, updated_at_utc = ?
+                WHERE episode_id = ?
+                """,
+                (
+                    status,
+                    metadata.recorded_at_utc.astimezone(UTC).isoformat(),
+                    episode_id,
+                ),
+            )
+
+    def restorable_option_episode_schedules(
+        self,
+        *,
+        run_id: str,
+    ) -> list[dict[str, Any]]:
+        """Load only scheduled or interrupted-streaming option tasks for one run."""
+
+        with self.repository._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM option_episode_schedule_v0
+                WHERE run_id = ? AND status IN ('scheduled', 'streaming')
+                ORDER BY entry_timestamp_utc, episode_id
+                """,
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def prospective_phase_for_session(
         self,
         *,
@@ -334,17 +579,25 @@ class FrozenRecorderRepository:
         with self.repository._connect() as connection:
             checkpoint = connection.execute(
                 """
-                SELECT probability FROM m1c_checkpoint_v0
-                WHERE run_id = ? AND symbol = ? AND session_date = ? AND eligible = 1
-                ORDER BY checkpoint DESC LIMIT 1
+                SELECT score.probability
+                FROM m1c_checkpoint_v0 AS score
+                JOIN m1c_checkpoint_completion_v0 AS completed
+                  ON completed.checkpoint_id = score.id
+                WHERE score.run_id = ? AND score.symbol = ?
+                  AND score.session_date = ? AND score.eligible = 1
+                ORDER BY score.checkpoint DESC LIMIT 1
                 """,
                 (run_id, symbol, session.isoformat()),
             ).fetchone()
             episode = connection.execute(
                 """
-                SELECT trigger_bar_end_utc, episode_number FROM m1c_episode_v0
-                WHERE run_id = ? AND symbol = ? AND session_date = ?
-                ORDER BY episode_number DESC LIMIT 1
+                SELECT episode.trigger_bar_end_utc, episode.episode_number
+                FROM m1c_episode_v0 AS episode
+                JOIN m1c_checkpoint_completion_v0 AS completed
+                  ON completed.checkpoint_id = episode.checkpoint_id
+                WHERE episode.run_id = ? AND episode.symbol = ?
+                  AND episode.session_date = ?
+                ORDER BY episode.episode_number DESC LIMIT 1
                 """,
                 (run_id, symbol, session.isoformat()),
             ).fetchone()
@@ -370,19 +623,28 @@ class FrozenRecorderRepository:
         with self.repository._connect() as connection:
             checkpoint = connection.execute(
                 """
-                SELECT m1c_probability FROM quiet_state_checkpoint_v0
-                WHERE run_id = ? AND symbol = ? AND session_date = ? AND eligible = 1
-                ORDER BY checkpoint DESC LIMIT 1
+                SELECT quiet.m1c_probability
+                FROM quiet_state_checkpoint_v0 AS quiet
+                JOIN m1c_checkpoint_completion_v0 AS completed
+                  ON completed.checkpoint_id = quiet.checkpoint_id
+                WHERE quiet.run_id = ? AND quiet.symbol = ?
+                  AND quiet.session_date = ? AND quiet.eligible = 1
+                ORDER BY quiet.checkpoint DESC LIMIT 1
                 """,
                 (run_id, symbol, session.isoformat()),
             ).fetchone()
             episode = connection.execute(
                 """
-                SELECT trigger_timestamp_utc, episode_number
-                FROM quiet_state_observation_v0
-                WHERE run_id = ? AND symbol = ? AND session_date = ?
-                  AND observation_kind = 'quiet_bottom_10'
-                ORDER BY episode_number DESC LIMIT 1
+                SELECT observation.trigger_timestamp_utc, observation.episode_number
+                FROM quiet_state_observation_v0 AS observation
+                JOIN quiet_state_checkpoint_v0 AS quiet
+                  ON quiet.id = observation.quiet_checkpoint_id
+                JOIN m1c_checkpoint_completion_v0 AS completed
+                  ON completed.checkpoint_id = quiet.checkpoint_id
+                WHERE observation.run_id = ? AND observation.symbol = ?
+                  AND observation.session_date = ?
+                  AND observation.observation_kind = 'quiet_bottom_10'
+                ORDER BY observation.episode_number DESC LIMIT 1
                 """,
                 (run_id, symbol, session.isoformat()),
             ).fetchone()
@@ -1742,7 +2004,10 @@ class FrozenRecorderRepository:
                 existing is not None
                 and str(existing["bar_end_utc"]) > event.bar_end_utc.isoformat()
             ):
-                raise ValueError("completed bar projection cannot move backwards")
+                # IBKR replays historical keepUpToDate bars after reconnect. Raw
+                # evidence remains append-only, but an older replay must not
+                # regress (or terminate) the bounded latest-bar projection.
+                return
             connection.execute(
                 """
                 INSERT INTO completed_bar_state_v0(

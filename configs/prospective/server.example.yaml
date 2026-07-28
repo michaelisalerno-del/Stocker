@@ -111,7 +111,7 @@ context:
 # Append-only after-session EODHD bars for IBKR/EODHD source-parity evidence.
 # These observations are always marked ineligible for scoring.
 parallel_validation:
-  enabled: false
+  enabled: true
   provider: eodhd
   api_token_env: EODHD_API_TOKEN
   credential_status_env: STOCKER_EODHD_TOKEN_CONFIGURED

@@ -382,10 +382,17 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             if config.parallel_validation.enabled and not parallel_credential_configured
             else None
         )
+        frozen_m1c_configured = config.paths.frozen_m1c_artifact_root is not None
         blocker_candidates = [
             *(item["blocker_code"] for item in runtime["blockers"]),
-            *bundle["blockers"],
-            parity["blocker"],
+            *(
+                blocker
+                for blocker in bundle["blockers"]
+                if not (
+                    frozen_m1c_configured and blocker == "blocked_feature_source_semantics_mismatch"
+                )
+            ),
+            None if frozen_m1c_configured else parity["blocker"],
             ibkr_api["blocker"] if config.runtime.source == "ibkr" else None,
             parallel_blocker,
         ]
@@ -419,6 +426,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "database": store.database_health(),
             "active_bundle": bundle,
             "feature_parity": {
+                "scope": "legacy_m1_diagnostic_not_frozen_m1c_runtime_gate",
                 "scoring_allowed": parity["scoring_allowed"],
                 "blocker": parity["blocker"],
                 "counts": parity["counts"],

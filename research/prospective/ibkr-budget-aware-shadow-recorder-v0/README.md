@@ -30,12 +30,13 @@ streams; optional exhaustion queues, reduces, records, or skips work without
 stopping frozen M1C recording.
 
 Missing external scientific inputs do not make the IBKR acquisition process
-disappear. When the production bar-compatibility report, historical activity
-baseline, or exact previous-session Group O package is absent, the process keeps
-the minimal bar streams and connection audit online while persisting a specific
-scientific blocker. M1C scoring and episode-triggered option recording remain
-disabled; a missing input is never replaced with a fabricated pass artifact,
-stale context, or an outcome-informed substitute.
+disappear. An absent bar-compatibility report is a pending Track A transfer
+result, not a pre-start blocker; an explicit failed bar-semantics result still
+blocks scoring. A missing historical activity baseline or exact previous-session
+Group O package blocks scoring while minimal bars continue. The Group O package
+is prepared from bounded historical EOD option requests after D-1 becomes
+available; it never opens a streaming option chain and never substitutes an
+arbitrary pair when the frozen selection rule fails.
 
 ## Scientific tracks
 
@@ -54,6 +55,27 @@ source-transfer decision is persisted.
 Use `configs/prospective/server.example.yaml` as the deployment template. The
 IBKR connection must be loopback, read-only, and market-data-only. Relevant
 capacity overrides are documented in `deploy/stocker.env.example`.
+
+Before the first recorder start, materialize the immutable, training-cutoff
+activity baseline for the exact frozen cohort:
+
+```bash
+sudo -u stocker sh -c '
+  set -a
+  . /etc/stocker/stocker.env
+  exec /opt/stocker/current/.venv/bin/stocker-prospective \
+    scientific-inputs build-activity-baseline \
+    --config /etc/stocker/prospective.yaml \
+    --from-session 2024-01-02 \
+    --latest-authorised-session 2026-06-29
+'
+```
+
+The command requires `EODHD_API_TOKEN`, validates all 20 symbols and at least
+ten prior sessions for each scored bar ordinal, and refuses to replace a
+different existing baseline. Load the root-owned recorder environment as shown;
+do not copy its token onto the command line. The server template enables Track A
+so the first 20 valid sessions receive their later EODHD comparison.
 
 The web application exposes read-only budget, source-transfer, universe,
 episode, and report-package endpoints. It has no order, account, position,

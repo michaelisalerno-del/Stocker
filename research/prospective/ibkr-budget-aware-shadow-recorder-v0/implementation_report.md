@@ -10,11 +10,22 @@ reserve. Resolved historical-bar pacing is enforced at request time. No order,
 account, position, or portfolio surface was added.
 
 The deployed-process boundary also distinguishes transport acquisition from
-scientific readiness. Missing external bar-compatibility, historical-activity,
-or previous-session Group O inputs are persisted as explicit blockers while
-IBKR connection events and minimal bars continue. They still block M1C scoring
-and episode-driven option capture and are never synthesized or treated as
-passing evidence.
+scientific readiness. A not-yet-generated bar-compatibility report remains
+pending inside the prospective source-transfer track; exact provider equality
+is not a pre-start condition. An explicit bar-semantics failure, missing
+historical-activity baseline, or missing exact D-1 Group O input still blocks
+M1C scoring while IBKR connection events and minimal bars continue.
+
+An explicit pre-start command now acquires and validates the frozen 20-stock
+EODHD five-minute activity baseline through the authorised training cutoff and
+publishes it create-once. The deployment template enables Track A by default;
+the EODHD credential is also required for ongoing D-1 Group O preparation.
+
+The runtime now ignores stale completed-bar callbacks in its bounded latest-bar
+projection after reconnect while retaining the raw append-only evidence. It
+also prepares exact D-1 Group O packages from bounded historical EOD option
+requests using only the frozen 2024 transforms. This preparation does not
+stream an option chain and does not use option outcomes.
 
 The historical conclusion is unchanged:
 `blocked_insufficient_low_tail_support`.
@@ -45,7 +56,9 @@ The historical conclusion is unchanged:
 Migration `0010_ibkr_budget_transfer_v0.sql` adds runtime capacity,
 subscription transitions, explicit option allocation/degradation, skipped
 recordings, provider observations, transfer-session decisions, and prospective
-session phases. The read-only web app adds budget, source-transfer, and report
+session phases. Migration `0011_m1c_checkpoint_completion_v0.sql` adds a final
+checkpoint marker so reconnect replay skips only fully applied signal and
+option-scheduling side effects. The read-only web app adds budget, source-transfer, and report
 download endpoints plus a permanent no-orders banner.
 
 ## Scientific controls

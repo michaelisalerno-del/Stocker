@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,7 +15,9 @@ from stocker_prospective.events import (
     UnderlyingDepthEvent,
     UnderlyingLevel1QuoteEvent,
 )
+from stocker_prospective.frozen_m1c import FrozenM1CScore
 from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
+from stocker_prospective.live_bars import AuditedLiveBar
 from stocker_prospective.live_recorder import (
     FrozenM1CLiveRecorder,
     ScientificReadiness,
@@ -261,6 +263,7 @@ def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
             AssertionError("Group O must not be requested without a completed checkpoint")
         ),
         metadata_factory=metadata_factory,
+        run_id="live-v0",
         universe_symbols=COHORT,
         market_proxy_symbol="VTI",
         readiness=ScientificReadiness(
@@ -336,3 +339,100 @@ def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
         window_start=gap_start + timedelta(minutes=6),
         window_end=gap_start + timedelta(minutes=7),
     )
+
+
+def test_live_recorder_hydrates_processed_checkpoints_before_restart_replay(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    database.migrate()
+    metadata = metadata_factory(START, (START,))
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    checkpoint_id = repository.record_checkpoint(
+        metadata,
+        symbol="AAL",
+        session=date(2026, 7, 24),
+        checkpoint=6,
+        bar_start_utc=START,
+        bar_end_utc=START + timedelta(minutes=30),
+        score=FrozenM1CScore(
+            model_hash="b" * 64,
+            probability=0.25,
+            threshold=0.488333710794033,
+            threshold_passed=False,
+            feature_order=("feature",),
+            feature_values=(0.0,),
+            transformed_values=(0.0,),
+            feature_hash="c" * 64,
+            missing_feature_count=0,
+        ),
+        session_context_hash="d" * 64,
+        feature_values={"feature": 0.0},
+        eligible=True,
+        feature_freshness="exact_previous_session",
+        rejection_reasons=(),
+    )
+    assert repository.recorded_checkpoint_identities(run_id="live-v0") == set()
+    repository.mark_checkpoint_complete(
+        metadata,
+        checkpoint_id=checkpoint_id,
+        symbol="AAL",
+        session=date(2026, 7, 24),
+        checkpoint=6,
+    )
+
+    recorder = FrozenM1CLiveRecorder(
+        adapter=adapter(),
+        normalizer=IBKRCallbackNormalizer(prospective_collection_start=START),
+        raw_store=PartitionedEventStore(
+            root=tmp_path / "raw",
+            prospective_collection_start=START,
+            recorder_version="test",
+            contract_version="frozen-m1c-microstructure-recorder-v0",
+        ),
+        repository=repository,
+        engine=cast(FrozenM1CRecorderEngine, object()),
+        activity_baseline=HistoricalActivityBaseline(minimum_sessions=1),
+        group_o_provider=lambda _symbol, _session: (_ for _ in ()).throw(
+            AssertionError("persisted checkpoint must not be rescored")
+        ),
+        metadata_factory=metadata_factory,
+        run_id="live-v0",
+        universe_symbols=COHORT,
+        market_proxy_symbol="VTI",
+        readiness=ScientificReadiness(
+            m1c_parity_passed=True,
+            direction_parity_passed=True,
+            bar_compatibility_passed=True,
+            clock_drift_within_tolerance=True,
+        ),
+        maximum_quote_age=timedelta(seconds=2),
+    )
+
+    session = date(2026, 7, 24)
+    for symbol in ("AAL", "VTI"):
+        recorder._bars[(symbol, session)] = {
+            checkpoint: AuditedLiveBar(
+                symbol=symbol,
+                session=session,
+                bar_start_utc=START + timedelta(minutes=5 * (checkpoint - 1)),
+                bar_end_utc=START + timedelta(minutes=5 * checkpoint),
+                checkpoint=checkpoint,
+                open=10.0,
+                high=10.1,
+                low=9.9,
+                close=10.0,
+                volume_or_activity_field=1_000.0,
+                wap_where_available=10.0,
+                trade_count_where_available=10,
+                source="ibkr_historical_data_update",
+                source_completeness="completed",
+                finalised=True,
+                provider_timestamp_utc=START + timedelta(minutes=5 * checkpoint),
+                received_timestamp_utc=START + timedelta(minutes=5 * checkpoint),
+            )
+            for checkpoint in range(1, 7)
+        }
+
+    assert recorder._score_ready() == ()

@@ -325,6 +325,67 @@ def test_twenty_valid_sessions_open_option_development_without_outcomes(
     assert engineering == ("engineering_transfer", False)
 
 
+def test_skipped_recording_idempotency_preserves_distinct_subscription_payloads(
+    tmp_path,
+) -> None:
+    repository = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    repository.migrate()
+    frozen = FrozenRecorderRepository(repository)
+    observed = datetime(2026, 7, 27, 14, 0, tzinfo=UTC)
+    metadata = EvidenceMetadata(
+        run_id="skipped-recording-run",
+        prospective_start_utc=observed,
+        app_version="test",
+        git_commit="deadbeef",
+        model_artifact_id="frozen-m1c",
+        universe_id="anchor-frozen-20-v1",
+        cohort="anchor_frozen_20",
+        source_timestamps=[observed.isoformat()],
+        recorded_at_utc=observed,
+    )
+    repository.create_run(metadata, mode="record_only")
+    shared = {
+        "session": observed.date(),
+        "episode_id": "episode-1",
+        "symbol": "AAL",
+        "recording_kind": "optional_option_stream_evicted",
+        "reason": "preempted_by:OPTION_LEVEL1|99",
+    }
+
+    first_id = frozen.record_skipped_recording(
+        metadata,
+        requested_payload={"subscription_key": "OPTION_LEVEL1|10", "request_id": 10},
+        **shared,
+    )
+    repeated_id = frozen.record_skipped_recording(
+        metadata,
+        requested_payload={"request_id": 10, "subscription_key": "OPTION_LEVEL1|10"},
+        **shared,
+    )
+    second_id = frozen.record_skipped_recording(
+        metadata,
+        requested_payload={"subscription_key": "OPTION_LEVEL1|11", "request_id": 11},
+        **shared,
+    )
+
+    assert repeated_id == first_id
+    assert second_id != first_id
+    with repository._connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT requested_payload_json
+            FROM skipped_recording_v0
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (metadata.run_id,),
+        ).fetchall()
+    assert [json.loads(row["requested_payload_json"]) for row in rows] == [
+        {"subscription_key": "OPTION_LEVEL1|10", "request_id": 10},
+        {"subscription_key": "OPTION_LEVEL1|11", "request_id": 11},
+    ]
+
+
 def test_daily_report_package_contains_exact_required_files(tmp_path) -> None:
     repository = ProspectiveRepository(tmp_path / "prospective.sqlite3")
     repository.migrate()

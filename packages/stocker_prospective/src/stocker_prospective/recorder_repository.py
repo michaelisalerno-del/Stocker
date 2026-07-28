@@ -2891,19 +2891,21 @@ class FrozenRecorderRepository:
         scientific_option_evidence: bool | None = None,
     ) -> int:
         self._validate(metadata)
+        requested_payload_json = _json(dict(requested_payload))
         with self.repository._connect() as connection:
             if episode_id is not None:
                 existing = connection.execute(
                     """
                     SELECT id FROM skipped_recording_v0
                     WHERE run_id = ? AND episode_id = ? AND recording_kind = ?
-                      AND reason = ?
+                      AND reason = ? AND requested_payload_json = ?
                     """,
                     (
                         metadata.run_id,
                         episode_id,
                         recording_kind,
                         reason,
+                        requested_payload_json,
                     ),
                 ).fetchone()
                 if existing is not None:
@@ -2939,7 +2941,7 @@ class FrozenRecorderRepository:
                     symbol,
                     recording_kind,
                     reason,
-                    _json(dict(requested_payload)),
+                    requested_payload_json,
                     metadata.recorded_at_utc.isoformat(),
                     resolved_phase,
                     int(resolved_evidence),

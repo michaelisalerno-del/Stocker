@@ -969,7 +969,7 @@ function renderAudit() {
   ));
   const replay = state.status.replay || {};
   document.getElementById("replay-state").textContent =
-    `${clean(replay.state).toUpperCase()} // IBKR CONNECTIONS ${replay.ibkr_connections_attempted || 0}`;
+    `REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER ${clean(state.status.state).toUpperCase()} // IBKR CONNECTIONS ${replay.ibkr_connections_attempted || 0}`;
 }
 
 async function refreshAll() {

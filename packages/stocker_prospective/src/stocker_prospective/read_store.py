@@ -989,9 +989,16 @@ class ProspectiveReadStore:
         sample: list[dict[str, Any]] = []
         for partition in partitions:
             path = Path(str(partition["file_path"]))
-            if not path.is_file():
+            try:
+                is_file = path.is_file()
+            except OSError:
+                is_file = False
+            if not is_file:
                 continue
-            rows = pq.ParquetFile(path).read().to_pylist()  # type: ignore[no-untyped-call]
+            try:
+                rows = pq.ParquetFile(path).read().to_pylist()  # type: ignore[no-untyped-call]
+            except OSError:
+                continue
             for row in rows[-limit:]:
                 timestamp = row.get("provider_timestamp_utc") or row.get("received_timestamp_utc")
                 detail = {

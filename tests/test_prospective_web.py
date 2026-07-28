@@ -125,6 +125,7 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     assert script.status_code == 200
     assert "Official IBKR API" in script.text
     assert "Recorder readiness" in script.text
+    assert "REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER" in script.text
 
     endpoints = (
         "/api/health",
@@ -162,6 +163,63 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         "model",
     }
     assert client.get(f"/api/shadow/{structure_id}").status_code == 200
+
+
+def test_audit_events_skip_raw_partitions_the_web_identity_cannot_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+    protected_path = tmp_path / "recorder-only" / "protected.complete.parquet"
+    with sqlite3.connect(cfg.paths.database) as connection:
+        connection.execute(
+            """
+            INSERT INTO raw_partition_manifest_v0(
+                run_id, data_source, session_date, symbol, event_type,
+                file_path, row_count, minimum_timestamp_utc,
+                maximum_timestamp_utc, schema_version, content_hash,
+                complete, gap_count, recorder_version, contract_version,
+                recorded_at_utc, claims_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "replay-run-001",
+                "ibkr",
+                "2026-07-24",
+                "AAPL",
+                "five_minute_bar_event",
+                str(protected_path),
+                1,
+                "2026-07-24T13:30:00+00:00",
+                "2026-07-24T13:35:00+00:00",
+                "raw-event-v1",
+                "protected-partition",
+                1,
+                0,
+                "test",
+                "test",
+                "2026-07-24T13:35:01+00:00",
+                "{}",
+            ),
+        )
+
+    original_is_file = Path.is_file
+
+    def inaccessible_partition(path: Path) -> bool:
+        if path == protected_path:
+            raise PermissionError(13, "Permission denied", str(path))
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", inaccessible_partition)
+
+    response = client.get("/api/audit/events")
+
+    assert response.status_code == 200
+    assert any(
+        item["audit_type"] == "raw_partition" and item["identity"] == "protected-partition"
+        for item in response.json()["items"]
+    )
 
 
 def test_health_does_not_apply_legacy_m1_parity_gate_to_frozen_m1c(

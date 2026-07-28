@@ -1,0 +1,5 @@
+period,horizon_minutes,role,policy,actions,sessions,directional_accuracy,mean_aligned_return,median_aligned_return
+assessment,10,secondary_only_not_m1c_probability_partition,asymmetric_downside_v1,58,38,0.41379310344827586,-0.0010589007775089684,-0.001188617197172235
+assessment,10,secondary_only_not_m1c_probability_partition,frozen_A1,139,78,0.5251798561151079,0.0017732888661518354,0.0005717062500220685
+stress,10,secondary_only_not_m1c_probability_partition,asymmetric_downside_v1,70,32,0.5142857142857142,0.0018802601045639466,0.0012299974419405736
+stress,10,secondary_only_not_m1c_probability_partition,frozen_A1,219,63,0.5114155251141552,0.0001249671608640796,0.0003964321161928768

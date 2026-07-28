@@ -1,0 +1,25 @@
+{
+  "C": 1.0,
+  "algorithm": "sklearn.linear_model.LogisticRegression",
+  "class_weight": null,
+  "coefficients_standardised": {
+    "D1_signed_return_5m": 0.30956991648600596,
+    "D2_signed_return_15m": 0.21247714740183438,
+    "D3_close_location_15m": -0.20665987687244147,
+    "D4_distance_from_session_vwap_iv": -0.3161884538675025
+  },
+  "feature_names": [
+    "D1_signed_return_5m",
+    "D2_signed_return_15m",
+    "D3_close_location_15m",
+    "D4_distance_from_session_vwap_iv"
+  ],
+  "fit_intercept": true,
+  "intercept": 0.16934281110486785,
+  "iterations": 8,
+  "l1_ratio": 0.0,
+  "max_iter": 1000,
+  "penalty": "l2",
+  "random_state": 2026072801,
+  "solver": "lbfgs"
+}

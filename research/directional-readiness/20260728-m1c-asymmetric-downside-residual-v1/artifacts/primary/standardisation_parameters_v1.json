@@ -1,0 +1,22 @@
+{
+  "feature_names": [
+    "D1_signed_return_5m",
+    "D2_signed_return_15m",
+    "D3_close_location_15m",
+    "D4_distance_from_session_vwap_iv"
+  ],
+  "fit_scope": "supplied_training_rows_only",
+  "means": {
+    "D1_signed_return_5m": 0.0009873979430856685,
+    "D2_signed_return_15m": 0.0008401836215427775,
+    "D3_close_location_15m": 0.026231116665650336,
+    "D4_distance_from_session_vwap_iv": 0.10138811496531742
+  },
+  "scales": {
+    "D1_signed_return_5m": 0.012083558674045565,
+    "D2_signed_return_15m": 0.020870564651774923,
+    "D3_close_location_15m": 0.6197855619784922,
+    "D4_distance_from_session_vwap_iv": 2.275167006528935
+  },
+  "variance_definition": "population_ddof_0"
+}

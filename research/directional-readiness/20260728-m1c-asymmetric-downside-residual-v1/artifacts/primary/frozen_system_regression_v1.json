@@ -1,0 +1,30 @@
+{
+  "fresh_episodes": {
+    "fields": [
+      "M1C_probability",
+      "m1c_high_tail_v1",
+      "m1c_tail_phase_v1",
+      "movement_consumed_v1",
+      "A1_probability_up_v1",
+      "A1_action_v1",
+      "episode_id",
+      "existing_fresh_episode_identifier"
+    ],
+    "passed": true,
+    "rows_compared": 1416,
+    "tolerance": 0.0
+  },
+  "high_tail_checkpoints": {
+    "fields": [
+      "M1C_probability",
+      "m1c_high_tail_v1",
+      "m1c_tail_phase_v1",
+      "movement_consumed_v1",
+      "A1_probability_up_v1",
+      "A1_action_v1"
+    ],
+    "passed": true,
+    "rows_compared": 2970,
+    "tolerance": 0.0
+  }
+}

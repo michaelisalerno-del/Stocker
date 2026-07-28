@@ -6,7 +6,7 @@ import json
 import sqlite3
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from pydantic import BaseModel
 
@@ -36,6 +36,12 @@ from stocker_prospective.quiet_state import (
     QuietStateSnapshot,
 )
 from stocker_prospective.safety import EpisodeSafetyDecision
+from stocker_prospective.signed_market_shock_v1 import (
+    CheckpointShockThresholdsV1,
+    MarketShockStateResultV1,
+    PreentryMarketWindowsV1,
+    StockShockResponseResultV1,
+)
 from stocker_prospective.subscriptions import PromotionDecision, SubscriptionRecord
 from stocker_prospective.tail_phase_v1 import (
     M1C_TAIL_PHASE_V1_VERSION,
@@ -52,6 +58,26 @@ TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT = frozenset(
         "ibkr_transfer_supported_without_recalibration",
         "ibkr_ranking_supported_probability_scale_shifted",
     }
+)
+SIGNED_MARKET_SHOCK_COLUMNS_V1: Final[tuple[str, ...]] = (
+    "canonical_market_proxy_v1",
+    "market_return_w0_v1",
+    "market_range_w0_v1",
+    "market_return_w1_v1",
+    "market_range_w1_v1",
+    "market_shock_thresholds_v1_json",
+    "market_shock_state_v1",
+    "market_shock_event_id_v1",
+    "shock_sign_v1",
+    "stock_return_w0_v1",
+    "stock_absolute_alignment_v1",
+    "shock_relative_response_v1",
+    "shock_response_class_v1",
+    "shock_resisting_subtype_v1",
+    "market_shock_complete_v1",
+    "shock_response_complete_v1",
+    "market_shock_missing_reasons_v1_json",
+    "shock_response_missing_reasons_v1_json",
 )
 
 
@@ -76,6 +102,56 @@ def _assert_immutable_observation(
     mismatches = tuple(key for key, value in expected.items() if existing[key] != value)
     if mismatches:
         raise ValueError(f"immutable {label} differs: {','.join(sorted(mismatches))}")
+
+
+def _signed_market_shock_values_v1(
+    *,
+    market_windows_v1: PreentryMarketWindowsV1,
+    market_shock_state_v1: MarketShockStateResultV1,
+    stock_shock_response_v1: StockShockResponseResultV1,
+    market_shock_thresholds_v1: CheckpointShockThresholdsV1 | None,
+) -> dict[str, object]:
+    """Serialise the logging-only fields once for insert and retry validation."""
+
+    values: dict[str, object] = {
+        "canonical_market_proxy_v1": market_windows_v1.market_proxy_v1,
+        "market_return_w0_v1": market_windows_v1.market_return_w0_v1,
+        "market_range_w0_v1": market_windows_v1.market_range_w0_v1,
+        "market_return_w1_v1": market_windows_v1.market_return_w1_v1,
+        "market_range_w1_v1": market_windows_v1.market_range_w1_v1,
+        "market_shock_thresholds_v1_json": (
+            None
+            if market_shock_thresholds_v1 is None
+            else _json(market_shock_thresholds_v1)
+        ),
+        "market_shock_state_v1": market_shock_state_v1.market_shock_state_v1,
+        "market_shock_event_id_v1": (
+            market_shock_state_v1.market_shock_event_id_v1
+        ),
+        "shock_sign_v1": market_shock_state_v1.shock_sign_v1,
+        "stock_return_w0_v1": stock_shock_response_v1.stock_return_w0_v1,
+        "stock_absolute_alignment_v1": (
+            stock_shock_response_v1.stock_absolute_alignment_v1
+        ),
+        "shock_relative_response_v1": (
+            stock_shock_response_v1.shock_relative_response_v1
+        ),
+        "shock_response_class_v1": (
+            stock_shock_response_v1.shock_response_class_v1
+        ),
+        "shock_resisting_subtype_v1": stock_shock_response_v1.resisting_subtype_v1,
+        "market_shock_complete_v1": int(market_shock_state_v1.complete_v1),
+        "shock_response_complete_v1": int(stock_shock_response_v1.complete_v1),
+        "market_shock_missing_reasons_v1_json": _json(
+            market_shock_state_v1.missing_reasons_v1
+        ),
+        "shock_response_missing_reasons_v1_json": _json(
+            stock_shock_response_v1.missing_reasons_v1
+        ),
+    }
+    if tuple(values) != SIGNED_MARKET_SHOCK_COLUMNS_V1:
+        raise AssertionError("signed market-shock persistence column order drifted")
+    return values
 
 
 class FrozenRecorderRepository:
@@ -1228,6 +1304,142 @@ class FrozenRecorderRepository:
                     ),
                 )
             return checkpoint_id
+
+    def record_signed_market_shock_checkpoint_v1(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        checkpoint_id: int,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        market_windows_v1: PreentryMarketWindowsV1,
+        market_shock_state_v1: MarketShockStateResultV1,
+        stock_shock_response_v1: StockShockResponseResultV1,
+        market_shock_thresholds_v1: CheckpointShockThresholdsV1 | None,
+        activation_status_v1: str,
+    ) -> None:
+        """Attach optional signed-shock evidence after core episode promotion."""
+
+        self._validate(metadata)
+        expected = _signed_market_shock_values_v1(
+            market_windows_v1=market_windows_v1,
+            market_shock_state_v1=market_shock_state_v1,
+            stock_shock_response_v1=stock_shock_response_v1,
+            market_shock_thresholds_v1=market_shock_thresholds_v1,
+        )
+        shock_source = {
+            "schema_version": "m1c-signed-market-shock-transition-v1",
+            "activation_status_v1": activation_status_v1,
+            "threshold_configuration": (
+                None
+                if market_shock_thresholds_v1 is None
+                else market_shock_thresholds_v1.model_dump(mode="json")
+            ),
+            "w0_bar_ordinals_v1": market_windows_v1.w0_bar_ordinals_v1,
+            "w1_bar_ordinals_v1": market_windows_v1.w1_bar_ordinals_v1,
+            "signal_timestamp": market_windows_v1.signal_timestamp,
+            "maximum_market_timestamp_v1": (
+                market_windows_v1.maximum_market_timestamp_v1
+            ),
+            "maximum_stock_timestamp_v1": (
+                stock_shock_response_v1.maximum_stock_timestamp_v1
+            ),
+            "recorder_configuration_hash": self.configuration_hash,
+            "logging_only": True,
+            "m1c_scoring_changed": False,
+            "episode_promotion_changed": False,
+            "recorder_priority_changed": False,
+            "subscription_allocation_changed": False,
+            "option_contract_selection_changed": False,
+            "direction_decision_changed": False,
+            "episode_inclusion_changed": False,
+            "order_routing_changed": False,
+        }
+        source_json = _json(shock_source)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT run_id, symbol, session_date, checkpoint,
+                       canonical_market_proxy_v1,
+                       market_return_w0_v1, market_range_w0_v1,
+                       market_return_w1_v1, market_range_w1_v1,
+                       market_shock_thresholds_v1_json,
+                       market_shock_state_v1, market_shock_event_id_v1,
+                       shock_sign_v1, stock_return_w0_v1,
+                       stock_absolute_alignment_v1,
+                       shock_relative_response_v1,
+                       shock_response_class_v1,
+                       shock_resisting_subtype_v1,
+                       market_shock_complete_v1,
+                       shock_response_complete_v1,
+                       market_shock_missing_reasons_v1_json,
+                       shock_response_missing_reasons_v1_json,
+                       signed_market_shock_source_v1_json
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if existing is None:
+                raise ValueError("signed-shock checkpoint does not exist")
+            if (
+                str(existing["run_id"]) != metadata.run_id
+                or str(existing["symbol"]) != symbol
+                or str(existing["session_date"]) != session.isoformat()
+                or int(existing["checkpoint"]) != checkpoint
+                or market_windows_v1.session != session
+                or market_windows_v1.checkpoint != checkpoint
+            ):
+                raise ValueError("signed-shock checkpoint identity differs")
+            if existing["signed_market_shock_source_v1_json"] is not None:
+                _assert_immutable_observation(
+                    existing,
+                    expected={
+                        **expected,
+                        "signed_market_shock_source_v1_json": source_json,
+                    },
+                    label="signed market-shock checkpoint",
+                )
+                return
+            if any(
+                existing[column] is not None
+                for column in SIGNED_MARKET_SHOCK_COLUMNS_V1
+            ):
+                raise ValueError("signed market-shock checkpoint is partially populated")
+            connection.execute(
+                """
+                UPDATE m1c_checkpoint_v0
+                SET canonical_market_proxy_v1 = ?,
+                    market_return_w0_v1 = ?,
+                    market_range_w0_v1 = ?,
+                    market_return_w1_v1 = ?,
+                    market_range_w1_v1 = ?,
+                    market_shock_thresholds_v1_json = ?,
+                    market_shock_state_v1 = ?,
+                    market_shock_event_id_v1 = ?,
+                    shock_sign_v1 = ?,
+                    stock_return_w0_v1 = ?,
+                    stock_absolute_alignment_v1 = ?,
+                    shock_relative_response_v1 = ?,
+                    shock_response_class_v1 = ?,
+                    shock_resisting_subtype_v1 = ?,
+                    market_shock_complete_v1 = ?,
+                    shock_response_complete_v1 = ?,
+                    market_shock_missing_reasons_v1_json = ?,
+                    shock_response_missing_reasons_v1_json = ?,
+                    signed_market_shock_source_v1_json = ?
+                WHERE id = ?
+                """,
+                (
+                    *(
+                        expected[column]
+                        for column in SIGNED_MARKET_SHOCK_COLUMNS_V1
+                    ),
+                    source_json,
+                    checkpoint_id,
+                ),
+            )
 
     def record_episode(
         self,

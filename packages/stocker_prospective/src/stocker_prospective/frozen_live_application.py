@@ -88,6 +88,9 @@ from stocker_prospective.recorder_v0 import (
     FrozenM1CRecorderEngine,
     RecorderCheckpointResult,
 )
+from stocker_prospective.signed_market_shock_v1 import (
+    load_signed_market_shock_threshold_manifest_v1,
+)
 from stocker_prospective.source_transfer import SourceTransferCoordinator
 from stocker_prospective.subscriptions import (
     PromotionScheduler,
@@ -673,6 +676,24 @@ def build_frozen_prospective_application(
             else:
                 tail_phase_activation_status_v1 = "available"
                 artifact_files["m1c_tail_phase_v1_config"] = tail_phase_path
+    signed_market_shock_thresholds_v1 = None
+    signed_market_shock_activation_status_v1 = "not_configured"
+    if paths.m1c_signed_market_shock_v1_config is not None:
+        shock_path = Path(paths.m1c_signed_market_shock_v1_config)
+        if not shock_path.is_file():
+            signed_market_shock_activation_status_v1 = "unavailable:config_absent"
+        else:
+            try:
+                signed_market_shock_thresholds_v1 = (
+                    load_signed_market_shock_threshold_manifest_v1(shock_path)
+                )
+            except (OSError, ValueError):
+                signed_market_shock_activation_status_v1 = (
+                    "unavailable:config_invalid"
+                )
+            else:
+                signed_market_shock_activation_status_v1 = "available"
+                artifact_files["m1c_signed_market_shock_v1_config"] = shock_path
     if any(not path.is_file() for path in artifact_files.values()):
         absent = sorted(name for name, path in artifact_files.items() if not path.is_file())
         raise ValueError("frozen recorder artifact absent: " + ",".join(absent))
@@ -931,6 +952,10 @@ def build_frozen_prospective_application(
             None if tail_phase_config is None else tail_phase_config.movement_consumed_median_2024
         ),
         tail_phase_activation_status_v1=tail_phase_activation_status_v1,
+        signed_market_shock_thresholds_v1=signed_market_shock_thresholds_v1,
+        signed_market_shock_activation_status_v1=(
+            signed_market_shock_activation_status_v1
+        ),
     )
     controller_budget = SubscriptionBudgetManager(
         limits={

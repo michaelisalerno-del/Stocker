@@ -1,0 +1,121 @@
+{
+  "adjustment_convention": "raw/unadjusted OHLC; source has no adjusted-close field",
+  "alternative_proxies_tested": false,
+  "bars_at_frozen_checkpoints": [
+    {
+      "checkpoint": 6,
+      "complete_rows": 0,
+      "incomplete_rows": 497,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 8,
+      "complete_rows": 496,
+      "incomplete_rows": 1,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 10,
+      "complete_rows": 495,
+      "incomplete_rows": 2,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 12,
+      "complete_rows": 495,
+      "incomplete_rows": 2,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 14,
+      "complete_rows": 495,
+      "incomplete_rows": 2,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 16,
+      "complete_rows": 495,
+      "incomplete_rows": 2,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 18,
+      "complete_rows": 497,
+      "incomplete_rows": 0,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 20,
+      "complete_rows": 497,
+      "incomplete_rows": 0,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 22,
+      "complete_rows": 496,
+      "incomplete_rows": 1,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 24,
+      "complete_rows": 496,
+      "incomplete_rows": 1,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 26,
+      "complete_rows": 496,
+      "incomplete_rows": 1,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 28,
+      "complete_rows": 496,
+      "incomplete_rows": 1,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 30,
+      "complete_rows": 496,
+      "incomplete_rows": 1,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 32,
+      "complete_rows": 496,
+      "incomplete_rows": 1,
+      "scheduled_rows": 497
+    },
+    {
+      "checkpoint": 34,
+      "complete_rows": 495,
+      "incomplete_rows": 2,
+      "scheduled_rows": 497
+    }
+  ],
+  "bounded_arrow_sha256": "92e5be6975ab50c2a6ba792f235a281aae99f9a3ab1aaee72b31a4cc05c08b4f",
+  "bounded_max_timestamp": "2025-12-31T21:00:00+00:00",
+  "bounded_min_timestamp": "2024-01-02T14:30:00+00:00",
+  "bounded_opened_row_count": 39429,
+  "bounded_rows_with_missing_ohlc_count": 28,
+  "canonical_proxy_available": true,
+  "checkpoint_6_note": "VTI bars are present, but W1 is deterministically incomplete because its reference would cross the session boundary",
+  "existing_causal_alignment": {
+    "benchmark_available_after_stock_bar_count": 0,
+    "maximum_absolute_bar_range_difference": 0.0,
+    "maximum_absolute_bar_return_difference": 0.0,
+    "passed": true,
+    "rows_compared": 19860
+  },
+  "frequency": "five_minutes",
+  "imputation": false,
+  "new_external_dataset_acquired": false,
+  "partial_bars_allowed": false,
+  "protected_filter": "timestamp >= 2024-01-01T00:00:00Z and < 2026-01-01T00:00:00Z",
+  "proxy_identifier": "VTI",
+  "session_crossing_allowed": false,
+  "source": "EODHD canonical processed stock bars",
+  "source_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=VTI.US/timeframe=5m/data.parquet",
+  "timestamp_semantics": "UTC bar-start timestamp; a bar is causal only at bar_start_plus_5_minutes",
+  "trading_calendar": "NYSE regular session 09:30-16:00 America/New_York"
+}

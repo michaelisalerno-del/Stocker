@@ -58,6 +58,7 @@ from stocker_prospective.recorder_v0 import (
     RecorderCheckpointInput,
     RecorderCheckpointResult,
 )
+from stocker_prospective.signed_market_shock_v1 import MarketShockBarV1
 
 MetadataFactory = Callable[[datetime, tuple[datetime, ...]], EvidenceMetadata]
 GroupOProvider = Callable[[str, date], FrozenGroupOContext]
@@ -813,6 +814,32 @@ class FrozenM1CLiveRecorder:
             raise ValueError("direction bar width differs from checkpoint")
         return tuple(output)
 
+    def _market_shock_bars_v1(
+        self,
+        *,
+        session: date,
+        checkpoint: int,
+    ) -> tuple[MarketShockBarV1, ...]:
+        """Map the already-subscribed canonical proxy into causal logging bars."""
+
+        bars = self._bars.get((self.market_proxy_symbol, session), {})
+        return tuple(
+            MarketShockBarV1(
+                symbol=self.market_proxy_symbol,
+                session=session,
+                bar_ordinal=expected - 1,
+                bar_start_timestamp=bar.bar_start_utc,
+                bar_complete_timestamp=bar.bar_end_utc,
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                finalised=bar.finalised,
+            )
+            for expected in range(1, checkpoint + 1)
+            if (bar := bars.get(expected)) is not None
+        )
+
     def _score_ready(self) -> tuple[RecorderCheckpointResult, ...]:
         if not self._scientific_scoring_enabled:
             return ()
@@ -895,6 +922,12 @@ class FrozenM1CLiveRecorder:
                                 underlying_quote_fresh=quote_fresh,
                                 unresolved_bar_gap=symbol in self._gap_symbols,
                                 raw_event_storage_writable=True,
+                                completed_market_shock_bars_v1=(
+                                    self._market_shock_bars_v1(
+                                        session=session,
+                                        checkpoint=checkpoint,
+                                    )
+                                ),
                             )
                         )
                     except (KeyError, ValueError) as exc:

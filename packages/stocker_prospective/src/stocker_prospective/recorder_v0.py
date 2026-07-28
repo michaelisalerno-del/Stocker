@@ -36,6 +36,18 @@ from stocker_prospective.safety import (
     EpisodeSafetyInputs,
     evaluate_episode_safety,
 )
+from stocker_prospective.signed_market_shock_v1 import (
+    MARKET_SHOCK_PROXY_V1,
+    CheckpointShockThresholdsV1,
+    MarketShockBarV1,
+    MarketShockStateResultV1,
+    PreentryMarketWindowsV1,
+    SignedMarketShockThresholdManifestV1,
+    StockShockResponseResultV1,
+    calculate_preentry_windows_v1,
+    calculate_stock_shock_response_v1,
+    classify_market_shock_state_v1,
+)
 from stocker_prospective.tail_phase_v1 import (
     MovementConsumedBarV1,
     MovementConsumedBucketV1,
@@ -45,6 +57,54 @@ from stocker_prospective.tail_phase_v1 import (
     assign_movement_consumed_bucket_v1,
     calculate_movement_consumed_v1,
 )
+
+
+def _unknown_signed_market_shock_logging_v1(
+    *,
+    session: date,
+    checkpoint: int,
+    signal_timestamp: datetime,
+    reason: str,
+) -> tuple[
+    PreentryMarketWindowsV1,
+    MarketShockStateResultV1,
+    StockShockResponseResultV1,
+]:
+    """Represent an optional logging failure without touching M1C control flow."""
+
+    windows = PreentryMarketWindowsV1(
+        market_proxy_v1=MARKET_SHOCK_PROXY_V1,
+        session=session,
+        checkpoint=checkpoint,
+        signal_timestamp=signal_timestamp,
+        w0_bar_ordinals_v1=(checkpoint - 3, checkpoint - 2, checkpoint - 1),
+        w1_bar_ordinals_v1=(checkpoint - 6, checkpoint - 5, checkpoint - 4),
+        market_return_w0_v1=None,
+        market_range_w0_v1=None,
+        market_return_w1_v1=None,
+        market_range_w1_v1=None,
+        maximum_market_timestamp_v1=None,
+        complete_v1=False,
+        missing_reasons_v1=(reason,),
+    )
+    state = MarketShockStateResultV1(
+        market_shock_state_v1="UNKNOWN_INCOMPLETE",
+        market_shock_event_id_v1=None,
+        shock_sign_v1=None,
+        complete_v1=False,
+        missing_reasons_v1=(reason,),
+    )
+    response = StockShockResponseResultV1(
+        stock_return_w0_v1=None,
+        stock_absolute_alignment_v1=None,
+        shock_relative_response_v1=None,
+        shock_response_class_v1="UNKNOWN_INCOMPLETE",
+        resisting_subtype_v1=None,
+        maximum_stock_timestamp_v1=None,
+        complete_v1=False,
+        missing_reasons_v1=(reason,),
+    )
+    return windows, state, response
 
 
 @dataclass(frozen=True)
@@ -64,6 +124,7 @@ class RecorderCheckpointInput:
     unresolved_bar_gap: bool
     raw_event_storage_writable: bool
     feature_freshness: str = "fresh"
+    completed_market_shock_bars_v1: tuple[MarketShockBarV1, ...] = ()
 
 
 class RecorderCheckpointResult(BaseModel):
@@ -76,6 +137,9 @@ class RecorderCheckpointResult(BaseModel):
     tail_phase_v1: TailPhaseStateV1
     movement_consumed_state_v1: MovementConsumedStateV1
     movement_consumed_bucket_v1: MovementConsumedBucketV1
+    market_windows_v1: PreentryMarketWindowsV1
+    market_shock_state_v1: MarketShockStateResultV1
+    stock_shock_response_v1: StockShockResponseResultV1
     episode_decision: EpisodeDecision
     quiet_state: QuietStateSnapshot
     quiet_episode_decision: QuietEpisodeDecision
@@ -106,6 +170,10 @@ class FrozenM1CRecorderEngine:
         tail_phase_tracker_v1: TailPhaseTrackerV1 | None = None,
         movement_consumed_median_v1: float | None = None,
         tail_phase_activation_status_v1: str = "not_configured",
+        signed_market_shock_thresholds_v1: (
+            SignedMarketShockThresholdManifestV1 | None
+        ) = None,
+        signed_market_shock_activation_status_v1: str = "not_configured",
     ) -> None:
         self.m1c_runtime = m1c_runtime
         self.m1c_features = m1c_features
@@ -122,11 +190,88 @@ class FrozenM1CRecorderEngine:
         )
         self.movement_consumed_median_v1 = movement_consumed_median_v1
         self.tail_phase_activation_status_v1 = tail_phase_activation_status_v1
+        self.signed_market_shock_thresholds_v1 = signed_market_shock_thresholds_v1
+        self.signed_market_shock_activation_status_v1 = (
+            signed_market_shock_activation_status_v1
+        )
         self._restored_sessions: set[tuple[str, date]] = set()
         self._high_tail_episode_timestamps: dict[
             tuple[str, date],
             list[datetime],
         ] = {}
+
+    def _signed_market_shock_logging_v1(
+        self,
+        *,
+        item: RecorderCheckpointInput,
+        checkpoint: int,
+        signal_timestamp: datetime,
+    ) -> tuple[
+        PreentryMarketWindowsV1,
+        MarketShockStateResultV1,
+        StockShockResponseResultV1,
+        CheckpointShockThresholdsV1 | None,
+    ]:
+        """Calculate optional evidence while containing every local data failure."""
+
+        thresholds = (
+            None
+            if self.signed_market_shock_thresholds_v1 is None
+            else self.signed_market_shock_thresholds_v1.threshold_for_checkpoint(
+                checkpoint
+            )
+        )
+        try:
+            windows = calculate_preentry_windows_v1(
+                market_proxy=MARKET_SHOCK_PROXY_V1,
+                session=item.session,
+                checkpoint=checkpoint,
+                signal_timestamp=signal_timestamp,
+                completed_bars=item.completed_market_shock_bars_v1,
+            )
+            state = classify_market_shock_state_v1(
+                windows=windows,
+                thresholds=thresholds,
+            )
+            response = calculate_stock_shock_response_v1(
+                symbol=item.symbol,
+                session=item.session,
+                checkpoint=checkpoint,
+                signal_timestamp=signal_timestamp,
+                completed_stock_bars=tuple(
+                    MarketShockBarV1(
+                        symbol=bar.symbol,
+                        session=bar.session,
+                        bar_ordinal=bar.bar_ordinal,
+                        bar_start_timestamp=bar.bar_start_timestamp,
+                        bar_complete_timestamp=bar.bar_complete_timestamp,
+                        open=bar.open,
+                        high=bar.high,
+                        low=bar.low,
+                        close=bar.close,
+                        finalised=bar.finalised,
+                    )
+                    for bar in item.completed_m1c_bars
+                ),
+                market_return_w0_v1=windows.market_return_w0_v1,
+                market_shock_state_v1=state,
+                threshold_15m=(
+                    item.group_o_context.previous_close_implied_movement_15m
+                ),
+            )
+            return windows, state, response, thresholds
+        except Exception as error:
+            reason = (
+                "signed_market_shock_logging_calculation_error:"
+                f"{type(error).__name__}"
+            )
+            windows, state, response = _unknown_signed_market_shock_logging_v1(
+                session=item.session,
+                checkpoint=checkpoint,
+                signal_timestamp=signal_timestamp,
+                reason=reason,
+            )
+            return windows, state, response, thresholds
 
     def _restore_session(self, item: RecorderCheckpointInput) -> None:
         key = (item.symbol, item.session)
@@ -299,6 +444,16 @@ class FrozenM1CRecorderEngine:
             movement_consumed_state_v1.movement_consumed_v1,
             frozen_median=self.movement_consumed_median_v1,
         )
+        (
+            market_windows_v1,
+            market_shock_state_v1,
+            stock_shock_response_v1,
+            checkpoint_thresholds_v1,
+        ) = self._signed_market_shock_logging_v1(
+            item=item,
+            checkpoint=checkpoint,
+            signal_timestamp=trigger.bar_complete_timestamp,
+        )
         checkpoint_id = self.repository.record_checkpoint(
             item.metadata,
             symbol=item.symbol,
@@ -455,6 +610,35 @@ class FrozenM1CRecorderEngine:
                     valid=safety.scientific_recording_valid,
                 )
                 display_allowed = True
+        try:
+            self.repository.record_signed_market_shock_checkpoint_v1(
+                item.metadata,
+                checkpoint_id=checkpoint_id,
+                symbol=item.symbol,
+                session=item.session,
+                checkpoint=checkpoint,
+                market_windows_v1=market_windows_v1,
+                market_shock_state_v1=market_shock_state_v1,
+                stock_shock_response_v1=stock_shock_response_v1,
+                market_shock_thresholds_v1=checkpoint_thresholds_v1,
+                activation_status_v1=(
+                    self.signed_market_shock_activation_status_v1
+                ),
+            )
+        except Exception as error:
+            (
+                market_windows_v1,
+                market_shock_state_v1,
+                stock_shock_response_v1,
+            ) = _unknown_signed_market_shock_logging_v1(
+                session=item.session,
+                checkpoint=checkpoint,
+                signal_timestamp=trigger.bar_complete_timestamp,
+                reason=(
+                    "signed_market_shock_logging_persistence_error:"
+                    f"{type(error).__name__}"
+                ),
+            )
         all_reasons = tuple(
             dict.fromkeys(
                 (
@@ -469,6 +653,9 @@ class FrozenM1CRecorderEngine:
             tail_phase_v1=tail_phase_v1,
             movement_consumed_state_v1=movement_consumed_state_v1,
             movement_consumed_bucket_v1=movement_consumed_bucket_v1,
+            market_windows_v1=market_windows_v1,
+            market_shock_state_v1=market_shock_state_v1,
+            stock_shock_response_v1=stock_shock_response_v1,
             episode_decision=episode,
             quiet_state=quiet_state,
             quiet_episode_decision=quiet_episode,

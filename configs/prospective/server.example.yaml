@@ -18,6 +18,7 @@ paths:
   frozen_m1c_artifact_root: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary
   m1c_scaling_artifact: /opt/stocker/current/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json
   m1c_tail_phase_v1_config: /opt/stocker/current/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/frozen_config_v1.json
+  m1c_signed_market_shock_v1_config: /opt/stocker/current/research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/checkpoint_shock_threshold_manifest_v1.json
   direction_beta_artifact: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/stock_market_beta_parameters.csv
   historical_activity_bars: /var/lib/stocker/preprocessing/prior-session-five-minute-bars.parquet
   bar_compatibility_report: /var/lib/stocker/prospective/bar_compatibility_report.json

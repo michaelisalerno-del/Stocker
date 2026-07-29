@@ -1017,6 +1017,13 @@ manually mark a row acknowledged. A processing commit without an
 acknowledgement is safe for acknowledgement-only recovery; a provider envelope
 without canonical materialisation is not safe and becomes ingestion-fatal.
 
+The default lease batch is bounded at 256 callbacks. This amortizes immutable
+partition and checkpoint overhead across the 28 required bar streams while
+leaving excess callbacks pending and recoverable. Processing refreshes
+generation ownership every eight projected callbacks. Do not raise the bound
+merely to hide a growing backlog; compare callback admission and processing
+rates, oldest-unacknowledged age, lease freshness, and host capacity first.
+
 An expired callback batch lease can be reclaimed by a newer generation. A
 stale recorder-process owner is different: the executable cannot prove that
 its in-memory active episodes and option subscriptions were continuous.

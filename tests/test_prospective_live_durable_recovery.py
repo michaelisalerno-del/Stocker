@@ -306,7 +306,7 @@ def test_large_durable_batch_refreshes_processing_heartbeat(
         inbox=inbox,
         processing_heartbeat=lambda: pulses.append(len(pulses)),
     )
-    for index in range(17):
+    for index in range(257):
         emit(adapter, field="bid" if index % 2 else "ask")
 
     result = recorder.poll(now=NOW + timedelta(seconds=1))
@@ -315,9 +315,10 @@ def test_large_durable_batch_refreshes_processing_heartbeat(
         acknowledged_at=NOW + timedelta(seconds=1),
     )
 
-    assert recorder.inbox_batch_limit == 32
-    assert len(result.durable_inbox_event_ids) == 17
-    assert pulses == [0, 1, 2]
+    assert recorder.inbox_batch_limit == 256
+    assert len(result.durable_inbox_event_ids) == 256
+    assert pulses == list(range(32))
+    assert inbox.accounting().pending == 1
 
 
 def test_crash_after_lease_is_reclaimed_without_loss(tmp_path: Path) -> None:

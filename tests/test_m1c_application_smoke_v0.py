@@ -193,6 +193,7 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
     result = application.poll(now=polled_at)
 
     assert result.checkpoint_results == ()
+    assert config.runtime.callback_inbox_batch_limit == 256
     assert (tmp_path / "activation.json").is_file()
     assert (tmp_path / "capability.json").is_file()
     with sqlite3.connect(config.paths.database) as connection:

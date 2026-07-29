@@ -241,7 +241,7 @@ class FrozenM1CLiveRecorder:
         recorder_generation: int | None = None,
         lease_owner: str | None = None,
         inbox_lease_timeout: timedelta = timedelta(seconds=30),
-        inbox_batch_limit: int = 32,
+        inbox_batch_limit: int = 256,
         failure_injector: Callable[[str], None] | None = None,
         operational_repository: RecorderOperationalRepository | None = None,
         operational_thresholds: OperationalThresholds | None = None,

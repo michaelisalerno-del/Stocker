@@ -344,6 +344,19 @@ function micropriceEdge(row) {
   return microprice - (Number(row.bid) + Number(row.ask)) / 2;
 }
 
+function m1cEvidenceStatus(row) {
+  if (row.m1c_probability === null || row.m1c_probability === undefined) {
+    return "awaiting checkpoint";
+  }
+  if (row.m1c_scientific_eligible === true) return "scientific-eligible";
+  const reasons = Array.isArray(row.m1c_rejection_reasons)
+    ? row.m1c_rejection_reasons.filter((reason) => typeof reason === "string")
+    : [];
+  return reasons.length
+    ? `engineering shadow: ${reasons.join(", ")}`
+    : "engineering shadow";
+}
+
 function renderUniverse() {
   replace("universe-panel", table(
     [
@@ -352,6 +365,7 @@ function renderUniverse() {
       { label: "M1C p", value: "m1c_probability" },
       { label: "Gate", value: "m1c_threshold" },
       { label: "Distance", value: "distance_from_threshold" },
+      { label: "Evidence status", value: m1cEvidenceStatus },
       { label: "Fresh episode", value: "fresh_episode" },
       { label: "A1", value: "a1_classification" },
       { label: "C1", value: "c1_classification" },

@@ -581,17 +581,21 @@ class FrozenRecorderRepository:
             raise ValueError("unsupported prospective phase parent")
         row = connection.execute(
             f"""
-            SELECT session_date FROM {parent_table}
+            SELECT session_date, scientific_recording_valid FROM {parent_table}
             WHERE run_id = ? AND {parent_id_column} = ?
             """,
             (run_id, parent_id),
         ).fetchone()
         if row is None:
             raise KeyError(parent_id)
-        return self.prospective_phase_for_session(
+        phase, phase_allows_scientific_evidence = self.prospective_phase_for_session(
             run_id=run_id,
             session=date.fromisoformat(str(row["session_date"])),
             connection=connection,
+        )
+        return (
+            phase,
+            phase_allows_scientific_evidence and bool(row["scientific_recording_valid"]),
         )
 
     @staticmethod
@@ -1123,6 +1127,7 @@ class FrozenRecorderRepository:
         quiet_checkpoint_id: int,
         decision: NeutralControlDecision,
         trigger_timestamp: datetime,
+        scientific_recording_valid: bool,
         data_quality_flags: tuple[str, ...],
     ) -> str:
         """Persist only a deterministic ten-percent neutral selection."""
@@ -1179,7 +1184,7 @@ class FrozenRecorderRepository:
                         "neutral_hash_fraction": decision.hash_fraction,
                         "neutral_sampling_fraction": decision.sampling_fraction,
                         "neutral_salt_id": decision.salt_id,
-                        "scientific_recording_valid": 1,
+                        "scientific_recording_valid": int(scientific_recording_valid),
                         "data_quality_flags_json": _json(tuple(sorted(set(data_quality_flags)))),
                         "claims_json": self.claims_json,
                     },
@@ -1205,7 +1210,7 @@ class FrozenRecorderRepository:
                     completion_status, completed_at_utc, claims_json
                 ) VALUES (
                     ?, ?, ?, ?, 'neutral_control', ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0,
-                    NULL, NULL, 0, 0, ?, ?, ?, ?, 0, 1, ?, 'pending_completion',
+                    NULL, NULL, 0, 0, ?, ?, ?, ?, 0, ?, ?, 'pending_completion',
                     'active', NULL, ?
                 )
                 """,
@@ -1229,6 +1234,7 @@ class FrozenRecorderRepository:
                     decision.hash_fraction,
                     decision.sampling_fraction,
                     decision.salt_id,
+                    int(scientific_recording_valid),
                     _json(tuple(sorted(set(data_quality_flags)))),
                     self.claims_json,
                 ),
@@ -5185,7 +5191,7 @@ class FrozenRecorderRepository:
                     connection.execute(
                         """
                         SELECT 1
-                        FROM opening_reversal_v1_1_eligible_episode
+                        FROM opening_reversal_v1_1_capture_eligible_episode
                         WHERE run_id = ? AND episode_id = ?
                         """,
                         (metadata.run_id, episode_id),
@@ -5299,7 +5305,7 @@ class FrozenRecorderRepository:
                 and connection.execute(
                     """
                     SELECT 1
-                    FROM opening_reversal_v1_1_eligible_episode
+                    FROM opening_reversal_v1_1_capture_eligible_episode
                     WHERE run_id = ? AND episode_id = ?
                     """,
                     (metadata.run_id, episode_id),
@@ -5891,7 +5897,7 @@ class FrozenRecorderRepository:
                 eligible = connection.execute(
                     """
                     SELECT episode_id, session_date
-                    FROM opening_reversal_v1_1_eligible_episode
+                    FROM opening_reversal_v1_1_capture_eligible_episode
                     WHERE run_id = ? AND prediction_receipt_hash_v1 = ?
                     """,
                     (metadata.run_id, outcome.prediction_receipt_hash_v1),
@@ -5928,9 +5934,10 @@ class FrozenRecorderRepository:
             )
             if outcome.role == "opposite_leg":
                 expected_right = "P" if expected_right == "C" else "C"
+            v1_1_capture = parent is not None and str(parent["experiment_version"]) == "1.1"
             if (
                 parent is None
-                or not bool(parent["scientific_outcome_eligible_v1"])
+                or (not v1_1_capture and not bool(parent["scientific_outcome_eligible_v1"]))
                 or parent["promoted_receipt_hash_v1"] is None
                 or outcome.contract.underlying != str(parent["stock"])
                 or outcome.contract.right != expected_right

@@ -301,6 +301,7 @@ class RecorderCheckpointInput:
     underlying_quote_fresh: bool
     unresolved_bar_gap: bool
     raw_event_storage_writable: bool
+    scientific_recording_authorized: bool
     feature_freshness: str = "fresh"
     completed_market_shock_bars_v1: tuple[MarketShockBarV1, ...] = ()
     market_previous_session_v1: date | None = None
@@ -502,6 +503,9 @@ class FrozenM1CRecorderEngine:
                 entry_timestamp_utc=episode.prospective_entry_timestamp,
                 receipt_created_at_utc=receipt_created_at,
                 m1c_probability=score.probability,
+                # Signal validity describes whether the frozen predictor ran on
+                # complete causal inputs. Scientific admission is a separate
+                # persisted property of the parent evidence.
                 m1c_probability_valid=signal_inputs_eligible,
                 high_tail_membership=score.threshold_passed,
                 fresh_episode_id=episode.episode_id,
@@ -1001,6 +1005,26 @@ class FrozenM1CRecorderEngine:
             and not item.unresolved_bar_gap
             and item.raw_event_storage_writable
         )
+        _phase, phase_allows_scientific_evidence = self.repository.prospective_phase_for_session(
+            run_id=item.metadata.run_id,
+            session=item.session,
+        )
+        scientific_recording_authorized = (
+            item.scientific_recording_authorized and phase_allows_scientific_evidence
+        )
+        scientific_inputs_eligible = signal_inputs_eligible and scientific_recording_authorized
+        scientific_rejection_reasons = tuple(
+            dict.fromkeys(
+                (
+                    *rejection_reasons,
+                    *(
+                        ()
+                        if scientific_recording_authorized
+                        else ("scientific_recording_not_authorized",)
+                    ),
+                )
+            )
+        )
         tail_phase_v1 = self.tail_phase_tracker_v1.evaluate(
             symbol=item.symbol,
             session=item.session,
@@ -1068,9 +1092,9 @@ class FrozenM1CRecorderEngine:
                 "_causal_builder_feature_hash": causal.feature_hash,
                 "_scaling_artifact_hash": causal.scaling_artifact_hash,
             },
-            eligible=signal_inputs_eligible,
+            eligible=scientific_inputs_eligible,
             feature_freshness=item.feature_freshness,
-            rejection_reasons=rejection_reasons,
+            rejection_reasons=scientific_rejection_reasons,
             tail_phase_v1=tail_phase_v1,
             movement_consumed_v1=movement_consumed_state_v1,
             movement_consumed_bucket_v1=movement_consumed_bucket_v1,
@@ -1108,7 +1132,7 @@ class FrozenM1CRecorderEngine:
             session=item.session,
             checkpoint=checkpoint,
             snapshot=quiet_state,
-            eligible=signal_inputs_eligible,
+            eligible=scientific_inputs_eligible,
         )
         quiet_observation_id: str | None = None
         if quiet_episode.fresh_episode:
@@ -1116,7 +1140,7 @@ class FrozenM1CRecorderEngine:
                 item.metadata,
                 quiet_checkpoint_id=quiet_checkpoint_id,
                 decision=quiet_episode,
-                scientific_recording_valid=signal_inputs_eligible,
+                scientific_recording_valid=scientific_inputs_eligible,
             )
         neutral_control = self.neutral_sampler.evaluate(
             session=item.session,
@@ -1133,7 +1157,8 @@ class FrozenM1CRecorderEngine:
                 quiet_checkpoint_id=quiet_checkpoint_id,
                 decision=neutral_control,
                 trigger_timestamp=trigger.bar_complete_timestamp,
-                data_quality_flags=rejection_reasons,
+                scientific_recording_valid=scientific_inputs_eligible,
+                data_quality_flags=scientific_rejection_reasons,
             )
         episode = self.tracker.evaluate(
             symbol=item.symbol,
@@ -1172,6 +1197,7 @@ class FrozenM1CRecorderEngine:
                     unresolved_bar_gap=item.unresolved_bar_gap,
                     deterministic_episode_identity=episode.episode_id is not None,
                     raw_event_storage_writable=item.raw_event_storage_writable,
+                    scientific_recording_authorized=scientific_recording_authorized,
                 )
             )
             episode_id = self.repository.record_episode(
@@ -1263,7 +1289,7 @@ class FrozenM1CRecorderEngine:
         all_reasons = tuple(
             dict.fromkeys(
                 (
-                    *rejection_reasons,
+                    *scientific_rejection_reasons,
                     *(() if safety is None else safety.rejection_reasons),
                 )
             )

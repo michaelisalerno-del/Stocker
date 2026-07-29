@@ -131,6 +131,12 @@ from stocker_prospective.tail_phase_v1 import load_tail_phase_frozen_config_v1
 NEW_YORK = ZoneInfo("America/New_York")
 MARKET_PROXY = "VTI"
 SECTOR_PROXY_SYMBOLS = tuple(sorted(set(SECTOR_PROXY_BY_SYMBOL.values())))
+_PROMOTION_RECOVERABLE_REJECTIONS = frozenset(
+    {
+        "scientific_recording_not_authorized",
+        "underlying_quote_stale",
+    }
+)
 _HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
     {
         "callback_inbox_max_unacknowledged",
@@ -143,6 +149,12 @@ _HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
         "callback_inbox_oldest_healthy_seconds",
     }
 )
+
+
+def _operationally_promotable(checkpoint: RecorderCheckpointResult) -> bool:
+    """Allow quote acquisition only when it can resolve every current rejection."""
+
+    return not (set(checkpoint.rejection_reasons) - _PROMOTION_RECOVERABLE_REJECTIONS)
 
 
 def _sha256(path: Path) -> str:
@@ -618,7 +630,7 @@ class FrozenProspectiveApplication:
                 self._opening_reversal_receipts.setdefault(group_key, {})[symbol] = opening_receipt
             self._sessions_seen.add(checkpoint.episode_decision.session)
             self._probabilities[symbol] = checkpoint.score.probability
-            if not checkpoint.rejection_reasons:
+            if _operationally_promotable(checkpoint):
                 self._eligible_symbols.add(symbol)
             else:
                 self._eligible_symbols.discard(symbol)
@@ -1350,7 +1362,7 @@ def build_frozen_prospective_application(
             label="bar compatibility",
         )
         if bar_compatibility_available
-        else True
+        else False
     )
     gateway_version = config.ibkr.tws_or_gateway_version
     if not gateway_version:
@@ -1563,10 +1575,18 @@ def build_frozen_prospective_application(
             },
         )
 
+    static_scientific_prerequisites_passed = (
+        m1c_parity and direction_parity and bar_compatibility and historical_activity_available
+    )
+
     def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:
-        return frozen_repository.prospective_phase_for_session(
+        phase, phase_allows_scientific_evidence = frozen_repository.prospective_phase_for_session(
             run_id=config.runtime.run_id or "",
             session=observed_at.astimezone(NEW_YORK).date(),
+        )
+        return (
+            phase,
+            phase_allows_scientific_evidence and static_scientific_prerequisites_passed,
         )
 
     frozen_repository.record_runtime_capacity(

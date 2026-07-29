@@ -20,6 +20,7 @@ class EpisodeSafetyInputs:
     unresolved_bar_gap: bool
     deterministic_episode_identity: bool
     raw_event_storage_writable: bool
+    scientific_recording_authorized: bool
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,10 @@ def evaluate_episode_safety(inputs: EpisodeSafetyInputs) -> EpisodeSafetyDecisio
         (not inputs.unresolved_bar_gap, "unresolved_bar_gap"),
         (inputs.deterministic_episode_identity, "episode_identity_not_deterministic"),
         (inputs.raw_event_storage_writable, "raw_event_storage_not_writable"),
+        (
+            inputs.scientific_recording_authorized,
+            "scientific_recording_not_authorized",
+        ),
     )
     reasons = tuple(reason for passed, reason in checks if not passed)
     return EpisodeSafetyDecision(

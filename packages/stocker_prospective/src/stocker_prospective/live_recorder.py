@@ -355,22 +355,21 @@ class FrozenM1CLiveRecorder:
                 self._gap_intervals[symbol] = [(started_at, None)]
         self._capability_preflight_passed = readiness.capability_preflight_passed
         self._session_context_ready = True
-        self._scientific_prerequisites_passed = (
+        self._shadow_prerequisites_passed = (
             readiness.m1c_parity_passed
             and readiness.direction_parity_passed
-            and readiness.bar_compatibility_passed
             and readiness.historical_activity_baseline_available
             and readiness.clock_drift_within_tolerance
+        )
+        self._scientific_prerequisites_passed = (
+            self._shadow_prerequisites_passed and readiness.bar_compatibility_passed
         )
         self._scientific_block_latched = (
             durable_inbox is not None and durable_inbox.has_active_fatal()
         )
-        self._scientific_scoring_enabled = (
-            readiness.capability_preflight_passed
-            and self._scientific_prerequisites_passed
-            and self._session_context_ready
-            and not self._scientific_block_latched
-        )
+        self._shadow_evaluation_enabled = False
+        self._scientific_scoring_enabled = False
+        self._refresh_evaluation_gates()
         self._clock_drift_seconds: float | None = None
         self._depth_exchanges: tuple[str, ...] = ()
         self._opening_reversal_decision_gate_v1_1 = (
@@ -549,29 +548,30 @@ class FrozenM1CLiveRecorder:
         """Enable scoring only after the live capability manifest passes."""
 
         self._capability_preflight_passed = passed
-        self._scientific_scoring_enabled = (
-            passed
-            and self._scientific_prerequisites_passed
-            and self._session_context_ready
-            and not self._scientific_block_latched
-        )
+        self._refresh_evaluation_gates()
 
     def set_session_context_ready(self, *, passed: bool) -> None:
         """Keep missing D-1 context retryable without consuming checkpoints."""
 
         self._session_context_ready = passed
-        self._scientific_scoring_enabled = (
+        self._refresh_evaluation_gates()
+
+    def _refresh_evaluation_gates(self) -> None:
+        """Keep engineering shadow evaluation separate from evidence admission."""
+
+        shared_ready = (
             self._capability_preflight_passed
-            and self._scientific_prerequisites_passed
             and self._session_context_ready
             and not self._scientific_block_latched
         )
+        self._shadow_evaluation_enabled = shared_ready and self._shadow_prerequisites_passed
+        self._scientific_scoring_enabled = shared_ready and self._scientific_prerequisites_passed
 
     def _latch_scientific_block(self) -> None:
         """Prevent readiness refreshes from clearing a persisted fatal latch."""
 
         self._scientific_block_latched = True
-        self._scientific_scoring_enabled = False
+        self._refresh_evaluation_gates()
 
     def acknowledge_checkpoint(self, result: RecorderCheckpointResult) -> None:
         """Suppress replay only after the application commits all side effects."""
@@ -694,6 +694,10 @@ class FrozenM1CLiveRecorder:
     @property
     def scientific_scoring_enabled(self) -> bool:
         return self._scientific_scoring_enabled
+
+    @property
+    def shadow_evaluation_enabled(self) -> bool:
+        return self._shadow_evaluation_enabled
 
     @property
     def scientific_block_latched(self) -> bool:
@@ -2307,7 +2311,7 @@ class FrozenM1CLiveRecorder:
         *,
         observed_now: datetime,
     ) -> tuple[RecorderCheckpointResult, ...]:
-        if not self._scientific_scoring_enabled:
+        if not self._shadow_evaluation_enabled:
             return ()
         results: list[RecorderCheckpointResult] = []
         for symbol in self.universe_symbols:
@@ -2384,12 +2388,9 @@ class FrozenM1CLiveRecorder:
                                 ),
                                 capability_preflight_passed=(
                                     self._capability_preflight_passed
-                                    and self._scientific_scoring_enabled
+                                    and self._shadow_evaluation_enabled
                                 ),
-                                m1c_parity_passed=(
-                                    self.readiness.m1c_parity_passed
-                                    and self.readiness.bar_compatibility_passed
-                                ),
+                                m1c_parity_passed=self.readiness.m1c_parity_passed,
                                 direction_parity_passed=self.readiness.direction_parity_passed,
                                 clock_drift_within_tolerance=(
                                     self.readiness.clock_drift_within_tolerance
@@ -2436,6 +2437,7 @@ class FrozenM1CLiveRecorder:
                                         )
                                     )
                                 ),
+                                scientific_recording_authorized=(self._scientific_scoring_enabled),
                             )
                         )
                     except (KeyError, ValueError) as exc:

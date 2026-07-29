@@ -810,6 +810,8 @@ class ProspectiveReadStore:
                        c.probability AS m1c_probability,
                        c.threshold AS m1c_threshold,
                        c.threshold_passed,
+                       c.eligible AS m1c_scientific_eligible,
+                       c.rejection_reasons_json AS m1c_rejection_reasons_json,
                        e.episode_id, e.completion_status AS episode_status,
                        COALESCE(s.bid, q.bid) AS bid,
                        COALESCE(s.ask, q.ask) AS ask,
@@ -853,6 +855,18 @@ class ProspectiveReadStore:
             item = dict(row)
             probability = item.get("m1c_probability")
             threshold = item.get("m1c_threshold")
+            rejection_reasons_json = item.pop(
+                "m1c_rejection_reasons_json",
+                None,
+            )
+            item["m1c_scientific_eligible"] = (
+                None if probability is None else bool(item.get("m1c_scientific_eligible"))
+            )
+            item["m1c_rejection_reasons"] = (
+                []
+                if rejection_reasons_json is None
+                else list(json.loads(str(rejection_reasons_json)))
+            )
             item["distance_from_threshold"] = (
                 None
                 if probability is None or threshold is None
@@ -1195,7 +1209,7 @@ class ProspectiveReadStore:
         *,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        """Return only strict V1.1 predicted-leg virtual position evidence."""
+        """Return strict V1.1 predicted-leg shadow and scientific evidence."""
 
         run_id = self._selected_run_id()
         if run_id is None:

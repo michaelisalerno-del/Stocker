@@ -20,7 +20,7 @@ class VirtualPositionLifecycle(StrEnum):
 
 
 class OpeningReversalVirtualPositionV1(BaseModel):
-    """One V1.1 predicted 1DTE leg projected from its strict two-line evidence."""
+    """One V1.1 predicted 1DTE leg projected from its strict two-line capture."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -78,7 +78,7 @@ class OpeningReversalVirtualPositionV1(BaseModel):
     latest_quote_quality_flags: tuple[str, ...]
     entry_convention: Literal["first_valid_live_ask_at_or_after_entry"]
     exit_convention: Literal["first_valid_live_bid_at_or_after_frozen_15m_horizon"]
-    scientific_eligible: Literal[True]
+    scientific_eligible: bool
     execution_claimed: Literal[False]
     paper_fill_claimed: Literal[False]
 

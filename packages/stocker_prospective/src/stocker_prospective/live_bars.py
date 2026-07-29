@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from functools import lru_cache
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -60,6 +61,7 @@ class AuditedLiveBar(BaseModel):
     received_timestamp_utc: datetime
 
 
+@lru_cache(maxsize=512)
 def _xnys_session_bounds(session: date) -> tuple[datetime, datetime]:
     import pandas_market_calendars as mcal
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import pandas_market_calendars as mcal
 import pytest
 
+import stocker_prospective.live_bars as live_bars
 from stocker_prospective.live_bars import (
     AuditedFiveMinuteBarAdapter,
     HistoricalBarUpdate,
@@ -189,6 +191,28 @@ def test_new_york_checkpoint_mapping_rejects_non_rth_and_misalignment() -> None:
         checkpoint_for_bar(datetime(2026, 7, 24, 13, 25, tzinfo=UTC))
     with pytest.raises(ValueError, match="aligned"):
         checkpoint_for_bar(datetime(2026, 7, 24, 13, 31, tzinfo=UTC))
+
+
+def test_new_york_session_bounds_are_reused_within_one_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    get_calendar = mcal.get_calendar
+
+    def counted_get_calendar(name: str) -> object:
+        nonlocal calls
+        calls += 1
+        return get_calendar(name)
+
+    live_bars._xnys_session_bounds.cache_clear()
+    monkeypatch.setattr(mcal, "get_calendar", counted_get_calendar)
+    try:
+        assert checkpoint_for_bar(datetime(2026, 7, 24, 13, 30, tzinfo=UTC)) == 1
+        assert checkpoint_for_bar(datetime(2026, 7, 24, 13, 55, tzinfo=UTC)) == 6
+    finally:
+        live_bars._xnys_session_bounds.cache_clear()
+
+    assert calls == 1
 
 
 def test_keep_up_to_date_waits_for_next_bar_before_finalising() -> None:

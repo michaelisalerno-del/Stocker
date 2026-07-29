@@ -1,5 +1,10 @@
 "use strict";
 
+import {
+  DashboardPollCoordinator,
+  detailRequestPlan,
+} from "/assets/polling.mjs";
+
 const state = {
   health: null,
   status: null,
@@ -20,7 +25,12 @@ const state = {
   transfer: null,
   reportPackages: [],
   selectedQuietEpisode: null,
+  sectionErrors: {},
+  lastSnapshotAt: null,
 };
+
+let episodeController = null;
+let quietEpisodeController = null;
 
 function node(tag, className = "", text = null) {
   const element = document.createElement(tag);
@@ -167,9 +177,12 @@ function renderStatus() {
   const status = state.status;
   const capabilities = state.capabilities;
   const manifest = capabilities.manifest || {};
+  const noOrderChecks = state.health.no_order_checks || {};
+  const noOrderVerified = noOrderChecks.aggregate_no_order_verdict === true;
   const blockers = [
     ...(state.health.blockers || []),
     ...(manifest.blockers || []),
+    ...Object.values(state.sectionErrors || {}).map((item) => item.error_code),
   ];
   const strip = document.createDocumentFragment();
   if (!blockers.length) {
@@ -182,10 +195,24 @@ function renderStatus() {
   replace("blocker-strip", strip);
 
   const connection = status.ibkr_connection || {};
+  const operational = status.operational || {};
+  const operationalTimestamps = operational.timestamps || {};
   const latest = status.latest_checkpoint || {};
   const grid = document.createDocumentFragment();
   [
-    metric("Recorder readiness", status.state, status.banner, status.state === "recording" ? "ok" : "danger"),
+    metric(
+      "Recorder readiness",
+      status.state,
+      operational.reason_code || status.banner,
+      status.state === "RECORDING_HEALTHY" ? "ok" : "danger",
+    ),
+    metric("Process heartbeat", clock(operationalTimestamps.process_heartbeat_at_utc), "Recorder loop liveness"),
+    metric("Latest callback received", clock(operationalTimestamps.latest_callback_received_at_utc), "External callback boundary"),
+    metric("Latest callback admitted", clock(operationalTimestamps.latest_callback_durably_admitted_at_utc), "SQLite WAL inbox commit"),
+    metric("Latest raw partition", clock(operationalTimestamps.latest_raw_partition_committed_at_utc), "Immutable Parquet + manifest"),
+    metric("Latest inbox acknowledgement", clock(operationalTimestamps.latest_inbox_acknowledgement_at_utc), "Processing commit precedes acknowledgement"),
+    metric("Latest completed 5m bar", clock(operationalTimestamps.latest_completed_five_minute_bar_at_utc), "Scientific bar clock"),
+    metric("Latest checkpoint", clock(operationalTimestamps.latest_successful_checkpoint_at_utc), "Successful frozen checkpoint"),
     metric("IBKR connection", connection.state || "OFFLINE", connection.message || "No current socket event"),
     metric("Market-data type", manifest.market_data_type || "UNOBSERVED", "Scientific recording requires LIVE", capabilities.scientific_recording_valid ? "ok" : "danger"),
     metric("Gateway / TWS", manifest.tws_or_gateway_version, `API server ${clean(manifest.api_server_version)}`),
@@ -201,7 +228,12 @@ function renderStatus() {
     metric("Last completed bar", clock(status.bar?.last_completed), "Partial bars are never scored"),
     metric("Next bar completion", clock(status.bar?.next_expected_completion), `${clean(status.bar?.freshness_seconds, 1)}s since last completed bar`),
     metric("Last raw event", clock(status.last_event_timestamp), `${status.data_gaps || 0} recorded gaps`),
-    metric("No-order state", status.execution_enabled ? "FAILED" : "VERIFIED", "Execution disabled; broker mutation unavailable", status.execution_enabled ? "danger" : "ok"),
+    metric(
+      "No-order state",
+      noOrderVerified ? "VERIFIED" : "UNVERIFIED",
+      "Derived from named adapter, route, database, configuration, and mutation checks",
+      noOrderVerified ? "ok" : "danger",
+    ),
   ].forEach((item) => grid.append(item));
   replace("runtime-grid", grid);
 
@@ -504,14 +536,22 @@ function renderMicrostructure(items, quoteSeries = [], depth = null) {
 }
 
 async function loadEpisode(episodeId) {
+  if (episodeController) episodeController.abort();
+  const controller = new AbortController();
+  episodeController = controller;
+  state.selectedEpisode = episodeId;
   replace("signal-evidence", node("div", "empty-state", "Reading causal evidence…"));
   try {
     const [detail, microstructure, options] = await Promise.all([
-      api(`/api/episodes/${encodeURIComponent(episodeId)}`),
-      api(`/api/episodes/${encodeURIComponent(episodeId)}/microstructure`),
-      api(`/api/episodes/${encodeURIComponent(episodeId)}/options`),
+      api(`/api/episodes/${encodeURIComponent(episodeId)}`, { signal: controller.signal }),
+      api(`/api/episodes/${encodeURIComponent(episodeId)}/microstructure`, {
+        signal: controller.signal,
+      }),
+      api(`/api/episodes/${encodeURIComponent(episodeId)}/options`, {
+        signal: controller.signal,
+      }),
     ]);
-    state.selectedEpisode = episodeId;
+    if (episodeController !== controller) return;
     const episode = detail.episode;
     const directions = detail.directional_research_classifications || [];
     const maximumDirectionTime = directions.length
@@ -551,7 +591,10 @@ async function loadEpisode(episodeId) {
     if ([...picker.options].some((item) => item.value === episodeId)) picker.value = episodeId;
     renderOptions(options.items || []);
   } catch (error) {
+    if (error.name === "AbortError") return;
     replace("signal-evidence", node("div", "empty-state value-danger", "Episode evidence is unavailable."));
+  } finally {
+    if (episodeController === controller) episodeController = null;
   }
 }
 
@@ -718,13 +761,21 @@ function quietOptionTable(items) {
 }
 
 async function loadQuietEpisode(observationId) {
+  if (quietEpisodeController) quietEpisodeController.abort();
+  const controller = new AbortController();
+  quietEpisodeController = controller;
+  state.selectedQuietEpisode = observationId;
   replace("quiet-episode-evidence", node("div", "empty-state", "Reading quiet-state evidence…"));
   try {
     const [detail, options] = await Promise.all([
-      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}`),
-      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}/options`),
+      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}`, {
+        signal: controller.signal,
+      }),
+      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}/options`, {
+        signal: controller.signal,
+      }),
     ]);
-    state.selectedQuietEpisode = observationId;
+    if (quietEpisodeController !== controller) return;
     const episode = detail.episode;
     const stack = node("div", "detail-stack");
     stack.append(
@@ -786,10 +837,13 @@ async function loadQuietEpisode(observationId) {
     );
     replace("quiet-episode-evidence", stack);
   } catch (error) {
+    if (error.name === "AbortError") return;
     replace(
       "quiet-episode-evidence",
       node("div", "empty-state value-danger", "Quiet-state evidence is unavailable."),
     );
+  } finally {
+    if (quietEpisodeController === controller) quietEpisodeController = null;
   }
 }
 
@@ -926,8 +980,10 @@ function safetyCard(label, value, description, tone = "") {
 
 function renderAudit() {
   const grid = node("div", "safety-grid");
+  const noOrderChecks = state.health.no_order_checks || {};
+  const noOrderVerified = noOrderChecks.aggregate_no_order_verdict === true;
   [
-    safetyCard("No-order path", state.health.no_order_path_verified ? "VERIFIED ABSENT" : "FAILED", "No order, account or position resource. Replay POST controls only.", state.health.no_order_path_verified ? "ok" : "danger"),
+    safetyCard("No-order path", noOrderVerified ? "VERIFIED ABSENT" : "UNVERIFIED", "Named checks cover order, account, position, execution, read-only database, and broker mutation evidence.", noOrderVerified ? "ok" : "danger"),
     safetyCard("M1C parity", state.status.model_parity?.m1c, "250-row live inference parity gate at 1e-12."),
     safetyCard("Direction parity", state.status.model_parity?.direction, "A1, C1 and R1 output remains hidden until exact parity."),
     safetyCard("Raw evidence", state.status.last_event_timestamp ? "APPEND-ONLY" : "WAITING", "Partitioned Parquet with content hashes and explicit incomplete state."),
@@ -957,6 +1013,8 @@ function renderAudit() {
       { label: "Session", value: "session_date" },
       { label: "Complete", value: "complete" },
       { label: "Generated", value: "generated_at_utc", format: clock },
+      { label: "Recorder state", value: (row) => row.report?.recorder_operational_state },
+      { label: "Scientific valid", value: (row) => row.report?.scientific_recording_valid },
       { label: "Level I coverage", value: (row) => row.report?.level1_coverage },
       { label: "M1C coverage", value: (row) => row.report?.m1c_checkpoint_coverage },
       { label: "Episodes", value: (row) => row.report?.fresh_episodes },
@@ -972,65 +1030,51 @@ function renderAudit() {
     `REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER ${clean(state.status.state).toUpperCase()} // IBKR CONNECTIONS ${replay.ibkr_connections_attempted || 0}`;
 }
 
-async function refreshAll() {
+async function performRefresh({ refreshDetails = false, signal } = {}) {
   const button = document.getElementById("refresh");
   button.disabled = true;
   button.textContent = "Reading…";
   try {
-    const [
-      health,
-      status,
-      capabilities,
-      universe,
-      episodes,
-      shadow,
-      audit,
-      reports,
-      quietStatus,
-      quietUniverse,
-      quietEpisodes,
-      quietShadow,
-      quietSessionQuality,
-      concentrationAudit,
-      budget,
-      transfer,
-      reportPackages,
-    ] = await Promise.all([
-      api("/api/health"),
-      api("/api/recorder/status"),
-      api("/api/recorder/capabilities"),
-      api("/api/universe/live"),
-      api("/api/episodes"),
-      api("/api/shadow-outcomes"),
-      api("/api/audit/events"),
-      api("/api/recorder/session-reports"),
-      api("/api/quiet-state/status"),
-      api("/api/quiet-state/universe"),
-      api("/api/quiet-state/episodes"),
-      api("/api/quiet-state/shadow-structures"),
-      api("/api/quiet-state/session-quality"),
-      api("/api/quiet-state/concentration-audit"),
-      api("/api/market-data-budget"),
-      api("/api/source-transfer"),
-      api("/api/reports/daily"),
-    ]);
-    state.health = health;
-    state.status = status;
-    state.capabilities = capabilities;
-    state.universe = universe.items || [];
-    state.episodes = episodes.items || [];
-    state.shadow = shadow.items || [];
-    state.audit = audit.items || [];
-    state.sessionReports = reports.items || [];
-    state.quietStatus = quietStatus;
-    state.quietUniverse = quietUniverse.items || [];
-    state.quietEpisodes = quietEpisodes.items || [];
-    state.quietShadow = quietShadow.items || [];
-    state.quietSessionQuality = quietSessionQuality.items || [];
-    state.concentrationAudit = concentrationAudit;
-    state.budget = budget;
-    state.transfer = transfer;
-    state.reportPackages = reportPackages.items || [];
+    const snapshot = await api("/api/dashboard-snapshot", {
+      signal,
+    });
+    const sections = snapshot.sections || {};
+    state.sectionErrors = snapshot.section_errors || {};
+    state.lastSnapshotAt = snapshot.snapshot_at_utc || null;
+    if (sections.health) state.health = sections.health;
+    if (sections.status) state.status = sections.status;
+    if (sections.capabilities) state.capabilities = sections.capabilities;
+    if (sections.universe) state.universe = sections.universe.items || [];
+    if (sections.episodes) state.episodes = sections.episodes.items || [];
+    if (sections.shadow) state.shadow = sections.shadow.items || [];
+    if (sections.audit) state.audit = sections.audit.items || [];
+    if (sections.session_reports) {
+      state.sessionReports = sections.session_reports.items || [];
+    }
+    if (sections.quiet_status) state.quietStatus = sections.quiet_status;
+    if (sections.quiet_universe) {
+      state.quietUniverse = sections.quiet_universe.items || [];
+    }
+    if (sections.quiet_episodes) {
+      state.quietEpisodes = sections.quiet_episodes.items || [];
+    }
+    if (sections.quiet_shadow) {
+      state.quietShadow = sections.quiet_shadow.items || [];
+    }
+    if (sections.quiet_session_quality) {
+      state.quietSessionQuality = sections.quiet_session_quality.items || [];
+    }
+    if (sections.concentration_audit) {
+      state.concentrationAudit = sections.concentration_audit;
+    }
+    if (sections.budget) state.budget = sections.budget;
+    if (sections.transfer) state.transfer = sections.transfer;
+    if (sections.report_packages) {
+      state.reportPackages = sections.report_packages.items || [];
+    }
+    if (!state.health || !state.status || !state.capabilities) {
+      throw new Error("dashboard_core_sections_unavailable");
+    }
     renderStatus();
     renderUniverse();
     renderEpisodeIndex();
@@ -1041,26 +1085,70 @@ async function refreshAll() {
     renderQuietShadow();
     renderConcentrationAudit();
     renderBudgetTransfer();
-    const legacyEvidence = !state.selectedEpisode && state.episodes.length
-      ? loadEpisode(state.episodes[0].episode_id)
-      : loadSelectedOptions();
-    const quietEvidence = !state.selectedQuietEpisode && state.quietEpisodes.length
-      ? loadQuietEpisode(state.quietEpisodes[0].observation_id)
+    if (
+      state.selectedEpisode
+      && !state.episodes.some((item) => item.episode_id === state.selectedEpisode)
+    ) {
+      if (episodeController) episodeController.abort();
+      state.selectedEpisode = null;
+    }
+    if (
+      state.selectedQuietEpisode
+      && !state.quietEpisodes.some(
+        (item) => item.observation_id === state.selectedQuietEpisode,
+      )
+    ) {
+      if (quietEpisodeController) quietEpisodeController.abort();
+      state.selectedQuietEpisode = null;
+    }
+    const legacyEpisodeToLoad = detailRequestPlan({
+      selectedId: state.selectedEpisode,
+      availableIds: state.episodes.map((item) => item.episode_id),
+      explicitRefresh: refreshDetails,
+    });
+    const quietEpisodeToLoad = detailRequestPlan({
+      selectedId: state.selectedQuietEpisode,
+      availableIds: state.quietEpisodes.map((item) => item.observation_id),
+      explicitRefresh: refreshDetails,
+    });
+    const legacyEvidence = legacyEpisodeToLoad
+      ? loadEpisode(legacyEpisodeToLoad)
+      : Promise.resolve();
+    const quietEvidence = quietEpisodeToLoad
+      ? loadQuietEpisode(quietEpisodeToLoad)
       : Promise.resolve();
     await Promise.all([legacyEvidence, quietEvidence]);
     document.getElementById("last-sync").textContent =
-      `SYNCHRONIZED ${new Date().toISOString()}`;
+      `${snapshot.partial ? "PARTIAL SNAPSHOT" : "SYNCHRONIZED"} ${clock(state.lastSnapshotAt)}`;
   } catch (error) {
+    if (error.name === "AbortError") return;
     const message = error.status === 401
       ? "Authentication required."
-      : "Persistent recorder state is unavailable.";
+      : state.lastSnapshotAt
+        ? "Recorder snapshot is stale; the latest refresh is unavailable."
+        : "Persistent recorder state is unavailable.";
     replace("blocker-strip", node("span", "blocker", message));
     document.getElementById("last-sync").textContent =
-      `SYNC FAILED ${new Date().toISOString()}`;
+      state.lastSnapshotAt
+        ? `STALE SINCE ${clock(state.lastSnapshotAt)}`
+        : `UNAVAILABLE ${new Date().toISOString()}`;
   } finally {
     button.disabled = false;
     button.textContent = "Refresh evidence";
   }
+}
+
+const polling = new DashboardPollCoordinator({
+  run: performRefresh,
+  isVisible: () => document.visibilityState === "visible",
+});
+
+function refreshAll({ refreshDetails = false } = {}) {
+  if (refreshDetails) {
+    if (episodeController) episodeController.abort();
+    if (quietEpisodeController) quietEpisodeController.abort();
+  }
+  return polling.refresh({ refreshDetails });
 }
 
 async function controlReplay(action) {
@@ -1083,11 +1171,25 @@ async function controlReplay(action) {
 document.querySelectorAll(".nav-item").forEach((button) => {
   button.addEventListener("click", () => showScreen(button.dataset.screen));
 });
-document.getElementById("refresh").addEventListener("click", refreshAll);
-document.getElementById("option-episode").addEventListener("change", loadSelectedOptions);
+document.getElementById("refresh").addEventListener(
+  "click",
+  () => refreshAll({ refreshDetails: true }),
+);
+document.getElementById("option-episode").addEventListener("change", (event) => {
+  const episodeId = event.target.value;
+  if (episodeId && episodeId !== state.selectedEpisode) loadEpisode(episodeId);
+});
 document.getElementById("replay-start").addEventListener("click", () => controlReplay("start"));
 document.getElementById("replay-stop").addEventListener("click", () => controlReplay("stop"));
 refreshAll();
 setInterval(() => {
   if (document.visibilityState === "visible") refreshAll();
 }, 15000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") polling.show();
+  else {
+    polling.hide();
+    if (episodeController) episodeController.abort();
+    if (quietEpisodeController) quietEpisodeController.abort();
+  }
+});

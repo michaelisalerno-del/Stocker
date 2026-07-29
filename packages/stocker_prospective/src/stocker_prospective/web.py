@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import ipaddress
 import json
+import logging
 import os
 import secrets
 import threading
@@ -23,15 +25,22 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from stocker_prospective.bundle import BundleError, load_active_bundle
 from stocker_prospective.config import (
     ProspectiveConfig,
+    operational_thresholds,
     public_config,
     validate_runtime_safety,
 )
 from stocker_prospective.contract import claims_boundary
 from stocker_prospective.evidence_replay import replay_persisted_evidence
-from stocker_prospective.ibkr import official_ibkr_api_projection
+from stocker_prospective.ibkr import (
+    FORBIDDEN_BROKER_SURFACE,
+    IBKRMarketDataAdapter,
+    official_ibkr_api_projection,
+)
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay_control import ReplayController, ReplayStartRequest
+
+LOGGER = logging.getLogger("stocker_prospective.web")
 
 
 def _active_bundle_projection(config: ProspectiveConfig) -> dict[str, Any]:
@@ -295,16 +304,48 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     maximum_rate_limit_identities = 4096
     replay_control_paths = {"/api/replay/start", "/api/replay/stop"}
 
+    def security_headers(correlation_id: str) -> dict[str, str]:
+        return {
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": (
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+            ),
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "X-Correlation-ID": correlation_id,
+        }
+
     @app.middleware("http")
     async def security_boundary(request: Request, call_next: Any) -> Any:
+        supplied_correlation = request.headers.get("x-correlation-id", "")
+        correlation_id = (
+            supplied_correlation
+            if supplied_correlation
+            and len(supplied_correlation) <= 128
+            and all(character.isalnum() or character in "-_." for character in supplied_correlation)
+            else secrets.token_hex(16)
+        )
+        request.state.correlation_id = correlation_id
+
+        def secured(response: Any) -> Any:
+            response.headers.update(security_headers(correlation_id))
+            return response
+
         if (
             request.url.path.startswith("/api/")
             and request.method not in {"GET", "HEAD", "OPTIONS"}
             and not (request.method == "POST" and request.url.path in replay_control_paths)
         ):
-            return JSONResponse(
-                status_code=404,
-                content={"detail": "not_found"},
+            return secured(
+                JSONResponse(
+                    status_code=404,
+                    content={
+                        "detail": "not_found",
+                        "correlation_id": correlation_id,
+                    },
+                )
             )
         if authentication_token is not None:
             authorization = request.headers.get("authorization", "")
@@ -316,10 +357,15 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             cookie = request.cookies.get(config.web.auth_cookie_name, "")
             supplied = bearer or cookie
             if not supplied or not secrets.compare_digest(supplied, authentication_token):
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "authentication_required"},
-                    headers={"WWW-Authenticate": "Bearer"},
+                return secured(
+                    JSONResponse(
+                        status_code=401,
+                        content={
+                            "detail": "authentication_required",
+                            "correlation_id": correlation_id,
+                        },
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
                 )
 
         client_ip = "unknown" if request.client is None else request.client.host
@@ -337,32 +383,156 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         while window and window[0] <= now - 60:
             window.popleft()
         if len(window) >= config.web.requests_per_minute:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "rate_limit_exceeded"},
+            return secured(
+                JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "rate_limit_exceeded",
+                        "correlation_id": correlation_id,
+                    },
+                )
             )
         window.append(now)
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
-        )
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        return response
+        return secured(response)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
-        _request: Request,
-        _exc: RequestValidationError,
+        request: Request,
+        exc: RequestValidationError,
     ) -> JSONResponse:
-        return JSONResponse(status_code=422, content={"detail": "invalid_request"})
+        correlation_id = getattr(request.state, "correlation_id", secrets.token_hex(16))
+        LOGGER.warning(
+            "web_request_error path=%s method=%s correlation_id=%s "
+            "exception_class=%s error_code=%s version=%s run_id=%s",
+            request.url.path,
+            request.method,
+            correlation_id,
+            type(exc).__name__,
+            "WEB_INVALID_REQUEST",
+            config.runtime.app_version,
+            config.runtime.run_id,
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": "invalid_request",
+                "correlation_id": correlation_id,
+            },
+            headers=security_headers(correlation_id),
+        )
 
     @app.exception_handler(Exception)
-    async def production_error(_request: Request, _exc: Exception) -> JSONResponse:
-        return JSONResponse(status_code=500, content={"detail": "internal_error"})
+    async def production_error(request: Request, exc: Exception) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", secrets.token_hex(16))
+        LOGGER.exception(
+            "web_request_error path=%s method=%s correlation_id=%s "
+            "exception_class=%s error_code=%s version=%s run_id=%s",
+            request.url.path,
+            request.method,
+            correlation_id,
+            type(exc).__name__,
+            "WEB_INTERNAL_ERROR",
+            config.runtime.app_version,
+            config.runtime.run_id,
+            exc_info=exc,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "internal_error",
+                "correlation_id": correlation_id,
+            },
+            headers=security_headers(correlation_id),
+        )
+
+    def no_order_safety_projection() -> dict[str, Any]:
+        forbidden_methods = set(FORBIDDEN_BROKER_SURFACE)
+        adapter_methods = set(dir(IBKRMarketDataAdapter))
+        route_safety = all(
+            not _path_exposes_forbidden_broker_resource(str(getattr(route, "path", "")))
+            and (
+                set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
+                or (
+                    str(getattr(route, "path", "")) in replay_control_paths
+                    and set(getattr(route, "methods", set()) or set()) == {"POST"}
+                )
+            )
+            for route in app.routes
+            if str(getattr(route, "path", "")).startswith("/api/")
+        )
+        read_only = store.read_only_verification()
+        operational = store.recorder_operational_state(
+            now=datetime.now(UTC),
+            prospective_start_utc=config.runtime.prospective_start_utc,
+            thresholds=operational_thresholds(config),
+        )
+        checks = {
+            "risk_trading_enabled_false": config.risk.trading_enabled is False,
+            "web_has_no_broker_reference": not any(
+                hasattr(app.state, name)
+                for name in ("broker", "recorder", "adapter", "execution_client")
+            ),
+            "web_database_opened_read_only": bool(read_only["verified"]),
+            "http_order_routes_absent": route_safety,
+            "adapter_order_methods_absent": not bool(
+                forbidden_methods.intersection(adapter_methods)
+            ),
+            "ibkr_read_only_configured": config.ibkr.read_only
+            and config.ibkr.expected_environment in {"read_only", "live_read_only", "paper"},
+            "ibkr_socket_loopback_only": ipaddress.ip_address(config.ibkr.host).is_loopback,
+            "runtime_order_surface_absent": route_safety
+            and not bool(forbidden_methods.intersection(adapter_methods)),
+            "broker_state_mutation_count_zero": (
+                (
+                    operational.run_id is not None
+                    and operational.conditions["broker_state_mutation_count_zero"] is True
+                )
+                or (
+                    config.runtime.source == "replay"
+                    and replay_controller.status().broker_state_mutated is False
+                )
+            ),
+        }
+        return {
+            **checks,
+            "aggregate_no_order_verdict": all(checks.values()),
+            "ibkr_read_only_evidence": {
+                "configured": checks["ibkr_read_only_configured"],
+                "locally_enforced_by_adapter_surface": checks["adapter_order_methods_absent"],
+                "observed_runtime_broker_mutation_count_zero": checks[
+                    "broker_state_mutation_count_zero"
+                ],
+                "external_ibkr_environment_verification": "not_externally_verifiable",
+            },
+            "database": read_only,
+        }
+
+    def operational_alerts(
+        operational: Any,
+    ) -> list[dict[str, str]]:
+        state = (
+            operational.state.value if hasattr(operational, "state") else str(operational["state"])
+        )
+        reason = (
+            operational.reason_code
+            if hasattr(operational, "reason_code")
+            else str(operational["reason_code"])
+        )
+        if state in {
+            "RECORDING_HEALTHY",
+            "MARKET_CLOSED",
+            "WAITING_FOR_PROSPECTIVE_START",
+        }:
+            return []
+        severity = "fatal" if state in {"INGESTION_FATAL", "STORAGE_FATAL"} else "warning"
+        return [
+            {
+                "stable_error_code": reason,
+                "severity": severity,
+                "state": state,
+            }
+        ]
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -371,6 +541,12 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         runtime = store.runtime_projection()
+        operational = store.recorder_operational_state(
+            now=datetime.now(UTC),
+            prospective_start_utc=config.runtime.prospective_start_utc,
+            thresholds=operational_thresholds(config),
+        )
+        runtime_artifacts = store.runtime_artifact_verification()
         bundle = _active_bundle_projection(config)
         parity = _parity_projection(config)
         ibkr_api = official_ibkr_api_projection()
@@ -382,21 +558,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             if config.parallel_validation.enabled and not parallel_credential_configured
             else None
         )
-        frozen_m1c_configured = config.paths.frozen_m1c_artifact_root is not None
         blocker_candidates = [
             *(item["blocker_code"] for item in runtime["blockers"]),
-            *(
-                blocker
-                for blocker in bundle["blockers"]
-                if not (
-                    frozen_m1c_configured and blocker == "blocked_feature_source_semantics_mismatch"
-                )
-            ),
-            None if frozen_m1c_configured else parity["blocker"],
+            *bundle["blockers"],
+            *runtime_artifacts["blockers"],
+            parity["blocker"],
             ibkr_api["blocker"] if config.runtime.source == "ibkr" else None,
             parallel_blocker,
+            (None if operational.scientific_recording_valid else operational.reason_code),
         ]
         blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
+        no_order = no_order_safety_projection()
+        if not no_order["aggregate_no_order_verdict"]:
+            blockers.append("NO_ORDER_INVARIANT_FAILED")
         return {
             "status": "blocked" if blockers else "healthy",
             "research_only": True,
@@ -410,11 +584,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "mode": config.runtime.mode,
                 "run_id": config.runtime.run_id,
                 "lease": runtime["recorder_lease"],
-                "operational_status": _recorder_operational_status(
-                    config,
-                    runtime["recorder_lease"],
-                ),
+                "operational_status": operational.state.value,
+                "operational": operational.model_dump(mode="json"),
             },
+            "operational_alerts": operational_alerts(operational),
             "ibkr": runtime["ibkr_connection"],
             "ibkr_api": ibkr_api,
             "market_data": {
@@ -425,6 +598,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             },
             "database": store.database_health(),
             "active_bundle": bundle,
+            "runtime_artifact_verification": runtime_artifacts,
             "feature_parity": {
                 "scope": "legacy_m1_diagnostic_not_frozen_m1c_runtime_gate",
                 "scoring_allowed": parity["scoring_allowed"],
@@ -445,19 +619,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "latest_score": runtime["latest_score"],
             "latest_signal_episode": runtime["latest_signal_episode"],
             "blockers": blockers,
-            "no_order_path_verified": config.risk.trading_enabled is False
-            and all(
-                not _path_exposes_forbidden_broker_resource(str(getattr(route, "path", "")))
-                and (
-                    set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
-                    or (
-                        str(getattr(route, "path", "")) in replay_control_paths
-                        and set(getattr(route, "methods", set()) or set()) == {"POST"}
-                    )
-                )
-                for route in app.routes
-                if str(getattr(route, "path", "")).startswith("/api/")
-            ),
+            "no_order_path_verified": no_order["aggregate_no_order_verdict"],
+            "no_order_checks": no_order,
             "claims_boundary": claims_boundary(),
         }
 
@@ -535,7 +698,11 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
 
     @app.get("/api/recorder/status")
     def recorder_status() -> dict[str, Any]:
-        status = store.recorder_status_v0()
+        status = store.recorder_status_v0(
+            now=datetime.now(UTC),
+            prospective_start_utc=config.runtime.prospective_start_utc,
+            thresholds=operational_thresholds(config),
+        )
         m1c_parity = _json_artifact(config.paths.m1c_live_parity_report)
         direction_parity = _json_artifact(config.paths.direction_live_parity_report)
         completed_bar = status["latest_completed_bar"]
@@ -606,6 +773,9 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                     "compatibility_status": "parity_gated",
                 },
                 "replay": replay_controller.status().model_dump(mode="json"),
+                "runtime_artifact_verification": (store.runtime_artifact_verification()),
+                "operational_alerts": operational_alerts(status["operational"]),
+                "no_order_checks": no_order_safety_projection(),
                 "claims_boundary": claims_boundary(),
             }
         )
@@ -841,6 +1011,62 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "complete_quote_quality_structures",
                 "strict_quote_quality_structures",
             ],
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/dashboard-snapshot")
+    def dashboard_snapshot(request: Request) -> dict[str, Any]:
+        """Return the main dashboard from one SQLite read transaction."""
+
+        section_builders = {
+            "health": health,
+            "status": recorder_status,
+            "capabilities": recorder_capabilities,
+            "universe": universe_live,
+            "episodes": episodes,
+            "shadow": shadow_outcomes,
+            "audit": audit_events,
+            "session_reports": recorder_session_reports,
+            "quiet_status": quiet_state_status,
+            "quiet_universe": quiet_state_universe,
+            "quiet_episodes": quiet_state_episodes,
+            "quiet_shadow": quiet_state_shadow_structures,
+            "quiet_session_quality": quiet_state_session_quality,
+            "concentration_audit": quiet_state_concentration_audit,
+            "budget": market_data_budget,
+            "transfer": source_transfer,
+            "report_packages": daily_report_packages,
+        }
+        sections: dict[str, Any] = {}
+        errors: dict[str, dict[str, str]] = {}
+        snapshot_at = datetime.now(UTC)
+        with store.snapshot_transaction():
+            for name, build_section in section_builders.items():
+                try:
+                    sections[name] = build_section()
+                except Exception as exc:
+                    error_code = f"DASHBOARD_SECTION_{name.upper()}_UNAVAILABLE"
+                    errors[name] = {
+                        "error_code": error_code,
+                    }
+                    LOGGER.exception(
+                        "dashboard_section_error path=%s method=%s "
+                        "correlation_id=%s exception_class=%s error_code=%s "
+                        "version=%s run_id=%s",
+                        request.url.path,
+                        request.method,
+                        getattr(request.state, "correlation_id", "unavailable"),
+                        type(exc).__name__,
+                        error_code,
+                        config.runtime.app_version,
+                        config.runtime.run_id,
+                        exc_info=exc,
+                    )
+        return {
+            "snapshot_at_utc": snapshot_at.isoformat(),
+            "sections": sections,
+            "section_errors": errors,
+            "partial": bool(errors),
             "claims_boundary": claims_boundary(),
         }
 

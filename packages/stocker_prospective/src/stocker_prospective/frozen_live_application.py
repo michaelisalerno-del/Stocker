@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from stocker_prospective.activation import ProspectiveActivationLedger
+from stocker_prospective.activation import ActivationRecord, ProspectiveActivationLedger
 from stocker_prospective.budget_reports import BudgetAwareDailyReportWriter
 from stocker_prospective.capability import (
     CapabilityObservation,
@@ -29,10 +29,12 @@ from stocker_prospective.config import ProspectiveConfig, operational_thresholds
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.contract import (
     BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
+    CONTRACT_VERSION,
     M1C_FEATURE_MANIFEST_SHA256,
     M1C_SCALING_ARTIFACT_SHA256,
     M1C_THRESHOLD_ARTIFACT_SHA256,
     SECTOR_PROXY_BY_SYMBOL,
+    claims_boundary,
 )
 from stocker_prospective.database import (
     EvidenceMetadata,
@@ -129,6 +131,18 @@ from stocker_prospective.tail_phase_v1 import load_tail_phase_frozen_config_v1
 NEW_YORK = ZoneInfo("America/New_York")
 MARKET_PROXY = "VTI"
 SECTOR_PROXY_SYMBOLS = tuple(sorted(set(SECTOR_PROXY_BY_SYMBOL.values())))
+_HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
+    {
+        "callback_inbox_max_unacknowledged",
+        "callback_inbox_batch_limit",
+        "callback_inbox_lease_seconds",
+        "callback_heartbeat_stale_seconds",
+        "raw_storage_heartbeat_stale_seconds",
+        "callback_acknowledgement_stale_seconds",
+        "callback_inbox_healthy_backlog",
+        "callback_inbox_oldest_healthy_seconds",
+    }
+)
 
 
 def _sha256(path: Path) -> str:
@@ -137,6 +151,73 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _configuration_hash(
+    config: ProspectiveConfig,
+    *,
+    git_commit: str | None = None,
+    omitted_runtime_fields: frozenset[str] = frozenset(),
+) -> str:
+    payload: dict[str, Any] = config.model_dump(mode="json")
+    runtime_payload = cast(dict[str, Any], payload["runtime"])
+    if git_commit is not None:
+        runtime_payload["git_commit"] = git_commit
+    for field_name in omitted_runtime_fields:
+        runtime_payload.pop(field_name)
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _activation_configuration_hash_candidates(
+    config: ProspectiveConfig,
+    *,
+    activation_git_commit: str,
+) -> frozenset[str]:
+    """Reconstruct only the supported first-activation configuration shapes."""
+
+    return frozenset(
+        {
+            _configuration_hash(config, git_commit=activation_git_commit),
+            _configuration_hash(
+                config,
+                git_commit=activation_git_commit,
+                omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
+            ),
+        }
+    )
+
+
+def _require_compatible_existing_activation(
+    *,
+    activation: ActivationRecord,
+    config: ProspectiveConfig,
+    artifact_hashes: Mapping[str, str],
+    ibkr_api_version: str,
+    tws_or_gateway_version: str,
+) -> None:
+    """Preserve first activation while failing closed on scientific drift."""
+
+    if activation.contract_version != CONTRACT_VERSION:
+        raise ValueError("blocked_existing_activation_contract_version_mismatch")
+    if activation.claims_boundary != claims_boundary():
+        raise ValueError("blocked_existing_activation_claims_boundary_mismatch")
+    if activation.model_artifact_hashes != dict(sorted(artifact_hashes.items())):
+        raise ValueError("blocked_existing_activation_artifact_hash_mismatch")
+    if activation.ibkr_api_version != ibkr_api_version:
+        raise ValueError("blocked_existing_activation_ibkr_api_version_mismatch")
+    if activation.tws_or_gateway_version != tws_or_gateway_version:
+        raise ValueError("blocked_existing_activation_gateway_version_mismatch")
+    if activation.configuration_hash not in _activation_configuration_hash_candidates(
+        config,
+        activation_git_commit=activation.git_sha,
+    ):
+        raise ValueError("blocked_existing_activation_configuration_mismatch")
 
 
 def _attribute(value: Any, *names: str) -> Any:
@@ -1258,13 +1339,7 @@ def build_frozen_prospective_application(
     gateway_version = config.ibkr.tws_or_gateway_version
     if not gateway_version:
         raise ValueError("IBKR_TWS_OR_GATEWAY_VERSION is required at activation")
-    configuration_hash = hashlib.sha256(
-        json.dumps(
-            config.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
+    configuration_hash = _configuration_hash(config)
 
     def pace_request() -> None:
         if heartbeat is not None:
@@ -1378,21 +1453,26 @@ def build_frozen_prospective_application(
         heartbeat=heartbeat,
     )
 
+    artifact_hashes = {name: _sha256(path) for name, path in sorted(artifact_files.items())}
     existing_activation = activation_ledger.load()
-    activation = activation_ledger.activate(
-        activation_timestamp_utc=(
-            datetime.now(UTC)
-            if existing_activation is None
-            else existing_activation.prospective_collection_start_utc
-        ),
-        git_sha=config.runtime.git_commit,
-        model_artifact_hashes={
-            name: _sha256(path) for name, path in sorted(artifact_files.items())
-        },
-        configuration_hash=configuration_hash,
-        ibkr_api_version=ibkr_api_version,
-        tws_or_gateway_version=gateway_version,
-    )
+    if existing_activation is None:
+        activation = activation_ledger.activate(
+            activation_timestamp_utc=datetime.now(UTC),
+            git_sha=config.runtime.git_commit,
+            model_artifact_hashes=artifact_hashes,
+            configuration_hash=configuration_hash,
+            ibkr_api_version=ibkr_api_version,
+            tws_or_gateway_version=gateway_version,
+        )
+    else:
+        _require_compatible_existing_activation(
+            activation=existing_activation,
+            config=config,
+            artifact_hashes=artifact_hashes,
+            ibkr_api_version=ibkr_api_version,
+            tws_or_gateway_version=gateway_version,
+        )
+        activation = existing_activation
     prospective_start = activation.prospective_collection_start_utc
 
     def metadata_factory(
@@ -1403,7 +1483,10 @@ def build_frozen_prospective_application(
             run_id=config.runtime.run_id or "",
             prospective_start_utc=prospective_start,
             app_version=config.runtime.app_version,
-            git_commit=config.runtime.git_commit,
+            # prospective_run is the immutable first-activation identity.
+            # The current release is persisted with the active generation's
+            # runtime-artifact receipts below.
+            git_commit=activation.git_sha,
             model_artifact_id=m1c_runtime.model_hash,
             universe_id=identity.universe_id,
             cohort="anchor_frozen_20",
@@ -1415,7 +1498,7 @@ def build_frozen_prospective_application(
     repository.create_run(initial_metadata, mode="record_only")
     frozen_repository = FrozenRecorderRepository(
         repository,
-        configuration_hash=configuration_hash,
+        configuration_hash=activation.configuration_hash,
     )
     if opening_reversal_activation_v1 is not None:
         frozen_repository.record_opening_reversal_activation_v1(
@@ -1945,6 +2028,8 @@ def build_frozen_prospective_application(
                     details={
                         "expected_hash_source": "immutable_activation_receipt",
                         "application_wiring_completed": True,
+                        "activation_git_commit": activation.git_sha,
+                        "runtime_git_commit": config.runtime.git_commit,
                     },
                 )
             )

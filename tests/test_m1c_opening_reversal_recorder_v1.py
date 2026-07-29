@@ -125,9 +125,7 @@ def _receipt(*, probability: float = 0.70):
             tail_phase_v1="FIRST_ENTRY",
             market_opening_return_v1=-0.004,
             market_opening_range_v1=0.006,
-            opening_market_transition_state_v1=(
-                "NEGATIVE_SEVERE_OPENING_TRANSITION"
-            ),
+            opening_market_transition_state_v1=("NEGATIVE_SEVERE_OPENING_TRANSITION"),
             opening_transition_sign_v1=-1,
             opening_transition_event_id_v1="event-1",
             vti_opening_transition_complete=True,
@@ -172,14 +170,20 @@ def test_migration_and_prediction_receipt_are_append_immutable(
         receipt,
     )
 
-    assert repository.record_opening_reversal_activation_v1(
-        metadata,
-        activation,
-    ) == activation_id
-    assert repository.record_opening_reversal_prediction_v1(
-        metadata,
-        receipt,
-    ) == prediction_id
+    assert (
+        repository.record_opening_reversal_activation_v1(
+            metadata,
+            activation,
+        )
+        == activation_id
+    )
+    assert (
+        repository.record_opening_reversal_prediction_v1(
+            metadata,
+            receipt,
+        )
+        == prediction_id
+    )
     with database._connect() as connection:
         stored = connection.execute(
             """
@@ -286,10 +290,20 @@ def test_contract_discovery_failure_is_persisted_without_live_chain_lines(
     metadata = _metadata("opening-reversal-v1")
     database.create_run(metadata)
     repository = FrozenRecorderRepository(database)
+    repository.record_opening_reversal_activation_v1(
+        metadata,
+        _activation_receipt(),
+    )
+    _seed_supported_transfer(
+        database=database,
+        repository=repository,
+        metadata=metadata,
+    )
+    repository.record_opening_reversal_prediction_v1(metadata, _receipt())
 
     repository.record_opening_reversal_contract_discovery_failure_v1(
         metadata,
-        episode_id="opening-event-1:AAL",
+        episode_id="fresh-aal",
         discovery_timestamp_utc=ENTRY,
         contract_source="ibkr_secdef_metadata",
         cache_hit=False,
@@ -380,9 +394,7 @@ def test_transfer_boundary_receipt_rejects_protected_outcome_access() -> None:
             decision="opening_transfer_supported_without_recalibration",
             cohort_first_session=date(2026, 7, 1),
             cohort_last_session=SESSION,
-            source_receipt_hashes=tuple(
-                f"{index + 1:064x}" for index in range(20)
-            ),
+            source_receipt_hashes=tuple(f"{index + 1:064x}" for index in range(20)),
             support_counts={"valid_sessions": 20},
             protected_outcome_fields_accessed=True,
         )
@@ -395,9 +407,7 @@ def test_decision_receipt_rejects_hash_tampering() -> None:
         decision="opening_transfer_supported_without_recalibration",
         cohort_first_session=date(2026, 7, 1),
         cohort_last_session=SESSION,
-        source_receipt_hashes=tuple(
-            f"{index + 1:064x}" for index in range(20)
-        ),
+        source_receipt_hashes=tuple(f"{index + 1:064x}" for index in range(20)),
         support_counts={
             "operational_sessions_passed": 20,
             "valid_sessions": 20,
@@ -426,9 +436,7 @@ def test_confirmation_phase_requires_development_and_confirmation_start_receipts
         decision="prospective_opening_reversal_development_supported",
         cohort_first_session=SESSION + timedelta(days=1),
         cohort_last_session=development_end,
-        source_receipt_hashes=tuple(
-            f"{index + 1_000:064x}" for index in range(150)
-        ),
+        source_receipt_hashes=tuple(f"{index + 1_000:064x}" for index in range(150)),
         support_counts={
             "complete_eligible_stock_episodes": 150,
             "maximum_event_episode_count": 4,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -14,9 +15,13 @@ from stocker_prospective.m1c_features import LiveFeatureBar
 from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
     OpeningReversalPredictionInputV1,
     OpeningReversalPredictionTimingEvidenceV1_1,
+    OptionContractCandidateV1,
+    OptionTopOfBookV1,
     build_activation_receipt_v1,
     build_frozen_experiment_config_v1,
     build_prediction_receipt_v1,
+    build_primary_option_bid_ask_outcome_v1,
+    select_primary_option_pair_v1,
     select_promoted_prediction_v1,
 )
 from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
@@ -89,7 +94,17 @@ def _activation_pair():
     return base, activation
 
 
-def _prediction(addendum_activation_hash: str, *, stock: str = "AAL"):
+def _prediction(
+    addendum_activation_hash: str,
+    *,
+    stock: str = "AAL",
+    cohort_phase: Literal[
+        "engineering_transfer",
+        "prospective_development",
+        "untouched_confirmation",
+    ] = "engineering_transfer",
+    transfer_status: str = "engineering_transfer_pending",
+):
     timing = OpeningReversalPredictionTimingEvidenceV1_1(
         timing_addendum_activation_receipt_hash_v1_1=(addendum_activation_hash),
         rule_committed_at_utc=ADDENDUM_ACTIVATION,
@@ -106,8 +121,8 @@ def _prediction(addendum_activation_hash: str, *, stock: str = "AAL"):
         OpeningReversalPredictionInputV1(
             experiment_version="1.1",
             activation_timestamp_utc=ADDENDUM_ACTIVATION,
-            cohort_phase="engineering_transfer",
-            transfer_status="engineering_transfer_pending",
+            cohort_phase=cohort_phase,
+            transfer_status=transfer_status,
             session=SESSION,
             stock=stock,
             checkpoint=6,
@@ -133,6 +148,249 @@ def _prediction(addendum_activation_hash: str, *, stock: str = "AAL"):
             capacity_snapshot_id="capacity-1",
             timing_evidence_v1_1=timing,
         )
+    )
+
+
+def _record_fresh_episode(
+    database: ProspectiveRepository,
+    metadata: EvidenceMetadata,
+    *,
+    quiet_state_alias: bool = False,
+) -> None:
+    with database._connect() as connection:
+        checkpoint_envelope = database._insert_envelope(connection, metadata)
+        checkpoint = connection.execute(
+            """
+            INSERT INTO m1c_checkpoint_v0(
+                envelope_id, run_id, symbol, session_date, checkpoint,
+                bar_start_utc, bar_end_utc, feature_as_of_utc, model_id,
+                model_version, model_hash, feature_hash,
+                session_context_hash, feature_values_json, probability,
+                threshold, threshold_passed, eligible, feature_freshness,
+                missing_feature_count, rejection_reasons_json, claims_json
+            ) VALUES (?, ?, 'AAL', ?, 6, ?, ?, ?, 'M1C', 'frozen-m1c-v0',
+                      ?, ?, ?, '{}', 0.70, 0.488333710794033, 1, 1,
+                      'complete', 0, '[]', '{}')
+            """,
+            (
+                checkpoint_envelope,
+                metadata.run_id,
+                SESSION.isoformat(),
+                (ENTRY - timedelta(minutes=5)).isoformat(),
+                ENTRY.isoformat(),
+                ENTRY.isoformat(),
+                "a" * 64,
+                "b" * 64,
+                "c" * 64,
+            ),
+        )
+        assert checkpoint.lastrowid is not None
+        episode_envelope = database._insert_envelope(connection, metadata)
+        connection.execute(
+            """
+            INSERT INTO m1c_episode_v0(
+                episode_id, envelope_id, checkpoint_id, run_id, symbol,
+                session_date, trigger_checkpoint, trigger_bar_end_utc,
+                prospective_entry_timestamp_utc, m1c_probability,
+                previous_m1c_probability, episode_number,
+                minutes_since_previous_episode, scientific_recording_valid,
+                rejection_reasons_json, phase, completion_status,
+                completed_at_utc, claims_json
+            ) VALUES ('fresh-aal', ?, ?, ?, 'AAL', ?, 6, ?, ?, 0.70,
+                      0.40, 1, NULL, 1, '[]', 'pending_completion',
+                      'active', NULL, '{}')
+            """,
+            (
+                episode_envelope,
+                checkpoint.lastrowid,
+                metadata.run_id,
+                SESSION.isoformat(),
+                ENTRY.isoformat(),
+                ENTRY.isoformat(),
+            ),
+        )
+        if not quiet_state_alias:
+            return
+        quiet_checkpoint_envelope = database._insert_envelope(connection, metadata)
+        quiet_checkpoint = connection.execute(
+            """
+            INSERT INTO quiet_state_checkpoint_v0(
+                envelope_id, checkpoint_id, run_id, symbol, session_date,
+                checkpoint, m1c_probability, previous_m1c_probability,
+                bottom_5, bottom_10, bottom_20, high_tail,
+                distance_from_bottom_10, model_hash, feature_hash, eligible,
+                data_quality_status, data_quality_flags_json, claims_json
+            ) VALUES (?, ?, ?, 'AAL', ?, 6, 0.70, 0.40, 0, 0, 0, 1,
+                      0.564103034304374, ?, ?, 1, 'valid', '[]', '{}')
+            """,
+            (
+                quiet_checkpoint_envelope,
+                checkpoint.lastrowid,
+                metadata.run_id,
+                SESSION.isoformat(),
+                "a" * 64,
+                "b" * 64,
+            ),
+        )
+        assert quiet_checkpoint.lastrowid is not None
+        quiet_episode_envelope = database._insert_envelope(connection, metadata)
+        connection.execute(
+            """
+            INSERT INTO quiet_state_observation_v0(
+                observation_id, envelope_id, quiet_checkpoint_id, run_id,
+                observation_kind, symbol, session_date, trigger_checkpoint,
+                trigger_timestamp_utc, prospective_entry_timestamp_utc,
+                m1c_probability, previous_m1c_probability, bottom_5,
+                bottom_10, bottom_20, high_tail, episode_number,
+                minutes_since_previous_quiet_episode,
+                previous_high_tail_within_60_minutes,
+                following_high_tail_within_60_minutes,
+                scientific_recording_valid, data_quality_flags_json, phase,
+                completion_status, completed_at_utc, claims_json
+            ) VALUES ('fresh-aal', ?, ?, ?, 'high_tail_control', 'AAL', ?,
+                      6, ?, ?, 0.70, 0.40, 0, 0, 0, 1, 1, NULL, 0, 0, 1,
+                      '[]', 'pending_completion', 'active', NULL, '{}')
+            """,
+            (
+                quiet_episode_envelope,
+                quiet_checkpoint.lastrowid,
+                metadata.run_id,
+                SESSION.isoformat(),
+                ENTRY.isoformat(),
+                ENTRY.isoformat(),
+            ),
+        )
+
+
+def _seed_eligible_v1_1_episode(
+    database: ProspectiveRepository,
+    repository: FrozenRecorderRepository,
+    metadata: EvidenceMetadata,
+    *,
+    quiet_state_alias: bool = False,
+):
+    base, activation = _activation_pair()
+    repository.record_opening_reversal_activation_v1(metadata, base)
+    repository.record_opening_reversal_activation_v1_1(metadata, activation)
+    with database._connect() as connection:
+        envelope_id = database._insert_envelope(connection, metadata)
+        connection.execute(
+            """
+            INSERT INTO opening_reversal_decision_receipt_v1(
+                envelope_id, run_id, receipt_kind, boundary_timestamp_utc,
+                decision, cohort_first_session, cohort_last_session,
+                receipt_hash_v1, receipt_json
+            ) VALUES (?, ?, 'transfer', ?,
+                      'opening_transfer_supported_without_recalibration',
+                      '2026-07-01', '2026-07-29', ?, '{}')
+            """,
+            (
+                envelope_id,
+                metadata.run_id,
+                ADDENDUM_ACTIVATION.isoformat(),
+                "d" * 64,
+            ),
+        )
+    _record_fresh_episode(
+        database,
+        metadata,
+        quiet_state_alias=quiet_state_alias,
+    )
+    stocks = ("AAL", *(f"S{index:02d}" for index in range(1, 20)))
+    receipts = tuple(
+        _prediction(
+            activation.activation_receipt_hash_v1_1,
+            stock=stock,
+            cohort_phase="prospective_development",
+            transfer_status="opening_transfer_supported_without_recalibration",
+        )
+        for stock in stocks
+    )
+    for receipt in receipts:
+        repository.record_opening_reversal_prediction_v1(metadata, receipt)
+    audit = build_causal_barrier_audit_v1_1(
+        activation_receipt_hash_v1_1=activation.activation_receipt_hash_v1_1,
+        session=SESSION,
+        nominal_entry_timestamp_utc=ENTRY,
+        prediction_receipts=receipts,
+        deferred_event_received_timestamps=(ENTRY + timedelta(milliseconds=1),),
+        entry_or_post_entry_data_admitted_before_receipts=False,
+        release_authorized_at_utc=RECEIPT_CREATED,
+    )
+    repository.record_opening_reversal_causal_barrier_audit_v1_1(metadata, audit)
+    repository.record_opening_reversal_promotion_v1(
+        metadata,
+        select_promoted_prediction_v1(receipts),
+    )
+    return receipts[0]
+
+
+def _primary_selection(*, expiry_offset: int = 1):
+    expiry = SESSION + timedelta(days=expiry_offset)
+    candidates = (
+        OptionContractCandidateV1(
+            con_id=1001,
+            underlying="AAL",
+            expiry=expiry,
+            strike=100.0,
+            right="C",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        ),
+        OptionContractCandidateV1(
+            con_id=1002,
+            underlying="AAL",
+            expiry=expiry,
+            strike=100.0,
+            right="P",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        ),
+    )
+    return select_primary_option_pair_v1(
+        session=SESSION + timedelta(days=expiry_offset - 1),
+        underlying_reference=100.0,
+        candidates=candidates,
+        discovery_timestamp_utc=ENTRY + timedelta(seconds=1),
+        contract_source="synthetic_contract_metadata",
+        cache_hit=False,
+    )
+
+
+def _primary_outcome(
+    *,
+    receipt_hash: str,
+    contract: OptionContractCandidateV1,
+    role: Literal["predicted_leg", "opposite_leg"],
+):
+    return build_primary_option_bid_ask_outcome_v1(
+        prediction_receipt_hash_v1=receipt_hash,
+        contract=contract,
+        role=role,
+        entry_timestamp_utc=ENTRY,
+        subscription_start_utc=ENTRY,
+        subscription_end_utc=ENTRY + timedelta(minutes=16),
+        capacity_line_owner="opening-reversal-primary-pair",
+        entry_quote=OptionTopOfBookV1(
+            timestamp_utc=ENTRY + timedelta(seconds=1),
+            bid=1.0,
+            ask=1.1,
+            quote_age_seconds=1.0,
+            locked_or_crossed=False,
+            stale=False,
+            missing_reason=None,
+        ),
+        exit_quote=OptionTopOfBookV1(
+            timestamp_utc=ENTRY + timedelta(minutes=15),
+            bid=1.2,
+            ask=1.3,
+            quote_age_seconds=0.0,
+            locked_or_crossed=False,
+            stale=False,
+            missing_reason=None,
+        ),
     )
 
 
@@ -242,6 +500,259 @@ def test_v1_1_promotion_requires_persisted_passing_barrier_audit(
     )
     assert operational.prediction_receipt_count == 20
     assert operational.prediction_receipt_timing_pass
+
+
+def test_v1_1_eligible_episode_accepts_only_its_selected_two_line_outcomes(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "eligible-v1-1.sqlite3")
+    database.migrate()
+    metadata = _metadata("eligible-v1-1", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    receipt = _seed_eligible_v1_1_episode(database, repository, metadata)
+    selection = _primary_selection()
+
+    repository.record_opening_reversal_contract_discovery_v1(
+        metadata,
+        episode_id="fresh-aal",
+        selection=selection,
+    )
+    predicted_contract = selection.call if receipt.prediction_v1 == "CALL" else selection.put
+    opposite_contract = selection.put if receipt.prediction_v1 == "CALL" else selection.call
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=predicted_contract,
+            role="predicted_leg",
+        ),
+    )
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=opposite_contract,
+            role="opposite_leg",
+        ),
+    )
+
+    with database._connect() as connection:
+        eligible = connection.execute(
+            """
+            SELECT activation_receipt_identity,
+                   causal_barrier_audit_identity, episode_id
+            FROM opening_reversal_v1_1_eligible_episode
+            WHERE run_id = ?
+            """,
+            (metadata.run_id,),
+        ).fetchall()
+        legs = connection.execute(
+            """
+            SELECT right, role, expiry, strike
+            FROM opening_reversal_primary_option_outcome_v1
+            WHERE run_id = ?
+            ORDER BY role
+            """,
+            (metadata.run_id,),
+        ).fetchall()
+
+    assert len(eligible) == 1
+    assert eligible[0]["episode_id"] == "fresh-aal"
+    assert eligible[0]["activation_receipt_identity"]
+    assert eligible[0]["causal_barrier_audit_identity"]
+    assert len(legs) == 2
+    assert {str(row["right"]) for row in legs} == {"C", "P"}
+    assert {str(row["role"]) for row in legs} == {
+        "predicted_leg",
+        "opposite_leg",
+    }
+    assert {str(row["expiry"]) for row in legs} == {(SESSION + timedelta(days=1)).isoformat()}
+    assert {float(row["strike"]) for row in legs} == {100.0}
+
+
+def test_v1_1_repository_rejects_secondary_dte_selection(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "secondary-dte.sqlite3")
+    database.migrate()
+    metadata = _metadata("secondary-dte", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    _seed_eligible_v1_1_episode(database, repository, metadata)
+
+    with pytest.raises(ValueError, match="primary_expiry_must_be_1dte"):
+        repository.record_opening_reversal_contract_discovery_v1(
+            metadata,
+            episode_id="fresh-aal",
+            selection=_primary_selection(expiry_offset=2),
+        )
+
+
+def test_v1_1_discovery_failure_is_valid_segregated_evidence(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "failed-discovery.sqlite3")
+    database.migrate()
+    metadata = _metadata("failed-discovery", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    _seed_eligible_v1_1_episode(database, repository, metadata)
+
+    identifier = repository.record_opening_reversal_contract_discovery_failure_v1(
+        metadata,
+        episode_id="fresh-aal",
+        discovery_timestamp_utc=RECEIPT_CREATED,
+        contract_source="ibkr_secdef",
+        cache_hit=False,
+        candidates_inspected=0,
+        missing_reason="no_valid_common_1dte_pair",
+    )
+
+    with database._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT status, call_con_id, put_con_id,
+                   planned_live_market_data_lines, missing_reason
+            FROM opening_reversal_contract_discovery_v1
+            WHERE id = ?
+            """,
+            (identifier,),
+        ).fetchone()
+    assert tuple(row) == (
+        "failed",
+        None,
+        None,
+        0,
+        "no_valid_common_1dte_pair",
+    )
+
+
+def test_database_guard_rejects_generic_episode_discovery_identity(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "generic-discovery.sqlite3")
+    database.migrate()
+    metadata = _metadata("generic-discovery", RECEIPT_CREATED)
+    database.create_run(metadata)
+
+    with database._connect() as connection:
+        envelope_id = database._insert_envelope(connection, metadata)
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="blocked_opening_reversal_episode_identity_missing",
+        ):
+            connection.execute(
+                """
+                INSERT INTO opening_reversal_contract_discovery_v1(
+                    envelope_id, run_id, episode_id, discovery_timestamp_utc,
+                    contract_source, cache_hit, candidates_inspected,
+                    call_con_id, put_con_id, expiry, strike, tie_break_rule,
+                    live_market_data_lines_consumed,
+                    planned_live_market_data_lines, metadata_request_ended,
+                    full_chain_live_subscription_created, status,
+                    missing_reason, audit_hash_v1, audit_json
+                ) VALUES (?, ?, 'quiet-or-generic-episode', ?, 'fixture',
+                          0, 0, NULL, NULL, NULL, NULL, 'frozen', 0, 0,
+                          1, 0, 'failed', 'unavailable', ?, '{}')
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    RECEIPT_CREATED.isoformat(),
+                    "d" * 64,
+                ),
+            )
+
+
+def test_database_guard_rejects_two_calls_even_with_distinct_roles(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "duplicate-right.sqlite3")
+    database.migrate()
+    metadata = _metadata("duplicate-right", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    receipt = _seed_eligible_v1_1_episode(database, repository, metadata)
+    selection = _primary_selection()
+    repository.record_opening_reversal_contract_discovery_v1(
+        metadata,
+        episode_id="fresh-aal",
+        selection=selection,
+    )
+    predicted = selection.call if receipt.prediction_v1 == "CALL" else selection.put
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=predicted,
+            role="predicted_leg",
+        ),
+    )
+
+    with database._connect() as connection:
+        row = dict(
+            connection.execute(
+                """
+                SELECT *
+                FROM opening_reversal_primary_option_outcome_v1
+                WHERE run_id = ?
+                """,
+                (metadata.run_id,),
+            ).fetchone()
+        )
+        row.pop("id")
+        row["role"] = "opposite_leg"
+        row["outcome_hash_v1"] = "e" * 64
+        columns = tuple(row)
+        placeholders = ",".join("?" for _ in columns)
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="blocked_v1_1_outcome_duplicate_option_right",
+        ):
+            connection.execute(
+                f"""
+                INSERT INTO opening_reversal_primary_option_outcome_v1(
+                    {",".join(columns)}
+                ) VALUES ({placeholders})
+                """,
+                tuple(row[column] for column in columns),
+            )
+
+
+def test_v1_1_repository_rejects_quiet_state_episode_identity(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "quiet-alias.sqlite3")
+    database.migrate()
+    metadata = _metadata("quiet-alias", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    _seed_eligible_v1_1_episode(
+        database,
+        repository,
+        metadata,
+        quiet_state_alias=True,
+    )
+
+    with pytest.raises(ValueError, match="episode_not_eligible"):
+        repository.record_opening_reversal_contract_discovery_v1(
+            metadata,
+            episode_id="fresh-aal",
+            selection=_primary_selection(),
+        )
+    with database._connect() as connection:
+        assert (
+            connection.execute(
+                """
+            SELECT COUNT(*)
+            FROM opening_reversal_v1_1_eligible_episode
+            WHERE run_id = ?
+            """,
+                (metadata.run_id,),
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_v1_1_activation_requires_a_fresh_engineering_run(

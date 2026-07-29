@@ -13,7 +13,15 @@ from fastapi.testclient import TestClient
 from stocker_prospective.budget_reports import BudgetAwareDailyReportWriter
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.contract import claims_boundary
-from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
+from stocker_prospective.database import (
+    EvidenceMetadata,
+    ProspectiveRepository,
+    SchemaVersionTooNew,
+)
+from stocker_prospective.operational_state import (
+    RecorderOperationalRepository,
+    RuntimeArtifactVerification,
+)
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.web import create_web_app
@@ -109,6 +117,79 @@ def seeded_app(tmp_path: Path, *, authenticated: bool = False) -> TestClient:
         )
     )
     return TestClient(create_web_app(cfg))
+
+
+def record_runtime_artifact_verification(
+    cfg: ProspectiveConfig,
+    *,
+    observed_hash: str | None,
+    verified: bool,
+    expected_artifact_count: int = 1,
+) -> None:
+    repository = ProspectiveRepository(cfg.paths.database)
+    now = datetime.now(UTC)
+    lease = repository.acquire_recorder_lease(
+        run_id=cfg.runtime.run_id or "",
+        owner_id="test-web-fixture",
+        now=now,
+        stale_after=timedelta(seconds=60),
+    )
+    operational = RecorderOperationalRepository(cfg.paths.database)
+    operational.start_generation(
+        run_id=cfg.runtime.run_id or "",
+        recorder_generation=lease.generation,
+        owner_id=lease.owner_id,
+        started_at=now,
+        required_market_data_mode="LIVE",
+        expected_artifact_count=expected_artifact_count,
+    )
+    operational.record_artifact_verification(
+        RuntimeArtifactVerification(
+            verification_id=f"artifact-verification-{verified}",
+            run_id=cfg.runtime.run_id or "",
+            recorder_generation=lease.generation,
+            artifact_bundle_id="frozen-m1c-test-bundle",
+            artifact_name="causal_movement_threshold.json",
+            expected_hash="a" * 64,
+            observed_hash=observed_hash,
+            feature_contract_version="m1c-causal-movement-v1",
+            activation_receipt_identity="activation-receipt-test",
+            found=observed_hash is not None,
+            loaded=observed_hash is not None,
+            schema_validated=observed_hash is not None,
+            hash_verified=verified,
+            contract_compatible=observed_hash is not None,
+            used_by_active_generation=verified,
+            load_timestamp_utc=now,
+            verification_result="verified" if verified else "blocked",
+            blocker=None if verified else "RUNTIME_ARTIFACT_HASH_MISMATCH",
+        )
+    )
+
+
+def test_read_only_web_fails_closed_on_newer_database_schema(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    repository = ProspectiveRepository(cfg.paths.database)
+    repository.migrate()
+    with repository._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO schema_migrations(version, applied_at_utc)
+            VALUES ('9999_future_schema.sql', ?)
+            """,
+            (datetime.now(UTC).isoformat(),),
+        )
+
+    with (
+        pytest.raises(
+            SchemaVersionTooNew,
+            match="blocked_schema_newer_than_supported",
+        ),
+        TestClient(create_web_app(cfg)),
+    ):
+        pass
 
 
 def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
@@ -222,7 +303,7 @@ def test_audit_events_skip_raw_partitions_the_web_identity_cannot_read(
     )
 
 
-def test_health_does_not_apply_legacy_m1_parity_gate_to_frozen_m1c(
+def test_configured_artifact_path_does_not_suppress_runtime_verification_blockers(
     tmp_path: Path,
 ) -> None:
     cfg = config(tmp_path).model_copy(
@@ -246,10 +327,11 @@ def test_health_does_not_apply_legacy_m1_parity_gate_to_frozen_m1c(
     health = TestClient(create_web_app(cfg)).get("/api/health").json()
 
     assert health["feature_parity"]["blocker"] == "blocked_feature_source_semantics_mismatch"
-    assert "blocked_feature_source_semantics_mismatch" not in health["blockers"]
+    assert "blocked_missing_verified_frozen_bundle" in health["blockers"]
+    assert health["runtime_artifact_verification"]["verified"] is False
 
 
-def test_health_reports_live_recorder_waiting_for_prospective_start(
+def test_lease_without_active_recorder_generation_is_inactive(
     tmp_path: Path,
 ) -> None:
     cfg = config(tmp_path)
@@ -276,7 +358,8 @@ def test_health_reports_live_recorder_waiting_for_prospective_start(
     health = TestClient(create_web_app(cfg)).get("/api/health").json()
 
     assert health["recorder"]["lease"]["owner_id"] == "server-instance:recorder-process"
-    assert health["recorder"]["operational_status"] == "waiting_for_prospective_start"
+    assert health["recorder"]["operational_status"] == "INACTIVE"
+    assert health["recorder"]["operational"]["reason_code"] == "NO_ACTIVE_RECORDER_GENERATION"
     with sqlite3.connect(cfg.paths.database) as connection:
         assert connection.execute("SELECT count(*) FROM prospective_run").fetchone() == (0,)
 
@@ -379,7 +462,19 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     assert "SHORT BID / LONG ASK OPEN" in page.text
     assert "retrospective oracle" not in page.text.lower()
     script = client.get("/assets/app.js").text
-    assert "/api/quiet-state/universe" in script
+    polling = client.get("/assets/polling.mjs").text
+    assert 'api("/api/dashboard-snapshot"' in script
+    assert "/api/quiet-state/universe" not in script
+    assert "DashboardPollCoordinator" in script
+    assert "detailRequestPlan" in script
+    assert "new AbortController()" in polling
+    assert "if (this.active)" in polling
+    assert "this.controller.abort()" in polling
+    assert "episodeController.abort()" in script
+    assert "quietEpisodeController.abort()" in script
+    assert "signal: controller.signal" in script
+    assert 'document.visibilityState === "visible"' in script
+    assert "innerHTML" not in script
     assert "renderConcentrationAudit" in script
 
     for path in (
@@ -402,6 +497,189 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
         )
         assert response.status_code == 200
         assert response.json()["claims_boundary"] == claims_boundary()
+
+
+def test_dashboard_snapshot_is_one_consistent_projection(tmp_path: Path) -> None:
+    client = seeded_app(tmp_path)
+
+    response = client.get("/api/dashboard-snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["partial"] is False
+    assert payload["section_errors"] == {}
+    assert {
+        "health",
+        "status",
+        "capabilities",
+        "universe",
+        "episodes",
+        "shadow",
+        "audit",
+        "session_reports",
+        "quiet_status",
+        "quiet_universe",
+        "quiet_episodes",
+        "quiet_shadow",
+        "quiet_session_quality",
+        "concentration_audit",
+        "budget",
+        "transfer",
+        "report_packages",
+    } == set(payload["sections"])
+    assert payload["sections"]["health"]["recorder"]["run_id"] == "replay-run-001"
+    assert payload["sections"]["status"]["run_id"] == "replay-run-001"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-correlation-id"]
+
+
+def test_optional_snapshot_section_failure_preserves_other_sections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+
+    def fail_optional_section(_self: ProspectiveReadStore) -> list[dict[str, object]]:
+        raise RuntimeError("synthetic optional section failure")
+
+    monkeypatch.setattr(
+        ProspectiveReadStore,
+        "quiet_state_session_quality_v0",
+        fail_optional_section,
+    )
+    client = TestClient(create_web_app(cfg))
+
+    response = client.get("/api/dashboard-snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["partial"] is True
+    assert "health" in payload["sections"]
+    assert "status" in payload["sections"]
+    assert "quiet_session_quality" not in payload["sections"]
+    assert payload["section_errors"]["quiet_session_quality"] == {
+        "error_code": "DASHBOARD_SECTION_QUIET_SESSION_QUALITY_UNAVAILABLE",
+    }
+
+
+@pytest.mark.parametrize("observed_hash", [None, "b" * 64])
+def test_missing_or_wrong_hash_runtime_artifact_remains_blocked(
+    tmp_path: Path,
+    observed_hash: str | None,
+) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+    record_runtime_artifact_verification(
+        cfg,
+        observed_hash=observed_hash,
+        verified=False,
+    )
+
+    payload = TestClient(create_web_app(cfg)).get("/api/recorder/status").json()
+
+    verification = payload["runtime_artifact_verification"]
+    assert verification["verified"] is False
+    assert verification["blockers"] == ["RUNTIME_ARTIFACT_HASH_MISMATCH"]
+    assert verification["items"][0]["expected_hash"] == "a" * 64
+    assert verification["items"][0]["observed_hash"] == observed_hash
+    assert verification["items"][0]["used_by_active_generation"] == 0
+
+
+def test_persisted_runtime_artifact_evidence_is_displayed_as_verified(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+    record_runtime_artifact_verification(
+        cfg,
+        observed_hash="a" * 64,
+        verified=True,
+    )
+
+    payload = TestClient(create_web_app(cfg)).get("/api/recorder/status").json()
+
+    verification = payload["runtime_artifact_verification"]
+    assert verification["verified"] is True
+    assert verification["blockers"] == []
+    assert verification["items"][0]["verification_result"] == "verified"
+    assert verification["items"][0]["used_by_active_generation"] == 1
+
+
+def test_partial_runtime_artifact_set_cannot_claim_verified(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+    record_runtime_artifact_verification(
+        cfg,
+        observed_hash="a" * 64,
+        verified=True,
+        expected_artifact_count=2,
+    )
+
+    verification = (
+        TestClient(create_web_app(cfg))
+        .get("/api/recorder/status")
+        .json()["runtime_artifact_verification"]
+    )
+
+    assert verification["expected_artifact_count"] == 2
+    assert len(verification["items"]) == 1
+    assert verification["verified"] is False
+    assert verification["blockers"] == ["RUNTIME_ARTIFACT_EVIDENCE_INCOMPLETE"]
+
+
+def test_no_order_verdict_is_derived_from_named_checks(tmp_path: Path) -> None:
+    health = seeded_app(tmp_path).get("/api/health").json()
+    checks = health["no_order_checks"]
+
+    named_checks = {
+        "risk_trading_enabled_false",
+        "web_has_no_broker_reference",
+        "web_database_opened_read_only",
+        "http_order_routes_absent",
+        "adapter_order_methods_absent",
+        "ibkr_read_only_configured",
+        "ibkr_socket_loopback_only",
+        "runtime_order_surface_absent",
+        "broker_state_mutation_count_zero",
+    }
+    assert all(checks[name] is True for name in named_checks)
+    assert checks["aggregate_no_order_verdict"] is True
+    assert (
+        checks["ibkr_read_only_evidence"]["external_ibkr_environment_verification"]
+        == "not_externally_verifiable"
+    )
+
+
+def test_production_errors_have_correlation_ids_and_generic_browser_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+
+    def fail_universe(_self: ProspectiveReadStore) -> dict[str, list[dict[str, object]]]:
+        raise RuntimeError("synthetic secret-free server failure")
+
+    monkeypatch.setattr(ProspectiveReadStore, "universe", fail_universe)
+    client = TestClient(create_web_app(cfg), raise_server_exceptions=False)
+
+    with caplog.at_level("ERROR"):
+        response = client.get(
+            "/api/universe",
+            headers={"x-correlation-id": "test-correlation-123"},
+        )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "internal_error",
+        "correlation_id": "test-correlation-123",
+    }
+    assert response.headers["x-correlation-id"] == "test-correlation-123"
+    assert "WEB_INTERNAL_ERROR" in caplog.text
+    assert "path=/api/universe" in caplog.text
+    assert "exception_class=RuntimeError" in caplog.text
 
 
 def test_quiet_state_read_only_api_preserves_frozen_decision(tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -13,9 +13,15 @@ import stocker_prospective.cli as cli_module
 import stocker_prospective.ibkr_official as ibkr_official_module
 from stocker_prospective.bundle import BundleError
 from stocker_prospective.cli import app
-from stocker_prospective.config import load_prospective_config
-from stocker_prospective.database import ProspectiveRepository
+from stocker_prospective.config import RuntimeSafetyError, load_prospective_config
+from stocker_prospective.database import (
+    EvidenceMetadata,
+    LeaseRecord,
+    ProspectiveRepository,
+)
+from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.ibkr_api import OfficialIBKRApiProvenance, OfficialIBKRApiRelease
+from stocker_prospective.operational_state import RecorderOperationalRepository
 
 ROOT = Path(__file__).parents[1]
 RUNNER = CliRunner()
@@ -57,6 +63,7 @@ def write_ibkr_config(tmp_path: Path) -> Path:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     payload["runtime"]["source"] = "ibkr"
     payload["runtime"]["mode"] = "record_only"
+    payload["paths"]["frozen_m1c_artifact_root"] = str(tmp_path / "frozen-artifacts")
     payload["ibkr"] = {
         "host": "127.0.0.1",
         "port": 7497,
@@ -81,6 +88,77 @@ def test_cli_exposes_operational_commands_and_no_order_command() -> None:
     assert "place-order" not in lowered
     assert "cancel-order" not in lowered
     assert "\n│ orders " not in lowered
+
+
+def test_unclean_recorder_takeover_latches_before_socket_open(
+    tmp_path: Path,
+) -> None:
+    cfg = load_prospective_config(write_replay_config(tmp_path))
+    assert cfg.runtime.run_id is not None
+    repository = ProspectiveRepository(cfg.paths.database)
+    repository.migrate()
+    observed = datetime(2026, 7, 29, 15, tzinfo=UTC)
+    repository.create_run(
+        EvidenceMetadata(
+            run_id=cfg.runtime.run_id,
+            prospective_start_utc=cfg.runtime.prospective_start_utc,
+            app_version=cfg.runtime.app_version,
+            git_commit=cfg.runtime.git_commit,
+            model_artifact_id="frozen-m1c",
+            universe_id="anchor-frozen-20",
+            cohort="anchor_frozen_20",
+            source_timestamps=[observed.isoformat()],
+            recorded_at_utc=observed,
+        )
+    )
+    inbox = DurableCallbackInbox(
+        cfg.paths.database,
+        run_id=cfg.runtime.run_id,
+        recorder_generation=2,
+        owner_id="replacement",
+    )
+    operational = RecorderOperationalRepository(cfg.paths.database)
+    lease = LeaseRecord(
+        run_id=cfg.runtime.run_id,
+        owner_id="replacement",
+        acquired_at_utc=observed,
+        heartbeat_at_utc=observed - timedelta(minutes=5),
+        generation=2,
+        recovered_stale_owner=True,
+    )
+
+    with pytest.raises(
+        RuntimeSafetyError,
+        match="blocked_unclean_recorder_restart_state_uncertain",
+    ):
+        cli_module._fail_closed_on_unclean_recorder_takeover(
+            lease=lease,
+            config=cfg,
+            owner_id="replacement",
+            durable_inbox=inbox,
+            operational_repository=operational,
+        )
+
+    assert inbox.has_active_fatal("ingestion")
+    with repository._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT state, scientific_recording_valid
+            FROM recorder_operational_state_v1
+            WHERE run_id = ?
+            """,
+            (cfg.runtime.run_id,),
+        ).fetchone()
+        incident = connection.execute(
+            """
+            SELECT details_json
+            FROM operational_incident_v1
+            WHERE stable_error_code =
+                  'RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN'
+            """
+        ).fetchone()
+    assert tuple(row) == ("INGESTION_FATAL", 0)
+    assert '"socket_opened":false' in str(incident["details_json"])
 
 
 def test_ibkr_api_register_writes_verified_immutable_provenance(
@@ -299,6 +377,9 @@ def test_transient_ibkr_failure_uses_restartable_exit_and_releases_lease(
 
     class FakeAdapter:
         stopped = False
+
+        def attach_durable_inbox(self, inbox: object) -> None:
+            return None
 
         def attach_official_client(self, client: object) -> None:
             return None

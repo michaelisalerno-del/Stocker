@@ -445,6 +445,9 @@ def test_end_of_session_quality_report_fails_closed_without_raw_partitions(
     assert report.expected_universe_minutes == 7800
     assert report.level1_coverage == 0.0
     assert report.complete is False
+    assert report.recorder_operational_state == "INACTIVE"
+    assert report.recorder_state_reason_code == "NO_ACTIVE_RECORDER_GENERATION"
+    assert report.scientific_recording_valid is False
     assert report.claims == CLAIMS_BOUNDARY
 
 

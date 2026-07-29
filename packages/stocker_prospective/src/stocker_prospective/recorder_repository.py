@@ -294,6 +294,20 @@ class FrozenRecorderRepository:
             for row in rows
         }
 
+    def recorded_session_quality_report_dates(self, *, run_id: str) -> set[date]:
+        """Return final reports that a replacement generation must not rebuild."""
+
+        with self.repository._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT session_date
+                FROM recorder_session_report_v0
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchall()
+        return {date.fromisoformat(str(row["session_date"])) for row in rows}
+
     def mark_checkpoint_complete(
         self,
         metadata: EvidenceMetadata,

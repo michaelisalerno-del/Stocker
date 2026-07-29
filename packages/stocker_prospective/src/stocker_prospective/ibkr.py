@@ -397,6 +397,7 @@ class IBKRMarketDataAdapter:
         self._loop_thread: threading.Thread | None = None
         self._client: Any | None = None
         self._stopping = threading.Event()
+        self._client_loop_exit_expected = threading.Event()
         self._connected = threading.Event()
         self._socket_preflight = socket_preflight
         if self._durable_inbox is not None:
@@ -479,8 +480,9 @@ class IBKRMarketDataAdapter:
             )
             raise RuntimeError("blocked_ibkr_connection")
         self._stopping.clear()
+        self._client_loop_exit_expected.clear()
         self._loop_thread = threading.Thread(
-            target=self._client.run,
+            target=self._run_client_loop,
             name="stocker-ibkr-callback-loop",
             daemon=True,
         )
@@ -496,6 +498,7 @@ class IBKRMarketDataAdapter:
     def stop(self) -> None:
         self.connection.shutting_down()
         self._stopping.set()
+        self._client_loop_exit_expected.set()
         self.callbacks.shutdown()
         self.stream_quotes.clear()
         for key in self.budget.shutdown():
@@ -518,6 +521,7 @@ class IBKRMarketDataAdapter:
         self._socket_preflight(self.config.host, self.config.port)
         self._connection_generation += 1
         self._connected.clear()
+        self._client_loop_exit_expected.set()
         try:
             self._client.disconnect()
         finally:
@@ -533,8 +537,9 @@ class IBKRMarketDataAdapter:
         if connection_result is False:
             self.connection.degraded(code=-1, message="blocked_ibkr_connection")
             raise RuntimeError("blocked_ibkr_connection")
+        self._client_loop_exit_expected.clear()
         self._loop_thread = threading.Thread(
-            target=self._client.run,
+            target=self._run_client_loop,
             name="stocker-ibkr-callback-loop",
             daemon=True,
         )
@@ -545,6 +550,36 @@ class IBKRMarketDataAdapter:
                 message="blocked_ibkr_connection: reconnect_handshake_timeout",
             )
             raise RuntimeError("blocked_ibkr_connection: reconnect_handshake_timeout")
+
+    def _run_client_loop(self) -> None:
+        """Contain the official client's external network-loop boundary."""
+
+        assert self._client is not None
+        try:
+            self._client.run()
+        except Exception as exc:
+            if self._stopping.is_set() or self._client_loop_exit_expected.is_set():
+                return
+            self.connection.degraded(
+                code=-1,
+                message="blocked_ibkr_connection: client_loop_failure",
+            )
+            try:
+                self._latch_callback_failure(
+                    callback_kind="client_run_loop",
+                    request_id=-1,
+                    error=exc,
+                    source_sequence=self._latest_durably_admitted_sequence,
+                    stable_error_code="IBKR_CLIENT_LOOP_FAILURE",
+                    component="official_ibkr_client_loop",
+                )
+            except Exception:
+                # This is an external thread boundary. Preserve a bounded
+                # in-process fatal signal even if durable classification fails.
+                with self._callback_failure_lock:
+                    if self._fatal_callback_code is None:
+                        self._fatal_callback_code = "IBKR_CLIENT_LOOP_FAILURE"
+                        self._fatal_callback_sequence = self._latest_durably_admitted_sequence
 
     def request_market_data(
         self,
@@ -1082,9 +1117,11 @@ class IBKRMarketDataAdapter:
         request_id: int,
         error: Exception,
         source_sequence: int | None,
+        stable_error_code: str | None = None,
+        component: str = "official_ibkr_callback",
     ) -> None:
         occurred_at = datetime.now(UTC)
-        code = self._stable_callback_error_code(error)
+        code = stable_error_code or self._stable_callback_error_code(error)
         with self._callback_failure_lock:
             if self._fatal_callback_code is None:
                 self._fatal_callback_code = code
@@ -1099,6 +1136,7 @@ class IBKRMarketDataAdapter:
                 "connection_generation": self._connection_generation,
                 "subscription_owner": self._request_owners.get(request_id),
                 "symbol": self._symbol_from_owner(self._request_owners.get(request_id)),
+                "component": component,
                 "failure_count": 1,
             }
             if not self._persist_callback_failure(payload):
@@ -1117,7 +1155,7 @@ class IBKRMarketDataAdapter:
         try:
             self._durable_inbox.record_incident(
                 stable_error_code=str(payload["stable_error_code"]),
-                component="official_ibkr_callback",
+                component=str(payload.get("component", "official_ibkr_callback")),
                 severity="fatal",
                 occurred_at=occurred_at,
                 error_class=str(payload["error_class"]),

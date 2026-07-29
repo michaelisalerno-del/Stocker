@@ -461,7 +461,14 @@ class FrozenProspectiveApplication:
         ] = {}
         self._quiet_phase_finalised: set[str] = set()
         self._sessions_seen: set[date] = set()
-        self._session_reports_written: set[date] = set()
+        # Session reports are immutable per run/date. A replacement generation
+        # must hydrate their identities before processing callbacks, otherwise
+        # its first post-close poll can attempt to rewrite committed evidence.
+        self._session_reports_written = (
+            self.phase_manager.repository.recorded_session_quality_report_dates(
+                run_id=self.config.runtime.run_id or "",
+            )
+        )
         self._session_context_checked: set[date] = set()
         self._session_context_failures: dict[date, str] = {}
         self._reconnect_attempts = 0

@@ -412,6 +412,48 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
     assert adapter.active_subscriptions == {}
 
 
+def test_restart_after_session_report_does_not_rewrite_immutable_report(
+    tmp_path: Path,
+) -> None:
+    report_due_at = datetime(2026, 7, 29, 20, 31, tzinfo=UTC)
+    first_application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        events=(),
+    )
+    first_application.poll(now=report_due_at)
+    first_application.shutdown(now=report_due_at + timedelta(seconds=1))
+    with sqlite3.connect(config.paths.database) as connection:
+        report_before_restart = connection.execute(
+            """
+            SELECT report_json
+            FROM recorder_session_report_v0
+            WHERE run_id = ? AND session_date = '2026-07-29'
+            """,
+            (config.runtime.run_id,),
+        ).fetchone()
+    assert report_before_restart is not None
+
+    restarted_application, _config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        events=(),
+    )
+    restarted_application.poll(now=report_due_at + timedelta(minutes=1))
+    restarted_application.shutdown(now=report_due_at + timedelta(minutes=1, seconds=1))
+
+    with sqlite3.connect(config.paths.database) as connection:
+        reports_after_restart = connection.execute(
+            """
+            SELECT report_json
+            FROM recorder_session_report_v0
+            WHERE run_id = ? AND session_date = '2026-07-29'
+            """,
+            (config.runtime.run_id,),
+        ).fetchall()
+    assert reports_after_restart == [report_before_restart]
+
+
 def test_clock_probe_is_retried_after_the_operational_interval(
     tmp_path: Path,
 ) -> None:

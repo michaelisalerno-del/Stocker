@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -149,6 +150,123 @@ def test_market_data_adapter_rechecks_socket_before_start_and_reconnect(
     adapter.stop()
 
     assert preflight_calls == [("127.0.0.1", 4002), ("127.0.0.1", 4002)]
+
+
+def test_market_data_adapter_contains_client_loop_error_during_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import stocker_prospective.ibkr as ibkr_module
+
+    monkeypatch.setattr(ibkr_module, "require_official_ibkr_api", lambda: object())
+    uncaught: list[BaseException] = []
+    monkeypatch.setattr(
+        threading,
+        "excepthook",
+        lambda arguments: uncaught.append(arguments.exc_value),
+    )
+    disconnected = threading.Event()
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=4002,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=MarketDataBudget(
+            line_limit=4,
+            reserved_headroom=1,
+            request_rate_limit=2,
+        ),
+        socket_preflight=lambda _host, _port: ("127.0.0.1",),
+    )
+
+    class FailingOnDisconnectClient:
+        def connect(self, *_: object) -> bool:
+            return True
+
+        def disconnect(self) -> None:
+            disconnected.set()
+
+        def run(self) -> None:
+            adapter.on_connected(MarketDataType.LIVE)
+            assert disconnected.wait(1)
+            raise TypeError("client loop observed cleared server version")
+
+        def reqMktData(self, *_: object) -> None:  # noqa: N802
+            return None
+
+        def cancelMktData(self, *_: object) -> None:  # noqa: N802
+            return None
+
+    adapter.attach_official_client(FailingOnDisconnectClient())
+    adapter.start()
+    adapter.stop()
+
+    assert uncaught == []
+    assert adapter.fatal_callback_code is None
+
+
+def test_market_data_adapter_latches_unexpected_client_loop_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import stocker_prospective.ibkr as ibkr_module
+
+    monkeypatch.setattr(ibkr_module, "require_official_ibkr_api", lambda: object())
+    uncaught: list[BaseException] = []
+    monkeypatch.setattr(
+        threading,
+        "excepthook",
+        lambda arguments: uncaught.append(arguments.exc_value),
+    )
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=4002,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=MarketDataBudget(
+            line_limit=4,
+            reserved_headroom=1,
+            request_rate_limit=2,
+        ),
+        socket_preflight=lambda _host, _port: ("127.0.0.1",),
+    )
+
+    class FailingClient:
+        def connect(self, *_: object) -> bool:
+            return True
+
+        def disconnect(self) -> None:
+            return None
+
+        def run(self) -> None:
+            adapter.on_connected(MarketDataType.LIVE)
+            raise RuntimeError("unexpected official client loop failure")
+
+        def reqMktData(self, *_: object) -> None:  # noqa: N802
+            return None
+
+        def cancelMktData(self, *_: object) -> None:  # noqa: N802
+            return None
+
+    adapter.attach_official_client(FailingClient())
+    adapter.start()
+    assert adapter._loop_thread is not None
+    adapter._loop_thread.join(timeout=1)
+
+    assert uncaught == []
+    assert adapter.fatal_callback_code == "IBKR_CLIENT_LOOP_FAILURE"
+
+    adapter.stop()
 
 
 def test_connection_contract_rejects_remote_ibkr_host() -> None:

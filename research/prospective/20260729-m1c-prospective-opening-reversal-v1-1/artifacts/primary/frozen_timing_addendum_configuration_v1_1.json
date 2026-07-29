@@ -1,0 +1,22 @@
+{
+  "capacity_policy_changed": false,
+  "configuration_hash_v1_1": "959720fa98f79744b616e33611cb823c536f4e2989c7f72f2d707c83da3c2233",
+  "engineering_transfer_sessions_restart": 20,
+  "experiment_id": "m1c-prospective-opening-reversal-v1",
+  "experiment_version": "1.1",
+  "frozen_configuration_hash_v1": "7d95baa2f7d56c8b82b639f7ee2bae459a879aa0b61200bc2786f0e3bf695c8e",
+  "frozen_rule_hash_v1": "7a2a40170fa1dffb148cb51144c1c9bfcb029c5d797ea9680164cfd9fbce1ea7",
+  "nominal_entry_actionable": false,
+  "nominal_entry_timestamp": "10:00 America/New_York",
+  "nominal_signal_timestamp": "10:00 America/New_York",
+  "order_routing_enabled": false,
+  "predictor_window_must_be_complete": true,
+  "primary_horizon_minutes": 15,
+  "raw_append_only_archival_before_receipt_allowed": true,
+  "receipt_contract": "durable_before_entry_or_post_entry_data_admitted_to_decision_surface",
+  "research_shadow_only": true,
+  "schema_version": "m1c-prospective-opening-reversal-timing-addendum-config-v1.1",
+  "scientific_rule_changed": false,
+  "superseded_activation_receipt_hash_v1": "9b0df39b477e49e3af3e464346b01f0dd121541614b12968ea7333695f31e6ba",
+  "superseded_experiment_version": "1"
+}

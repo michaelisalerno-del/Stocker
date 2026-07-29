@@ -1,0 +1,25 @@
+{
+  "capacity_policy_changed": false,
+  "degradation_order": [
+    "neutral_control",
+    "additional_strike",
+    "3_to_5_dte_comparison",
+    "0dte_comparison",
+    "tick_by_tick",
+    "additional_underlying_diagnostic"
+  ],
+  "priority": [
+    "critical_connection_session_clock_health",
+    "VTI_and_required_critical_market_proxies",
+    "frozen_20_stock_m1c_five_minute_bars",
+    "frozen_m1c_scoring_and_episode_receipts",
+    "one_promoted_episode_underlying",
+    "primary_1dte_option_call_and_put",
+    "optional_comparison_contracts",
+    "single_promoted_underlying_tick_by_tick",
+    "optional_additional_underlying_quote_detail",
+    "level_ii_separate_authorisation_only",
+    "neutral_controls_and_additional_expiries"
+  ],
+  "schema_version": "subscription-priority-manifest-v1.1"
+}

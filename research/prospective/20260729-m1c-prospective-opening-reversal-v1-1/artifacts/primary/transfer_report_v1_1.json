@@ -1,0 +1,10 @@
+{
+  "cohort_phase": "engineering_transfer",
+  "experiment_version": "1.1",
+  "outcomes_opened": false,
+  "reason": "awaiting_20_post_v1_1_engineering_transfer_sessions",
+  "source_mapping_frozen": false,
+  "status": "pending",
+  "valid_sessions_observed": 0,
+  "valid_sessions_required": 20
+}

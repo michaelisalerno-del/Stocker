@@ -1,0 +1,17 @@
+{
+  "activation_timestamp_utc": "2026-07-29T07:53:23.253773+00:00",
+  "confirmation_episode_count": 0,
+  "development_episode_count": 0,
+  "engineering_transfer_sessions_required": 20,
+  "exact_prediction_rule": "prediction_sign_v1=-opening_transition_sign_v1",
+  "experiment_id": "m1c-prospective-opening-reversal-v1",
+  "experiment_version": "1.1",
+  "nominal_entry_actionable": false,
+  "option_profitability_claim_issued": false,
+  "orders_placed": 0,
+  "reserved_line_count": 12,
+  "scientific_result_issued": false,
+  "scientific_rule_changed": false,
+  "status": "activated_engineering_transfer_pending",
+  "timing_contract_changed": true
+}

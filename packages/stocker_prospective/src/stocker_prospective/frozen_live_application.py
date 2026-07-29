@@ -70,6 +70,10 @@ from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
     load_frozen_experiment_config_v1,
     select_promoted_prediction_v1,
 )
+from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
+    load_activation_receipt_v1_1,
+    load_frozen_timing_addendum_config_v1_1,
+)
 from stocker_prospective.market_data import ConnectionState, MarketDataType
 from stocker_prospective.opening_market_transition_v1 import (
     load_opening_transition_threshold_manifest_v1,
@@ -181,9 +185,7 @@ class FrozenProspectiveApplication:
         live_recorder: FrozenM1CLiveRecorder,
         subscriptions: LiveSubscriptionController,
         subscription_budget: SubscriptionBudgetManager,
-        opening_reversal_capacity: (
-            OpeningReversalCapacityCoordinatorV1 | None
-        ),
+        opening_reversal_capacity: (OpeningReversalCapacityCoordinatorV1 | None),
         option_discovery: BoundedOptionDiscoveryService,
         phase_manager: ProspectivePhaseManager,
         quiet_phase_manager: QuietStatePhaseManager,
@@ -297,22 +299,15 @@ class FrozenProspectiveApplication:
                     checkpoint.episode_decision.session,
                     checkpoint.episode_decision.checkpoint,
                 )
-                self._opening_reversal_results.setdefault(group_key, {})[
-                    symbol
-                ] = checkpoint
-                self._opening_reversal_receipts.setdefault(group_key, {})[
-                    symbol
-                ] = opening_receipt
+                self._opening_reversal_results.setdefault(group_key, {})[symbol] = checkpoint
+                self._opening_reversal_receipts.setdefault(group_key, {})[symbol] = opening_receipt
             self._sessions_seen.add(checkpoint.episode_decision.session)
             self._probabilities[symbol] = checkpoint.score.probability
             if not checkpoint.rejection_reasons:
                 self._eligible_symbols.add(symbol)
             else:
                 self._eligible_symbols.discard(symbol)
-            if (
-                checkpoint.episode_decision.fresh_episode
-                and opening_receipt is None
-            ):
+            if checkpoint.episode_decision.fresh_episode and opening_receipt is None:
                 episode_id = checkpoint.episode_decision.episode_id
                 assert episode_id is not None
                 self._episode_results[episode_id] = checkpoint
@@ -340,9 +335,7 @@ class FrozenProspectiveApplication:
                 (checkpoint.neutral_control_id, "neutral_control"),
                 (checkpoint.high_tail_control_id, "high_tail_control"),
             )
-            for observation_id, kind in (
-                quiet_observations if opening_receipt is None else ()
-            ):
+            for observation_id, kind in quiet_observations if opening_receipt is None else ():
                 if observation_id is None:
                     continue
                 self._quiet_observation_results[observation_id] = (checkpoint, kind)
@@ -367,19 +360,32 @@ class FrozenProspectiveApplication:
                 (receipt.session, receipt.checkpoint),
                 {},
             )[receipt.stock] = receipt
-        for group_key, group_receipts in tuple(
-            self._opening_reversal_receipts.items()
-        ):
-            if (
-                group_key in self._opening_reversal_finalised_groups
-                or set(group_receipts)
-                != set(self.live_recorder.universe_symbols)
+        barrier_audits_v1_1 = {
+            audit.session: audit for audit in (result.opening_reversal_causal_barrier_audits_v1_1)
+        }
+        for group_key, group_receipts in tuple(self._opening_reversal_receipts.items()):
+            if group_key in self._opening_reversal_finalised_groups or set(group_receipts) != set(
+                self.live_recorder.universe_symbols
             ):
                 continue
             receipts = tuple(
-                group_receipts[symbol]
-                for symbol in self.live_recorder.universe_symbols
+                group_receipts[symbol] for symbol in self.live_recorder.universe_symbols
             )
+            if {receipt.experiment_version for receipt in receipts} == {"1.1"}:
+                barrier_audit = barrier_audits_v1_1.get(group_key[0])
+                if barrier_audit is None:
+                    barrier_audit = (
+                        self.live_recorder.repository
+                        .load_opening_reversal_causal_barrier_audit_v1_1(
+                            run_id=callback_metadata.run_id,
+                            session=group_key[0],
+                        )
+                    )
+                if barrier_audit is None:
+                    continue
+                if barrier_audit.barrier_status != "passed":
+                    self._opening_reversal_finalised_groups.add(group_key)
+                    continue
             selection = select_promoted_prediction_v1(receipts)
             self._opening_reversal_finalised_groups.add(group_key)
             if selection.promoted is None:
@@ -387,9 +393,7 @@ class FrozenProspectiveApplication:
             promoted = selection.promoted
             group_results = self._opening_reversal_results.get(group_key, {})
             if promoted.stock not in group_results:
-                raise RuntimeError(
-                    "eligible opening-reversal receipt lacks its causal score"
-                )
+                raise RuntimeError("eligible opening-reversal receipt lacks its causal score")
             promoted_result = group_results[promoted.stock]
             episode_id = promoted.fresh_episode_id
             assert episode_id is not None
@@ -799,13 +803,11 @@ def build_frozen_prospective_application(
             signed_market_shock_activation_status_v1 = "unavailable:config_absent"
         else:
             try:
-                signed_market_shock_thresholds_v1 = (
-                    load_signed_market_shock_threshold_manifest_v1(shock_path)
+                signed_market_shock_thresholds_v1 = load_signed_market_shock_threshold_manifest_v1(
+                    shock_path
                 )
             except (OSError, ValueError):
-                signed_market_shock_activation_status_v1 = (
-                    "unavailable:config_invalid"
-                )
+                signed_market_shock_activation_status_v1 = "unavailable:config_invalid"
             else:
                 signed_market_shock_activation_status_v1 = "available"
                 artifact_files["m1c_signed_market_shock_v1_config"] = shock_path
@@ -814,60 +816,76 @@ def build_frozen_prospective_application(
     if paths.m1c_opening_market_transition_v1_config is not None:
         opening_path = Path(paths.m1c_opening_market_transition_v1_config)
         if not opening_path.is_file():
-            opening_transition_activation_status_v1 = (
-                "unavailable:config_absent"
-            )
+            opening_transition_activation_status_v1 = "unavailable:config_absent"
         else:
             try:
-                opening_manifest = (
-                    load_opening_transition_threshold_manifest_v1(opening_path)
-                )
+                opening_manifest = load_opening_transition_threshold_manifest_v1(opening_path)
             except (OSError, ValueError):
-                opening_transition_activation_status_v1 = (
-                    "unavailable:config_invalid"
-                )
+                opening_transition_activation_status_v1 = "unavailable:config_invalid"
             else:
                 opening_transition_thresholds_v1 = opening_manifest.thresholds
                 opening_transition_activation_status_v1 = "available"
-                artifact_files[
-                    "m1c_opening_market_transition_v1_config"
-                ] = opening_path
+                artifact_files["m1c_opening_market_transition_v1_config"] = opening_path
     opening_reversal_activation_v1 = None
-    reversal_config_path = (
-        paths.m1c_prospective_opening_reversal_v1_config
-    )
-    reversal_activation_path = (
-        paths.m1c_prospective_opening_reversal_v1_activation
-    )
+    reversal_config_path = paths.m1c_prospective_opening_reversal_v1_config
+    reversal_activation_path = paths.m1c_prospective_opening_reversal_v1_activation
     if (reversal_config_path is None) != (reversal_activation_path is None):
-        raise ValueError(
-            "opening reversal config and activation must be configured together"
-        )
+        raise ValueError("opening reversal config and activation must be configured together")
     if reversal_config_path is not None:
         assert reversal_activation_path is not None
         if config.ibkr.reserved_future_trading_lines != 12:
-            raise ValueError(
-                "opening reversal V1 requires exactly 12 reserved market-data lines"
-            )
-        frozen_reversal_config = load_frozen_experiment_config_v1(
-            str(reversal_config_path)
-        )
-        opening_reversal_activation_v1 = load_activation_receipt_v1(
-            str(reversal_activation_path)
-        )
+            raise ValueError("opening reversal V1 requires exactly 12 reserved market-data lines")
+        frozen_reversal_config = load_frozen_experiment_config_v1(str(reversal_config_path))
+        opening_reversal_activation_v1 = load_activation_receipt_v1(str(reversal_activation_path))
         if (
             opening_reversal_activation_v1.configuration_hash
             != frozen_reversal_config.configuration_hash
         ):
+            raise ValueError("opening reversal activation/configuration hash mismatch")
+        artifact_files["m1c_prospective_opening_reversal_v1_config"] = Path(reversal_config_path)
+        artifact_files["m1c_prospective_opening_reversal_v1_activation"] = Path(
+            reversal_activation_path
+        )
+    opening_reversal_activation_v1_1 = None
+    reversal_v1_1_config_path = paths.m1c_prospective_opening_reversal_v1_1_config
+    reversal_v1_1_activation_path = paths.m1c_prospective_opening_reversal_v1_1_activation
+    if (reversal_v1_1_config_path is None) != (reversal_v1_1_activation_path is None):
+        raise ValueError("opening reversal V1.1 config and activation must be configured together")
+    if reversal_v1_1_config_path is not None:
+        assert reversal_v1_1_activation_path is not None
+        if opening_reversal_activation_v1 is None:
+            raise ValueError("opening reversal V1.1 requires the exact V1 activation")
+        if config.ibkr.reserved_future_trading_lines != 12:
             raise ValueError(
-                "opening reversal activation/configuration hash mismatch"
+                "opening reversal V1.1 preserves exactly 12 reserved market-data lines"
             )
-        artifact_files[
-            "m1c_prospective_opening_reversal_v1_config"
-        ] = Path(reversal_config_path)
-        artifact_files[
-            "m1c_prospective_opening_reversal_v1_activation"
-        ] = Path(reversal_activation_path)
+        timing_addendum_config = load_frozen_timing_addendum_config_v1_1(
+            str(reversal_v1_1_config_path)
+        )
+        opening_reversal_activation_v1_1 = load_activation_receipt_v1_1(
+            str(reversal_v1_1_activation_path)
+        )
+        if (
+            opening_reversal_activation_v1_1.timing_addendum_configuration_hash_v1_1
+            != timing_addendum_config.configuration_hash_v1_1
+            or (
+                opening_reversal_activation_v1_1.superseded_activation_receipt_hash_v1
+                != opening_reversal_activation_v1.activation_receipt_hash
+            )
+            or opening_reversal_activation_v1_1.frozen_rule_hash
+            != opening_reversal_activation_v1.frozen_rule_hash
+            or (
+                opening_reversal_activation_v1_1.frozen_configuration_hash_v1
+                != opening_reversal_activation_v1.configuration_hash
+            )
+        ):
+            raise ValueError("opening reversal V1.1 activation/addendum/V1 binding mismatch")
+        artifact_files["m1c_prospective_opening_reversal_v1_1_config"] = Path(
+            reversal_v1_1_config_path
+        )
+        artifact_files["m1c_prospective_opening_reversal_v1_1_activation"] = Path(
+            reversal_v1_1_activation_path
+        )
     if any(not path.is_file() for path in artifact_files.values()):
         absent = sorted(name for name, path in artifact_files.items() if not path.is_file())
         raise ValueError("frozen recorder artifact absent: " + ",".join(absent))
@@ -1052,6 +1070,11 @@ def build_frozen_prospective_application(
             initial_metadata,
             opening_reversal_activation_v1,
         )
+    if opening_reversal_activation_v1_1 is not None:
+        frozen_repository.record_opening_reversal_activation_v1_1(
+            initial_metadata,
+            opening_reversal_activation_v1_1,
+        )
 
     def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:
         return frozen_repository.prospective_phase_for_session(
@@ -1132,14 +1155,11 @@ def build_frozen_prospective_application(
         ),
         tail_phase_activation_status_v1=tail_phase_activation_status_v1,
         signed_market_shock_thresholds_v1=signed_market_shock_thresholds_v1,
-        signed_market_shock_activation_status_v1=(
-            signed_market_shock_activation_status_v1
-        ),
+        signed_market_shock_activation_status_v1=(signed_market_shock_activation_status_v1),
         opening_transition_thresholds_v1=opening_transition_thresholds_v1,
-        opening_transition_activation_status_v1=(
-            opening_transition_activation_status_v1
-        ),
+        opening_transition_activation_status_v1=(opening_transition_activation_status_v1),
         opening_reversal_activation_v1=opening_reversal_activation_v1,
+        opening_reversal_activation_v1_1=(opening_reversal_activation_v1_1),
     )
     controller_budget = SubscriptionBudgetManager(
         limits={
@@ -1174,6 +1194,7 @@ def build_frozen_prospective_application(
         )
     )
     if opening_reversal_capacity is not None:
+
         def persist_pre_receipt_capacity_snapshot(
             metadata: EvidenceMetadata,
         ) -> str:
@@ -1307,6 +1328,7 @@ def build_frozen_prospective_application(
             return False
 
     option_recorder.eviction_sink = cancel_evicted_subscription
+
     def persist_episode_allocation(
         record: EpisodeAllocationRecord,
     ) -> None:
@@ -1321,8 +1343,7 @@ def build_frozen_prospective_application(
         if (
             record.kind is not EpisodeKind.OPENING_REVERSAL
             or opening_reversal_capacity is None
-            or record.state
-            not in {EpisodeState.EPISODE_QUEUED, EpisodeState.DEGRADED}
+            or record.state not in {EpisodeState.EPISODE_QUEUED, EpisodeState.DEGRADED}
         ):
             return
         snapshot = opening_reversal_capacity.snapshot(
@@ -1417,9 +1438,7 @@ def build_frozen_prospective_application(
         aggregate_report_path=resolved_paths["aggregate_transfer_report"],
         runtime_parity_passed=m1c_parity,
         expected_symbols=identity.symbols,
-        opening_reversal_enabled=(
-            opening_reversal_activation_v1 is not None
-        ),
+        opening_reversal_enabled=(opening_reversal_activation_v1 is not None),
     )
     daily_report_writer = BudgetAwareDailyReportWriter(
         database_path=repository.database_path,

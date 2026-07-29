@@ -27,9 +27,7 @@ from stocker_prospective.subscriptions import (
     SubscriptionClass,
 )
 
-M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID: Final[str] = (
-    "m1c-prospective-opening-reversal-v1"
-)
+M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID: Final[str] = "m1c-prospective-opening-reversal-v1"
 M1C_PROSPECTIVE_OPENING_REVERSAL_V1_VERSION: Final[str] = "1"
 M1C_HIGH_TAIL_THRESHOLD_V1: Final[float] = 0.488333710794033
 NEGATIVE_OPENING_RETURN_THRESHOLD_V1: Final[float] = -0.00288963733897
@@ -75,19 +73,12 @@ def _canonical_value(value: object) -> object:
     if isinstance(value, BaseModel):
         return _canonical_value(value.model_dump(mode="json"))
     if isinstance(value, Mapping):
-        return {
-            str(key): _canonical_value(item)
-            for key, item in value.items()
-        }
+        return {str(key): _canonical_value(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
         return [_canonical_value(item) for item in value]
     if isinstance(value, datetime):
         encoded = value.isoformat()
-        return (
-            encoded[:-6] + "Z"
-            if encoded.endswith("+00:00")
-            else encoded
-        )
+        return encoded[:-6] + "Z" if encoded.endswith("+00:00") else encoded
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, Enum):
@@ -127,12 +118,8 @@ class FrozenOpeningReversalRuleV1(BaseModel):
     market_proxy: Literal["VTI"] = "VTI"
     m1c_probability_threshold: float = M1C_HIGH_TAIL_THRESHOLD_V1
     tail_phase_required: Literal["FIRST_ENTRY"] = "FIRST_ENTRY"
-    opening_return_q10: float = (
-        NEGATIVE_OPENING_RETURN_THRESHOLD_V1
-    )
-    opening_return_q90: float = (
-        POSITIVE_OPENING_RETURN_THRESHOLD_V1
-    )
+    opening_return_q10: float = NEGATIVE_OPENING_RETURN_THRESHOLD_V1
+    opening_return_q90: float = POSITIVE_OPENING_RETURN_THRESHOLD_V1
     opening_range_q75: float = OPENING_RANGE_THRESHOLD_V1
     primary_horizon_minutes: Literal[15] = 15
     reserved_market_data_lines: Literal[12] = 12
@@ -140,9 +127,9 @@ class FrozenOpeningReversalRuleV1(BaseModel):
     primary_expiry: Literal["1DTE"] = "1DTE"
     order_routing_enabled: Literal[False] = False
     order_methods_available: Literal[False] = False
-    direction_formula: Literal[
+    direction_formula: Literal["prediction_sign_v1=-opening_transition_sign_v1"] = (
         "prediction_sign_v1=-opening_transition_sign_v1"
-    ] = "prediction_sign_v1=-opening_transition_sign_v1"
+    )
     optional_feed_degradation_order: tuple[str, ...] = (
         "neutral_control",
         "additional_strike",
@@ -397,9 +384,7 @@ def build_activation_receipt_v1(
             activation_timestamp_utc,
             label="activation timestamp",
         ),
-        "new_york_trading_date_at_activation": (
-            new_york_trading_date_at_activation
-        ),
+        "new_york_trading_date_at_activation": (new_york_trading_date_at_activation),
         "branch": branch,
         "commit": commit,
         "dirty_working_tree_status": dirty_working_tree_status,
@@ -430,9 +415,7 @@ def build_activation_receipt_v1(
         ),
         "order_routing_disabled": True,
         "order_methods_available": False,
-        "retrospective_event_reconciliation_outcome": (
-            "event_label_ambiguity_corrected"
-        ),
+        "retrospective_event_reconciliation_outcome": ("event_label_ambiguity_corrected"),
         "protected_pre_activation_outcomes_opened": False,
     }
     payload["activation_receipt_hash"] = _sha256(payload)
@@ -473,11 +456,56 @@ def load_frozen_experiment_config_v1(
     return config
 
 
+class OpeningReversalPredictionTimingEvidenceV1_1(BaseModel):
+    """Causal timing proof for the V1.1 shadow-only receipt amendment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    timing_addendum_activation_receipt_hash_v1_1: str = Field(pattern=r"^[a-f0-9]{64}$")
+    rule_committed_at_utc: datetime
+    causal_barrier_armed_at_utc: datetime
+    predictor_window_completed_at_utc: datetime
+    first_entry_or_post_entry_event_buffered_at_utc: datetime | None
+    entry_or_post_entry_data_admitted_before_receipt: bool
+    raw_event_archive_write_before_receipt: Literal[True]
+    decision_surface_release_requires_durable_receipt: Literal[True]
+    nominal_entry_actionable: Literal[False]
+    receipt_latency_after_nominal_entry_seconds: float = Field(ge=0.0)
+
+    @field_validator(
+        "rule_committed_at_utc",
+        "causal_barrier_armed_at_utc",
+        "predictor_window_completed_at_utc",
+        "first_entry_or_post_entry_event_buffered_at_utc",
+    )
+    @classmethod
+    def _timing_timestamp_is_aware(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        return _aware_utc(value, label="V1.1 timing evidence timestamp")
+
+    @model_validator(mode="after")
+    def _commitment_precedes_predictor_completion(
+        self,
+    ) -> OpeningReversalPredictionTimingEvidenceV1_1:
+        if (
+            self.rule_committed_at_utc > self.causal_barrier_armed_at_utc
+            or self.causal_barrier_armed_at_utc > self.predictor_window_completed_at_utc
+            or not math.isfinite(self.receipt_latency_after_nominal_entry_seconds)
+        ):
+            raise ValueError("V1.1 timing evidence chronology is invalid")
+        return self
+
+
 class OpeningReversalPredictionInputV1(BaseModel):
     """All causal facts allowed to construct one immutable V1 receipt."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    experiment_version: Literal["1", "1.1"] = "1"
     activation_timestamp_utc: datetime
     cohort_phase: CohortPhaseV1
     transfer_status: str
@@ -508,6 +536,7 @@ class OpeningReversalPredictionInputV1(BaseModel):
         tuple[str, FrozenComparisonScalarV1],
         ...,
     ] = ()
+    timing_evidence_v1_1: OpeningReversalPredictionTimingEvidenceV1_1 | None = None
 
     @field_validator(
         "activation_timestamp_utc",
@@ -542,7 +571,7 @@ class OpeningReversalPredictionReceiptV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     experiment_id: Literal["m1c-prospective-opening-reversal-v1"]
-    experiment_version: Literal["1"]
+    experiment_version: Literal["1", "1.1"]
     session: date
     stock: str
     checkpoint: Literal[6]
@@ -579,6 +608,9 @@ class OpeningReversalPredictionReceiptV1(BaseModel):
         tuple[str, FrozenComparisonScalarV1],
         ...,
     ]
+    timing_evidence_v1_1: OpeningReversalPredictionTimingEvidenceV1_1 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     rule_hash_v1: str = Field(pattern=r"^[a-f0-9]{64}$")
     receipt_hash_v1: str = Field(pattern=r"^[a-f0-9]{64}$")
 
@@ -600,6 +632,10 @@ class OpeningReversalPredictionReceiptV1(BaseModel):
             raise ValueError("prediction receipt threshold drift")
         if self.rule_hash_v1 != FrozenOpeningReversalRuleV1().rule_hash:
             raise ValueError("prediction receipt rule hash mismatch")
+        if (self.experiment_version == "1" and self.timing_evidence_v1_1 is not None) or (
+            self.experiment_version == "1.1" and self.timing_evidence_v1_1 is None
+        ):
+            raise ValueError("prediction receipt timing protocol mismatch")
         payload = self.model_dump(mode="python", exclude={"receipt_hash_v1"})
         if self.receipt_hash_v1 != _sha256(payload):
             raise ValueError("prediction receipt hash mismatch")
@@ -648,9 +684,7 @@ def build_prediction_receipt_v1(
 ) -> OpeningReversalPredictionReceiptV1:
     """Apply the frozen rule exactly once and return a self-hashing receipt."""
 
-    source = OpeningReversalPredictionInputV1.model_validate(
-        item.model_dump(mode="python")
-    )
+    source = OpeningReversalPredictionInputV1.model_validate(item.model_dump(mode="python"))
     frozen_rule = FrozenOpeningReversalRuleV1() if rule is None else rule
     reasons: list[str] = []
 
@@ -669,10 +703,7 @@ def build_prediction_receipt_v1(
     )
     if not probability_valid:
         reasons.append("m1c_probability_invalid")
-    elif (
-        probability is not None
-        and probability < frozen_rule.m1c_probability_threshold
-    ):
+    elif probability is not None and probability < frozen_rule.m1c_probability_threshold:
         reasons.append("m1c_below_frozen_high_tail")
     expected_high_tail = bool(
         probability_valid
@@ -705,8 +736,46 @@ def build_prediction_receipt_v1(
         reasons.append("transfer_status_incomplete")
     if source.capacity_snapshot_id is None:
         reasons.append("capacity_snapshot_missing")
-    if source.receipt_created_at_utc >= source.entry_timestamp_utc:
-        reasons.append("receipt_not_completed_before_entry")
+    timing = source.timing_evidence_v1_1
+    if source.experiment_version == "1":
+        if timing is not None:
+            reasons.append("v1_timing_addendum_not_permitted")
+        if source.receipt_created_at_utc >= source.entry_timestamp_utc:
+            reasons.append("receipt_not_completed_before_entry")
+    elif timing is None:
+        reasons.append("timing_addendum_evidence_missing")
+    else:
+        expected_latency = (
+            source.receipt_created_at_utc - source.entry_timestamp_utc
+        ).total_seconds()
+        if timing.rule_committed_at_utc != source.activation_timestamp_utc:
+            reasons.append("timing_rule_commitment_mismatch")
+        if timing.causal_barrier_armed_at_utc > source.signal_timestamp_utc:
+            reasons.append("causal_barrier_not_armed_before_signal")
+        if (
+            timing.predictor_window_completed_at_utc != source.signal_timestamp_utc
+            or timing.predictor_window_completed_at_utc != source.entry_timestamp_utc
+        ):
+            reasons.append("predictor_window_completion_mismatch")
+        if source.receipt_created_at_utc < timing.predictor_window_completed_at_utc:
+            reasons.append("receipt_created_before_predictor_complete")
+        if timing.entry_or_post_entry_data_admitted_before_receipt:
+            reasons.append("entry_or_post_entry_data_admitted_before_receipt")
+        buffered_at = timing.first_entry_or_post_entry_event_buffered_at_utc
+        if buffered_at is not None and buffered_at < source.entry_timestamp_utc:
+            reasons.append("entry_buffer_timestamp_before_nominal_entry")
+        if (
+            buffered_at is not None
+            and buffered_at > source.receipt_created_at_utc
+        ):
+            reasons.append("entry_buffer_timestamp_after_receipt")
+        if expected_latency < 0.0 or not math.isclose(
+            timing.receipt_latency_after_nominal_entry_seconds,
+            expected_latency,
+            rel_tol=0.0,
+            abs_tol=1e-6,
+        ):
+            reasons.append("timing_receipt_latency_mismatch")
     if source.signal_timestamp_utc != source.entry_timestamp_utc:
         reasons.append("frozen_signal_entry_timestamp_mismatch")
 
@@ -735,6 +804,15 @@ def build_prediction_receipt_v1(
         "transfer_status_incomplete",
         "capacity_snapshot_missing",
         "receipt_not_completed_before_entry",
+        "timing_addendum_evidence_missing",
+        "timing_rule_commitment_mismatch",
+        "causal_barrier_not_armed_before_signal",
+        "predictor_window_completion_mismatch",
+        "receipt_created_before_predictor_complete",
+        "entry_or_post_entry_data_admitted_before_receipt",
+        "entry_buffer_timestamp_before_nominal_entry",
+        "entry_buffer_timestamp_after_receipt",
+        "timing_receipt_latency_mismatch",
         "opening_state_threshold_mismatch",
         "opening_transition_event_id_missing",
     }
@@ -758,7 +836,7 @@ def build_prediction_receipt_v1(
     )
     payload: dict[str, object] = {
         "experiment_id": frozen_rule.experiment_id,
-        "experiment_version": frozen_rule.experiment_version,
+        "experiment_version": source.experiment_version,
         "session": source.session,
         "stock": source.stock,
         "checkpoint": 6,
@@ -773,9 +851,7 @@ def build_prediction_receipt_v1(
         "market_proxy_v1": frozen_rule.market_proxy,
         "market_opening_return_v1": source.market_opening_return_v1,
         "market_opening_range_v1": source.market_opening_range_v1,
-        "opening_market_transition_state_v1": (
-            source.opening_market_transition_state_v1
-        ),
+        "opening_market_transition_state_v1": (source.opening_market_transition_state_v1),
         "opening_transition_sign_v1": source.opening_transition_sign_v1,
         "opening_transition_event_id_v1": source.opening_transition_event_id_v1,
         "negative_opening_return_threshold_v1": frozen_rule.opening_return_q10,
@@ -796,6 +872,8 @@ def build_prediction_receipt_v1(
         "frozen_comparisons": source.frozen_comparisons,
         "rule_hash_v1": frozen_rule.rule_hash,
     }
+    if timing is not None:
+        payload["timing_evidence_v1_1"] = timing
     payload["receipt_hash_v1"] = _sha256(payload)
     return OpeningReversalPredictionReceiptV1.model_validate(payload)
 
@@ -820,9 +898,9 @@ class PromotionSelectionV1(BaseModel):
     non_promoted: tuple[NonPromotedEligiblePredictionV1, ...]
     eligible_count: int
     maximum_promoted_count: Literal[1] = 1
-    selection_rule: Literal[
+    selection_rule: Literal["m1c_probability_desc_receipt_time_asc_ticker_asc"] = (
         "m1c_probability_desc_receipt_time_asc_ticker_asc"
-    ] = "m1c_probability_desc_receipt_time_asc_ticker_asc"
+    )
 
 
 def select_promoted_prediction_v1(
@@ -859,9 +937,7 @@ def select_promoted_prediction_v1(
                 stock=receipt.stock,
                 m1c_probability=cast(float, receipt.m1c_probability),
                 prediction_v1=receipt.prediction_v1,
-                opening_transition_state_v1=(
-                    receipt.opening_market_transition_state_v1
-                ),
+                opening_transition_state_v1=(receipt.opening_market_transition_state_v1),
                 capacity_snapshot_id=receipt.capacity_snapshot_id,
                 winning_promoted_stock=winner.stock,
                 reason_not_promoted_v1="lower_frozen_promotion_rank",
@@ -910,7 +986,7 @@ class OpeningReversalUnderlyingOutcomeV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     experiment_id: Literal["m1c-prospective-opening-reversal-v1"]
-    experiment_version: Literal["1"]
+    experiment_version: Literal["1", "1.1"]
     prediction_receipt_hash_v1: str
     fresh_episode_id: str
     opening_transition_event_id_v1: str
@@ -957,9 +1033,7 @@ class OpeningReversalUnderlyingOutcomeV1(BaseModel):
                 value is None for value in required_results
             ):
                 raise ValueError("complete opening reversal outcome is missing")
-        elif not self.missing_reason_v1 or any(
-            value is not None for value in required_results
-        ):
+        elif not self.missing_reason_v1 or any(value is not None for value in required_results):
             raise ValueError("incomplete opening reversal outcome is not fail-closed")
         payload = self.model_dump(
             mode="python",
@@ -1029,8 +1103,7 @@ def build_opening_reversal_outcome_v1(
     correct = (
         None
         if state == "NO_MATERIAL_MOVE"
-        else (state == "MATERIAL_UP" and sign == 1)
-        or (state == "MATERIAL_DOWN" and sign == -1)
+        else (state == "MATERIAL_UP" and sign == 1) or (state == "MATERIAL_DOWN" and sign == -1)
     )
     log_high = max(math.log(bar.high / entry) for bar in bars)
     log_low = min(math.log(bar.low / entry) for bar in bars)
@@ -1064,9 +1137,7 @@ def build_opening_reversal_outcome_v1(
         "accuracy_counting_no_move_as_failure_v1": bool(correct),
         "maximum_favourable_excursion_v1": favourable,
         "maximum_adverse_excursion_v1": adverse,
-        "canonical_post_entry_local_range_share_v1": (
-            canonical_post_entry_local_range_share_v1
-        ),
+        "canonical_post_entry_local_range_share_v1": (canonical_post_entry_local_range_share_v1),
         "iv_residual_v1": abs(signed_return) - threshold_15m,
         "exceed_iv_v1": state in {"MATERIAL_UP", "MATERIAL_DOWN"},
         "outcome_completeness_v1": "complete",
@@ -1113,9 +1184,7 @@ def build_incomplete_opening_reversal_outcome_v1(
         "prediction_v1": receipt.prediction_v1,
         "prediction_sign_v1": receipt.prediction_sign_v1,
         "entry_timestamp_utc": receipt.entry_timestamp_utc,
-        "terminal_timestamp_utc": (
-            receipt.entry_timestamp_utc + timedelta(minutes=15)
-        ),
+        "terminal_timestamp_utc": (receipt.entry_timestamp_utc + timedelta(minutes=15)),
         "r_15m": None,
         "absolute_return_15m": None,
         "threshold_15m": threshold,
@@ -1172,8 +1241,7 @@ def reconcile_opening_event_accounting_v1(
     """Enforce one sign per VTI event and one common count population."""
 
     items = tuple(
-        OpeningEventAccountingRowV1.model_validate(row.model_dump(mode="python"))
-        for row in rows
+        OpeningEventAccountingRowV1.model_validate(row.model_dump(mode="python")) for row in rows
     )
     signs_by_event: dict[str, set[int]] = {}
     errors: list[str] = []
@@ -1193,29 +1261,15 @@ def reconcile_opening_event_accounting_v1(
         for event_id, signs in sorted(signs_by_event.items())
         if len(signs) != 1
     )
-    included = {
-        row.event_id: row
-        for row in items
-        if row.included_in_total_event_count
-    }
-    negative = {
-        row.event_id
-        for row in items
-        if row.included_in_negative_count
-    }
-    positive = {
-        row.event_id
-        for row in items
-        if row.included_in_positive_count
-    }
+    included = {row.event_id: row for row in items if row.included_in_total_event_count}
+    negative = {row.event_id for row in items if row.included_in_negative_count}
+    positive = {row.event_id for row in items if row.included_in_positive_count}
     if len(negative) + len(positive) != len(included):
         errors.append("positive_plus_negative_does_not_equal_total_signed_events")
     unique_errors = tuple(dict.fromkeys(errors))
     return OpeningEventAccountingReconciliationV1(
         outcome=(
-            "blocked_event_accounting"
-            if unique_errors
-            else "event_accounting_fully_reconciled"
+            "blocked_event_accounting" if unique_errors else "event_accounting_fully_reconciled"
         ),
         unique_signed_event_count=len(included),
         negative_unique_event_count=len(negative),
@@ -1287,8 +1341,7 @@ class OpeningTransferOperationalEvidenceV1(BaseModel):
         self,
     ) -> OpeningTransferOperationalEvidenceV1:
         checks = (
-            self.prediction_receipt_count
-            == self.expected_prediction_receipt_count,
+            self.prediction_receipt_count == self.expected_prediction_receipt_count,
             self.prediction_receipt_timing_pass,
             self.prediction_receipt_immutability_pass,
             self.capacity_snapshots_complete,
@@ -1389,10 +1442,7 @@ def _opening_transfer_measurement(
     session: date,
     bars: Sequence[OpeningTransferBarV1],
 ) -> tuple[float | None, float | None, tuple[str, ...]]:
-    rows = tuple(
-        OpeningTransferBarV1.model_validate(bar.model_dump(mode="python"))
-        for bar in bars
-    )
+    rows = tuple(OpeningTransferBarV1.model_validate(bar.model_dump(mode="python")) for bar in bars)
     reasons: list[str] = []
     if len(rows) != 6 or tuple(row.ordinal for row in rows) != tuple(range(6)):
         reasons.append("opening_transfer_requires_exactly_six_bars")
@@ -1417,16 +1467,13 @@ def _opening_transfer_measurement(
                 reasons.append(f"opening_transfer_invalid_bar_duration:{index}")
             if (
                 index > 0
-                and row.bar_start_timestamp_utc
-                != rows[index - 1].bar_complete_timestamp_utc
+                and row.bar_start_timestamp_utc != rows[index - 1].bar_complete_timestamp_utc
             ):
                 reasons.append(f"opening_transfer_non_contiguous_bar:{index}")
     if reasons:
         return None, None, tuple(dict.fromkeys(reasons))
     opening_return = math.log(rows[-1].close / rows[0].open)
-    opening_range = math.log(
-        max(row.high for row in rows) / min(row.low for row in rows)
-    )
+    opening_range = math.log(max(row.high for row in rows) / min(row.low for row in rows))
     return opening_return, opening_range, ()
 
 
@@ -1457,15 +1504,11 @@ def evaluate_opening_transfer_session_v1(
         opening_return=eodhd_return,
         opening_range=eodhd_range,
     )
-    timestamp_alignment = (
-        len(ibkr_bars) == len(eodhd_bars) == 6
-        and all(
-            left.ordinal == right.ordinal
-            and left.bar_start_timestamp_utc == right.bar_start_timestamp_utc
-            and left.bar_complete_timestamp_utc
-            == right.bar_complete_timestamp_utc
-            for left, right in zip(ibkr_bars, eodhd_bars, strict=True)
-        )
+    timestamp_alignment = len(ibkr_bars) == len(eodhd_bars) == 6 and all(
+        left.ordinal == right.ordinal
+        and left.bar_start_timestamp_utc == right.bar_start_timestamp_utc
+        and left.bar_complete_timestamp_utc == right.bar_complete_timestamp_utc
+        for left, right in zip(ibkr_bars, eodhd_bars, strict=True)
     )
     complete = (
         not ibkr_reasons
@@ -1478,9 +1521,7 @@ def evaluate_opening_transfer_session_v1(
     )
     state_agreement = complete and ibkr_state == eodhd_state
     sign_agreement = complete and ibkr_sign == eodhd_sign
-    boundary_disagreement = complete and (
-        ibkr_state != eodhd_state or ibkr_sign != eodhd_sign
-    )
+    boundary_disagreement = complete and (ibkr_state != eodhd_state or ibkr_sign != eodhd_sign)
     # A source-complete session counts toward the fixed engineering cohort even
     # when it reveals disagreement.  Excluding disagreements would select the
     # transfer cohort on the transfer result itself.
@@ -1496,12 +1537,7 @@ def evaluate_opening_transfer_session_v1(
         and stock_probability_rank_comparison_available
         and engineering.critical_checks_pass
     )
-    if (
-        valid
-        and state_agreement
-        and sign_agreement
-        and checkpoint_6_episode_identity_agreement
-    ):
+    if valid and state_agreement and sign_agreement and checkpoint_6_episode_identity_agreement:
         decision = "opening_transfer_supported_without_recalibration"
     elif (
         not complete
@@ -1534,16 +1570,12 @@ def evaluate_opening_transfer_session_v1(
         "ibkr_opening_return": ibkr_return,
         "eodhd_opening_return": eodhd_return,
         "opening_return_absolute_difference": (
-            None
-            if ibkr_return is None or eodhd_return is None
-            else abs(ibkr_return - eodhd_return)
+            None if ibkr_return is None or eodhd_return is None else abs(ibkr_return - eodhd_return)
         ),
         "ibkr_opening_range": ibkr_range,
         "eodhd_opening_range": eodhd_range,
         "opening_range_absolute_difference": (
-            None
-            if ibkr_range is None or eodhd_range is None
-            else abs(ibkr_range - eodhd_range)
+            None if ibkr_range is None or eodhd_range is None else abs(ibkr_range - eodhd_range)
         ),
         "ibkr_opening_state": ibkr_state,
         "eodhd_opening_state": eodhd_state,
@@ -1552,9 +1584,7 @@ def evaluate_opening_transfer_session_v1(
         "bar_timestamp_alignment": timestamp_alignment,
         "missingness_agreement": bool(ibkr_reasons) == bool(eodhd_reasons),
         "threshold_boundary_disagreement": boundary_disagreement,
-        "checkpoint_6_episode_identity_agreement": (
-            checkpoint_6_episode_identity_agreement
-        ),
+        "checkpoint_6_episode_identity_agreement": (checkpoint_6_episode_identity_agreement),
         "stock_probability_rank_comparison_available": (
             stock_probability_rank_comparison_available
         ),
@@ -1649,7 +1679,7 @@ class OpeningReversalDecisionReceiptV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     experiment_id: Literal["m1c-prospective-opening-reversal-v1"]
-    experiment_version: Literal["1"]
+    experiment_version: Literal["1", "1.1"]
     receipt_kind: OpeningReversalDecisionKindV1
     boundary_timestamp_utc: datetime
     decision: str = Field(min_length=1)
@@ -1671,12 +1701,9 @@ class OpeningReversalDecisionReceiptV1(BaseModel):
             self.receipt_kind in {"transfer", "confirmation_start"}
             and self.protected_outcome_fields_accessed
         ):
-            raise ValueError(
-                f"{self.receipt_kind} receipt cannot access protected outcomes"
-            )
+            raise ValueError(f"{self.receipt_kind} receipt cannot access protected outcomes")
         if any(
-            len(value) != 64
-            or any(character not in "0123456789abcdef" for character in value)
+            len(value) != 64 or any(character not in "0123456789abcdef" for character in value)
             for value in self.source_receipt_hashes
         ):
             raise ValueError("decision source receipt hash is invalid")
@@ -1688,10 +1715,8 @@ class OpeningReversalDecisionReceiptV1(BaseModel):
         if self.receipt_kind == "transfer":
             if (
                 self.decision not in TRANSFER_DECISIONS_V1
-                or len(self.source_receipt_hashes)
-                != ENGINEERING_TRANSFER_SESSION_COUNT_V1
-                or counts.get("valid_sessions")
-                != ENGINEERING_TRANSFER_SESSION_COUNT_V1
+                or len(self.source_receipt_hashes) != ENGINEERING_TRANSFER_SESSION_COUNT_V1
+                or counts.get("valid_sessions") != ENGINEERING_TRANSFER_SESSION_COUNT_V1
                 or counts.get("operational_sessions_passed")
                 != ENGINEERING_TRANSFER_SESSION_COUNT_V1
                 or self.cohort_first_session is None
@@ -1706,14 +1731,11 @@ class OpeningReversalDecisionReceiptV1(BaseModel):
             if (
                 self.decision not in allowed
                 or set(counts) != COHORT_SUPPORT_COUNT_KEYS_V1
-                or counts["complete_eligible_stock_episodes"]
-                != len(self.source_receipt_hashes)
+                or counts["complete_eligible_stock_episodes"] != len(self.source_receipt_hashes)
                 or self.cohort_first_session is None
                 or not self.protected_outcome_fields_accessed
             ):
-                raise ValueError(
-                    f"{self.receipt_kind} decision receipt is incomplete"
-                )
+                raise ValueError(f"{self.receipt_kind} decision receipt is incomplete")
             if self.decision in {
                 "prospective_opening_reversal_development_supported",
                 "prospective_opening_reversal_direction_supported",
@@ -1726,15 +1748,11 @@ class OpeningReversalDecisionReceiptV1(BaseModel):
                     and counts["negative_transition_events"] >= 15
                     and counts["represented_stocks"] >= 12
                     and counts["sessions"] >= 40
-                    and counts["maximum_stock_episode_count"]
-                    <= 0.20 * episode_count
-                    and counts["maximum_event_episode_count"]
-                    <= 0.15 * episode_count
+                    and counts["maximum_stock_episode_count"] <= 0.20 * episode_count
+                    and counts["maximum_event_episode_count"] <= 0.15 * episode_count
                 )
                 if not supported:
-                    raise ValueError(
-                        f"{self.receipt_kind} supported decision fails support gates"
-                    )
+                    raise ValueError(f"{self.receipt_kind} supported decision fails support gates")
         elif self.receipt_kind == "confirmation_start":
             if (
                 self.decision != "untouched_confirmation_started"
@@ -1754,26 +1772,18 @@ class OpeningReversalDecisionReceiptV1(BaseModel):
                 != 2 * counts["complete_promoted_option_episodes"] + 1
             ):
                 raise ValueError("option-economics decision receipt is incomplete")
-            if (
-                self.decision
-                == "prospective_opening_reversal_option_economics_supported"
-            ):
+            if self.decision == "prospective_opening_reversal_option_economics_supported":
                 episode_count = counts["complete_promoted_option_episodes"]
                 if not (
                     episode_count >= 100
                     and counts["call_option_episodes"] >= 30
                     and counts["put_option_episodes"] >= 30
                     and counts["unique_severe_opening_events"] >= 30
-                    and counts["maximum_stock_episode_count"]
-                    <= 0.20 * episode_count
-                    and counts["maximum_expiry_episode_count"]
-                    <= 0.20 * episode_count
-                    and counts["maximum_event_episode_count"]
-                    <= 0.15 * episode_count
+                    and counts["maximum_stock_episode_count"] <= 0.20 * episode_count
+                    and counts["maximum_expiry_episode_count"] <= 0.20 * episode_count
+                    and counts["maximum_event_episode_count"] <= 0.15 * episode_count
                 ):
-                    raise ValueError(
-                        "option-economics supported decision fails support gates"
-                    )
+                    raise ValueError("option-economics supported decision fails support gates")
         payload = self.model_dump(mode="python", exclude={"receipt_hash_v1"})
         if self.receipt_hash_v1 != _sha256(payload):
             raise ValueError("decision receipt hash mismatch")
@@ -1782,6 +1792,7 @@ class OpeningReversalDecisionReceiptV1(BaseModel):
 
 def build_opening_reversal_decision_receipt_v1(
     *,
+    experiment_version: Literal["1", "1.1"] = "1",
     receipt_kind: OpeningReversalDecisionKindV1,
     boundary_timestamp_utc: datetime,
     decision: str,
@@ -1797,9 +1808,7 @@ def build_opening_reversal_decision_receipt_v1(
     callers cannot advance a phase using this hash builder alone.
     """
 
-    if (
-        cohort_first_session is None
-    ) != (cohort_last_session is None):
+    if (cohort_first_session is None) != (cohort_last_session is None):
         raise ValueError("decision cohort boundaries must both be present or absent")
     if (
         cohort_first_session is not None
@@ -1815,7 +1824,7 @@ def build_opening_reversal_decision_receipt_v1(
         raise ValueError("decision support counts must be nonnegative")
     payload: dict[str, object] = {
         "experiment_id": M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID,
-        "experiment_version": M1C_PROSPECTIVE_OPENING_REVERSAL_V1_VERSION,
+        "experiment_version": experiment_version,
         "receipt_kind": receipt_kind,
         "boundary_timestamp_utc": _aware_utc(
             boundary_timestamp_utc,
@@ -1848,15 +1857,13 @@ def build_opening_reversal_confirmation_start_receipt_v1(
     )
     if (
         development.receipt_kind != "development"
-        or development.decision
-        != "prospective_opening_reversal_development_supported"
+        or development.decision != "prospective_opening_reversal_development_supported"
         or development.cohort_last_session is None
         or boundary <= development.boundary_timestamp_utc
     ):
-        raise ValueError(
-            "confirmation requires a prior supported development receipt"
-        )
+        raise ValueError("confirmation requires a prior supported development receipt")
     return build_opening_reversal_decision_receipt_v1(
+        experiment_version=development.experiment_version,
         receipt_kind="confirmation_start",
         boundary_timestamp_utc=boundary,
         decision="untouched_confirmation_started",
@@ -1872,6 +1879,7 @@ def build_opening_transfer_decision_receipt_v1(
     *,
     sessions: Sequence[OpeningTransferSessionResultV1],
     boundary_timestamp_utc: datetime,
+    experiment_version: Literal["1", "1.1"] = "1",
 ) -> OpeningReversalDecisionReceiptV1:
     """Freeze the aggregate result of the first 20 valid transfer sessions."""
 
@@ -1882,9 +1890,7 @@ def build_opening_transfer_decision_receipt_v1(
         raise ValueError("transfer decision sessions must be unique")
     if not all(item.valid for item in ordered):
         raise ValueError("transfer decision cannot include an invalid session")
-    if not all(
-        item.operational_evidence.critical_checks_pass for item in ordered
-    ):
+    if not all(item.operational_evidence.critical_checks_pass for item in ordered):
         raise ValueError("transfer decision requires all engineering safeguards")
     decisions = {item.decision for item in ordered}
     if decisions == {"opening_transfer_supported_without_recalibration"}:
@@ -1898,22 +1904,18 @@ def build_opening_transfer_decision_receipt_v1(
     counts = {
         "valid_sessions": len(ordered),
         "supported_without_recalibration": sum(
-            item.decision == "opening_transfer_supported_without_recalibration"
-            for item in ordered
+            item.decision == "opening_transfer_supported_without_recalibration" for item in ordered
         ),
-        "mixed_sessions": sum(
-            item.decision == "opening_transfer_mixed" for item in ordered
-        ),
+        "mixed_sessions": sum(item.decision == "opening_transfer_mixed" for item in ordered),
         "not_supported_sessions": sum(
-            item.decision == "opening_transfer_not_supported"
-            for item in ordered
+            item.decision == "opening_transfer_not_supported" for item in ordered
         ),
         "operational_sessions_passed": sum(
-            item.operational_evidence.critical_checks_pass
-            for item in ordered
+            item.operational_evidence.critical_checks_pass for item in ordered
         ),
     }
     return build_opening_reversal_decision_receipt_v1(
+        experiment_version=experiment_version,
         receipt_kind="transfer",
         boundary_timestamp_utc=boundary_timestamp_utc,
         decision=decision,
@@ -1935,11 +1937,7 @@ class OptionalOpeningReversalFeedV1(StrEnum):
 
     @property
     def drop_order(self) -> int:
-        return (
-            FrozenOpeningReversalRuleV1()
-            .optional_feed_degradation_order.index(self.value)
-            + 1
-        )
+        return FrozenOpeningReversalRuleV1().optional_feed_degradation_order.index(self.value) + 1
 
 
 class CapacityFeedV1(BaseModel):
@@ -2028,9 +2026,7 @@ def build_capacity_degradation_events_v1(
     optional_by_order: dict[int, list[str]] = {}
     for key in transition:
         optional_by_order.setdefault(drop_orders.get(key, 0), []).append(key)
-    feeds_by_order = {
-        feed.drop_order: feed for feed in OptionalOpeningReversalFeedV1
-    }
+    feeds_by_order = {feed.drop_order: feed for feed in OptionalOpeningReversalFeedV1}
     return tuple(
         CapacityDegradationEventV1(
             timestamp_utc=record.updated_at_utc,
@@ -2059,11 +2055,7 @@ class OpeningReversalCapacityCoordinatorV1:
         observed_at_utc: datetime,
         promoted_episode_id: str | None,
     ) -> MarketDataCapacitySnapshotV1:
-        active = tuple(
-            record
-            for record in self.budget.records.values()
-            if record.active
-        )
+        active = tuple(record for record in self.budget.records.values() if record.active)
         feeds = tuple(
             CapacityFeedV1(
                 subscription_identifier=record.key,
@@ -2074,11 +2066,7 @@ class OpeningReversalCapacityCoordinatorV1:
                     else "ownership_awaiting_cleanup"
                 ),
                 may_be_dropped=not record.protected,
-                drop_order=(
-                    record.drop_order
-                    if not record.protected
-                    else None
-                ),
+                drop_order=(record.drop_order if not record.protected else None),
                 line_cost=record.line_cost,
                 status=record.status.value,
             )
@@ -2087,29 +2075,19 @@ class OpeningReversalCapacityCoordinatorV1:
         mandatory_lines = sum(
             record.line_cost
             for record in active
-            if record.protected
-            or record.subscription_class <= SubscriptionClass.ACTIVE_EPISODE
+            if record.protected or record.subscription_class <= SubscriptionClass.ACTIVE_EPISODE
         )
         optional_lines = sum(
             record.line_cost
             for record in active
-            if not record.protected
-            and record.subscription_class > SubscriptionClass.ACTIVE_EPISODE
+            if not record.protected and record.subscription_class > SubscriptionClass.ACTIVE_EPISODE
         )
-        pending = sum(
-            record.line_cost
-            for record in active
-            if record.status.value == "pending"
-        )
+        pending = sum(record.line_cost for record in active if record.status.value == "pending")
         awaiting = sum(
-            record.line_cost
-            for record in active
-            if record.status.value == "cancellation_requested"
+            record.line_cost for record in active if record.status.value == "cancellation_requested"
         )
         cancelled = sum(
-            record.line_cost
-            for record in self.budget.records.values()
-            if not record.active
+            record.line_cost for record in self.budget.records.values() if not record.active
         )
         payload: dict[str, object] = {
             "schema_version": "market_data_capacity_snapshot_v1",
@@ -2131,16 +2109,14 @@ class OpeningReversalCapacityCoordinatorV1:
             "lines_awaiting_acknowledgement_or_cleanup": awaiting,
             "estimated_free_lines": max(
                 0,
-                self.budget.usable_research_lines
-                - sum(record.line_cost for record in active),
+                self.budget.usable_research_lines - sum(record.line_cost for record in active),
             ),
             "exact_broker_accounting_known": False,
             "uncertainty": "conservative_local_estimate",
             "active_subscriptions": feeds,
             "current_promoted_episode_id": promoted_episode_id,
             "capacity_denial_reasons": tuple(
-                str(value.get("reason"))
-                for value in self.budget.capacity_denials
+                str(value.get("reason")) for value in self.budget.capacity_denials
             ),
         }
         payload["snapshot_hash"] = _sha256(payload)
@@ -2330,9 +2306,7 @@ class PrimaryOptionBidAskOutcomeV1(BaseModel):
                     or quote.stale
                     or quote.missing_reason is not None
                 ):
-                    raise ValueError(
-                        f"complete option {label} quote quality is invalid"
-                    )
+                    raise ValueError(f"complete option {label} quote quality is invalid")
             if not (
                 self.subscription_start_utc
                 <= self.entry_quote.timestamp_utc
@@ -2347,9 +2321,7 @@ class PrimaryOptionBidAskOutcomeV1(BaseModel):
             expected_entry_age = (
                 self.entry_quote.timestamp_utc - self.entry_timestamp_utc
             ).total_seconds()
-            expected_exit_age = (
-                self.exit_quote.timestamp_utc - horizon
-            ).total_seconds()
+            expected_exit_age = (self.exit_quote.timestamp_utc - horizon).total_seconds()
             if (
                 self.entry_quote.quote_age_seconds is None
                 or self.exit_quote.quote_age_seconds is None
@@ -2408,9 +2380,7 @@ class PrimaryOptionBidAskOutcomeV1(BaseModel):
                         abs_tol=1e-12,
                     )
                 ):
-                    raise ValueError(
-                        f"complete option {label} is inconsistent"
-                    )
+                    raise ValueError(f"complete option {label} is inconsistent")
         elif self.conservative_return_v1 is not None or not self.missing_reason:
             raise ValueError("incomplete option outcome must fail closed")
         payload = self.model_dump(mode="python", exclude={"outcome_hash_v1"})
@@ -2466,9 +2436,7 @@ def build_primary_option_bid_ask_outcome_v1(
         )
     )
     entry_chronology_valid = (
-        subscription_start
-        <= entry_quote.timestamp_utc
-        <= subscription_end
+        subscription_start <= entry_quote.timestamp_utc <= subscription_end
         and entry_quote.timestamp_utc >= entry_timestamp
     )
     entry_valid = (
@@ -2499,9 +2467,7 @@ def build_primary_option_bid_ask_outcome_v1(
         )
     )
     exit_chronology_valid = (
-        subscription_start
-        <= exit_quote.timestamp_utc
-        <= subscription_end
+        subscription_start <= exit_quote.timestamp_utc <= subscription_end
         and exit_quote.timestamp_utc >= horizon
     )
     exit_valid = (
@@ -2614,6 +2580,7 @@ __all__ = [
     "OpeningReversalDecisionReceiptV1",
     "OpeningReversalPredictionInputV1",
     "OpeningReversalPredictionReceiptV1",
+    "OpeningReversalPredictionTimingEvidenceV1_1",
     "OpeningReversalUnderlyingOutcomeV1",
     "OpeningTransferBarV1",
     "OpeningTransferOperationalEvidenceV1",

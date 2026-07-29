@@ -100,9 +100,7 @@ def _freeze_sign_map(
         ):
             raise ValueError("baseline sign rows must be unique and in {-1,0,1}")
         seen.add(name)
-        canonical: Literal[-1, 0, 1] = (
-            -1 if sign == -1 else 1 if sign == 1 else 0
-        )
+        canonical: Literal[-1, 0, 1] = -1 if sign == -1 else 1 if sign == 1 else 0
         output.append((name, canonical))
     return tuple(sorted(output))
 
@@ -114,9 +112,7 @@ def _freeze_reason_map(value: object) -> tuple[tuple[str, str], ...]:
     elif isinstance(value, (tuple, list)):
         rows = tuple(value)
     else:
-        raise TypeError(
-            "baseline reasons must be a mapping or key/value sequence"
-        )
+        raise TypeError("baseline reasons must be a mapping or key/value sequence")
     output: list[tuple[str, str]] = []
     seen: set[str] = set()
     for row in rows:
@@ -143,6 +139,7 @@ class OpeningReversalAnalysisEpisodeV1(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    experiment_version: Literal["1", "1.1"] = "1"
     prediction_receipt_hash_v1: str = Field(pattern=r"^[a-f0-9]{64}$")
     outcome_receipt_hash_v1: str = Field(pattern=r"^[a-f0-9]{64}$")
     cohort_phase: AnalysisPhaseV1
@@ -205,18 +202,12 @@ class OpeningReversalAnalysisEpisodeV1(BaseModel):
         ):
             raise ValueError("aligned return differs from frozen formula")
         expected_direction = (
-            1
-            if self.r_15m > self.threshold_15m
-            else -1
-            if self.r_15m < -self.threshold_15m
-            else 0
+            1 if self.r_15m > self.threshold_15m else -1 if self.r_15m < -self.threshold_15m else 0
         )
         if self.outcome_direction_v1 != expected_direction:
             raise ValueError("material direction differs from strict threshold")
         expected_correct = (
-            None
-            if expected_direction == 0
-            else expected_direction == self.prediction_sign_v1
+            None if expected_direction == 0 else expected_direction == self.prediction_sign_v1
         )
         if self.material_direction_correct_v1 is not expected_correct:
             raise ValueError("material correctness differs")
@@ -225,9 +216,7 @@ class OpeningReversalAnalysisEpisodeV1(BaseModel):
         if set(signs).intersection(unavailable):
             raise ValueError("a baseline cannot be available and unavailable")
         if set(signs).union(unavailable) != set(FROZEN_BASELINE_IDS_V1):
-            raise ValueError(
-                "every frozen baseline must be present or explicitly unavailable"
-            )
+            raise ValueError("every frozen baseline must be present or explicitly unavailable")
         exact_signs = {
             "follow_vti_severe_opening_sign": self.opening_transition_sign_v1,
             "oppose_vti_severe_opening_sign": self.prediction_sign_v1,
@@ -251,9 +240,7 @@ def build_opening_reversal_analysis_episode_v1(
     receipt = OpeningReversalPredictionReceiptV1.model_validate(
         prediction.model_dump(mode="python")
     )
-    result = OpeningReversalUnderlyingOutcomeV1.model_validate(
-        outcome.model_dump(mode="python")
-    )
+    result = OpeningReversalUnderlyingOutcomeV1.model_validate(outcome.model_dump(mode="python"))
     if (
         result.outcome_completeness_v1 != "complete"
         or not receipt.scientific_outcome_eligible_v1
@@ -277,18 +264,12 @@ def build_opening_reversal_analysis_episode_v1(
     for baseline in FROZEN_BASELINE_IDS_V1[4:]:
         raw_sign = comparisons.get(f"baseline_{baseline}_prediction_sign_v1")
         raw_reason = comparisons.get(f"baseline_{baseline}_unavailable_reason_v1")
-        if (
-            isinstance(raw_sign, int)
-            and not isinstance(raw_sign, bool)
-            and raw_sign in {-1, 0, 1}
-        ):
+        if isinstance(raw_sign, int) and not isinstance(raw_sign, bool) and raw_sign in {-1, 0, 1}:
             signs[baseline] = cast(Literal[-1, 0, 1], raw_sign)
         elif isinstance(raw_reason, str) and raw_reason.strip():
             unavailable[baseline] = raw_reason.strip()
         else:
-            raise ValueError(
-                f"frozen baseline lacks causal value or reason:{baseline}"
-            )
+            raise ValueError(f"frozen baseline lacks causal value or reason:{baseline}")
     outcome_direction: Literal[-1, 0, 1] = (
         1
         if result.outcome_state_v1 == "MATERIAL_UP"
@@ -297,6 +278,7 @@ def build_opening_reversal_analysis_episode_v1(
         else 0
     )
     return OpeningReversalAnalysisEpisodeV1(
+        experiment_version=receipt.experiment_version,
         prediction_receipt_hash_v1=receipt.receipt_hash_v1,
         outcome_receipt_hash_v1=result.outcome_receipt_hash_v1,
         cohort_phase=receipt.cohort_phase,
@@ -309,12 +291,8 @@ def build_opening_reversal_analysis_episode_v1(
         r_15m=result.r_15m,
         threshold_15m=result.threshold_15m,
         outcome_direction_v1=outcome_direction,
-        material_direction_correct_v1=(
-            result.correct_predicted_material_direction_v1
-        ),
-        opening_reversal_aligned_return_v1=(
-            result.opening_reversal_aligned_return_v1
-        ),
+        material_direction_correct_v1=(result.correct_predicted_material_direction_v1),
+        opening_reversal_aligned_return_v1=(result.opening_reversal_aligned_return_v1),
         promoted=promoted,
         primary_option_evidence_complete=primary_option_evidence_complete,
         baseline_prediction_signs=tuple(sorted(signs.items())),
@@ -413,6 +391,7 @@ class OpeningReversalBaselinePopulationResultV1(BaseModel):
 class OpeningReversalAnalysisResultV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    experiment_version: Literal["1", "1.1"] = "1"
     cohort_phase: AnalysisPhaseV1
     support: OpeningReversalSupportSummaryV1
     summary: OpeningReversalDirectionSummaryV1
@@ -439,6 +418,7 @@ class OpeningReversalOptionEpisodeV1(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    experiment_version: Literal["1", "1.1"] = "1"
     prediction_receipt_hash_v1: str = Field(pattern=r"^[a-f0-9]{64}$")
     predicted_leg_outcome_hash_v1: str = Field(pattern=r"^[a-f0-9]{64}$")
     opposite_leg_outcome_hash_v1: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -481,15 +461,9 @@ def build_opening_reversal_option_episode_v1(
     receipt = OpeningReversalPredictionReceiptV1.model_validate(
         prediction.model_dump(mode="python")
     )
-    selection = PromotionSelectionV1.model_validate(
-        promotion.model_dump(mode="python")
-    )
-    predicted = PrimaryOptionBidAskOutcomeV1.model_validate(
-        predicted_leg.model_dump(mode="python")
-    )
-    opposite = PrimaryOptionBidAskOutcomeV1.model_validate(
-        opposite_leg.model_dump(mode="python")
-    )
+    selection = PromotionSelectionV1.model_validate(promotion.model_dump(mode="python"))
+    predicted = PrimaryOptionBidAskOutcomeV1.model_validate(predicted_leg.model_dump(mode="python"))
+    opposite = PrimaryOptionBidAskOutcomeV1.model_validate(opposite_leg.model_dump(mode="python"))
     if (
         selection.promoted is None
         or selection.promoted.receipt_hash_v1 != receipt.receipt_hash_v1
@@ -518,6 +492,7 @@ def build_opening_reversal_option_episode_v1(
     ):
         raise ValueError("primary option legs differ from frozen pair selection")
     return OpeningReversalOptionEpisodeV1(
+        experiment_version=receipt.experiment_version,
         prediction_receipt_hash_v1=receipt.receipt_hash_v1,
         predicted_leg_outcome_hash_v1=predicted.outcome_hash_v1,
         opposite_leg_outcome_hash_v1=opposite.outcome_hash_v1,
@@ -538,6 +513,7 @@ def build_opening_reversal_option_episode_v1(
 class OpeningReversalOptionEconomicsResultV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    experiment_version: Literal["1", "1.1"] = "1"
     episode_count: int
     call_episode_count: int
     put_episode_count: int
@@ -570,9 +546,7 @@ def _positive_group_rate(
         groups[key(episode)].append(episode.opening_reversal_aligned_return_v1)
     if not groups:
         return None
-    return statistics.fmean(
-        statistics.fmean(values) > 0.0 for values in groups.values()
-    )
+    return statistics.fmean(statistics.fmean(values) > 0.0 for values in groups.values())
 
 
 def _validate_event_identity_v1(
@@ -586,9 +560,7 @@ def _validate_event_identity_v1(
             identity,
         )
         if existing != identity:
-            raise ValueError(
-                "one opening event ID maps to multiple sessions or signs"
-            )
+            raise ValueError("one opening event ID maps to multiple sessions or signs")
 
 
 def evaluate_support_v1(
@@ -601,14 +573,10 @@ def evaluate_support_v1(
     _validate_event_identity_v1(rows)
     events = {row.opening_transition_event_id_v1 for row in rows}
     positive_events = {
-        row.opening_transition_event_id_v1
-        for row in rows
-        if row.opening_transition_sign_v1 == 1
+        row.opening_transition_event_id_v1 for row in rows if row.opening_transition_sign_v1 == 1
     }
     negative_events = {
-        row.opening_transition_event_id_v1
-        for row in rows
-        if row.opening_transition_sign_v1 == -1
+        row.opening_transition_event_id_v1 for row in rows if row.opening_transition_sign_v1 == -1
     }
     stock_counts = Counter(row.stock for row in rows)
     event_counts = Counter(row.opening_transition_event_id_v1 for row in rows)
@@ -677,9 +645,7 @@ def _cluster_bootstrap(
 ) -> tuple[float, ...]:
     grouped: dict[object, list[float]] = defaultdict(list)
     for episode in episodes:
-        grouped[cluster(episode)].append(
-            episode.opening_reversal_aligned_return_v1
-        )
+        grouped[cluster(episode)].append(episode.opening_reversal_aligned_return_v1)
     keys = tuple(sorted(grouped, key=str))
     if not keys:
         return ()
@@ -728,9 +694,7 @@ def _leave_one_out(
     values = tuple(sorted({key(row) for row in episodes}))
     return {
         omitted: statistics.fmean(
-            row.opening_reversal_aligned_return_v1
-            for row in episodes
-            if key(row) != omitted
+            row.opening_reversal_aligned_return_v1 for row in episodes if key(row) != omitted
         )
         for omitted in values
         if any(key(row) != omitted for row in episodes)
@@ -746,10 +710,7 @@ def _primary_null_draws(
     by_stock: dict[str, list[OpeningReversalAnalysisEpisodeV1]] = defaultdict(list)
     for episode in episodes:
         by_stock[episode.stock].append(episode)
-    if any(
-        len(rows) < 2 or len({row.session for row in rows}) < 2
-        for rows in by_stock.values()
-    ):
+    if any(len(rows) < 2 or len({row.session for row in rows}) < 2 for rows in by_stock.values()):
         return ()
     generator = random.Random(seed)
     draws: list[OpeningReversalNullDrawV1] = []
@@ -784,18 +745,13 @@ def _primary_null_draws(
                 )
             )
         aligned = tuple(
-            prediction.prediction_sign_v1 * outcome.r_15m
-            for prediction, outcome in pairs
+            prediction.prediction_sign_v1 * outcome.r_15m for prediction, outcome in pairs
         )
         follow = tuple(
-            prediction.opening_transition_sign_v1 * outcome.r_15m
-            for prediction, outcome in pairs
+            prediction.opening_transition_sign_v1 * outcome.r_15m for prediction, outcome in pairs
         )
         material = tuple(
-            (
-                prediction.prediction_sign_v1
-                == outcome.outcome_direction_v1
-            )
+            (prediction.prediction_sign_v1 == outcome.outcome_direction_v1)
             for prediction, outcome in pairs
             if outcome.outcome_direction_v1 != 0
         )
@@ -822,17 +778,12 @@ def _primary_null_draws(
                 seed=PRIMARY_NULL_SEED_V1,
                 replication=replication,
                 mean_aligned_return=statistics.fmean(aligned),
-                material_direction_accuracy=(
-                    statistics.fmean(material) if material else None
-                ),
+                material_direction_accuracy=(statistics.fmean(material) if material else None),
                 accuracy_counting_no_moves_as_failures=statistics.fmean(
-                    prediction.prediction_sign_v1
-                    == outcome.outcome_direction_v1
+                    prediction.prediction_sign_v1 == outcome.outcome_direction_v1
                     for prediction, outcome in pairs
                 ),
-                difference_versus_follow_vti=(
-                    statistics.fmean(aligned) - statistics.fmean(follow)
-                ),
+                difference_versus_follow_vti=(statistics.fmean(aligned) - statistics.fmean(follow)),
                 positive_transition_consistent=(
                     bool(positive) and statistics.fmean(positive) > 0.0
                 ),
@@ -905,17 +856,12 @@ def _baseline_population_results(
     for population, population_rows in populations:
         for baseline in FROZEN_BASELINE_IDS_V1:
             available = tuple(
-                row
-                for row in population_rows
-                if baseline in dict(row.baseline_prediction_signs)
+                row for row in population_rows if baseline in dict(row.baseline_prediction_signs)
             )
             baseline_mean = _mean(
-                dict(row.baseline_prediction_signs)[baseline] * row.r_15m
-                for row in available
+                dict(row.baseline_prediction_signs)[baseline] * row.r_15m for row in available
             )
-            reversal_mean = _mean(
-                row.opening_reversal_aligned_return_v1 for row in available
-            )
+            reversal_mean = _mean(row.opening_reversal_aligned_return_v1 for row in available)
             results.append(
                 OpeningReversalBaselinePopulationResultV1(
                     population=population,
@@ -923,12 +869,7 @@ def _baseline_population_results(
                     population_episode_count=len(population_rows),
                     available_episode_count=len(available),
                     unavailable_episode_count=len(population_rows) - len(available),
-                    event_count=len(
-                        {
-                            row.opening_transition_event_id_v1
-                            for row in available
-                        }
-                    ),
+                    event_count=len({row.opening_transition_event_id_v1 for row in available}),
                     baseline_mean_aligned_return=baseline_mean,
                     reversal_mean_on_identical_episodes=reversal_mean,
                     reversal_minus_baseline_mean=(
@@ -950,13 +891,15 @@ def build_opening_reversal_direction_decision_receipt_v1(
     """Bind a development/confirmation decision to every outcome receipt."""
 
     rows = tuple(
-        OpeningReversalAnalysisEpisodeV1.model_validate(
-            episode.model_dump(mode="python")
-        )
+        OpeningReversalAnalysisEpisodeV1.model_validate(episode.model_dump(mode="python"))
         for episode in episodes
     )
     expected_phase: AnalysisPhaseV1 = result.cohort_phase
-    if not rows or any(row.cohort_phase != expected_phase for row in rows):
+    if (
+        not rows
+        or any(row.cohort_phase != expected_phase for row in rows)
+        or {row.experiment_version for row in rows} != {result.experiment_version}
+    ):
         raise ValueError("decision receipt rows differ from analysis cohort")
     support = evaluate_support_v1(rows)
     if support != result.support:
@@ -966,6 +909,7 @@ def build_opening_reversal_direction_decision_receipt_v1(
         phase=expected_phase,
         transfer_failure=result.transfer_failure,
         operational_failure=result.operational_failure,
+        experiment_version=result.experiment_version,
         cluster_bootstrap_replications=CLUSTER_BOOTSTRAP_REPLICATIONS_V1,
         primary_null_replications=PRIMARY_NULL_REPLICATIONS_V1,
     )
@@ -984,18 +928,15 @@ def build_opening_reversal_direction_decision_receipt_v1(
         "maximum_event_episode_count": max(event_counts.values()),
     }
     return build_opening_reversal_decision_receipt_v1(
+        experiment_version=result.experiment_version,
         receipt_kind=(
-            "development"
-            if expected_phase == "prospective_development"
-            else "confirmation"
+            "development" if expected_phase == "prospective_development" else "confirmation"
         ),
         boundary_timestamp_utc=boundary_timestamp_utc,
         decision=result.decision,
         cohort_first_session=min(row.session for row in rows),
         cohort_last_session=max(row.session for row in rows),
-        source_receipt_hashes=tuple(
-            sorted(row.outcome_receipt_hash_v1 for row in rows)
-        ),
+        source_receipt_hashes=tuple(sorted(row.outcome_receipt_hash_v1 for row in rows)),
         support_counts=support_counts,
         protected_outcome_fields_accessed=True,
     )
@@ -1090,12 +1031,10 @@ def _decision(
             and summary.winsorised_one_percent_mean > 0.0
         ),
         "primary_null_p_value_not_below_0_05": (
-            summary.primary_null_p_value is not None
-            and summary.primary_null_p_value < 0.05
+            summary.primary_null_p_value is not None and summary.primary_null_p_value < 0.05
         ),
         "temporal_placebo_reproduced_effect": (
-            summary.temporal_placebo_mean is not None
-            and summary.temporal_placebo_mean <= 0.0
+            summary.temporal_placebo_mean is not None and summary.temporal_placebo_mean <= 0.0
         ),
     }
     confirmation_failures = tuple(
@@ -1123,6 +1062,7 @@ def analyze_direction_cohort_v1(
     episodes: Sequence[OpeningReversalAnalysisEpisodeV1],
     *,
     phase: AnalysisPhaseV1,
+    experiment_version: Literal["1", "1.1"] | None = None,
     transfer_failure: bool = False,
     operational_failure: bool = False,
     cluster_bootstrap_replications: int = CLUSTER_BOOTSTRAP_REPLICATIONS_V1,
@@ -1133,11 +1073,17 @@ def analyze_direction_cohort_v1(
     if cluster_bootstrap_replications < 1 or primary_null_replications < 1_000:
         raise ValueError("analysis replication count below frozen contract")
     rows = tuple(
-        OpeningReversalAnalysisEpisodeV1.model_validate(
-            episode.model_dump(mode="python")
-        )
+        OpeningReversalAnalysisEpisodeV1.model_validate(episode.model_dump(mode="python"))
         for episode in episodes
     )
+    versions = {row.experiment_version for row in rows}
+    if len(versions) > 1:
+        raise ValueError("analysis cannot mix experiment versions")
+    resolved_version: Literal["1", "1.1"] = (
+        experiment_version if experiment_version is not None else next(iter(versions), "1")
+    )
+    if versions and versions != {resolved_version}:
+        raise ValueError("analysis experiment version differs from episodes")
     if any(row.cohort_phase != phase for row in rows):
         raise ValueError("analysis cannot cross development and confirmation")
     if len({(row.stock, row.session) for row in rows}) != len(rows):
@@ -1172,38 +1118,27 @@ def analyze_direction_cohort_v1(
         rows,
         key=lambda row: row.opening_transition_event_id_v1,
     )
-    material = tuple(
-        row for row in rows if row.outcome_direction_v1 != 0
-    )
-    primary_accuracy_all = _mean(
-        float(row.material_direction_correct_v1 is True) for row in rows
-    )
+    material = tuple(row for row in rows if row.outcome_direction_v1 != 0)
+    primary_accuracy_all = _mean(float(row.material_direction_correct_v1 is True) for row in rows)
     follow_accuracy_all = _mean(
-        float(row.outcome_direction_v1 == row.opening_transition_sign_v1)
-        for row in rows
+        float(row.outcome_direction_v1 == row.opening_transition_sign_v1) for row in rows
     )
     observed_mean = _mean(aligned)
     null_p = (
         None
         if observed_mean is None or not null_draws
-        else (
-            1
-            + sum(draw.mean_aligned_return >= observed_mean for draw in null_draws)
-        )
+        else (1 + sum(draw.mean_aligned_return >= observed_mean for draw in null_draws))
         / (len(null_draws) + 1)
     )
     summary = OpeningReversalDirectionSummaryV1(
         episode_count=len(rows),
-        event_count=len(
-            {row.opening_transition_event_id_v1 for row in rows}
-        ),
+        event_count=len({row.opening_transition_event_id_v1 for row in rows}),
         mean_aligned_return=observed_mean,
         median_aligned_return=statistics.median(aligned) if aligned else None,
         session_cluster_interval=_interval(session_draws),
         event_cluster_interval=_interval(event_draws),
         material_direction_accuracy=_mean(
-            float(row.material_direction_correct_v1 is True)
-            for row in material
+            float(row.material_direction_correct_v1 is True) for row in material
         ),
         accuracy_counting_no_moves_as_failures=primary_accuracy_all,
         material_up_count=sum(row.outcome_direction_v1 == 1 for row in rows),
@@ -1217,9 +1152,7 @@ def analyze_direction_cohort_v1(
             None
             if observed_mean is None
             else observed_mean
-            - statistics.fmean(
-                row.opening_transition_sign_v1 * row.r_15m for row in rows
-            )
+            - statistics.fmean(row.opening_transition_sign_v1 * row.r_15m for row in rows)
         ),
         positive_transition_mean_reversal_return=_mean(
             row.opening_reversal_aligned_return_v1
@@ -1232,14 +1165,10 @@ def analyze_direction_cohort_v1(
             if row.opening_transition_sign_v1 == -1
         ),
         call_mean_reversal_return=_mean(
-            row.opening_reversal_aligned_return_v1
-            for row in rows
-            if row.prediction_v1 == "CALL"
+            row.opening_reversal_aligned_return_v1 for row in rows if row.prediction_v1 == "CALL"
         ),
         put_mean_reversal_return=_mean(
-            row.opening_reversal_aligned_return_v1
-            for row in rows
-            if row.prediction_v1 == "PUT"
+            row.opening_reversal_aligned_return_v1 for row in rows if row.prediction_v1 == "PUT"
         ),
         positive_session_rate=_positive_group_rate(rows, lambda row: row.session),
         positive_event_rate=_positive_group_rate(
@@ -1251,15 +1180,9 @@ def analyze_direction_cohort_v1(
             lambda row: (row.session.year, row.session.month),
         ),
         winsorised_one_percent_mean=_winsorised_mean(aligned),
-        leave_one_stock_out_minimum_mean=(
-            min(leave_stock.values()) if leave_stock else None
-        ),
-        leave_one_session_out_minimum_mean=(
-            min(leave_session.values()) if leave_session else None
-        ),
-        leave_one_event_out_minimum_mean=(
-            min(leave_event.values()) if leave_event else None
-        ),
+        leave_one_stock_out_minimum_mean=(min(leave_stock.values()) if leave_stock else None),
+        leave_one_session_out_minimum_mean=(min(leave_session.values()) if leave_session else None),
+        leave_one_event_out_minimum_mean=(min(leave_event.values()) if leave_event else None),
         primary_null_p_value=null_p,
         temporal_placebo_mean=_mean(placebo),
     )
@@ -1271,6 +1194,7 @@ def analyze_direction_cohort_v1(
         operational_failure=operational_failure,
     )
     return OpeningReversalAnalysisResultV1(
+        experiment_version=resolved_version,
         cohort_phase=phase,
         support=support,
         summary=summary,
@@ -1294,6 +1218,7 @@ def analyze_option_economics_v1(
     episodes: Sequence[OpeningReversalOptionEpisodeV1],
     *,
     underlying_direction_supported: bool,
+    experiment_version: Literal["1", "1.1"] | None = None,
     capacity_blocked: bool = False,
     event_bootstrap_replications: int = CLUSTER_BOOTSTRAP_REPLICATIONS_V1,
 ) -> OpeningReversalOptionEconomicsResultV1:
@@ -1302,26 +1227,29 @@ def analyze_option_economics_v1(
     if event_bootstrap_replications < 1:
         raise ValueError("option event bootstrap replication count is invalid")
     rows = tuple(
-        OpeningReversalOptionEpisodeV1.model_validate(
-            episode.model_dump(mode="python")
-        )
+        OpeningReversalOptionEpisodeV1.model_validate(episode.model_dump(mode="python"))
         for episode in episodes
     )
+    versions = {row.experiment_version for row in rows}
+    if len(versions) > 1:
+        raise ValueError("option economics cannot mix experiment versions")
+    resolved_version: Literal["1", "1.1"] = (
+        experiment_version if experiment_version is not None else next(iter(versions), "1")
+    )
+    if versions and versions != {resolved_version}:
+        raise ValueError("option economics experiment version differs from episodes")
     if len({row.prediction_receipt_hash_v1 for row in rows}) != len(rows):
         raise ValueError("option economics has duplicate prediction receipts")
-    if (
-        len(
-            {
-                outcome_hash
-                for row in rows
-                for outcome_hash in (
-                    row.predicted_leg_outcome_hash_v1,
-                    row.opposite_leg_outcome_hash_v1,
-                )
-            }
-        )
-        != 2 * len(rows)
-    ):
+    if len(
+        {
+            outcome_hash
+            for row in rows
+            for outcome_hash in (
+                row.predicted_leg_outcome_hash_v1,
+                row.opposite_leg_outcome_hash_v1,
+            )
+        }
+    ) != 2 * len(rows):
         raise ValueError("option economics reuses a primary-option outcome")
     event_sessions: dict[str, date] = {}
     for row in rows:
@@ -1333,22 +1261,14 @@ def analyze_option_economics_v1(
             != row.session
         ):
             raise ValueError("one option opening event maps to multiple sessions")
-    events = {
-        row.opening_transition_event_id_v1 for row in rows
-    }
+    events = {row.opening_transition_event_id_v1 for row in rows}
     stock_counts = Counter(row.stock for row in rows)
     expiry_counts = Counter(row.expiry for row in rows)
-    event_counts = Counter(
-        row.opening_transition_event_id_v1 for row in rows
-    )
+    event_counts = Counter(row.opening_transition_event_id_v1 for row in rows)
     denominator = len(rows)
 
     def fraction(counter: Counter[object]) -> float:
-        return (
-            max(counter.values(), default=0) / denominator
-            if denominator
-            else 0.0
-        )
+        return max(counter.values(), default=0) / denominator if denominator else 0.0
 
     call_count = sum(row.prediction_v1 == "CALL" for row in rows)
     put_count = sum(row.prediction_v1 == "PUT" for row in rows)
@@ -1376,30 +1296,24 @@ def analyze_option_economics_v1(
     support_failures = tuple(reason for passed, reason in checks if not passed)
     grouped: dict[str, list[float]] = defaultdict(list)
     for row in rows:
-        grouped[row.opening_transition_event_id_v1].append(
-            row.predicted_leg_conservative_return_v1
-        )
+        grouped[row.opening_transition_event_id_v1].append(row.predicted_leg_conservative_return_v1)
     keys = tuple(sorted(grouped))
     generator = random.Random(EVENT_BOOTSTRAP_SEED_V1)
-    event_draws = tuple(
-        statistics.fmean(
-            value
-            for key in generator.choices(keys, k=len(keys))
-            for value in grouped[key]
+    event_draws = (
+        tuple(
+            statistics.fmean(
+                value for key in generator.choices(keys, k=len(keys)) for value in grouped[key]
+            )
+            for _ in range(event_bootstrap_replications)
         )
-        for _ in range(event_bootstrap_replications)
-    ) if keys else ()
+        if keys
+        else ()
+    )
     interval = _interval(event_draws)
-    predicted_mean = _mean(
-        row.predicted_leg_conservative_return_v1 for row in rows
-    )
-    opposite_mean = _mean(
-        row.opposite_leg_conservative_return_v1 for row in rows
-    )
+    predicted_mean = _mean(row.predicted_leg_conservative_return_v1 for row in rows)
+    opposite_mean = _mean(row.opposite_leg_conservative_return_v1 for row in rows)
     difference = (
-        None
-        if predicted_mean is None or opposite_mean is None
-        else predicted_mean - opposite_mean
+        None if predicted_mean is None or opposite_mean is None else predicted_mean - opposite_mean
     )
     reasons: tuple[str, ...]
     if capacity_blocked:
@@ -1426,15 +1340,14 @@ def analyze_option_economics_v1(
                 "predicted_leg_did_not_beat_opposite_leg",
             ),
         )
-        reasons = tuple(
-            reason for passed, reason in statistical_checks if not passed
-        )
+        reasons = tuple(reason for passed, reason in statistical_checks if not passed)
         decision = (
             "prospective_opening_reversal_option_economics_supported"
             if not reasons
             else "direction_supported_without_option_edge"
         )
     return OpeningReversalOptionEconomicsResultV1(
+        experiment_version=resolved_version,
         episode_count=len(rows),
         call_episode_count=call_count,
         put_episode_count=put_count,
@@ -1464,9 +1377,7 @@ def build_opening_reversal_option_decision_receipt_v1(
     """Bind the option decision to both legs and supported direction evidence."""
 
     rows = tuple(
-        OpeningReversalOptionEpisodeV1.model_validate(
-            episode.model_dump(mode="python")
-        )
+        OpeningReversalOptionEpisodeV1.model_validate(episode.model_dump(mode="python"))
         for episode in episodes
     )
     direction = OpeningReversalDecisionReceiptV1.model_validate(
@@ -1474,13 +1385,15 @@ def build_opening_reversal_option_decision_receipt_v1(
     )
     if (
         direction.receipt_kind != "confirmation"
-        or direction.decision
-        != "prospective_opening_reversal_direction_supported"
+        or direction.decision != "prospective_opening_reversal_direction_supported"
+        or direction.experiment_version != result.experiment_version
+        or (rows and {row.experiment_version for row in rows} != {result.experiment_version})
     ):
         raise ValueError("option decision requires supported confirmation direction")
     recalculated = analyze_option_economics_v1(
         rows,
         underlying_direction_supported=True,
+        experiment_version=result.experiment_version,
         capacity_blocked=result.decision == "option_economics_blocked_capacity",
         event_bootstrap_replications=CLUSTER_BOOTSTRAP_REPLICATIONS_V1,
     )
@@ -1494,6 +1407,7 @@ def build_opening_reversal_option_decision_receipt_v1(
         ):
             raise ValueError("empty option cohort requires recorded capacity block")
         return build_opening_reversal_decision_receipt_v1(
+            experiment_version=result.experiment_version,
             receipt_kind="option_economics",
             boundary_timestamp_utc=boundary_timestamp_utc,
             decision=result.decision,
@@ -1517,6 +1431,7 @@ def build_opening_reversal_option_decision_receipt_v1(
     expiry_counts = Counter(row.expiry for row in rows)
     event_counts = Counter(row.opening_transition_event_id_v1 for row in rows)
     return build_opening_reversal_decision_receipt_v1(
+        experiment_version=result.experiment_version,
         receipt_kind="option_economics",
         boundary_timestamp_utc=boundary_timestamp_utc,
         decision=result.decision,
@@ -1537,12 +1452,8 @@ def build_opening_reversal_option_decision_receipt_v1(
         ),
         support_counts={
             "complete_promoted_option_episodes": len(rows),
-            "call_option_episodes": sum(
-                row.prediction_v1 == "CALL" for row in rows
-            ),
-            "put_option_episodes": sum(
-                row.prediction_v1 == "PUT" for row in rows
-            ),
+            "call_option_episodes": sum(row.prediction_v1 == "CALL" for row in rows),
+            "put_option_episodes": sum(row.prediction_v1 == "PUT" for row in rows),
             "unique_severe_opening_events": len(event_counts),
             "represented_stocks": len(stock_counts),
             "represented_expiries": len(expiry_counts),

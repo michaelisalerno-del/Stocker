@@ -38,6 +38,10 @@ from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
     PromotionSelectionV1,
     build_opening_transfer_decision_receipt_v1,
 )
+from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
+    OpeningReversalActivationReceiptV1_1,
+    OpeningReversalCausalBarrierAuditV1_1,
+)
 from stocker_prospective.microstructure import MicrostructureWindowSummary
 from stocker_prospective.opening_market_transition_v1 import (
     OpeningMarketTransitionStateResultV1,
@@ -173,34 +177,20 @@ def _signed_market_shock_values_v1(
         "market_return_w1_v1": market_windows_v1.market_return_w1_v1,
         "market_range_w1_v1": market_windows_v1.market_range_w1_v1,
         "market_shock_thresholds_v1_json": (
-            None
-            if market_shock_thresholds_v1 is None
-            else _json(market_shock_thresholds_v1)
+            None if market_shock_thresholds_v1 is None else _json(market_shock_thresholds_v1)
         ),
         "market_shock_state_v1": market_shock_state_v1.market_shock_state_v1,
-        "market_shock_event_id_v1": (
-            market_shock_state_v1.market_shock_event_id_v1
-        ),
+        "market_shock_event_id_v1": (market_shock_state_v1.market_shock_event_id_v1),
         "shock_sign_v1": market_shock_state_v1.shock_sign_v1,
         "stock_return_w0_v1": stock_shock_response_v1.stock_return_w0_v1,
-        "stock_absolute_alignment_v1": (
-            stock_shock_response_v1.stock_absolute_alignment_v1
-        ),
-        "shock_relative_response_v1": (
-            stock_shock_response_v1.shock_relative_response_v1
-        ),
-        "shock_response_class_v1": (
-            stock_shock_response_v1.shock_response_class_v1
-        ),
+        "stock_absolute_alignment_v1": (stock_shock_response_v1.stock_absolute_alignment_v1),
+        "shock_relative_response_v1": (stock_shock_response_v1.shock_relative_response_v1),
+        "shock_response_class_v1": (stock_shock_response_v1.shock_response_class_v1),
         "shock_resisting_subtype_v1": stock_shock_response_v1.resisting_subtype_v1,
         "market_shock_complete_v1": int(market_shock_state_v1.complete_v1),
         "shock_response_complete_v1": int(stock_shock_response_v1.complete_v1),
-        "market_shock_missing_reasons_v1_json": _json(
-            market_shock_state_v1.missing_reasons_v1
-        ),
-        "shock_response_missing_reasons_v1_json": _json(
-            stock_shock_response_v1.missing_reasons_v1
-        ),
+        "market_shock_missing_reasons_v1_json": _json(market_shock_state_v1.missing_reasons_v1),
+        "shock_response_missing_reasons_v1_json": _json(stock_shock_response_v1.missing_reasons_v1),
     }
     if tuple(values) != SIGNED_MARKET_SHOCK_COLUMNS_V1:
         raise AssertionError("signed market-shock persistence column order drifted")
@@ -222,59 +212,35 @@ def _opening_market_transition_values_v1(
         "vti_prior_regular_session_close_v1": (
             opening_window_v1.market_prior_regular_session_close_v1
         ),
-        "opening_expected_bar_count_v1": (
-            opening_window_v1.expected_opening_bar_count_v1
-        ),
-        "opening_observed_bar_count_v1": (
-            opening_window_v1.observed_opening_bar_count_v1
-        ),
+        "opening_expected_bar_count_v1": (opening_window_v1.expected_opening_bar_count_v1),
+        "opening_observed_bar_count_v1": (opening_window_v1.observed_opening_bar_count_v1),
         "market_opening_return_v1": opening_window_v1.market_opening_return_v1,
         "market_opening_range_v1": opening_window_v1.market_opening_range_v1,
         "market_overnight_gap_v1": opening_window_v1.market_overnight_gap_v1,
-        "market_total_transition_v1": (
-            opening_window_v1.market_total_transition_v1
-        ),
-        "market_gap_open_alignment_v1": (
-            opening_window_v1.market_gap_open_alignment_v1
-        ),
+        "market_total_transition_v1": (opening_window_v1.market_total_transition_v1),
+        "market_gap_open_alignment_v1": (opening_window_v1.market_gap_open_alignment_v1),
         "opening_thresholds_v1_json": (
-            None
-            if opening_thresholds_v1 is None
-            else _json(opening_thresholds_v1)
+            None if opening_thresholds_v1 is None else _json(opening_thresholds_v1)
         ),
         "opening_market_transition_state_v1": (
             opening_transition_state_v1.opening_market_transition_state_v1
         ),
-        "opening_transition_sign_v1": (
-            opening_transition_state_v1.opening_transition_sign_v1
-        ),
+        "opening_transition_sign_v1": (opening_transition_state_v1.opening_transition_sign_v1),
         "opening_transition_event_id_v1": (
             opening_transition_state_v1.opening_transition_event_id_v1
         ),
-        "stock_opening_return_v1": (
-            stock_opening_response_v1.stock_opening_return_v1
-        ),
-        "stock_opening_range_v1": (
-            stock_opening_response_v1.stock_opening_range_v1
-        ),
-        "stock_opening_alignment_v1": (
-            stock_opening_response_v1.stock_opening_alignment_v1
-        ),
+        "stock_opening_return_v1": (stock_opening_response_v1.stock_opening_return_v1),
+        "stock_opening_range_v1": (stock_opening_response_v1.stock_opening_range_v1),
+        "stock_opening_alignment_v1": (stock_opening_response_v1.stock_opening_alignment_v1),
         "stock_relative_opening_response_v1": (
             stock_opening_response_v1.stock_relative_opening_response_v1
         ),
         "stock_opening_response_class_v1": (
             stock_opening_response_v1.stock_opening_response_class_v1
         ),
-        "stock_opening_resisting_subtype_v1": (
-            stock_opening_response_v1.resisting_subtype_v1
-        ),
-        "opening_market_complete_v1": int(
-            opening_transition_state_v1.complete_v1
-        ),
-        "stock_opening_response_complete_v1": int(
-            stock_opening_response_v1.complete_v1
-        ),
+        "stock_opening_resisting_subtype_v1": (stock_opening_response_v1.resisting_subtype_v1),
+        "opening_market_complete_v1": int(opening_transition_state_v1.complete_v1),
+        "stock_opening_response_complete_v1": int(stock_opening_response_v1.complete_v1),
         "opening_market_missing_reasons_v1_json": _json(
             opening_transition_state_v1.missing_reasons_v1
         ),
@@ -1472,12 +1438,8 @@ class FrozenRecorderRepository:
             "w0_bar_ordinals_v1": market_windows_v1.w0_bar_ordinals_v1,
             "w1_bar_ordinals_v1": market_windows_v1.w1_bar_ordinals_v1,
             "signal_timestamp": market_windows_v1.signal_timestamp,
-            "maximum_market_timestamp_v1": (
-                market_windows_v1.maximum_market_timestamp_v1
-            ),
-            "maximum_stock_timestamp_v1": (
-                stock_shock_response_v1.maximum_stock_timestamp_v1
-            ),
+            "maximum_market_timestamp_v1": (market_windows_v1.maximum_market_timestamp_v1),
+            "maximum_stock_timestamp_v1": (stock_shock_response_v1.maximum_stock_timestamp_v1),
             "recorder_configuration_hash": self.configuration_hash,
             "logging_only": True,
             "m1c_scoring_changed": False,
@@ -1535,10 +1497,7 @@ class FrozenRecorderRepository:
                     label="signed market-shock checkpoint",
                 )
                 return
-            if any(
-                existing[column] is not None
-                for column in SIGNED_MARKET_SHOCK_COLUMNS_V1
-            ):
+            if any(existing[column] is not None for column in SIGNED_MARKET_SHOCK_COLUMNS_V1):
                 raise ValueError("signed market-shock checkpoint is partially populated")
             connection.execute(
                 """
@@ -1565,10 +1524,7 @@ class FrozenRecorderRepository:
                 WHERE id = ?
                 """,
                 (
-                    *(
-                        expected[column]
-                        for column in SIGNED_MARKET_SHOCK_COLUMNS_V1
-                    ),
+                    *(expected[column] for column in SIGNED_MARKET_SHOCK_COLUMNS_V1),
                     source_json,
                     checkpoint_id,
                 ),
@@ -1606,29 +1562,15 @@ class FrozenRecorderRepository:
                 else opening_thresholds_v1.model_dump(mode="json")
             ),
             "previous_session_v1": opening_window_v1.previous_session_v1,
-            "session_open_timestamp_v1": (
-                opening_window_v1.session_open_timestamp_v1
-            ),
+            "session_open_timestamp_v1": (opening_window_v1.session_open_timestamp_v1),
             "signal_timestamp_v1": opening_window_v1.signal_timestamp_v1,
             "entry_timestamp_v1": opening_window_v1.entry_timestamp_v1,
-            "opening_bar_ordinals_v1": (
-                opening_window_v1.opening_bar_ordinals_v1
-            ),
-            "expected_opening_bar_count_v1": (
-                opening_window_v1.expected_opening_bar_count_v1
-            ),
-            "observed_opening_bar_count_v1": (
-                opening_window_v1.observed_opening_bar_count_v1
-            ),
-            "entry_bar_included_v1": (
-                opening_window_v1.entry_bar_included_v1
-            ),
-            "maximum_market_timestamp_v1": (
-                opening_window_v1.maximum_market_timestamp_v1
-            ),
-            "maximum_stock_timestamp_v1": (
-                stock_opening_response_v1.maximum_stock_timestamp_v1
-            ),
+            "opening_bar_ordinals_v1": (opening_window_v1.opening_bar_ordinals_v1),
+            "expected_opening_bar_count_v1": (opening_window_v1.expected_opening_bar_count_v1),
+            "observed_opening_bar_count_v1": (opening_window_v1.observed_opening_bar_count_v1),
+            "entry_bar_included_v1": (opening_window_v1.entry_bar_included_v1),
+            "maximum_market_timestamp_v1": (opening_window_v1.maximum_market_timestamp_v1),
+            "maximum_stock_timestamp_v1": (stock_opening_response_v1.maximum_stock_timestamp_v1),
             "recorder_configuration_hash": self.configuration_hash,
             "logging_only": True,
             "m1c_scoring_changed": False,
@@ -1687,10 +1629,7 @@ class FrozenRecorderRepository:
                 or opening_window_v1.checkpoint_v1 != checkpoint
             ):
                 raise ValueError("opening-transition checkpoint identity differs")
-            if (
-                existing["opening_market_transition_source_v1_json"]
-                is not None
-            ):
+            if existing["opening_market_transition_source_v1_json"] is not None:
                 _assert_immutable_observation(
                     existing,
                     expected={
@@ -1700,13 +1639,8 @@ class FrozenRecorderRepository:
                     label="opening market-transition checkpoint",
                 )
                 return
-            if any(
-                existing[column] is not None
-                for column in OPENING_MARKET_TRANSITION_COLUMNS_V1
-            ):
-                raise ValueError(
-                    "opening market-transition checkpoint is partially populated"
-                )
+            if any(existing[column] is not None for column in OPENING_MARKET_TRANSITION_COLUMNS_V1):
+                raise ValueError("opening market-transition checkpoint is partially populated")
             connection.execute(
                 """
                 UPDATE m1c_checkpoint_v0
@@ -1738,10 +1672,7 @@ class FrozenRecorderRepository:
                 WHERE id = ?
                 """,
                 (
-                    *(
-                        expected[column]
-                        for column in OPENING_MARKET_TRANSITION_COLUMNS_V1
-                    ),
+                    *(expected[column] for column in OPENING_MARKET_TRANSITION_COLUMNS_V1),
                     source_json,
                     checkpoint_id,
                 ),
@@ -3735,8 +3666,7 @@ class FrozenRecorderRepository:
         confirmation = by_kind.get("confirmation_start")
         if (
             development is not None
-            and str(development["decision"])
-            == "prospective_opening_reversal_development_supported"
+            and str(development["decision"]) == "prospective_opening_reversal_development_supported"
             and confirmation is not None
             and confirmation["cohort_last_session"] is not None
             and str(confirmation["cohort_last_session"]) < session.isoformat()
@@ -3772,9 +3702,7 @@ class FrozenRecorderRepository:
                     str(existing["receipt_hash_v1"]) != receipt.receipt_hash_v1
                     or str(existing["receipt_json"]) != encoded
                 ):
-                    raise ValueError(
-                        f"{receipt.receipt_kind} decision receipt is immutable"
-                    )
+                    raise ValueError(f"{receipt.receipt_kind} decision receipt is immutable")
                 return int(existing["id"])
             envelope_id = self.repository._insert_envelope(connection, metadata)
             cursor = connection.execute(
@@ -3837,9 +3765,9 @@ class FrozenRecorderRepository:
                 """
                 SELECT activation_timestamp_utc, new_york_trading_date
                 FROM opening_reversal_activation_v1
-                WHERE run_id = ?
+                WHERE run_id = ? AND experiment_version = ?
                 """,
-                (run_id,),
+                (run_id, receipt.experiment_version),
             ).fetchone()
             if (
                 len(rows) != 20
@@ -3847,48 +3775,46 @@ class FrozenRecorderRepository:
                 or hashes != receipt.source_receipt_hashes
                 or any(
                     date.fromisoformat(str(row["session_date"]))
-                    < date.fromisoformat(
-                        str(activation["new_york_trading_date"])
-                    )
+                    < date.fromisoformat(str(activation["new_york_trading_date"]))
                     or datetime.fromisoformat(str(row["recorded_at_utc"]))
-                    <= datetime.fromisoformat(
-                        str(activation["activation_timestamp_utc"])
-                    )
+                    <= datetime.fromisoformat(str(activation["activation_timestamp_utc"]))
                     for row in rows
                 )
-                or receipt.cohort_first_session
-                != date.fromisoformat(str(rows[0]["session_date"]))
-                or receipt.cohort_last_session
-                != date.fromisoformat(str(rows[-1]["session_date"]))
+                or receipt.cohort_first_session != date.fromisoformat(str(rows[0]["session_date"]))
+                or receipt.cohort_last_session != date.fromisoformat(str(rows[-1]["session_date"]))
             ):
-                raise ValueError(
-                    "transfer receipt sources do not match first 20 valid sessions"
-                )
+                raise ValueError("transfer receipt sources do not match first 20 valid sessions")
             return
 
         if receipt.receipt_kind == "confirmation_start":
             development = connection.execute(
                 """
                 SELECT decision, boundary_timestamp_utc, cohort_last_session,
-                       receipt_hash_v1
+                       receipt_hash_v1, receipt_json
                 FROM opening_reversal_decision_receipt_v1
                 WHERE run_id = ? AND receipt_kind = 'development'
                 """,
                 (run_id,),
             ).fetchone()
+            development_receipt = (
+                None
+                if development is None
+                else OpeningReversalDecisionReceiptV1.model_validate_json(
+                    str(development["receipt_json"])
+                )
+            )
             if (
                 development is None
+                or development_receipt is None
+                or development_receipt.experiment_version != receipt.experiment_version
                 or str(development["decision"])
                 != "prospective_opening_reversal_development_supported"
-                or receipt.source_receipt_hashes
-                != (str(development["receipt_hash_v1"]),)
+                or receipt.source_receipt_hashes != (str(development["receipt_hash_v1"]),)
                 or receipt.cohort_last_session is None
                 or receipt.cohort_last_session.isoformat()
                 != str(development["cohort_last_session"])
                 or receipt.boundary_timestamp_utc
-                <= datetime.fromisoformat(
-                    str(development["boundary_timestamp_utc"])
-                )
+                <= datetime.fromisoformat(str(development["boundary_timestamp_utc"]))
             ):
                 raise ValueError(
                     "confirmation-start source is not the stored supported development"
@@ -3899,7 +3825,7 @@ class FrozenRecorderRepository:
             direction = connection.execute(
                 """
                 SELECT receipt_hash_v1, cohort_first_session,
-                       cohort_last_session
+                       cohort_last_session, receipt_json
                 FROM opening_reversal_decision_receipt_v1
                 WHERE run_id = ? AND receipt_kind = 'confirmation'
                   AND decision =
@@ -3928,17 +3854,31 @@ class FrozenRecorderRepository:
                      prediction.receipt_hash_v1
                 WHERE option_outcome.run_id = ?
                   AND option_outcome.complete = 1
+                  AND prediction.experiment_version = ?
                   AND prediction.scientific_outcome_eligible_v1 = 1
                   AND option_outcome.subscription_end_utc <= ?
                 ORDER BY option_outcome.prediction_receipt_hash_v1,
                          option_outcome.role
                 """,
-                (run_id, receipt.boundary_timestamp_utc.isoformat()),
+                (
+                    run_id,
+                    receipt.experiment_version,
+                    receipt.boundary_timestamp_utc.isoformat(),
+                ),
             ).fetchall()
-            if direction is None:
-                raise ValueError(
-                    "option decision requires stored supported confirmation direction"
+            direction_receipt = (
+                None
+                if direction is None
+                else OpeningReversalDecisionReceiptV1.model_validate_json(
+                    str(direction["receipt_json"])
                 )
+            )
+            if (
+                direction is None
+                or direction_receipt is None
+                or direction_receipt.experiment_version != receipt.experiment_version
+            ):
+                raise ValueError("option decision requires stored supported confirmation direction")
             by_prediction: dict[str, list[sqlite3.Row]] = {}
             for row in option_rows:
                 by_prediction.setdefault(
@@ -3949,14 +3889,11 @@ class FrozenRecorderRepository:
                 prediction_hash: rows
                 for prediction_hash, rows in by_prediction.items()
                 if len(rows) == 2
-                and {str(row["role"]) for row in rows}
-                == {"predicted_leg", "opposite_leg"}
+                and {str(row["role"]) for row in rows} == {"predicted_leg", "opposite_leg"}
             }
             option_hashes = tuple(
                 sorted(
-                    str(row["outcome_hash_v1"])
-                    for rows in complete_pairs.values()
-                    for row in rows
+                    str(row["outcome_hash_v1"]) for rows in complete_pairs.values() for row in rows
                 )
             )
             expected_sources = {
@@ -3964,12 +3901,8 @@ class FrozenRecorderRepository:
                 *option_hashes,
             }
             if set(receipt.source_receipt_hashes) != expected_sources:
-                raise ValueError(
-                    "option decision sources differ from persisted primary pairs"
-                )
-            representative_rows = tuple(
-                rows[0] for rows in complete_pairs.values()
-            )
+                raise ValueError("option decision sources differ from persisted primary pairs")
+            representative_rows = tuple(rows[0] for rows in complete_pairs.values())
             if not representative_rows:
                 capacity_blocks = int(
                     connection.execute(
@@ -4004,38 +3937,28 @@ class FrozenRecorderRepository:
                     or receipt.cohort_last_session.isoformat()
                     != str(direction["cohort_last_session"])
                 ):
-                    raise ValueError(
-                        "empty option decision lacks persisted capacity block"
-                    )
+                    raise ValueError("empty option decision lacks persisted capacity block")
                 return
             sessions = tuple(
-                date.fromisoformat(str(row["session_date"]))
-                for row in representative_rows
+                date.fromisoformat(str(row["session_date"])) for row in representative_rows
             )
             if (
                 min(sessions) != receipt.cohort_first_session
                 or max(sessions) != receipt.cohort_last_session
             ):
                 raise ValueError("option decision cohort boundary differs")
-            stock_counts = Counter(
-                str(row["stock"]) for row in representative_rows
-            )
-            expiry_counts = Counter(
-                str(rows[0]["expiry"]) for rows in complete_pairs.values()
-            )
+            stock_counts = Counter(str(row["stock"]) for row in representative_rows)
+            expiry_counts = Counter(str(rows[0]["expiry"]) for rows in complete_pairs.values())
             event_counts = Counter(
-                str(row["opening_transition_event_id_v1"])
-                for row in representative_rows
+                str(row["opening_transition_event_id_v1"]) for row in representative_rows
             )
             expected_counts = {
                 "complete_promoted_option_episodes": len(representative_rows),
                 "call_option_episodes": sum(
-                    str(row["prediction_v1"]) == "CALL"
-                    for row in representative_rows
+                    str(row["prediction_v1"]) == "CALL" for row in representative_rows
                 ),
                 "put_option_episodes": sum(
-                    str(row["prediction_v1"]) == "PUT"
-                    for row in representative_rows
+                    str(row["prediction_v1"]) == "PUT" for row in representative_rows
                 ),
                 "unique_severe_opening_events": len(event_counts),
                 "represented_stocks": len(stock_counts),
@@ -4045,9 +3968,7 @@ class FrozenRecorderRepository:
                 "maximum_event_episode_count": max(event_counts.values()),
             }
             if dict(receipt.support_counts) != expected_counts:
-                raise ValueError(
-                    "option decision support differs from persisted primary pairs"
-                )
+                raise ValueError("option decision support differs from persisted primary pairs")
             from stocker_prospective.m1c_opening_reversal_analysis_v1 import (
                 OpeningReversalOptionEpisodeV1,
                 analyze_option_economics_v1,
@@ -4069,6 +3990,7 @@ class FrozenRecorderRepository:
                 assert opposite.conservative_return_v1 is not None
                 option_episodes.append(
                     OpeningReversalOptionEpisodeV1(
+                        experiment_version=prediction.experiment_version,
                         prediction_receipt_hash_v1=prediction_hash,
                         predicted_leg_outcome_hash_v1=predicted.outcome_hash_v1,
                         opposite_leg_outcome_hash_v1=opposite.outcome_hash_v1,
@@ -4083,12 +4005,8 @@ class FrozenRecorderRepository:
                             prediction.prediction_v1,
                         ),
                         expiry=predicted.contract.expiry,
-                        predicted_leg_conservative_return_v1=(
-                            predicted.conservative_return_v1
-                        ),
-                        opposite_leg_conservative_return_v1=(
-                            opposite.conservative_return_v1
-                        ),
+                        predicted_leg_conservative_return_v1=(predicted.conservative_return_v1),
+                        opposite_leg_conservative_return_v1=(opposite.conservative_return_v1),
                         actual_bid_ask_evidence=True,
                         quote_quality_passed=True,
                         staleness_passed=True,
@@ -4098,22 +4016,15 @@ class FrozenRecorderRepository:
             option_analysis = analyze_option_economics_v1(
                 option_episodes,
                 underlying_direction_supported=True,
-                capacity_blocked=(
-                    receipt.decision == "option_economics_blocked_capacity"
-                ),
+                capacity_blocked=(receipt.decision == "option_economics_blocked_capacity"),
             )
             if option_analysis.decision != receipt.decision:
-                raise ValueError(
-                    "option decision differs from frozen bid/ask analysis"
-                )
+                raise ValueError("option decision differs from frozen bid/ask analysis")
             return
 
         if receipt.receipt_kind not in {"development", "confirmation"}:
             return
-        if (
-            receipt.cohort_first_session is None
-            or receipt.cohort_last_session is None
-        ):
+        if receipt.cohort_first_session is None or receipt.cohort_last_session is None:
             raise ValueError("direction decision cohort boundary is missing")
         phase = (
             "prospective_development"
@@ -4150,27 +4061,39 @@ class FrozenRecorderRepository:
               ON prediction.receipt_hash_v1 =
                  outcome.prediction_receipt_hash_v1
             WHERE outcome.run_id = ?
+              AND prediction.experiment_version = ?
               AND prediction.cohort_phase = ?
               AND prediction.scientific_outcome_eligible_v1 = 1
+              AND (
+                  prediction.experiment_version != '1.1'
+                  OR EXISTS(
+                      SELECT 1
+                      FROM opening_reversal_causal_barrier_audit_v1_1 barrier
+                      WHERE barrier.run_id = prediction.run_id
+                        AND barrier.session_date = prediction.session_date
+                        AND barrier.barrier_status = 'passed'
+                  )
+              )
               AND outcome.outcome_completeness_v1 = 'complete'
               AND outcome.outcome_created_at_utc <= ?
             ORDER BY outcome.outcome_receipt_hash_v1
             """,
-            (run_id, phase, receipt.boundary_timestamp_utc.isoformat()),
+            (
+                run_id,
+                receipt.experiment_version,
+                phase,
+                receipt.boundary_timestamp_utc.isoformat(),
+            ),
         ).fetchall()
         hashes = tuple(str(row["outcome_receipt_hash_v1"]) for row in rows)
         if hashes != tuple(sorted(receipt.source_receipt_hashes)) or not rows:
-            raise ValueError(
-                f"{receipt.receipt_kind} sources do not match persisted outcomes"
-            )
+            raise ValueError(f"{receipt.receipt_kind} sources do not match persisted outcomes")
         sessions = tuple(date.fromisoformat(str(row["session_date"])) for row in rows)
         if (
             min(sessions) != receipt.cohort_first_session
             or max(sessions) != receipt.cohort_last_session
         ):
-            raise ValueError(
-                f"{receipt.receipt_kind} cohort boundary differs from outcomes"
-            )
+            raise ValueError(f"{receipt.receipt_kind} cohort boundary differs from outcomes")
         event_identity: dict[str, tuple[date, int]] = {}
         for row, session in zip(rows, sessions, strict=True):
             event_id = str(row["opening_transition_event_id_v1"])
@@ -4179,9 +4102,7 @@ class FrozenRecorderRepository:
             if event_identity.setdefault(event_id, identity) != identity:
                 raise ValueError("one persisted opening event has multiple identities")
         stock_counts = Counter(str(row["stock"]) for row in rows)
-        event_counts = Counter(
-            str(row["opening_transition_event_id_v1"]) for row in rows
-        )
+        event_counts = Counter(str(row["opening_transition_event_id_v1"]) for row in rows)
         expected_counts = {
             "complete_eligible_stock_episodes": len(rows),
             "unique_severe_opening_events": len(event_identity),
@@ -4214,9 +4135,7 @@ class FrozenRecorderRepository:
                     str(row["outcome_json"])
                 ),
                 promoted=bool(row["promoted"]),
-                primary_option_evidence_complete=(
-                    int(row["complete_option_leg_count"]) == 2
-                ),
+                primary_option_evidence_complete=(int(row["complete_option_leg_count"]) == 2),
             )
             for row in rows
         )
@@ -4231,9 +4150,7 @@ class FrozenRecorderRepository:
             ),
         )
         if direction_analysis.decision != receipt.decision:
-            raise ValueError(
-                f"{receipt.receipt_kind} decision differs from frozen analysis"
-            )
+            raise ValueError(f"{receipt.receipt_kind} decision differs from frozen analysis")
 
     def maybe_record_opening_transfer_decision_v1(
         self,
@@ -4265,16 +4182,33 @@ class FrozenRecorderRepository:
                 """,
                 (metadata.run_id,),
             ).fetchall()
+            activation = connection.execute(
+                """
+                SELECT experiment_version
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (metadata.run_id,),
+            ).fetchone()
         if len(rows) < 20:
             return None
+        if activation is None or str(activation["experiment_version"]) not in {
+            "1",
+            "1.1",
+        }:
+            raise ValueError("opening reversal activation is unavailable")
         receipt = build_opening_transfer_decision_receipt_v1(
             sessions=tuple(
-                OpeningTransferSessionResultV1.model_validate_json(
-                    str(row["report_json"])
-                )
+                OpeningTransferSessionResultV1.model_validate_json(str(row["report_json"]))
                 for row in rows
             ),
             boundary_timestamp_utc=metadata.recorded_at_utc,
+            experiment_version=cast(
+                Literal["1", "1.1"],
+                str(activation["experiment_version"]),
+            ),
         )
         self.record_opening_reversal_decision_receipt_v1(metadata, receipt)
         return receipt
@@ -4303,8 +4237,7 @@ class FrozenRecorderRepository:
             ).fetchone()
             if existing is not None:
                 if (
-                    str(existing["activation_receipt_hash"])
-                    != receipt.activation_receipt_hash
+                    str(existing["activation_receipt_hash"]) != receipt.activation_receipt_hash
                     or str(existing["receipt_json"]) != encoded
                 ):
                     raise ValueError("opening reversal activation is immutable")
@@ -4336,6 +4269,95 @@ class FrozenRecorderRepository:
             assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
 
+    def record_opening_reversal_activation_v1_1(
+        self,
+        metadata: EvidenceMetadata,
+        receipt: OpeningReversalActivationReceiptV1_1,
+    ) -> int:
+        """Persist the immutable timing addendum without replacing V1."""
+
+        self._validate(metadata)
+        encoded = _json(receipt)
+        with self.repository._connect() as connection:
+            base = connection.execute(
+                """
+                SELECT activation_receipt_hash, configuration_hash,
+                       frozen_rule_hash
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ?
+                  AND experiment_version = '1'
+                """,
+                (metadata.run_id, receipt.experiment_id),
+            ).fetchone()
+            if (
+                base is None
+                or str(base["activation_receipt_hash"])
+                != receipt.superseded_activation_receipt_hash_v1
+                or str(base["configuration_hash"]) != receipt.frozen_configuration_hash_v1
+                or str(base["frozen_rule_hash"]) != receipt.frozen_rule_hash
+            ):
+                raise ValueError("opening reversal V1.1 lacks the exact V1 activation")
+            existing = connection.execute(
+                """
+                SELECT id, activation_receipt_hash, receipt_json
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ?
+                  AND experiment_version = '1.1'
+                """,
+                (metadata.run_id, receipt.experiment_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["activation_receipt_hash"]) != receipt.activation_receipt_hash_v1_1
+                    or str(existing["receipt_json"]) != encoded
+                ):
+                    raise ValueError("opening reversal V1.1 activation is immutable")
+                return int(existing["id"])
+            prior_experiment_rows = sum(
+                int(
+                    connection.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE run_id = ?",
+                        (metadata.run_id,),
+                    ).fetchone()[0]
+                )
+                for table in (
+                    "opening_reversal_prediction_v1",
+                    "opening_reversal_transfer_session_v1",
+                    "opening_reversal_underlying_outcome_v1",
+                    "opening_reversal_decision_receipt_v1",
+                )
+            )
+            if prior_experiment_rows:
+                raise ValueError(
+                    "opening reversal V1.1 requires a fresh run so the "
+                    "20-session engineering transfer restarts"
+                )
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_activation_v1(
+                    envelope_id, run_id, experiment_id, experiment_version,
+                    activation_timestamp_utc, new_york_trading_date,
+                    configuration_hash, frozen_rule_hash,
+                    configured_reserved_line_count, order_routing_disabled,
+                    activation_receipt_hash, receipt_json
+                ) VALUES (?, ?, ?, '1.1', ?, ?, ?, ?, 12, 1, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    receipt.experiment_id,
+                    receipt.activation_timestamp_utc.isoformat(),
+                    receipt.new_york_trading_date_at_activation.isoformat(),
+                    receipt.timing_addendum_configuration_hash_v1_1,
+                    receipt.frozen_rule_hash,
+                    receipt.activation_receipt_hash_v1_1,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
     def record_opening_reversal_prediction_v1(
         self,
         metadata: EvidenceMetadata,
@@ -4344,19 +4366,15 @@ class FrozenRecorderRepository:
         """Append one immutable receipt; corrections use their own table."""
 
         self._validate(metadata)
-        expected_phase, expected_transfer_status = (
-            self.opening_reversal_phase_for_session(
-                run_id=metadata.run_id,
-                session=receipt.session,
-            )
+        expected_phase, expected_transfer_status = self.opening_reversal_phase_for_session(
+            run_id=metadata.run_id,
+            session=receipt.session,
         )
         if (
             receipt.cohort_phase != expected_phase
             or receipt.transfer_status != expected_transfer_status
         ):
-            raise ValueError(
-                "opening reversal prediction phase differs from immutable boundaries"
-            )
+            raise ValueError("opening reversal prediction phase differs from immutable boundaries")
         encoded = _json(receipt)
         with self.repository._connect() as connection:
             activation = connection.execute(
@@ -4372,24 +4390,25 @@ class FrozenRecorderRepository:
                     receipt.experiment_version,
                 ),
             ).fetchone()
-            if (
-                activation is None
-                or receipt.receipt_created_at_utc
-                <= datetime.fromisoformat(
-                    str(activation["activation_timestamp_utc"])
-                )
+            if activation is None or receipt.receipt_created_at_utc <= datetime.fromisoformat(
+                str(activation["activation_timestamp_utc"])
             ):
-                raise ValueError(
-                    "opening reversal prediction lacks prior activation boundary"
-                )
+                raise ValueError("opening reversal prediction lacks prior activation boundary")
             existing = connection.execute(
                 """
                 SELECT id, receipt_hash_v1, receipt_json
                 FROM opening_reversal_prediction_v1
                 WHERE run_id = ? AND session_date = ? AND stock = ?
-                  AND checkpoint = 6
+                  AND checkpoint = 6 AND experiment_id = ?
+                  AND experiment_version = ?
                 """,
-                (metadata.run_id, receipt.session.isoformat(), receipt.stock),
+                (
+                    metadata.run_id,
+                    receipt.session.isoformat(),
+                    receipt.stock,
+                    receipt.experiment_id,
+                    receipt.experiment_version,
+                ),
             ).fetchone()
             if existing is not None:
                 if (
@@ -4469,6 +4488,7 @@ class FrozenRecorderRepository:
         run_id: str,
         session: date,
         stock: str,
+        experiment_version: Literal["1", "1.1"] = "1",
     ) -> OpeningReversalPredictionReceiptV1 | None:
         """Read an already-frozen receipt so late bars cannot replace it."""
 
@@ -4478,15 +4498,13 @@ class FrozenRecorderRepository:
                 SELECT receipt_json
                 FROM opening_reversal_prediction_v1
                 WHERE run_id = ? AND session_date = ? AND stock = ?
-                      AND checkpoint = 6
+                      AND checkpoint = 6 AND experiment_version = ?
                 """,
-                (run_id, session.isoformat(), stock),
+                (run_id, session.isoformat(), stock, experiment_version),
             ).fetchone()
         if row is None:
             return None
-        return OpeningReversalPredictionReceiptV1.model_validate_json(
-            str(row["receipt_json"])
-        )
+        return OpeningReversalPredictionReceiptV1.model_validate_json(str(row["receipt_json"]))
 
     def record_opening_reversal_promotion_v1(
         self,
@@ -4501,9 +4519,7 @@ class FrozenRecorderRepository:
             raise ValueError("promotion receipt requires an eligible winner")
         payload = {
             "session": promoted.session,
-            "opening_transition_event_id_v1": (
-                promoted.opening_transition_event_id_v1
-            ),
+            "opening_transition_event_id_v1": (promoted.opening_transition_event_id_v1),
             "promoted_receipt_hash_v1": promoted.receipt_hash_v1,
             "promoted_stock": promoted.stock,
             "eligible_count": selection.eligible_count,
@@ -4514,6 +4530,23 @@ class FrozenRecorderRepository:
         promotion_hash = _content_hash(payload)
         encoded_losers = _json(selection.non_promoted)
         with self.repository._connect() as connection:
+            if promoted.experiment_version == "1.1":
+                barrier = connection.execute(
+                    """
+                    SELECT audit_json
+                    FROM opening_reversal_causal_barrier_audit_v1_1
+                    WHERE run_id = ? AND session_date = ?
+                      AND barrier_status = 'passed'
+                    """,
+                    (metadata.run_id, promoted.session.isoformat()),
+                ).fetchone()
+                if barrier is None:
+                    raise ValueError("opening reversal V1.1 causal barrier has not passed")
+                audit = OpeningReversalCausalBarrierAuditV1_1.model_validate_json(
+                    str(barrier["audit_json"])
+                )
+                if promoted.receipt_hash_v1 not in audit.prediction_receipt_hashes:
+                    raise ValueError("opening reversal V1.1 promotion is outside causal barrier")
             existing = connection.execute(
                 """
                 SELECT id, promotion_hash_v1
@@ -4554,6 +4587,125 @@ class FrozenRecorderRepository:
             )
             assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
+
+    def record_opening_reversal_causal_barrier_audit_v1_1(
+        self,
+        metadata: EvidenceMetadata,
+        audit: OpeningReversalCausalBarrierAuditV1_1,
+    ) -> int:
+        """Persist barrier proof before any buffered decision data is released."""
+
+        self._validate(metadata)
+        encoded = _json(audit)
+        with self.repository._connect() as connection:
+            activation = connection.execute(
+                """
+                SELECT activation_receipt_hash
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ?
+                  AND experiment_version = '1.1'
+                """,
+                (metadata.run_id, audit.experiment_id),
+            ).fetchone()
+            persisted_hashes = tuple(
+                sorted(
+                    str(row["receipt_hash_v1"])
+                    for row in connection.execute(
+                        """
+                        SELECT receipt_hash_v1
+                        FROM opening_reversal_prediction_v1
+                        WHERE run_id = ? AND experiment_version = '1.1'
+                          AND session_date = ?
+                        """,
+                        (metadata.run_id, audit.session.isoformat()),
+                    ).fetchall()
+                )
+            )
+            if (
+                activation is None
+                or str(activation["activation_receipt_hash"]) != audit.activation_receipt_hash_v1_1
+                or persisted_hashes != audit.prediction_receipt_hashes
+            ):
+                raise ValueError("opening reversal V1.1 barrier sources are not durable")
+            existing = connection.execute(
+                """
+                SELECT id, audit_hash_v1_1, audit_json
+                FROM opening_reversal_causal_barrier_audit_v1_1
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (metadata.run_id, audit.session.isoformat()),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["audit_hash_v1_1"]) != audit.audit_hash_v1_1
+                    or str(existing["audit_json"]) != encoded
+                ):
+                    raise ValueError("opening reversal V1.1 barrier audit is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_causal_barrier_audit_v1_1(
+                    envelope_id, run_id, experiment_id, experiment_version,
+                    activation_receipt_hash_v1_1, session_date,
+                    nominal_entry_timestamp_utc, prediction_receipt_count,
+                    prediction_receipt_hashes_json, deferred_event_count,
+                    first_deferred_event_received_at_utc,
+                    entry_or_post_entry_data_admitted_before_receipts,
+                    raw_event_archive_write_allowed, core_recorder_continued,
+                    barrier_status, failure_reason, release_authorized_at_utc,
+                    audit_hash_v1_1, audit_json
+                ) VALUES (
+                    ?, ?, ?, '1.1', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?,
+                    ?, ?
+                )
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    audit.experiment_id,
+                    audit.activation_receipt_hash_v1_1,
+                    audit.session.isoformat(),
+                    audit.nominal_entry_timestamp_utc.isoformat(),
+                    audit.prediction_receipt_count,
+                    _json(audit.prediction_receipt_hashes),
+                    audit.deferred_event_count,
+                    (
+                        None
+                        if audit.first_deferred_event_received_at_utc is None
+                        else audit.first_deferred_event_received_at_utc.isoformat()
+                    ),
+                    int(audit.entry_or_post_entry_data_admitted_before_receipts),
+                    audit.barrier_status,
+                    audit.failure_reason,
+                    audit.release_authorized_at_utc.isoformat(),
+                    audit.audit_hash_v1_1,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def load_opening_reversal_causal_barrier_audit_v1_1(
+        self,
+        *,
+        run_id: str,
+        session: date,
+    ) -> OpeningReversalCausalBarrierAuditV1_1 | None:
+        """Restore the immutable gate disposition after a recorder restart."""
+
+        with self.repository._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT audit_json
+                FROM opening_reversal_causal_barrier_audit_v1_1
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (run_id, session.isoformat()),
+            ).fetchone()
+        if row is None:
+            return None
+        return OpeningReversalCausalBarrierAuditV1_1.model_validate_json(str(row["audit_json"]))
 
     def record_opening_reversal_capacity_snapshot_v1(
         self,
@@ -4883,17 +5035,41 @@ class FrozenRecorderRepository:
 
         session_text = session.isoformat()
         with self.repository._connect() as connection:
+            activation_row = connection.execute(
+                """
+                SELECT experiment_version, receipt_json
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            active_version = (
+                None if activation_row is None else str(activation_row["experiment_version"])
+            )
             predictions = connection.execute(
                 """
-                SELECT receipt_hash_v1, receipt_created_at_utc,
+                SELECT experiment_version, receipt_hash_v1,
+                       receipt_created_at_utc,
                        entry_timestamp_utc, capacity_snapshot_id,
-                       fresh_episode_id
+                       fresh_episode_id, receipt_json
                 FROM opening_reversal_prediction_v1
                 WHERE run_id = ? AND session_date = ? AND checkpoint = 6
+                  AND experiment_version = ?
                 ORDER BY stock
                 """,
-                (run_id, session_text),
+                (run_id, session_text, active_version),
             ).fetchall()
+            barrier_row = connection.execute(
+                """
+                SELECT barrier_status, prediction_receipt_hashes_json,
+                       audit_json
+                FROM opening_reversal_causal_barrier_audit_v1_1
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (run_id, session_text),
+            ).fetchone()
             correction_count = int(
                 connection.execute(
                     """
@@ -4935,17 +5111,6 @@ class FrozenRecorderRepository:
                 """,
                 (run_id, session_text),
             ).fetchone()
-            activation_row = connection.execute(
-                """
-                SELECT receipt_json
-                FROM opening_reversal_activation_v1
-                WHERE run_id = ?
-                ORDER BY id
-                LIMIT 1
-                """,
-                (run_id,),
-            ).fetchone()
-
             promoted_ids = tuple(
                 str(row["fresh_episode_id"])
                 for row in promoted
@@ -5005,15 +5170,50 @@ class FrozenRecorderRepository:
                 )
 
         prediction_count = len(predictions)
-        timing_pass = prediction_count == 20 and all(
-            datetime.fromisoformat(str(row["receipt_created_at_utc"]))
-            < datetime.fromisoformat(str(row["entry_timestamp_utc"]))
-            for row in predictions
-        )
+        prediction_hashes = tuple(sorted(str(row["receipt_hash_v1"]) for row in predictions))
+        if active_version == "1.1":
+            barrier_hashes = (
+                ()
+                if barrier_row is None
+                else tuple(
+                    sorted(
+                        cast(
+                            list[str],
+                            json.loads(str(barrier_row["prediction_receipt_hashes_json"])),
+                        )
+                    )
+                )
+            )
+            timing_pass = (
+                prediction_count == 20
+                and barrier_row is not None
+                and str(barrier_row["barrier_status"]) == "passed"
+                and barrier_hashes == prediction_hashes
+                and all(
+                    (
+                        receipt := (
+                            OpeningReversalPredictionReceiptV1.model_validate_json(
+                                str(row["receipt_json"])
+                            )
+                        )
+                    ).experiment_version
+                    == "1.1"
+                    and receipt.timing_evidence_v1_1 is not None
+                    and not (
+                        receipt.timing_evidence_v1_1.entry_or_post_entry_data_admitted_before_receipt
+                    )
+                    for row in predictions
+                )
+            )
+        else:
+            timing_pass = prediction_count == 20 and all(
+                datetime.fromisoformat(str(row["receipt_created_at_utc"]))
+                < datetime.fromisoformat(str(row["entry_timestamp_utc"]))
+                for row in predictions
+            )
         immutability_pass = prediction_count == 20 and correction_count == 0
         capacity_by_hash = {
-            str(row["snapshot_hash_v1"]): int(row["reserved_lines"])
-            for row in capacity_rows
+            str(row["snapshot_hash_v1"]): int(row["reserved_lines"]) for row in capacity_rows
         }
         required_snapshot_ids = tuple(
             str(row["capacity_snapshot_id"])
@@ -5023,33 +5223,19 @@ class FrozenRecorderRepository:
         capacity_complete = (
             prediction_count == 20
             and len(required_snapshot_ids) == prediction_count
-            and all(
-                snapshot_id in capacity_by_hash
-                for snapshot_id in required_snapshot_ids
-            )
+            and all(snapshot_id in capacity_by_hash for snapshot_id in required_snapshot_ids)
         )
         reserve_pass = capacity_complete and all(
             capacity_by_hash[snapshot_id] >= RESERVED_MARKET_DATA_LINES_V1
             for snapshot_id in required_snapshot_ids
         )
         discovery_complete = len(discovery_rows) == len(promoted_ids)
-        selected_count = sum(
-            str(row["status"]) == "selected" for row in discovery_rows
-        )
-        promoted_underlying_level1_pass = (
-            not promoted_ids
-            or all(promoted_level1_started.values())
-        )
-        pair_recording_pass = (
-            not promoted_ids
-            or (
-                discovery_complete
-                and selected_count == len(promoted_ids)
-                and all(
-                    latest_allocations[episode_id] == "COMPLETE"
-                    for episode_id in promoted_ids
-                )
-            )
+        selected_count = sum(str(row["status"]) == "selected" for row in discovery_rows)
+        promoted_underlying_level1_pass = not promoted_ids or all(promoted_level1_started.values())
+        pair_recording_pass = not promoted_ids or (
+            discovery_complete
+            and selected_count == len(promoted_ids)
+            and all(latest_allocations[episode_id] == "COMPLETE" for episode_id in promoted_ids)
         )
         graceful_degradation_pass = all(
             bool(row["primary_direction_evidence_remains_complete"])
@@ -5060,12 +5246,8 @@ class FrozenRecorderRepository:
             }
             for row in degradation_rows
         )
-        cancellation_recovery_pass = (
-            not promoted_ids
-            or all(
-                latest_allocations[episode_id] == "COMPLETE"
-                for episode_id in promoted_ids
-            )
+        cancellation_recovery_pass = not promoted_ids or all(
+            latest_allocations[episode_id] == "COMPLETE" for episode_id in promoted_ids
         )
         quality = (
             {}
@@ -5077,12 +5259,8 @@ class FrozenRecorderRepository:
         )
         universe_uninterrupted = (
             bool(quality.get("complete"))
-            and float(
-                cast(float | int, quality.get("m1c_checkpoint_coverage", 0.0))
-            )
-            == 1.0
-            and int(cast(float | int, quality.get("m1c_predictions", 0)))
-            >= 20 * 15
+            and float(cast(float | int, quality.get("m1c_checkpoint_coverage", 0.0))) == 1.0
+            and int(cast(float | int, quality.get("m1c_predictions", 0))) >= 20 * 15
         )
         recorder_reliability_pass = (
             bool(quality.get("complete"))
@@ -5144,9 +5322,7 @@ class FrozenRecorderRepository:
             ),
             (no_order_guard_pass, "engineering_no_order_guard_failed"),
         )
-        missing_reasons = tuple(
-            reason for passed, reason in checks if not passed
-        )
+        missing_reasons = tuple(reason for passed, reason in checks if not passed)
         return OpeningTransferOperationalEvidenceV1(
             prediction_receipt_count=prediction_count,
             prediction_receipt_timing_pass=timing_pass,
@@ -5155,9 +5331,7 @@ class FrozenRecorderRepository:
             capacity_snapshots_complete=capacity_complete,
             reserved_twelve_lines_pass=reserve_pass,
             promoted_episode_count=len(promoted_ids),
-            promoted_underlying_level1_pass=(
-                promoted_underlying_level1_pass
-            ),
+            promoted_underlying_level1_pass=(promoted_underlying_level1_pass),
             contract_discovery_audit_count=len(discovery_rows),
             contract_discovery_complete=discovery_complete,
             primary_option_pair_available_count=selected_count,
@@ -5182,7 +5356,8 @@ class FrozenRecorderRepository:
         with self.repository._connect() as connection:
             parent = connection.execute(
                 """
-                SELECT scientific_outcome_eligible_v1
+                SELECT scientific_outcome_eligible_v1,
+                       experiment_version, session_date
                 FROM opening_reversal_prediction_v1
                 WHERE receipt_hash_v1 = ?
                 """,
@@ -5190,6 +5365,26 @@ class FrozenRecorderRepository:
             ).fetchone()
             if parent is None or not bool(parent["scientific_outcome_eligible_v1"]):
                 raise ValueError("protected or engineering outcome rejected")
+            if str(parent["experiment_version"]) == "1.1":
+                barrier = connection.execute(
+                    """
+                    SELECT audit_json
+                    FROM opening_reversal_causal_barrier_audit_v1_1
+                    WHERE run_id = ? AND session_date = ?
+                      AND barrier_status = 'passed'
+                    """,
+                    (
+                        metadata.run_id,
+                        str(parent["session_date"]),
+                    ),
+                ).fetchone()
+                if barrier is None:
+                    raise ValueError("V1.1 outcome lacks a passing causal barrier")
+                audit = OpeningReversalCausalBarrierAuditV1_1.model_validate_json(
+                    str(barrier["audit_json"])
+                )
+                if outcome.prediction_receipt_hash_v1 not in audit.prediction_receipt_hashes:
+                    raise ValueError("V1.1 outcome prediction is outside causal barrier")
             existing = connection.execute(
                 """
                 SELECT id, outcome_receipt_hash_v1, outcome_json
@@ -5200,8 +5395,7 @@ class FrozenRecorderRepository:
             ).fetchone()
             if existing is not None:
                 if (
-                    str(existing["outcome_receipt_hash_v1"])
-                    != outcome.outcome_receipt_hash_v1
+                    str(existing["outcome_receipt_hash_v1"]) != outcome.outcome_receipt_hash_v1
                     or str(existing["outcome_json"]) != encoded
                 ):
                     raise ValueError("opening reversal outcome is immutable")
@@ -5245,21 +5439,14 @@ class FrozenRecorderRepository:
                     ),
                     (
                         None
-                        if outcome.accuracy_counting_no_move_as_failure_v1
-                        is None
-                        else int(
-                            outcome.accuracy_counting_no_move_as_failure_v1
-                        )
+                        if outcome.accuracy_counting_no_move_as_failure_v1 is None
+                        else int(outcome.accuracy_counting_no_move_as_failure_v1)
                     ),
                     outcome.maximum_favourable_excursion_v1,
                     outcome.maximum_adverse_excursion_v1,
                     outcome.canonical_post_entry_local_range_share_v1,
                     outcome.iv_residual_v1,
-                    (
-                        None
-                        if outcome.exceed_iv_v1 is None
-                        else int(outcome.exceed_iv_v1)
-                    ),
+                    (None if outcome.exceed_iv_v1 is None else int(outcome.exceed_iv_v1)),
                     outcome.outcome_completeness_v1,
                     outcome.missing_reason_v1,
                     outcome.outcome_created_at_utc.isoformat(),
@@ -5294,10 +5481,7 @@ class FrozenRecorderRepository:
                 (metadata.run_id, outcome.prediction_receipt_hash_v1),
             ).fetchone()
             expected_right = (
-                "C"
-                if parent is not None
-                and str(parent["prediction_v1"]) == "CALL"
-                else "P"
+                "C" if parent is not None and str(parent["prediction_v1"]) == "CALL" else "P"
             )
             if outcome.role == "opposite_leg":
                 expected_right = "P" if expected_right == "C" else "C"
@@ -5308,9 +5492,7 @@ class FrozenRecorderRepository:
                 or outcome.contract.underlying != str(parent["stock"])
                 or outcome.contract.right != expected_right
             ):
-                raise ValueError(
-                    "primary option outcome is not linked to promoted prediction"
-                )
+                raise ValueError("primary option outcome is not linked to promoted prediction")
             other_leg = connection.execute(
                 """
                 SELECT expiry, strike, right

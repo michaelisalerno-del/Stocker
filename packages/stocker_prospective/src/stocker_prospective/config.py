@@ -41,6 +41,8 @@ class PathsConfig(BaseModel):
     m1c_opening_market_transition_v1_config: Path | None = None
     m1c_prospective_opening_reversal_v1_config: Path | None = None
     m1c_prospective_opening_reversal_v1_activation: Path | None = None
+    m1c_prospective_opening_reversal_v1_1_config: Path | None = None
+    m1c_prospective_opening_reversal_v1_1_activation: Path | None = None
     direction_beta_artifact: Path | None = None
     historical_activity_bars: Path | None = None
     bar_compatibility_report: Path | None = None

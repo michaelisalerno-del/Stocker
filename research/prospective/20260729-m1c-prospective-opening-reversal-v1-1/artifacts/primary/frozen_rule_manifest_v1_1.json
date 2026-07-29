@@ -1,0 +1,31 @@
+{
+  "checkpoint": 6,
+  "experiment_id": "m1c-prospective-opening-reversal-v1",
+  "experiment_version": "1.1",
+  "forbidden_action_inputs": [
+    "A1",
+    "RSI",
+    "stock_amplification_or_resistance",
+    "recent_momentum",
+    "market_sector_features",
+    "microstructure",
+    "option_prices",
+    "option_spreads",
+    "chart_quality",
+    "later_outcomes"
+  ],
+  "m1c_probability_threshold": 0.488333710794033,
+  "nominal_entry": "10:00 America/New_York",
+  "prediction": {
+    "NEGATIVE_SEVERE_OPENING_TRANSITION": "CALL",
+    "POSITIVE_SEVERE_OPENING_TRANSITION": "PUT",
+    "every_other_state": "ABSTAIN",
+    "formula": "prediction_sign_v1=-opening_transition_sign_v1"
+  },
+  "primary_horizon_minutes": 15,
+  "schema_version": "m1c-prospective-opening-reversal-rule-manifest-v1.1",
+  "scientific_rule_changed": false,
+  "scientific_rule_hash": "7a2a40170fa1dffb148cb51144c1c9bfcb029c5d797ea9680164cfd9fbce1ea7",
+  "scientific_rule_source": "research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/frozen_rule_manifest_v1.json",
+  "tail_phase": "FIRST_ENTRY"
+}

@@ -22,6 +22,8 @@ paths:
   m1c_opening_market_transition_v1_config: /opt/stocker/current/research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/frozen_2024_opening_threshold_manifest_v1.json
   m1c_prospective_opening_reversal_v1_config: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/frozen_experiment_configuration_v1.json
   m1c_prospective_opening_reversal_v1_activation: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/experiment_activation_receipt_v1.json
+  m1c_prospective_opening_reversal_v1_1_config: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/artifacts/primary/frozen_timing_addendum_configuration_v1_1.json
+  m1c_prospective_opening_reversal_v1_1_activation: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/artifacts/primary/experiment_activation_receipt_v1_1.json
   direction_beta_artifact: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/stock_market_beta_parameters.csv
   historical_activity_bars: /var/lib/stocker/preprocessing/prior-session-five-minute-bars.parquet
   bar_compatibility_report: /var/lib/stocker/prospective/bar_compatibility_report.json

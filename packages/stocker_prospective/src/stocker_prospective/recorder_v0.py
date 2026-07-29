@@ -27,7 +27,11 @@ from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
     OpeningReversalActivationReceiptV1,
     OpeningReversalPredictionInputV1,
     OpeningReversalPredictionReceiptV1,
+    OpeningReversalPredictionTimingEvidenceV1_1,
     build_prediction_receipt_v1,
+)
+from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
+    OpeningReversalActivationReceiptV1_1,
 )
 from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.opening_market_transition_v1 import (
@@ -111,8 +115,7 @@ def _existing_clean_market_direction_baseline_sign_v1(
         and all(bar.finalised for bar in selected)
         and selected[0].session == selected[1].session
         and all(math.isfinite(bar.market_log_return) for bar in selected)
-        and selected[0].bar_complete_timestamp
-        == selected[1].bar_start_timestamp
+        and selected[0].bar_complete_timestamp == selected[1].bar_start_timestamp
     ):
         return None
     return _comparison_sign(sum(bar.market_log_return for bar in selected))
@@ -126,17 +129,13 @@ def _opening_reversal_baseline_comparisons_v1(
 ) -> tuple[tuple[str, str | float | int | bool | None], ...]:
     """Freeze causal baseline values without allowing them into the V1 action."""
 
-    bars = tuple(
-        sorted(item.completed_m1c_bars, key=lambda value: value.bar_ordinal)
-    )
+    bars = tuple(sorted(item.completed_m1c_bars, key=lambda value: value.bar_ordinal))
     recent_sign = (
         None
         if len(bars) < 6 or not bars[-1].finalised
         else _comparison_sign(bars[-1].close - bars[-1].open)
     )
-    opening_sign = _comparison_sign(
-        stock_opening_response_v1.stock_opening_return_v1
-    )
+    opening_sign = _comparison_sign(stock_opening_response_v1.stock_opening_return_v1)
     clean_market_sign = _existing_clean_market_direction_baseline_sign_v1(
         item.completed_direction_bars,
     )
@@ -154,11 +153,7 @@ def _opening_reversal_baseline_comparisons_v1(
         comparisons.append(
             (
                 f"baseline_{baseline}_unavailable_reason_v1",
-                (
-                    None
-                    if sign is not None
-                    else f"{baseline}_not_causally_available_at_receipt"
-                ),
+                (None if sign is not None else f"{baseline}_not_causally_available_at_receipt"),
             )
         )
     unavailable = {
@@ -244,16 +239,12 @@ def _unknown_opening_market_transition_logging_v1(
     window = OpeningPreEntryWindowV1(
         market_proxy_v1=OPENING_MARKET_PROXY_V1,
         session=session,
-        previous_session_v1=(
-            session if previous_session is None else previous_session
-        ),
+        previous_session_v1=(session if previous_session is None else previous_session),
         checkpoint_v1=6,
         session_open_timestamp_v1=session_open,
         signal_timestamp_v1=signal_timestamp,
         entry_timestamp_v1=signal_timestamp,
-        opening_bar_ordinals_v1=tuple(
-            range(EXPECTED_OPENING_BAR_COUNT_V1)
-        ),
+        opening_bar_ordinals_v1=tuple(range(EXPECTED_OPENING_BAR_COUNT_V1)),
         expected_opening_bar_count_v1=EXPECTED_OPENING_BAR_COUNT_V1,
         observed_opening_bar_count_v1=0,
         final_complete_pre_entry_bar_start_v1=None,
@@ -314,6 +305,9 @@ class RecorderCheckpointInput:
     completed_market_shock_bars_v1: tuple[MarketShockBarV1, ...] = ()
     market_previous_session_v1: date | None = None
     market_prior_regular_session_close_v1: float | None = None
+    opening_reversal_receipt_created_at_utc_v1_1: datetime | None = None
+    opening_reversal_first_buffered_event_received_at_utc_v1_1: datetime | None = None
+    opening_reversal_entry_data_admitted_before_receipt_v1_1: bool = False
 
 
 class RecorderCheckpointResult(BaseModel):
@@ -332,9 +326,7 @@ class RecorderCheckpointResult(BaseModel):
     opening_window_v1: OpeningPreEntryWindowV1
     opening_transition_state_v1: OpeningMarketTransitionStateResultV1
     stock_opening_response_v1: StockOpeningResponseResultV1
-    opening_reversal_prediction_v1: (
-        OpeningReversalPredictionReceiptV1 | None
-    ) = None
+    opening_reversal_prediction_v1: OpeningReversalPredictionReceiptV1 | None = None
     episode_decision: EpisodeDecision
     quiet_state: QuietStateSnapshot
     quiet_episode_decision: QuietEpisodeDecision
@@ -365,17 +357,12 @@ class FrozenM1CRecorderEngine:
         tail_phase_tracker_v1: TailPhaseTrackerV1 | None = None,
         movement_consumed_median_v1: float | None = None,
         tail_phase_activation_status_v1: str = "not_configured",
-        signed_market_shock_thresholds_v1: (
-            SignedMarketShockThresholdManifestV1 | None
-        ) = None,
+        signed_market_shock_thresholds_v1: (SignedMarketShockThresholdManifestV1 | None) = None,
         signed_market_shock_activation_status_v1: str = "not_configured",
-        opening_transition_thresholds_v1: (
-            OpeningTransitionThresholdsV1 | None
-        ) = None,
+        opening_transition_thresholds_v1: (OpeningTransitionThresholdsV1 | None) = None,
         opening_transition_activation_status_v1: str = "not_configured",
-        opening_reversal_activation_v1: (
-            OpeningReversalActivationReceiptV1 | None
-        ) = None,
+        opening_reversal_activation_v1: (OpeningReversalActivationReceiptV1 | None) = None,
+        opening_reversal_activation_v1_1: (OpeningReversalActivationReceiptV1_1 | None) = None,
     ) -> None:
         self.m1c_runtime = m1c_runtime
         self.m1c_features = m1c_features
@@ -393,16 +380,25 @@ class FrozenM1CRecorderEngine:
         self.movement_consumed_median_v1 = movement_consumed_median_v1
         self.tail_phase_activation_status_v1 = tail_phase_activation_status_v1
         self.signed_market_shock_thresholds_v1 = signed_market_shock_thresholds_v1
-        self.signed_market_shock_activation_status_v1 = (
-            signed_market_shock_activation_status_v1
-        )
-        self.opening_transition_thresholds_v1 = (
-            opening_transition_thresholds_v1
-        )
-        self.opening_transition_activation_status_v1 = (
-            opening_transition_activation_status_v1
-        )
+        self.signed_market_shock_activation_status_v1 = signed_market_shock_activation_status_v1
+        self.opening_transition_thresholds_v1 = opening_transition_thresholds_v1
+        self.opening_transition_activation_status_v1 = opening_transition_activation_status_v1
         self.opening_reversal_activation_v1 = opening_reversal_activation_v1
+        self.opening_reversal_activation_v1_1 = opening_reversal_activation_v1_1
+        if opening_reversal_activation_v1_1 is not None and (
+            opening_reversal_activation_v1 is None
+            or (
+                opening_reversal_activation_v1_1.superseded_activation_receipt_hash_v1
+                != opening_reversal_activation_v1.activation_receipt_hash
+            )
+            or opening_reversal_activation_v1_1.frozen_rule_hash
+            != opening_reversal_activation_v1.frozen_rule_hash
+            or (
+                opening_reversal_activation_v1_1.frozen_configuration_hash_v1
+                != opening_reversal_activation_v1.configuration_hash
+            )
+        ):
+            raise ValueError("opening reversal V1.1 does not supersede the configured V1")
         self.opening_reversal_capacity_snapshot_provider_v1: (
             Callable[[EvidenceMetadata], str] | None
         ) = None
@@ -452,18 +448,51 @@ class FrozenM1CRecorderEngine:
         signal_inputs_eligible: bool,
     ) -> OpeningReversalPredictionReceiptV1:
         assert self.opening_reversal_activation_v1 is not None
-        phase, transfer_status = (
-            self.repository.opening_reversal_phase_for_session(
-                run_id=item.metadata.run_id,
-                session=item.session,
-            )
+        phase, transfer_status = self.repository.opening_reversal_phase_for_session(
+            run_id=item.metadata.run_id,
+            session=item.session,
         )
         a1 = classifications.get("A1")
+        addendum = self.opening_reversal_activation_v1_1
+        receipt_created_at = (
+            item.metadata.recorded_at_utc
+            if addendum is None
+            else item.opening_reversal_receipt_created_at_utc_v1_1
+        )
+        if receipt_created_at is None:
+            raise ValueError("V1.1 receipt creation timestamp is unavailable")
+        timing_evidence = (
+            None
+            if addendum is None
+            else OpeningReversalPredictionTimingEvidenceV1_1(
+                timing_addendum_activation_receipt_hash_v1_1=(
+                    addendum.activation_receipt_hash_v1_1
+                ),
+                rule_committed_at_utc=addendum.activation_timestamp_utc,
+                causal_barrier_armed_at_utc=addendum.activation_timestamp_utc,
+                predictor_window_completed_at_utc=trigger_timestamp,
+                first_entry_or_post_entry_event_buffered_at_utc=(
+                    item.opening_reversal_first_buffered_event_received_at_utc_v1_1
+                ),
+                entry_or_post_entry_data_admitted_before_receipt=(
+                    item.opening_reversal_entry_data_admitted_before_receipt_v1_1
+                ),
+                raw_event_archive_write_before_receipt=True,
+                decision_surface_release_requires_durable_receipt=True,
+                nominal_entry_actionable=False,
+                receipt_latency_after_nominal_entry_seconds=(
+                    receipt_created_at - episode.prospective_entry_timestamp
+                ).total_seconds(),
+            )
+        )
         return build_prediction_receipt_v1(
             OpeningReversalPredictionInputV1(
                 activation_timestamp_utc=(
                     self.opening_reversal_activation_v1.activation_timestamp_utc
+                    if addendum is None
+                    else addendum.activation_timestamp_utc
                 ),
+                experiment_version="1" if addendum is None else "1.1",
                 cohort_phase=phase,
                 transfer_status=transfer_status,
                 session=item.session,
@@ -471,50 +500,34 @@ class FrozenM1CRecorderEngine:
                 checkpoint=checkpoint,
                 signal_timestamp_utc=trigger_timestamp,
                 entry_timestamp_utc=episode.prospective_entry_timestamp,
-                receipt_created_at_utc=item.metadata.recorded_at_utc,
+                receipt_created_at_utc=receipt_created_at,
                 m1c_probability=score.probability,
                 m1c_probability_valid=signal_inputs_eligible,
                 high_tail_membership=score.threshold_passed,
                 fresh_episode_id=episode.episode_id,
                 canonical_fresh_episode=episode.fresh_episode,
                 tail_phase_v1=tail_phase_v1.m1c_tail_phase_v1,
-                market_opening_return_v1=(
-                    opening_window_v1.market_opening_return_v1
-                ),
-                market_opening_range_v1=(
-                    opening_window_v1.market_opening_range_v1
-                ),
+                market_opening_return_v1=(opening_window_v1.market_opening_return_v1),
+                market_opening_range_v1=(opening_window_v1.market_opening_range_v1),
                 opening_market_transition_state_v1=(
-                    opening_transition_state_v1
-                    .opening_market_transition_state_v1
+                    opening_transition_state_v1.opening_market_transition_state_v1
                 ),
-                opening_transition_sign_v1=(
-                    opening_transition_state_v1.opening_transition_sign_v1
-                ),
+                opening_transition_sign_v1=(opening_transition_state_v1.opening_transition_sign_v1),
                 opening_transition_event_id_v1=(
-                    opening_transition_state_v1
-                    .opening_transition_event_id_v1
+                    opening_transition_state_v1.opening_transition_event_id_v1
                 ),
-                vti_opening_transition_complete=(
-                    opening_transition_state_v1.complete_v1
-                ),
-                stock_causal_data_complete=(
-                    stock_opening_response_v1.complete_v1
-                ),
+                vti_opening_transition_complete=(opening_transition_state_v1.complete_v1),
+                stock_causal_data_complete=(stock_opening_response_v1.complete_v1),
                 previous_close_atm_iv_scale_15m=(
                     item.group_o_context.previous_close_implied_movement_15m
                 ),
                 previous_close_atm_iv_scale_valid=(
                     item.group_o_context.eligible
-                    and item.group_o_context
-                    .previous_close_implied_movement_15m
-                    is not None
+                    and item.group_o_context.previous_close_implied_movement_15m is not None
                 ),
                 data_source="ibkr",
                 capacity_snapshot_id=(
-                    self._opening_reversal_capacity_snapshot_id_v1(
-                        item.metadata
-                    )
+                    self._opening_reversal_capacity_snapshot_id_v1(item.metadata)
                 ),
                 frozen_comparisons=(
                     *_opening_reversal_baseline_comparisons_v1(
@@ -544,15 +557,14 @@ class FrozenM1CRecorderEngine:
                     ),
                     (
                         "stock_opening_response_class_v1",
-                        stock_opening_response_v1
-                        .stock_opening_response_class_v1,
+                        stock_opening_response_v1.stock_opening_response_class_v1,
                     ),
                     (
                         "stock_relative_opening_response_v1",
-                        stock_opening_response_v1
-                        .stock_relative_opening_response_v1,
+                        stock_opening_response_v1.stock_relative_opening_response_v1,
                     ),
                 ),
+                timing_evidence_v1_1=timing_evidence,
             )
         )
 
@@ -567,6 +579,9 @@ class FrozenM1CRecorderEngine:
         opening_transition_state_v1: OpeningMarketTransitionStateResultV1,
         group_o_context: FrozenGroupOContext | None,
         missing_reason: str,
+        receipt_created_at_utc_v1_1: datetime | None = None,
+        first_buffered_event_received_at_utc_v1_1: datetime | None = None,
+        entry_data_admitted_before_receipt_v1_1: bool = False,
     ) -> OpeningReversalPredictionReceiptV1:
         """Emit the frozen ABSTAIN receipt when checkpoint-6 data misses deadline."""
 
@@ -576,25 +591,55 @@ class FrozenM1CRecorderEngine:
             run_id=metadata.run_id,
             session=session,
             stock=stock,
+            experiment_version=("1" if self.opening_reversal_activation_v1_1 is None else "1.1"),
         )
         if existing is not None:
             return existing
-        phase, transfer_status = (
-            self.repository.opening_reversal_phase_for_session(
-                run_id=metadata.run_id,
-                session=session,
-            )
+        phase, transfer_status = self.repository.opening_reversal_phase_for_session(
+            run_id=metadata.run_id,
+            session=session,
         )
         iv_scale = (
+            None if group_o_context is None else group_o_context.previous_close_implied_movement_15m
+        )
+        addendum = self.opening_reversal_activation_v1_1
+        receipt_created_at = (
+            metadata.recorded_at_utc if addendum is None else receipt_created_at_utc_v1_1
+        )
+        if receipt_created_at is None:
+            raise ValueError("V1.1 receipt creation timestamp is unavailable")
+        timing_evidence = (
             None
-            if group_o_context is None
-            else group_o_context.previous_close_implied_movement_15m
+            if addendum is None
+            else OpeningReversalPredictionTimingEvidenceV1_1(
+                timing_addendum_activation_receipt_hash_v1_1=(
+                    addendum.activation_receipt_hash_v1_1
+                ),
+                rule_committed_at_utc=addendum.activation_timestamp_utc,
+                causal_barrier_armed_at_utc=addendum.activation_timestamp_utc,
+                predictor_window_completed_at_utc=signal_timestamp,
+                first_entry_or_post_entry_event_buffered_at_utc=(
+                    first_buffered_event_received_at_utc_v1_1
+                ),
+                entry_or_post_entry_data_admitted_before_receipt=(
+                    entry_data_admitted_before_receipt_v1_1
+                ),
+                raw_event_archive_write_before_receipt=True,
+                decision_surface_release_requires_durable_receipt=True,
+                nominal_entry_actionable=False,
+                receipt_latency_after_nominal_entry_seconds=(
+                    receipt_created_at - signal_timestamp
+                ).total_seconds(),
+            )
         )
         receipt = build_prediction_receipt_v1(
             OpeningReversalPredictionInputV1(
                 activation_timestamp_utc=(
                     self.opening_reversal_activation_v1.activation_timestamp_utc
+                    if addendum is None
+                    else addendum.activation_timestamp_utc
                 ),
+                experiment_version="1" if addendum is None else "1.1",
                 cohort_phase=phase,
                 transfer_status=transfer_status,
                 session=session,
@@ -602,33 +647,23 @@ class FrozenM1CRecorderEngine:
                 checkpoint=6,
                 signal_timestamp_utc=signal_timestamp,
                 entry_timestamp_utc=signal_timestamp,
-                receipt_created_at_utc=metadata.recorded_at_utc,
+                receipt_created_at_utc=receipt_created_at,
                 m1c_probability=None,
                 m1c_probability_valid=False,
                 high_tail_membership=False,
                 fresh_episode_id=None,
                 canonical_fresh_episode=False,
                 tail_phase_v1="UNKNOWN_INCOMPLETE",
-                market_opening_return_v1=(
-                    opening_window_v1.market_opening_return_v1
-                ),
-                market_opening_range_v1=(
-                    opening_window_v1.market_opening_range_v1
-                ),
+                market_opening_return_v1=(opening_window_v1.market_opening_return_v1),
+                market_opening_range_v1=(opening_window_v1.market_opening_range_v1),
                 opening_market_transition_state_v1=(
-                    opening_transition_state_v1
-                    .opening_market_transition_state_v1
+                    opening_transition_state_v1.opening_market_transition_state_v1
                 ),
-                opening_transition_sign_v1=(
-                    opening_transition_state_v1.opening_transition_sign_v1
-                ),
+                opening_transition_sign_v1=(opening_transition_state_v1.opening_transition_sign_v1),
                 opening_transition_event_id_v1=(
-                    opening_transition_state_v1
-                    .opening_transition_event_id_v1
+                    opening_transition_state_v1.opening_transition_event_id_v1
                 ),
-                vti_opening_transition_complete=(
-                    opening_transition_state_v1.complete_v1
-                ),
+                vti_opening_transition_complete=(opening_transition_state_v1.complete_v1),
                 stock_causal_data_complete=False,
                 previous_close_atm_iv_scale_15m=iv_scale,
                 previous_close_atm_iv_scale_valid=(
@@ -637,9 +672,7 @@ class FrozenM1CRecorderEngine:
                     and iv_scale is not None
                 ),
                 data_source="ibkr",
-                capacity_snapshot_id=(
-                    self._opening_reversal_capacity_snapshot_id_v1(metadata)
-                ),
+                capacity_snapshot_id=(self._opening_reversal_capacity_snapshot_id_v1(metadata)),
                 frozen_comparisons=(
                     ("incomplete_checkpoint_reason_v1", missing_reason),
                     *tuple(
@@ -671,6 +704,7 @@ class FrozenM1CRecorderEngine:
                         "UNKNOWN_INCOMPLETE",
                     ),
                 ),
+                timing_evidence_v1_1=timing_evidence,
             )
         )
         self.repository.record_opening_reversal_prediction_v1(
@@ -696,9 +730,7 @@ class FrozenM1CRecorderEngine:
         thresholds = (
             None
             if self.signed_market_shock_thresholds_v1 is None
-            else self.signed_market_shock_thresholds_v1.threshold_for_checkpoint(
-                checkpoint
-            )
+            else self.signed_market_shock_thresholds_v1.threshold_for_checkpoint(checkpoint)
         )
         try:
             windows = calculate_preentry_windows_v1(
@@ -734,16 +766,11 @@ class FrozenM1CRecorderEngine:
                 ),
                 market_return_w0_v1=windows.market_return_w0_v1,
                 market_shock_state_v1=state,
-                threshold_15m=(
-                    item.group_o_context.previous_close_implied_movement_15m
-                ),
+                threshold_15m=(item.group_o_context.previous_close_implied_movement_15m),
             )
             return windows, state, response, thresholds
         except Exception as error:
-            reason = (
-                "signed_market_shock_logging_calculation_error:"
-                f"{type(error).__name__}"
-            )
+            reason = f"signed_market_shock_logging_calculation_error:{type(error).__name__}"
             windows, state, response = _unknown_signed_market_shock_logging_v1(
                 session=item.session,
                 checkpoint=checkpoint,
@@ -796,9 +823,7 @@ class FrozenM1CRecorderEngine:
                 signal_timestamp=signal_timestamp,
                 entry_timestamp=signal_timestamp,
                 completed_bars=market_bars,
-                prior_regular_session_close=(
-                    item.market_prior_regular_session_close_v1
-                ),
+                prior_regular_session_close=(item.market_prior_regular_session_close_v1),
             )
             state = classify_opening_market_transition_v1(
                 window=window,
@@ -826,9 +851,7 @@ class FrozenM1CRecorderEngine:
                 ),
                 market_opening_return_v1=window.market_opening_return_v1,
                 opening_transition_state_v1=state,
-                threshold_15m=(
-                    item.group_o_context.previous_close_implied_movement_15m
-                ),
+                threshold_15m=(item.group_o_context.previous_close_implied_movement_15m),
             )
             return window, state, response
         except Exception as error:
@@ -837,8 +860,7 @@ class FrozenM1CRecorderEngine:
                 previous_session=item.market_previous_session_v1,
                 signal_timestamp=signal_timestamp,
                 reason=(
-                    "opening_market_transition_logging_calculation_error:"
-                    f"{type(error).__name__}"
+                    f"opening_market_transition_logging_calculation_error:{type(error).__name__}"
                 ),
             )
 
@@ -1199,9 +1221,7 @@ class FrozenM1CRecorderEngine:
                 market_shock_state_v1=market_shock_state_v1,
                 stock_shock_response_v1=stock_shock_response_v1,
                 market_shock_thresholds_v1=checkpoint_thresholds_v1,
-                activation_status_v1=(
-                    self.signed_market_shock_activation_status_v1
-                ),
+                activation_status_v1=(self.signed_market_shock_activation_status_v1),
             )
         except Exception as error:
             (
@@ -1212,10 +1232,7 @@ class FrozenM1CRecorderEngine:
                 session=item.session,
                 checkpoint=checkpoint,
                 signal_timestamp=trigger.bar_complete_timestamp,
-                reason=(
-                    "signed_market_shock_logging_persistence_error:"
-                    f"{type(error).__name__}"
-                ),
+                reason=(f"signed_market_shock_logging_persistence_error:{type(error).__name__}"),
             )
         try:
             self.repository.record_opening_market_transition_checkpoint_v1(
@@ -1228,9 +1245,7 @@ class FrozenM1CRecorderEngine:
                 opening_transition_state_v1=opening_transition_state_v1,
                 stock_opening_response_v1=stock_opening_response_v1,
                 opening_thresholds_v1=self.opening_transition_thresholds_v1,
-                activation_status_v1=(
-                    self.opening_transition_activation_status_v1
-                ),
+                activation_status_v1=(self.opening_transition_activation_status_v1),
             )
         except Exception as error:
             (
@@ -1242,8 +1257,7 @@ class FrozenM1CRecorderEngine:
                 previous_session=item.market_previous_session_v1,
                 signal_timestamp=trigger.bar_complete_timestamp,
                 reason=(
-                    "opening_market_transition_logging_persistence_error:"
-                    f"{type(error).__name__}"
+                    f"opening_market_transition_logging_persistence_error:{type(error).__name__}"
                 ),
             )
         all_reasons = tuple(
@@ -1254,34 +1268,31 @@ class FrozenM1CRecorderEngine:
                 )
             )
         )
-        opening_reversal_prediction_v1: (
-            OpeningReversalPredictionReceiptV1 | None
-        ) = None
+        opening_reversal_prediction_v1: OpeningReversalPredictionReceiptV1 | None = None
         if checkpoint == 6 and self.opening_reversal_activation_v1 is not None:
-            existing_opening_receipt = (
-                self.repository.load_opening_reversal_prediction_v1(
-                    run_id=item.metadata.run_id,
-                    session=item.session,
-                    stock=item.symbol,
-                )
+            existing_opening_receipt = self.repository.load_opening_reversal_prediction_v1(
+                run_id=item.metadata.run_id,
+                session=item.session,
+                stock=item.symbol,
+                experiment_version=(
+                    "1" if self.opening_reversal_activation_v1_1 is None else "1.1"
+                ),
             )
             if existing_opening_receipt is not None:
                 opening_reversal_prediction_v1 = existing_opening_receipt
             else:
-                opening_reversal_prediction_v1 = (
-                    self._build_opening_reversal_prediction_v1(
-                        item=item,
-                        checkpoint=checkpoint,
-                        trigger_timestamp=trigger.bar_complete_timestamp,
-                        score=score,
-                        episode=episode,
-                        tail_phase_v1=tail_phase_v1,
-                        opening_window_v1=opening_window_v1,
-                        opening_transition_state_v1=opening_transition_state_v1,
-                        stock_opening_response_v1=stock_opening_response_v1,
-                        classifications=classifications,
-                        signal_inputs_eligible=signal_inputs_eligible,
-                    )
+                opening_reversal_prediction_v1 = self._build_opening_reversal_prediction_v1(
+                    item=item,
+                    checkpoint=checkpoint,
+                    trigger_timestamp=trigger.bar_complete_timestamp,
+                    score=score,
+                    episode=episode,
+                    tail_phase_v1=tail_phase_v1,
+                    opening_window_v1=opening_window_v1,
+                    opening_transition_state_v1=opening_transition_state_v1,
+                    stock_opening_response_v1=stock_opening_response_v1,
+                    classifications=classifications,
+                    signal_inputs_eligible=signal_inputs_eligible,
                 )
                 self.repository.record_opening_reversal_prediction_v1(
                     item.metadata,

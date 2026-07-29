@@ -24,20 +24,16 @@ def _episode(
     ordinal: int,
     phase: str = "prospective_development",
     aligned_return: float = 0.02,
+    experiment_version: str = "1",
 ) -> OpeningReversalAnalysisEpisodeV1:
     event = ordinal // 3
     transition_sign = 1 if event % 2 == 0 else -1
     prediction_sign = -transition_sign
     signed_return = prediction_sign * aligned_return
     threshold = 0.01
-    outcome_direction = (
-        1
-        if signed_return > threshold
-        else -1
-        if signed_return < -threshold
-        else 0
-    )
+    outcome_direction = 1 if signed_return > threshold else -1 if signed_return < -threshold else 0
     return OpeningReversalAnalysisEpisodeV1(
+        experiment_version=experiment_version,
         prediction_receipt_hash_v1=f"{ordinal + 1:064x}",
         outcome_receipt_hash_v1=f"{ordinal + 10_001:064x}",
         cohort_phase=phase,
@@ -64,9 +60,7 @@ def _episode(
             "most_recent_completed_five_minute_stock_momentum": (
                 "test_fixture_causal_baseline_unavailable"
             ),
-            "complete_stock_opening_window_momentum": (
-                "test_fixture_causal_baseline_unavailable"
-            ),
+            "complete_stock_opening_window_momentum": ("test_fixture_causal_baseline_unavailable"),
             "existing_clean_market_direction_baseline": (
                 "test_fixture_causal_baseline_unavailable"
             ),
@@ -79,6 +73,17 @@ def _episode(
             ),
         },
     )
+
+
+def test_analysis_cannot_mix_v1_and_v1_1_episodes() -> None:
+    with pytest.raises(ValueError, match="mix experiment versions"):
+        analyze_direction_cohort_v1(
+            (
+                _episode(ordinal=0, experiment_version="1"),
+                _episode(ordinal=1, experiment_version="1.1"),
+            ),
+            phase="prospective_development",
+        )
 
 
 def _supported(
@@ -108,9 +113,7 @@ def test_development_analysis_runs_frozen_cluster_null_and_placebo_contract() ->
         phase="prospective_development",
     )
 
-    assert result.decision == (
-        "prospective_opening_reversal_development_supported"
-    )
+    assert result.decision == ("prospective_opening_reversal_development_supported")
     assert result.summary.mean_aligned_return == pytest.approx(0.02)
     assert result.summary.material_direction_accuracy == 1.0
     assert (
@@ -120,36 +123,23 @@ def test_development_analysis_runs_frozen_cluster_null_and_placebo_contract() ->
         == result.summary.episode_count
     )
     assert result.summary.difference_versus_follow_vti == pytest.approx(0.04)
-    assert result.summary.positive_transition_mean_reversal_return == pytest.approx(
-        0.02
-    )
-    assert result.summary.negative_transition_mean_reversal_return == pytest.approx(
-        0.02
-    )
+    assert result.summary.positive_transition_mean_reversal_return == pytest.approx(0.02)
+    assert result.summary.negative_transition_mean_reversal_return == pytest.approx(0.02)
     assert len(result.session_bootstrap_draws) == 2_000
     assert len(result.event_bootstrap_draws) == 2_000
     assert len(result.primary_null_draws) == PRIMARY_NULL_REPLICATIONS_V1
-    assert {draw.seed for draw in result.primary_null_draws} == {
-        PRIMARY_NULL_SEED_V1
-    }
+    assert {draw.seed for draw in result.primary_null_draws} == {PRIMARY_NULL_SEED_V1}
     assert result.summary.primary_null_p_value is not None
     assert result.summary.primary_null_p_value < 0.05
     assert result.summary.temporal_placebo_mean is not None
     assert result.summary.temporal_placebo_mean < 0.0
     baseline_means = dict(result.baseline_means)
-    assert baseline_means[
-        "oppose_vti_severe_opening_sign"
-    ] == pytest.approx(0.02)
-    assert baseline_means[
-        "follow_vti_severe_opening_sign"
-    ] == pytest.approx(-0.02)
+    assert baseline_means["oppose_vti_severe_opening_sign"] == pytest.approx(0.02)
+    assert baseline_means["follow_vti_severe_opening_sign"] == pytest.approx(-0.02)
     populations = {
-        (row.population, row.baseline): row
-        for row in result.baseline_population_results
+        (row.population, row.baseline): row for row in result.baseline_population_results
     }
-    promoted = populations[
-        ("promoted_episodes", "oppose_vti_severe_opening_sign")
-    ]
+    promoted = populations[("promoted_episodes", "oppose_vti_severe_opening_sign")]
     assert promoted.population_episode_count == 50
     assert promoted.available_episode_count == 50
     assert promoted.reversal_minus_baseline_mean == pytest.approx(0.0)
@@ -171,9 +161,7 @@ def test_confirmation_requires_both_cluster_lower_bounds_and_null() -> None:
         phase="untouched_confirmation",
     )
 
-    assert result.decision == (
-        "prospective_opening_reversal_direction_supported"
-    )
+    assert result.decision == ("prospective_opening_reversal_direction_supported")
     assert result.summary.session_cluster_interval.lower_95 == pytest.approx(0.02)
     assert result.summary.event_cluster_interval.lower_95 == pytest.approx(0.02)
     assert result.summary.winsorised_one_percent_mean == pytest.approx(0.02)
@@ -188,9 +176,7 @@ def test_insufficient_support_blocks_without_relaxing_gates() -> None:
         phase="prospective_development",
     )
 
-    assert result.decision == (
-        "blocked_insufficient_prospective_development_support"
-    )
+    assert result.decision == ("blocked_insufficient_prospective_development_support")
     assert "complete_eligible_stock_episodes_below_150" in result.decision_reasons
     assert "unique_severe_opening_events_below_40" in result.decision_reasons
 
@@ -202,9 +188,7 @@ def test_direction_decision_receipt_recomputes_full_frozen_analysis() -> None:
         phase="prospective_development",
     )
     tampered = result.model_copy(
-        update={
-            "decision": "prospective_opening_reversal_development_not_supported"
-        }
+        update={"decision": "prospective_opening_reversal_development_not_supported"}
     )
 
     with pytest.raises(ValueError, match="statistics differ"):
@@ -230,11 +214,7 @@ def test_analysis_rejects_cross_cohort_and_non_reversal_rows() -> None:
 def test_analysis_blocks_one_event_id_with_multiple_sessions_or_signs() -> None:
     first = _episode(ordinal=0)
     contradictory = _episode(ordinal=3).model_copy(
-        update={
-            "opening_transition_event_id_v1": (
-                first.opening_transition_event_id_v1
-            )
-        }
+        update={"opening_transition_event_id_v1": (first.opening_transition_event_id_v1)}
     )
 
     with pytest.raises(ValueError, match="multiple sessions or signs"):
@@ -296,9 +276,7 @@ def test_option_economics_remains_a_separate_actual_bid_ask_decision() -> None:
     assert result.mean_predicted_leg_conservative_return == pytest.approx(0.10)
     assert result.mean_opposite_leg_conservative_return == pytest.approx(-0.05)
     assert result.event_cluster_interval.lower_95 == pytest.approx(0.10)
-    assert result.decision == (
-        "prospective_opening_reversal_option_economics_supported"
-    )
+    assert result.decision == ("prospective_opening_reversal_option_economics_supported")
 
     with pytest.raises(ValueError, match="duplicate prediction receipts"):
         analyze_option_economics_v1(

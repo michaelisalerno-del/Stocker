@@ -1050,6 +1050,16 @@ hash verify. A not-yet-materialized callback becomes immutable
 `raw_callback_envelope_event` evidence. Confirm its processing row says
 `scientifically_blocked_raw_only` and
 `scientific_projection_complete = 0`; this is recovery evidence, not a score.
+The restored fatal latch continues to quarantine ordinary stream callbacks,
+but an already-pending bounded bootstrap request (such as exact contract
+qualification) may complete so the replacement generation can open its
+raw-only recorder. Its original provider envelope retains the
+`callback_after_data_loss_latch` classification and becomes diagnostic; it
+cannot enter a scientific projection. A bootstrap provider envelope
+quarantined by an older executable may be retired only through the explicit
+bootstrap-envelope resolution operation, with exact failure classification,
+non-empty operator evidence, and an atomic operational incident. Live quote,
+bar, option, and depth envelopes are not eligible for that resolution.
 The fatal latch cannot be cleared by artifact, context, capability, or
 connection readiness. Every score, checkpoint, promotion, episode, and outcome
 projection remains disabled. An interrupted streaming option episode also creates one

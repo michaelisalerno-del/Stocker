@@ -566,3 +566,87 @@ def test_poison_resolution_requires_explicit_event_and_latch_evidence(
 
     assert not inbox.has_active_fatal("ingestion")
     assert inbox.accounting().pending == 1
+
+
+def test_bootstrap_provider_quarantine_has_audited_diagnostic_resolution(
+    tmp_path: Path,
+) -> None:
+    inbox = durable_inbox(migrated_database(tmp_path))
+    inbox.admit(
+        callback_kind="official_provider_contract_details",
+        request_id=7,
+        payload={"provider_arguments": [7, {"contract": "opaque"}]},
+        connection_generation=2,
+        classification=CallbackClassification.AFTER_DATA_LOSS_LATCH,
+        received_utc=NOW,
+        received_monotonic_ns=123,
+        inbox_event_id="provider-contract-details",
+        subscription_owner="exact_contract_qualification:7",
+        provider_envelope=True,
+    )
+    assert inbox.accounting().quarantined == 1
+
+    inbox.resolve_quarantined_bootstrap_provider_envelope(
+        inbox_event_id="provider-contract-details",
+        expected_failure_classification="callback_after_data_loss_latch",
+        resolution_evidence=(
+            "request was never materialised; exact contract qualification "
+            "will be reissued by the replacement generation"
+        ),
+        resolved_at=NOW + timedelta(seconds=1),
+    )
+
+    assert inbox.accounting().quarantined == 0
+    assert inbox.accounting().diagnostic == 1
+    with inbox._connect() as connection:
+        event = connection.execute(
+            """
+            SELECT status, acknowledgement_timestamp_utc, failure_classification
+            FROM callback_inbox_v1
+            WHERE inbox_event_id = 'provider-contract-details'
+            """
+        ).fetchone()
+        incident = connection.execute(
+            """
+            SELECT stable_error_code, evidence_loss_possible, details_json
+            FROM operational_incident_v1
+            WHERE stable_error_code =
+                  'CALLBACK_BOOTSTRAP_PROVIDER_QUARANTINE_RESOLVED'
+            """
+        ).fetchone()
+    assert event["status"] == "diagnostic"
+    assert event["acknowledgement_timestamp_utc"] == (NOW + timedelta(seconds=1)).isoformat()
+    assert event["failure_classification"] == "callback_after_data_loss_latch"
+    assert incident["evidence_loss_possible"] == 0
+    assert "exact contract qualification will be reissued" in incident["details_json"]
+
+
+def test_stream_provider_quarantine_cannot_be_retired_as_bootstrap_diagnostic(
+    tmp_path: Path,
+) -> None:
+    inbox = durable_inbox(migrated_database(tmp_path))
+    inbox.admit(
+        callback_kind="official_provider_tick_price",
+        request_id=7,
+        payload={"provider_arguments": [7, 1, 10.0]},
+        connection_generation=2,
+        classification=CallbackClassification.AFTER_DATA_LOSS_LATCH,
+        received_utc=NOW,
+        received_monotonic_ns=123,
+        inbox_event_id="provider-stream-quote",
+        subscription_owner="AAL:level1",
+        provider_envelope=True,
+    )
+
+    with pytest.raises(
+        CallbackInboxError,
+        match="CALLBACK_BOOTSTRAP_QUARANTINE_NOT_RESOLVABLE",
+    ):
+        inbox.resolve_quarantined_bootstrap_provider_envelope(
+            inbox_event_id="provider-stream-quote",
+            expected_failure_classification="callback_after_data_loss_latch",
+            resolution_evidence="must remain poison evidence",
+            resolved_at=NOW + timedelta(seconds=1),
+        )
+
+    assert inbox.accounting().quarantined == 1

@@ -994,6 +994,11 @@ class IBKRMarketDataAdapter:
                 }
                 else self._classify_callback(request_id, now=received_at)
             )
+            bounded_recovery_callback = (
+                classification is CallbackClassification.AFTER_DATA_LOSS_LATCH
+                and request_id >= 0
+                and self.callbacks.is_pending(request_id)
+            )
             provider_payload = {
                 "provider_arguments": _serialisable_provider_value(provider_arguments),
                 "provider_keywords": _serialisable_provider_value(dict(provider_keywords or {})),
@@ -1026,6 +1031,7 @@ class IBKRMarketDataAdapter:
                     symbol=self._symbol_from_owner(owner),
                     stream_owner=self._request_stream_owners.get(request_id),
                     provider_envelope=True,
+                    allow_after_data_loss_provider_processing=(bounded_recovery_callback),
                 )
                 self._latest_durably_admitted_sequence = admission.event.source_sequence
                 if admission.duplicate:
@@ -1035,10 +1041,10 @@ class IBKRMarketDataAdapter:
                 CallbackClassification.PREVIOUS_CONNECTION,
             }:
                 return
-            if classification in {
-                CallbackClassification.UNKNOWN,
-                CallbackClassification.AFTER_DATA_LOSS_LATCH,
-            }:
+            if classification is CallbackClassification.UNKNOWN or (
+                classification is CallbackClassification.AFTER_DATA_LOSS_LATCH
+                and not bounded_recovery_callback
+            ):
                 self._latch_callback_failure(
                     callback_kind=callback_kind,
                     request_id=request_id,

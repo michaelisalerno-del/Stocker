@@ -538,3 +538,80 @@ def test_restarted_adapter_restores_persisted_ingestion_latch(
 
     assert restarted.fatal_callback_code == "CALLBACK_UNKNOWN_REQUEST_ID"
     assert classifications(restarted_inbox)[-1] == "callback_after_data_loss_latch"
+
+
+def test_restarted_adapter_completes_bounded_bootstrap_request_under_latch(
+    tmp_path: Path,
+) -> None:
+    first, inbox = adapter(tmp_path)
+    activate(first)
+    first.contain_official_callback(
+        "tick_price",
+        999,
+        lambda: first.on_quote_update(999, {"field": "bid", "value": 10.0}),
+    )
+    assert inbox.has_active_fatal("ingestion")
+
+    restarted, restarted_inbox = adapter(tmp_path)
+    restarted._track_request(7, "exact_contract_qualification:7")
+    restarted.callbacks.begin(7, kind="exact_contract_qualification")
+    restarted.contain_official_callback(
+        "contract_details",
+        7,
+        lambda: restarted.on_contract_details(7, {"symbol": "AAL", "con_id": 1}),
+    )
+    restarted.contain_official_callback(
+        "contract_details_end",
+        7,
+        lambda: restarted.on_contract_details_end(7),
+    )
+
+    result = restarted.callbacks.wait(7, timeout_seconds=0.01)
+
+    assert result.complete is True
+    assert result.items == ({"symbol": "AAL", "con_id": 1},)
+    assert classifications(restarted_inbox)[-2:] == (
+        "callback_after_data_loss_latch",
+        "callback_after_data_loss_latch",
+    )
+    assert restarted_inbox.accounting().quarantined == 1
+    assert restarted.fatal_callback_code == "CALLBACK_UNKNOWN_REQUEST_ID"
+
+
+def test_restarted_adapter_quarantines_failed_bounded_bootstrap_callback(
+    tmp_path: Path,
+) -> None:
+    first, inbox = adapter(tmp_path)
+    activate(first)
+    first.contain_official_callback(
+        "tick_price",
+        999,
+        lambda: first.on_quote_update(999, {"field": "bid", "value": 10.0}),
+    )
+    assert inbox.has_active_fatal("ingestion")
+
+    restarted, restarted_inbox = adapter(tmp_path)
+    restarted._track_request(7, "exact_contract_qualification:7")
+    restarted.callbacks.begin(7, kind="exact_contract_qualification")
+
+    def fail_bootstrap_callback() -> None:
+        raise ValueError("malformed contract details")
+
+    restarted.contain_official_callback(
+        "contract_details",
+        7,
+        fail_bootstrap_callback,
+    )
+
+    assert restarted_inbox.accounting().quarantined == 2
+    assert restarted.fatal_callback_code == "CALLBACK_UNKNOWN_REQUEST_ID"
+    with restarted_inbox._connect() as connection:
+        failure = connection.execute(
+            """
+            SELECT failure_classification
+            FROM callback_inbox_v1
+            WHERE callback_kind = 'official_provider_contract_details'
+            ORDER BY source_sequence DESC LIMIT 1
+            """
+        ).fetchone()
+    assert failure["failure_classification"] == "CALLBACK_MALFORMED_VALUE"

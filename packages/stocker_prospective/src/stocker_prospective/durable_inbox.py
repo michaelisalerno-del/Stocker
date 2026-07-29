@@ -368,6 +368,7 @@ class DurableCallbackInbox:
         diagnostic: bool = False,
         provider_envelope: bool = False,
         provider_envelope_event_id: str | None = None,
+        allow_after_data_loss_provider_processing: bool = False,
     ) -> InboxAdmissionResult:
         """Commit the original serialisable callback before returning it."""
 
@@ -409,8 +410,17 @@ class DurableCallbackInbox:
         received_encoded = received.isoformat()
         if provider_envelope and provider_envelope_event_id is not None:
             raise ValueError("a provider envelope cannot reference another provider envelope")
+        if allow_after_data_loss_provider_processing and (
+            not provider_envelope
+            or classification is not CallbackClassification.AFTER_DATA_LOSS_LATCH
+        ):
+            raise ValueError(
+                "after-data-loss processing is restricted to original provider envelopes"
+            )
         initial_status = (
-            InboxStatus.DIAGNOSTIC
+            InboxStatus.PROVIDER_PENDING
+            if allow_after_data_loss_provider_processing
+            else InboxStatus.DIAGNOSTIC
             if diagnostic
             else InboxStatus.DIAGNOSTIC
             if classification
@@ -1145,6 +1155,121 @@ class DurableCallbackInbox:
                 "resolution_evidence": evidence,
             },
         )
+
+    def resolve_quarantined_bootstrap_provider_envelope(
+        self,
+        *,
+        inbox_event_id: str,
+        expected_failure_classification: str,
+        resolution_evidence: str,
+        resolved_at: datetime,
+    ) -> None:
+        """Retire a non-scientific bootstrap envelope with atomic audit evidence."""
+
+        evidence = resolution_evidence.strip()
+        expected_failure = expected_failure_classification.strip()
+        if not evidence:
+            raise ValueError("provider-envelope resolution evidence is required")
+        if not expected_failure:
+            raise ValueError("expected provider-envelope failure is required")
+        observed = _utc(resolved_at, label="provider-envelope resolution timestamp")
+        allowed_kinds = {
+            "official_provider_contract_details",
+            "official_provider_contract_details_end",
+        }
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT *
+                FROM callback_inbox_v1
+                WHERE inbox_event_id = ? AND admission_run_id IS ?
+                """,
+                (inbox_event_id, self.run_id),
+            ).fetchone()
+            if row is None or str(row["status"]) != InboxStatus.QUARANTINED.value:
+                connection.rollback()
+                raise CallbackInboxError("CALLBACK_BOOTSTRAP_QUARANTINE_RESOLUTION_CHANGED")
+            callback_kind = str(row["callback_kind"])
+            if callback_kind not in allowed_kinds or row["provider_envelope_event_id"] is not None:
+                connection.rollback()
+                raise CallbackInboxError("CALLBACK_BOOTSTRAP_QUARANTINE_NOT_RESOLVABLE")
+            if str(row["failure_classification"]) != expected_failure:
+                connection.rollback()
+                raise CallbackInboxError("CALLBACK_BOOTSTRAP_QUARANTINE_FAILURE_CHANGED")
+            cursor = connection.execute(
+                """
+                UPDATE callback_inbox_v1
+                SET status = 'diagnostic',
+                    acknowledgement_timestamp_utc = ?,
+                    lease_owner = NULL,
+                    lease_timestamp_utc = NULL,
+                    updated_at_utc = ?
+                WHERE inbox_event_id = ? AND admission_run_id IS ?
+                  AND status = 'quarantined'
+                  AND failure_classification = ?
+                """,
+                (
+                    observed.isoformat(),
+                    observed.isoformat(),
+                    inbox_event_id,
+                    self.run_id,
+                    expected_failure,
+                ),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                raise CallbackInboxError("CALLBACK_BOOTSTRAP_QUARANTINE_RESOLUTION_CHANGED")
+            details_json = _encoded(
+                {
+                    "inbox_event_id": inbox_event_id,
+                    "original_failure_classification": expected_failure,
+                    "resolution_evidence": evidence,
+                    "replacement_generation_must_reissue_request": True,
+                    "scientific_projection_permitted": False,
+                }
+            )
+            incident_id = hashlib.sha256(
+                "|".join(
+                    (
+                        "CALLBACK_BOOTSTRAP_PROVIDER_QUARANTINE_RESOLVED",
+                        str(self.run_id),
+                        inbox_event_id,
+                        observed.isoformat(),
+                        details_json,
+                    )
+                ).encode()
+            ).hexdigest()
+            connection.execute(
+                """
+                INSERT INTO operational_incident_v1(
+                    incident_id, run_id, recorder_generation,
+                    connection_generation, occurred_at_utc, component,
+                    severity, stable_error_code, callback_kind, request_id,
+                    source_sequence, subscription_owner, symbol, error_class,
+                    evidence_loss_possible, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    incident_id,
+                    self.run_id,
+                    int(row["admission_recorder_generation"]),
+                    int(row["connection_generation"]),
+                    observed.isoformat(),
+                    "durable_callback_inbox",
+                    "diagnostic",
+                    "CALLBACK_BOOTSTRAP_PROVIDER_QUARANTINE_RESOLVED",
+                    callback_kind,
+                    int(row["request_id"]),
+                    int(row["source_sequence"]),
+                    row["subscription_owner"],
+                    row["symbol"],
+                    "OperatorBootstrapResolution",
+                    0,
+                    details_json,
+                ),
+            )
+            connection.commit()
 
     def resolve_fatal_latch(
         self,

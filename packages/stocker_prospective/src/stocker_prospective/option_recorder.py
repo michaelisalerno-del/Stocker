@@ -37,6 +37,7 @@ from stocker_prospective.safety import (
 )
 from stocker_prospective.short_premium_shadow import (
     CreditShadowOutcome,
+    DefinedRiskStructure,
     calculate_credit_shadow,
     select_delta_iron_condor,
     select_fixed_width_credit_spread,
@@ -136,6 +137,63 @@ def _required_quote_matrix_completion(
         and complete_required == required
         and not subscription_gap_spans_horizon,
     )
+
+
+def _quiet_virtual_leg_evidence(
+    *,
+    structure: DefinedRiskStructure,
+    entry_surface: tuple[OptionQuoteEvent, ...],
+    exit_surface: tuple[OptionQuoteEvent, ...],
+) -> list[dict[str, object]]:
+    """Freeze the exact bid/ask inputs behind one quiet structure outcome."""
+
+    entry_by_con_id = {quote.con_id: quote for quote in entry_surface}
+    exit_by_con_id = {quote.con_id: quote for quote in exit_surface}
+    evidence: list[dict[str, object]] = []
+    for leg in structure.legs:
+        con_id = int(leg.contract.con_id or 0)
+        entry_quote = entry_by_con_id.get(con_id)
+        exit_quote = exit_by_con_id.get(con_id)
+        entry_fill = (
+            None
+            if entry_quote is None
+            else entry_quote.bid
+            if leg.side == "short"
+            else entry_quote.ask
+        )
+        exit_fill = (
+            None
+            if exit_quote is None
+            else exit_quote.ask
+            if leg.side == "short"
+            else exit_quote.bid
+        )
+        evidence.append(
+            {
+                "side": leg.side,
+                "con_id": leg.contract.con_id,
+                "expiry": leg.contract.expiry.isoformat(),
+                "dte": leg.contract.dte,
+                "dte_bucket": leg.contract.dte_bucket.value,
+                "strike": leg.contract.strike,
+                "right": leg.contract.right,
+                "multiplier": leg.contract.multiplier,
+                "target_delta": leg.target_delta,
+                "entry_quote_timestamp_utc": (
+                    None if entry_quote is None else entry_quote.ordering_timestamp.isoformat()
+                ),
+                "entry_bid": None if entry_quote is None else entry_quote.bid,
+                "entry_ask": None if entry_quote is None else entry_quote.ask,
+                "entry_fill_price": entry_fill,
+                "exit_quote_timestamp_utc": (
+                    None if exit_quote is None else exit_quote.ordering_timestamp.isoformat()
+                ),
+                "exit_bid": None if exit_quote is None else exit_quote.bid,
+                "exit_ask": None if exit_quote is None else exit_quote.ask,
+                "exit_fill_price": exit_fill,
+            }
+        )
+    return evidence
 
 
 class OptionEpisodeFinalization(BaseModel):
@@ -1332,16 +1390,11 @@ class BoundedOptionRecorder:
                     flags.add("subscription_gap_spans_horizon")
                 payload: dict[str, object] = {
                     **outcome.model_dump(mode="json"),
-                    "legs": [
-                        {
-                            "side": leg.side,
-                            "con_id": leg.contract.con_id,
-                            "strike": leg.contract.strike,
-                            "right": leg.contract.right,
-                            "target_delta": leg.target_delta,
-                        }
-                        for leg in structure.legs
-                    ],
+                    "legs": _quiet_virtual_leg_evidence(
+                        structure=structure,
+                        entry_surface=entry_surface,
+                        exit_surface=exit_surface,
+                    ),
                 }
                 self.repository.record_quiet_shadow_structure(
                     metadata,

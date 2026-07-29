@@ -39,7 +39,7 @@ def create_pre_hardening_database(path: Path) -> None:
             """
         )
         for migration in sorted(MIGRATION_ROOT.glob("*.sql")):
-            if migration.name.startswith(("0016_", "0017_", "0018_")):
+            if migration.name.startswith(("0016_", "0017_", "0018_", "0019_")):
                 continue
             connection.executescript(migration.read_text(encoding="utf-8"))
             connection.execute(
@@ -136,6 +136,12 @@ def test_pre_hardening_database_migrates_forward_without_deleting_legacy_data(
             WHERE version = '0018_virtual_position_ledgers_v1.sql'
             """
         ).fetchone() == (1,)
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM schema_migrations
+            WHERE version = '0019_virtual_position_ledger_evidence_v1.sql'
+            """
+        ).fetchone() == (1,)
         for table in (
             "callback_inbox_v1",
             "callback_raw_materialization_v1",
@@ -206,6 +212,7 @@ def test_database_with_0016_already_applied_receives_0017_columns(
                 WHERE version LIKE '0016_%'
                    OR version LIKE '0017_%'
                    OR version LIKE '0018_%'
+                   OR version LIKE '0019_%'
                 """
             )
         }
@@ -232,6 +239,7 @@ def test_database_with_0016_already_applied_receives_0017_columns(
         "0016_prospective_recorder_hardening_v1.sql",
         "0017_callback_raw_only_recovery_v1.sql",
         "0018_virtual_position_ledgers_v1.sql",
+        "0019_virtual_position_ledger_evidence_v1.sql",
     }
     assert "stream_owner_json" in inbox_columns
     assert {
@@ -247,6 +255,66 @@ def test_database_with_0016_already_applied_receives_0017_columns(
         "trg_opening_reversal_v1_1_outcome_immutable",
     }.isdisjoint(trigger_names)
     assert legacy_gap_count == (17,)
+
+
+def test_database_already_on_0018_receives_forward_replaced_ledger_views(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "already-on-0018.sqlite3"
+    create_pre_hardening_database(path)
+    with sqlite3.connect(path) as connection:
+        for migration_name in (
+            "0016_prospective_recorder_hardening_v1.sql",
+            "0017_callback_raw_only_recovery_v1.sql",
+            "0018_virtual_position_ledgers_v1.sql",
+        ):
+            migration = MIGRATION_ROOT / migration_name
+            connection.executescript(migration.read_text(encoding="utf-8"))
+            connection.execute(
+                """
+                INSERT INTO schema_migrations(version, applied_at_utc)
+                VALUES (?, ?)
+                """,
+                (migration.name, NOW.isoformat()),
+            )
+        connection.executescript(
+            """
+            DROP VIEW opening_reversal_virtual_position_v1;
+            DROP VIEW quiet_state_virtual_position_v1;
+            CREATE VIEW opening_reversal_virtual_position_v1 AS
+            SELECT 'stale' AS stale_marker;
+            CREATE VIEW quiet_state_virtual_position_v1 AS
+            SELECT 'stale' AS stale_marker;
+            """
+        )
+
+    ProspectiveRepository(path).migrate()
+
+    with sqlite3.connect(path) as connection:
+        versions = {
+            str(row[0])
+            for row in connection.execute(
+                """
+                SELECT version FROM schema_migrations
+                WHERE version LIKE '0019_%'
+                """
+            )
+        }
+        opening_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(opening_reversal_virtual_position_v1)")
+        }
+        quiet_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(quiet_state_virtual_position_v1)")
+        }
+    assert versions == {"0019_virtual_position_ledger_evidence_v1.sql"}
+    assert {
+        "option_schedule_status",
+        "predicted_outcome_present",
+        "opposite_outcome_present",
+    }.issubset(opening_columns)
+    assert {"legs_json", "conservative_fill_convention"}.issubset(quiet_columns)
 
 
 def test_migration_makes_legacy_discovery_identity_immutable(

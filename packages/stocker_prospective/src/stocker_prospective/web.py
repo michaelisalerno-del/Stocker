@@ -936,23 +936,39 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "claims_boundary": claims_boundary(),
         }
 
-    @app.get("/api/virtual-ledgers")
-    def virtual_ledgers() -> dict[str, Any]:
-        """Expose two segregated evidence ledgers without broker semantics."""
+    def _virtual_ledgers_projection(
+        *,
+        opening_limit: int,
+        quiet_limit: int,
+        quiet_capture_limit: int,
+    ) -> dict[str, Any]:
+        """Build a bounded projection of segregated virtual evidence."""
 
         return {
             "opening_reversal": {
                 "ledger_scope": "opening_reversal_v1_1",
-                "items": store.opening_reversal_virtual_positions_v1(),
+                "items": store.opening_reversal_virtual_positions_v1(
+                    limit=opening_limit,
+                ),
+                "item_limit": opening_limit,
                 "entry_convention": "first_valid_live_ask_at_or_after_entry",
-                "exit_convention": ("last_valid_live_bid_at_or_before_frozen_15m_horizon"),
+                "exit_convention": ("first_valid_live_bid_at_or_after_frozen_15m_horizon"),
                 "quantity": 1,
                 "opposite_leg_is_control_only": True,
             },
             "quiet_state": {
                 "ledger_scope": "quiet_state_short_premium",
-                "items": store.quiet_state_virtual_positions_v1(),
+                "capture_ledger_scope": "quiet_state_short_premium_capture",
+                "capture_items": store.quiet_state_virtual_captures_v1(
+                    limit=quiet_capture_limit,
+                ),
+                "capture_item_limit": quiet_capture_limit,
+                "items": store.quiet_state_virtual_positions_v1(
+                    limit=quiet_limit,
+                ),
+                "item_limit": quiet_limit,
                 "fill_convention": ("open_short_bid_long_ask_close_short_ask_long_bid"),
+                "latest_quotes_are_diagnostic_only": True,
                 "controls_included": False,
                 "long_option_candidates_included": False,
             },
@@ -961,6 +977,23 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "broker_positions_claimed": False,
             "claims_boundary": claims_boundary(),
         }
+
+    @app.get("/api/virtual-ledgers")
+    def virtual_ledgers(
+        opening_limit: int = 200,
+        quiet_limit: int = 500,
+        quiet_capture_limit: int = 50,
+    ) -> dict[str, Any]:
+        """Expose bounded segregated evidence ledgers without broker semantics."""
+
+        requested_limits = (opening_limit, quiet_limit, quiet_capture_limit)
+        if any(limit < 1 or limit > 1000 for limit in requested_limits):
+            raise HTTPException(status_code=422, detail="virtual_ledger_limit_out_of_range")
+        return _virtual_ledgers_projection(
+            opening_limit=opening_limit,
+            quiet_limit=quiet_limit,
+            quiet_capture_limit=quiet_capture_limit,
+        )
 
     @app.get("/api/audit/events")
     def audit_events() -> dict[str, Any]:
@@ -1051,7 +1084,11 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "universe": universe_live,
             "episodes": episodes,
             "shadow": shadow_outcomes,
-            "virtual_ledgers": virtual_ledgers,
+            "virtual_ledgers": lambda: _virtual_ledgers_projection(
+                opening_limit=25,
+                quiet_limit=50,
+                quiet_capture_limit=25,
+            ),
             "audit": audit_events,
             "session_reports": recorder_session_reports,
             "quiet_status": quiet_state_status,

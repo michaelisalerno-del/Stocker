@@ -5,10 +5,13 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from stocker_prospective.contract import CLAIMS_BOUNDARY
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
+from stocker_prospective.events import OptionQuoteEvent
 from stocker_prospective.frozen_m1c import FrozenM1CScore
+from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.option_ledger import OptionContract, OptionContractPlan
 from stocker_prospective.options import DteBucket
 from stocker_prospective.quiet_state import (
@@ -18,6 +21,7 @@ from stocker_prospective.quiet_state import (
 )
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
+from stocker_prospective.virtual_positions import QuietStateVirtualPositionV1
 
 START = datetime(2026, 7, 27, 14, 0, tzinfo=UTC)
 SESSION = date(2026, 7, 27)
@@ -452,14 +456,214 @@ def test_quiet_virtual_ledger_contains_only_quiet_short_premium_structures(
         ),
         scientific_recording_valid=True,
     )
+    read_store = ProspectiveReadStore(
+        database.database_path,
+        run_id=metadata.run_id,
+    )
+    scheduled = read_store.quiet_state_virtual_captures_v1()
+    assert len(scheduled) == 1
+    assert scheduled[0]["lifecycle_state"] == "SCHEDULED"
+    assert scheduled[0]["contracts"] == []
+
+    capture_contracts = (
+        OptionContract(
+            underlying_con_id=1,
+            con_id=101,
+            expiry=SESSION + timedelta(days=1),
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=102.0,
+            right="C",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        ),
+        OptionContract(
+            underlying_con_id=1,
+            con_id=102,
+            expiry=SESSION + timedelta(days=1),
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=98.0,
+            right="P",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        ),
+        OptionContract(
+            underlying_con_id=1,
+            con_id=103,
+            expiry=SESSION + timedelta(days=1),
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=105.0,
+            right="C",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        ),
+        OptionContract(
+            underlying_con_id=1,
+            con_id=104,
+            expiry=SESSION + timedelta(days=1),
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=95.0,
+            right="P",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        ),
+    )
+    repository.record_quiet_option_plan(
+        metadata,
+        observation_id=observation_id,
+        plan=OptionContractPlan(
+            contracts=capture_contracts,
+            requested_contract_count=4,
+            maximum_contracts=4,
+            capacity_reduced=False,
+            missing_buckets=(),
+        ),
+    )
+    first_contract_id: int | None = None
+    for rank, contract in enumerate(capture_contracts, start=1):
+        contract_id = repository.record_quiet_option_contract(
+            metadata,
+            observation_id=observation_id,
+            contract=contract,
+            selection_rank=rank,
+            selection_roles=("quiet_short_premium_candidate",),
+            resolution_status="recording",
+            rejection_reason=None,
+            recording_started_at_utc=START,
+            recording_ends_at_utc=START + timedelta(minutes=60),
+        )
+        if first_contract_id is None:
+            first_contract_id = contract_id
+    assert first_contract_id is not None
+    repository.update_quiet_option_quote_projection(
+        option_contract_id=first_contract_id,
+        event=OptionQuoteEvent(
+            event_id="quiet-ledger-current-quote",
+            received_timestamp_utc=START + timedelta(minutes=5),
+            received_monotonic_ns=1,
+            provider_timestamp_utc=START + timedelta(minutes=5),
+            source_sequence=1,
+            session=SESSION,
+            symbol="AAL",
+            con_id=101,
+            request_id=101,
+            episode_id=observation_id,
+            expiry=SESSION + timedelta(days=1),
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=102.0,
+            right="C",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+            bid=1.0,
+            bid_size=10.0,
+            ask=1.1,
+            ask_size=12.0,
+            last=1.05,
+            last_size=1.0,
+            market_data_type=MarketDataType.LIVE,
+        ),
+        recording_status="recording",
+        quote_quality_flags=(),
+    )
+    capturing = read_store.quiet_state_virtual_captures_v1()
+    assert len(capturing) == 1
+    assert capturing[0]["lifecycle_state"] == "CAPTURING"
+    assert len(capturing[0]["contracts"]) == 4
+    assert capturing[0]["contracts"][0]["latest_bid"] == pytest.approx(1.0)
+    assert capturing[0]["contracts"][0]["latest_ask"] == pytest.approx(1.1)
+    assert capturing[0]["latest_quotes_are_diagnostic_only"] is True
+    assert capturing[0]["execution_claimed"] is False
+    assert capturing[0]["paper_fill_claimed"] is False
+
     payload = {
         "closing_debit": 40.0,
-        "configured_commission_pnl": 7.4,
+        "configured_commission_pnl": 4.8,
         "legs": [
-            {"side": "short", "con_id": 101, "strike": 100.0, "right": "C"},
-            {"side": "short", "con_id": 102, "strike": 100.0, "right": "P"},
-            {"side": "long", "con_id": 103, "strike": 105.0, "right": "C"},
-            {"side": "long", "con_id": 104, "strike": 95.0, "right": "P"},
+            {
+                "side": "short",
+                "con_id": 101,
+                "expiry": (SESSION + timedelta(days=1)).isoformat(),
+                "dte": 1,
+                "dte_bucket": "1DTE",
+                "strike": 102.0,
+                "right": "C",
+                "multiplier": 100,
+                "target_delta": 0.25,
+                "entry_quote_timestamp_utc": START.isoformat(),
+                "entry_bid": 1.0,
+                "entry_ask": 1.1,
+                "entry_fill_price": 1.0,
+                "exit_quote_timestamp_utc": (START + timedelta(minutes=15)).isoformat(),
+                "exit_bid": 0.5,
+                "exit_ask": 0.6,
+                "exit_fill_price": 0.6,
+            },
+            {
+                "side": "short",
+                "con_id": 102,
+                "expiry": (SESSION + timedelta(days=1)).isoformat(),
+                "dte": 1,
+                "dte_bucket": "1DTE",
+                "strike": 98.0,
+                "right": "P",
+                "multiplier": 100,
+                "target_delta": -0.25,
+                "entry_quote_timestamp_utc": START.isoformat(),
+                "entry_bid": 1.0,
+                "entry_ask": 1.1,
+                "entry_fill_price": 1.0,
+                "exit_quote_timestamp_utc": (START + timedelta(minutes=15)).isoformat(),
+                "exit_bid": 0.5,
+                "exit_ask": 0.6,
+                "exit_fill_price": 0.6,
+            },
+            {
+                "side": "long",
+                "con_id": 103,
+                "expiry": (SESSION + timedelta(days=1)).isoformat(),
+                "dte": 1,
+                "dte_bucket": "1DTE",
+                "strike": 105.0,
+                "right": "C",
+                "multiplier": 100,
+                "target_delta": 0.10,
+                "entry_quote_timestamp_utc": START.isoformat(),
+                "entry_bid": 0.65,
+                "entry_ask": 0.75,
+                "entry_fill_price": 0.75,
+                "exit_quote_timestamp_utc": (START + timedelta(minutes=15)).isoformat(),
+                "exit_bid": 0.4,
+                "exit_ask": 0.5,
+                "exit_fill_price": 0.4,
+            },
+            {
+                "side": "long",
+                "con_id": 104,
+                "expiry": (SESSION + timedelta(days=1)).isoformat(),
+                "dte": 1,
+                "dte_bucket": "1DTE",
+                "strike": 95.0,
+                "right": "P",
+                "multiplier": 100,
+                "target_delta": -0.10,
+                "entry_quote_timestamp_utc": START.isoformat(),
+                "entry_bid": 0.65,
+                "entry_ask": 0.75,
+                "entry_fill_price": 0.75,
+                "exit_quote_timestamp_utc": (START + timedelta(minutes=15)).isoformat(),
+                "exit_bid": 0.4,
+                "exit_ask": 0.5,
+                "exit_fill_price": 0.4,
+            },
         ],
     }
     for structure_type in ("DELTA_IRON_CONDOR", "LONG_CALL"):
@@ -501,11 +705,47 @@ def test_quiet_virtual_ledger_contains_only_quiet_short_premium_structures(
     assert row["execution_claimed"] == 0
     assert row["paper_fill_claimed"] == 0
 
-    projected = ProspectiveReadStore(
-        database.database_path,
-        run_id=metadata.run_id,
-    ).quiet_state_virtual_positions_v1()
+    projected = read_store.quiet_state_virtual_positions_v1()
     assert len(projected) == 1
     assert projected[0]["structure_type"] == "DELTA_IRON_CONDOR"
     assert projected[0]["legs"][0]["side"] == "short"
     assert projected[0]["conservative_pnl"] == pytest.approx(10.0)
+
+    invalid_projection = dict(projected[0])
+    invalid_legs = [dict(leg) for leg in projected[0]["legs"]]
+    invalid_legs[0]["right"] = "P"
+    invalid_projection["legs"] = invalid_legs
+    with pytest.raises(ValidationError, match="composition is invalid"):
+        QuietStateVirtualPositionV1.model_validate(invalid_projection)
+
+    repository.record_quiet_shadow_structure(
+        metadata,
+        observation_id=observation_id,
+        structure_type="CALL_CREDIT_SPREAD",
+        dte_bucket="1DTE",
+        horizon_label="15m",
+        horizon_minutes=15,
+        payload={
+            "closing_debit": 5.0,
+            "configured_commission_pnl": 3.0,
+        },
+        opening_credit_or_debit=10.0,
+        maximum_defined_risk=490.0,
+        conservative_pnl=5.0,
+        return_on_maximum_risk=5.0 / 490.0,
+        short_strike_touched=False,
+        protective_wing_touched=False,
+        attempted=True,
+        complete_quote_quality=True,
+        strict_quote_quality=True,
+        quality_status="strict_quality",
+        quality_flags=(),
+    )
+    incomplete = next(
+        item
+        for item in read_store.quiet_state_virtual_positions_v1()
+        if item["structure_type"] == "CALL_CREDIT_SPREAD"
+    )
+    assert incomplete["lifecycle_state"] == "INVALID"
+    assert incomplete["status_reason"] == "immutable_leg_quote_evidence_incomplete"
+    assert incomplete["legs"] == []

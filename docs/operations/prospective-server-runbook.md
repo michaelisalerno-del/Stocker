@@ -1224,7 +1224,10 @@ overlaps requests, aborts an obsolete request, and pauses while hidden. Episode
 details load only when selection changes or an operator explicitly refreshes
 them. A section-level error leaves other snapshot sections visible. The UI
 shows the last successful snapshot and distinguishes stale from unavailable
-data.
+data. Its ledger section is bounded: the quiet capture table shows the latest
+persisted bid/ask for each selected quiet contract, while the finalized quiet
+table shows immutable per-leg quote evidence and conservative virtual P&L.
+Neither table represents an IBKR account or order.
 
 ## Gap incident lifecycle
 
@@ -1249,7 +1252,7 @@ evidence without its own audit.
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
-| Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation, strict contract evidence, and completed bid/ask outcomes. Inspect the corresponding capture or invalid reason; do not manufacture a position from configuration, a latest quote, or a partial leg. |
+| Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation and bounded contract plan. The quiet capture table may show current persisted bid/ask before a structure closes; a finalized row additionally requires complete immutable per-leg entry/exit quotes. Inspect the wait/invalid reason and never manufacture a position from configuration, a latest quote, or a partial leg. |
 
 ## Secure browser access
 

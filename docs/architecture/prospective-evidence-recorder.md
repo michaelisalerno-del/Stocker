@@ -361,7 +361,7 @@ The opposite leg remains control evidence. A row stays `SCHEDULED` before
 contract discovery and `CAPTURING` while the exact two-line call/put evidence
 is incomplete. It becomes `CLOSED` only when both same-strike primary outcomes
 are complete; its virtual entry is the first valid live ask and its frozen
-15-minute exit is the last valid live bid at or before the horizon. Missing
+15-minute exit is the first valid live bid at or after the horizon. Missing
 or invalid evidence produces `INVALID`, never a synthetic zero or fill.
 
 The quiet-state ledger is a different projection with a different identity.
@@ -370,9 +370,16 @@ structures: ATM iron butterfly, delta iron condor, call credit spread, and put
 credit spread. Long-option candidates, straddles, neutral controls, and
 high-tail controls do not enter it. Opening short bids/long asks and closing
 short asks/long bids remain the conservative convention. Each structure and
-horizon remains a separate research outcome.
+horizon remains a separate research outcome. Before finalization, a separate
+quiet capture projection shows the bounded option plan and each contract's
+latest durably persisted bid and ask. Those latest quotes are diagnostics, not
+fills; a finalized outcome freezes the exact per-leg entry and exit bid/ask,
+timestamps, conservative quote side, expiry, strike, DTE, and multiplier used
+to calculate its virtual P&L.
 
-The API returns these as separate collections and publishes no combined total.
+The API returns these as separate, bounded collections and publishes no
+combined total. The main dashboard snapshot uses smaller limits than the
+on-demand ledger route so polling cannot repeatedly render the full history.
 The web process obtains both with its query-only SQLite connection and cannot
 receive the recorder, adapter, or any mutable database object.
 
@@ -423,7 +430,11 @@ adding typed callback-owner receipts and the explicit normal-versus-raw-only
 processing disposition for crash recovery.
 Migration `0018` adds the two read-only virtual-ledger views over existing
 immutable V1.1 and quiet-state evidence. It adds no mutable trading or account
-state and preserves the experiment boundary in the SQL predicates.
+state and preserves the experiment boundary in the SQL predicates. Migration
+`0019` forward-replaces those views for databases already on `0018`, adding
+role-aware partial-pair status, exact frozen quote-timing labels, terminal
+schedule handling, and fail-closed immutable quiet-leg evidence checks without
+changing any source evidence row.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

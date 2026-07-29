@@ -460,6 +460,7 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     assert 'id="concentration-audit"' in page.text
     assert 'id="virtual-ledgers"' in page.text
     assert 'id="opening-reversal-virtual-ledger"' in page.text
+    assert 'id="quiet-state-capture-ledger"' in page.text
     assert 'id="quiet-state-virtual-ledger"' in page.text
     assert "VIRTUAL EVIDENCE — NOT BROKER POSITIONS" in page.text
     assert "BLOCKED_INSUFFICIENT_LOW_TAIL_SUPPORT" in page.text
@@ -481,6 +482,8 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     assert "innerHTML" not in script
     assert "renderConcentrationAudit" in script
     assert "renderVirtualLedgers" in script
+    assert '{ label: "Entry bid", value: "entry_bid" }' in script
+    assert '{ label: "Exit ask", value: "exit_ask" }' in script
 
     for path in (
         "/api/recorder/status",
@@ -536,6 +539,10 @@ def test_dashboard_snapshot_is_one_consistent_projection(tmp_path: Path) -> None
     } == set(payload["sections"])
     assert payload["sections"]["health"]["recorder"]["run_id"] == "replay-run-001"
     assert payload["sections"]["status"]["run_id"] == "replay-run-001"
+    ledgers = payload["sections"]["virtual_ledgers"]
+    assert ledgers["opening_reversal"]["item_limit"] == 25
+    assert ledgers["quiet_state"]["item_limit"] == 50
+    assert ledgers["quiet_state"]["capture_item_limit"] == 25
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-correlation-id"]
 
@@ -552,7 +559,13 @@ def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> N
     assert (
         payload["opening_reversal"]["entry_convention"] == "first_valid_live_ask_at_or_after_entry"
     )
+    assert (
+        payload["opening_reversal"]["exit_convention"]
+        == "first_valid_live_bid_at_or_after_frozen_15m_horizon"
+    )
     assert payload["quiet_state"]["ledger_scope"] == "quiet_state_short_premium"
+    assert payload["quiet_state"]["capture_ledger_scope"] == "quiet_state_short_premium_capture"
+    assert payload["quiet_state"]["capture_items"] == []
     assert payload["quiet_state"]["items"] == []
     assert (
         payload["quiet_state"]["fill_convention"]
@@ -562,6 +575,24 @@ def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> N
     assert payload["execution_claimed"] is False
     assert payload["broker_positions_claimed"] is False
     assert payload["claims_boundary"] == claims_boundary()
+
+    bounded = client.get(
+        "/api/virtual-ledgers",
+        params={
+            "opening_limit": 1,
+            "quiet_limit": 1,
+            "quiet_capture_limit": 1,
+        },
+    )
+    assert bounded.status_code == 200
+    assert bounded.json()["quiet_state"]["capture_item_limit"] == 1
+    assert (
+        client.get(
+            "/api/virtual-ledgers",
+            params={"quiet_capture_limit": 1001},
+        ).status_code
+        == 422
+    )
 
 
 def test_optional_snapshot_section_failure_preserves_other_sections(

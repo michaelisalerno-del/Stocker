@@ -664,7 +664,25 @@ function renderShadow() {
 
 function renderVirtualLedgers() {
   const opening = state.virtualLedgers.opening_reversal?.items || [];
+  const quietCaptures = state.virtualLedgers.quiet_state?.capture_items || [];
   const quiet = state.virtualLedgers.quiet_state?.items || [];
+  const quietCaptureRows = quietCaptures.flatMap((capture) => {
+    const contracts = capture.contracts || [];
+    const summary = {
+      lifecycle_state: capture.lifecycle_state,
+      session_date: capture.session_date,
+      symbol: capture.symbol,
+      observation_id: capture.observation_id,
+      status_reason: capture.status_reason,
+    };
+    if (!contracts.length) return [summary];
+    return contracts.map((contract) => ({ ...summary, ...contract }));
+  });
+  const quietFinalRows = quiet.flatMap((position) => {
+    const legs = position.legs || [];
+    if (!legs.length) return [position];
+    return legs.map((leg) => ({ ...position, ...leg }));
+  });
   replace("opening-reversal-virtual-ledger", table(
     [
       { label: "State", value: "lifecycle_state" },
@@ -685,6 +703,25 @@ function renderVirtualLedgers() {
     ],
     opening,
   ));
+  replace("quiet-state-capture-ledger", table(
+    [
+      { label: "State", value: "lifecycle_state" },
+      { label: "Session", value: "session_date" },
+      { label: "Symbol", value: "symbol" },
+      { label: "Observation", value: "observation_id", format: short },
+      { label: "Contract", value: "con_id" },
+      { label: "Right", value: "right" },
+      { label: "Strike", value: "strike" },
+      { label: "DTE", value: "dte_bucket" },
+      { label: "Latest bid", value: "latest_bid" },
+      { label: "Latest ask", value: "latest_ask" },
+      { label: "Quote received", value: "latest_quote_received_at_utc", format: clock },
+      { label: "Market data", value: "latest_market_data_type" },
+      { label: "Recording", value: "latest_recording_status" },
+      { label: "Blocker / wait", value: "status_reason" },
+    ],
+    quietCaptureRows,
+  ));
   replace("quiet-state-virtual-ledger", table(
     [
       { label: "State", value: "lifecycle_state" },
@@ -693,17 +730,22 @@ function renderVirtualLedgers() {
       { label: "Structure", value: "structure_type" },
       { label: "DTE", value: "dte_bucket" },
       { label: "Horizon", value: "horizon_label" },
-      { label: "Legs", value: "leg_count" },
-      { label: "Opening credit", value: "opening_net_credit" },
-      { label: "Closing debit", value: "closing_net_debit" },
-      { label: "Conservative P&L", value: "conservative_pnl" },
-      { label: "Commission P&L", value: "configured_commission_pnl" },
-      { label: "Max risk", value: "maximum_defined_risk" },
+      { label: "Leg", value: "side" },
+      { label: "Contract", value: "con_id" },
+      { label: "Right", value: "right" },
+      { label: "Strike", value: "strike" },
+      { label: "Entry bid", value: "entry_bid" },
+      { label: "Entry ask", value: "entry_ask" },
+      { label: "Entry side", value: "entry_fill_price" },
+      { label: "Exit bid", value: "exit_bid" },
+      { label: "Exit ask", value: "exit_ask" },
+      { label: "Exit side", value: "exit_fill_price" },
+      { label: "Structure P&L", value: "conservative_pnl" },
       { label: "Quality", value: "quality_status" },
       { label: "Scientific", value: "scientific_option_evidence" },
       { label: "Blocker", value: "status_reason" },
     ],
-    quiet,
+    quietFinalRows,
   ));
 }
 

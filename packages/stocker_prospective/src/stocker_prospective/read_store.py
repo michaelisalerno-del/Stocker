@@ -30,6 +30,7 @@ from stocker_prospective.quiet_state import (
 )
 from stocker_prospective.virtual_positions import (
     OpeningReversalVirtualPositionV1,
+    QuietStateVirtualCaptureV1,
     QuietStateVirtualPositionV1,
 )
 
@@ -1192,7 +1193,7 @@ class ProspectiveReadStore:
     def opening_reversal_virtual_positions_v1(
         self,
         *,
-        limit: int = 1000,
+        limit: int = 200,
     ) -> list[dict[str, Any]]:
         """Return only strict V1.1 predicted-leg virtual position evidence."""
 
@@ -1225,7 +1226,7 @@ class ProspectiveReadStore:
     def quiet_state_virtual_positions_v1(
         self,
         *,
-        limit: int = 2000,
+        limit: int = 500,
     ) -> list[dict[str, Any]]:
         """Return quiet-bottom-10 short-premium evidence in its own projection."""
 
@@ -1250,6 +1251,151 @@ class ProspectiveReadStore:
             raw["quality_flags"] = tuple(json.loads(str(raw.pop("quality_flags_json"))))
             raw["legs"] = tuple(json.loads(str(raw.pop("legs_json"))))
             item = QuietStateVirtualPositionV1.model_validate(raw)
+            items.append(item.model_dump(mode="json"))
+        return items
+
+    def quiet_state_virtual_captures_v1(
+        self,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return scheduled/capturing quiet episodes with latest quote diagnostics."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connection() as connection:
+            observations = connection.execute(
+                """
+                SELECT observation.*,
+                       (
+                           SELECT COUNT(*)
+                           FROM quiet_state_shadow_outcome_v0 AS outcome
+                           WHERE outcome.run_id = observation.run_id
+                             AND outcome.observation_id =
+                                 observation.observation_id
+                             AND outcome.structure_type IN (
+                                 'ATM_IRON_BUTTERFLY',
+                                 'DELTA_IRON_CONDOR',
+                                 'CALL_CREDIT_SPREAD',
+                                 'PUT_CREDIT_SPREAD'
+                             )
+                       ) AS frozen_short_premium_outcome_count
+                FROM quiet_state_observation_v0 AS observation
+                WHERE observation.run_id = ?
+                  AND observation.observation_kind = 'quiet_bottom_10'
+                ORDER BY observation.trigger_timestamp_utc DESC,
+                         observation.observation_id DESC
+                LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+            observation_ids = tuple(str(row["observation_id"]) for row in observations)
+            contract_rows: list[sqlite3.Row] = []
+            if observation_ids:
+                placeholders = ",".join("?" for _ in observation_ids)
+                contract_rows = connection.execute(
+                    f"""
+                    SELECT contract.id AS option_contract_id,
+                           contract.observation_id,
+                           contract.con_id, contract.expiry, contract.dte,
+                           contract.dte_bucket, contract.strike, contract.right,
+                           contract.multiplier, contract.selection_roles_json,
+                           contract.resolution_status, contract.rejection_reason,
+                           contract.recording_started_at_utc,
+                           contract.recording_ends_at_utc,
+                           quote.received_timestamp_utc
+                               AS latest_quote_received_at_utc,
+                           quote.bid AS latest_bid,
+                           quote.ask AS latest_ask,
+                           quote.market_data_type AS latest_market_data_type,
+                           quote.recording_status AS latest_recording_status,
+                           quote.quote_quality_flags_json
+                               AS latest_quote_quality_flags_json
+                    FROM quiet_state_option_contract_v0 AS contract
+                    LEFT JOIN quiet_state_option_quote_state_v0 AS quote
+                      ON quote.option_contract_id = contract.id
+                    WHERE contract.run_id = ?
+                      AND contract.observation_id IN ({placeholders})
+                    ORDER BY contract.observation_id, contract.dte,
+                             contract.selection_rank, contract.strike,
+                             contract.right
+                    """,
+                    (run_id, *observation_ids),
+                ).fetchall()
+        contracts_by_observation: dict[str, list[dict[str, Any]]] = {
+            observation_id: [] for observation_id in observation_ids
+        }
+        for row in contract_rows:
+            raw_contract = dict(row)
+            observation_id = str(raw_contract.pop("observation_id"))
+            raw_contract["selection_roles"] = tuple(
+                json.loads(str(raw_contract.pop("selection_roles_json")))
+            )
+            encoded_flags = raw_contract.pop("latest_quote_quality_flags_json")
+            raw_contract["latest_quote_quality_flags"] = (
+                () if encoded_flags is None else tuple(json.loads(str(encoded_flags)))
+            )
+            contracts_by_observation[observation_id].append(raw_contract)
+
+        items: list[dict[str, Any]] = []
+        for row in observations:
+            observation = dict(row)
+            observation_id = str(observation["observation_id"])
+            contracts = tuple(contracts_by_observation[observation_id])
+            completion_status = str(observation["completion_status"])
+            outcome_count = int(observation["frozen_short_premium_outcome_count"])
+            plan_recorded = bool(observation["option_plan_recorded"])
+            lifecycle: str
+            reason: str | None
+            if not bool(observation["scientific_recording_valid"]):
+                lifecycle = "INVALID"
+                reason = "quiet_scientific_recording_invalid"
+            elif completion_status == "incomplete":
+                lifecycle = "INVALID"
+                reason = "quiet_recording_completed_incomplete"
+            elif completion_status == "complete":
+                lifecycle = "CLOSED" if outcome_count > 0 else "INVALID"
+                reason = None if outcome_count > 0 else "quiet_structure_outcomes_missing"
+            elif not plan_recorded:
+                lifecycle = "SCHEDULED"
+                reason = "awaiting_bounded_quiet_option_plan"
+            elif not contracts:
+                lifecycle = "INVALID"
+                reason = "bounded_quiet_option_contracts_unavailable"
+            else:
+                lifecycle = "CAPTURING"
+                reason = "awaiting_frozen_quiet_structure_outcomes"
+            item = QuietStateVirtualCaptureV1.model_validate(
+                {
+                    "virtual_capture_id": f"quiet-capture:{observation_id}",
+                    "ledger_scope": "quiet_state_short_premium_capture",
+                    "run_id": observation["run_id"],
+                    "observation_id": observation_id,
+                    "observation_kind": observation["observation_kind"],
+                    "session_date": observation["session_date"],
+                    "symbol": observation["symbol"],
+                    "trigger_timestamp_utc": observation["trigger_timestamp_utc"],
+                    "entry_timestamp_utc": observation["prospective_entry_timestamp_utc"],
+                    "lifecycle_state": lifecycle,
+                    "status_reason": reason,
+                    "option_plan_recorded": plan_recorded,
+                    "requested_contract_count": observation["option_plan_requested_contract_count"],
+                    "selected_contract_count": observation["option_plan_selected_contract_count"],
+                    "option_plan_capacity_reduced": observation["option_plan_capacity_reduced"],
+                    "option_plan_missing_buckets": tuple(
+                        json.loads(str(observation["option_plan_missing_buckets_json"]))
+                    ),
+                    "completion_status": completion_status,
+                    "completed_at_utc": observation["completed_at_utc"],
+                    "frozen_short_premium_outcome_count": outcome_count,
+                    "contracts": contracts,
+                    "scientific_recording_valid": observation["scientific_recording_valid"],
+                    "latest_quotes_are_diagnostic_only": True,
+                    "execution_claimed": False,
+                    "paper_fill_claimed": False,
+                }
+            )
             items.append(item.model_dump(mode="json"))
         return items
 

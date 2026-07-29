@@ -387,10 +387,10 @@ def _primary_outcome(
             missing_reason=None,
         ),
         exit_quote=OptionTopOfBookV1(
-            timestamp_utc=ENTRY + timedelta(minutes=15),
+            timestamp_utc=ENTRY + timedelta(minutes=15, seconds=1),
             bid=1.2,
             ask=1.3,
-            quote_age_seconds=0.0,
+            quote_age_seconds=1.0,
             locked_or_crossed=False,
             stale=False,
             missing_reason=None,
@@ -1112,6 +1112,9 @@ def test_v1_1_virtual_position_closes_only_after_both_primary_pair_outcomes(
         ).fetchone()
     assert still_capturing["lifecycle_state"] == "CAPTURING"
     assert still_capturing["pair_outcome_count"] == 1
+    assert still_capturing["status_reason"] == "awaiting_opposite_control_outcome"
+    assert still_capturing["predicted_outcome_present"] == 1
+    assert still_capturing["opposite_outcome_present"] == 0
 
     repository.record_opening_reversal_primary_option_outcome_v1(
         metadata,
@@ -1135,6 +1138,10 @@ def test_v1_1_virtual_position_closes_only_after_both_primary_pair_outcomes(
     assert closed["quantity"] == 1
     assert closed["entry_ask"] == pytest.approx(1.1)
     assert closed["exit_bid"] == pytest.approx(1.2)
+    assert datetime.fromisoformat(closed["exit_quote_timestamp_utc"]) > (
+        ENTRY + timedelta(minutes=15)
+    )
+    assert closed["exit_convention"] == "first_valid_live_bid_at_or_after_frozen_15m_horizon"
     assert closed["gross_quote_pnl"] == pytest.approx(10.0)
     assert closed["execution_claimed"] == 0
     assert closed["paper_fill_claimed"] == 0
@@ -1147,3 +1154,39 @@ def test_v1_1_virtual_position_closes_only_after_both_primary_pair_outcomes(
     assert projected[0]["lifecycle_state"] == "CLOSED"
     assert projected[0]["right"] == predicted.right
     assert projected[0]["gross_quote_pnl"] == pytest.approx(10.0)
+
+
+def test_v1_1_virtual_position_names_the_predicted_leg_when_control_arrives_first(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "control-arrives-first.sqlite3")
+    database.migrate()
+    metadata = _metadata("control-arrives-first", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    receipt = _seed_eligible_v1_1_episode(database, repository, metadata)
+    selection = _primary_selection()
+    repository.record_opening_reversal_contract_discovery_v1(
+        metadata,
+        episode_id="fresh-aal",
+        selection=selection,
+    )
+    opposite = selection.put if receipt.prediction_v1 == "CALL" else selection.call
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=opposite,
+            role="opposite_leg",
+        ),
+    )
+
+    with database._connect() as connection:
+        capturing = connection.execute(
+            "SELECT * FROM opening_reversal_virtual_position_v1"
+        ).fetchone()
+
+    assert capturing["lifecycle_state"] == "CAPTURING"
+    assert capturing["status_reason"] == "awaiting_predicted_leg_outcome"
+    assert capturing["predicted_outcome_present"] == 0
+    assert capturing["opposite_outcome_present"] == 1

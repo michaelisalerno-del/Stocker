@@ -23,6 +23,7 @@ from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.option_ledger import OptionContract, build_shadow_outcomes
 from stocker_prospective.option_recorder import (
     BoundedOptionRecorder,
+    _quiet_virtual_leg_evidence,
     _required_quote_matrix_completion,
 )
 from stocker_prospective.options import DteBucket
@@ -423,6 +424,46 @@ def test_delta_iron_condor_uses_frozen_targets_ordering_and_tolerance() -> None:
         ("long", 95.0, "P"),
     ]
     assert all(distance == pytest.approx(0.0) for distance in structure.delta_distances)
+
+
+def test_quiet_virtual_leg_evidence_freezes_each_conservative_bid_ask_side() -> None:
+    contracts, entry_quotes = _chain()
+    structure = select_delta_iron_condor(
+        contracts=contracts,
+        entry_quotes=entry_quotes,
+    )
+    exit_quotes = tuple(
+        quote.model_copy(
+            update={
+                "event_id": f"exit-{quote.event_id}",
+                "received_timestamp_utc": ENTRY + timedelta(minutes=15),
+                "provider_timestamp_utc": ENTRY + timedelta(minutes=15),
+                "bid": None if quote.bid is None else quote.bid * 0.5,
+                "ask": None if quote.ask is None else quote.ask * 0.5,
+            }
+        )
+        for quote in entry_quotes
+    )
+
+    evidence = _quiet_virtual_leg_evidence(
+        structure=structure,
+        entry_surface=entry_quotes,
+        exit_surface=exit_quotes,
+    )
+
+    assert [(leg["side"], leg["right"], leg["strike"]) for leg in evidence] == [
+        ("short", "C", 102.0),
+        ("short", "P", 98.0),
+        ("long", "C", 105.0),
+        ("long", "P", 95.0),
+    ]
+    assert [leg["entry_fill_price"] for leg in evidence] == pytest.approx([0.85, 0.90, 0.35, 0.40])
+    assert [leg["exit_fill_price"] for leg in evidence] == pytest.approx([0.475, 0.50, 0.15, 0.175])
+    assert all(leg["entry_quote_timestamp_utc"] == ENTRY.isoformat() for leg in evidence)
+    assert all(
+        leg["exit_quote_timestamp_utc"] == (ENTRY + timedelta(minutes=15)).isoformat()
+        for leg in evidence
+    )
 
 
 def test_delta_iron_condor_fails_closed_outside_delta_tolerance() -> None:

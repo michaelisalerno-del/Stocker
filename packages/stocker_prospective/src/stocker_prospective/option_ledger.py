@@ -238,6 +238,7 @@ class ShadowOptionOutcome(BaseModel):
     primary_return_definition: str = (
         "first_valid_ask_after_entry_to_last_valid_bid_at_or_before_horizon"
     )
+    first_ask_after_horizon: float | None = None
     research_only: bool = True
     shadow_quote_pnl: bool = True
 
@@ -552,6 +553,9 @@ def build_shadow_outcomes(
                     first_bid_after_horizon=(None if sensitivity is None else sensitivity.bid),
                     first_bid_after_horizon_timestamp=(
                         None if sensitivity is None else sensitivity.ordering_timestamp
+                    ),
+                    first_ask_after_horizon=(
+                        None if sensitivity is None else sensitivity.ask
                     ),
                     ask_to_bid_return=primary_return,
                     first_after_horizon_sensitivity_return=sensitivity_return,

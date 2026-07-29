@@ -8,6 +8,7 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
@@ -44,6 +45,12 @@ from stocker_prospective.m1c_features import (
     HistoricalActivityBaseline,
     LiveFeatureBar,
 )
+from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
+    OpeningReversalPredictionReceiptV1,
+    PostEntryBarV1,
+    build_incomplete_opening_reversal_outcome_v1,
+    build_opening_reversal_outcome_v1,
+)
 from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.microstructure import (
     STANDARD_WINDOWS,
@@ -51,6 +58,10 @@ from stocker_prospective.microstructure import (
     episode_relative_windows,
     standard_window_summaries,
     summarise_microstructure_window,
+)
+from stocker_prospective.opening_market_transition_v1 import (
+    calculate_opening_preentry_window_v1,
+    classify_opening_market_transition_v1,
 )
 from stocker_prospective.order_book import DepthBook
 from stocker_prospective.partition_store import PartitionedEventStore
@@ -66,6 +77,7 @@ MetadataFactory = Callable[[datetime, tuple[datetime, ...]], EvidenceMetadata]
 GroupOProvider = Callable[[str, date], FrozenGroupOContext]
 OptionQuoteSink = Callable[[EvidenceMetadata, OptionQuoteEvent], None]
 EpisodeCallback = Callable[[RecorderCheckpointResult], None]
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True)
@@ -88,6 +100,10 @@ class LivePollResult(BaseModel):
     partition_hashes: tuple[str, ...]
     blocked_checkpoints: dict[str, str]
     checkpoint_results: tuple[RecorderCheckpointResult, ...]
+    opening_reversal_prediction_receipts: tuple[
+        OpeningReversalPredictionReceiptV1,
+        ...,
+    ] = ()
     depth_reset_symbols: tuple[str, ...] = ()
     ibkr_errors: tuple[tuple[int, int], ...] = ()
     broker_mutations: int = 0
@@ -225,6 +241,10 @@ class FrozenM1CLiveRecorder:
         self._bar_order: dict[tuple[int, datetime], tuple[int, int]] = {}
         self._episode_windows: dict[tuple[str, str], tuple[str, datetime, datetime]] = {}
         self._episode_actions: dict[str, dict[str, str]] = {}
+        self._opening_reversal_outcome_inputs: dict[
+            str,
+            tuple[OpeningReversalPredictionReceiptV1, float | None],
+        ] = {}
         self._quiet_observation_ids: set[str] = set()
         self._completed_episode_windows: set[tuple[str, str]] = set()
         self._gap_symbols: set[str] = set()
@@ -717,6 +737,21 @@ class FrozenM1CLiveRecorder:
             elif isinstance(event, OptionQuoteEvent) and self.option_quote_sink is not None:
                 self.option_quote_sink(metadata, event)
         results = self._score_ready()
+        complete_opening_receipts = tuple(
+            receipt
+            for result in results
+            if (receipt := result.opening_reversal_prediction_v1) is not None
+        )
+        deadline_opening_receipts = (
+            self._emit_opening_reversal_deadline_receipts_v1(observed_now)
+        )
+        opening_receipts_by_hash = {
+            receipt.receipt_hash_v1: receipt
+            for receipt in (
+                *complete_opening_receipts,
+                *deadline_opening_receipts,
+            )
+        }
         self._record_due_episode_windows(observed_now)
         self._trim_history(observed_now)
         return LivePollResult(
@@ -731,9 +766,104 @@ class FrozenM1CLiveRecorder:
                 for (symbol, session, checkpoint), reason in sorted(self._blocked.items())
             },
             checkpoint_results=results,
+            opening_reversal_prediction_receipts=tuple(
+                opening_receipts_by_hash.values()
+            ),
             depth_reset_symbols=tuple(sorted(depth_reset_symbols)),
             ibkr_errors=tuple(ibkr_errors),
         )
+
+    def _emit_opening_reversal_deadline_receipts_v1(
+        self,
+        observed_now: datetime,
+    ) -> tuple[OpeningReversalPredictionReceiptV1, ...]:
+        """Freeze one ABSTAIN receipt per missing checkpoint-6 stock at 10:00."""
+
+        if (
+            not hasattr(self.engine, "opening_reversal_activation_v1")
+            or self.engine.opening_reversal_activation_v1 is None
+        ):
+            return ()
+        session = observed_now.astimezone(NEW_YORK).date()
+        try:
+            session_open, _ = xnys_session_bounds(session)
+        except ValueError:
+            return ()
+        signal_timestamp = session_open + timedelta(minutes=30)
+        if observed_now < signal_timestamp:
+            return ()
+        market_previous_session, market_prior_close = (
+            self._market_opening_reference_v1(session=session)
+        )
+        opening_window = calculate_opening_preentry_window_v1(
+            market_proxy=self.market_proxy_symbol,
+            session=session,
+            previous_session=(
+                session
+                if market_previous_session is None
+                else market_previous_session
+            ),
+            session_open_timestamp=session_open,
+            signal_timestamp=signal_timestamp,
+            entry_timestamp=signal_timestamp,
+            completed_bars=self._market_shock_bars_v1(
+                session=session,
+                checkpoint=6,
+            ),
+            prior_regular_session_close=market_prior_close,
+        )
+        opening_state = classify_opening_market_transition_v1(
+            window=opening_window,
+            thresholds=self.engine.opening_transition_thresholds_v1,
+        )
+        receipts: list[OpeningReversalPredictionReceiptV1] = []
+        for symbol in self.universe_symbols:
+            existing = self.repository.load_opening_reversal_prediction_v1(
+                run_id=self.metadata_factory(
+                    observed_now,
+                    (signal_timestamp,),
+                ).run_id,
+                session=session,
+                stock=symbol,
+            )
+            if existing is not None:
+                continue
+            stock_bars = self._bars.get((symbol, session), {})
+            missing_stock = tuple(
+                ordinal for ordinal in range(1, 7) if ordinal not in stock_bars
+            )
+            # A complete result would already have been created by _score_ready.
+            # Any remaining row failed one of the causal checkpoint requirements.
+            reason = (
+                "checkpoint_6_missing_stock_bars:"
+                + ",".join(str(value) for value in missing_stock)
+                if missing_stock
+                else self._blocked.get(
+                    (symbol, session, 6),
+                    "checkpoint_6_causal_inputs_incomplete",
+                )
+            )
+            metadata = self.metadata_factory(
+                observed_now,
+                (signal_timestamp,),
+            )
+            try:
+                group_o_context = self.group_o_provider(symbol, session)
+            except (KeyError, RuntimeError, ValueError):
+                group_o_context = None
+            receipts.append(
+                self.engine.build_incomplete_opening_reversal_prediction_v1(
+                    metadata=metadata,
+                    session=session,
+                    stock=symbol,
+                    signal_timestamp=signal_timestamp,
+                    opening_window_v1=opening_window,
+                    opening_transition_state_v1=opening_state,
+                    group_o_context=group_o_context,
+                    missing_reason=reason,
+                )
+            )
+        return tuple(receipts)
 
     def _feature_bars(
         self,
@@ -981,6 +1111,20 @@ class FrozenM1CLiveRecorder:
                     )
                     if result.episode_decision.fresh_episode:
                         self._arm_episode_windows(result)
+                        receipt = result.opening_reversal_prediction_v1
+                        if (
+                            receipt is not None
+                            and receipt.scientific_outcome_eligible_v1
+                            and receipt.eligibility_v1
+                            and result.episode_decision.episode_id is not None
+                        ):
+                            self._opening_reversal_outcome_inputs[
+                                result.episode_decision.episode_id
+                            ] = (
+                                receipt,
+                                result.movement_consumed_state_v1
+                                .movement_consumed_numerator_v1,
+                            )
                         if self.episode_callback is not None:
                             self.episode_callback(result)
                     if (
@@ -1248,6 +1392,84 @@ class FrozenM1CLiveRecorder:
             flags.add("sector_proxy_data_gap")
         return payload, tuple(sorted(flags))
 
+    def _record_opening_reversal_outcome_v1(
+        self,
+        *,
+        episode_id: str,
+        symbol: str,
+        now: datetime,
+    ) -> None:
+        inputs = self._opening_reversal_outcome_inputs.get(episode_id)
+        if inputs is None:
+            return
+        receipt, pre_trigger_range = inputs
+        metadata = self.metadata_factory(
+            now,
+            (receipt.entry_timestamp_utc + timedelta(minutes=15),),
+        )
+        missing_reason: str | None = None
+        if self.gap_overlaps(
+            symbol,
+            window_start=receipt.entry_timestamp_utc,
+            window_end=receipt.entry_timestamp_utc + timedelta(minutes=15),
+        ):
+            missing_reason = "post_entry_data_gap"
+        session_bars = self._bars.get((symbol, receipt.session), {})
+        audited = tuple(session_bars.get(checkpoint) for checkpoint in (7, 8, 9))
+        if missing_reason is None and any(bar is None for bar in audited):
+            missing_reason = "post_entry_bar_missing"
+        if missing_reason is None and any(
+            bar is not None and not bar.finalised for bar in audited
+        ):
+            missing_reason = "post_entry_bar_partial"
+        if missing_reason is not None:
+            outcome = build_incomplete_opening_reversal_outcome_v1(
+                prediction_receipt=receipt,
+                missing_reason_v1=missing_reason,
+                outcome_created_at_utc=now,
+            )
+        else:
+            complete_bars = tuple(
+                PostEntryBarV1(
+                    ordinal=index,
+                    bar_start_timestamp_utc=bar.bar_start_utc,
+                    bar_complete_timestamp_utc=bar.bar_end_utc,
+                    open=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    finalised=bar.finalised,
+                )
+                for index, candidate in enumerate(audited)
+                if (bar := candidate) is not None
+            )
+            post_ten_minute_range = math.log(
+                max(bar.high for bar in complete_bars[:2])
+                / min(bar.low for bar in complete_bars[:2])
+            )
+            range_share = (
+                post_ten_minute_range
+                / (pre_trigger_range + post_ten_minute_range)
+                if pre_trigger_range is not None
+                and math.isfinite(pre_trigger_range)
+                and pre_trigger_range >= 0.0
+                and post_ten_minute_range >= 0.0
+                and pre_trigger_range + post_ten_minute_range > 0.0
+                else None
+            )
+            assert receipt.previous_close_atm_iv_scale_15m is not None
+            outcome = build_opening_reversal_outcome_v1(
+                prediction_receipt=receipt,
+                completed_post_entry_bars=complete_bars,
+                threshold_15m=receipt.previous_close_atm_iv_scale_15m,
+                outcome_created_at_utc=now,
+                canonical_post_entry_local_range_share_v1=range_share,
+            )
+        self.repository.record_opening_reversal_underlying_outcome_v1(
+            metadata,
+            outcome,
+        )
+
     def _record_due_episode_windows(self, now: datetime) -> None:
         for identity, (symbol, start, end) in sorted(self._episode_windows.items()):
             if identity in self._completed_episode_windows or end > now:
@@ -1321,6 +1543,12 @@ class FrozenM1CLiveRecorder:
                         summary=summary,
                     ),
                 )
+                if name == "entry_to_+15m":
+                    self._record_opening_reversal_outcome_v1(
+                        episode_id=episode_id,
+                        symbol=symbol,
+                        now=now,
+                    )
             self._completed_episode_windows.add(identity)
 
 

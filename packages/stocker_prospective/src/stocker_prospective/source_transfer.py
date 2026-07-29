@@ -26,6 +26,10 @@ from stocker_prospective.m1c_features import (
     LiveFeatureBar,
     M1CCausalFeatureBuilder,
 )
+from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
+    OpeningTransferBarV1,
+    evaluate_opening_transfer_session_v1,
+)
 from stocker_prospective.quiet_state import QuietEpisodeTracker
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.transfer import (
@@ -97,6 +101,7 @@ class SourceTransferCoordinator:
         aggregate_report_path: Path,
         runtime_parity_passed: bool,
         expected_symbols: tuple[str, ...],
+        opening_reversal_enabled: bool = False,
     ) -> None:
         if len(expected_symbols) != 20 or len(set(expected_symbols)) != 20:
             raise ValueError("source transfer requires the exact frozen 20-stock universe")
@@ -111,6 +116,7 @@ class SourceTransferCoordinator:
         self.aggregate_report_path = aggregate_report_path
         self.runtime_parity_passed = runtime_parity_passed
         self.expected_symbols = expected_symbols
+        self.opening_reversal_enabled = opening_reversal_enabled
         numeric_width = len(model.numeric_features)
         self.monitor = M1CTransferMonitor(
             robust_feature_scales={
@@ -159,6 +165,50 @@ class SourceTransferCoordinator:
             eodhd=eodhd_session,
             report=current_session_report,
         )
+        opening_transfer = None
+        if self.opening_reversal_enabled:
+            ibkr_high = {
+                (row.symbol, row.checkpoint)
+                for row in ibkr_session
+                if row.checkpoint == 6 and row.high_tail_episode
+            }
+            eodhd_high = {
+                (row.symbol, row.checkpoint)
+                for row in eodhd_session
+                if row.checkpoint == 6 and row.high_tail_episode
+            }
+            operational_evidence = (
+                self.frozen_repository
+                .opening_reversal_engineering_operational_evidence_v1(
+                    run_id=self.run_id,
+                    session=session,
+                )
+            )
+            opening_transfer = evaluate_opening_transfer_session_v1(
+                session=session,
+                ibkr_bars=self._opening_ibkr_bars(ibkr_bars),
+                eodhd_bars=self._opening_eodhd_bars(
+                    eodhd_rows.get("VTI", ())
+                ),
+                checkpoint_6_episode_identity_agreement=(
+                    ibkr_high == eodhd_high
+                ),
+                stock_probability_rank_comparison_available=(
+                    current_session_report.probability_metrics.count > 0
+                ),
+                operational_evidence=operational_evidence,
+            )
+            self.frozen_repository.record_opening_reversal_transfer_session_v1(
+                metadata,
+                opening_transfer,
+            )
+            transfer_decision_receipt = (
+                self.frozen_repository.maybe_record_opening_transfer_decision_v1(
+                    metadata
+                )
+            )
+        else:
+            transfer_decision_receipt = None
         valid_sessions = self._prior_valid_sessions()
         if session_valid:
             valid_sessions.add(session)
@@ -182,6 +232,16 @@ class SourceTransferCoordinator:
         payload["current_session_valid"] = session_valid
         payload["current_session_quality_decision"] = current_session_report.decision
         payload["engineering_recording_summary"] = self._engineering_summary()
+        payload["opening_reversal_transfer_v1"] = (
+            None
+            if opening_transfer is None
+            else opening_transfer.model_dump(mode="json")
+        )
+        payload["opening_reversal_transfer_decision_receipt_v1"] = (
+            None
+            if transfer_decision_receipt is None
+            else transfer_decision_receipt.model_dump(mode="json")
+        )
         payload["claims_boundary"] = claims_boundary()
         self.frozen_repository.record_source_transfer_session(
             metadata,
@@ -223,6 +283,47 @@ class SourceTransferCoordinator:
                 )
             )
         return report
+
+    @staticmethod
+    def _opening_ibkr_bars(
+        bars: Mapping[tuple[str, int], Mapping[str, object]],
+    ) -> tuple[OpeningTransferBarV1, ...]:
+        output: list[OpeningTransferBarV1] = []
+        for checkpoint in range(1, 7):
+            row = bars.get(("VTI", checkpoint))
+            if row is None:
+                continue
+            output.append(
+                OpeningTransferBarV1(
+                    ordinal=checkpoint - 1,
+                    bar_start_timestamp_utc=_aware(row["bar_start_utc"]),
+                    bar_complete_timestamp_utc=_aware(row["bar_end_utc"]),
+                    open=float(cast(Any, row["open"])),
+                    high=float(cast(Any, row["high"])),
+                    low=float(cast(Any, row["low"])),
+                    close=float(cast(Any, row["close"])),
+                    complete=bool(row.get("finalised", True)),
+                )
+            )
+        return tuple(output)
+
+    @staticmethod
+    def _opening_eodhd_bars(
+        bars: tuple[Mapping[str, object], ...],
+    ) -> tuple[OpeningTransferBarV1, ...]:
+        return tuple(
+            OpeningTransferBarV1(
+                ordinal=ordinal,
+                bar_start_timestamp_utc=_aware(row["bar_start_utc"]),
+                bar_complete_timestamp_utc=_aware(row["bar_end_utc"]),
+                open=float(cast(Any, row["open"])),
+                high=float(cast(Any, row["high"])),
+                low=float(cast(Any, row["low"])),
+                close=float(cast(Any, row["close"])),
+                complete=str(row["completeness"]) == "complete",
+            )
+            for ordinal, row in enumerate(bars[:6])
+        )
 
     def _freeze_calibration_candidate(
         self,

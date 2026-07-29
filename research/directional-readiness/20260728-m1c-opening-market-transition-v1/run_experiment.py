@@ -1764,6 +1764,12 @@ def _event_accounting(
         severe = stock_rows.loc[
             stock_rows["opening_market_transition_state_v1"].isin(SEVERE_STATES)
         ]
+        eligible_events = severe[
+            [
+                "opening_transition_event_id_v1",
+                "opening_market_transition_state_v1",
+            ]
+        ].drop_duplicates()
         markets = market_states.loc[market_states["partition"].eq(period)]
         records.append(
             {
@@ -1774,12 +1780,22 @@ def _event_accounting(
                 "unique_opening_transition_event_count": int(
                     severe["opening_transition_event_id_v1"].nunique()
                 ),
-                "negative_transition_event_count": int(
+                "eligible_negative_opening_transition_event_count": int(
+                    eligible_events["opening_market_transition_state_v1"]
+                    .eq("NEGATIVE_SEVERE_OPENING_TRANSITION")
+                    .sum()
+                ),
+                "eligible_positive_opening_transition_event_count": int(
+                    eligible_events["opening_market_transition_state_v1"]
+                    .eq("POSITIVE_SEVERE_OPENING_TRANSITION")
+                    .sum()
+                ),
+                "all_market_negative_severe_session_count": int(
                     markets["opening_market_transition_state_v1"]
                     .eq("NEGATIVE_SEVERE_OPENING_TRANSITION")
                     .sum()
                 ),
-                "positive_transition_event_count": int(
+                "all_market_positive_severe_session_count": int(
                     markets["opening_market_transition_state_v1"]
                     .eq("POSITIVE_SEVERE_OPENING_TRANSITION")
                     .sum()
@@ -3611,8 +3627,10 @@ def _report_markdown(
             "severe_stock_episode_count",
             "unique_session_count",
             "unique_opening_transition_event_count",
-            "negative_transition_event_count",
-            "positive_transition_event_count",
+            "eligible_negative_opening_transition_event_count",
+            "eligible_positive_opening_transition_event_count",
+            "all_market_negative_severe_session_count",
+            "all_market_positive_severe_session_count",
             "complete_normal_opening_event_count",
             "incomplete_event_count",
         ],
@@ -3977,7 +3995,7 @@ def _write_outputs(
         panel,
     )
     _write_csv(PRIMARY / "unique_opening_transition_events_v1.csv", events)
-    _write_csv(PRIMARY / "event_accounting_v1.csv", event_accounting)
+    _write_csv(PRIMARY / "event_accounting_v2.csv", event_accounting)
     _write_csv(PRIMARY / "assessment_results_v1.csv", assessment)
     _write_csv(PRIMARY / "stress_results_v1.csv", stress)
     _write_csv(
@@ -4062,7 +4080,7 @@ def _write_outputs(
     _write_json(PRIMARY / "decision_contract_results_v1.json", decision)
     _write_json(PRIMARY / "summary_v1.json", summary)
     REPORTS.mkdir(parents=True, exist_ok=True)
-    (REPORTS / "m1c_opening_market_transition_v1.md").write_text(
+    (REPORTS / "m1c_opening_market_transition_v2.md").write_text(
         report,
         encoding="utf-8",
     )
@@ -4374,8 +4392,8 @@ def run() -> dict[str, Any]:
         if path.is_file() and path.name != "provenance_manifest_v1.json"
     }
     output_hashes[
-        "reports/m1c_opening_market_transition_v1.md"
-    ] = _sha256_file(REPORTS / "m1c_opening_market_transition_v1.md")
+        "reports/m1c_opening_market_transition_v2.md"
+    ] = _sha256_file(REPORTS / "m1c_opening_market_transition_v2.md")
     provenance = {
         "schema_version": "m1c-opening-market-transition-provenance-v1",
         "generated_at_utc": datetime.now(tz=UTC),

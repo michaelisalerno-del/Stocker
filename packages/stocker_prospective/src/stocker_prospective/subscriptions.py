@@ -132,6 +132,8 @@ class SubscriptionRecord:
     protected_owners: set[str] = field(default_factory=set)
     last_callback_at_utc: datetime | None = None
     generation: int = 0
+    research_feed: str | None = None
+    drop_order: int | None = None
 
     @property
     def owner_count(self) -> int:
@@ -349,11 +351,17 @@ class SubscriptionBudgetManager:
         subscription_class: SubscriptionClass | None = None,
         protected: bool = False,
         line_cost: int = 1,
+        research_feed: str | None = None,
+        drop_order: int | None = None,
         now_monotonic: float,
         now_utc: datetime | None = None,
     ) -> AllocationDecision:
         if line_cost <= 0:
             raise ValueError("subscription line cost must be positive")
+        if drop_order is not None and drop_order <= 0:
+            raise ValueError("subscription drop order must be positive")
+        if protected and drop_order is not None:
+            raise ValueError("protected subscriptions cannot have a drop order")
         resolved_class = (
             _class_for_priority(priority) if subscription_class is None else subscription_class
         )
@@ -374,6 +382,18 @@ class SubscriptionBudgetManager:
             existing.protected = bool(existing.protected_owners)
             if owner_episode is not None and existing.owner_episode is None:
                 existing.owner_episode = owner_episode
+            if research_feed is not None:
+                existing.research_feed = (
+                    research_feed
+                    if existing.research_feed is None
+                    else existing.research_feed
+                )
+            if drop_order is not None:
+                existing.drop_order = (
+                    drop_order
+                    if existing.drop_order is None
+                    else min(existing.drop_order, drop_order)
+                )
             return AllocationDecision(
                 True,
                 key,
@@ -450,6 +470,8 @@ class SubscriptionBudgetManager:
             owners={resolved_owner: resolved_class},
             owner_priorities={resolved_owner: priority},
             protected_owners={resolved_owner} if protected else set(),
+            research_feed=research_feed,
+            drop_order=drop_order,
         )
         self.records[key] = record
         self.lifecycle.append(record)

@@ -1,0 +1,23 @@
+{
+  "accounting_policy": "conservative_local_estimate_fail_closed_optional",
+  "configured_budget_at_activation": null,
+  "deployment_template_budget": 100,
+  "exact_broker_accounting_known": false,
+  "full_option_chain_streaming": false,
+  "level_ii_enabled": false,
+  "mandatory_persistent_estimated_lines": {
+    "VTI_five_minute": 1,
+    "frozen_20_stock_m1c_five_minute": 20
+  },
+  "mandatory_promoted_episode_estimated_lines": {
+    "primary_1dte_call": 1,
+    "primary_1dte_put": 1,
+    "promoted_underlying_level1": 1
+  },
+  "maximum_promoted_underlyings": 1,
+  "optional_capacity_failure": "optional_feed_not_started_capacity_reserved",
+  "primary_option_capacity_failure": "option_economics_blocked_capacity; underlying episode retained",
+  "reserve_may_fund_optional_research": false,
+  "reserved_position_monitoring_and_operational_safety_lines": 12,
+  "schema_version": "api-market-data-capacity-manifest-v1"
+}

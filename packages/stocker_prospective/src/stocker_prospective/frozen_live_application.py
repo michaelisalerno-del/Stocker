@@ -62,11 +62,24 @@ from stocker_prospective.m1c_features import (
     HistoricalActivityBaseline,
     M1CCausalFeatureBuilder,
 )
+from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
+    OpeningReversalCapacityCoordinatorV1,
+    OpeningReversalPredictionReceiptV1,
+    build_capacity_degradation_events_v1,
+    load_activation_receipt_v1,
+    load_frozen_experiment_config_v1,
+    select_promoted_prediction_v1,
+)
 from stocker_prospective.market_data import ConnectionState, MarketDataType
 from stocker_prospective.opening_market_transition_v1 import (
     load_opening_transition_threshold_manifest_v1,
 )
-from stocker_prospective.option_budget import BudgetAwareEpisodeStateMachine
+from stocker_prospective.option_budget import (
+    BudgetAwareEpisodeStateMachine,
+    EpisodeAllocationRecord,
+    EpisodeKind,
+    EpisodeState,
+)
 from stocker_prospective.option_discovery import BoundedOptionDiscoveryService
 from stocker_prospective.option_recorder import BoundedOptionRecorder
 from stocker_prospective.partition_store import PartitionedEventStore
@@ -168,6 +181,9 @@ class FrozenProspectiveApplication:
         live_recorder: FrozenM1CLiveRecorder,
         subscriptions: LiveSubscriptionController,
         subscription_budget: SubscriptionBudgetManager,
+        opening_reversal_capacity: (
+            OpeningReversalCapacityCoordinatorV1 | None
+        ),
         option_discovery: BoundedOptionDiscoveryService,
         phase_manager: ProspectivePhaseManager,
         quiet_phase_manager: QuietStatePhaseManager,
@@ -215,6 +231,16 @@ class FrozenProspectiveApplication:
         self._reconnect_attempts = 0
         self._next_reconnect_at: datetime | None = None
         self._last_reconciliation_monotonic = 0.0
+        self.opening_reversal_capacity = opening_reversal_capacity
+        self._opening_reversal_results: dict[
+            tuple[date, int],
+            dict[str, RecorderCheckpointResult],
+        ] = {}
+        self._opening_reversal_receipts: dict[
+            tuple[date, int],
+            dict[str, OpeningReversalPredictionReceiptV1],
+        ] = {}
+        self._opening_reversal_finalised_groups: set[tuple[date, int]] = set()
 
     def process_source_transfer(self, session: date, observed_at: datetime) -> None:
         """Rescore completed EODHD bars without changing live V0 decisions."""
@@ -248,6 +274,8 @@ class FrozenProspectiveApplication:
                 self._session_context_checked.add(observed_session)
         self._recover_if_required(observed)
         result = self.live_recorder.poll(now=observed)
+        opening_reversal_seen = False
+        promoted_opening_episode_id: str | None = None
         callback_metadata = self.metadata_factory(observed, (observed,))
         for request_id, code in result.ibkr_errors:
             self.subscriptions.record_ibkr_error(
@@ -262,13 +290,29 @@ class FrozenProspectiveApplication:
             )
         for checkpoint in result.checkpoint_results:
             symbol = checkpoint.episode_decision.symbol
+            opening_receipt = checkpoint.opening_reversal_prediction_v1
+            if opening_receipt is not None:
+                opening_reversal_seen = True
+                group_key = (
+                    checkpoint.episode_decision.session,
+                    checkpoint.episode_decision.checkpoint,
+                )
+                self._opening_reversal_results.setdefault(group_key, {})[
+                    symbol
+                ] = checkpoint
+                self._opening_reversal_receipts.setdefault(group_key, {})[
+                    symbol
+                ] = opening_receipt
             self._sessions_seen.add(checkpoint.episode_decision.session)
             self._probabilities[symbol] = checkpoint.score.probability
             if not checkpoint.rejection_reasons:
                 self._eligible_symbols.add(symbol)
             else:
                 self._eligible_symbols.discard(symbol)
-            if checkpoint.episode_decision.fresh_episode:
+            if (
+                checkpoint.episode_decision.fresh_episode
+                and opening_receipt is None
+            ):
                 episode_id = checkpoint.episode_decision.episode_id
                 assert episode_id is not None
                 self._episode_results[episode_id] = checkpoint
@@ -286,7 +330,8 @@ class FrozenProspectiveApplication:
                     symbol,
                     checkpoint.episode_decision.prospective_entry_timestamp + timedelta(minutes=60),
                 )
-            self.option_discovery.schedule_quiet_state(checkpoint)
+            if opening_receipt is None:
+                self.option_discovery.schedule_quiet_state(checkpoint)
             quiet_observations: tuple[
                 tuple[str | None, QuietObservationKind],
                 ...,
@@ -295,7 +340,9 @@ class FrozenProspectiveApplication:
                 (checkpoint.neutral_control_id, "neutral_control"),
                 (checkpoint.high_tail_control_id, "high_tail_control"),
             )
-            for observation_id, kind in quiet_observations:
+            for observation_id, kind in (
+                quiet_observations if opening_receipt is None else ()
+            ):
                 if observation_id is None:
                     continue
                 self._quiet_observation_results[observation_id] = (checkpoint, kind)
@@ -314,7 +361,62 @@ class FrozenProspectiveApplication:
                     checkpoint.quiet_episode_decision.prospective_entry_timestamp
                     + timedelta(minutes=60),
                 )
-        if result.checkpoint_results:
+        for receipt in result.opening_reversal_prediction_receipts:
+            opening_reversal_seen = True
+            self._opening_reversal_receipts.setdefault(
+                (receipt.session, receipt.checkpoint),
+                {},
+            )[receipt.stock] = receipt
+        for group_key, group_receipts in tuple(
+            self._opening_reversal_receipts.items()
+        ):
+            if (
+                group_key in self._opening_reversal_finalised_groups
+                or set(group_receipts)
+                != set(self.live_recorder.universe_symbols)
+            ):
+                continue
+            receipts = tuple(
+                group_receipts[symbol]
+                for symbol in self.live_recorder.universe_symbols
+            )
+            selection = select_promoted_prediction_v1(receipts)
+            self._opening_reversal_finalised_groups.add(group_key)
+            if selection.promoted is None:
+                continue
+            promoted = selection.promoted
+            group_results = self._opening_reversal_results.get(group_key, {})
+            if promoted.stock not in group_results:
+                raise RuntimeError(
+                    "eligible opening-reversal receipt lacks its causal score"
+                )
+            promoted_result = group_results[promoted.stock]
+            episode_id = promoted.fresh_episode_id
+            assert episode_id is not None
+            self.live_recorder.repository.record_opening_reversal_promotion_v1(
+                self.metadata_factory(observed, (promoted.receipt_created_at_utc,)),
+                selection,
+            )
+            metadata = self.metadata_factory(
+                observed,
+                (promoted.receipt_created_at_utc,),
+            )
+            self.subscriptions.promote_active_episode(
+                metadata,
+                symbol=promoted.stock,
+                episode_id=episode_id,
+            )
+            self.option_discovery.schedule_opening_reversal(
+                promoted_result,
+                promoted,
+            )
+            self._episode_results[episode_id] = promoted_result
+            self._active_episode_end[episode_id] = (
+                promoted.stock,
+                promoted.entry_timestamp_utc + timedelta(minutes=30),
+            )
+            promoted_opening_episode_id = episode_id
+        if result.checkpoint_results and not opening_reversal_seen:
             metadata = self.metadata_factory(observed, (observed,))
             active_symbols = {symbol for symbol, _ in self._active_episode_end.values()}
             decisions = self.promotion_scheduler.rank_checkpoint(
@@ -325,6 +427,16 @@ class FrozenProspectiveApplication:
             )
             self.subscriptions.apply_checkpoint_promotions(metadata, decisions)
         self.option_discovery.poll(now=observed)
+        if opening_reversal_seen:
+            assert self.opening_reversal_capacity is not None
+            snapshot = self.opening_reversal_capacity.snapshot(
+                observed_at_utc=observed,
+                promoted_episode_id=promoted_opening_episode_id,
+            )
+            self.live_recorder.repository.record_opening_reversal_capacity_snapshot_v1(
+                self.metadata_factory(observed, (observed,)),
+                snapshot,
+            )
         self._reconcile_subscriptions(observed)
         self._finalise_due_phases(observed)
         self._finalise_due_quiet_phases(observed)
@@ -720,6 +832,42 @@ def build_frozen_prospective_application(
                 artifact_files[
                     "m1c_opening_market_transition_v1_config"
                 ] = opening_path
+    opening_reversal_activation_v1 = None
+    reversal_config_path = (
+        paths.m1c_prospective_opening_reversal_v1_config
+    )
+    reversal_activation_path = (
+        paths.m1c_prospective_opening_reversal_v1_activation
+    )
+    if (reversal_config_path is None) != (reversal_activation_path is None):
+        raise ValueError(
+            "opening reversal config and activation must be configured together"
+        )
+    if reversal_config_path is not None:
+        assert reversal_activation_path is not None
+        if config.ibkr.reserved_future_trading_lines != 12:
+            raise ValueError(
+                "opening reversal V1 requires exactly 12 reserved market-data lines"
+            )
+        frozen_reversal_config = load_frozen_experiment_config_v1(
+            str(reversal_config_path)
+        )
+        opening_reversal_activation_v1 = load_activation_receipt_v1(
+            str(reversal_activation_path)
+        )
+        if (
+            opening_reversal_activation_v1.configuration_hash
+            != frozen_reversal_config.configuration_hash
+        ):
+            raise ValueError(
+                "opening reversal activation/configuration hash mismatch"
+            )
+        artifact_files[
+            "m1c_prospective_opening_reversal_v1_config"
+        ] = Path(reversal_config_path)
+        artifact_files[
+            "m1c_prospective_opening_reversal_v1_activation"
+        ] = Path(reversal_activation_path)
     if any(not path.is_file() for path in artifact_files.values()):
         absent = sorted(name for name, path in artifact_files.items() if not path.is_file())
         raise ValueError("frozen recorder artifact absent: " + ",".join(absent))
@@ -899,6 +1047,11 @@ def build_frozen_prospective_application(
         repository,
         configuration_hash=configuration_hash,
     )
+    if opening_reversal_activation_v1 is not None:
+        frozen_repository.record_opening_reversal_activation_v1(
+            initial_metadata,
+            opening_reversal_activation_v1,
+        )
 
     def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:
         return frozen_repository.prospective_phase_for_session(
@@ -986,6 +1139,7 @@ def build_frozen_prospective_application(
         opening_transition_activation_status_v1=(
             opening_transition_activation_status_v1
         ),
+        opening_reversal_activation_v1=opening_reversal_activation_v1,
     )
     controller_budget = SubscriptionBudgetManager(
         limits={
@@ -1012,6 +1166,30 @@ def build_frozen_prospective_application(
         future_trading_reserve_lines=int(runtime_capacity.reserved_future_trading_lines.value),
         safety_margin_lines=int(runtime_capacity.safety_margin_lines.value),
     )
+    opening_reversal_capacity = (
+        None
+        if opening_reversal_activation_v1 is None
+        else OpeningReversalCapacityCoordinatorV1(
+            budget=controller_budget,
+        )
+    )
+    if opening_reversal_capacity is not None:
+        def persist_pre_receipt_capacity_snapshot(
+            metadata: EvidenceMetadata,
+        ) -> str:
+            snapshot = opening_reversal_capacity.snapshot(
+                observed_at_utc=metadata.recorded_at_utc,
+                promoted_episode_id=None,
+            )
+            frozen_repository.record_opening_reversal_capacity_snapshot_v1(
+                metadata,
+                snapshot,
+            )
+            return snapshot.snapshot_hash
+
+        engine.set_opening_reversal_capacity_snapshot_provider_v1(
+            persist_pre_receipt_capacity_snapshot
+        )
     live = FrozenM1CLiveRecorder(
         adapter=adapter,
         normalizer=normalizer,
@@ -1129,6 +1307,39 @@ def build_frozen_prospective_application(
             return False
 
     option_recorder.eviction_sink = cancel_evicted_subscription
+    def persist_episode_allocation(
+        record: EpisodeAllocationRecord,
+    ) -> None:
+        allocation_metadata = metadata_factory(
+            record.updated_at_utc,
+            (record.updated_at_utc,),
+        )
+        frozen_repository.record_option_episode_allocation(
+            allocation_metadata,
+            record,
+        )
+        if (
+            record.kind is not EpisodeKind.OPENING_REVERSAL
+            or opening_reversal_capacity is None
+            or record.state
+            not in {EpisodeState.EPISODE_QUEUED, EpisodeState.DEGRADED}
+        ):
+            return
+        snapshot = opening_reversal_capacity.snapshot(
+            observed_at_utc=record.updated_at_utc,
+            promoted_episode_id=record.episode_id,
+        )
+        frozen_repository.record_opening_reversal_capacity_snapshot_v1(
+            allocation_metadata,
+            snapshot,
+        )
+        for event in build_capacity_degradation_events_v1(record):
+            frozen_repository.record_opening_reversal_degradation_v1(
+                allocation_metadata,
+                event,
+                capacity_snapshot_hash_v1=snapshot.snapshot_hash,
+            )
+
     episode_state = BudgetAwareEpisodeStateMachine(
         budget=controller_budget,
         max_active_episodes=config.ibkr.max_active_option_episodes,
@@ -1141,10 +1352,7 @@ def build_frozen_prospective_application(
             ),
         ),
         maximum_recording_duration=timedelta(minutes=config.ibkr.option_episode_maximum_minutes),
-        persistence_sink=lambda record: frozen_repository.record_option_episode_allocation(
-            metadata_factory(record.updated_at_utc, (record.updated_at_utc,)),
-            record,
-        ),
+        persistence_sink=persist_episode_allocation,
         eviction_sink=cancel_evicted_subscription,
         phase_resolver=lambda task: prospective_phase_at(task.triggered_at_utc),
     )
@@ -1209,6 +1417,9 @@ def build_frozen_prospective_application(
         aggregate_report_path=resolved_paths["aggregate_transfer_report"],
         runtime_parity_passed=m1c_parity,
         expected_symbols=identity.symbols,
+        opening_reversal_enabled=(
+            opening_reversal_activation_v1 is not None
+        ),
     )
     daily_report_writer = BudgetAwareDailyReportWriter(
         database_path=repository.database_path,
@@ -1223,6 +1434,7 @@ def build_frozen_prospective_application(
         live_recorder=live,
         subscriptions=controller,
         subscription_budget=controller_budget,
+        opening_reversal_capacity=opening_reversal_capacity,
         option_discovery=option_discovery,
         phase_manager=phase_manager,
         quiet_phase_manager=quiet_phase_manager,

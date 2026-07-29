@@ -67,7 +67,11 @@ class RuntimeConfig(BaseModel):
     callback_inbox_batch_limit: int = Field(default=256, ge=1, le=65_536)
     callback_inbox_lease_seconds: int = Field(default=30, ge=5)
     callback_heartbeat_stale_seconds: int = Field(default=30, ge=5)
-    raw_storage_heartbeat_stale_seconds: int = Field(default=60, ge=5)
+    # With only the always-on five-minute bar surface active, a normalised raw
+    # partition is emitted when the next bar proves the prior bar complete.
+    # Six minutes remains below two missed bar boundaries and does not pretend
+    # that partial updates are immutable partition commits.
+    raw_storage_heartbeat_stale_seconds: int = Field(default=360, ge=5)
     callback_acknowledgement_stale_seconds: int = Field(default=30, ge=5)
     callback_inbox_healthy_backlog: int = Field(default=5_000, ge=0)
     callback_inbox_oldest_healthy_seconds: int = Field(default=60, ge=1)

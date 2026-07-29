@@ -1064,6 +1064,14 @@ activity from configured paths or historical data. Treat only
 - scientific prerequisites pass, the broker mutation count is zero, and no
   required stream gap or fatal latch is active.
 
+When only the always-on five-minute bar surface is active, a normalised
+immutable raw partition is expected when the next bar proves the prior bar
+complete. The default raw-storage freshness bound is therefore six minutes.
+This does not relax the separate 30-second callback-receipt, durable-admission,
+or inbox-acknowledgement bounds. Once Level I is promoted, partitions normally
+arrive more often; a raw-storage age beyond six minutes during an open session
+is degraded evidence and must be investigated.
+
 `MARKET_CLOSED` is expected outside the configured session and does not demand
 a callback heartbeat. `RECORDING_DEGRADED` means evidence is still being
 recorded but a nonfatal live condition is unhealthy. `SCIENTIFICALLY_BLOCKED`,

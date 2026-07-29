@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from stocker_prospective.activation import ActivationRecord
-from stocker_prospective.config import ProspectiveConfig
+from stocker_prospective.config import ProspectiveConfig, operational_thresholds
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.contract import SECTOR_PROXY_BY_SYMBOL
 from stocker_prospective.database import ProspectiveRepository
@@ -194,6 +194,8 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
 
     assert result.checkpoint_results == ()
     assert config.runtime.callback_inbox_batch_limit == 256
+    assert config.runtime.raw_storage_heartbeat_stale_seconds == 360
+    assert operational_thresholds(config).raw_storage_heartbeat_stale_after == timedelta(minutes=6)
     assert (tmp_path / "activation.json").is_file()
     assert (tmp_path / "capability.json").is_file()
     with sqlite3.connect(config.paths.database) as connection:

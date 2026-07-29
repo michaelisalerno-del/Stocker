@@ -682,22 +682,23 @@ def _fail_closed_on_unclean_recorder_takeover(
 
     assert config.runtime.run_id is not None
     with repository._connect() as connection:
-        prior_same_run_generation = (
-            connection.execute(
-                """
-                SELECT 1
-                FROM recorder_generation_v1
-                WHERE run_id = ? AND recorder_generation < ?
-                LIMIT 1
-                """,
-                (config.runtime.run_id, lease.generation),
-            ).fetchone()
-            is not None
-        )
+        previous_generation = connection.execute(
+            """
+            SELECT recorder_generation, stopped_cleanly
+            FROM recorder_generation_v1
+            WHERE run_id = ? AND recorder_generation < ?
+            ORDER BY recorder_generation DESC
+            LIMIT 1
+            """,
+            (config.runtime.run_id, lease.generation),
+        ).fetchone()
+    previous_generation_unclean = previous_generation is not None and (
+        previous_generation["stopped_cleanly"] != 1
+    )
     same_run_stale_takeover = (
         lease.recovered_stale_owner and lease.previous_run_id == config.runtime.run_id
     )
-    if not (same_run_stale_takeover or prior_same_run_generation):
+    if not (same_run_stale_takeover or previous_generation_unclean):
         return False
     observed = datetime.now(UTC)
     operational_repository.start_generation(
@@ -736,6 +737,14 @@ def _fail_closed_on_unclean_recorder_takeover(
                 None
                 if lease.previous_heartbeat_at_utc is None
                 else lease.previous_heartbeat_at_utc.isoformat()
+            ),
+            "previous_recorder_generation": (
+                None
+                if previous_generation is None
+                else int(previous_generation["recorder_generation"])
+            ),
+            "previous_generation_stopped_cleanly": (
+                None if previous_generation is None else previous_generation["stopped_cleanly"] == 1
             ),
             "socket_opened_at_detection": False,
             "raw_inbox_recovery_continues": True,

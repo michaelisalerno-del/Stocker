@@ -193,6 +193,80 @@ def test_unclean_recorder_takeover_latches_and_continues_raw_recovery(
     )
 
 
+def test_clean_previous_generation_does_not_relatch_unclean_restart(
+    tmp_path: Path,
+) -> None:
+    cfg = load_prospective_config(write_replay_config(tmp_path))
+    assert cfg.runtime.run_id is not None
+    repository = ProspectiveRepository(cfg.paths.database)
+    repository.migrate()
+    observed = datetime(2026, 7, 29, 15, tzinfo=UTC)
+    repository.create_run(
+        EvidenceMetadata(
+            run_id=cfg.runtime.run_id,
+            prospective_start_utc=cfg.runtime.prospective_start_utc,
+            app_version=cfg.runtime.app_version,
+            git_commit=cfg.runtime.git_commit,
+            model_artifact_id="frozen-m1c",
+            universe_id="anchor-frozen-20",
+            cohort="anchor_frozen_20",
+            source_timestamps=[observed.isoformat()],
+            recorded_at_utc=observed,
+        )
+    )
+    operational = RecorderOperationalRepository(cfg.paths.database)
+    operational.start_generation(
+        run_id=cfg.runtime.run_id,
+        recorder_generation=1,
+        owner_id="clean-owner",
+        started_at=observed - timedelta(minutes=2),
+        required_market_data_mode="live",
+        expected_artifact_count=1,
+    )
+    operational.set_stopping(
+        run_id=cfg.runtime.run_id,
+        recorder_generation=1,
+        owner_id="clean-owner",
+        now=observed - timedelta(minutes=1),
+    )
+    operational.set_stopped_cleanly(
+        run_id=cfg.runtime.run_id,
+        recorder_generation=1,
+        owner_id="clean-owner",
+        now=observed,
+        termination_reason="operator_shutdown",
+    )
+    inbox = DurableCallbackInbox(
+        cfg.paths.database,
+        run_id=cfg.runtime.run_id,
+        recorder_generation=2,
+        owner_id="replacement",
+    )
+    lease = LeaseRecord(
+        run_id=cfg.runtime.run_id,
+        owner_id="replacement",
+        acquired_at_utc=observed,
+        heartbeat_at_utc=observed,
+        generation=2,
+        recovered_stale_owner=False,
+        previous_run_id=cfg.runtime.run_id,
+        previous_owner_id="clean-owner",
+        previous_heartbeat_at_utc=observed,
+    )
+
+    recovery_continues = cli_module._fail_closed_on_unclean_recorder_takeover(
+        lease=lease,
+        config=cfg,
+        owner_id="replacement",
+        repository=repository,
+        durable_inbox=inbox,
+        operational_repository=operational,
+    )
+
+    assert recovery_continues is False
+    assert not inbox.has_active_fatal("ingestion")
+
+
 def test_ibkr_api_register_writes_verified_immutable_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -104,7 +104,7 @@ def _write_csv(path: Path, rows: list[dict[str, Any]], columns: list[str]) -> No
 
 def _git(*args: str) -> str:
     result = subprocess.run(
-        ["rtk", "git", *args],
+        ["git", *args],
         cwd=ROOT,
         check=True,
         capture_output=True,

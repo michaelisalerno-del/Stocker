@@ -1,0 +1,48 @@
+{
+  "checks": {
+    "admission_feature_allowlist_has_no_outcomes": true,
+    "aggregate_metrics_replay": true,
+    "all_training_sessions_strictly_precede_scores": true,
+    "artifact_manifest_complete_and_valid": true,
+    "bootstrap_and_holm_replay": true,
+    "diversion_specific_payoff_artifact_absent": true,
+    "fixed_payoffs_replay": true,
+    "frozen_population_and_calendar_match": false,
+    "pre_score_and_artifact_source_hashes_match": true,
+    "research_only_and_unsealed_status": true,
+    "route_probabilities_valid_and_floored": true,
+    "route_topology_and_pre_entry_clock_replay": true,
+    "sequential_policies_use_earliest_causal_class": true,
+    "snapshot_next_open_clock_and_route_replay": true,
+    "snapshot_payoffs_replay": true,
+    "uncertainty_and_point_classes_replay": true
+  },
+  "contract_id": "20260714-causal-payoff-model-paths-v1",
+  "errors": {
+    "aggregate_counts": 0,
+    "causal_training": 0,
+    "classes": 0,
+    "diversion_artifacts": [],
+    "forbidden_feature_hits": [],
+    "manifest": 0,
+    "policies": 0,
+    "population": 1,
+    "pre_entry": 0,
+    "probabilities": 0,
+    "route": 0,
+    "snapshot_clock": 0,
+    "snapshot_route": 0
+  },
+  "live_ordering_enabled": false,
+  "maximum_errors": {
+    "aggregate_metric_replay": 1.4210854715202004e-14,
+    "bootstrap_replay": 7.105427357601002e-15,
+    "fixed_payoff_replay": 0.0,
+    "holm_replay": 0.0,
+    "snapshot_payoff_replay": 0.0
+  },
+  "order_placement": "disabled",
+  "passed": 15,
+  "research_only": true,
+  "total": 16
+}

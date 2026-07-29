@@ -1,0 +1,87 @@
+id: opening_range_breakout_intraday_session_flat_v1
+name: Opening Range Breakout Intraday Session Flat
+description: >
+  Session-flat intraday opening-range breakout continuation hypothesis for
+  liquid stocks using the Stage 4.1 intraday feature layer.
+hypothesis_version: 1
+market_universe: us_liquid_5m_intraday
+instrument_type: stock
+timeframe: 5m
+data_source: eodhd
+template: opening_range_breakout
+signal_family: opening_range_breakout
+direction: long_only
+preferred_style: intraday
+allow_intraday: true
+allow_overnight: false
+allow_weekend: false
+max_holding_sessions: 1
+flatten_before_close_minutes: 10
+entry_cutoff_before_close_minutes: 30
+entry_logic: >
+  Long only after the opening range is complete and a completed 5m bar closes
+  above opening_range_high plus a small basis-point buffer, subject to early
+  session timing, relative-volume, and opening-range width filters.
+exit_logic: >
+  Exit by a simple max-bars time stop or by failure to hold above the opening
+  range mid when that exit mode is selected. Scored positions are forced
+  session-flat by the research holding policy before close.
+holding_period: >
+  Intraday only. New entries are blocked before the no-entry cutoff and scored
+  positions must be flat before the close; max_holding_sessions is 1.
+expected_edge_reason: >
+  Some liquid stocks may continue directionally after breaking a completed
+  opening range, but only when the breakout occurs early enough in the regular
+  session, relative volume is sufficient, and scored exposure is forcibly
+  session-flat. This is a research hypothesis, not an edge claim.
+invalidation_rules:
+  - Rejected if walk-forward test splits fail after realistic intraday costs.
+  - Rejected if trade count is too low for the selected parameter set.
+  - Rejected if returns do not exceed same-window buy-and-hold and null timing checks.
+  - Rejected if scored positions are not session-flat compliant.
+  - Rejected if performance is isolated to one fragile parameter setting.
+minimum_evidence:
+  min_trades: 20
+  min_profitable_split_pct: 0.6
+  min_stability_score: 0.5
+holding_policy:
+  preferred_style: intraday
+  allow_intraday: true
+  allow_overnight: false
+  allow_weekend: false
+  max_holding_sessions: 1
+  flatten_before_close_minutes: 10
+  entry_cutoff_before_close_minutes: 30
+  require_exceptional_evidence_for_swing: true
+  require_gap_risk_report: true
+  min_swing_excess_vs_benchmark: 0.05
+  min_swing_excess_vs_null: 0.03
+  min_swing_trade_count: 50
+  max_gap_return_contribution_pct: 0.25
+  max_weekend_exposure_count: 0
+  max_overnight_exposure_count: 0
+  max_swing_drawdown: 0.15
+parameter_space:
+  opening_minutes: [15, 30]
+  breakout_buffer_bps: [0, 5]
+  min_bars_after_open: [3]
+  max_hold_bars: [12]
+  min_relative_volume: [1.0]
+  max_opening_range_width_pct: [0.025]
+  exit_mode: [time_stop, range_mid_reclaim_fail]
+maximum_parameter_sets: 8
+costs:
+  spread_bps: 3
+  commission_bps: 0.5
+  slippage_bps: 2
+risk:
+  max_drawdown: 0.20
+  min_trades: 20
+walkforward:
+  mode: rolling
+  train_bars: 7800
+  test_bars: 3900
+  embargo_bars: 1
+  step_bars: 3900
+  minimum_rows: 11701
+created_at: "2026-06-29T00:00:00Z"

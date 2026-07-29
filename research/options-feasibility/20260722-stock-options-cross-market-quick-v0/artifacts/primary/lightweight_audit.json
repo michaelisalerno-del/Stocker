@@ -1,0 +1,286 @@
+{
+  "blocked_outputs_verified_empty": true,
+  "bootstrap_draws_audited": 0,
+  "broker_integration_required": false,
+  "checks": {
+    "blocked_model_outputs": {
+      "fitted_models": [],
+      "manual_probability_reconstruction_rows_per_fitted_model": {},
+      "nonempty_outputs": {},
+      "passed": true,
+      "prediction_rows": 0
+    },
+    "bootstrap_and_null_designs": {
+      "bootstrap_draws_planned": 10,
+      "bootstrap_draws_run": 0,
+      "bootstrap_interval_levels": [
+        0.8,
+        0.9,
+        0.95
+      ],
+      "bootstrap_seed": 20260722,
+      "options_null_refits_planned": 3,
+      "options_null_refits_run": 0,
+      "options_null_seeds": [
+        20260723,
+        20260724,
+        20260725
+      ],
+      "passed": true,
+      "reason": "blocked_insufficient_cached_options_coverage",
+      "route_null_refits_planned": 3,
+      "route_null_refits_run": 0,
+      "route_null_seeds": [
+        20260726,
+        20260727,
+        20260728
+      ]
+    },
+    "cached_options_integrity": {
+      "cached_vendor_records_used": 3624,
+      "history_records_materialised": 18,
+      "passed": true,
+      "protected_cached_history_records_skipped_before_materialisation": 24,
+      "protected_history_records_materialised": 0,
+      "raw_hash_failures": 0,
+      "raw_record_count_mismatches": 0
+    },
+    "candidate_normalized_weights": {
+      "maximum_difference": 0.0,
+      "passed": true
+    },
+    "coverage_gap_and_request_plan": {
+      "estimated_additional_records": 6920136,
+      "estimated_additional_requests": 56196,
+      "mismatches": {},
+      "missing_exact_chain_stock_dates": 8028,
+      "passed": true,
+      "stock_date_rows": 8040
+    },
+    "decision_logic": {
+      "mismatches": {},
+      "passed": true
+    },
+    "determinism": {
+      "joined_row_mismatches": 0,
+      "maximum_feature_difference": 0.0,
+      "maximum_probability_difference": 0.0,
+      "passed": true,
+      "selected_contract_mismatches": 0
+    },
+    "development_only_stock_relative_scaling": {
+      "maximum_difference": 0.0,
+      "passed": true
+    },
+    "exact_previous_trading_session_join": {
+      "mismatches": 0,
+      "passed": true
+    },
+    "five_cross_market_disagreement_features": {
+      "maximum_disagreement_difference": 0.0,
+      "maximum_standardization_difference": 0.0,
+      "passed": true
+    },
+    "frozen_dates_cohort_and_checkpoints": {
+      "assessment_maximum": "2025-08-22",
+      "assessment_minimum": "2025-01-02",
+      "checkpoints": [
+        6,
+        8,
+        10,
+        12,
+        14,
+        16,
+        18,
+        20,
+        22,
+        24,
+        26,
+        28,
+        30,
+        32,
+        34
+      ],
+      "development_maximum": "2024-12-31",
+      "development_minimum": "2024-01-17",
+      "passed": true,
+      "symbols": [
+        "AAL",
+        "AAOI",
+        "APLD",
+        "ASTS",
+        "CIFR",
+        "HIMS",
+        "IONQ",
+        "IREN",
+        "MARA",
+        "MP",
+        "MRNA",
+        "MSTR",
+        "NVTS",
+        "QBTS",
+        "RGTI",
+        "RIOT",
+        "RIVN",
+        "SMCI",
+        "SOFI",
+        "WULF"
+      ]
+    },
+    "frozen_pair_selection": {
+      "exact_chains": 9,
+      "passed": true,
+      "selected_contract_mismatches": 0,
+      "valid_pairs": 8
+    },
+    "model_and_preprocessing_configuration": {
+      "passed": true,
+      "primary_model": {
+        "C": 0.25,
+        "class_weight": null,
+        "max_iter": 300,
+        "n_jobs": 1,
+        "penalty": "l2",
+        "solver": "liblinear"
+      },
+      "ridge": {
+        "alpha": 10.0,
+        "solver": "cholesky"
+      }
+    },
+    "model_feature_surfaces": {
+      "mismatches": [],
+      "passed": true
+    },
+    "no_same_day_or_future_option_join": {
+      "passed": true,
+      "same_day_or_future_rows": 0
+    },
+    "option_pair_and_feature_reconstruction": {
+      "identity_mismatches": 0,
+      "maximum_option_feature_difference": 0.0,
+      "passed": true
+    },
+    "protected_boundary_artifact": {
+      "passed": true,
+      "protected_cached_history_records_skipped_before_materialisation": 24,
+      "protected_rows_materialised": 0
+    },
+    "protected_date_causal_state_trace_session": {
+      "maximum": "2025-08-22",
+      "passed": true
+    },
+    "protected_date_cross_market_panel_required_options_date": {
+      "maximum": "2025-08-21",
+      "passed": true
+    },
+    "protected_date_cross_market_panel_session": {
+      "maximum": "2025-08-22",
+      "passed": true
+    },
+    "protected_date_dense_structural_panel_session": {
+      "maximum": "2025-08-22",
+      "passed": true
+    },
+    "quick_support_gates": {
+      "evidence": {
+        "assessment_months": 1,
+        "assessment_rows": 39,
+        "assessment_sessions": 1,
+        "assessment_stocks": 3,
+        "broad_conflict_rows": 8,
+        "exact_pair_row_coverage": 0.0011279174017410417,
+        "low_route_support_rows": 6,
+        "maximum_stock_weight_share": 0.33333333333333337,
+        "test_a_positives": 0,
+        "test_b_positives": 14
+      },
+      "gates": {
+        "assessment_months": false,
+        "assessment_rows": false,
+        "assessment_sessions": false,
+        "assessment_stocks": false,
+        "broad_conflict_rows": false,
+        "exact_pair_row_coverage": false,
+        "low_route_support_rows": false,
+        "maximum_stock_weight_share": false,
+        "test_a_positives": false,
+        "test_b_positives": false
+      },
+      "passed": true
+    },
+    "required_artifacts": {
+      "missing": [],
+      "passed": true
+    },
+    "route_state_residual_statistics": {
+      "broad_minus_low": {
+        "exceed_iv_rate_difference": -0.13333333333333336,
+        "mean_iv_residual_difference": 0.0023323536841499746,
+        "median_iv_residual_difference": -1.4919652982667893e-05,
+        "upper_decile_iv_residual_difference": 0.030130859225401718
+      },
+      "maximum_difference": 1.1102230246251565e-16,
+      "passed": true
+    },
+    "safety_flags": {
+      "mismatches": {},
+      "passed": true
+    },
+    "source_hashes": {
+      "mismatches": {},
+      "passed": true
+    },
+    "structural_eligibility_and_target": {
+      "eligibility_mismatches": 0,
+      "passed": true,
+      "rows": 87443,
+      "target_mismatches": 0
+    },
+    "structural_panel_reconstruction": {
+      "joined_maximum_shared_feature_difference": 0.0,
+      "joined_route_state_mismatches": 0,
+      "joined_row_identity_mismatches": 0,
+      "passed": true
+    },
+    "test_a_target": {
+      "ineligible_rows_materialised": 0,
+      "passed": true,
+      "target_mismatches": 0
+    },
+    "test_b_underlying_movement_target": {
+      "maximum_difference": 0.0,
+      "passed": true,
+      "target_mismatches": 0
+    },
+    "trailing_realised_volatility": {
+      "maximum_iv_minus_realised_difference": 0.0,
+      "maximum_volatility_difference": 0.0,
+      "passed": true
+    }
+  },
+  "decision": "blocked_insufficient_cached_options_coverage",
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "fitted_models_audited": 0,
+  "intraday_option_quotes_used": false,
+  "manual_probability_reconstruction_rows_per_fitted_model": {},
+  "model_metric_rows_audited": 0,
+  "note": "The support gate bound before fitting; model coefficients, manual probabilities, proper-score metrics, Ridge diagnostics, bootstrap draws, and null refits are therefore correctly absent.",
+  "option_pnl_calculated": false,
+  "options_null_refits_audited": 0,
+  "order_placement": "disabled",
+  "passed": true,
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_cross_market_screen": true,
+  "research_only": true,
+  "ridge_models_audited": 0,
+  "route_null_refits_audited": 0,
+  "status": "passed",
+  "strategy_promotion": false,
+  "test_a_options_to_stock": true,
+  "test_b_stock_to_options_movement": true,
+  "underlying_movement_outcomes_opened": true
+}

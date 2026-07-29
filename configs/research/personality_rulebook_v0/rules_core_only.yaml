@@ -1,0 +1,63 @@
+version: personality_rulebook_core_only_v0_20260701
+research_only: true
+source_report: data/reports/research/personality_rulebook_v0/personality_rulebook_v0_20260701T123956Z
+notes: >
+  Strict personality + core regime + filter variant. This drops rules whose
+  regime field is auction location, time of day, cross-stock alignment, or
+  freshness. No thresholds are refit.
+rules:
+  - rule_id: dead_chop_vwap_offset_h6
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 6
+    expected_direction: 0
+    regime_field: compression_x_efficiency_regime
+    regime_value: normal_compression|mixed_efficiency
+    rule_kind: single
+    feature: distance_from_vwap_pct
+    operator: ">="
+    threshold: 0.000425036
+    filter_rule: distance_from_vwap_pct >= 0.000425036
+    source_note: core regime plus vwap offset no-trade filter
+
+  - rule_id: dead_chop_opening_high_location_h24
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 24
+    expected_direction: 0
+    regime_field: efficiency_regime
+    regime_value: mixed_efficiency
+    rule_kind: single
+    feature: distance_from_opening_range_high_pct
+    operator: ">="
+    threshold: -0.00825485
+    filter_rule: distance_from_opening_range_high_pct >= -0.00825485
+    source_note: core efficiency regime plus opening-range location filter
+
+  - rule_id: dead_chop_compressed_opening_high_h6
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 6
+    expected_direction: 0
+    regime_field: compression_x_efficiency_regime
+    regime_value: compressed|mixed_efficiency
+    rule_kind: single
+    feature: distance_from_opening_range_high_pct
+    operator: ">="
+    threshold: -0.00825454
+    filter_rule: distance_from_opening_range_high_pct >= -0.00825454
+    source_note: core compressed/mixed-efficiency no-trade filter
+
+  - rule_id: active_liquidation_low_compression_h12
+    personality: active_liquidation
+    role: short_or_long_blocker
+    horizon: 12
+    expected_direction: -1
+    regime_field: opening_mid_x_range_regime
+    regime_value: below|low_range
+    rule_kind: single
+    feature: compression_zscore
+    operator: "<="
+    threshold: -0.291076
+    filter_rule: compression_zscore <= -0.291076
+    source_note: core opening-mid/range regime plus compression filter

@@ -1,0 +1,72 @@
+{
+  "broad_family": "frozen registered motif_type: primitive, repeat, or composite",
+  "broker_integration_required": false,
+  "development_frozen_bins": {
+    "posterior_entropy_median": 0.12281747563993205,
+    "route_quartiles": {
+      "prefix_family_entropy": [
+        0.410116318288409,
+        0.5623351446188083,
+        0.8979457248567798
+      ],
+      "top_minus_second_prefix_depth": [
+        0.0,
+        0.0,
+        0.3333333333333333
+      ],
+      "top_prefix_depth_fraction": [
+        0.0,
+        0.0,
+        0.5
+      ]
+    },
+    "route_resolution_definitions": {
+      "BROAD_CONFLICT": "entropy >= development Q75 and depth margin <= development Q25",
+      "DOMINANT_ROUTE": "top depth and depth margin both >= development Q75",
+      "LOW_ROUTE_SUPPORT": "active prefix count <= 2",
+      "NARROWING": "active-prefix count change over three bars < 0 and depth-margin change > 0",
+      "OTHER": "all remaining rows",
+      "precedence": [
+        "BROAD_CONFLICT",
+        "NARROWING",
+        "DOMINANT_ROUTE",
+        "LOW_ROUTE_SUPPORT",
+        "OTHER"
+      ]
+    },
+    "transition_probability_median": 0.17664659067088087
+  },
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "feature_count": 15,
+  "features": [
+    "active_prefix_count",
+    "active_prefix_family_count",
+    "top_prefix_depth_fraction",
+    "second_prefix_depth_fraction",
+    "top_minus_second_prefix_depth",
+    "prefix_family_entropy",
+    "orientation_disagreement_fraction",
+    "new_prefixes_last_1_bar",
+    "invalidated_prefixes_last_1_bar",
+    "active_prefix_count_change_last_1_bar",
+    "active_prefix_count_change_last_3_bars",
+    "top_prefix_depth_change_last_1_bar",
+    "top_prefix_depth_change_last_3_bars",
+    "matching_recent_loop_prefix_count",
+    "recent_loop_memory_weighted_top_depth"
+  ],
+  "future_target_identity_used": false,
+  "orientation_disagreement": "one minus the modal cross-route orientation-anchor-state share; zero when fewer than two or unavailable",
+  "prefix_depth_fraction": "(progress_states - 1) / (progress_states + transitions_remaining - 1)",
+  "prefix_identity": "exact frozen registered semantic_loop_id plus orientation_id",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "recent_loop_memory": "exact identity in previous six bars receives +1; exact identity 7-12 bars ago receives +0.5",
+  "registered_completion_hazard": true,
+  "research_only": true,
+  "route_competition_features": true,
+  "strategy_promotion": false
+}

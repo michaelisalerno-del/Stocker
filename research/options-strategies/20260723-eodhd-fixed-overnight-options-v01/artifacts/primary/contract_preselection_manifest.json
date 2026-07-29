@@ -1,0 +1,75 @@
+{
+  "S1": {
+    "entry_dte": [
+      7,
+      14
+    ],
+    "selection_date_expected_dte": [
+      8,
+      15
+    ],
+    "strike_rule": "minimum_abs_log_strike_over_previous_close",
+    "tie_break": [
+      "highest_minimum_open_interest",
+      "narrowest_combined_relative_spread",
+      "smallest_iv_gap",
+      "strike",
+      "contract_ids_lexicographic"
+    ]
+  },
+  "S2": {
+    "both_sides_preselected": true,
+    "long_absolute_delta": 0.5,
+    "maximum_absolute_delta_error": 0.1,
+    "short_absolute_delta": 0.25,
+    "status": "blocked_direction_mapping_unavailable",
+    "tie_break": [
+      "highest_minimum_open_interest",
+      "narrowest_combined_relative_spread",
+      "smallest_total_delta_error",
+      "contract_ids_lexicographic"
+    ]
+  },
+  "S3": {
+    "entry_dte": [
+      1,
+      1
+    ],
+    "selection_date_expected_dte": [
+      2,
+      2
+    ],
+    "strike_rule": "same_frozen_atm_rule_as_S1"
+  },
+  "achieved_pnl_claimed": false,
+  "blocker": "none",
+  "broker_integration_required": false,
+  "contract_expiration_may_cross_protected_boundary": true,
+  "contract_selection_date_rule": "exact_previous_us_trading_session_D_minus_1",
+  "daily_option_high_low_used": false,
+  "directional_strategy_requires_audited_mapping": true,
+  "exact_observation_date_filtering": true,
+  "execution_enabled": false,
+  "extra_provider_dates_discarded_before_materialisation": true,
+  "incomplete_strategy_date_chains": 2781,
+  "intraday_option_fill_simulated": false,
+  "older_chain_forward_filled": false,
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "prospective_validation": false,
+  "protected_boundary_applied_to_observation_date": true,
+  "repair_version": "v0.1",
+  "required_option_date_rows": 6864,
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "same_session_closing_chain_used_for_identity_selection": false,
+  "same_session_greeks_used_for_selection": false,
+  "selected_contract_replacement_at_entry": false,
+  "selected_contracts": 2009,
+  "stock_signal_time": "15:30 America/New_York",
+  "strategies_evaluated_independently": true,
+  "strategy_promotion": false,
+  "unique_incomplete_symbol_dates": 2440
+}

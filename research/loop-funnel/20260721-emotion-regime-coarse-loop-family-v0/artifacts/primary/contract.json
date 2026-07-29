@@ -1,0 +1,136 @@
+{
+  "binding_question": "At 10:00 and 10:30, do frozen behavioural dimensions and behavioural × regime-mixture interactions improve prediction of the broad first-loop family occurring within the next six completed five-minute bars?",
+  "blocked_designs_not_rerun": [
+    "Regime × Loop Prefix × Behavioural Context Quick Screen V0",
+    "Emotion × Regime-Mix Loop Funnel Quick Screen V0"
+  ],
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "decision_gates": {
+    "bootstrap_90_lower_required_non_negative": true,
+    "checkpoint_material_adversity_log_loss_improvement": -0.001,
+    "minimum_positive_assessment_months": 5,
+    "null_threshold_percentile": 0.9,
+    "proper_score_improvement_required": true,
+    "top_two_must_not_decline": true
+  },
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "experiment_id": "20260721-emotion-regime-coarse-loop-family-v0",
+  "experiment_name": "Emotion × Regime-Mix Coarse Loop-Family Funnel V0",
+  "hypothesis": "Behavioural condition may alter the probability of several broad structural outcomes, while the current soft regime mixture determines how that behavioural pressure is likely to express itself.",
+  "models": {
+    "C": 0.25,
+    "class_weight": null,
+    "fit_interval": "2024_only",
+    "max_iter": 300,
+    "maximum_primary_models": 3,
+    "multi_class": "multinomial",
+    "n_jobs": 1,
+    "penalty": "l2",
+    "random_state": 20260721,
+    "row_weight": "1/eligible_stocks_in_session_checkpoint",
+    "solver": "lbfgs"
+  },
+  "order_placement": "disabled",
+  "population": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "checkpoints": {
+      "12": "10:30 America/New_York",
+      "6": "10:00 America/New_York"
+    },
+    "decision_unit": "stock_x_session_x_checkpoint",
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "horizon_completed_five_minute_bars": 6,
+    "maximum_decision_rows": 20000,
+    "protected_start": "2025-08-23",
+    "requires_active_loop_prefix": false,
+    "stock_cohort": "existing_audited_20_stock_cohort"
+  },
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "resampling": {
+    "behavioural_null_draws": 10,
+    "behavioural_null_seed": 20260723,
+    "bootstrap_draws": 50,
+    "bootstrap_seed": 20260722,
+    "bootstrap_unit": "whole_session",
+    "null_bundle_dimensions": 6,
+    "null_permutation_unit": "session_checkpoint_slate",
+    "refit_inside_bootstrap": false
+  },
+  "research_only": true,
+  "resource_limits": {
+    "feature_search": false,
+    "full_second_rerun": false,
+    "gpu": false,
+    "hyperparameter_tuning": false,
+    "maximum_plots": 1,
+    "model_search": false,
+    "n_jobs": 1,
+    "one_minute_data": false,
+    "processes": 1,
+    "raw_data_download": false
+  },
+  "safety": {
+    "broker_integration_required": false,
+    "coarse_loop_family_target": true,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "order_placement": "disabled",
+    "pre_loop_prediction": true,
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "soft_regime_mixture": true,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true
+  },
+  "soft_regime_mixture": true,
+  "status": {
+    "deployable": false,
+    "economic_edge_evidence": false,
+    "observable_only": true,
+    "prospective_validation": false,
+    "retrospective": true,
+    "strategy": false,
+    "structural_only": true
+  },
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "target": {
+    "assessment_repooling": false,
+    "dictionary": "frozen_v2_semantic_loop_dictionary",
+    "event_semantics": "frozen_v2_first_event_semantics",
+    "excluded_from_primary": [
+      "TIED_REGISTERED_COMPLETION",
+      "SOURCE_UNAVAILABLE"
+    ],
+    "failed_registered_pool": "OTHER_REGISTERED_COMPLETION",
+    "mandatory_fallback": [
+      "REGISTERED_COMPLETION",
+      "UNREGISTERED_LOOP",
+      "NO_REGISTERED_COMPLETION"
+    ],
+    "mapping_fit_interval": "2024_only",
+    "raw_outcomes": [
+      "REGISTERED_PRIMITIVE",
+      "REGISTERED_REPEAT",
+      "REGISTERED_COMPOSITE",
+      "UNREGISTERED_LOOP",
+      "NO_REGISTERED_COMPLETION",
+      "TIED_REGISTERED_COMPLETION",
+      "SOURCE_UNAVAILABLE"
+    ],
+    "registered_subtype_support": {
+      "maximum_stock_share": 0.3,
+      "minimum_months": 4,
+      "minimum_outcomes": 75,
+      "minimum_sessions": 30,
+      "minimum_stocks": 8
+    }
+  }
+}

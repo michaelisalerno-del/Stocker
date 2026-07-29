@@ -1,0 +1,290 @@
+{
+  "contract_id": "20260714-selective-payoff-equations-v1",
+  "scientific_status": "post_inspection_causal_retrospective_equation_development_on_opened_2024_not_validation",
+  "frozen_before_scoring": true,
+  "purpose": "Test whether causal context, the full 20-loop score mixture, and one-to-three completed confirmation bars incrementally identify target-before-invalidation paths and positive cost-adjusted expectancy.",
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "position_or_order_functionality_allowed": false,
+    "application_implementation_authorized": false,
+    "strategy_promotion_allowed": false
+  },
+  "opened_data_status": {
+    "period": 2024,
+    "opened": true,
+    "sealed_validation_available": false,
+    "permitted_claim": "retrospective mechanism and incremental-information development only",
+    "forbidden_claims": [
+      "validation",
+      "out_of_sample_edge",
+      "economic_edge",
+      "tradable_strategy"
+    ]
+  },
+  "inputs": {
+    "accepted_setup_signals_2024": "/private/tmp/stocker_causal_setup_conditions_v1_20260712/accepted_setup_signals_2024.parquet",
+    "anchor_panel_2024": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+    "fixed_cycles": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/fixed_cycles.csv",
+    "provider_root_2024": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "parent_first_class_artifact": "../artifacts/20260714-first-class-profitable-move-detectors-v1/primary",
+    "parent_equation_specification": "20260714-first-class-profitable-move-prospective-log-v1.json"
+  },
+  "population": {
+    "surface": "causal_setup_conditions_v1 OCO anchor breakouts",
+    "setup": "oco_anchor_breakout_all",
+    "family": "oco_baseline",
+    "source_horizon": 24,
+    "source_status": "filled",
+    "period": 2024,
+    "surface_sessions": 128,
+    "first_session": "2024-07-01",
+    "last_session": "2024-12-31",
+    "symbols": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "excluded_2024_only_symbols": ["AXTI", "OKLO"],
+    "base_decision_latest_ordinal": 50,
+    "risk_bps_minimum": 20.0,
+    "risk_bps_maximum": 250.0,
+    "cooldown_bars_per_symbol_session": 24,
+    "cooldown_clock": "completed base decision ordinal",
+    "shared_base_population_for_all_equations": true
+  },
+  "data": {
+    "provider": "EODHD historical five-minute bars",
+    "timeframe": "5m",
+    "timezone": "America/New_York",
+    "regular_session": "09:30 inclusive to 16:00 exclusive",
+    "source_columns": ["timestamp", "open", "high", "low", "close", "volume"],
+    "off_grid_policy": "exclude and count; never round",
+    "ordinal_alignment": "Map each anchor by its exact timestamp into the cleaned provider session; the source bar_ordinal is provenance only and is never used to shift across missing provider bars.",
+    "intrabar_ohlc_order": "unknown",
+    "same_bar_target_and_stop": "conservative_failure",
+    "volume_label": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "market_or_sector_context": "unavailable_on_the_frozen_source_and_not_substituted"
+  },
+  "causal_clock": {
+    "base_alert": "frozen OCO anchor",
+    "base_decision": "after the accepted breakout confirmation bar has completed, counted in exact cleaned-provider rows from the exact-timestamp anchor",
+    "base_hypothetical_entry": "next exact provider open",
+    "sequential_checkpoints": [1, 2, 3],
+    "sequential_checkpoint_clock": "after the corresponding additional provider bar has completed",
+    "sequential_hypothetical_entry": "next exact provider open after the selected checkpoint",
+    "future_features_forbidden": true
+  },
+  "risk_and_outcome": {
+    "direction": "accepted OCO breakout direction",
+    "structural_invalidation": "opposite side of the frozen anchor range",
+    "target": "one times the causal entry-to-invalidation distance",
+    "maximum_horizon_bars": 24,
+    "primary_label": "target_before_structural_invalidation",
+    "stop_gap": "exit at observed open when worse than stop",
+    "target_gap": "credit only the frozen target",
+    "dual_touch": "failure and stop payoff",
+    "no_touch": "bar-24 close",
+    "primary_cost_bps_per_side": 5.0,
+    "round_trip_cost_bps": 10.0
+  },
+  "equations": {
+    "prediction_only_comparator": {
+      "formula": "logit(p_target)=state+direction+clock+sum_i(beta_i*loop_score_i)+loop_mass+loop_entropy+loop_margin",
+      "purpose": "measure what the frozen loop prediction surface can do without local admission context"
+    },
+    "E1_context_only": {
+      "formula": "logit(p_target)=alpha+beta_context*causal_context",
+      "loop_inputs": false
+    },
+    "E2_context_plus_loop_mixture": {
+      "formula": "logit(p_target)=E1+sum_i(beta_i*loop_score_i)+loop_mass+loop_entropy+loop_margin",
+      "loop_inputs": "all_20_raw_causal_compatibility_scores_and_normalised_mixture_diagnostics",
+      "warning": "the raw loop scores are compatible-loop scores and do not sum to one; normalised weights and total mass are logged separately"
+    },
+    "E3_sequential_confirmation": {
+      "formula": "logit(p_target_at_checkpoint)=E2+beta_path*completed_path_state",
+      "checkpoints": [1, 2, 3],
+      "policy": "select the earliest eligible checkpoint whose conservative expected net is positive",
+      "eligibility": "the frozen structural invalidation has not touched before the checkpoint and the later-entry risk remains inside the frozen risk bounds"
+    }
+  },
+  "shared_context_numeric_features": [
+    "entry_step",
+    "decision_session_fraction",
+    "base_risk_bps",
+    "anchor_range_prior_atr",
+    "decision_range_prior_atr",
+    "decision_body_fraction",
+    "decision_upper_wick_fraction",
+    "decision_lower_wick_fraction",
+    "decision_close_location",
+    "directional_decision_displacement_prior_atr",
+    "decision_vwap_distance_prior_atr",
+    "decision_activity_ratio",
+    "compression_ratio",
+    "trend_return_6",
+    "source_body_fraction",
+    "source_outer_fraction",
+    "current_bar_log_return",
+    "return_sum_6",
+    "mean_abs_return_12",
+    "session_return",
+    "bar_range_pct"
+  ],
+  "shared_context_categorical_features": [
+    "direction_label",
+    "state_label",
+    "previous_state_label",
+    "clock_quartile_label",
+    "strong_close_label",
+    "trend_aligned_label"
+  ],
+  "loop_features": {
+    "raw_scores": "loop_score_01 through loop_score_20",
+    "diagnostics": [
+      "loop_score_mass",
+      "loop_score_entropy",
+      "top_loop_score",
+      "top_loop_margin",
+      "top_loop_label"
+    ]
+  },
+  "sequential_path_features": [
+    "checkpoint",
+    "directional_close_return_bps",
+    "running_mfe_bps",
+    "running_mae_bps",
+    "causal_retracement_bps",
+    "current_range_prior_atr",
+    "current_body_fraction",
+    "current_upper_wick_fraction",
+    "current_lower_wick_fraction",
+    "directional_vwap_distance_prior_atr",
+    "current_activity_ratio",
+    "favourable_close_fraction"
+  ],
+  "model": {
+    "family": "L2_regularised_binary_logistic",
+    "C": 0.1,
+    "solver": "liblinear",
+    "maximum_iterations": 2000,
+    "numeric_processing": "median_imputation_then_standardisation_fitted_on_prior_sessions_only",
+    "categorical_processing": "most_frequent_imputation_then_one_hot_ignore_unknown_fitted_on_prior_sessions_only",
+    "rolling_training_sessions": 60,
+    "minimum_training_sessions": 40,
+    "minimum_training_rows": 500,
+    "first_raw_prediction_session_index": 40,
+    "first_primary_score_session_index": 60
+  },
+  "causal_probability_calibration": {
+    "history": "prior prequential predictions only",
+    "maximum_history_sessions": 60,
+    "direct_nearest_probability_rows": 500,
+    "direct_minimum_support": 200,
+    "sequential_nearest_probability_rows_per_checkpoint": 300,
+    "sequential_minimum_support_per_checkpoint": 150,
+    "posterior": "Jeffreys beta-binomial",
+    "lower_probability_quantile": 0.05,
+    "unknown_when_support_insufficient": true
+  },
+  "selective_policy": {
+    "conservative_expected_net_bps": "(2*p_target_lower-1)*risk_bps-10",
+    "primary_positive_rule": "conservative_expected_net_bps greater than zero",
+    "point_mean_diagnostic": "(2*p_target_calibrated_mean-1)*risk_bps-10 greater than zero",
+    "forced_ranking_forbidden": true,
+    "abstentions_receive_zero_counterfactual_payoff": true
+  },
+  "comparisons": [
+    "context_only_minus_prediction_only",
+    "context_plus_loop_minus_context_only",
+    "sequential_confirmation_minus_context_plus_loop",
+    "each_equation_against_unfiltered_shared_base_population"
+  ],
+  "evaluation": {
+    "primary_policy": "conservative_uncertainty_aware",
+    "diagnostic_policy": "calibrated_point_mean_nonqualifying",
+    "metrics": [
+      "raw_log_loss",
+      "raw_Brier_score",
+      "selected_target_first_precision",
+      "coverage",
+      "selected_mean_net_bps",
+      "selector_mean_net_per_base_opportunity",
+      "paired_incremental_selector_return",
+      "calibration_support",
+      "monthly_stability",
+      "leave_one_stock_out_robustness",
+      "cost_sensitivity"
+    ],
+    "bootstrap": {
+      "draws": 5000,
+      "moving_session_block": 5,
+      "multiplicity": "Holm within absolute-net, incremental-return, and predictive-loss families"
+    },
+    "qualification_gates": {
+      "selected_rows_minimum": 150,
+      "coverage_minimum": 0.05,
+      "selected_sessions_minimum": 30,
+      "selected_stocks_minimum": 15,
+      "selected_mean_net_positive": true,
+      "selected_net_block_lower_positive": true,
+      "incremental_return_block_lower_positive": true,
+      "Holm_adjusted_p_maximum": 0.05,
+      "positive_at_7_5_bps_per_side": true,
+      "positive_month_majority": true,
+      "positive_leave_one_stock_out_minimum": 16
+    }
+  },
+  "forbidden": [
+    "using source gross_return, exit_price, holding_bars, signal_exit_ordinal, future states, future range, future return, realised loop, child, morph, target, stop, MFE, MAE, or payoff as a feature",
+    "rounding off-grid timestamps",
+    "tuning model C, calibration neighbourhoods, checkpoints, costs, risk, target, stop, horizon, features, or gates after scoring",
+    "calling the opened 2024 result validation",
+    "promoting any result to live, paper, demo, broker, deployment, position, order, or application functionality"
+  ],
+  "required_artifacts": [
+    "pre_outcome_base_events.parquet",
+    "pre_outcome_sequential_snapshots.parquet",
+    "data_coverage.csv",
+    "population_counts.csv",
+    "pre_score_manifest.json",
+    "base_outcomes.parquet",
+    "snapshot_outcomes.parquet",
+    "direct_predictions.parquet",
+    "sequential_predictions.parquet",
+    "policy_rows.parquet",
+    "model_metrics.csv",
+    "policy_metrics.csv",
+    "incremental_metrics.csv",
+    "bootstrap_metrics.csv",
+    "monthly_metrics.csv",
+    "stock_deletions.csv",
+    "cost_sensitivity.csv",
+    "decision.json",
+    "summary.json",
+    "artifact_manifest.json",
+    "independent_audit.json"
+  ]
+}

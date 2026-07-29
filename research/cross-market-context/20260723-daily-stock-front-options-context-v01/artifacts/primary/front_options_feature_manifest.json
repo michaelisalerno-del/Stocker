@@ -1,0 +1,117 @@
+{
+  "assessment_rows": 929,
+  "back_expiry_bulk_download_enabled": false,
+  "back_expiry_schema_preflight_only": true,
+  "branches_run_independently": true,
+  "broker_integration_required": false,
+  "daily_stock_context_test": true,
+  "development_finite_raw_feature_counts": {
+    "atm_iv": 1250,
+    "call_put_iv_gap": 1250,
+    "call_put_oi_imbalance": 1250,
+    "combined_relative_spread": 1250,
+    "iv_minus_realised_20d": 1250,
+    "near_spot_oi_concentration": 1250,
+    "skew_25d": 1059,
+    "straddle_mid_pct": 1250
+  },
+  "development_only_scaling_and_imputation": true,
+  "development_rows": 1250,
+  "dimensions": [
+    "front_options_implied_tension",
+    "front_options_premium_richness",
+    "front_options_downside_asymmetry",
+    "front_options_liquidity_stress",
+    "front_options_positioning_concentration",
+    "front_options_directional_positioning",
+    "front_options_surface_disagreement"
+  ],
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "fitted_period": "development_2024_only",
+  "forbidden_features": [
+    "front_term_urgency",
+    "back_atm_iv",
+    "term_structure"
+  ],
+  "front_feature_support_passed": true,
+  "front_options_only_context_test": true,
+  "imputation_medians": {
+    "atm_iv": 0.92145,
+    "call_put_iv_gap": 0.011450000000000016,
+    "call_put_oi_imbalance": 0.4562339983046745,
+    "combined_relative_spread": 0.10526315789473689,
+    "iv_minus_realised_20d": 0.07092555926389191,
+    "near_spot_oi_concentration": 0.2343130769116039,
+    "skew_25d": -0.03700000000000003,
+    "straddle_mid_pct": 0.11360898680072756
+  },
+  "intraday_option_quotes_used": false,
+  "kind": "front_options",
+  "missing_indicators": [
+    "skew_25d_missing",
+    "near_spot_oi_concentration_missing",
+    "call_put_oi_imbalance_missing"
+  ],
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_context_screen": true,
+  "raw_features": [
+    "atm_iv",
+    "straddle_mid_pct",
+    "call_put_iv_gap",
+    "skew_25d",
+    "combined_relative_spread",
+    "iv_minus_realised_20d",
+    "near_spot_oi_concentration",
+    "call_put_oi_imbalance"
+  ],
+  "research_only": true,
+  "scales": {
+    "abs_call_put_iv_gap": {
+      "center": 0.03015000000000001,
+      "scale": 0.06907499999999994
+    },
+    "abs_skew_25d": {
+      "center": 0.04265000000000002,
+      "scale": 0.08445
+    },
+    "atm_iv": {
+      "center": 0.92145,
+      "scale": 0.5170750000000002
+    },
+    "call_put_iv_gap": {
+      "center": 0.011450000000000016,
+      "scale": 0.058175000000000004
+    },
+    "call_put_oi_imbalance": {
+      "center": 0.4562339983046745,
+      "scale": 0.918395028911468
+    },
+    "combined_relative_spread": {
+      "center": 0.10526315789473689,
+      "scale": 0.1694976546194697
+    },
+    "iv_minus_realised_20d": {
+      "center": 0.07092555926389191,
+      "scale": 0.3023999738937743
+    },
+    "near_spot_oi_concentration": {
+      "center": 0.2343130769116039,
+      "scale": 0.1967340914114658
+    },
+    "skew_25d": {
+      "center": -0.03700000000000003,
+      "scale": 0.09735000000000002
+    },
+    "straddle_mid_pct": {
+      "center": 0.11360898680072756,
+      "scale": 0.06551794819349216
+    }
+  },
+  "strategy_promotion": false,
+  "underlying_movement_outcomes_opened": true
+}

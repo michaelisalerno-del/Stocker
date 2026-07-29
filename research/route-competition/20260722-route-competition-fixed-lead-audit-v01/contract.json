@@ -1,0 +1,60 @@
+{
+  "research_only": true,
+  "quick_feasibility_screen": true,
+  "fixed_lead_audit": true,
+  "next_bar_completion_test": true,
+  "two_to_three_bar_advance_test": true,
+  "near_complete_prefix_excluded_from_advance_test": true,
+  "exact_route_identity_modelled": false,
+  "economic_outcomes_opened": false,
+  "directional_outcomes_opened": false,
+  "options_outcomes_opened": false,
+  "execution_enabled": false,
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "title": "Route-Competition Fixed-Lead Audit Quick Screen V0.1",
+  "dates": {
+    "development_start": "2024-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "assessment_start": "2025-01-01",
+    "assessment_end_inclusive": "2025-08-22",
+    "protected_start": "2025-08-23"
+  },
+  "checkpoints": [6, 10, 14, 18, 22, 26, 30, 34],
+  "targets": {
+    "immediate": "completion_next_1_bar",
+    "advance": "completion_in_bars_2_or_3",
+    "lead_values": [0, 1, 2, 3]
+  },
+  "hard_limits": {
+    "processes": 1,
+    "n_jobs": 1,
+    "gpu": false,
+    "checkpoints": 8,
+    "primary_model_fits": 4,
+    "session_bootstrap_draws": 15,
+    "route_feature_null_refits_per_target": 3,
+    "maximum_plots": 1,
+    "one_minute_data": false
+  },
+  "support_gates": {
+    "predecessor_assessment_rows": 24000,
+    "predecessor_retention": 0.95,
+    "immediate_positive_outcomes": 300,
+    "advance_assessment_rows": 18000,
+    "advance_positive_outcomes": 250,
+    "advance_feature_retention": 0.90,
+    "maximum_weighted_stock_share": 0.10
+  },
+  "model": {
+    "penalty": "l2",
+    "C": 0.25,
+    "solver": "liblinear",
+    "max_iter": 300,
+    "class_weight": null,
+    "random_state": 20260722,
+    "n_jobs": 1
+  },
+  "stop_on_advance_positive_shortfall": true
+}

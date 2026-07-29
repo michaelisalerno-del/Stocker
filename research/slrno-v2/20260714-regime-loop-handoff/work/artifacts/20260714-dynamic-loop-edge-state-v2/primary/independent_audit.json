@@ -1,0 +1,253 @@
+{
+  "all_passed": true,
+  "audit_id": "dynamic_loop_edge_state_v2_independent_audit",
+  "check_count": 48,
+  "checks": [
+    {
+      "detail": "missing=[]",
+      "name": "primary_artifact_completeness",
+      "passed": true
+    },
+    {
+      "detail": "all recorded hashes match",
+      "name": "primary_manifest_hashes",
+      "passed": true
+    },
+    {
+      "detail": "missing=[]",
+      "name": "exact_rerun_artifact_completeness",
+      "passed": true
+    },
+    {
+      "detail": "all recorded hashes match",
+      "name": "exact_rerun_manifest_hashes",
+      "passed": true
+    },
+    {
+      "detail": "research_only/live/order flags",
+      "name": "primary_research_safety",
+      "passed": true
+    },
+    {
+      "detail": "{\"sealed_rows_checked\": 10382, \"state_and_history_token_exact\": true, \"top_loop_exact\": true, \"top_probability_exact\": true}",
+      "name": "primary_v1_recovery_equivalence",
+      "passed": true
+    },
+    {
+      "detail": "research_only/live/order flags",
+      "name": "exact_rerun_research_safety",
+      "passed": true
+    },
+    {
+      "detail": "{\"sealed_rows_checked\": 10382, \"state_and_history_token_exact\": true, \"top_loop_exact\": true, \"top_probability_exact\": true}",
+      "name": "exact_rerun_v1_recovery_equivalence",
+      "passed": true
+    },
+    {
+      "detail": "primary='20260714-dynamic-loop-edge-state-v2-8c68a7c1-66be016d'; exact='20260714-dynamic-loop-edge-state-v2-8c68a7c1-66be016d'",
+      "name": "metadata_exact_run_id",
+      "passed": true
+    },
+    {
+      "detail": "primary='ca3537a0f337097a9a75abf87ae4bf419fae6a5d'; exact='ca3537a0f337097a9a75abf87ae4bf419fae6a5d'",
+      "name": "metadata_exact_git_sha",
+      "passed": true
+    },
+    {
+      "detail": "primary='agent/slrno-research-handoff'; exact='agent/slrno-research-handoff'",
+      "name": "metadata_exact_repository_branch",
+      "passed": true
+    },
+    {
+      "detail": "primary='66be016db2be4b55e0309dfe7a1ec4ee6b99a0b490af8d9abfa11b5832dc1a6a'; exact='66be016db2be4b55e0309dfe7a1ec4ee6b99a0b490af8d9abfa11b5832dc1a6a'",
+      "name": "metadata_exact_data_snapshot_identifier",
+      "passed": true
+    },
+    {
+      "detail": "primary='44fe7fec153a544c25896150652f579016292f3b923414ce798f024c1f9c1a93'; exact='44fe7fec153a544c25896150652f579016292f3b923414ce798f024c1f9c1a93'",
+      "name": "metadata_exact_universe_snapshot_identifier",
+      "passed": true
+    },
+    {
+      "detail": "primary='8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373'; exact='8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373'",
+      "name": "metadata_exact_configuration_hash",
+      "passed": true
+    },
+    {
+      "detail": "primary='dynamic_loop_edge_state_v2.1.0'; exact='dynamic_loop_edge_state_v2.1.0'",
+      "name": "metadata_exact_model_version",
+      "passed": true
+    },
+    {
+      "detail": "primary='frozen_regime_loop_pnl_sanity_v1_fixed_5bps_per_side'; exact='frozen_regime_loop_pnl_sanity_v1_fixed_5bps_per_side'",
+      "name": "metadata_exact_cost_model_version",
+      "passed": true
+    },
+    {
+      "detail": "primary='dynamic_loop_edge_state_features_v2.1.0'; exact='dynamic_loop_edge_state_features_v2.1.0'",
+      "name": "metadata_exact_feature_schema_version",
+      "passed": true
+    },
+    {
+      "detail": "primary=24; exact=24",
+      "name": "metadata_exact_fixed_horizon_bars",
+      "passed": true
+    },
+    {
+      "detail": "primary=20260714; exact=20260714",
+      "name": "metadata_exact_random_seed",
+      "passed": true
+    },
+    {
+      "detail": "rows=3760; exact dataframe equality",
+      "name": "exact_rerun_session_payoff_panel.parquet",
+      "passed": true
+    },
+    {
+      "detail": "rows=41800; exact dataframe equality",
+      "name": "exact_rerun_causal_edge_state_forecasts.parquet",
+      "passed": true
+    },
+    {
+      "detail": "rows=62292; exact dataframe equality",
+      "name": "exact_rerun_trade_decisions.parquet",
+      "passed": true
+    },
+    {
+      "detail": "rows=18; exact dataframe equality",
+      "name": "exact_rerun_model_comparison_metrics.csv",
+      "passed": true
+    },
+    {
+      "detail": "rows=140; exact dataframe equality",
+      "name": "exact_rerun_calibration_results.csv",
+      "passed": true
+    },
+    {
+      "detail": "rows=5; exact dataframe equality",
+      "name": "exact_rerun_change_point_diagnostics.csv",
+      "passed": true
+    },
+    {
+      "detail": "rows=215; exact dataframe equality",
+      "name": "exact_rerun_hindsight_episode_diagnostics.parquet",
+      "passed": true
+    },
+    {
+      "detail": "rows=50; exact dataframe equality",
+      "name": "exact_rerun_stress_test_results.csv",
+      "passed": true
+    },
+    {
+      "detail": "rows=11000; exact dataframe equality",
+      "name": "exact_rerun_causal_feature_panel.parquet",
+      "passed": true
+    },
+    {
+      "detail": "rows=14005; exact dataframe equality",
+      "name": "exact_rerun_prequential_scored_targets.parquet",
+      "passed": true
+    },
+    {
+      "detail": "rows=2801; exact dataframe equality",
+      "name": "exact_rerun_hindsight_episode_states.parquet",
+      "passed": true
+    },
+    {
+      "detail": "rows=390; exact dataframe equality",
+      "name": "exact_rerun_trading_slices.csv",
+      "passed": true
+    },
+    {
+      "detail": "rows=7; exact dataframe equality",
+      "name": "exact_rerun_concentration_analysis.csv",
+      "passed": true
+    },
+    {
+      "detail": "plots=['episode_0016-cycle_05-state_0-2023.png', 'episode_0200-cycle_13-state_5-2025.png', 'episode_0205-cycle_13-state_7-2025.png']",
+      "name": "exact_rerun_plot_set",
+      "passed": true
+    },
+    {
+      "detail": "PNG SHA-256 equality",
+      "name": "exact_rerun_episode_0016-cycle_05-state_0-2023.png",
+      "passed": true
+    },
+    {
+      "detail": "PNG SHA-256 equality",
+      "name": "exact_rerun_episode_0200-cycle_13-state_5-2025.png",
+      "passed": true
+    },
+    {
+      "detail": "PNG SHA-256 equality",
+      "name": "exact_rerun_episode_0205-cycle_13-state_7-2025.png",
+      "passed": true
+    },
+    {
+      "detail": "rows=41800",
+      "name": "one_frozen_forecast_per_model_cell_session",
+      "passed": true
+    },
+    {
+      "detail": "ewma_short_memory,hierarchical_change_point,hierarchical_payoff_history_change_point,payoff_only_change_point,v1_60_session_selector",
+      "name": "registered_model_set",
+      "passed": true
+    },
+    {
+      "detail": "null cold starts allowed; every populated timestamp is strict",
+      "name": "training_availability_precedes_decision",
+      "passed": true
+    },
+    {
+      "detail": "null cold starts allowed; every populated timestamp is strict",
+      "name": "feature_availability_precedes_decision",
+      "passed": true
+    },
+    {
+      "detail": "forecast ledger freeze timestamp equality",
+      "name": "prediction_frozen_at_decision",
+      "passed": true
+    },
+    {
+      "detail": "rows=62292",
+      "name": "opportunity_forecast_frozen_before_payoff",
+      "passed": true
+    },
+    {
+      "detail": "rows=11000",
+      "name": "feature_panel_is_strictly_lagged",
+      "passed": true
+    },
+    {
+      "detail": "rows=3760",
+      "name": "one_session_level_statistical_unit",
+      "passed": true
+    },
+    {
+      "detail": "positive independent support and raw fills never below stocks",
+      "name": "independent_stock_support_not_raw_fill_support",
+      "passed": true
+    },
+    {
+      "detail": "run/config/row metadata",
+      "name": "run_metadata_on_every_forecast",
+      "passed": true
+    },
+    {
+      "detail": "rows=20; expected=20",
+      "name": "leave_one_stock_out_fully_retrained",
+      "passed": true
+    },
+    {
+      "detail": "[np.int64(2023), np.int64(2025)]",
+      "name": "historical_period_boundary",
+      "passed": true
+    }
+  ],
+  "exact_rerun": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun",
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "passed_count": 48,
+  "primary": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260714-dynamic-loop-edge-state-v2/primary",
+  "research_only": true
+}

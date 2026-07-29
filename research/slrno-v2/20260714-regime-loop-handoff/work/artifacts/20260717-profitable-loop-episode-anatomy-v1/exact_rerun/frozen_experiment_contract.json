@@ -1,0 +1,268 @@
+{
+  "anatomy": {
+    "diffuse_multi_loop": "multiple positive loops and leader share <= 0.50",
+    "extreme_loop_dominance": "multiple positive loops and leader share > 0.80",
+    "loop_specific_threshold": "positive loop-excess contribution > 50% of target supported positive payoff and fewer than half of same-regime peers are positive",
+    "majority_loop_dominance": "multiple positive loops and 0.50 < leader share <= 0.80",
+    "multi_regime_shared": "at least two positive regimes and common component > 0 in every supported episode session",
+    "sequence_interaction_candidate": "both sequence increment and loop increment within sequence are positive with frozen support",
+    "shared_regime_threshold": "at least two positive loops and positive regime-component contribution > 50% of supported positive regime payoff",
+    "single_loop": "one positive loop in same-regime episode",
+    "stock_or_cohort_concentrated": "top stock supplies more than 30% of positive contribution"
+  },
+  "census_reproduction_is_a_pre_registration_gate": true,
+  "coactivation_network": {
+    "complete_edge_table_required": true,
+    "display_minimum_observed_coactivations": 5,
+    "display_uncertainty_rule": "observed coactivation exceeds the one-sided 95th percentile of the registered block-circular null",
+    "selection_or_trading_use_allowed": false
+  },
+  "components": {
+    "causal_variance_claim_allowed": false,
+    "common": "session median robust net payoff over supported eligible pairs",
+    "identity_tolerance": 1e-10,
+    "loop_excess": "pair payoff minus common minus regime",
+    "regime": "within-session-regime median of pair payoff minus common component",
+    "sensitivity": "equal-pair ten-percent winsorised means"
+  },
+  "contract_id": "20260717-profitable-loop-episode-anatomy-v1",
+  "decision_labels": [
+    "shared_episode_with_dominant_loop_supported_descriptively",
+    "same_regime_loop_specific_activation_dominant",
+    "regime_sequence_loop_interaction_supported_descriptively",
+    "occurrence_dominance_explains_leader",
+    "payoff_efficiency_explains_leader",
+    "common_episode_explains_most_pair_profitability",
+    "mixed_episode_anatomy_no_single_mechanism",
+    "coactivation_not_above_null",
+    "episode_results_stock_or_period_concentrated",
+    "experiment_blocked_by_missing_data"
+  ],
+  "episode_definitions": {
+    "adjacent": "same or consecutive explicit trading-calendar sessions",
+    "missing_session_bridge": false,
+    "pair": "existing frozen contiguous positive-plus-decaying pair episode ledger; positive session labels remain strictly positive only",
+    "period_bridge": false,
+    "phase_rule": "pre before onset; onset at first episode session; decay at final episode session when duration exceeds one; early is the first third; middle the second third; late the final third before decay; post after end",
+    "same_regime": "union overlapping or adjacent pair episodes with the same orientation/current regime",
+    "shared_market": "union overlapping or adjacent pair episodes across all orientations/current regimes",
+    "window_sessions_after": 10,
+    "window_sessions_before": 10
+  },
+  "experiment_version": "profitable_loop_episode_anatomy_v1.0.0",
+  "factor_diagnostic": {
+    "fixed_factor_counts": [
+      1,
+      2,
+      3
+    ],
+    "period_specific_loadings": true,
+    "primary_decomposition_changed": false,
+    "selection_from_profitability": false
+  },
+  "forbidden_work": [
+    "trading_strategy",
+    "admission_filter",
+    "payoff_predictor",
+    "loop_selector",
+    "regime_detector",
+    "classifier",
+    "threshold_search",
+    "execution_rule"
+  ],
+  "indicator_rules": {
+    "arbitrary_threshold_search_allowed": false,
+    "atlas_population_rule": "availability inventory only because its fixed-clock population does not identify the 2023/2025 h24 episode-panel rows",
+    "clock_phase": "use the frozen sequential checkpoint clock_phase only where opportunity identity joins exactly; otherwise unavailable",
+    "coarse_bins": "lower third, middle third, and upper third from fixed 1/3 and 2/3 within-period empirical quantiles; no threshold is promoted",
+    "completed_prior_dwell": "unavailable on the primary synchronized pair panel",
+    "distribution_overlap": "histogram intersection over ten equal-width bins spanning pooled finite values",
+    "future_regime_as_predictor": false,
+    "hindsight_episode_label_as_predictor": false,
+    "large_predictive_model_allowed": false,
+    "mfe_or_mae_as_causal_input": false,
+    "primary_matched_source": "V2 causal feature panel joined on period-session-loop-orientation-h24",
+    "primary_methods": [
+      "rank_correlation",
+      "predeclared_coarse_bins",
+      "robust_group_difference",
+      "period_specific",
+      "session_block_bootstrap"
+    ],
+    "same_orientation_repeat_count": "unavailable on the primary synchronized pair panel",
+    "sector_inference_from_company_name": false,
+    "standardised_effect": "upper-third minus lower-third mean divided by pooled standard deviation",
+    "state_age": "unavailable on the primary synchronized pair panel; do not substitute post-anchor admission age"
+  },
+  "inputs": {
+    "files": {
+      "atlas_outcome_free_feature_ledger.parquet": "f9e420ab676996b046849b8e34fd0adf79019a33d2fa69fc6b342046bcba6f04",
+      "causal_route_signal_path_events.parquet": "afa6bfb11e931a64be785ee23e0f9a60df962e041d5fd61f3e0c595469ab7f69",
+      "rotation_same_regime_episode_attribution.parquet": "ee3d9dfd1d90aa229d6241b378ab2de0a886171413108b65478ff33f2663eb1f",
+      "sequential_hindsight_episode_attribution.parquet": "b6df80bd2b191c5ca5ea20a5c539ab76ced868e38310881945cbf7de1e553a2d",
+      "sequential_path_diagnostics.parquet": "d51dd775a7786a84f8b0e0c6c86530ca924a8163a46ee24eb036447a6594b42d",
+      "t0_historical_control_reference_ledger.parquet": "9a4da2c2c26ec1cd16ae19d9fd760163f12ae4cdd385a14c4582bd89112cb4fa",
+      "t0_historical_named_reference_ledger.parquet": "2b1326f11714c296b12e4ff84c6659f957529226dae96e16462eebaabf93d123",
+      "t0_payoff_envelope_ledger.parquet": "b08fded53c0f03b0e38ff2458cf758b756763179b723c2767e9d97e45cba2bc5",
+      "v2_causal_feature_panel.parquet": "6873455f8ecdf57b04a3c6ffb253931de97d7d05f945253e8b89a2f4e1b271f2",
+      "v2_hindsight_episode_diagnostics.parquet": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be",
+      "v2_hindsight_episode_states.parquet": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3",
+      "v2_session_payoff_panel.parquet": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7",
+      "v2_trade_decisions.parquet": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f"
+    },
+    "recovery_rule": "Use only the retained hash-pinned immutable derived ledgers; never silently reconstruct an unavailable source field.",
+    "root": "../frozen/20260717-profitable-loop-episode-anatomy-v1",
+    "unavailable_originals": [
+      "2023 original anchor panel provider path from the V1 contract",
+      "2024 original anchor panel provider path from the V1 contract",
+      "2025 original anchor panel provider path from the V1 contract",
+      "original accepted-signal ledger path from the V1 contract",
+      "original execution manifest path from the V1 contract",
+      "2023 provider root referenced by the V1 contract",
+      "formal Frozen Named-Loop T0 Execution Realism V1 Markdown report"
+    ]
+  },
+  "leader": {
+    "checkpoints": [
+      "first_session",
+      "first_two",
+      "first_three",
+      "first_25pct",
+      "first_50pct"
+    ],
+    "definition": "loop with highest complete-episode total positive payoff",
+    "efficiency": "leader_positive_payoff_share / leader_occurrence_share",
+    "payoff_share_thresholds": [
+      0.5,
+      0.8
+    ],
+    "persistence_lags": [
+      1,
+      2,
+      3
+    ],
+    "ties": "explicit_pipe_delimited_set_no_unrecorded_lexical_break"
+  },
+  "lineage": {
+    "branch": "agent/slrno-research-handoff",
+    "cost_bps_per_side": 5.0,
+    "fixed_horizon_bars": 24,
+    "named_pairs": [
+      "cycle_04|state_4",
+      "cycle_07|state_5",
+      "cycle_04|state_2",
+      "cycle_07|state_6"
+    ],
+    "opened_context_periods": [
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "primary_periods": [
+      2023,
+      2025
+    ],
+    "starting_commit": "d199bed1e1d66199ba63b3f5e12df03768728484"
+  },
+  "nulls": {
+    "block_circular_pair_shift": {
+      "block_length_sessions": 5,
+      "eligibility_mask_preserved": true,
+      "period_boundary_preserved": true,
+      "positive_count_preserved": true,
+      "resamples": 2000,
+      "seed": 20260717,
+      "shift_unit": "each pair's within-period eligible sequence"
+    },
+    "pair_specific_independence": "period-specific Poisson-binomial using each eligible pair's historical positive probability",
+    "primary_statistic": "share of positive sessions containing at least two positive pairs"
+  },
+  "occurrence": {
+    "expected_raw_fills": 9926,
+    "expected_stock_capped_occurrences": 9548,
+    "mixed_clock_phase_within_identity": "clock phase unavailable",
+    "mixed_history_within_identity": "evaluate each decoded history length independently; a differing older state invalidates length three without discarding a unanimous available length-two path; never split one stock occurrence into several history occurrences",
+    "primary_identity": "period x session x loop x orientation x stock",
+    "raw_fills_within_identity": "one occurrence; payoff is the mean of capped fill payoffs"
+  },
+  "payoff": {
+    "median_sensitivity": true,
+    "missing_payoff_label": "unavailable_not_negative",
+    "no_opportunity": "missing_not_zero",
+    "primary": "one capped mean contribution per stock per session-loop-orientation, equal-stock ten-percent winsorised mean",
+    "raw_fill_weighting": false,
+    "stock_cap_bps": 500.0
+  },
+  "positive_pair": {
+    "alternative_definitions": "sensitivities_only",
+    "census_gate": {
+      "multi_loop_same_regime_episodes": 42,
+      "multi_pair_positive_sessions": 210,
+      "positive_sessions": 322,
+      "same_regime_episodes": 107,
+      "single_loop_same_regime_episodes": 65
+    },
+    "decaying_is_positive": false,
+    "primary_definition": "hindsight_payoff_state == positive"
+  },
+  "primary_unit": "period x session x current_regime x loop x orientation x registered_horizon",
+  "purpose": "Describe the anatomy of temporary hindsight-profitable loop periods before any later prediction experiment.",
+  "random_seed": 20260717,
+  "registered_before_extended_scoring": true,
+  "registered_hypotheses": [
+    "Temporary profitable loop periods are frequently shared economic episodes affecting several loop-regime pairs while one loop orientation captures a moderately dominant payoff share.",
+    "Dominance can arise from occurrence frequency, payoff per occurrence, or both, and those mechanisms must be separated.",
+    "Prior completed-regime sequence and state-history path may alter the payoff meaning of a loop orientation conditional on current regime.",
+    "State/history may explain common movement intensity while loop orientation explains leader-specific payoff excess."
+  ],
+  "safety": {
+    "api_keys_or_secrets_used": false,
+    "application_runtime_changed": false,
+    "broker_connection_enabled": false,
+    "deployment_enabled": false,
+    "existing_exit_logic_changed": false,
+    "ig_integration_enabled": false,
+    "live_ordering_enabled": false,
+    "order_placement_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "position_management_changed": false,
+    "read_only_inputs": true,
+    "research_only": true,
+    "strategy_promotion_allowed": false
+  },
+  "scientific_status": "opened_2023_2024_2025_and_partial_2026_descriptive_mechanism_research_not_validation",
+  "sequence": {
+    "best_sequence_selection_allowed": false,
+    "bootstrap_p_value": "two-sided empirical sign probability with plus-one correction; BH FDR uses this bootstrap p-value",
+    "bootstrap_seed_derivation": "support.bootstrap_seed plus the first 32 bits of SHA256(period|loop|regime|sequence_length|sequence|contrast), modulo 2^32",
+    "clock_phase_role": "predeclared descriptive context within each fixed sequence group; report availability and composition without adding clock phase to sequence identity",
+    "encoding": "((previous_state_2 * 9 + previous_state_1) * 8 + current_state), sentinel=8",
+    "future_states_allowed": false,
+    "inference": "within-period circular moving-session-block bootstrap over the union session calendar; all stock occurrences in a sampled session remain clustered",
+    "inference_support_rule": "bootstrap intervals, p-values, q-values, and FDR labels exist only when target, other-sequence/same-loop, and other-loop/target-sequence groups all pass frozen support; unsupported inference remains unavailable",
+    "length_four_availability": "unavailable_in_primary_2023_2025_h24_source",
+    "panel_mixed_history_rule": "for each history length, every contributing stock occurrence must agree on one available token; any disagreement, unavailable contributor, or within-stock ambiguity makes that aggregate history and its availability flag unavailable",
+    "primary_lengths": [
+      2,
+      3
+    ],
+    "sensitivity_lengths": [
+      4
+    ],
+    "source": "decoded frozen state_history_token using completed prior states only"
+  },
+  "support": {
+    "bootstrap": "session-block",
+    "bootstrap_block_length_sessions": 5,
+    "bootstrap_resamples": 1000,
+    "bootstrap_seed": 20260717,
+    "broad_multiplicity": "Benjamini-Hochberg FDR",
+    "maximum_stock_row_share": 0.3,
+    "minimum_independent_sessions": 15,
+    "minimum_independent_stocks": 8,
+    "minimum_months": 3,
+    "minimum_rows": 30,
+    "named_pair_multiplicity": "Holm"
+  }
+}

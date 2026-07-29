@@ -1,0 +1,93 @@
+{
+  "contract_id": "20260714-dynamic-long-short-neutral-prospective-log-v1",
+  "status": "specification_only_not_activated",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "position_or_order_functionality_allowed": false,
+  "application_implementation_authorized": false,
+  "strategy_promotion_allowed": false,
+  "purpose": "Prospectively test whether completed-bar evolution supports a calibrated competing-risk long, short, or neutral state after the frozen one-shot three-state equations failed.",
+  "opened_development_evidence": {
+    "artifact": "../artifacts/20260714-long-short-neutral-detector-v1/primary",
+    "periods": [
+      2024,
+      2025,
+      2026
+    ],
+    "scientific_status": "causal_retrospective_development_not_validation",
+    "do_not_retest_or_tune": true,
+    "findings": [
+      "The frozen target produced a genuine three-state population: roughly 24-27% long, 49-50% neutral, and 22-26% short.",
+      "Clock-prior, price-context, and price-plus-activity multinomial equations did not improve log loss portably.",
+      "The price models mainly predicted neutral; predicted long and short classes had low precision and very low recall.",
+      "The cost-aware directional outputs lost after 5 bps per side in both score periods.",
+      "Historical-volume activity did not supply a portable incremental signal.",
+      "Earlier opened research found one-to-three completed bars carried more payoff ranking information than static context, but not enough for positive expectancy."
+    ]
+  },
+  "hypothesis": {
+    "name": "dynamic_competing_first_touch_hazards",
+    "claim": "Direction may become identifiable as a path evolves even when it is not identifiable at a one-shot fixed-clock decision.",
+    "primary_endpoint": "Causally calibrated long or short expected net with a lower uncertainty bound above zero and nonzero stable coverage.",
+    "null": "The posterior remains neutral/unknown or directional outputs fail post-cost stability gates."
+  },
+  "frozen_state_equation": {
+    "observation_clock": "Update only after each newly completed bar; no intrabar values are used.",
+    "up_hazard": "h_up(k) = P(upper barrier is first touched during next bar | neither barrier touched through completed checkpoint k, causal x_k)",
+    "down_hazard": "h_down(k) = P(lower barrier is first touched during next bar | neither barrier touched through completed checkpoint k, causal x_k)",
+    "survival": "S(k) = product from j=1 through k of max(0, 1 - h_up(j) - h_down(j))",
+    "long_probability": "Sum over future k of S(k-1) * h_up(k)",
+    "short_probability": "Sum over future k of S(k-1) * h_down(k)",
+    "neutral_probability": "Residual survival probability through the frozen horizon plus explicitly unresolvable same-bar paths.",
+    "long_expected_net": "Probability-weighted realised long path payoff after the frozen cost model.",
+    "short_expected_net": "Probability-weighted realised short path payoff after the frozen cost model.",
+    "state": "Long only when the lower uncertainty bound of long expected net is above zero and exceeds short; short symmetrically; neutral/unknown otherwise.",
+    "no_forced_ranking": true
+  },
+  "target_and_cost_boundary": {
+    "reference_target": "symmetric causal-scale triple barrier from 20260714-long-short-neutral-detector-v1",
+    "primary_horizon_bars": 24,
+    "primary_cost_bps_per_side": 5,
+    "same_bar_dual_touch": "Unresolvable at five-minute resolution and never counted as a directional success.",
+    "short_borrow_and_market_impact": "Not modelled; any short economic result remains research-only and incomplete."
+  },
+  "required_causal_log": [
+    "immutable source, model, feature, target, and contract versions",
+    "completed-bar timestamp and observation checkpoint",
+    "full eligible population before state selection",
+    "causal price geometry, returns, compression, opening-range position, session position, and scale",
+    "historical-volume activity proxy with its precise provenance label",
+    "running favourable and adverse excursion available through the completed checkpoint only",
+    "upper hazard, lower hazard, survival, long probability, short probability, and neutral probability",
+    "long and short expected net with uncertainty and support",
+    "emitted long, short, or neutral/unknown state",
+    "sealed first-touch class, same-bar ambiguity, MFE, MAE, time-to-touch, and gross/net outcomes opened only after expiry"
+  ],
+  "activation_requirements": [
+    "Set an immutable activation timestamp before the first genuinely new observation.",
+    "Hash model source, features, barrier, costs, training window, calibration, uncertainty, and state equation before activation.",
+    "Do not select checkpoint, barrier width, threshold, feature subset, or calibration neighbourhood from the opened static or sequential tails.",
+    "Keep eligible, checkpoint, hypothetical-state, and sealed-outcome ledgers separate.",
+    "Do not activate through or implement in the trading application without separate explicit authorization."
+  ],
+  "evaluation": [
+    "three-state log loss, Brier score, calibration, balanced accuracy, macro F1, and per-class precision/recall",
+    "directional precision jointly with coverage",
+    "paired net payoff per full eligible opportunity and per directional output",
+    "session-block uncertainty and multiplicity control",
+    "time, month/quarter, and leave-one-stock-out robustness",
+    "2.5, 5, 7.5, and 10 bps per-side sensitivity",
+    "separate long and short evidence",
+    "independent timestamp, feature, target, leakage, payoff, and exact-rerun audit"
+  ],
+  "provenance": {
+    "historical_volume": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "five_minute_intrabar_order": "unknown",
+    "loops": "excluded from the primary model; they may enter only as a separately frozen incremental comparator",
+    "market_or_sector_context": "requires a separately frozen timestamp-audited source"
+  }
+}

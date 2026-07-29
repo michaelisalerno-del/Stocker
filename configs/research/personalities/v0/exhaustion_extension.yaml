@@ -1,0 +1,36 @@
+personality: exhaustion_extension
+version: v0
+role: mean_reversion_or_no_chase
+default_expected_direction: 0
+candidate: true
+base_event_states:
+  - exhaustion_extension
+preferred_horizons: [6, 9, 12, 24]
+regime_families:
+  - vwap_side
+  - session_open_side
+  - range
+  - vwap_x_range
+  - efficiency
+  - time_of_day
+filter_families:
+  - vwap_distance
+  - session_location
+  - wick_quality
+  - prior_return
+  - range_volatility
+  - volume
+caveat_families:
+  - auction_location
+  - event_quality
+  - time_of_day
+  - cross_stock_alignment
+  - freshness
+minimums:
+  train_count: 24
+  test_count: 10
+  retained_count: 8
+  symbol_count: 3
+max_single_symbol_share: 0.50
+max_single_session_share: 0.20
+max_single_month_share: 0.50

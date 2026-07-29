@@ -1,0 +1,341 @@
+{
+  "auditor": "independent_semantic_loop_dictionary_coverage_v2",
+  "broker_connected": false,
+  "check_count": 20,
+  "checks": [
+    {
+      "check": "source_identities_and_audited_manifests",
+      "evidence": {
+        "declared_artifacts_per_tree": 38,
+        "old_exact_mismatches": [],
+        "old_primary_mismatches": [],
+        "source_mismatches": []
+      },
+      "passed": true
+    },
+    {
+      "check": "frozen_historical_tree_immutability",
+      "evidence": {
+        "baseline": "6d43807dbe3287afb1587f7ab4f5dafdeedad426",
+        "blob_count": 1087,
+        "mismatches": [],
+        "post_run_tree_object": "7f524891ab4a51e98f44a933962b5294399a3312",
+        "pre_run_tree_object": "7f524891ab4a51e98f44a933962b5294399a3312",
+        "tree_object": "7f524891ab4a51e98f44a933962b5294399a3312"
+      },
+      "passed": true
+    },
+    {
+      "check": "audited_baseline_counts",
+      "evidence": {
+        "actual": {
+          "active_prefix_rows": 2933161,
+          "comparable_decisions": 398304,
+          "completed_bar_decisions": 424583,
+          "completion_event_rows": 487721,
+          "decisions_with_active_prefix": 317181,
+          "eligible_decisions": 398304,
+          "full_semantic_differences": 369745,
+          "legacy_multiple_positive_decisions": 14331,
+          "no_registered_loop_within_horizon": 10961,
+          "registered_event_set_differences": 175054,
+          "run_entry_rows": 110949,
+          "session_end": 30329,
+          "tied_registered_completion": 11003,
+          "unavailable_source": 26279,
+          "unregistered_loop": 271500
+        },
+        "recorded": {
+          "active_prefix_rows": 2933161,
+          "comparable_decisions": 398304,
+          "completed_bar_decisions": 424583,
+          "completion_event_rows": 487721,
+          "decisions_with_active_prefix": 317181,
+          "eligible_decisions": 398304,
+          "full_semantic_differences": 369745,
+          "legacy_multiple_positive_decisions": 14331,
+          "no_registered_loop_within_horizon": 10961,
+          "registered_event_set_differences": 175054,
+          "run_entry_rows": 110949,
+          "session_end": 30329,
+          "tied_registered_completion": 11003,
+          "unavailable_source": 26279,
+          "unregistered_loop": 271500
+        }
+      },
+      "passed": true
+    },
+    {
+      "check": "independent_tie_classification",
+      "evidence": {
+        "counts": {
+          "NESTED_SAME_PRIMITIVE_TIE": 11003
+        },
+        "resolved_to_one_primitive": 11003,
+        "total": 11003
+      },
+      "passed": true
+    },
+    {
+      "check": "unregistered_extraction_and_primitive_decomposition",
+      "evidence": {
+        "deterministic_sample_rows": 512,
+        "full_identity_failures": 0,
+        "full_rows": 271500,
+        "sample_mismatches": [],
+        "unique_primitives": 664
+      },
+      "passed": true
+    },
+    {
+      "check": "candidate_support_reconstruction",
+      "evidence": {
+        "candidate_universe": 685,
+        "mismatched_fields": [],
+        "support_passed": 83
+      },
+      "passed": true
+    },
+    {
+      "check": "observed_counts_bh_and_structural_qualification",
+      "evidence": {
+        "candidates": 83,
+        "leave_one_stock_out_minimum_matches": true,
+        "leave_one_stock_out_rate_scaling_used": false,
+        "leave_one_stock_out_rows": 1826,
+        "maximum_clock_q_error": 0.0,
+        "maximum_semi_q_error": 0.0,
+        "observed_count_mismatches": 0,
+        "qualified": 29
+      },
+      "passed": true
+    },
+    {
+      "check": "deterministic_semi_markov_and_clock_null_subset",
+      "evidence": {
+        "candidate_ids": [
+          "loop_p_5-6-5",
+          "loop_p_4-6-4"
+        ],
+        "clock_counts_sha256": "f3ca25605c8b6d7ae85ddcb7d5d16173ca7f9fb16efb653165f7ed08fe145534",
+        "draws": 32,
+        "duration_24_supported": true,
+        "semi_markov_counts_sha256": "326392ffc3826538a2bbd3197454d1403903cddeed8f3de197ca621be22d0c1a",
+        "sessions_fitted": 5128,
+        "subset_sessions": 12,
+        "terminal_right_censored_sessions": 5128
+      },
+      "passed": true
+    },
+    {
+      "check": "candidate_information_increment_beyond_retained_state_history",
+      "evidence": {
+        "candidate_model_mismatches": 0,
+        "candidates": 83,
+        "global_frequency_used_as_retained_baseline": false,
+        "maximum_increment_error": 7.500022738277101e-13,
+        "qualified": 51
+      },
+      "passed": true
+    },
+    {
+      "check": "dictionary_membership_selection_path_hash_and_legacy_mapping",
+      "evidence": {
+        "eligible_before_marginal_stop": 15,
+        "legacy_complete": true,
+        "legacy_rows": 20,
+        "reconstructed_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+        "recorded_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+        "selected": [
+          "loop_p_5-6-5",
+          "loop_p_4-6-4"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "check": "primary_target_precedence_2024",
+      "evidence": {
+        "after_horizon": 0,
+        "class_mismatches": 0,
+        "classes": {
+          "NO_LOOP_WITHIN_HORIZON": 13398,
+          "OTHER_PRIMITIVE_LOOP": 317432,
+          "SESSION_END": 25084,
+          "UNAVAILABLE_SOURCE": 26279,
+          "loop_p_4-6-4": 19633,
+          "loop_p_5-6-5": 22757
+        },
+        "completion_exactly_at_horizon": 1755,
+        "rows": 424583
+      },
+      "passed": true
+    },
+    {
+      "check": "primary_target_precedence_2025",
+      "evidence": {
+        "after_horizon": 0,
+        "class_mismatches": 0,
+        "classes": {
+          "NO_LOOP_WITHIN_HORIZON": 10195,
+          "OTHER_PRIMITIVE_LOOP": 332725,
+          "SESSION_END": 23701,
+          "UNAVAILABLE_SOURCE": 14978,
+          "loop_p_4-6-4": 23886,
+          "loop_p_5-6-5": 19349
+        },
+        "completion_exactly_at_horizon": 1555,
+        "rows": 424834
+      },
+      "passed": true
+    },
+    {
+      "check": "development_and_unchanged_validation_coverage",
+      "evidence": {
+        "development": {
+          "eligible_decisions": 398304,
+          "genuine_tie_share": 0.0,
+          "no_loop_share": 0.03363762352374066,
+          "other_primitive_loop_count": 317432,
+          "other_primitive_loop_share": 0.8821917503654585,
+          "period": "development_2024",
+          "primitive_loop_event_decisions": 359822,
+          "selected_dictionary_event_coverage": 0.11780824963454152,
+          "selected_dictionary_events": 42390,
+          "session_end_share": 0.06297702257572106,
+          "total_decisions": 424583,
+          "unavailable_share": 0.06189366978894586
+        },
+        "mismatches": [],
+        "validation": {
+          "eligible_decisions": 409856,
+          "genuine_tie_share": 0.0,
+          "no_loop_share": 0.02487459009993754,
+          "other_primitive_loop_count": 332725,
+          "other_primitive_loop_share": 0.8850010639429726,
+          "period": "unchanged_retrospective_validation_2025",
+          "primitive_loop_event_decisions": 375960,
+          "selected_dictionary_event_coverage": 0.11499893605702734,
+          "selected_dictionary_events": 43235,
+          "session_end_share": 0.05782762726420987,
+          "total_decisions": 424834,
+          "unavailable_share": 0.03525612356826431
+        },
+        "validation_added_ids": []
+      },
+      "passed": true
+    },
+    {
+      "check": "auxiliary_repeat_composite_and_legacy_evidence",
+      "evidence": {
+        "composite_final_timestamp_failures": 0,
+        "composite_rows": 75364,
+        "composite_timestamp_order_failures": 0,
+        "legacy_label_mismatches": 0,
+        "missing_fields": [],
+        "rows": 424583,
+        "same_primitive_mismatches": 0
+      },
+      "passed": true
+    },
+    {
+      "check": "topology_only_family_mapping",
+      "evidence": {
+        "family_bh_reconstruction_pass": true,
+        "family_mismatches": 0,
+        "family_observed_count_mismatches": 0,
+        "family_rate_ratio_reconstruction_pass": true,
+        "family_structural_rows": 10,
+        "other_events_resolved_by_family": 332725,
+        "period_source_hashes_match": true,
+        "repeat_status_mismatches": 0,
+        "rows": 849417,
+        "validation_exact_entropy_nats": 4.0644962465933805,
+        "validation_family_entropy_nats": 0.9908764345064991
+      },
+      "passed": true
+    },
+    {
+      "check": "compressed_prefix_causality_eligibility_and_reconciliation",
+      "evidence": {
+        "availability_violations": 0,
+        "count_reconciliation_failures": 0,
+        "distance_reconciliation_failures": 0,
+        "expected_eligible_rows": 398304,
+        "extra_ids": 0,
+        "forbidden_columns": [],
+        "independent_bar_estimate_mismatches": 0,
+        "independent_bar_estimate_sample_rows": 512,
+        "missing_ids": 0,
+        "rows": 398304
+      },
+      "passed": true
+    },
+    {
+      "check": "scientific_decision_gate",
+      "evidence": {
+        "decision_rule_gap": true,
+        "exact_gate": false,
+        "family_gate": false,
+        "hybrid_gate": false,
+        "other_hhi": 0.03416646758198315,
+        "other_top_share": 0.09606431737921707,
+        "reconstructed_label": "semantic_dictionary_experiment_blocked",
+        "recorded_label": "semantic_dictionary_experiment_blocked",
+        "top_stock_share": 0.08659650745923442,
+        "unstable_gate": false,
+        "validation_rr_above_one_share": 1.0
+      },
+      "passed": true
+    },
+    {
+      "check": "artifact_manifest_input_hashes",
+      "evidence": {
+        "files": 64,
+        "mismatches": []
+      },
+      "passed": true
+    },
+    {
+      "check": "artifact_safety_trace_and_required_outputs",
+      "evidence": {
+        "broker_or_execution_imports": [],
+        "economic_selection_columns": [],
+        "missing_outputs": [],
+        "required_outputs_before_self_audit": 61,
+        "safety_failures": [],
+        "trace_failures": []
+      },
+      "passed": true
+    },
+    {
+      "check": "exact_rerun_byte_identity",
+      "evidence": {
+        "compared_files": 65,
+        "mismatches": []
+      },
+      "passed": true
+    }
+  ],
+  "contract_hash": "dfb2abfbd0d5b5431e372074ac76155f3b014339202325da0f365007267a4de8",
+  "data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "exact_compared_files": 65,
+  "exact_rerun_status": "byte_identical",
+  "execution_enabled": false,
+  "failed_checks": [],
+  "git_sha": "ee04e735b09f237a4a415c75cbf5c4569a921ed6",
+  "order_placement": "disabled",
+  "overall_pass": true,
+  "passed_checks": 20,
+  "payoff_selection_used": false,
+  "production_phase_imported": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "fc05b0eb9dede535bf255bd8",
+  "scientific_decision": "semantic_dictionary_experiment_blocked",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false
+}

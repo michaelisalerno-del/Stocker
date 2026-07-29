@@ -1,0 +1,133 @@
+{
+  "broker_connected": false,
+  "causality": {
+    "decision_time": "completed_bar_timestamp",
+    "first_difference": "current_completed_minus_previous_completed_within_segment",
+    "future_bars_used": false,
+    "origin": "strictly_previous_completed_rows",
+    "session_and_source_gap_resets": true
+  },
+  "contract_hash": "0bc8ac397792a0b665e0e9b1972bf539bd5ab964a296a6dedd8648fcf7741a44",
+  "data_snapshot_hash": "2b2efafb8d7c0cebbd7b392493ecbc0a279f71ee1d4f74197e18d99ecd8c43a7",
+  "development_complete_emission_rows": 401448,
+  "development_fit_period": "2024",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "feature_count": 14,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "7c8d4f606dc0e46e80d69390a4c1e6e30c3215b09ec2191a2b5fe7195f583a84",
+  "lineages": {
+    "MODEL_DURATION_REPAIR": "40d5b2c149856e2e2cdbf3df15adfe0c8108c1bb45ada73235a87bf67f87ce44",
+    "MODEL_FROZEN": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+    "MODEL_FULL_REFIT": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425"
+  },
+  "manifest_version": "cluster_invariant_trajectory_features_v1",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "order_placement": "disabled",
+  "ordered_emission_features": [
+    "regime_log_activity_3",
+    "regime_log_activity_12",
+    "regime_activity_acceleration",
+    "signed_efficiency_6",
+    "signed_efficiency_12",
+    "regime_log_bar_range",
+    "close_location_value",
+    "regime_wick_balance",
+    "log_relative_historical_volume",
+    "log_relative_cumulative_historical_volume",
+    "regime_log_market_dispersion",
+    "regime_stock_minus_market_scaled",
+    "vti__signed_efficiency_12",
+    "regime_market_breadth_centered"
+  ],
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "preprocessing": {
+    "centering": "development_training_median",
+    "centers": [
+      3.43057480984,
+      3.55484911584,
+      -0.0759333821267,
+      -8.031490712309999e-15,
+      -0.00760238448187,
+      4.03972502915,
+      2.2204460492499997e-14,
+      0.0,
+      0.579731954039,
+      0.61855349879,
+      4.57533372659,
+      0.0,
+      0.019408466774,
+      0.0
+    ],
+    "fit_rows_bound_by_predecessor_training_row_hash": "6224fe722280312a7f3d11a953ea13ecdbc8edafac31206d776dc78e8b2e6b3a",
+    "imputation": "development_training_median_with_explicit_missing_flag",
+    "medians": [
+      3.43057480984,
+      3.55484911584,
+      -0.0759333821267,
+      -8.031490712309999e-15,
+      -0.00760238448187,
+      4.03972502915,
+      2.2204460492499997e-14,
+      0.0,
+      0.579731954039,
+      0.61855349879,
+      4.57533372659,
+      0.0,
+      0.019408466774,
+      0.0
+    ],
+    "scales": [
+      1.06221739413,
+      0.906573001527,
+      0.56307858194,
+      0.751302039495,
+      0.527732683029,
+      1.00241793282,
+      1.20130637493,
+      0.449849277755,
+      0.486406948385,
+      0.402972368099,
+      0.625190162066,
+      0.500952858489,
+      0.545716474078,
+      0.363636363636
+    ],
+    "scaling": "development_training_interquartile_range"
+  },
+  "production_runtime_modified": false,
+  "representations": {
+    "E": [
+      "z",
+      "first_difference",
+      "velocity_3",
+      "acceleration_3",
+      "path_length_3",
+      "directional_consistency_3"
+    ],
+    "H": [
+      "development_q90_normalised_emission_distance",
+      "development_q90_normalised_posterior_distance",
+      "equal_weight_hybrid_score"
+    ],
+    "P": [
+      "state_posterior",
+      "sqrt_jensen_shannon_origin_distance",
+      "posterior_velocity",
+      "posterior_entropy",
+      "expected_state_age",
+      "departure_probability",
+      "hard_map_state",
+      "hysteretic_state"
+    ]
+  },
+  "research_only": true,
+  "run_id": "5592b30b8c4f3909d75c67cc",
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "cluster_invariant_excursion_event_model_v1",
+  "strategy_promotion": false,
+  "unchanged_validation_period": "2025"
+}

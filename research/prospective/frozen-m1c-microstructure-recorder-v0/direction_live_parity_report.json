@@ -1,0 +1,70 @@
+{
+  "assessment_rows_read": 417,
+  "claims_boundary": {
+    "a1_frozen_prospective_hypothesis": true,
+    "account_balance_access_required": false,
+    "broker_account_mutation_allowed": false,
+    "c1_frozen_comparison": true,
+    "execution_enabled": false,
+    "live_orders_allowed": false,
+    "m1c_frozen": true,
+    "m1c_threshold": 0.488333710794033,
+    "microstructure_direction_model_fitted": false,
+    "microstructure_features_descriptive_only": true,
+    "option_pnl_is_shadow_quote_pnl": true,
+    "option_quotes_recorded": true,
+    "paper_orders_allowed": false,
+    "place_order_method_available": false,
+    "position_access_required": false,
+    "prospective_collection": true,
+    "r1_frozen_comparison": true,
+    "record_only": true,
+    "research_only": true,
+    "strategy_promotion": false
+  },
+  "display_allowed": true,
+  "live_feature_rows_replayed": 417,
+  "maximum_raw_feature_difference": 1.1368683772161603e-13,
+  "models": {
+    "A1": {
+      "call_put_abstain_mismatches": 0,
+      "maximum_normalised_feature_difference": 0.0,
+      "maximum_probability_difference": 2.220446049250313e-16,
+      "passed": true,
+      "rows_replayed": 417
+    },
+    "C1": {
+      "call_put_abstain_mismatches": 0,
+      "maximum_normalised_feature_difference": 0.0,
+      "maximum_probability_difference": 2.220446049250313e-16,
+      "passed": true,
+      "rows_replayed": 417
+    },
+    "R1": {
+      "call_put_abstain_mismatches": 0,
+      "maximum_normalised_feature_difference": 4.156675004196586e-13,
+      "maximum_probability_difference": 9.992007221626409e-16,
+      "passed": true,
+      "rows_replayed": 417
+    }
+  },
+  "passed": true,
+  "prospective_hypothesis_only": true,
+  "raw_feature_finiteness_mismatches": 0,
+  "research_only": true,
+  "source_hashes": {
+    "assessment_predictions.parquet": "08340ee9c2b4ad887319cb655fd5aa556f53c40a62b69743fcebd5366cf6e027",
+    "frozen_archetype_thresholds.json": "54651f1fc4c74de8fecc49cfd88e317a41211201a2966128f4f0f0e23f293a3b",
+    "model_configurations.json": "857a8907159a4e8025f8417f829597c9b6338ad1eeabea646bc08307543bfdf8",
+    "stock_local_normalisation_parameters.json": "6b8e4f058e4e89a405c9ec33ddba1c6dd84ceaa5f19a4504f93bc937fa5a317d",
+    "stock_market_beta_parameters.csv": "86c2c63def43262b758f5f4df59113d2f8038ad151fcfd0c173f7a4d043cc7be"
+  },
+  "timing": {
+    "direction_marker_bar": "T-1",
+    "marker_not_before_trigger_count": 0,
+    "passed": true,
+    "rows_checked": 417,
+    "trigger_bar_exclusion_mismatches": 0
+  },
+  "tolerance": 1e-12
+}

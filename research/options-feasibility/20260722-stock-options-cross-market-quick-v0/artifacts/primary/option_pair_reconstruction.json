@@ -1,0 +1,220 @@
+{
+  "broker_integration_required": false,
+  "cached_contract_discovery_records_used": 3120,
+  "cached_contract_history_records_materialised": 18,
+  "cached_contract_history_records_scanned_as_text": 504,
+  "cached_contract_history_records_skipped_nonmatching": 462,
+  "cached_contract_history_records_used": 504,
+  "cached_stock_dates": 9,
+  "cached_symbols": [
+    "AAL",
+    "MSTR",
+    "WULF"
+  ],
+  "cached_vendor_records_used": 3624,
+  "directional_outcomes_primary": false,
+  "exact_previous_close_chains": 9,
+  "execution_enabled": false,
+  "frozen_selection_rule": {
+    "expiry": "nearest expiry satisfying 7 <= DTE <= 45",
+    "fallback_after_quality_failure": false,
+    "pair_quality": "frozen predecessor requirements",
+    "strike": "common call/put strike minimizing abs(log(strike / previous_close_underlying_price))",
+    "tie_break": [
+      "abs_log_moneyness ascending",
+      "minimum_pair_open_interest descending",
+      "combined_relative_spread ascending",
+      "absolute_call_put_iv_gap ascending",
+      "strike ascending",
+      "call_contract_id ascending",
+      "put_contract_id ascending"
+    ]
+  },
+  "intraday_option_quotes_used": false,
+  "maximum_option_feature_difference": 5.551115123125783e-17,
+  "network_requests_made": 0,
+  "option_pnl_calculated": false,
+  "optional_feature_scope_note": "The bounded cache stores selected ATM histories only; skew and term structure are marked missing rather than inferred.",
+  "order_placement": "disabled",
+  "passed": true,
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "protected_cached_history_records_skipped_before_materialisation": 24,
+  "protected_history_records_materialised": 0,
+  "quick_cross_market_screen": true,
+  "raw_cache_files": [
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/f150558636f0bf414dca4a75f7566ed12fb4cfd136d388958f01f9a5b87785e1.json",
+      "record_count": 192,
+      "sha256": "f150558636f0bf414dca4a75f7566ed12fb4cfd136d388958f01f9a5b87785e1"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/40a8f3a338e09a9efe66b7276f242a99c895037d792458a833f43adca2f43995.json",
+      "record_count": 828,
+      "sha256": "40a8f3a338e09a9efe66b7276f242a99c895037d792458a833f43adca2f43995"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/91c68ac7e4ac626297debf41be531b0c8d5798a5906f752cfdbc445b7b42a9a3.json",
+      "record_count": 12,
+      "sha256": "91c68ac7e4ac626297debf41be531b0c8d5798a5906f752cfdbc445b7b42a9a3"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/0cc1b8b80155a19ec4db79f28d502522eca0d6220582a7389f5ae51f6bf1eada.json",
+      "record_count": 192,
+      "sha256": "0cc1b8b80155a19ec4db79f28d502522eca0d6220582a7389f5ae51f6bf1eada"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/3597aa29abf1a51eae362408d79693e8333092a0e50933516a00b48ebb8273b0.json",
+      "record_count": 624,
+      "sha256": "3597aa29abf1a51eae362408d79693e8333092a0e50933516a00b48ebb8273b0"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/c5d3d150e6a253e1d14d86f0230d84c75def140a4ec8ef65102479c8a6cdd588.json",
+      "record_count": 84,
+      "sha256": "c5d3d150e6a253e1d14d86f0230d84c75def140a4ec8ef65102479c8a6cdd588"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/510aa83c1192bbf056c082700250abf63cba53b9f43f568e8e13d77b34872a1c.json",
+      "record_count": 180,
+      "sha256": "510aa83c1192bbf056c082700250abf63cba53b9f43f568e8e13d77b34872a1c"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/0e0403e57a75e5863578259e40f69766f9c786fcaff4f0efe16e1a222b8942c2.json",
+      "record_count": 876,
+      "sha256": "0e0403e57a75e5863578259e40f69766f9c786fcaff4f0efe16e1a222b8942c2"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/contracts",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/raw/contract-discovery/4b84ccb5bf999655a6c2fd4d05027eb17168386ade73140f2e1e852f32565bb6.json",
+      "record_count": 132,
+      "sha256": "4b84ccb5bf999655a6c2fd4d05027eb17168386ade73140f2e1e852f32565bb6"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/db9e52a1387ba6b25b8c54c6fee630a1b3d3b771d5e3e6fdd0a2206d7633897d.json",
+      "record_count": 34,
+      "sha256": "db9e52a1387ba6b25b8c54c6fee630a1b3d3b771d5e3e6fdd0a2206d7633897d"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/f1db1c5fd2a16bf20104810fd0b741e147bcdfbe43532b31247b9ac6caf06fd4.json",
+      "record_count": 34,
+      "sha256": "f1db1c5fd2a16bf20104810fd0b741e147bcdfbe43532b31247b9ac6caf06fd4"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/921c5c45fa586e3aa3b18ff968b6164eb0d741f1412d0b5370049890f5715e9b.json",
+      "record_count": 33,
+      "sha256": "921c5c45fa586e3aa3b18ff968b6164eb0d741f1412d0b5370049890f5715e9b"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/a86ffe8a02e0e759758f5355330445429e420db6c47917ef60c9f425bafe5227.json",
+      "record_count": 33,
+      "sha256": "a86ffe8a02e0e759758f5355330445429e420db6c47917ef60c9f425bafe5227"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/b0fee28c98c878677a798c811cd20dc8d88580d98b83cd5396534fdc0d40d214.json",
+      "record_count": 16,
+      "sha256": "b0fee28c98c878677a798c811cd20dc8d88580d98b83cd5396534fdc0d40d214"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/89827f311595aafe1110c401b1de08d952b76570207815304b92832fb23a89e6.json",
+      "record_count": 16,
+      "sha256": "89827f311595aafe1110c401b1de08d952b76570207815304b92832fb23a89e6"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/09cfdcb90c3f5a381db223af588a4d69aca81977acf919bb90a4d56b5eba7fc9.json",
+      "record_count": 29,
+      "sha256": "09cfdcb90c3f5a381db223af588a4d69aca81977acf919bb90a4d56b5eba7fc9"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/5cfdcac9e002d7d222ee69403f9472ebc950d8e8c9883c5c57d4533948ba4239.json",
+      "record_count": 29,
+      "sha256": "5cfdcac9e002d7d222ee69403f9472ebc950d8e8c9883c5c57d4533948ba4239"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/6b2067b6d6d3ab9e8903e3862b337064ca14f750c1447de7002a2d0c8e1d249b.json",
+      "record_count": 30,
+      "sha256": "6b2067b6d6d3ab9e8903e3862b337064ca14f750c1447de7002a2d0c8e1d249b"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/99a2899f1d87424302834bff3867051d91b742e617df73636df7167a9edf1979.json",
+      "record_count": 30,
+      "sha256": "99a2899f1d87424302834bff3867051d91b742e617df73636df7167a9edf1979"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/5ae8ed1b998198caacf5901ba6e8035b7daa53f5c74ac553e91bc0bfa95a2dae.json",
+      "record_count": 30,
+      "sha256": "5ae8ed1b998198caacf5901ba6e8035b7daa53f5c74ac553e91bc0bfa95a2dae"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/246cf8c5cbc03691da23c587aa70261f13bb763ad05c2c01599619745d0ace69.json",
+      "record_count": 30,
+      "sha256": "246cf8c5cbc03691da23c587aa70261f13bb763ad05c2c01599619745d0ace69"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/a861dffde8528d4aa81ad8fe57f098cbfb2577bdba97feeffe5388a3979d06b9.json",
+      "record_count": 36,
+      "sha256": "a861dffde8528d4aa81ad8fe57f098cbfb2577bdba97feeffe5388a3979d06b9"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/5d72c5c65577dba3e48912d64dd6bdffc57f6fc8ef9f1dec6e9ad47604c9ca48.json",
+      "record_count": 36,
+      "sha256": "5d72c5c65577dba3e48912d64dd6bdffc57f6fc8ef9f1dec6e9ad47604c9ca48"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/07626be6d0e5dc8a8964be3329443d57892d8bba829f98068313281741bb8c27.json",
+      "record_count": 8,
+      "sha256": "07626be6d0e5dc8a8964be3329443d57892d8bba829f98068313281741bb8c27"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/18090f38f3b2b60ce5cc040597032b62a4e407596179ff2daf3e05951b5adc7a.json",
+      "record_count": 8,
+      "sha256": "18090f38f3b2b60ce5cc040597032b62a4e407596179ff2daf3e05951b5adc7a"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/4e31314374a1ade263bf1b7fcd43b3456eec5eab18a71f9fee3e5646c904541e.json",
+      "record_count": 36,
+      "sha256": "4e31314374a1ade263bf1b7fcd43b3456eec5eab18a71f9fee3e5646c904541e"
+    },
+    {
+      "endpoint": "/mp/unicornbay/options/eod",
+      "path": "data/vendor/eodhd/options/contract-history-probe-v01/contract-histories/raw/1f706c27ec7149dc00fc312f8623fd8760a6958ac819513bf3fe5e84cf813922.json",
+      "record_count": 36,
+      "sha256": "1f706c27ec7149dc00fc312f8623fd8760a6958ac819513bf3fe5e84cf813922"
+    }
+  ],
+  "raw_file_hash_failures": 0,
+  "redownloaded": false,
+  "research_only": true,
+  "same_day_or_future_options_rows": 0,
+  "selected_contract_mismatches": 0,
+  "strategy_promotion": false,
+  "test_a_options_to_stock": true,
+  "test_b_stock_to_options_movement": true,
+  "underlying_movement_outcomes_opened": true,
+  "valid_primary_pairs": 8
+}

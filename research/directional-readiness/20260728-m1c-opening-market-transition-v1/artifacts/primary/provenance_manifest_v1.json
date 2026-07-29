@@ -1,0 +1,569 @@
+{
+  "branch": "* \n  codex/m1c-signed-market-shock-transition-v1",
+  "calibration_support": {
+    "calibration_complete_v1": true,
+    "calibration_missing_reason_v1": null,
+    "checkpoint_v1": 6,
+    "market_opening_range_q75_v1": 0.003848181718348481,
+    "market_opening_range_support_v1": 247,
+    "market_opening_return_q10_v1": -0.0028896373389661863,
+    "market_opening_return_q90_v1": 0.002255226760464915,
+    "market_opening_return_support_v1": 247,
+    "market_overnight_gap_q10_v1": -0.0038205689075119717,
+    "market_overnight_gap_q90_v1": 0.006379685630897604,
+    "market_overnight_gap_support_v1": 247,
+    "market_total_transition_q10_v1": -0.005360609443825508,
+    "market_total_transition_q90_v1": 0.006437555177674593,
+    "market_total_transition_support_v1": 247
+  },
+  "causality_confirmations": {
+    "alternative_market_proxies_tested": false,
+    "alternative_thresholds_tested": false,
+    "alternative_windows_tested": false,
+    "cross_sectional_normalisation_used": false,
+    "entry_bar_excluded": true,
+    "future_market_bars_used": false,
+    "future_stock_bars_used": false,
+    "outcome_driven_thresholds_used": false,
+    "partial_bars_excluded": true,
+    "stock_or_month_fitted_inputs_used": false
+  },
+  "commit": "c91c48cfd374b5ea481f519acf1a0221adf95bf9",
+  "configuration_sha256": "6a4b22017192308502cfc53da36e91ef446ddaac48548da8363f2e12a124f6b5",
+  "confirmations": {
+    "a1_unchanged": true,
+    "broker_accessed": false,
+    "contaminated_fields_used": false,
+    "engineering_transfer_used_for_recalibration": false,
+    "fresh_episode_definition_unchanged": true,
+    "future_bars_used_for_predictors": false,
+    "m1c_unchanged": true,
+    "option_profitability_tested": false,
+    "order_placed": false,
+    "order_routing_enabled": false,
+    "peer_slate_normalisation_used": false,
+    "prospective_recorder_logging_only_integrated": true,
+    "protected_2026_outcomes_accessed": false,
+    "tail_phase_v1_unchanged": true
+  },
+  "data_date_boundaries": {
+    "assessment": {
+      "end": "2025-08-22",
+      "start": "2025-01-01"
+    },
+    "development": {
+      "end": "2024-12-31",
+      "start": "2024-01-01"
+    },
+    "protected": {
+      "read_allowed": false,
+      "start": "2026-01-01"
+    },
+    "stress": {
+      "end": "2025-12-31",
+      "start": "2025-09-01"
+    }
+  },
+  "dirty_working_tree_status": "M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/amplification_results_v1.csv\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/cluster_bootstrap_summary_v1.csv\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/continuous_ranking_results_v1.csv\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/market_following_results_v1.csv\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/null_and_temporal_placebo_results_v1.json\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/opening_transition_event_cluster_bootstrap_v1.parquet\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/primary_null_draws_v1.parquet\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/resistance_results_v1.csv\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/session_cluster_bootstrap_v1.parquet\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/summary_v1.json\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/reports/m1c_opening_market_transition_v1.md\n M research/directional-readiness/20260728-m1c-opening-market-transition-v1/run_experiment.py\n M tests/test_m1c_opening_market_transition_v1_artifacts.py",
+  "exact_checkpoint_6_timing": {
+    "bar_local_intervals": [
+      "09:30-09:35",
+      "09:35-09:40",
+      "09:40-09:45",
+      "09:45-09:50",
+      "09:50-09:55",
+      "09:55-10:00"
+    ],
+    "bar_ordinals": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "checkpoint": 6,
+    "checkpoint_6_signal_timestamp_example_utc": "2025-01-02T15:00:00+00:00",
+    "checkpoint_6_signal_timestamp_local": "2025-01-02T10:00:00-05:00",
+    "checkpoint_meaning": "six complete five-minute regular-session bars are available",
+    "complete_regular_session_bars_before_entry": 6,
+    "entry_bar_excluded": true,
+    "entry_bar_local_interval": "10:00-10:05",
+    "entry_bar_ordinal": 6,
+    "expected_opening_bar_count": 6,
+    "final_complete_bar_start_example_utc": "2025-01-02T14:55:00+00:00",
+    "final_complete_bar_start_local": "2025-01-02T09:55:00-05:00",
+    "next_bar_open_entry_timestamp_example_utc": "2025-01-02T15:00:00+00:00",
+    "next_bar_open_entry_timestamp_local": "2025-01-02T10:00:00-05:00",
+    "partial_bars_included": false,
+    "session_open_timestamp_example_utc": "2025-01-02T14:30:00+00:00",
+    "session_open_timestamp_local": "2025-01-02T09:30:00-05:00"
+  },
+  "exact_commands": [
+    "rtk uv run python research/directional-readiness/20260728-m1c-opening-market-transition-v1/run_experiment.py",
+    "rtk uv run pytest tests/test_m1c_opening_market_transition_v1.py tests/test_m1c_opening_market_transition_research_v1.py tests/test_m1c_opening_market_transition_v1_artifacts.py tests/test_m1c_opening_market_transition_v1_recorder.py -q",
+    "rtk uv run ruff check packages/stocker_prospective/src/stocker_prospective/opening_market_transition_v1.py packages/stocker_research/src/stocker_research/m1c_opening_market_transition_v1.py research/directional-readiness/20260728-m1c-opening-market-transition-v1/run_experiment.py",
+    "rtk uv run mypy packages/stocker_prospective/src/stocker_prospective/config.py packages/stocker_prospective/src/stocker_prospective/frozen_live_application.py packages/stocker_prospective/src/stocker_prospective/live_recorder.py packages/stocker_prospective/src/stocker_prospective/recorder_repository.py packages/stocker_prospective/src/stocker_prospective/recorder_v0.py packages/stocker_prospective/src/stocker_prospective/opening_market_transition_v1.py packages/stocker_research/src/stocker_research/m1c_opening_market_transition_v1.py"
+  ],
+  "exclusion_counts_and_reasons": [
+    {
+      "category": "market_transition",
+      "episode_count": 1,
+      "period": "assessment",
+      "reason": "opening_market_measurement_incomplete"
+    },
+    {
+      "category": "market_transition",
+      "episode_count": 1,
+      "period": "assessment",
+      "reason": "prior_regular_session_close_invalid"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 4,
+      "period": "assessment",
+      "reason": "opening_market_measurement_incomplete"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 4,
+      "period": "assessment",
+      "reason": "prior_regular_session_close_invalid"
+    },
+    {
+      "category": "market_transition",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "invalid_market_bar:1"
+    },
+    {
+      "category": "market_transition",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "non_contiguous_market_timestamps:0-2"
+    },
+    {
+      "category": "market_transition",
+      "episode_count": 5,
+      "period": "development",
+      "reason": "opening_market_measurement_incomplete"
+    },
+    {
+      "category": "market_transition",
+      "episode_count": 4,
+      "period": "development",
+      "reason": "prior_regular_session_close_invalid"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "invalid_market_bar:1"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "non_contiguous_market_timestamps:0-2"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 6,
+      "period": "development",
+      "reason": "opening_market_measurement_incomplete"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 5,
+      "period": "development",
+      "reason": "prior_regular_session_close_invalid"
+    },
+    {
+      "category": "market_transition",
+      "episode_count": 2,
+      "period": "stress",
+      "reason": "opening_market_measurement_incomplete"
+    },
+    {
+      "category": "market_transition",
+      "episode_count": 2,
+      "period": "stress",
+      "reason": "prior_regular_session_close_invalid"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 5,
+      "period": "stress",
+      "reason": "opening_market_measurement_incomplete"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 5,
+      "period": "stress",
+      "reason": "prior_regular_session_close_invalid"
+    }
+  ],
+  "execution_confirmation": {
+    "broker_access": false,
+    "order_routing_enabled": false,
+    "orders_submitted": false
+  },
+  "expected_opening_bar_count": 6,
+  "frozen_regression": {
+    "fields": [
+      "M1C_probability",
+      "m1c_high_tail_v1",
+      "m1c_tail_phase_v1",
+      "A1_probability_up_v1",
+      "A1_action_v1",
+      "episode_id",
+      "existing_fresh_episode_identifier"
+    ],
+    "passed": true,
+    "rows_compared": 1416,
+    "tolerance": 1e-15
+  },
+  "generated_at_utc": "2026-07-28T13:13:16.502258+00:00",
+  "input_artifacts": [
+    {
+      "bytes": 670138,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/fresh_episode_results_v1.parquet",
+      "sha256": "a843fedf4c5df712237fd374c5efb3ff8925b575c875395ea648d786b589d9a3"
+    },
+    {
+      "bytes": 6506235,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/checkpoint_results_v1.parquet",
+      "sha256": "8dd0ef53d9c5493b70f600a28d6f77e8ffabd5e7b48a5378cf0bb4411382cb8f"
+    },
+    {
+      "bytes": 180549179,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+      "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+    },
+    {
+      "bytes": 438909,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/episode_market_state_response_v1.parquet",
+      "sha256": "5abcff67f6c17ec6ab99c8bbc9d37e769594eb9cc90513882d3dd1e0f7ecf9a7"
+    },
+    {
+      "bytes": 479598,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/market_state_surface_v1.parquet",
+      "sha256": "d9cdb0bb99886968d72d464b24d53a4b330470156a9a918cf01b2ed0722966ed"
+    },
+    {
+      "bytes": 58925,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/tail_phase_diagnostics_v1.csv",
+      "sha256": "ca811abf83d81fa74abfd52875d411623dbc9a681af8a343525e2db911bfae6b"
+    },
+    {
+      "bytes": 30653,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/provenance_manifest_v1.json",
+      "sha256": "a5d7eb4f68e16324ea45b85f5f490bf7c47ff76dec2a219d015739e8940ce75f"
+    },
+    {
+      "bytes": null,
+      "hash_scope": "bounded Arrow rows timestamp>=2024-01-01 and <2026-01-01",
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=VTI.US/timeframe=5m/data.parquet",
+      "sha256": "92e5be6975ab50c2a6ba792f235a281aae99f9a3ab1aaee72b31a4cc05c08b4f"
+    }
+  ],
+  "market_proxy_identity": {
+    "adjustment_convention": "raw/unadjusted EODHD OHLC",
+    "alternative_proxies_tested": false,
+    "bounded_arrow_sha256": "92e5be6975ab50c2a6ba792f235a281aae99f9a3ab1aaee72b31a4cc05c08b4f",
+    "bounded_filter": "timestamp >= 2024-01-01T00:00:00Z and timestamp < 2026-01-01T00:00:00Z",
+    "bounded_max_timestamp": "2025-12-31T21:00:00+00:00",
+    "bounded_min_timestamp": "2024-01-02T14:30:00+00:00",
+    "bounded_opened_row_count": 39429,
+    "bounded_rows_with_missing_ohlc": 28,
+    "canonical_proxy_available": true,
+    "checkpoint_6_availability": [
+      {
+        "complete_with_valid_prior_session_close": 247,
+        "incomplete": 5,
+        "period": "development",
+        "scheduled_sessions": 252,
+        "six_current_session_bars_available": 252
+      },
+      {
+        "complete_with_valid_prior_session_close": 159,
+        "incomplete": 1,
+        "period": "assessment",
+        "scheduled_sessions": 160,
+        "six_current_session_bars_available": 160
+      },
+      {
+        "complete_with_valid_prior_session_close": 83,
+        "incomplete": 2,
+        "period": "stress",
+        "scheduled_sessions": 85,
+        "six_current_session_bars_available": 85
+      }
+    ],
+    "existing_causal_alignment": {
+      "benchmark_available_after_stock_bar_count": 0,
+      "maximum_absolute_bar_range_difference": 0.0,
+      "maximum_absolute_bar_return_difference": 0.0,
+      "passed": true,
+      "rows_compared": 20060
+    },
+    "finality_semantics": "bar is causal only after its five-minute interval completes",
+    "frequency": "5m",
+    "imputation": false,
+    "new_external_dataset_acquired": false,
+    "partial_bars_allowed": false,
+    "previous_zero_difference_audit_reused": true,
+    "protected_2026_rows_opened": false,
+    "proxy_identifier": "VTI",
+    "regular_session_bar_count": 38946,
+    "source": "EODHD processed local five-minute stock bars",
+    "source_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=VTI.US/timeframe=5m/data.parquet",
+    "timestamp_semantics": "UTC bar-start timestamp",
+    "trading_calendar": "NYSE regular-session calendar"
+  },
+  "output_sha256": {
+    "amplification_results_v1.csv": "c28f450537c05bf81c036f84c9e1f79193ed1e601e606b6f45c92255a65459f3",
+    "assessment_results_v1.csv": "faf54b5b84ec2411fa77e2cc829a5ea640ef601dbe0c5dc20bd7275467756988",
+    "baseline_comparisons_v1.csv": "76c962017483f30e1eef969d364ddb235c510046af57167f3ad256e98a3fb15d",
+    "canonical_vti_source_audit_v1.json": "32d82e95015029e4df4ed0b867be7ef76eaa245e6cc915e1b4c74572fb49f716",
+    "checkpoint_6_population_accounting_v1.csv": "d8777b93221f93b838bd4f3428ecbd83b0660dad01775f595eb8e17520145457",
+    "checkpoint_6_population_details_v1.parquet": "45075d0ab03ad2f98852756b01534cd6c617ffa0a205375760fd803c4ba1d201",
+    "checkpoint_6_timing_audit_v1.json": "23861820728d840335bb5a1bde0431a5db9925214d21ec8a40c1da45801fa158",
+    "cluster_bootstrap_summary_v1.csv": "f8e2b179df0fbc882c6b0f1fb57e9dfa1e81d68344ad86140a0a8d30448b6e34",
+    "concentration_report_v1.csv": "365a0ec300364e4bdaaeba8156441c35eca7e19a867ab6a4ec2edd9d914e5665",
+    "continuous_ranking_results_v1.csv": "ec9e20ba2beb4a5cdf46d410c7f02416c0d0b95125bcd8ffbb22c885ff8aba0b",
+    "decision_contract_results_v1.json": "85bb740a9fdcc776b773d87a6b9adb8a1403477d985c7a4681cd94c3eb1dfe67",
+    "episode_opening_transition_v1.parquet": "430019a412638501b42a75062cd28cf58660301d30e1ac8d6b12c4c423fc3cca",
+    "event_accounting_v1.csv": "98f88c8820b4efe753f1773d7f3b2c69a709a5912c63b82e6085bae8117f2023",
+    "frozen_2024_opening_threshold_manifest_v1.json": "c0052d3409e8871636a3a64903342251c6245f49b9da83d3ab24e1da07ba0ac3",
+    "frozen_configuration_v1.json": "9f1ad149117adf98340baf8c72f5e7b9366629d3e97ec0c51aac6db24942b2ab",
+    "gap_open_alignment_diagnostics_v1.csv": "bfd43c489efda81bb4a7a0bdff0bd55b97232fcb696bfc810a7b52c6fbb3e9d7",
+    "leave_one_month_out_v1.csv": "bd7ec99d518736a2410a9b80243e5554b8faa821e04a9d260ad7ae79e40c3ef1",
+    "leave_one_stock_out_v1.csv": "537d37f7cf2de28dc876f578f5872cdb63105967a3c628472cebb1cfb034621d",
+    "leave_one_transition_event_out_v1.csv": "92bc3aab7e5b5af646b4a02c499686b70deef9afc92ca3ca6038ffb2727d4883",
+    "market_following_results_v1.csv": "e710a5c36415ac877a3ed05aecba969b97ebd706b5f13eb0e16f2f3d978f8136",
+    "missingness_reasons_v1.csv": "6aebacdc2a13badd6a5d076750cf8cdf014cec2d9d798834aab4897c3fbd730f",
+    "null_and_temporal_placebo_results_v1.json": "30be64baff872e801523ef2881d1cd96ce8d59fb2b818c03ac1dca20a1d53ff7",
+    "opening_market_state_surface_v1.parquet": "4a9aea6e37b4bd68c162e81b5a01fa1019fd08d1bd0a11bd70ff92ec93021bf2",
+    "opening_transition_event_cluster_bootstrap_v1.parquet": "303c01b637dbbabdad70efa1a9500138dcde5c93cbed62cdc918739b8f2050bb",
+    "predictor_only_calibration_v1.csv": "e3cf274d1a3f0ba1c6ffcd35bd311ab4a98e9c735f4a3c87c0480e90e81d0089",
+    "primary_null_draws_v1.parquet": "4efb7de50a0b8b2bce57748316715828208b94b4ed76ff8ba1f6c77e71a0f26f",
+    "prior_population_reconciliation_summary_v1.json": "b01da3f0becce20866ae68a9de9dcf2604ed1bb5d4e59275cccba1e817ff5281",
+    "prior_signed_shock_population_reconciliation_v1.csv": "48b0ea53ba024b503d32179450dac0eb8977fd075276982fd55dd8caf8efd5a7",
+    "reports/m1c_opening_market_transition_v1.md": "db53feb6dcaca3150db5923c5430a653fbc7be6f613cbc37a88ac1c72ac7e3b0",
+    "resistance_results_v1.csv": "2b24826e2820ec10e902b6439d49438cb16cca8ee5831f086b11b4ee95d783a7",
+    "response_quintile_outcomes_v1.csv": "0c86a0ed839d29a4a089264e30ed403b027ad5c5377065c30ebfc239c02f07c8",
+    "session_cluster_bootstrap_v1.parquet": "a373d6f024794dc8c10eef91053f4f0861d10f0b00783da9b9f263a68f1c0d26",
+    "severe_vs_normal_comparison_v1.csv": "d2f0642527d6a7c1a12b98681e16b3d7e79f79b3127b7849b8719e9ee47996f2",
+    "stress_results_v1.csv": "25bb25e965ae942b25cad28af1b15ce0e6e4dd37a1b298bc2d62832570de5078",
+    "summary_v1.json": "dea262c25484f523a0786b62c7cb17d0c74b8efe263e4cff3a13fdff19b9e24e",
+    "tail_phase_provenance_v1.csv": "941f1b39c518ae43554981a29795f94009a87b6b12987cfea32506cf374f8854",
+    "target_partition_audit_v1.json": "e10cec7e98b1c97ca9a534dc1169d1a6d96b07043486b4875bfb544920db20bf",
+    "transition_sign_stratification_v1.csv": "9012458e64a0ad2ce2d5c9205cfd22dcf6d28e66cf7536451a22c016a1adc7e6",
+    "unique_opening_transition_events_v1.csv": "6eb48b5d5b842a6844f90270e08cceea55a4a618352e77e037ef5ac1b3eb38bb"
+  },
+  "population_counts": [
+    {
+      "period": "development",
+      "row_count": 1250,
+      "stage": "all_checkpoint_6_rows"
+    },
+    {
+      "period": "development",
+      "row_count": 1250,
+      "stage": "valid_checkpoint_6_m1c_probability"
+    },
+    {
+      "period": "development",
+      "row_count": 413,
+      "stage": "high_m1c_checkpoint_6_rows"
+    },
+    {
+      "period": "development",
+      "row_count": 413,
+      "stage": "canonical_fresh_first_entry_rows"
+    },
+    {
+      "period": "development",
+      "row_count": 407,
+      "stage": "complete_market_transition_state"
+    },
+    {
+      "period": "development",
+      "row_count": 407,
+      "stage": "complete_stock_opening_response"
+    },
+    {
+      "period": "development",
+      "row_count": 413,
+      "stage": "complete_15m_outcome"
+    },
+    {
+      "period": "development",
+      "row_count": 407,
+      "stage": "final_eligible_rows"
+    },
+    {
+      "period": "assessment",
+      "row_count": 929,
+      "stage": "all_checkpoint_6_rows"
+    },
+    {
+      "period": "assessment",
+      "row_count": 929,
+      "stage": "valid_checkpoint_6_m1c_probability"
+    },
+    {
+      "period": "assessment",
+      "row_count": 360,
+      "stage": "high_m1c_checkpoint_6_rows"
+    },
+    {
+      "period": "assessment",
+      "row_count": 360,
+      "stage": "canonical_fresh_first_entry_rows"
+    },
+    {
+      "period": "assessment",
+      "row_count": 356,
+      "stage": "complete_market_transition_state"
+    },
+    {
+      "period": "assessment",
+      "row_count": 356,
+      "stage": "complete_stock_opening_response"
+    },
+    {
+      "period": "assessment",
+      "row_count": 360,
+      "stage": "complete_15m_outcome"
+    },
+    {
+      "period": "assessment",
+      "row_count": 356,
+      "stage": "final_eligible_rows"
+    },
+    {
+      "period": "stress",
+      "row_count": 1214,
+      "stage": "all_checkpoint_6_rows"
+    },
+    {
+      "period": "stress",
+      "row_count": 1214,
+      "stage": "valid_checkpoint_6_m1c_probability"
+    },
+    {
+      "period": "stress",
+      "row_count": 442,
+      "stage": "high_m1c_checkpoint_6_rows"
+    },
+    {
+      "period": "stress",
+      "row_count": 442,
+      "stage": "canonical_fresh_first_entry_rows"
+    },
+    {
+      "period": "stress",
+      "row_count": 437,
+      "stage": "complete_market_transition_state"
+    },
+    {
+      "period": "stress",
+      "row_count": 437,
+      "stage": "complete_stock_opening_response"
+    },
+    {
+      "period": "stress",
+      "row_count": 442,
+      "stage": "complete_15m_outcome"
+    },
+    {
+      "period": "stress",
+      "row_count": 437,
+      "stage": "final_eligible_rows"
+    }
+  ],
+  "protected_data_confirmation": {
+    "bounded_reader_upper_limit_exclusive": "2026-01-01",
+    "protected_data_opened": false,
+    "protected_outcomes_calculated": false,
+    "protected_outcomes_displayed": false,
+    "protected_outcomes_inspected": false
+  },
+  "random_seeds": {
+    "opening_transition_event_cluster_bootstrap": 2026072807,
+    "primary_null": 2026072808,
+    "session_cluster_bootstrap": 2026072806
+  },
+  "replication_counts": {
+    "opening_transition_event_cluster_bootstrap": 5000,
+    "primary_null": 1000,
+    "session_cluster_bootstrap": 5000
+  },
+  "schema_version": "m1c-opening-market-transition-provenance-v1",
+  "threshold_values": {
+    "calibration_complete_v1": true,
+    "calibration_missing_reason_v1": null,
+    "checkpoint_v1": 6,
+    "market_opening_range_q75_v1": 0.003848181718348481,
+    "market_opening_range_support_v1": 247,
+    "market_opening_return_q10_v1": -0.0028896373389661863,
+    "market_opening_return_q90_v1": 0.002255226760464915,
+    "market_opening_return_support_v1": 247,
+    "market_overnight_gap_q10_v1": -0.0038205689075119717,
+    "market_overnight_gap_q90_v1": 0.006379685630897604,
+    "market_overnight_gap_support_v1": 247,
+    "market_total_transition_q10_v1": -0.005360609443825508,
+    "market_total_transition_q90_v1": 0.006437555177674593,
+    "market_total_transition_support_v1": 247
+  },
+  "unique_event_counts": [
+    {
+      "complete_normal_opening_event_count": 185,
+      "incomplete_event_count": 5,
+      "maximum_stocks_per_transition_event": 5,
+      "mean_stocks_per_transition_event": 2.5,
+      "negative_transition_event_count": 23,
+      "period": "development",
+      "positive_transition_event_count": 15,
+      "severe_stock_episode_count": 65,
+      "stock_episode_count": 407,
+      "unique_opening_transition_event_count": 26,
+      "unique_session_count": 26
+    },
+    {
+      "complete_normal_opening_event_count": 72,
+      "incomplete_event_count": 1,
+      "maximum_stocks_per_transition_event": 8,
+      "mean_stocks_per_transition_event": 3.0232558139534884,
+      "negative_transition_event_count": 28,
+      "period": "assessment",
+      "positive_transition_event_count": 30,
+      "severe_stock_episode_count": 130,
+      "stock_episode_count": 356,
+      "unique_opening_transition_event_count": 43,
+      "unique_session_count": 43
+    },
+    {
+      "complete_normal_opening_event_count": 56,
+      "incomplete_event_count": 2,
+      "maximum_stocks_per_transition_event": 14,
+      "mean_stocks_per_transition_event": 7.769230769230769,
+      "negative_transition_event_count": 7,
+      "period": "stress",
+      "positive_transition_event_count": 11,
+      "severe_stock_episode_count": 101,
+      "stock_episode_count": 437,
+      "unique_opening_transition_event_count": 13,
+      "unique_session_count": 13
+    }
+  ]
+}

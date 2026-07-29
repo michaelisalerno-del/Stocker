@@ -1,0 +1,222 @@
+{
+  "assessment": {
+    "end_inclusive": "2025-08-22",
+    "start": "2025-01-01"
+  },
+  "behavioural_dimensions": [
+    "arousal",
+    "conviction",
+    "frustration",
+    "tension",
+    "signed_pressure",
+    "pressure_magnitude",
+    "exhaustion_magnitude",
+    "signed_exhaustion",
+    "independence",
+    "signed_independence"
+  ],
+  "behavioural_ledger_maximum_absolute_reconstruction_error": 1e-12,
+  "broker_integration_required": false,
+  "candidate_population": {
+    "minimum_causal_state_transitions_matched": 1,
+    "one_row_per_active_registered_oriented_prefix": true,
+    "requires_incomplete_prefix": true,
+    "requires_registered_semantic_id": true,
+    "rows_without_active_prefix_label": "no_active_registered_prefix"
+  },
+  "candidate_weighting": {
+    "candidate_weight": "1 / active_candidate_count_for_stock_session_checkpoint",
+    "row_weight": "candidate_weight * slate_weight",
+    "slate_weight": "1 / eligible_stocks_in_session_checkpoint"
+  },
+  "checkpoints": [
+    {
+      "america_new_york": "10:00",
+      "decision_ordinal": 6,
+      "repo_completed_bar_start_ordinal": 5
+    },
+    {
+      "america_new_york": "10:30",
+      "decision_ordinal": 12,
+      "repo_completed_bar_start_ordinal": 11
+    }
+  ],
+  "cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "contract_id": "20260721-regime-loop-behaviour-quick-screen-v0",
+  "decision_categories": [
+    "behavioural_context_improves_loop_completion",
+    "structural_behavioural_interactions_improve_loop_completion",
+    "behavioural_main_effects_only",
+    "no_behavioural_context_increment",
+    "blocked_behavioural_ledger_not_reconstructable",
+    "blocked_v2_prefix_population_not_reconstructable",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_insufficient_active_prefix_support",
+    "blocked_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "decision_policy": {
+    "behavioural_context_improves_loop_completion": "M1 passes and M2 is neither passing nor materially adverse",
+    "behavioural_main_effects_only": "M1 passes and M2 is materially adverse",
+    "checkpoint_material_adversity": {
+      "brier_improvement_less_than": -0.001,
+      "log_loss_improvement_less_than": -0.005
+    },
+    "m1_pass": [
+      "pooled Brier improvement positive",
+      "pooled log-loss improvement positive",
+      "pooled AUC increment non-negative",
+      "90% bootstrap lower bounds for Brier and log-loss improvements non-negative",
+      "both proper-score improvements positive together in at least five represented months",
+      "neither checkpoint materially adverse",
+      "real Brier or log-loss increment exceeds the within-slate null 90th percentile",
+      "concentration gates pass"
+    ],
+    "m2_pass": [
+      "pooled Brier improvement positive",
+      "pooled log-loss improvement positive",
+      "pooled AUC increment non-negative",
+      "90% bootstrap lower bounds for Brier and log-loss improvements non-negative",
+      "both proper-score improvements positive together in at least five represented months",
+      "neither checkpoint materially adverse",
+      "real Brier or log-loss increment exceeds the within-slate null 90th percentile",
+      "concentration gates pass"
+    ],
+    "precedence": [
+      "valid blocker",
+      "M2 passes",
+      "M1 passes and M2 materially adverse",
+      "M1 passes",
+      "no increment"
+    ],
+    "top_one_is_secondary": true
+  },
+  "development": {
+    "end_inclusive": "2024-12-31",
+    "start": "2024-01-01"
+  },
+  "economic_outcomes_opened": false,
+  "evaluation": {
+    "bootstrap": {
+      "draws": 100,
+      "intervals": [
+        0.9,
+        0.95
+      ],
+      "seed": 20260721,
+      "unit": "whole_session"
+    },
+    "candidate_metrics": [
+      "brier_score",
+      "log_loss",
+      "auc",
+      "calibration_intercept",
+      "calibration_slope",
+      "expected_calibration_error",
+      "base_rate",
+      "rows",
+      "decisions",
+      "sessions",
+      "stocks",
+      "candidate_loop_support"
+    ],
+    "null": {
+      "bundle": "all_ten_behavioural_dimensions_by_stock",
+      "draws": 25,
+      "seed": 20260722,
+      "unit": "session_checkpoint_slate"
+    },
+    "ranking_metrics": [
+      "top_one_realised_candidate_accuracy",
+      "mean_reciprocal_rank",
+      "mean_probability_assigned_to_realised_candidate",
+      "top_three_inclusion"
+    ]
+  },
+  "execution_enabled": false,
+  "horizon_completed_five_minute_bars": 6,
+  "interactions": [
+    "candidate_orientation_sign * signed_pressure",
+    "prefix_completion_fraction * conviction",
+    "current_transition_probability * arousal",
+    "repeat_depth * tension",
+    "probability_of_next_required_state * candidate_orientation_sign * signed_exhaustion"
+  ],
+  "interaction_clipping": {
+    "fit_period": "development_only",
+    "lower_percentile": 0.01,
+    "upper_percentile": 0.99
+  },
+  "model": {
+    "C": 1.0,
+    "class_weight": null,
+    "fit_period": "2024_only",
+    "ladder": {
+      "M0": "fixed structural baseline",
+      "M1": "M0 plus ten frozen behavioural dimensions",
+      "M2": "M1 plus exactly five fixed interactions"
+    },
+    "max_iter": 250,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "order_placement": "disabled",
+  "orientation_sign_rule": "sign of the arithmetic mean of the frozen development-fitted raw signed_efficiency_6 and signed_efficiency_12 centroids for the next required state; zero maps to +1",
+  "pre_completion_context_only": true,
+  "production_runtime_modified": false,
+  "protected_start": "2025-08-23",
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "resource_limits": {
+    "bootstrap_draws": 100,
+    "candidate_rows": 50000,
+    "gpu": false,
+    "null_draws": 25,
+    "one_minute_data": false,
+    "plots": 2,
+    "primary_models": 3,
+    "processes": 1,
+    "raw_data_download": false,
+    "repository_wide_test_suite": false
+  },
+  "strategy_promotion": false,
+  "structural_prediction_only": true,
+  "support_gates": {
+    "assessment_active_prefix_decisions_minimum": 1000,
+    "assessment_candidate_rows_minimum": 3000,
+    "assessment_months_minimum": 6,
+    "assessment_multi_candidate_decisions_minimum": 300,
+    "assessment_positive_candidate_completions_minimum": 300,
+    "assessment_semantic_candidate_loops_minimum": 10,
+    "assessment_sessions_minimum": 100,
+    "assessment_stocks_minimum": 15,
+    "maximum_loop_share_of_positive_completions": 0.3,
+    "maximum_stock_share_of_candidate_rows": 0.125
+  },
+  "target": "candidate_completes_first_within_6_bars",
+  "tie_policy": "exclude TIED_REGISTERED_COMPLETION decision; never lexical break"
+}

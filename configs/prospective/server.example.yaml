@@ -1,0 +1,129 @@
+paths:
+  database: /var/lib/stocker/prospective/prospective.sqlite3
+  bundle_root: /var/lib/stocker/bundles
+  context_root: /var/lib/stocker/daily-context
+  feature_parity_report: /opt/stocker/current/configs/prospective/feature-parity-m1.json
+  # Also supplies the verified anchor identity for record-only diagnostics
+  # when serialized scoring artifacts are not yet installed.
+  replay_universe: /opt/stocker/current/configs/prospective/anchor-frozen-20.json
+  raw_event_root: /var/lib/stocker/prospective/raw-events
+  recorder_activation: /var/lib/stocker/prospective/frozen-m1c-v0-activation.json
+  m1c_live_parity_report: /opt/stocker/current/research/prospective/frozen-m1c-microstructure-recorder-v0/m1c_live_parity_report.json
+  direction_live_parity_report: /opt/stocker/current/research/prospective/frozen-m1c-microstructure-recorder-v0/direction_live_parity_report.json
+  ibkr_capability_manifest: /var/lib/stocker/prospective/ibkr_capability_manifest.json
+  ibkr_runtime_capacity_manifest: /var/lib/stocker/prospective/ibkr_runtime_capacity_manifest.json
+  prospective_report_root: /var/lib/stocker/prospective/ibkr-budget-aware-shadow-recorder-v0/reports
+  aggregate_transfer_report: /var/lib/stocker/prospective/ibkr-budget-aware-shadow-recorder-v0/twenty_session_transfer_report.json
+  prospective_phase_ledger: /var/lib/stocker/prospective/frozen-m1c-v0-phases.jsonl
+  frozen_m1c_artifact_root: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary
+  m1c_scaling_artifact: /opt/stocker/current/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json
+  m1c_tail_phase_v1_config: /opt/stocker/current/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/frozen_config_v1.json
+  m1c_signed_market_shock_v1_config: /opt/stocker/current/research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/checkpoint_shock_threshold_manifest_v1.json
+  m1c_opening_market_transition_v1_config: /opt/stocker/current/research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/frozen_2024_opening_threshold_manifest_v1.json
+  m1c_prospective_opening_reversal_v1_config: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/frozen_experiment_configuration_v1.json
+  m1c_prospective_opening_reversal_v1_activation: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/experiment_activation_receipt_v1.json
+  m1c_prospective_opening_reversal_v1_1_config: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/artifacts/primary/frozen_timing_addendum_configuration_v1_1.json
+  m1c_prospective_opening_reversal_v1_1_activation: /opt/stocker/current/research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/artifacts/primary/experiment_activation_receipt_v1_1.json
+  direction_beta_artifact: /opt/stocker/current/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/stock_market_beta_parameters.csv
+  historical_activity_bars: /var/lib/stocker/preprocessing/prior-session-five-minute-bars.parquet
+  bar_compatibility_report: /var/lib/stocker/prospective/bar_compatibility_report.json
+  quiet_state_concentration_audit_root: /opt/stocker/current/research/options-feasibility/20260727-m1c-quiet-state-concentration-audit-v0/artifacts/primary
+
+runtime:
+  # Set both values deliberately before first service start.
+  mode: record_only
+  source: ibkr
+  prospective_start_utc: "2099-01-01T00:00:00Z"
+  instance_id: REPLACE-WITH-SERVER-INSTANCE
+  app_version: 0.1.0
+  git_commit: ${STOCKER_GIT_COMMIT}
+  run_id: REPLACE-WITH-PROSPECTIVE-RUN-ID
+  recorder_lease_stale_seconds: 60
+  heartbeat_seconds: 10
+
+risk:
+  trading_enabled: false
+
+web:
+  host: 127.0.0.1
+  port: 8765
+  production: true
+  trust_proxy_headers: false
+  trusted_proxy_ips: []
+  authentication_enabled: false
+  auth_token_env: null
+  auth_cookie_name: __Host-stocker_session
+  auth_cookie_secure: true
+  requests_per_minute: 240
+  allowed_hosts:
+    - 127.0.0.1
+    - localhost
+
+ibkr:
+  host: 127.0.0.1
+  # Frozen internal deployment contract: connect only to the Stocker loopback proxy.
+  # The Gateway's separate upstream API socket is never configured here.
+  # Frozen local proxy endpoint, not an IBKR paper/live port. IBKR_PORT may
+  # override it; the recorder never infers execution mode from a port.
+  port: 4003
+  client_id: 71
+  expected_environment: read_only
+  read_only: true
+  market_data_type_required: live
+  enable_level2: false
+  level2_rows: 5
+  max_depth_subscriptions: 0
+  max_tick_by_tick_subscriptions: 2
+  max_option_subscriptions: 8
+  externally_reserved_lines: 0
+  reserved_future_trading_lines: 12
+  safety_margin_lines: 2
+  max_concurrent_snapshots: 2
+  max_active_option_episodes: 1
+  max_option_lines_per_episode: 8
+  tick_by_tick_active_underlyings: 1
+  level2_active_underlyings: 0
+  max_high_resolution_underlyings: 1
+  high_tail_approach_boundary: 0.40
+  pending_subscription_timeout_seconds: 15
+  subscription_reconciliation_interval_seconds: 30
+  option_episode_maximum_minutes: 65
+  maximum_option_contracts_per_episode: 20
+  option_strike_steps: 2
+  maximum_quote_age_seconds: 2
+  stream_poll_interval_seconds: 0.1
+  maximum_clock_drift_seconds: 2
+  tws_or_gateway_version: null
+  connect_timeout_seconds: 10
+  request_timeout_seconds: 10
+  reconnect_max_attempts: 5
+  reconnect_backoff_seconds: 2
+  market_data_line_budget: 100
+  reserved_line_headroom: 10
+  request_rate_per_second: 20
+  historical_requests_per_window: 60
+  historical_request_window_seconds: 600
+  quote_capture_timeout_seconds: 15
+  allowed_market_data_types:
+    - live
+    - frozen
+    - delayed
+    - delayed_frozen
+
+context:
+  mode: signed_import
+  hmac_secret_env: STOCKER_CONTEXT_SIGNING_SECRET
+  import_directory: /var/lib/stocker/daily-context/incoming
+
+# Append-only after-session EODHD bars for IBKR/EODHD source-parity evidence.
+# These observations are always marked ineligible for scoring.
+parallel_validation:
+  enabled: true
+  provider: eodhd
+  api_token_env: EODHD_API_TOKEN
+  credential_status_env: STOCKER_EODHD_TOKEN_CONFIGURED
+  base_url: https://eodhd.com/api
+  request_timeout_seconds: 30
+  max_retries: 3
+  capture_delay_seconds: 7200
+  requests_per_minute: 20

@@ -1,0 +1,68 @@
+{
+  "reconstruction_version": "independent_pre_run_audited_input_reconstruction_v2",
+  "method": "low-level manifest hashing and direct Parquet-column aggregation without importing the production V2 summary logic",
+  "git_sha": "ee04e735b09f237a4a415c75cbf5c4569a921ed6",
+  "contract_hash": "dfb2abfbd0d5b5431e372074ac76155f3b014339202325da0f365007267a4de8",
+  "data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "audit_manifest_verified": true,
+  "exact_rerun_verified_byte_identical": true,
+  "frozen_historical_tree_verified": true,
+  "frozen_historical_blob_count": 1087,
+  "completed_bar_decisions": 424583,
+  "causally_and_structurally_eligible_decisions": 398304,
+  "run_entry_baseline_rows": 110949,
+  "active_prefix_ledger_rows": 2933161,
+  "registered_completion_event_rows": 487721,
+  "legacy_v2_comparable_decisions": 398304,
+  "full_semantic_differences": 369745,
+  "registered_event_set_differences": 175054,
+  "legacy_multiple_positive_decisions": 14331,
+  "decisions_with_active_v2_prefixes": 317181,
+  "old_primary_outcome_counts": {
+    "TIED_REGISTERED_COMPLETION": 11003,
+    "NO_REGISTERED_LOOP_WITHIN_HORIZON": 10961,
+    "SESSION_END": 30329,
+    "UNREGISTERED_LOOP": 271500,
+    "UNAVAILABLE": 26279,
+    "REGISTERED_SINGLE_EVENT_TOTAL": 74511
+  },
+  "audited_semantic_dictionary": {
+    "entries": 20,
+    "primitive_loops": 11,
+    "repeated_traversals": 8,
+    "composite_motifs": 1,
+    "ambiguous_legacy_migrations": 0,
+    "recorded_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "independently_reconstructed_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3"
+  },
+  "duration_reconstruction": {
+    "minimum_exact_duration": 1,
+    "maximum_exact_duration": 78,
+    "exact_duration_24_runs": 390,
+    "duration_greater_than_24_runs": 491,
+    "right_censored_source_complete_terminal_runs": 5128
+  },
+  "old_tie_signature_reconstruction": {
+    "tied_decisions": 11003,
+    "primary_tied_completion_rows": 25405,
+    "nested_same_primitive_signatures": 11003,
+    "signatures_with_two_distinct_primitive_roots": 0,
+    "migration_or_unknown_signatures": 0
+  },
+  "unregistered_preflight": {
+    "old_unregistered_decisions_reconstructed": 271500,
+    "missing_reconstructions": 0,
+    "decisions_with_an_earlier_valid_uncapped_closure_than_old_v2": 11046,
+    "cause": "old unregistered scan capped closed paths at eight transitions",
+    "preflight_unique_final_primitive_roots": 664
+  },
+  "reconstruction_status": "pass_with_explicit_uncapped_extraction_delta",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false
+}

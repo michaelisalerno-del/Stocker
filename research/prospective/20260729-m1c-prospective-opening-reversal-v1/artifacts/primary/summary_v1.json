@@ -1,0 +1,30 @@
+{
+  "activation_timestamp_utc": "2026-07-29T06:39:44.466604+00:00",
+  "cohort_status": {
+    "engineering_transfer_valid_sessions": 0,
+    "prospective_development_complete_eligible_episodes": 0,
+    "untouched_confirmation_complete_eligible_episodes": 0
+  },
+  "experiment_id": "m1c-prospective-opening-reversal-v1",
+  "experiment_version": "1",
+  "frozen_prediction": {
+    "NEGATIVE_SEVERE_OPENING_TRANSITION": "CALL",
+    "POSITIVE_SEVERE_OPENING_TRANSITION": "PUT",
+    "formula": "prediction_sign_v1=-opening_transition_sign_v1",
+    "otherwise": "ABSTAIN"
+  },
+  "operational_blockers": [
+    {
+      "code": "checkpoint_6_receipt_timing_contract_conflict",
+      "detail": "The final 09:55-10:00 bar is causal only when complete at 10:00, while the frozen entry is 10:00 and eligibility requires receipt_created_at < entry_timestamp. The live implementation fails closed; no timestamp is fabricated."
+    }
+  ],
+  "option_economics_result": "not_issued",
+  "order_routing_enabled": false,
+  "orders_placed": 0,
+  "prior_scientific_interpretation_changes": false,
+  "protected_pre_activation_2026_outcomes_opened": false,
+  "retrospective_decision": "blocked_insufficient_support",
+  "retrospective_event_reconciliation": "event_label_ambiguity_corrected",
+  "scientific_result": "not_issued"
+}

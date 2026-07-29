@@ -1,0 +1,10 @@
+{
+  "research_only": true,
+  "edge_claimed": false,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "input_events": "/private/tmp/stocker_preloop_bar_activation_test_20260709/run_preloop_bar_activation_test.py",
+  "input_captured": "/private/tmp/stocker_stable_activation_pattern_deep_dive_20260709/captured_activation_events_all_years.csv",
+  "output_dir": "/private/tmp/stocker_one_win_warm_state_idea_sweep_20260709",
+  "forward_rows": 49
+}

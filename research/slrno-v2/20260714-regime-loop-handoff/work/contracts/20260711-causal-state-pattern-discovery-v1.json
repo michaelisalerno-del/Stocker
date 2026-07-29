@@ -1,0 +1,304 @@
+{
+  "contract_id": "causal_state_pattern_discovery_v1",
+  "contract_frozen_at_utc": "2026-07-11T20:30:00Z",
+  "scientific_status": "post_inspection_2024_development_discovery_and_temporal_qualification",
+  "prospective_validation_claim_permitted": false,
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Test whether a state-only discovery period can identify new exact closed regime loops or directed low-to-high regime excursions whose occurrence is causally forecastable and whose later 2024 realizations have reliably elevated absolute movement and future range beyond current-state context.",
+  "known_before_freeze": {
+    "opened_periods": ["2023", "2024", "2025", "partial_2026"],
+    "prior_frozen_cycle_dictionary_size": 20,
+    "prior_exact_oriented_routes_tested": 45,
+    "prior_exact_route_horizon_candidates_qualified": 0,
+    "known_descriptive_focus": "3_to_6_to_3_at_6_bars_had_large_descriptive_uplift_but_failed_the_prior_full_gate",
+    "implication": "This experiment is a new development test, not untouched validation. Candidate discovery must ignore every price outcome, and any survivor still requires a separately frozen future test."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_new_closed_regime_loops",
+      "question": "Do exact directed closed state paths discovered only from January-June recurrence remain structurally forecastable in July-December and identify elevated absolute movement and range?",
+      "bounded_pattern": "entry_state_followed_by_2_to_4_destinations_with_the_last_destination_equal_to_entry_state",
+      "stop": "No novel loop-horizon passes support, structural, both-target quality, robustness, calibration, and familywise multiplicity gates."
+    },
+    {
+      "id": "H2_directed_low_to_high_excursions",
+      "question": "Does a one-way transition from a below-zero frozen bar-range state centroid to an above-zero centroid, with at least 0.25 standardized-unit increase, identify elevated later movement without requiring a return?",
+      "bounded_pattern": "one_exact_next_state_transition_with_frozen_centroid_boundary_crossing",
+      "stop": "No directed-excursion horizon passes the same complete qualification gates."
+    },
+    {
+      "id": "H3_regime_specificity",
+      "question": "Is any movement result specific enough to exact path identity to improve over the same causal current-state and entry-context model?",
+      "bounded_pattern": "candidate_identity_one_hot_added_only_on_realized_pattern_rows",
+      "stop": "Candidate-identity probabilities do not improve proper loss over context in both targets and both half-year qualification quarters."
+    },
+    {
+      "id": "H4_horizon_specificity",
+      "question": "Does a candidate qualify independently at 6, 12, or 24 five-minute bars?",
+      "bounded_pattern": "one_named_candidate_and_one_named_horizon",
+      "stop": "A candidate-horizon may not borrow a pass from either another horizon or a single target."
+    }
+  ],
+  "frozen_lineage": {
+    "anchor_panel_2024": {
+      "path": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+      "sha256": "788fd81909d1c5d3e6ee20e3e36e3ebb74199188e41052ea1b04f61c96fa9932",
+      "rows_expected": 70374
+    },
+    "filtered_runs_2024": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/train_2024_filtered_runs.csv",
+      "sha256": "9557298a1a1bc32d47e15a3be31c453f81e019c5a9b1cf76401e4ad4613614d0",
+      "used_for_scoring": false
+    },
+    "semimarkov_parameters": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/frozen_semimarkov_parameters.npz",
+      "sha256": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+      "bar_range_feature_index": 5,
+      "bar_range_centroids_expected": [-1.223364, -0.504674, -0.336422, -0.163784, 0.272415, 0.550085, 0.617942, 0.980817]
+    },
+    "emission_preprocessing": {
+      "path": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/frozen_emission_preprocessing.csv",
+      "sha256": "453988be81e1dd54dd892316ab0da41423197c5aec4afb691e9010e97e05fc67"
+    },
+    "frozen_cycles": {
+      "path": "/private/tmp/stocker_per_loop_movement_quality_20260710/fixed_cycles.csv",
+      "sha256": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253",
+      "use": "mark_exact_path_overlap_with_the_already_tested_dictionary_only"
+    },
+    "parent_quality_contract": {
+      "path": "work/contracts/20260710-per-loop-movement-quality-v1.json",
+      "sha256": "67d64c463df52f01f360561ef0a69d5772b7eec0409468c93d6eb5a630dee02e",
+      "use": "reuse_frozen_global_2024_movement_thresholds"
+    },
+    "detector_refit_permitted": false,
+    "state_relabel_permitted": false,
+    "later_period_input_permitted": false
+  },
+  "period_and_phase_lock": {
+    "discovery_period": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+    "qualification_period": ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"],
+    "qualification_outer_training_rule": "strictly_earlier_2024_months",
+    "phase_1_allowed_anchor_columns": [
+      "anchor_id", "symbol_norm", "session_date", "month", "state",
+      "previous_state_1", "previous_state_2", "future_state_1",
+      "future_state_2", "future_state_3", "future_state_4"
+    ],
+    "phase_1_forbidden_column_prefixes": [
+      "absolute_return", "future_range", "signed_return", "direction", "exact_", "loop_score"
+    ],
+    "phase_1_output": "candidate_manifest_csv_plus_discovery_lock_json",
+    "phase_1_lock_fields": ["contract_sha256", "runner_sha256", "input_sha256", "manifest_sha256", "manifest_rows", "candidate_ids"],
+    "phase_2_refuses_if_runner_or_manifest_hash_changed": true,
+    "phase_2_result_use": "development_screen_only",
+    "2023_or_2025_paths_permitted": false,
+    "partial_2026_permitted": false,
+    "prospective_shadow_read_or_write_permitted": false
+  },
+  "candidate_discovery": {
+    "outcome_blind": true,
+    "family_exact_closed_loop": {
+      "family_id": "closed_loop",
+      "transition_lengths": [2, 3, 4],
+      "entry_and_terminal_state_equal": true,
+      "intermediate_return_to_entry_allowed": true,
+      "orientation": "exact_from_entry_state_no_rotation_collapse",
+      "session_end_before_completion": "not_an_occurrence",
+      "minimum_discovery_occurrences": 120,
+      "minimum_discovery_stocks": 12,
+      "all_discovery_months_required": true,
+      "minimum_occurrences_each_discovery_month": 10,
+      "novel_definition": "exact_closed_path_not_present_in_any_rotation_of_the_frozen_twenty_cycles",
+      "selection_cap_novel": 40,
+      "selection_cap_existing_controls": 8,
+      "ranking_if_over_cap": ["minimum_month_occurrences_desc", "total_occurrences_desc", "stock_count_desc", "path_lexicographic_asc"],
+      "qualification_decision_scope": "novel_candidates_only",
+      "existing_controls": "descriptive_only_not_in_primary_multiplicity_or_survivor_set"
+    },
+    "family_directed_excursion": {
+      "family_id": "upward_excursion",
+      "transition_length": 1,
+      "return_required": false,
+      "source_bar_range_centroid_rule": "strictly_below_zero",
+      "destination_bar_range_centroid_rule": "strictly_above_zero",
+      "minimum_centroid_increase": 0.25,
+      "minimum_discovery_occurrences": 150,
+      "minimum_discovery_stocks": 15,
+      "all_discovery_months_required": true,
+      "minimum_occurrences_each_discovery_month": 15,
+      "selection_cap": 16,
+      "ranking_if_over_cap": ["minimum_month_occurrences_desc", "total_occurrences_desc", "stock_count_desc", "source_then_destination_asc"]
+    },
+    "candidate_selection_may_not_use": ["movement_outcome", "future_price", "quality_rate", "model_loss", "later_period_support"],
+    "empty_family_rule": "record_the_empty_family_and_continue_without_relaxing_thresholds"
+  },
+  "outcomes": {
+    "provider_bars": "regular_session_five_minute_provider_OHLC",
+    "direct_test_volume_label": "historical_volume_not_used",
+    "upstream_state_volume_note": "The frozen state assignments were produced by a detector whose fourteen emissions included two provider historical_volume transforms; this test reads no raw volume field and makes no volume-confirmation claim.",
+    "direction_or_signed_return_used": false,
+    "targets": ["absolute_return_bps", "future_range_bps"],
+    "horizons_bars": [6, 12, 24],
+    "thresholds": {
+      "absolute_return_bps": {
+        "6": {"p75": 116.9594286396164, "p90": 200.72998029354338},
+        "12": {"p75": 158.55477362021094, "p90": 269.3043689982858},
+        "24": {"p75": 212.95262152537344, "p90": 354.9152270049836}
+      },
+      "future_range_bps": {
+        "6": {"p75": 217.39112318840534, "p90": 333.7890582759158},
+        "12": {"p75": 295.50341925592556, "p90": 443.43894920629566},
+        "24": {"p75": 396.8727211744621, "p90": 577.2272790601467}
+      }
+    },
+    "comparison": "strictly_greater_than_threshold",
+    "future_bars_begin_after_anchor": true,
+    "quality_classes": [0, 1, 2]
+  },
+  "structural_models": {
+    "destination_space": [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    "session_end_destination": 8,
+    "history_model": "order_3_state_token_destination_counts_shrunk_to_first_order",
+    "history_token": ["previous_state_2", "previous_state_1", "current_state"],
+    "first_order_baseline": "current_state_destination_counts_shrunk_to_uniform",
+    "first_order_uniform_pseudocount_each_destination": 1.0,
+    "history_backoff_strength": 20.0,
+    "multi_step_path_probability": "causal_product_of_destination_probabilities_with_history_token_updated_after_each_destination",
+    "fold_fit": "strictly_earlier_2024_months",
+    "evaluation_rows": "all_qualification_anchors_compatible_with_candidate_entry_state",
+    "probability_clipping": [1e-12, 0.999999999999]
+  },
+  "movement_models": {
+    "families_fit_separately": true,
+    "fit_rows": "realized_candidate_occurrences_only",
+    "prediction_rows": "every_compatible_candidate_row_in_each_outer_qualification_month",
+    "positive_overlap_weight": "inverse_number_of_realized_candidates_in_the_same_family_at_the_anchor",
+    "qcontext_features": {
+      "state_one_hot_width": 8,
+      "causal_numeric_controls": [
+        "b0_entry_numeric", "b0_entry_high_stress", "entry_time_sin", "entry_time_cos",
+        "current_bar_log_return", "bar_range_pct", "return_sum_6", "mean_abs_return_12", "session_return"
+      ],
+      "stock_identity": false,
+      "future_state_or_outcome_feature": false
+    },
+    "qcandidate_features": "qcontext_plus_family_candidate_one_hot",
+    "candidate_one_hot_scale": 0.5,
+    "numeric_imputation": "training_prefix_anchor_level_median",
+    "numeric_standardization": "weighted_training_realized_rows_only_no_validation_recenter",
+    "estimator": {
+      "class": "sklearn_LogisticRegression_multinomial",
+      "C": 0.2,
+      "solver": "lbfgs",
+      "max_iter": 1000,
+      "tol": 0.0001,
+      "random_state": 20260711,
+      "required_classes": [0, 1, 2]
+    },
+    "one_pair_per_family_target_horizon_outer_month": true,
+    "raw_probabilities_primary": true,
+    "post_hoc_calibration_permitted": false,
+    "ordered_probability_requirement": "0_le_q90_le_q75_le_1"
+  },
+  "qualification_support_each_candidate": {
+    "compatible_rows_minimum": 600,
+    "realized_rows_minimum": 100,
+    "realized_stocks_minimum": 12,
+    "required_quarters": ["2024_q3", "2024_q4"],
+    "realized_rows_each_quarter_minimum": 30,
+    "p75_positive_and_negative_rows_each_target_horizon_minimum": 25,
+    "p90_positive_rows_each_target_horizon_minimum": 12,
+    "p90_negative_rows_each_target_horizon_minimum": 25
+  },
+  "structural_gate_each_candidate": {
+    "history_log_loss_below_first_order": true,
+    "history_brier_below_first_order": true,
+    "history_ece_no_worse_than_first_order_plus": 0.01,
+    "history_maximum_supported_bin_error_no_worse_than_first_order_plus": 0.02,
+    "minimum_supported_bin_rows": 100
+  },
+  "quality_gates_each_candidate_target_horizon_tier": {
+    "conditional_qcandidate_vs_qcontext": {
+      "minimum_relative_log_loss_improvement": 0.005,
+      "brier_difference_below_zero": true,
+      "both_quarters_log_loss_difference_below_zero": true,
+      "every_leave_one_stock_out_log_loss_difference_below_or_equal_zero": true,
+      "five_session_bootstrap_95pct_log_loss_upper_bound_below_zero": true
+    },
+    "joint_same_structural_probability": {
+      "definition": "history_occurrence_probability_times_conditional_movement_probability",
+      "minimum_relative_log_loss_improvement": 0.0025,
+      "brier_difference_below_zero": true
+    },
+    "calibration": {
+      "fixed_bins": 10,
+      "conditional_supported_bin_rows_minimum": 25,
+      "joint_supported_bin_rows_minimum": 100,
+      "candidate_ECE_no_worse_than_context_plus": 0.01,
+      "conditional_absolute_maximum_supported_bin_error": 0.08,
+      "joint_absolute_maximum_supported_bin_error": 0.04
+    },
+    "lift": {
+      "observed_rate_minus_qcontext_five_session_bootstrap_95pct_lower_bound_above_zero": true
+    }
+  },
+  "multiplicity": {
+    "primary_families": ["novel_closed_loop_P75", "upward_excursion_P75"],
+    "test": "4999_draw_session_level_Rademacher_sign_flip_of_daily_weighted_conditional_log_loss_differences",
+    "seed": 20260711,
+    "correction": "Holm_within_family_at_familywise_alpha_0.05",
+    "candidate_requirement": "Both target P75 tests for a candidate-horizon pass their family's Holm correction. High additionally requires both P90 tests in that family's separate P90 correction."
+  },
+  "horizon_grade_rules": {
+    "development_good_candidate": {
+      "both_targets_P75_all_support_structural_quality_calibration_robustness_lift_and_Holm_gates": true,
+      "minimum_observed_P75_rate": 0.30,
+      "minimum_mean_qcandidate_P75": 0.30,
+      "minimum_observed_rate_divided_by_mean_qcontext": 1.10
+    },
+    "development_high_candidate": {
+      "must_first_pass_good": true,
+      "both_targets_P90_all_gates_and_Holm": true,
+      "minimum_observed_P75_rate": 0.35,
+      "minimum_mean_qcandidate_P75": 0.35,
+      "minimum_observed_P90_rate": 0.15,
+      "minimum_mean_qcandidate_P90": 0.15,
+      "minimum_observed_P90_rate_divided_by_mean_qcontext": 1.20
+    },
+    "development_unqualified": "any_required_gate_fails",
+    "single_target_candidate_forbidden": true,
+    "global_all_horizon_grade_forbidden": true
+  },
+  "dependency_reporting": {
+    "regime_dependency": "candidate_entry_state_and_exact_path",
+    "quarter_slices": ["2024_q3", "2024_q4"],
+    "session_buckets_by_bar_index": {"open": [0, 25], "middle": [26, 50], "late": [51, null]},
+    "stock_deletion": "every_symbol",
+    "report_discovery_and_qualification_support_by_month_and_stock": true
+  },
+  "decision_and_stop_rules": {
+    "survivor_set": "Every novel closed-loop or upward-excursion candidate-horizon with a good or high development grade.",
+    "candidate_cap_each_family": 12,
+    "more_than_cap": "rank_free_fail_closed_and_require_a_new_contract",
+    "zero_candidates_in_family": "stop_that_family_without_relaxing_or_tuning",
+    "one_to_twelve_candidates": "freeze_exact_ID_horizon_grade_hashes_and_evidence_for_a_separate_future_contract",
+    "same_experiment_refinement_permitted": false,
+    "later_period_scoring": false,
+    "prospective_shadow_entry": false,
+    "trading_rule_or_PnL_model_permitted": false,
+    "directional_claim_permitted": false
+  },
+  "integrity": {
+    "independent_audit_required": true,
+    "auditor_may_not_import_runner": true,
+    "audit_candidate_manifest_lock_labels_weights_folds_probabilities_metrics_Holm_and_grades": true,
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "all_safety_flags_exact": true,
+    "no_later_period_or_shadow_path_resolution": true
+  },
+  "planned_artifact_root": "/private/tmp/stocker_causal_state_pattern_discovery_v1_20260711"
+}

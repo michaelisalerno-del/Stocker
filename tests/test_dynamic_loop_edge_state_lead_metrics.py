@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from stocker_research.dynamic_loop_edge_state_lead_lag.episodes import (
+    build_episode_attribution,
+)
+from stocker_research.dynamic_loop_edge_state_lead_lag.metrics import (
+    build_feature_contribution_bins,
+    build_paired_prediction_table,
+    lead_calibration_metrics,
+    paired_lead_metrics,
+    validate_paired_training_identity,
+)
+
+
+def _synthetic_pairs(*, related: bool) -> pd.DataFrame:
+    sessions = pd.date_range("2025-01-02", periods=80, freq="B").strftime("%Y-%m-%d")
+    signal = np.tile([0, 1], 40)
+    target = np.roll(signal, 1)
+    target[0] = 0
+    rows: list[dict[str, object]] = []
+    for model in ("hierarchical_payoff_history_change_point", "hierarchical_change_point"):
+        for index, session in enumerate(sessions):
+            for lead in (0, 1):
+                target_index = index + lead
+                if target_index >= len(sessions):
+                    continue
+                probability = 0.5
+                if model == "hierarchical_change_point" and related:
+                    probability = 0.9 if signal[index] else 0.1
+                rows.append(
+                    {
+                        "forecast_id": f"{model}-{index}",
+                        "model_name": model,
+                        "period": 2025,
+                        "score_session": session,
+                        "loop_id": "cycle_01",
+                        "orientation": "state_1",
+                        "horizon": 24,
+                        "target_lead_sessions": lead,
+                        "target_session": sessions[target_index],
+                        "target_outcome_id": f"outcome-{target_index}",
+                        "target_status": "payoff_settled",
+                        "target_payoff_available": True,
+                        "target_payoff_positive": bool(target[target_index]),
+                        "target_robust_net_bps": 20.0 if target[target_index] else -20.0,
+                        "target_robust_gross_bps": (30.0 if target[target_index] else -10.0),
+                        "target_cost_contribution_bps": 10.0,
+                        "p_next_payoff_positive": probability,
+                        "p_edge_positive": 0.5,
+                        "p_edge_active": probability,
+                        "p_on_next": probability,
+                        "p_off_next": 1.0 - probability,
+                        "p_survive_horizon": probability,
+                        "posterior_mean_net_bps": 0.0,
+                        "posterior_lower_bound_net_bps": -1.0,
+                        "edge_state": "active" if probability >= 0.8 else "unknown",
+                        "target_independent_stocks": 3,
+                        "target_independent_stock_ids": '["AAA","BBB","CCC"]',
+                        "target_effective_sample_size": 3.0,
+                        "target_episode_state": "positive" if target[target_index] else "neutral",
+                        "target_episode_id": "episode-1" if target[target_index] else pd.NA,
+                        "target_episode_onset_within_lead": False,
+                        "target_episode_survival": False,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_synthetic_leading_feature_is_detected_at_lead_one_not_lead_zero() -> None:
+    paired = build_paired_prediction_table(_synthetic_pairs(related=True))
+    metrics = paired_lead_metrics(paired, bootstrap_resamples=100, seed=7)
+
+    lead_zero = metrics.loc[metrics["target_lead_sessions"].eq(0)].iloc[0]
+    lead_one = metrics.loc[metrics["target_lead_sessions"].eq(1)].iloc[0]
+    assert lead_one["paired_brier_improvement"] > 0.1
+    assert lead_zero["paired_brier_improvement"] < 0.0
+    assert lead_one["paired_economic_increment_bps"] > 0.0
+
+
+def test_null_case_does_not_manufacture_feature_improvement() -> None:
+    paired = build_paired_prediction_table(_synthetic_pairs(related=False))
+    metrics = paired_lead_metrics(paired, bootstrap_resamples=100, seed=7)
+
+    assert metrics["paired_brier_improvement"].eq(0.0).all()
+    assert metrics["paired_log_loss_improvement"].eq(0.0).all()
+    assert metrics["paired_economic_increment_bps"].eq(0.0).all()
+
+
+def test_contribution_bins_use_predictor_only_and_not_target() -> None:
+    paired = build_paired_prediction_table(_synthetic_pairs(related=True))
+    original = build_feature_contribution_bins(paired, bins=5)
+    shuffled = paired.copy()
+    shuffled["target_robust_net_bps"] = (
+        shuffled["target_robust_net_bps"].sample(frac=1.0, random_state=4).to_numpy()
+    )
+    rebuilt = build_feature_contribution_bins(shuffled, bins=5)
+
+    assert original["contribution_bin"].equals(rebuilt["contribution_bin"])
+
+
+def test_full_and_control_must_have_identical_training_state() -> None:
+    forecasts = pd.DataFrame(
+        {
+            "period": [2025, 2025],
+            "score_session": ["2025-01-03"] * 2,
+            "loop_id": ["cycle_01"] * 2,
+            "orientation": ["state_1"] * 2,
+            "horizon": [24, 24],
+            "model_name": [
+                "hierarchical_payoff_history_change_point",
+                "hierarchical_change_point",
+            ],
+            "posterior_mean_net_bps": [1.0, 2.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="training-state mismatch"):
+        validate_paired_training_identity(forecasts, ["posterior_mean_net_bps"])
+
+
+def test_onset_precision_uses_operational_inactive_to_active_transition() -> None:
+    rows = pd.DataFrame(
+        {
+            "model_name": ["model"] * 3,
+            "period": [2025] * 3,
+            "score_session": ["2025-01-02", "2025-01-03", "2025-01-06"],
+            "loop_id": ["cycle_01"] * 3,
+            "orientation": ["state_1"] * 3,
+            "horizon": [24] * 3,
+            "target_lead_sessions": [1] * 3,
+            "target_payoff_available": [True] * 3,
+            "target_payoff_positive": [False, True, True],
+            "target_robust_net_bps": [-5.0, 10.0, 8.0],
+            "p_next_payoff_positive": [0.2, 0.8, 0.8],
+            "p_on_next": [0.9, 0.9, 0.9],
+            "p_survive_horizon": [0.1, 0.9, 0.9],
+            "edge_state": ["unknown", "active", "active"],
+            "target_episode_onset_within_lead": [False, True, False],
+            "target_episode_survival": [False, True, True],
+        }
+    )
+
+    metric = lead_calibration_metrics(rows).iloc[0]
+
+    assert metric["onset_operational_predictions"] == 1
+    assert metric["onset_precision"] == pytest.approx(1.0)
+    assert metric["onset_recall"] == pytest.approx(1.0)
+    assert metric["false_onset_rate"] == pytest.approx(0.0)
+
+
+def test_survival_probability_is_scored_against_episode_persistence() -> None:
+    rows = pd.DataFrame(
+        {
+            "model_name": ["model", "model"],
+            "period": [2025, 2025],
+            "score_session": ["2025-01-02", "2025-01-03"],
+            "loop_id": ["cycle_01", "cycle_01"],
+            "orientation": ["state_1", "state_1"],
+            "horizon": [24, 24],
+            "target_lead_sessions": [1, 1],
+            "target_payoff_available": [True, True],
+            "target_payoff_positive": [False, True],
+            "target_robust_net_bps": [-5.0, 10.0],
+            "p_next_payoff_positive": [0.2, 0.8],
+            "p_on_next": [0.2, 0.8],
+            "p_survive_horizon": [0.1, 0.9],
+            "edge_state": ["unknown", "active"],
+            "target_episode_onset_within_lead": [False, True],
+            "target_episode_survival": [False, True],
+        }
+    )
+
+    metric = lead_calibration_metrics(rows).iloc[0]
+
+    assert metric["survival_observations"] == 2
+    assert metric["survival_brier_score"] == pytest.approx(0.01)
+    assert metric["survival_log_loss"] == pytest.approx(-np.log(0.9))
+
+
+def test_episode_forecast_on_onset_session_is_not_classified_as_leading() -> None:
+    sessions = ["2025-01-02", "2025-01-03", "2025-01-06"]
+    calendar = pd.DataFrame(
+        {
+            "period": [2025] * 3,
+            "score_session": sessions,
+            "loop_id": ["cycle_01"] * 3,
+            "orientation": ["state_1"] * 3,
+            "horizon": [24] * 3,
+        }
+    )
+    forecasts = pd.DataFrame(
+        [
+            {
+                "period": 2025,
+                "score_session": session,
+                "loop_id": "cycle_01",
+                "orientation": "state_1",
+                "horizon": 24,
+                "model_name": model,
+                "p_next_payoff_positive": (
+                    0.9 if model == "hierarchical_change_point" and session == "2025-01-03" else 0.1
+                ),
+            }
+            for session in sessions
+            for model in (
+                "hierarchical_change_point",
+                "hierarchical_payoff_history_change_point",
+            )
+        ]
+    )
+    states = calendar.assign(
+        robust_net_payoff_bps=[0.0, 10.0, 8.0],
+        independent_stock_ids=['["AAA"]'] * 3,
+    )
+    episodes = pd.DataFrame(
+        {
+            "period": [2025],
+            "loop_id": ["cycle_01"],
+            "orientation": ["state_1"],
+            "horizon": [24],
+            "episode_id": ["episode_1"],
+            "hindsight_estimated_onset": ["2025-01-03"],
+            "hindsight_estimated_end": ["2025-01-06"],
+        }
+    )
+
+    attribution = build_episode_attribution(forecasts, states, episodes, calendar)
+
+    assert attribution.iloc[0]["episode_attribution_class"] == "unpredicted"
+    assert pd.isna(attribution.iloc[0]["full_model_first_positive_lead_forecast"])

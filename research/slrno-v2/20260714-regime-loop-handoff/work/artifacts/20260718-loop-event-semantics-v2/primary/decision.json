@@ -1,0 +1,31 @@
+{
+  "broker_connected": false,
+  "completed_requirements": [
+    "independent_audit",
+    "exact_rerun_identity"
+  ],
+  "contract_hash": "e193fb8979c231eebd1876b8e6390d837006a454fcc911a94cdc196ab015ecd6",
+  "data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+  "dictionary_version": "semantic_loop_dictionary_v2",
+  "edge_claimed": false,
+  "exact_next_experiment": "A separately preregistered structural forecast comparing simple baselines and competing-event models for first next-loop identity and arrival time, with no payoff or economic target.",
+  "execution_enabled": false,
+  "git_sha": "59e535ede1aaf77a6482002718cb2b77dfb691c0",
+  "independent_audit_pass": true,
+  "known_limitations": [
+    "known_missingness_preserved",
+    "posterior_reset_at_gap; excluded_from_duration_dictionary_and_null; failed_closed_as_UNAVAILABLE",
+    "V2_posterior_uses_78_age_support_with_explicit_geometric_tail; legacy_hard_map_remains_separate",
+    "bounded_deterministic_sample_by_contract"
+  ],
+  "order_placement": "disabled",
+  "predictor_built": false,
+  "ready_for_next_loop_forecast": true,
+  "research_only": true,
+  "run_id_v2": "864601cf54c8c758fee528e6",
+  "scientific_decision": "loop_event_v2_ready_with_known_limitations",
+  "source_artifact_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false
+}

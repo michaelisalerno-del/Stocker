@@ -1,0 +1,4 @@
+period,stock_episode_count,severe_stock_episode_count,unique_session_count,unique_opening_transition_event_count,negative_transition_event_count,positive_transition_event_count,complete_normal_opening_event_count,incomplete_event_count,mean_stocks_per_transition_event,maximum_stocks_per_transition_event
+development,407,65,26,26,23,15,185,5,2.5,5
+assessment,356,130,43,43,28,30,72,1,3.0232558139534884,8
+stress,437,101,13,13,7,11,56,2,7.769230769230769,14

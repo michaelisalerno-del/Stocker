@@ -1,0 +1,72 @@
+{
+  "assessment_end": "2025-08-22",
+  "assessment_start": "2025-01-01",
+  "bootstrap": {
+    "draws": 100,
+    "seed": 20260726,
+    "unit": "complete_assessment_session"
+  },
+  "broker_access": false,
+  "call_put_abstain_policy": true,
+  "confidence_policy": {
+    "development_action_coverage_target": 0.35,
+    "minimum_development_actions": 150,
+    "symmetric": true
+  },
+  "development_end": "2024-12-31",
+  "development_start": "2024-01-01",
+  "direction_model_is_second_stage": true,
+  "direction_models": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "direction_models_trained_on_2024_only": true,
+  "episode_minimum_spacing_minutes": 30,
+  "experiment": "Movement-Qualified Directional Readiness Quick Screen V0",
+  "intraday_option_quotes_used": false,
+  "layer_attribution_support_rule": {
+    "assessment_increments_required_non_adverse": [
+      "log_loss",
+      "brier",
+      "auc",
+      "selective_accuracy",
+      "mean_aligned_return"
+    ],
+    "development_oof_increments_required_non_adverse": [
+      "log_loss",
+      "brier",
+      "auc"
+    ]
+  },
+  "live_orders_allowed": false,
+  "m1_threshold_frozen": 0.49588519865576763,
+  "movement_model_frozen": true,
+  "movement_model_refit_allowed": false,
+  "null_refits": {
+    "count": 5,
+    "seeds": [
+      20260731,
+      20260732,
+      20260733,
+      20260734,
+      20260735
+    ]
+  },
+  "opened_movement_holdout_excluded": true,
+  "option_pnl_calculated": false,
+  "paper_orders_allowed": false,
+  "primary_direction_horizon_minutes": 10,
+  "production_runtime_modified": false,
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "retrospective_directional_screen": true,
+  "rows_from_2026_onward_protected": true,
+  "seeds": {
+    "model": 20260726,
+    "oof_folds": 20260727
+  },
+  "strategy_promotion": false
+}

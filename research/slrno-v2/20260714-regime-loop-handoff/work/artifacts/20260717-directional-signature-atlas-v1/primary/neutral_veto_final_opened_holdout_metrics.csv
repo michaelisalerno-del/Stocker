@@ -1,0 +1,5 @@
+neutral_veto_id,rows,sessions,stocks,neutral_rate,base_neutral_rate,neutral_lift,mean_long_net_bps,mean_short_net_bps,raw_p_value,support_reasons,holm_adjusted_p_value,validation_rejection_reasons,neutral_validation_survived
+neutral_veto__00362ade49a6,87,54,18,0.16091954023,0.0975338813597,0.0633856588702,-15.873851828,-4.12614817201,1,['insufficient_directional_outcomes'],1,"['insufficient_directional_outcomes', 'validation_holm_not_passed']",False
+neutral_veto__061d52c9f0cb,805,106,19,0.129192546584,0.0975338813597,0.0316586652242,4.75403056596,-24.754030566,0.0156416508975,[],0.0469249526925,['validation_directional_payoff_not_suppressed'],False
+neutral_veto__e0fa86bb1b33,933,118,19,0.124330117899,0.0975338813597,0.0267962365396,-0.371899371556,-19.6281006284,0.00871966748135,[],0.0348786699254,[],True
+neutral_veto__efd731c0213a,464,113,19,0.0969827586207,0.0975338813597,-0.000551122739008,-6.31076308928,-13.6892369107,0.282092538004,[],0.564185076007,"['validation_holm_not_passed', 'validation_neutral_lift_not_positive']",False

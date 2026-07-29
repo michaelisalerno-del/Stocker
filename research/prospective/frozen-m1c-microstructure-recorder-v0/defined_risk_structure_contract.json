@@ -1,0 +1,51 @@
+{
+  "contract_version": "m1c-defined-risk-shadow-structures-v0",
+  "research_only": true,
+  "original_low_movement_decision_preserved": true,
+  "original_decision": "blocked_insufficient_low_tail_support",
+  "retrospective_gate_relaxation_allowed": false,
+  "m1c_frozen": true,
+  "m1c_bottom_5_threshold": 0.115697407847643,
+  "m1c_bottom_10_threshold": 0.135896965695626,
+  "m1c_bottom_20_threshold": 0.167095528962669,
+  "primary_quiet_state": "bottom_10_percent",
+  "prospective_record_only": true,
+  "option_shadow_outcomes_only": true,
+  "defined_risk_short_premium_only": true,
+  "naked_short_options_allowed": false,
+  "paper_orders_allowed": false,
+  "live_orders_allowed": false,
+  "broker_order_methods_allowed": false,
+  "strategy_promotion": false,
+  "protected_historical_start": "2026-01-01",
+  "S1_ATM_IRON_BUTTERFLY": {
+    "short_legs": ["atm_call", "atm_put"],
+    "protective_wings": "nearest_same_expiry_symmetric_strikes_at_least_1_percent_of_underlying_entry_from_atm",
+    "minimum_wing_fraction": 0.01,
+    "asymmetric_pair_substitution_allowed": false
+  },
+  "S2_DELTA_IRON_CONDOR": {
+    "short_call_target_delta": 0.25,
+    "short_put_target_delta": -0.25,
+    "long_call_target_delta": 0.1,
+    "long_put_target_delta": -0.1,
+    "maximum_absolute_delta_distance": 0.05,
+    "same_expiry_required": true,
+    "strike_order": "long_put < short_put < short_call < long_call",
+    "target_substitution_allowed": false
+  },
+  "S3_CALL_CREDIT_SPREAD": {
+    "directional_comparison_only": true,
+    "short_leg": "atm_call",
+    "protective_leg": "nearest_call_at_least_1_percent_above_atm"
+  },
+  "S4_PUT_CREDIT_SPREAD": {
+    "directional_comparison_only": true,
+    "short_leg": "atm_put",
+    "protective_leg": "nearest_put_at_least_1_percent_below_atm"
+  },
+  "long_premium_structures": ["ATM_CALL", "ATM_PUT", "ATM_STRADDLE"],
+  "naked_short_straddles_recorded": false,
+  "naked_short_strangles_recorded": false,
+  "unavailable_structures_persisted_with_reason": true
+}

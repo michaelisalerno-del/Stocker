@@ -1,0 +1,61 @@
+{
+  "binary": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "binary_models": [
+    "O0",
+    "O1"
+  ],
+  "continuous": {
+    "alpha": 10.0,
+    "kind": "Ridge"
+  },
+  "continuous_models": [
+    "R0",
+    "R1"
+  ],
+  "hyperparameter_tuning": false,
+  "materially_adverse_checkpoint_thresholds": {
+    "O1_brier_improvement_below": -0.002,
+    "O1_log_loss_improvement_below": -0.005,
+    "broad_minus_low_iv_residual_below": -0.0005
+  },
+  "route_bundle_null": {
+    "bundle_features": [
+      "active_prefix_count",
+      "active_prefix_family_count",
+      "top_prefix_depth_fraction",
+      "second_prefix_depth_fraction",
+      "top_minus_second_prefix_depth",
+      "prefix_family_entropy",
+      "orientation_disagreement_fraction",
+      "new_prefixes_last_1_bar",
+      "invalidated_prefixes_last_1_bar",
+      "active_prefix_count_change_last_1_bar",
+      "active_prefix_count_change_last_3_bars",
+      "top_prefix_depth_change_last_1_bar",
+      "top_prefix_depth_change_last_3_bars",
+      "matching_recent_loop_prefix_count",
+      "recent_loop_memory_weighted_top_depth"
+    ],
+    "preserve_O0": true,
+    "refits": 5,
+    "strata": [
+      "development_or_assessment",
+      "session",
+      "checkpoint"
+    ]
+  },
+  "session_bootstrap": {
+    "draws": 25,
+    "refit": false,
+    "seed": 20260722
+  },
+  "threshold_tuning": false,
+  "weights": "exact_frozen_candidate_normalized_row_weight"
+}

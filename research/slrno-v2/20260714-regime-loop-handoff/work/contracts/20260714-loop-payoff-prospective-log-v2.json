@@ -1,0 +1,177 @@
+{
+  "contract_id": "20260714-loop-payoff-prospective-log-v2",
+  "status": "specification_only_not_activated",
+  "extends": "20260713-loop-payoff-prospective-log-v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "position_or_order_functionality_allowed": false,
+  "application_implementation_authorized": false,
+  "strategy_promotion_allowed": false,
+  "purpose": "Prospectively distinguish profitable and losing occurrences of a frozen loop orientation by logging causal route state and price-path state without treating realised loop completion, child, morph, MFE, MAE, or payoff as admission information.",
+  "originating_opened_evidence": {
+    "artifact": "../artifacts/20260714-causal-loop-state-path-v1/primary",
+    "scientific_status": "retrospective_development_not_validation",
+    "findings_are_hypothesis_seeds_only": true,
+    "do_not_retest_or_tune_on": [2023, 2025],
+    "summary": [
+      "Exact parent completion was not a universal positive-payoff state.",
+      "An incompatible first transition was profitable at the frozen close in both periods for both primary candidates, so structural route invalidation was not economic invalidation.",
+      "The expected first leg followed by a diversion was negative at the frozen close in all four opened candidate-period cells, but this was observed after inspection and is not a validated exit rule.",
+      "Next-open exits after completion, invalidation, the first transition, or the first terminal route event failed the frozen paired gates."
+    ]
+  },
+  "observation_unit": {
+    "type": "hypothetical_research_admission_no_order",
+    "primary_candidates": ["cycle_04|state4|anchor_h24", "cycle_07|state5|anchor_h24"],
+    "matched_controls": ["cycle_04|state2|anchor_h24", "cycle_07|state6|anchor_h24"],
+    "baselines": ["fixed_anchor_h24_close", "unfiltered_frozen_signal", "loop_only", "matched_orientation"],
+    "primary_cost_bps_per_side": 5,
+    "market_impact_modelled": false,
+    "short_locate_or_borrow_modelled": false
+  },
+  "activation_requirements": [
+    "Use only sessions whose raw data and outcomes were genuinely unseen when this contract, model, feature schema, route state machine, costs, and evaluation code were hashed.",
+    "Set an activation timestamp before the first observation and forbid backfilling earlier sessions into the prospective evaluation.",
+    "Create an append-only ledger and outcome-opening schedule that prevent row replacement after observation time.",
+    "Freeze model source or binary hashes, the complete feature availability clock, missingness rules, candidate set, and all uncertainty and abstention thresholds.",
+    "Independently audit leakage, provider timestamps, next-open counterfactual clocks, and exact replay before outcomes are opened."
+  ],
+  "immutable_identity_fields": [
+    "contract_id",
+    "model_version",
+    "model_source_sha256",
+    "route_state_machine_version",
+    "feature_schema_version",
+    "observation_id",
+    "symbol",
+    "session_date",
+    "anchor_timestamp",
+    "hypothetical_admission_timestamp",
+    "candidate_or_control_id"
+  ],
+  "admission_snapshot_available_at_or_before_admission": [
+    "all_20_predicted_parent_loop_probabilities",
+    "top predicted parent loop and calibrated probability",
+    "anchor orientation and latest available completed-bar state",
+    "current and previous regime",
+    "causally known route prefix before the entry bar",
+    "regime age and 2024-frozen duration percentile and exit hazard with support",
+    "direction, session phase, opening-range position, and VWAP distance",
+    "prior-bar ATR14, causal range percentile, compression, body/range, and wick ratios",
+    "historical_volume_activity_proxy with source, availability time, and support",
+    "broader-market and sector context only if separately sourced and timestamp-audited",
+    "predicted fixed-horizon net-payoff probability and expected value with interval and support",
+    "predicted route-class probabilities with interval and support",
+    "positive, negative, or unknown/abstain payoff class"
+  ],
+  "causal_route_state_machine_after_each_completed_bar": {
+    "clock": "A new state and transition become observable only after the assigned 5-minute bar closes.",
+    "states": [
+      "orientation_intact",
+      "expected_leg_active",
+      "exact_parent_completion_detected",
+      "incompatible_first_transition_detected",
+      "expected_leg_then_diversion_detected",
+      "route_unknown"
+    ],
+    "fields": [
+      "bar_timestamp and bars_since_admission",
+      "current state, previous state, regime age, and transition event",
+      "route state before and after this completed bar",
+      "first detection timestamp for completion, incompatible transition, and diversion",
+      "updated parent-loop and route-class probabilities generated without future labels",
+      "updated fixed-horizon and event-horizon net-payoff prediction with interval and support",
+      "close return from hypothetical admission",
+      "running favorable and adverse excursion in bps and prior-admission ATR units",
+      "running favorable peak and causal retracement from that peak",
+      "positive, negative, or unknown/abstain path-payoff state"
+    ]
+  },
+  "counterfactuals_logged_without_execution": [
+    "frozen anchor+24 close",
+    "next provider open after exact completion detection",
+    "next provider open after incompatible first-transition detection",
+    "next provider open after expected-leg-then-diversion detection",
+    "next provider open after any first post-admission transition",
+    "next provider open after any pre-frozen payoff-state change"
+  ],
+  "outcome_fields_opened_only_after_window_close": [
+    "gross and 10-bps-cost-adjusted frozen anchor+24 payoff",
+    "gross and cost-adjusted payoff for every predeclared counterfactual",
+    "MFE, MAE, time-to-MFE, time-to-MAE, and causal running path snapshots",
+    "complete 24-bar route topology labelled outcome-only",
+    "eventual parent, child, and morph identities labelled oracle-only",
+    "eventual regime transitions and durations labelled outcome-only"
+  ],
+  "prospective_hypotheses": [
+    {
+      "id": "P1_direct_payoff_state",
+      "claim": "A calibrated positive/negative/unknown payoff-state model can improve paired net payoff or coverage-quality trade-offs conditional on the frozen loop forecast.",
+      "priority": "primary",
+      "tuning_source": "prospective training windows only; never reopened 2023 or 2025 path outcomes"
+    },
+    {
+      "id": "P2_expected_leg_then_diversion",
+      "claim": "A causally detected expected-leg-then-diversion state may identify an unfavorable payoff branch.",
+      "priority": "secondary_opened_data_hypothesis",
+      "warning": "Observed after inspecting all four opened candidate-period cells; must be frozen and evaluated only on new sealed observations."
+    },
+    {
+      "id": "P3_incompatible_is_not_economic_invalidation",
+      "claim": "The payoff model should distinguish structural incompatibility from adverse price-path state instead of automatically exiting on an incompatible transition.",
+      "priority": "mechanism_control"
+    },
+    {
+      "id": "P4_loop_specific_completion_response",
+      "claim": "Completion payoff response differs by parent loop, so any partial pooling must retain a loop-specific completion effect with uncertainty.",
+      "priority": "secondary"
+    },
+    {
+      "id": "P5_price_path_state_after_transition",
+      "claim": "Causal running excursion, retracement, and volatility support after a state event may separate a usable move from a move likely to be surrendered.",
+      "priority": "secondary",
+      "warning": "No retracement, ATR, bar-count, or price threshold may be selected from opened V2/V3 paths."
+    }
+  ],
+  "model_shape": {
+    "primary_target": "cost-adjusted payoff distribution conditional on frozen loop forecast and current causal path information",
+    "secondary_target": "route-topology probabilities used as auxiliary forecasts, never realised labels at admission",
+    "estimation": "hierarchical partial pooling by loop and route state with time-aware fitting and explicit uncertainty",
+    "output_classes": ["positive", "negative", "unknown_abstain"],
+    "forced_ranking_forbidden": true,
+    "child_or_morph_use": "forbidden unless a separately frozen causal forecast with availability timestamps exists"
+  },
+  "predeclared_evaluation": {
+    "primary_target": "net payoff after 5 bps per side",
+    "primary_comparison": "paired against the frozen anchor+24 close on identical hypothetical admissions",
+    "additional_comparators": ["loop-only", "unfiltered", "matched orientation", "generic first-transition counterfactual"],
+    "requirements": [
+      "minimum support and coverage for every reported class",
+      "session-block paired uncertainty",
+      "time and quarter stability",
+      "leave-one-stock-out robustness",
+      "2.5, 5, 7.5, and 10 bps per-side cost sensitivity",
+      "multiplicity control across loop, route-state, and policy endpoints",
+      "calibration and selective-risk evaluation for unknown/abstain",
+      "independent source-hash, leakage, timestamp, and exact-rerun audit"
+    ],
+    "forbidden": [
+      "calling 2023 or 2025 validation",
+      "choosing a route, transition, bar, retracement, ATR, or payoff threshold from opened results",
+      "using realised completion, child, morph, future state, duration, MFE, MAE, or payoff as an admission feature",
+      "interpreting parent identity conditional on completion as 100 percent opportunity-level occurrence",
+      "promoting any finding directly to live, paper, demo, broker, position, order, deployment, or application functionality"
+    ]
+  },
+  "provenance_and_missingness": {
+    "historical_volume": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "quotes_or_ticks": "unavailable unless a separately frozen source exists",
+    "intrabar_ohlc_order": "unknown",
+    "all_features": "store source timestamp, availability timestamp, transform version, missingness reason, and support"
+  },
+  "lifecycle_fields": ["unknown", "emerging", "active", "decaying", "retired"]
+}

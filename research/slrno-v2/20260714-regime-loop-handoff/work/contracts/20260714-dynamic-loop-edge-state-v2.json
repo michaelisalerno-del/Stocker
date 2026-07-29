@@ -1,0 +1,219 @@
+{
+  "contract_id": "20260714-dynamic-loop-edge-state-v2",
+  "model_version": "dynamic_loop_edge_state_v2.1.0",
+  "scientific_status": "causal_retrospective_development_on_already_opened_2023_and_2025_surfaces_not_prospective_validation",
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "strategy_promotion_allowed": false,
+    "application_position_or_exit_logic_changed": false
+  },
+  "registered_target": {
+    "fixed_horizon_bars": 24,
+    "session_bars": 78,
+    "positive_payoff_event": "robust_session_net_payoff_bps_strictly_greater_than_zero_after_10_bps_round_trip_cost",
+    "selection_reason": "24 bars was the clearest confirmatory follow-up in the frozen V1 report; no horizon search is permitted",
+    "horizon_sensitivity_enabled": false
+  },
+  "source": {
+    "v1_contract": "20260713-dynamic-loop-context-edge-v1.json",
+    "v1_runner": "run_dynamic_loop_context_edge_v1.py",
+    "source_strategy": "breakout_loop_scores_range_p75",
+    "loop_identifier": "top causal parent-loop cycle_id",
+    "orientation": "current causal state within the rotation-invariant parent loop",
+    "cost_model_version": "frozen_regime_loop_pnl_sanity_v1_fixed_5bps_per_side",
+    "feature_schema_version": "dynamic_loop_edge_state_features_v2.1.0",
+    "market_or_sector_context": "causal anchor-level market summaries available; sector labels unavailable and not substituted",
+    "quotes_or_ticks_available": false,
+    "input_adapter": "hash_verified_v1_derived_outputs_recovered_after_original_ephemeral_anchor_and_2023_provider_files_expired",
+    "recovered_inputs": {
+      "accepted_signal_ledger": {
+        "path": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/accepted_signal_ledger.parquet",
+        "sha256": "97b846c3efe0c87a4c9daae5294a07410c7b31e1fea188749dec2ffc7e1308b4"
+      },
+      "loop_scoring_2023": {
+        "path": "/private/tmp/stocker_hierarchical_loop_quality_algorithm_v1_20260711/scoring_predictions_2023.parquet",
+        "sha256": "16ea8a4d1611a432b0fa7e6b895c41e0331a57659831f940bb5bcf47d86a35c7"
+      },
+      "loop_scoring_2025": {
+        "path": "/private/tmp/stocker_hierarchical_loop_quality_algorithm_v1_20260711/scoring_predictions_2025.parquet",
+        "sha256": "13d52ca52ffba83145deede48fbe646e69f46b041b8512617f1eff704a31f245"
+      },
+      "v1_scored_signal_ledger": {
+        "path": "/private/tmp/stocker_dynamic_loop_context_edge_v1_20260713_exact_rerun/scored_signal_ledger.parquet",
+        "sha256": "3869bd246192e392c7a51c2a4453e52940a023882edf63bf3a149998cb9ee075"
+      },
+      "v1_primary_cell_states": {
+        "path": "/private/tmp/stocker_dynamic_loop_context_edge_v1_20260713_exact_rerun/primary_cell_states.parquet",
+        "sha256": "8e33354abe7762a6bb805a62f504c5af28f3e540a126b94ef46eb7ea76a6c5b3"
+      },
+      "v1_summary": {
+        "path": "/private/tmp/stocker_dynamic_loop_context_edge_v1_20260713_exact_rerun/summary.json",
+        "sha256": "3d1238a567479b48c87dcf20b76c89b9204c42909b894cc98cfde5e2a38605e1"
+      },
+      "v1_source_hashes": {
+        "path": "/private/tmp/stocker_dynamic_loop_context_edge_v1_20260713_exact_rerun/source_hashes.json",
+        "sha256": "754ae356440a37a8c0fb6430fb247e72b174046131cac6cb18251d1b67eed438"
+      }
+    },
+    "recovery_equivalence_check": "for every V1 scored anchor in both years, reconstructed argmax cycle_id and top probability must equal the sealed V1 output exactly"
+  },
+  "session_aggregation": {
+    "primary_method": "equal_stock_winsorized_mean",
+    "alternative_method": "median",
+    "winsor_fraction_each_tail": 0.1,
+    "stock_contribution_cap_bps": 500.0,
+    "one_contribution_per_stock_session_cell": true,
+    "no_opportunity_is_missing_not_zero": true,
+    "effective_sample_size": "Kish ESS of equal independent-stock weights after one-stock capping",
+    "entry_cost_bps": 5.0,
+    "exit_cost_bps": 5.0,
+    "cost_stress_multiplier": 2.0
+  },
+  "observation_model": {
+    "family": "student_t_normal_inverse_gamma_bocpd",
+    "student_t_degrees_of_freedom_floor": 5.0,
+    "prior_mean_net_bps": 0.0,
+    "prior_mean_variance_bps2": 22500.0,
+    "scale_prior_bps": 120.0,
+    "outlier_clip_predictive_scales": 4.0,
+    "max_run_length_sessions": 120,
+    "minimum_likelihood": 1e-300
+  },
+  "change_point": {
+    "primary_hazard_probability_per_observed_session": 0.05,
+    "implied_expected_duration_sessions": 20.0,
+    "predeclared_hazard_sensitivities": [
+      0.03333333333333333,
+      0.07142857142857142
+    ],
+    "change_reset_probability": 0.45,
+    "selection_basis": "V1 median profitable cell streak was about 20 sessions; geometric hazard remains broad rather than fixing duration"
+  },
+  "hierarchy": {
+    "shared_environment_enabled": true,
+    "pooling_strength_sessions": 12.0,
+    "minimum_shared_cells_per_session": 2,
+    "shared_aggregation": "equal-cell winsorized mean",
+    "sparse_uncertainty_inflation_bps": 80.0,
+    "loading_approximation": "empirical-Bayes evidence weight between shared and cell BOCPD posteriors",
+    "independent_stock_reference": 5.0,
+    "effective_sample_size_per_session_reference": 5.0
+  },
+  "support": {
+    "warmup_completed_sessions": 60,
+    "minimum_independent_sessions": 8,
+    "minimum_independent_stocks": 5,
+    "minimum_effective_sample_size": 12.0,
+    "maximum_posterior_std_net_bps": 80.0
+  },
+  "thresholds": {
+    "active_probability": 0.9,
+    "survival_probability": 0.9,
+    "lower_bound_confidence": 0.9,
+    "decaying_termination_probability": 0.25,
+    "retired_positive_probability": 0.35,
+    "out_of_distribution_score": 4.0,
+    "nearby_active_probability": [
+      0.85,
+      0.95
+    ],
+    "nearby_survival_probability": [
+      0.85,
+      0.95
+    ]
+  },
+  "ewma": {
+    "half_life_observed_sessions": 10.0,
+    "minimum_variance_bps2": 25.0
+  },
+  "features": {
+    "enabled": [
+      "lagged_structural_breadth",
+      "lagged_breadth_change",
+      "lagged_top_loop_score",
+      "lagged_top_second_margin",
+      "lagged_loop_score_entropy",
+      "lagged_transition_surprise",
+      "lagged_positive_stock_fraction",
+      "lagged_payoff_dispersion",
+      "lagged_dispersion_change",
+      "lagged_cost_pressure",
+      "lagged_market_return",
+      "lagged_market_volatility",
+      "lagged_liquidity_pressure",
+      "out_of_distribution_score"
+    ],
+    "representation_rule": "compact loop-score summaries only; raw history token is not also included",
+    "leading_feature_logit_weights": {
+      "structural_breadth": 0.25,
+      "breadth_change": 0.5,
+      "top_loop_score": 0.15,
+      "top_second_margin": 0.25,
+      "loop_score_entropy": -0.2,
+      "transition_surprise": -0.35,
+      "positive_stock_fraction": 0.35,
+      "payoff_dispersion": -0.35,
+      "dispersion_change": -0.4,
+      "cost_pressure": -0.25,
+      "market_return": 0.0,
+      "market_volatility": -0.15,
+      "liquidity_pressure": -0.15,
+      "out_of_distribution_score": -0.5
+    },
+    "fit_or_tune_weights_on_final_pnl": false
+  },
+  "evaluation": {
+    "periods": [
+      2025,
+      2023
+    ],
+    "period_date_ranges": {
+      "2025": [
+        "2025-01-02",
+        "2025-12-31"
+      ],
+      "2023": [
+        "2023-01-03",
+        "2023-12-29"
+      ]
+    },
+    "reset_models_between_periods": true,
+    "score_after_warmup_only": true,
+    "random_shuffle_split_allowed": false,
+    "hindsight_episode_labels_allowed_as_features": false,
+    "fixed_random_seed": 20260714,
+    "calibration_bins": 10,
+    "calibration_probability": "posterior predictive probability that the next settled robust session payoff is positive",
+    "episode_positive_threshold_bps": 0.0,
+    "episode_neutral_band_bps": 5.0,
+    "episode_smoothing_sessions": 5,
+    "representative_episode_plot_count": 3
+  },
+  "stress_tests": {
+    "entry_delay_decision_steps": 1,
+    "leave_one_stock_out": true,
+    "remove_best_month": true,
+    "remove_best_episode": true,
+    "minimum_liquidity_quantile": 0.5,
+    "exclude_least_liquid_quantile": 0.2,
+    "exclude_highest_turnover_quantile": 0.2,
+    "alternative_aggregation": "median",
+    "hazard_sensitivities_enabled": true,
+    "unbounded_parameter_search_allowed": false
+  },
+  "decision_clock": {
+    "forecast_freeze": "regular_session_open_before_any_current_session_anchor_or_payoff",
+    "structural_features": "one-session lagged completed-session summaries",
+    "settlement_inclusion_rule": "settlement_timestamp_strictly_before_score_decision_timestamp",
+    "anchor_timestamp_semantics": "provider five-minute bar start",
+    "anchor_decision_timestamp": "anchor bar close equal to anchor_timestamp plus five minutes",
+    "entry_timestamp": "start of triggering provider bar; intrabar trigger time is unavailable",
+    "exit_and_settlement_timestamp": "anchor-plus-horizon provider bar close",
+    "current_session_updates_gate": false
+  }
+}

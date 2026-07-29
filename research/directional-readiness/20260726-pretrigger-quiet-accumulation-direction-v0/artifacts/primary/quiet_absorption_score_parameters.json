@@ -1,0 +1,106 @@
+{
+  "component_clip": [
+    -3.0,
+    3.0
+  ],
+  "component_parameters": {
+    "accumulation_sign_persistence_25": {
+      "center": 0.0,
+      "imputation": 0.0,
+      "scale": 1.0
+    },
+    "activity_without_displacement_25": {
+      "center": 0.0,
+      "imputation": 0.0,
+      "scale": 1.0
+    },
+    "break_failure_asymmetry_25": {
+      "center": -0.28205384615312373,
+      "imputation": -0.28205384615312373,
+      "scale": 1.0
+    },
+    "mean_clv_25": {
+      "center": 0.15871921910822626,
+      "imputation": 0.15871921910822626,
+      "scale": 0.40520510060676296
+    },
+    "mean_vwap_distance_25": {
+      "center": 0.6161427087216609,
+      "imputation": 0.6161427087216609,
+      "scale": 1.2454690361851004
+    },
+    "mean_wick_asymmetry_25": {
+      "center": 0.0073966814962299066,
+      "imputation": 0.0073966814962299066,
+      "scale": 0.17898044336905672
+    },
+    "pressure_persistence_25": {
+      "center": 0.0,
+      "imputation": 0.0,
+      "scale": 1.0
+    },
+    "pressure_slope_25": {
+      "center": 0.0,
+      "imputation": 0.0,
+      "scale": 1.0
+    },
+    "pressure_sum_25": {
+      "center": 0.0,
+      "imputation": 0.0,
+      "scale": 1.0
+    },
+    "relative_resilience_25": {
+      "center": 0.024809557385507747,
+      "imputation": 0.024809557385507747,
+      "scale": 0.05199826909626339
+    },
+    "signed_absorption_divergence_25": {
+      "center": 0.0,
+      "imputation": 0.0,
+      "scale": 1.0
+    },
+    "vwap_reclaim_balance_25": {
+      "center": 0.0,
+      "imputation": 0.0,
+      "scale": 1.0
+    },
+    "vwap_side_balance_25": {
+      "center": 0.6,
+      "imputation": 0.6,
+      "scale": 1.2
+    }
+  },
+  "component_weights": "equal",
+  "epsilon": 1e-12,
+  "fit_partition": "development",
+  "path_length": {
+    "center": 0.06209732448149735,
+    "imputation": 0.06209732448149735,
+    "scale": 0.059301140232644
+  },
+  "pressure_25": {
+    "center": 0.0,
+    "imputation": 0.0,
+    "scale": 1.0
+  },
+  "pressure_3bar": {
+    "center": 0.0,
+    "imputation": 0.0,
+    "scale": 1.0
+  },
+  "price_25": {
+    "center": 0.025447087595136964,
+    "imputation": 0.025447087595136964,
+    "scale": 0.05205476395820718
+  },
+  "price_3bar": {
+    "center": 0.009075963690371175,
+    "imputation": 0.009075963690371175,
+    "scale": 0.013794058362271173
+  },
+  "range_sum": {
+    "center": 0.0976263879211819,
+    "imputation": 0.0976263879211819,
+    "scale": 0.058405469656295436
+  }
+}

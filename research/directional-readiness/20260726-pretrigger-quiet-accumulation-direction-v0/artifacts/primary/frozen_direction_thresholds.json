@@ -1,0 +1,17 @@
+{
+  "Q1_binding_boundary": 0.13196538342778996,
+  "boundaries": {
+    "Q0": 0.13283823731140654,
+    "Q1": 0.13196538342778996,
+    "QS": 0.08373815667937762
+  },
+  "descriptive_probability_thresholds": [
+    0.55,
+    0.6,
+    0.65
+  ],
+  "minimum_development_actions": 100,
+  "same_boundary_for_call_and_put": true,
+  "source": "2024_complete_session_OOF_only",
+  "target_action_coverage": 0.35
+}

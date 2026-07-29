@@ -1,0 +1,5 @@
+strategy,period,trades,matched_trades,coverage,claim_coverage_passed,matched_control_excess,status,blocker
+S1,assessment,0,0,0,False,,blocked,blocked_chronology_or_leakage_failure
+S2_ALL,assessment,0,0,0,False,,blocked,blocked_chronology_or_leakage_failure
+S2_VETO,assessment,0,0,0,False,,blocked,blocked_chronology_or_leakage_failure
+S3,assessment,0,0,0,False,,blocked,blocked_chronology_or_leakage_failure

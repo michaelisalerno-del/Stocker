@@ -1,0 +1,59 @@
+{
+  "broker_integration_required": false,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "hidden_family_competing_route_test": true,
+  "hypotheses": [
+    {
+      "expected_sign": "positive",
+      "hypothesis_id": "H1",
+      "lookbacks": [
+        12
+      ],
+      "precursor_identity": "unregistered_primitive_like__5-6-5",
+      "precursor_kind": "hidden",
+      "target_identity": "loop_p_2-5-6-2"
+    },
+    {
+      "expected_sign": "positive",
+      "hypothesis_id": "H2",
+      "lookbacks": [
+        12
+      ],
+      "precursor_identity": "unregistered_primitive_like__5-6-5",
+      "precursor_kind": "hidden",
+      "target_identity": "loop_p_2-6-2"
+    },
+    {
+      "expected_sign": "positive",
+      "hypothesis_id": "H3",
+      "lookbacks": [
+        6,
+        12
+      ],
+      "precursor_identity": "loop_p_4-6-4",
+      "precursor_kind": "registered",
+      "target_identity": "loop_p_4-6-4"
+    },
+    {
+      "expected_sign": "negative",
+      "hypothesis_id": "H4",
+      "lookbacks": [
+        6
+      ],
+      "precursor_identity": "unregistered_primitive_like__2-3-2",
+      "precursor_kind": "hidden",
+      "target_identity": "ANY_REGISTERED_COMPLETION"
+    }
+  ],
+  "multiplicity_family_size": 4,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_recurrence_test": true,
+  "research_only": true,
+  "sequential_causal_updates": true,
+  "strategy_promotion": false,
+  "target_specific_registered_routes": true
+}

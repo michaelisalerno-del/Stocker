@@ -1,0 +1,113 @@
+{
+  "blas_metadata": {
+    "Build Dependencies": {
+      "blas": {
+        "detection method": "system",
+        "found": true,
+        "include directory": "unknown",
+        "lib directory": "unknown",
+        "name": "accelerate",
+        "openblas configuration": "unknown",
+        "pc file directory": "unknown",
+        "version": "unknown"
+      },
+      "lapack": {
+        "detection method": "system",
+        "found": true,
+        "include directory": "unknown",
+        "lib directory": "unknown",
+        "name": "accelerate",
+        "openblas configuration": "unknown",
+        "pc file directory": "unknown",
+        "version": "unknown"
+      }
+    },
+    "Compilers": {
+      "c": {
+        "commands": "cc",
+        "linker": "ld64",
+        "name": "clang",
+        "version": "15.0.0"
+      },
+      "c++": {
+        "commands": "c++",
+        "linker": "ld64",
+        "name": "clang",
+        "version": "15.0.0"
+      },
+      "cython": {
+        "commands": "cython",
+        "linker": "cython",
+        "name": "cython",
+        "version": "3.2.4"
+      }
+    },
+    "Machine Information": {
+      "build": {
+        "cpu": "aarch64",
+        "endian": "little",
+        "family": "aarch64",
+        "system": "darwin"
+      },
+      "host": {
+        "cpu": "aarch64",
+        "endian": "little",
+        "family": "aarch64",
+        "system": "darwin"
+      }
+    },
+    "Python Information": {
+      "path": "/private/var/folders/k4/_09nqs851t35bpkk8lr_p43c0000gn/T/build-env-06m09v1u/bin/python",
+      "version": "3.12"
+    },
+    "SIMD Extensions": {
+      "baseline": [
+        "NEON",
+        "NEON_FP16",
+        "NEON_VFPV4",
+        "ASIMD"
+      ],
+      "found": [
+        "ASIMDHP",
+        "ASIMDDP"
+      ],
+      "not found": [
+        "ASIMDFHM"
+      ]
+    }
+  },
+  "broker_connected": false,
+  "contract_hash": "7c23ba6c613d79731d3e3f1f37122ff5f97e6e6845274121313ccb1ba1459e88",
+  "data_snapshot_hash": "67417cf1fd1267cb4a945de8dff854916bd4d5bbde0c55f5d6545b1c4b6881e3",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "177788fe59872f782f56492a52f86c3b5177023ac875c509339d328f5ce5306f",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "numpy": "2.4.6",
+  "order_placement": "disabled",
+  "pandas": "2.3.3",
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "production_runtime_modified": false,
+  "pyarrow": "24.0.0",
+  "python": "3.12.13",
+  "research_only": true,
+  "run_id": "143cc35bbab621d585cb9bf2",
+  "scikit_learn": "1.9.0",
+  "scipy": "1.18.0",
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "regime_model_v2_full_right_censored_refit",
+  "strategy_promotion": false,
+  "thread_environment": {
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "tzdata": "2026.2"
+}

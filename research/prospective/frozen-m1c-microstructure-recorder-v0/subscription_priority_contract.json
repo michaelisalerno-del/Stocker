@@ -1,0 +1,46 @@
+{
+  "claims_contract": "contract.json",
+  "bounded": true,
+  "capacity_discovery_or_configuration_required": true,
+  "central_budget_manager": true,
+  "contract_version": "frozen-m1c-microstructure-recorder-v0",
+  "deterministic_tie_break": "descending M1C probability, then symbol",
+  "priority_high_to_low": [
+    "active M1C episode underlying high-resolution recording",
+    "active M1C episode option contracts",
+    "previously armed high-probability underlyings",
+    "market proxies",
+    "universe-wide underlying Level I"
+  ],
+  "protected": [
+    "universe-wide underlying Level I",
+    "active episode high-resolution streams through T+30 minutes"
+  ],
+  "tick_by_tick_streams_per_promoted_underlying": [
+    "BidAsk",
+    "Last"
+  ],
+  "universe_level1_cancelled_for_option_chain": false,
+  "claims_boundary": {
+    "a1_frozen_prospective_hypothesis": true,
+    "account_balance_access_required": false,
+    "broker_account_mutation_allowed": false,
+    "c1_frozen_comparison": true,
+    "execution_enabled": false,
+    "live_orders_allowed": false,
+    "m1c_frozen": true,
+    "m1c_threshold": 0.488333710794033,
+    "microstructure_direction_model_fitted": false,
+    "microstructure_features_descriptive_only": true,
+    "option_pnl_is_shadow_quote_pnl": true,
+    "option_quotes_recorded": true,
+    "paper_orders_allowed": false,
+    "place_order_method_available": false,
+    "position_access_required": false,
+    "prospective_collection": true,
+    "r1_frozen_comparison": true,
+    "record_only": true,
+    "research_only": true,
+    "strategy_promotion": false
+  }
+}

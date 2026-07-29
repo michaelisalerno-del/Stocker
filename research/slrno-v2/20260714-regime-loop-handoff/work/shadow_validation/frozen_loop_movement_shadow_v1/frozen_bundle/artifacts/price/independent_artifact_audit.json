@@ -1,0 +1,357 @@
+{
+  "all_passed": true,
+  "check_count": 33,
+  "checks": [
+    {
+      "details": null,
+      "name": "source_manifest_hash_frozen",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "all_source_hashes_current",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "path_predecessor_retained",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "twenty_fixed_cycles",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 70374
+      },
+      "name": "train_2024_price_controls_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 70374
+      },
+      "name": "train_2024_outcomes_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 70374
+      },
+      "name": "train_2024_loop_scores_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 70883
+      },
+      "name": "2025_price_controls_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 70883
+      },
+      "name": "2025_outcomes_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 70883
+      },
+      "name": "2025_loop_scores_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 66563
+      },
+      "name": "2023_price_controls_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 66563
+      },
+      "name": "2023_outcomes_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "maximum_loop_score_error": 0.0,
+        "maximum_outcome_error": 0.0,
+        "maximum_price_control_error": 0.0,
+        "rows": 66563
+      },
+      "name": "2023_loop_scores_exact",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "volume_not_used",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "frozen_feature_widths",
+      "pass": true
+    },
+    {
+      "details": {
+        "model_parameter": 0.0,
+        "prediction": 0.0,
+        "scaler": 0.0
+      },
+      "name": "scalers_refit_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "model_parameter": 0.0,
+        "prediction": 0.0,
+        "scaler": 0.0
+      },
+      "name": "outcome_models_refit_exact",
+      "pass": true
+    },
+    {
+      "details": {
+        "model_parameter": 0.0,
+        "prediction": 0.0,
+        "scaler": 0.0
+      },
+      "name": "predictions_reproduce",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0008702282054461,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 212649,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0009164066293549
+      },
+      "name": "2025_direction_reproduces_as_fail",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0008702282054461,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 212649,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0009164066293549
+      },
+      "name": "2025_signed_return_reproduces_as_fail",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0008702282054461,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 212649,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0009164066293549
+      },
+      "name": "2025_absolute_movement_reproduces",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0008702282054461,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 212649,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0009164066293549
+      },
+      "name": "2025_range_movement_reproduces",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0003959786094963,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 199689,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0004285464181379
+      },
+      "name": "2023_direction_reproduces_as_fail",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0003959786094963,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 199689,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0004285464181379
+      },
+      "name": "2023_signed_return_reproduces_as_fail",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0003959786094963,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 199689,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0004285464181379
+      },
+      "name": "2023_absolute_movement_reproduces",
+      "pass": true
+    },
+    {
+      "details": {
+        "direction_gate_stored": false,
+        "direction_primary_relative": -0.0003959786094963,
+        "movement_gate_reconstructed": {
+          "absolute_return_bps": true,
+          "future_range_bps": true
+        },
+        "rows": 199689,
+        "signed_gate_stored": false,
+        "signed_primary_relative": -0.0004285464181379
+      },
+      "name": "2023_range_movement_reproduces",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "directional_consequence_rejected",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "movement_consequence_retained",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "economic_edge_not_claimed",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "research_only",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "live_ordering_disabled",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "order_placement_disabled",
+      "pass": true
+    },
+    {
+      "details": null,
+      "name": "no_strategy_or_cost_columns",
+      "pass": true
+    }
+  ],
+  "metric_results": {
+    "2023": {
+      "direction_gate_stored": false,
+      "direction_primary_relative": -0.0003959786094963,
+      "movement_gate_reconstructed": {
+        "absolute_return_bps": true,
+        "future_range_bps": true
+      },
+      "rows": 199689,
+      "signed_gate_stored": false,
+      "signed_primary_relative": -0.0004285464181379
+    },
+    "2025": {
+      "direction_gate_stored": false,
+      "direction_primary_relative": -0.0008702282054461,
+      "movement_gate_reconstructed": {
+        "absolute_return_bps": true,
+        "future_range_bps": true
+      },
+      "rows": 212649,
+      "signed_gate_stored": false,
+      "signed_primary_relative": -0.0009164066293549
+    }
+  },
+  "model_errors": {
+    "model_parameter": 0.0,
+    "prediction": 0.0,
+    "scaler": 0.0
+  },
+  "panel_results": {
+    "2023": {
+      "maximum_loop_score_error": 0.0,
+      "maximum_outcome_error": 0.0,
+      "maximum_price_control_error": 0.0,
+      "rows": 66563
+    },
+    "2025": {
+      "maximum_loop_score_error": 0.0,
+      "maximum_outcome_error": 0.0,
+      "maximum_price_control_error": 0.0,
+      "rows": 70883
+    },
+    "train_2024": {
+      "maximum_loop_score_error": 0.0,
+      "maximum_outcome_error": 0.0,
+      "maximum_price_control_error": 0.0,
+      "rows": 70374
+    }
+  }
+}

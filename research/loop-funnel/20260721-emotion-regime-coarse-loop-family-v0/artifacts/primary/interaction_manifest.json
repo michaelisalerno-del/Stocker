@@ -1,0 +1,127 @@
+{
+  "broker_integration_required": false,
+  "clip_bounds": {
+    "posterior_entropy_x_frustration": {
+      "q01": -0.850911377525977,
+      "q99": 0.6884579219499029
+    },
+    "posterior_entropy_x_tension": {
+      "q01": -1.1114805830560106,
+      "q99": 0.8610480378468947
+    },
+    "state_p_0_x_signed_exhaustion": {
+      "q01": -0.23303933440126928,
+      "q99": 0.5071442761694537
+    },
+    "state_p_0_x_signed_pressure": {
+      "q01": -0.1504926330662561,
+      "q99": 0.09309635324424859
+    },
+    "state_p_1_x_signed_exhaustion": {
+      "q01": -0.27598080108323847,
+      "q99": 1.105979856661513
+    },
+    "state_p_1_x_signed_pressure": {
+      "q01": -0.016162563461412545,
+      "q99": 0.5429758051158426
+    },
+    "state_p_2_x_signed_exhaustion": {
+      "q01": -1.1740785796338085,
+      "q99": 1.0261614033468247
+    },
+    "state_p_2_x_signed_pressure": {
+      "q01": -0.47444540802357754,
+      "q99": 0.19487204405289946
+    },
+    "state_p_3_x_signed_exhaustion": {
+      "q01": -1.0852917634629697,
+      "q99": 0.6815245947855315
+    },
+    "state_p_3_x_signed_pressure": {
+      "q01": -0.62682793451062,
+      "q99": 0.03443458059725456
+    },
+    "state_p_4_x_signed_exhaustion": {
+      "q01": -0.7488267402262635,
+      "q99": 0.7451430291406959
+    },
+    "state_p_4_x_signed_pressure": {
+      "q01": -0.09965113262957011,
+      "q99": 0.48879101221917337
+    },
+    "state_p_5_x_signed_exhaustion": {
+      "q01": -2.6610408265952237,
+      "q99": 2.4863392065895837
+    },
+    "state_p_5_x_signed_pressure": {
+      "q01": -0.42538042636195084,
+      "q99": 1.3670804156714655
+    },
+    "state_p_6_x_signed_exhaustion": {
+      "q01": -2.0210846570371284,
+      "q99": 2.5837820878675233
+    },
+    "state_p_6_x_signed_pressure": {
+      "q01": -1.291972368811157,
+      "q99": 0.1577180513429644
+    },
+    "state_p_7_x_signed_exhaustion": {
+      "q01": -2.659909359866476,
+      "q99": 2.727099708647534
+    },
+    "state_p_7_x_signed_pressure": {
+      "q01": -0.8882191357462088,
+      "q99": 1.3762590469985194
+    },
+    "top_second_margin_x_conviction": {
+      "q01": -1.0800754690669139,
+      "q99": 1.6550860004617318
+    },
+    "transition_probability_x_arousal": {
+      "q01": -0.38437625408215687,
+      "q99": 0.2521138839525848
+    }
+  },
+  "coarse_loop_family_target": true,
+  "development_only_clip_quantiles": [
+    0.01,
+    0.99
+  ],
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "exhaustion_gating": [
+    "state_p_0_x_signed_exhaustion",
+    "state_p_1_x_signed_exhaustion",
+    "state_p_2_x_signed_exhaustion",
+    "state_p_3_x_signed_exhaustion",
+    "state_p_4_x_signed_exhaustion",
+    "state_p_5_x_signed_exhaustion",
+    "state_p_6_x_signed_exhaustion",
+    "state_p_7_x_signed_exhaustion"
+  ],
+  "interaction_count": 20,
+  "order_placement": "disabled",
+  "pre_loop_prediction": true,
+  "pressure_gating": [
+    "state_p_0_x_signed_pressure",
+    "state_p_1_x_signed_pressure",
+    "state_p_2_x_signed_pressure",
+    "state_p_3_x_signed_pressure",
+    "state_p_4_x_signed_pressure",
+    "state_p_5_x_signed_pressure",
+    "state_p_6_x_signed_pressure",
+    "state_p_7_x_signed_pressure"
+  ],
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "structural_uncertainty": [
+    "posterior_entropy_x_frustration",
+    "posterior_entropy_x_tension",
+    "transition_probability_x_arousal",
+    "top_second_margin_x_conviction"
+  ]
+}

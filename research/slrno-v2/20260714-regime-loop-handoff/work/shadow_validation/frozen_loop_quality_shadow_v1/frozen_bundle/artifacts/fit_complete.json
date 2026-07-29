@@ -1,0 +1,32 @@
+{
+  "artifact_hashes": {
+    "feature_manifest.json": "b3db72b43ad15f89ac8fedd182d2c5eee3931786dc600a339dc8714dad89ddd6",
+    "fit_manifest.json": "0a911d631fcc98445d60fa098a219313fabf3d88e78aa1137ab8b684c0e9ee58",
+    "fit_source_hashes.json": "b4c6fee5a1dc1b919cb8ca41c291ba9caa0737fa71dc16f6bb3b528c1b6f6fca",
+    "fixed_cycles.csv": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253",
+    "oof_fold_audit_2024.csv": "8c209de9b31c9c49d02bd5114fff631fee5add8c4d63e46e2a257431b02f85d1",
+    "oof_predictions_2024.parquet": "689b8853ec482c07a46faea48f49665df8c92612ef28bc9934fe2df2e97e7d30",
+    "prospective_shadow_pre_content_snapshot.json": "3f7dd2899b1005d5852924ae8f4318f974a2a3d786fa09845aa9d06ef4455b21",
+    "provisional_gates_2024.json": "61fb4241e566e494e156a332ef1bd71fe86576c2f542d4b8ba6943ffe6e99548",
+    "provisional_horizon_grades_2024.csv": "390a65ee42ceeba68ce8f8a17959fc6ffce5ba046e5914b22e6e3bbb4bca56ff",
+    "provisional_quality_cells_2024.csv": "891f5743e9096c138e388dcbc9888c6006e8e8811d311e10a25da788fab6937a",
+    "provisional_structural_2024.csv": "49e469cf22620a339964c8ad1d145b14833191016e6046f38c8e1d7d9fb17ece",
+    "provisional_support_2024.csv": "5974edec6960c961182628ca3c854d55c9c6ed7aab402e0dfbb6bcfdea4bddd1",
+    "provisional_tiers_2024.csv": "2a46df0499d9abd2bdf8b144d8b4353c6e90560b5b4f1c64971238630d6bf973",
+    "quality_model_parameters.npz": "f066ae0ac8c7a76b36d10df7a08b48cedce89dbe52918904333790df7f1f4c9b",
+    "quality_thresholds_2024.csv": "0c209957ccd6823e3fc21fa34d67cc1d9a3337dce2bbdf032c11f101e568f21a",
+    "quality_thresholds_2024.json": "f9e2355e36dae28e4279dfabe74645cb3a363b706d95d4179955093b80015b72",
+    "self_tests.json": "829bdbdec478280831b019ae6cf30959d430fe6e73a24fc5b6e3b636af1aa89b",
+    "temperature_selection_2024.csv": "c5f1b55045f6a9103ac43ed18d5cf3d4e59f1c4f38a5e4cb1be357d30674a78e",
+    "training_long_2024.parquet": "a901d868f65af5ddcaf296221606d2afe5dae1a8a16f3a59ae8990801acec256",
+    "training_support_2024.csv": "78891506264e3bd0813994ff32c1eb0a3ad2266e50c9ff386b92e9ea4114a8cf"
+  },
+  "contract_sha256": "67d64c463df52f01f360561ef0a69d5772b7eec0409468c93d6eb5a630dee02e",
+  "fit_source_hashes_sha256": "b4c6fee5a1dc1b919cb8ca41c291ba9caa0737fa71dc16f6bb3b528c1b6f6fca",
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true,
+  "runner_sha256": "7da5e88e603583d3dba7422569bc8e27837171c7165e69bcaafade472738e2ea",
+  "scoring_authorized": false,
+  "scoring_outcomes_opened": false
+}

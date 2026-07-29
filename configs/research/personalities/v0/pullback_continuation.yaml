@@ -1,0 +1,38 @@
+personality: pullback_continuation
+version: v0
+role: long_continuation
+default_expected_direction: 1
+base_event_states:
+  - controlled_pullback_after_bullish_impulse
+preferred_horizons: [6, 9, 12, 24]
+regime_families:
+  - vwap_side
+  - opening_mid_side
+  - range
+  - vwap_x_efficiency
+  - opening_mid_x_range
+  - relative_volume
+  - time_of_day
+filter_families:
+  - vwap_distance
+  - opening_range
+  - session_location
+  - recent_structure
+  - wick_quality
+  - prior_return
+  - efficiency
+  - volume
+caveat_families:
+  - auction_location
+  - event_quality
+  - time_of_day
+  - cross_stock_alignment
+  - freshness
+minimums:
+  train_count: 30
+  test_count: 12
+  retained_count: 8
+  symbol_count: 3
+max_single_symbol_share: 0.50
+max_single_session_share: 0.20
+max_single_month_share: 0.50

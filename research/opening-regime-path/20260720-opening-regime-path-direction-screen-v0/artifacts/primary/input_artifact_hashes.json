@@ -1,0 +1,75 @@
+{
+  "artifacts": [
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260717-directional-signature-atlas-v1.json",
+      "sha256": "be550e809344b0c2177c2a885b2d7802bf4680d282fd8322e35448d18a0a5741",
+      "size_bytes": 15662
+    },
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260719-right-censored-regime-refit-v2.json",
+      "sha256": "7c23ba6c613d79731d3e3f1f37122ff5f97e6e6845274121313ccb1ba1459e88",
+      "size_bytes": 11863
+    },
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_parameters.npz",
+      "sha256": "e267edc80298ff4d2915aa57b00f915cf34659b978ccdbc796d8103c8be4b9d2",
+      "size_bytes": 13489
+    },
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_preprocessing.csv",
+      "sha256": "b03681a1ef94e2118d0ff873334c7bb489730f784557bc7d742921feafb2b0db",
+      "size_bytes": 9934
+    },
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/posterior_audit_input.parquet",
+      "sha256": "3b623829e83d0a68b5b8a9018c4ce207d40f3e1e327e6f9d90768a951835534b",
+      "size_bytes": 178126
+    },
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_effective_configuration.json",
+      "sha256": "f05c4427de62cd686c022a073be79e46916fc77ad940b8fa31a93e0d6199a276",
+      "size_bytes": 3203
+    },
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/panel_hashes.json",
+      "sha256": "b188bc987294f7f85a8f726ba3ce6da561756981e336dbeb0c0472545fe53084",
+      "size_bytes": 1806
+    },
+    {
+      "repository_relative_path": "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/pre_repair_source_identity.json",
+      "sha256": "f979cecb37d94008ba3d9af563849daf2eb656c72e5c7997355d92505bdb3e5f",
+      "size_bytes": 4931
+    },
+    {
+      "repository_relative_path": "packages/stocker_research/src/stocker_research/regime_panel_v2.py",
+      "sha256": "48d42b59ac51efd9e942c8d3921743e79db85fe37af331366d2293cf56f26466",
+      "size_bytes": 34268
+    },
+    {
+      "repository_relative_path": "packages/stocker_research/src/stocker_research/regime_validity_v2.py",
+      "sha256": "9a3747361299b748a0170c49f513ab0fd461582ce29a856a43a9a348be96e218",
+      "size_bytes": 44986
+    },
+    {
+      "repository_relative_path": "packages/stocker_research/src/stocker_research/opening_regime_path_screen_v0.py",
+      "sha256": "7eaa1fc2efedbd89edb1d8726e52780eb9a5f9fb6b92d09037ce0b57b685ee1f",
+      "size_bytes": 25124
+    }
+  ],
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "frozen_state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "order_placement": "disabled",
+  "posterior_reproduction": {
+    "hard_state_agreement": 1.0,
+    "maximum_entropy_absolute_error": 1.1016594303470129e-09,
+    "maximum_expected_age_absolute_error": 5.360666577303164e-09,
+    "maximum_probability_absolute_error": 8.208774771034655e-10,
+    "rows": 624
+  },
+  "production_runtime_modified": false,
+  "representation_specific": true,
+  "research_only": true,
+  "strategy_promotion": false
+}

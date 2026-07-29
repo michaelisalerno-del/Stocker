@@ -1,0 +1,11 @@
+{
+  "activation_timestamp_utc": "2026-07-29T07:53:23.253773+00:00",
+  "experiment_id": "m1c-prospective-opening-reversal-v1",
+  "experiment_version": "1.1",
+  "protected_outcomes_opened": false,
+  "reason": "awaiting_20_post_v1_1_engineering_transfer_sessions",
+  "receipt_hash_v1_1": "688d7d2967ed69fc1e39bca3e7312bd45a4c2374c58845e56393cec5bf6bc22a",
+  "receipt_type": "confirmation_start",
+  "scientific_result_issued": false,
+  "status": "pending"
+}

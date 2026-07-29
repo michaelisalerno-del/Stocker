@@ -1,0 +1,62 @@
+{
+  "G0": {
+    "maximum_metric_difference": 9.020562075079397e-17,
+    "maximum_probability_difference": 0.0,
+    "metric_differences": {
+      "auc": 0.0,
+      "average_precision": 0.0,
+      "base_rate": 0.0,
+      "brier_score": 8.326672684688674e-17,
+      "calibration_intercept": 9.020562075079397e-17,
+      "calibration_slope": 0.0,
+      "expected_calibration_error": 5.551115123125783e-17,
+      "log_loss": 0.0,
+      "mean_probability_realised_class": 0.0,
+      "top_decile_lift": 0.0,
+      "top_decile_precision": 5.551115123125783e-17,
+      "top_quintile_lift": 0.0,
+      "top_quintile_precision": 0.0
+    },
+    "predecessor_model": "C0"
+  },
+  "G4": {
+    "maximum_metric_difference": 6.245004513516506e-17,
+    "maximum_probability_difference": 0.0,
+    "metric_differences": {
+      "auc": 0.0,
+      "average_precision": 0.0,
+      "base_rate": 0.0,
+      "brier_score": 0.0,
+      "calibration_intercept": 5.551115123125783e-17,
+      "calibration_slope": 0.0,
+      "expected_calibration_error": 6.245004513516506e-17,
+      "log_loss": 0.0,
+      "mean_probability_realised_class": 0.0,
+      "top_decile_lift": 0.0,
+      "top_decile_precision": 5.551115123125783e-17,
+      "top_quintile_lift": 0.0,
+      "top_quintile_precision": 0.0
+    },
+    "predecessor_model": "C1"
+  },
+  "broker_integration_required": false,
+  "cross_market_mismatch_group_test": true,
+  "daily_stock_group_test": true,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "frozen_joined_panel": true,
+  "intraday_compressed_transition_group_test": true,
+  "intraday_option_quotes_used": false,
+  "iv_excess_tail_test": true,
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "passed": true,
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_grouped_ablation_screen": true,
+  "research_only": true,
+  "route_competition_group_test": true,
+  "row_identity_mismatches": 0,
+  "strategy_promotion": false
+}

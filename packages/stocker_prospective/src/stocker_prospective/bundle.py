@@ -1,0 +1,994 @@
+"""Immutable deployment-bundle contract for the prospective server."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import re
+import shutil
+import stat
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Final, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from stocker_prospective.frozen_artifacts import (
+    APPROVED_FEATURE_RUNTIME_REGISTRY_SHA256,
+)
+
+BUNDLE_MANIFEST_VERSION: Final = "2"
+SCIENTIFIC_CLASSIFICATION: Final = (
+    "Previous-close front-options context + current intraday H0 stock condition -> "
+    "improved prediction that near-term underlying movement exceeds previous-close "
+    "option-implied movement."
+)
+ANCHOR_COHORT: Final = "anchor_frozen_20"
+PROTECTED_START: Final = "2026-01-01"
+DISALLOWED_BUNDLE_SUFFIXES = {
+    ".csv",
+    ".db",
+    ".duckdb",
+    ".parquet",
+    ".sqlite",
+    ".sqlite3",
+}
+SAFE_BUNDLE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{2,}$"
+SAFE_BUNDLE_ID = re.compile(SAFE_BUNDLE_ID_PATTERN)
+
+
+class BundleError(RuntimeError):
+    """A fail-closed bundle contract violation."""
+
+
+class FeatureRuntimeBuildSpec(BaseModel):
+    """Exact frozen feature-runtime inputs copied from registered research artifacts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    registry: Path
+    h0_parameters: Path
+    h0_preprocessing: Path
+    loop_dictionary: Path
+    front_options_feature_manifest: Path
+    front_options_regime_mapping: Path
+
+
+class BundleBuildSpec(BaseModel):
+    """Research-machine inputs used to construct a self-contained bundle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bundle_id: str = Field(pattern=SAFE_BUNDLE_ID_PATTERN)
+    created_at_utc: datetime
+    m0_artifact: Path
+    m1_artifact: Path
+    preprocessor: Path
+    feature_schema: Path
+    universe: Path
+    threshold: float = Field(ge=0.0, le=1.0)
+    threshold_provenance: Path
+    training_start: str
+    training_end: str
+    historical_reference_start: str
+    historical_reference_end: str
+    holdout_start: str
+    holdout_end: str
+    protected_start: str = PROTECTED_START
+    code_feature_contract_version: str = Field(min_length=1)
+    previous_session_context_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    previous_session_context_feature_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    audit_references: list[Path] = Field(default_factory=list)
+    determinism_references: list[Path] = Field(default_factory=list)
+    feature_runtime: FeatureRuntimeBuildSpec | None = None
+
+
+class FileIdentity(BaseModel):
+    """Identity for one file copied into a deployment bundle."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    size_bytes: int = Field(ge=0)
+    format: str
+
+
+class FeatureRuntimeIdentity(BaseModel):
+    """Verified assets required to reproduce the frozen feature transforms."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    contract_version: Literal["frozen-m1-feature-runtime-v1"]
+    registry: FileIdentity
+    h0_parameters: FileIdentity
+    h0_preprocessing: FileIdentity
+    loop_dictionary: FileIdentity
+    front_options_feature_manifest: FileIdentity
+    front_options_regime_mapping: FileIdentity
+    h0_model_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    h0_development_emission_panel_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    h0_emission_features: tuple[str, ...]
+    loop_dictionary_version: str
+    loop_dictionary_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    loop_definition_count: int = Field(gt=0)
+    front_options_raw_features: tuple[str, ...]
+    front_options_dimensions: tuple[str, ...]
+    front_options_missing_indicators: tuple[str, ...]
+    scoring_authorized_by_registry: Literal[False]
+    scoring_blocker: Literal["blocked_feature_source_semantics_mismatch"]
+
+
+class FeatureDefinition(BaseModel):
+    """One ordered feature contract entry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    dtype: Literal["float64", "int64", "bool", "string"]
+    missing: Literal["reject", "allow"]
+
+
+class FeatureSchemaIdentity(FileIdentity):
+    """Hashed ordered feature schema."""
+
+    schema_version: str
+    features: list[FeatureDefinition]
+
+
+class UniverseIdentity(FileIdentity):
+    """Hashed frozen universe identity."""
+
+    universe_id: str
+    cohort: Literal["anchor_frozen_20"]
+    symbol_count: int
+    symbols: list[str]
+    universe_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_artifact: str
+    source_artifact_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class FrozenThreshold(BaseModel):
+    """Frozen M1 selection threshold and provenance."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: Literal["M1"] = "M1"
+    value: float = Field(ge=0.0, le=1.0)
+    source: Literal["weighted_2024_development_predictions"]
+    frozen_before_holdout_outcomes: Literal[True]
+    provenance: FileIdentity
+
+
+class DateInterval(BaseModel):
+    """Inclusive date interval recorded in the frozen handoff."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    start: str
+    end: str
+
+
+class BundleManifest(BaseModel):
+    """Strict server-readable frozen deployment manifest."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    manifest_version: Literal["1", "2"]
+    bundle_id: str = Field(pattern=SAFE_BUNDLE_ID_PATTERN)
+    bundle_kind: Literal["frozen_m1"] = "frozen_m1"
+    created_at_utc: datetime
+    scientific_classification: Literal[
+        "Previous-close front-options context + current intraday H0 stock condition -> "
+        "improved prediction that near-term underlying movement exceeds previous-close "
+        "option-implied movement."
+    ]
+    claim_limit: Literal["underlying_movement_selection_not_option_profitability"] = (
+        "underlying_movement_selection_not_option_profitability"
+    )
+    code_feature_contract_version: str
+    previous_session_context_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    previous_session_context_feature_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    m0_artifact: FileIdentity
+    m1_artifact: FileIdentity
+    preprocessor: FileIdentity
+    feature_schema: FeatureSchemaIdentity
+    universe: UniverseIdentity
+    threshold: FrozenThreshold
+    training_interval: DateInterval
+    historical_reference_interval: DateInterval
+    holdout_interval: DateInterval
+    protected_start: Literal["2026-01-01"]
+    audit_references: list[FileIdentity]
+    determinism_references: list[FileIdentity]
+    feature_runtime: FeatureRuntimeIdentity | None = None
+    files: dict[str, str]
+
+
+class BundleVerification(BaseModel):
+    """Result returned by every bundle verification."""
+
+    manifest: BundleManifest
+    verified: bool
+    blockers: list[str]
+    manifest_sha256: str
+
+
+class ActiveBundle(BaseModel):
+    """Atomic active-bundle pointer."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    bundle_id: str = Field(pattern=SAFE_BUNDLE_ID_PATTERN)
+    manifest_sha256: str
+    activated_at_utc: datetime
+    operator: str
+
+
+def _canonical_json(payload: Any) -> bytes:
+    return (
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
+    ).encode("utf-8")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _identity(path: Path, relative_path: str) -> FileIdentity:
+    return FileIdentity(
+        path=relative_path,
+        sha256=_sha256(path),
+        size_bytes=path.stat().st_size,
+        format=path.suffix.lstrip(".") or "binary",
+    )
+
+
+def _require_safe_source(path: Path, role: str) -> None:
+    if not path.is_file():
+        raise BundleError(
+            f"blocked_missing_verified_frozen_bundle: missing {role} artifact at {path}"
+        )
+    if path.suffix.lower() in DISALLOWED_BUNDLE_SUFFIXES:
+        raise BundleError(
+            f"blocked_unsafe_bundle_content: {role} may not contain datasets or databases"
+        )
+
+
+def _copy_identity(source: Path, root: Path, relative_path: str) -> FileIdentity:
+    destination = root / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    return _identity(destination, relative_path)
+
+
+def _load_json(path: Path, role: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BundleError(f"blocked_feature_schema_mismatch: invalid {role} JSON") from exc
+    if not isinstance(payload, dict):
+        raise BundleError(f"blocked_feature_schema_mismatch: {role} must be an object")
+    return payload
+
+
+_FEATURE_RUNTIME_ROLES: Final[tuple[str, ...]] = (
+    "h0_parameters",
+    "h0_preprocessing",
+    "loop_dictionary",
+    "front_options_feature_manifest",
+    "front_options_regime_mapping",
+)
+_FEATURE_RUNTIME_SUFFIXES: Final[dict[str, str]] = {
+    "h0_parameters": ".npz",
+    "h0_preprocessing": ".csv",
+    "loop_dictionary": ".csv",
+    "front_options_feature_manifest": ".json",
+    "front_options_regime_mapping": ".json",
+}
+
+
+def _require_string_tuple(value: object, *, role: str) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item for item in value)
+        or len(value) != len(set(value))
+    ):
+        raise BundleError(f"blocked_feature_schema_mismatch: invalid {role}")
+    return tuple(value)
+
+
+def _runtime_file_identities(runtime: FeatureRuntimeIdentity) -> tuple[FileIdentity, ...]:
+    return (
+        runtime.registry,
+        runtime.h0_parameters,
+        runtime.h0_preprocessing,
+        runtime.loop_dictionary,
+        runtime.front_options_feature_manifest,
+        runtime.front_options_regime_mapping,
+    )
+
+
+def _build_feature_runtime(
+    spec: FeatureRuntimeBuildSpec,
+    root: Path,
+) -> FeatureRuntimeIdentity:
+    if spec.registry.suffix.lower() != ".json" or not spec.registry.is_file():
+        raise BundleError(
+            "blocked_missing_verified_frozen_bundle: feature-runtime registry is absent"
+        )
+    if _sha256(spec.registry) != APPROVED_FEATURE_RUNTIME_REGISTRY_SHA256:
+        raise BundleError(
+            "blocked_frozen_artifact_hash_mismatch: feature-runtime registry differs"
+        )
+    registry_payload = _load_json(spec.registry, "feature-runtime registry")
+    artifacts = registry_payload.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise BundleError("blocked_feature_schema_mismatch: feature-runtime artifacts are absent")
+    sources = {
+        role: Path(getattr(spec, role))
+        for role in _FEATURE_RUNTIME_ROLES
+    }
+    for role, source in sources.items():
+        registration = artifacts.get(role)
+        if (
+            not source.is_file()
+            or source.suffix.lower() != _FEATURE_RUNTIME_SUFFIXES[role]
+            or not isinstance(registration, dict)
+            or registration.get("sha256") != _sha256(source)
+        ):
+            raise BundleError(
+                f"blocked_frozen_artifact_hash_mismatch: feature-runtime {role} differs"
+            )
+        if source.stat().st_size > 10 * 1024 * 1024:
+            raise BundleError(
+                f"blocked_unsafe_bundle_content: feature-runtime {role} exceeds 10 MiB"
+            )
+    h0 = registry_payload.get("h0")
+    loop = registry_payload.get("loop_dictionary")
+    front = registry_payload.get("front_options")
+    if (
+        registry_payload.get("schema_version") != "1"
+        or registry_payload.get("feature_contract_version")
+        != "frozen-m1-feature-runtime-v1"
+        or registry_payload.get("fit_invocations") != 0
+        or registry_payload.get("protected_observations_read") != 0
+        or registry_payload.get("scoring_authorized_by_registry") is not False
+        or registry_payload.get("scoring_blocker")
+        != "blocked_feature_source_semantics_mismatch"
+        or not isinstance(h0, dict)
+        or not isinstance(loop, dict)
+        or not isinstance(front, dict)
+        or front.get("fitted_period") != "development_2024_only"
+        or front.get("previous_close_options_only") is not True
+    ):
+        raise BundleError(
+            "blocked_feature_schema_mismatch: feature-runtime registry safety contract differs"
+        )
+    registry = _copy_identity(
+        spec.registry,
+        root,
+        "contracts/frozen-feature-runtime.json",
+    )
+    copied: dict[str, FileIdentity] = {}
+    for role, source in sources.items():
+        copied[role] = _copy_identity(
+            source,
+            root,
+            f"feature-runtime/{role}{source.suffix.lower()}",
+        )
+    try:
+        return FeatureRuntimeIdentity(
+            contract_version="frozen-m1-feature-runtime-v1",
+            registry=registry,
+            **copied,
+            h0_model_hash=str(h0["embedded_model_hash"]),
+            h0_development_emission_panel_hash=str(h0["development_emission_panel_hash"]),
+            h0_emission_features=_require_string_tuple(
+                h0.get("emission_features"),
+                role="H0 emission features",
+            ),
+            loop_dictionary_version=str(loop["version"]),
+            loop_dictionary_hash=str(loop["dictionary_hash"]),
+            loop_definition_count=int(loop["registered_definition_count"]),
+            front_options_raw_features=_require_string_tuple(
+                front.get("raw_features"),
+                role="front-options raw features",
+            ),
+            front_options_dimensions=_require_string_tuple(
+                front.get("dimensions"),
+                role="front-options dimensions",
+            ),
+            front_options_missing_indicators=_require_string_tuple(
+                front.get("missing_indicators"),
+                role="front-options missing indicators",
+            ),
+            scoring_authorized_by_registry=False,
+            scoring_blocker="blocked_feature_source_semantics_mismatch",
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BundleError(
+            "blocked_feature_schema_mismatch: feature-runtime registry identity is invalid"
+        ) from exc
+
+
+def _feature_schema(identity: FileIdentity, path: Path) -> FeatureSchemaIdentity:
+    payload = _load_json(path, "feature schema")
+    features = [FeatureDefinition.model_validate(item) for item in payload.get("features", [])]
+    names = [feature.name for feature in features]
+    if not features or len(names) != len(set(names)):
+        raise BundleError("blocked_feature_schema_mismatch: features must be non-empty and unique")
+    return FeatureSchemaIdentity(
+        path=identity.path,
+        sha256=identity.sha256,
+        size_bytes=identity.size_bytes,
+        format=identity.format,
+        schema_version=str(payload.get("schema_version", "")),
+        features=features,
+    )
+
+
+def _universe(identity: FileIdentity, path: Path) -> UniverseIdentity:
+    payload = _load_json(path, "universe")
+    symbols = payload.get("symbols")
+    universe_hash = payload.get("universe_hash")
+    source_artifact_sha256 = payload.get("source_artifact_sha256")
+    canonical_symbols = json.dumps(symbols, separators=(",", ":"), ensure_ascii=True)
+    expected_universe_hash = hashlib.sha256((canonical_symbols + "\n").encode("utf-8")).hexdigest()
+    if (
+        payload.get("cohort") != ANCHOR_COHORT
+        or not isinstance(symbols, list)
+        or len(symbols) != 20
+        or len(set(symbols)) != 20
+        or any(not isinstance(symbol, str) or symbol != symbol.upper() for symbol in symbols)
+        or universe_hash != expected_universe_hash
+        or not isinstance(source_artifact_sha256, str)
+        or re.fullmatch(r"[a-f0-9]{64}", source_artifact_sha256) is None
+    ):
+        raise BundleError(
+            "blocked_frozen_universe_mismatch: anchor_frozen_20 must contain 20 unique "
+            "registered uppercase symbols"
+        )
+    return UniverseIdentity(
+        path=identity.path,
+        sha256=identity.sha256,
+        size_bytes=identity.size_bytes,
+        format=identity.format,
+        universe_id=str(payload.get("universe_id", "")),
+        cohort=ANCHOR_COHORT,
+        symbol_count=20,
+        symbols=symbols,
+        universe_hash=universe_hash,
+        source_artifact=str(payload.get("source_artifact", "")),
+        source_artifact_sha256=source_artifact_sha256,
+    )
+
+
+def _require_safe_bundle_id(bundle_id: str) -> None:
+    if SAFE_BUNDLE_ID.fullmatch(bundle_id) is None:
+        raise BundleError("blocked_unsafe_bundle_content: invalid bundle identifier")
+
+
+def _threshold(
+    value: float,
+    identity: FileIdentity,
+    path: Path,
+) -> FrozenThreshold:
+    payload = _load_json(path, "threshold provenance")
+    if (
+        payload.get("model") != "M1"
+        or payload.get("source") != "weighted_2024_development_predictions"
+        or payload.get("frozen_before_holdout_outcomes") is not True
+        or float(payload.get("value", -1.0)) != value
+    ):
+        raise BundleError("blocked_feature_schema_mismatch: frozen threshold provenance is invalid")
+    return FrozenThreshold(
+        value=value,
+        source="weighted_2024_development_predictions",
+        frozen_before_holdout_outcomes=True,
+        provenance=identity,
+    )
+
+
+def build_bundle(spec: BundleBuildSpec, destination: str | Path) -> BundleManifest:
+    """Copy frozen research artifacts into a self-contained immutable-format bundle."""
+
+    output = Path(destination)
+    if output.exists():
+        raise BundleError(f"bundle destination already exists: {output}")
+    if spec.protected_start != PROTECTED_START:
+        raise BundleError("blocked_unsafe_bundle_content: protected_start must remain 2026-01-01")
+    sources: list[tuple[Path, str]] = [
+        (spec.m0_artifact, "M0"),
+        (spec.m1_artifact, "M1"),
+        (spec.preprocessor, "preprocessor"),
+        (spec.feature_schema, "feature schema"),
+        (spec.universe, "universe"),
+        (spec.threshold_provenance, "threshold provenance"),
+        *((path, "audit reference") for path in spec.audit_references),
+        *((path, "determinism reference") for path in spec.determinism_references),
+    ]
+    for path, role in sources:
+        _require_safe_source(path, role)
+
+    temporary = output.with_name(f".{output.name}.{uuid.uuid4().hex}.tmp")
+    temporary.mkdir(parents=True)
+    try:
+        m0 = _copy_identity(spec.m0_artifact, temporary, f"artifacts/m0{spec.m0_artifact.suffix}")
+        m1 = _copy_identity(spec.m1_artifact, temporary, f"artifacts/m1{spec.m1_artifact.suffix}")
+        preprocessor = _copy_identity(
+            spec.preprocessor,
+            temporary,
+            f"artifacts/preprocessor{spec.preprocessor.suffix}",
+        )
+        schema_file = _copy_identity(
+            spec.feature_schema, temporary, "contracts/feature-schema.json"
+        )
+        universe_file = _copy_identity(spec.universe, temporary, "contracts/universe.json")
+        threshold_file = _copy_identity(
+            spec.threshold_provenance,
+            temporary,
+            "contracts/threshold-provenance.json",
+        )
+        audits = [
+            _copy_identity(path, temporary, f"references/audit/{index:02d}-{path.name}")
+            for index, path in enumerate(spec.audit_references, start=1)
+        ]
+        determinism = [
+            _copy_identity(path, temporary, f"references/determinism/{index:02d}-{path.name}")
+            for index, path in enumerate(spec.determinism_references, start=1)
+        ]
+        feature_runtime = (
+            None
+            if spec.feature_runtime is None
+            else _build_feature_runtime(spec.feature_runtime, temporary)
+        )
+        identities = [
+            m0,
+            m1,
+            preprocessor,
+            schema_file,
+            universe_file,
+            threshold_file,
+            *audits,
+            *determinism,
+            *(() if feature_runtime is None else _runtime_file_identities(feature_runtime)),
+        ]
+        manifest = BundleManifest(
+            manifest_version=(
+                "1" if feature_runtime is None else BUNDLE_MANIFEST_VERSION
+            ),
+            bundle_id=spec.bundle_id,
+            created_at_utc=spec.created_at_utc.astimezone(UTC),
+            scientific_classification=SCIENTIFIC_CLASSIFICATION,
+            code_feature_contract_version=spec.code_feature_contract_version,
+            previous_session_context_schema_hash=spec.previous_session_context_schema_hash,
+            previous_session_context_feature_hash=spec.previous_session_context_feature_hash,
+            m0_artifact=m0,
+            m1_artifact=m1,
+            preprocessor=preprocessor,
+            feature_schema=_feature_schema(schema_file, temporary / schema_file.path),
+            universe=_universe(universe_file, temporary / universe_file.path),
+            threshold=_threshold(
+                spec.threshold,
+                threshold_file,
+                temporary / threshold_file.path,
+            ),
+            training_interval=DateInterval(start=spec.training_start, end=spec.training_end),
+            historical_reference_interval=DateInterval(
+                start=spec.historical_reference_start,
+                end=spec.historical_reference_end,
+            ),
+            holdout_interval=DateInterval(start=spec.holdout_start, end=spec.holdout_end),
+            protected_start=PROTECTED_START,
+            audit_references=audits,
+            determinism_references=determinism,
+            feature_runtime=feature_runtime,
+            files={identity.path: identity.sha256 for identity in identities},
+        )
+        (temporary / "manifest.json").write_bytes(_canonical_json(manifest.model_dump(mode="json")))
+        os.replace(temporary, output)
+        verified = verify_bundle(output)
+        if not verified.verified:
+            raise BundleError(", ".join(verified.blockers))
+        return manifest
+    except Exception:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+        raise
+
+
+def _manifest(path: Path) -> BundleManifest:
+    manifest_path = path / "manifest.json"
+    if path.is_symlink() or manifest_path.is_symlink():
+        raise BundleError("blocked_unsafe_bundle_content: bundle paths may not be symlinks")
+    if not manifest_path.is_file():
+        raise BundleError(
+            f"blocked_missing_verified_frozen_bundle: missing manifest at {manifest_path}"
+        )
+    try:
+        return BundleManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise BundleError("blocked_feature_schema_mismatch: invalid bundle manifest") from exc
+
+
+def _declared_file_identities(manifest: BundleManifest) -> dict[str, FileIdentity]:
+    identities = [
+        manifest.m0_artifact,
+        manifest.m1_artifact,
+        manifest.preprocessor,
+        manifest.feature_schema,
+        manifest.universe,
+        manifest.threshold.provenance,
+        *manifest.audit_references,
+        *manifest.determinism_references,
+        *(
+            ()
+            if manifest.feature_runtime is None
+            else _runtime_file_identities(manifest.feature_runtime)
+        ),
+    ]
+    declared: dict[str, FileIdentity] = {}
+    for identity in identities:
+        if identity.path in declared:
+            raise BundleError(
+                f"blocked_unsafe_bundle_content: duplicate file identity {identity.path}"
+            )
+        declared[identity.path] = identity
+    return declared
+
+
+def _safe_bundle_relative_path(relative_path: str) -> bool:
+    candidate = Path(relative_path)
+    return bool(
+        relative_path
+        and not candidate.is_absolute()
+        and ".." not in candidate.parts
+        and candidate.as_posix() == relative_path
+    )
+
+
+def _resolves_within(root: Path, relative_path: str) -> bool:
+    try:
+        (root / relative_path).resolve(strict=False).relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def verify_bundle(path: str | Path) -> BundleVerification:
+    """Verify manifest schema, every file hash, universe, and embedded contracts."""
+
+    root = Path(path)
+    manifest = _manifest(root)
+    blockers: list[str] = []
+    try:
+        declared_files = _declared_file_identities(manifest)
+    except BundleError as exc:
+        blockers.append(str(exc).split(":", 1)[0])
+        declared_files = {}
+    if set(declared_files) - set(manifest.files):
+        blockers.append("blocked_missing_verified_frozen_bundle")
+    if set(manifest.files) - set(declared_files):
+        blockers.append("blocked_unsafe_bundle_content")
+    if any(
+        manifest.files.get(relative_path) != identity.sha256
+        for relative_path, identity in declared_files.items()
+        if relative_path in manifest.files
+    ):
+        blockers.append("blocked_frozen_artifact_hash_mismatch")
+
+    actual_files: set[str] = set()
+    for candidate in root.rglob("*"):
+        if candidate.is_symlink():
+            blockers.append("blocked_unsafe_bundle_content")
+            continue
+        if candidate.is_file():
+            actual_files.add(candidate.relative_to(root).as_posix())
+        elif not candidate.is_dir():
+            blockers.append("blocked_unsafe_bundle_content")
+    if actual_files - {"manifest.json"} - set(manifest.files):
+        blockers.append("blocked_unsafe_bundle_content")
+
+    resolved_root = root.resolve()
+    for relative_path, expected_hash in manifest.files.items():
+        if not _safe_bundle_relative_path(relative_path):
+            blockers.append("blocked_unsafe_bundle_content")
+            continue
+        candidate = root / relative_path
+        try:
+            candidate.resolve(strict=False).relative_to(resolved_root)
+        except ValueError:
+            blockers.append("blocked_unsafe_bundle_content")
+            continue
+        if candidate.is_symlink():
+            blockers.append("blocked_unsafe_bundle_content")
+        elif not candidate.is_file():
+            blockers.append("blocked_missing_verified_frozen_bundle")
+        elif _sha256(candidate) != expected_hash or (
+            relative_path in declared_files
+            and candidate.stat().st_size != declared_files[relative_path].size_bytes
+        ):
+            blockers.append("blocked_frozen_artifact_hash_mismatch")
+    contract_paths = (
+        manifest.feature_schema.path,
+        manifest.universe.path,
+        manifest.threshold.provenance.path,
+        *(
+            ()
+            if manifest.feature_runtime is None
+            else (manifest.feature_runtime.registry.path,)
+        ),
+    )
+    contracts_are_safe = all(
+        _safe_bundle_relative_path(relative_path)
+        and _resolves_within(root, relative_path)
+        and not (root / relative_path).is_symlink()
+        and (root / relative_path).is_file()
+        for relative_path in contract_paths
+    )
+    try:
+        if not contracts_are_safe:
+            raise BundleError("blocked_unsafe_bundle_content: invalid embedded contract path")
+        schema = _feature_schema(
+            manifest.feature_schema,
+            root / manifest.feature_schema.path,
+        )
+        if schema != manifest.feature_schema:
+            blockers.append("blocked_feature_schema_mismatch")
+        universe = _universe(manifest.universe, root / manifest.universe.path)
+        if universe != manifest.universe:
+            blockers.append("blocked_frozen_universe_mismatch")
+        threshold = _threshold(
+            manifest.threshold.value,
+            manifest.threshold.provenance,
+            root / manifest.threshold.provenance.path,
+        )
+        if threshold != manifest.threshold:
+            blockers.append("blocked_feature_schema_mismatch")
+        if manifest.manifest_version == "2" and manifest.feature_runtime is None:
+            blockers.append("blocked_missing_verified_frozen_bundle")
+        if manifest.feature_runtime is not None:
+            runtime = manifest.feature_runtime
+            registry_payload = _load_json(
+                root / runtime.registry.path,
+                "feature-runtime registry",
+            )
+            registered_artifacts = registry_payload.get("artifacts")
+            registered_h0 = registry_payload.get("h0")
+            registered_loop = registry_payload.get("loop_dictionary")
+            registered_front = registry_payload.get("front_options")
+            if (
+                registry_payload.get("feature_contract_version")
+                != runtime.contract_version
+                or registry_payload.get("scoring_authorized_by_registry")
+                is not runtime.scoring_authorized_by_registry
+                or registry_payload.get("scoring_blocker") != runtime.scoring_blocker
+                or not isinstance(registered_artifacts, dict)
+                or any(
+                    not isinstance(registered_artifacts.get(role), dict)
+                    or registered_artifacts[role].get("sha256")
+                    != getattr(runtime, role).sha256
+                    for role in _FEATURE_RUNTIME_ROLES
+                )
+                or not isinstance(registered_h0, dict)
+                or registered_h0.get("embedded_model_hash") != runtime.h0_model_hash
+                or registered_h0.get("development_emission_panel_hash")
+                != runtime.h0_development_emission_panel_hash
+                or tuple(registered_h0.get("emission_features", ()))
+                != runtime.h0_emission_features
+                or not isinstance(registered_loop, dict)
+                or registered_loop.get("dictionary_hash") != runtime.loop_dictionary_hash
+                or not isinstance(registered_front, dict)
+                or tuple(registered_front.get("raw_features", ()))
+                != runtime.front_options_raw_features
+                or tuple(registered_front.get("dimensions", ()))
+                != runtime.front_options_dimensions
+                or tuple(registered_front.get("missing_indicators", ()))
+                != runtime.front_options_missing_indicators
+            ):
+                blockers.append("blocked_feature_schema_mismatch")
+    except BundleError as exc:
+        code = str(exc).split(":", 1)[0]
+        blockers.append(code)
+    manifest_hash = _sha256(root / "manifest.json")
+    unique_blockers = list(dict.fromkeys(blockers))
+    return BundleVerification(
+        manifest=manifest,
+        verified=not unique_blockers,
+        blockers=unique_blockers,
+        manifest_sha256=manifest_hash,
+    )
+
+
+def validate_feature_vector(
+    manifest: BundleManifest,
+    values: list[tuple[str, object]],
+) -> None:
+    """Validate ordered runtime values before any frozen-model invocation."""
+
+    expected = manifest.feature_schema.features
+    if [name for name, _ in values] != [feature.name for feature in expected]:
+        raise BundleError("blocked_feature_schema_mismatch: feature ordering differs")
+    for feature, (_, value) in zip(expected, values, strict=True):
+        if value is None:
+            if feature.missing == "reject":
+                raise BundleError(
+                    f"blocked_feature_schema_mismatch: {feature.name} may not be missing"
+                )
+            continue
+        valid = {
+            "float64": (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+            ),
+            "int64": isinstance(value, int) and not isinstance(value, bool),
+            "bool": isinstance(value, bool),
+            "string": isinstance(value, str),
+        }[feature.dtype]
+        if not valid:
+            raise BundleError(
+                f"blocked_feature_schema_mismatch: {feature.name} expected {feature.dtype}"
+            )
+
+
+def _make_read_only(root: Path) -> None:
+    for path in sorted(root.rglob("*"), reverse=True):
+        if path.is_file():
+            path.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        elif path.is_dir():
+            path.chmod(
+                stat.S_IRUSR
+                | stat.S_IXUSR
+                | stat.S_IRGRP
+                | stat.S_IXGRP
+                | stat.S_IROTH
+                | stat.S_IXOTH
+            )
+    root.chmod(
+        stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
+    )
+
+
+def install_bundle(
+    bundle_path: str | Path,
+    bundle_root: str | Path,
+    *,
+    operator: str,
+) -> Path:
+    """Copy a verified bundle into a versioned server directory exactly once."""
+
+    if not operator.strip():
+        raise BundleError("operator identity is required")
+    verification = verify_bundle(bundle_path)
+    if not verification.verified:
+        raise BundleError(", ".join(verification.blockers))
+    root = Path(bundle_root)
+    installed_root = root / "installed"
+    installed_root.mkdir(parents=True, exist_ok=True)
+    _require_safe_bundle_id(verification.manifest.bundle_id)
+    destination = installed_root / verification.manifest.bundle_id
+    if not _resolves_within(installed_root, verification.manifest.bundle_id):
+        raise BundleError("blocked_unsafe_bundle_content: bundle path escapes installed root")
+    if destination.exists():
+        raise BundleError(f"installed bundle already exists: {destination}")
+    temporary = installed_root / f".{verification.manifest.bundle_id}.{uuid.uuid4().hex}.tmp"
+    shutil.copytree(bundle_path, temporary)
+    copied = verify_bundle(temporary)
+    if not copied.verified:
+        shutil.rmtree(temporary)
+        raise BundleError(", ".join(copied.blockers))
+    os.replace(temporary, destination)
+    _make_read_only(destination)
+    _append_activation_audit(
+        root,
+        {
+            "action": "install",
+            "bundle_id": verification.manifest.bundle_id,
+            "operator": operator,
+            "recorded_at_utc": datetime.now(UTC).isoformat(),
+            "manifest_sha256": verification.manifest_sha256,
+        },
+    )
+    return destination
+
+
+def list_installed_bundles(bundle_root: str | Path) -> list[BundleManifest]:
+    """List verified installed bundle manifests."""
+
+    root = Path(bundle_root) / "installed"
+    if not root.exists():
+        return []
+    manifests: list[BundleManifest] = []
+    for path in sorted(item for item in root.iterdir() if item.is_dir()):
+        verification = verify_bundle(path)
+        if verification.verified:
+            manifests.append(verification.manifest)
+    return manifests
+
+
+def _active_pointer(bundle_root: Path) -> ActiveBundle | None:
+    path = bundle_root / "active.json"
+    if not path.is_file():
+        return None
+    try:
+        return ActiveBundle.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise BundleError("blocked_frozen_artifact_hash_mismatch: invalid active pointer") from exc
+
+
+def _append_activation_audit(bundle_root: Path, payload: dict[str, object]) -> None:
+    bundle_root.mkdir(parents=True, exist_ok=True)
+    with (bundle_root / "operator-actions.jsonl").open("ab") as handle:
+        handle.write(_canonical_json(payload))
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def activate_bundle(
+    bundle_id: str,
+    bundle_root: str | Path,
+    *,
+    operator: str,
+    expected_current_bundle_id: str | None,
+) -> ActiveBundle:
+    """Atomically activate a verified installed bundle with compare-and-swap semantics."""
+
+    if not operator.strip():
+        raise BundleError("operator identity is required")
+    _require_safe_bundle_id(bundle_id)
+    root = Path(bundle_root)
+    current = _active_pointer(root)
+    current_id = None if current is None else current.bundle_id
+    if current_id != expected_current_bundle_id:
+        raise BundleError(
+            f"active bundle changed: expected {expected_current_bundle_id!r}, found {current_id!r}"
+        )
+    installed = root / "installed" / bundle_id
+    if not _resolves_within(root / "installed", bundle_id):
+        raise BundleError("blocked_unsafe_bundle_content: bundle path escapes installed root")
+    verification = verify_bundle(installed)
+    if not verification.verified:
+        raise BundleError(", ".join(verification.blockers))
+    pointer = ActiveBundle(
+        bundle_id=bundle_id,
+        manifest_sha256=verification.manifest_sha256,
+        activated_at_utc=datetime.now(UTC),
+        operator=operator,
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    temporary = root / ".active.tmp"
+    temporary.write_bytes(_canonical_json(pointer.model_dump(mode="json")))
+    with temporary.open("rb") as handle:
+        os.fsync(handle.fileno())
+    os.replace(temporary, root / "active.json")
+    _append_activation_audit(
+        root,
+        {
+            "action": "activate",
+            **pointer.model_dump(mode="json"),
+        },
+    )
+    return pointer
+
+
+def load_active_bundle(bundle_root: str | Path) -> BundleVerification:
+    """Load and reverify the active installed bundle before scoring."""
+
+    root = Path(bundle_root)
+    pointer = _active_pointer(root)
+    if pointer is None:
+        raise BundleError("blocked_missing_verified_frozen_bundle: no active bundle")
+    verification = verify_bundle(root / "installed" / pointer.bundle_id)
+    if not verification.verified or verification.manifest_sha256 != pointer.manifest_sha256:
+        raise BundleError("blocked_frozen_artifact_hash_mismatch")
+    return verification

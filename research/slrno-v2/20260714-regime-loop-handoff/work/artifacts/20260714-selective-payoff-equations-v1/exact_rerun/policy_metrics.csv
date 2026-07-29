@@ -1,0 +1,9 @@
+policy_type,model,base_rows,selected_rows,coverage,selected_sessions,selected_stocks,selected_target_first_precision,selected_precision_lower,selected_mean_gross_bps,selected_mean_net_bps,selector_mean_net_per_opportunity_bps,unfiltered_base_mean_net_bps
+calibrated_point_mean_nonqualifying,context_only,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203
+calibrated_point_mean_nonqualifying,context_plus_loop_mixture,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203
+calibrated_point_mean_nonqualifying,prediction_only,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203
+calibrated_point_mean_nonqualifying,sequential_confirmation,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203
+conservative_uncertainty_aware,context_only,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203
+conservative_uncertainty_aware,context_plus_loop_mixture,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203
+conservative_uncertainty_aware,prediction_only,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203
+conservative_uncertainty_aware,sequential_confirmation,1645,0,0.0,0,0,,,,,0.0,-16.971077078057203

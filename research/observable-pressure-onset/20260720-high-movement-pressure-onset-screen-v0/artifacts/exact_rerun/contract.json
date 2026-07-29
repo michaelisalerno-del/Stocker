@@ -1,0 +1,206 @@
+{
+  "broker_integration_required": false,
+  "cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "confirmation": {
+    "available_after": "completed_bar_t_plus_1",
+    "features": [
+      "change_cohort_relative_return_bps",
+      "change_relative_strength_acceleration",
+      "change_activity_shock",
+      "change_range_acceleration",
+      "change_signed_efficiency_3",
+      "change_close_location",
+      "new_high_at_t_plus_1",
+      "new_low_at_t_plus_1",
+      "favourable_retracement_bps",
+      "opening_range_acceptance_persisted",
+      "predicted_direction_remained_same"
+    ],
+    "may_use_t_plus_2_information": false
+  },
+  "contract_id": "20260720-high-movement-pressure-onset-screen-v0",
+  "dates": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "protected_start": "2025-08-23"
+  },
+  "decision_checkpoints": {
+    "decision_ordinals_completed_bar_count": [
+      6,
+      12
+    ],
+    "decision_times_america_new_york": [
+      "10:00",
+      "10:30"
+    ],
+    "regular_session_grid": "09:30_inclusive_16:00_exclusive_america_new_york_five_minute"
+  },
+  "decision_policy": {
+    "categories": [
+      "pressure_onset_and_direction_increment_observed",
+      "pressure_onset_occurrence_only",
+      "directional_pressure_only",
+      "one_bar_confirmation_required",
+      "movement_readiness_but_direction_unresolved",
+      "no_pressure_onset_increment",
+      "blocked_observable_movement_model_not_reconstructable",
+      "blocked_protected_boundary_failure",
+      "blocked_chronology_or_leakage_failure",
+      "blocked_insufficient_pressure_onset_support",
+      "blocked_quick_pressure_screen_resource_limit",
+      "blocked_model_convergence_failure",
+      "blocked_reproducibility_or_audit_failure"
+    ],
+    "checkpoint_material_adversity_brier": -0.001,
+    "confirmation_economic_not_worsened_tolerance_bps": 0.0,
+    "increment_definition": "baseline_metric_minus_candidate_metric",
+    "minimum_positive_assessment_months": 5,
+    "null_percentile_strictly_above": 0.9,
+    "readiness_useful": "A1_improves_A0_on_pooled_primary_brier_and_log_loss"
+  },
+  "economic_reference": {
+    "entry": "open_t_plus_2",
+    "friction_bps_round_trip": [
+      0,
+      10,
+      20
+    ],
+    "primary_exit": "close_t_plus_8",
+    "secondary_exit": "regular_session_final_close",
+    "selection": "greatest_absolute_signed_pressure_score_then_lexicographic_symbol",
+    "signed_pressure_score": "p_onset * (2 * p_up_given_onset - 1) * p_large_remaining_move"
+  },
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "features": {
+    "confirmation_count": 11,
+    "pressure_addition_count": 27,
+    "pressure_reuses_readiness": [
+      "open_to_decision_cohort_relative_return_bps",
+      "distance_from_opening_high_bps",
+      "distance_from_opening_low_bps"
+    ],
+    "progress_winsor_bounds": "2024_development_q01_q99",
+    "readiness_count": 18,
+    "same_clock_history": "expanding_prior_session_mean_minimum_10",
+    "vwap_status": "vwap_features_unavailable"
+  },
+  "high_movement_nomination": {
+    "admission_percentile": 0.75,
+    "development_probability": "expanding_monthly_OOF_M1_July_through_December_2024",
+    "minimum_initial_training": "2024-01_through_2024-06",
+    "threshold_scope": "checkpoint_specific",
+    "year_2025_probability": "frozen_predecessor_M1_fit_on_all_eligible_2024_rows"
+  },
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_ladder": {
+    "A0": [
+      "checkpoint_60m",
+      "p_large_remaining_move"
+    ],
+    "A1": "A0_plus_complete_readiness_features",
+    "A2": "A1_plus_complete_pressure_onset_additions",
+    "A3": "A2_plus_confirmation_changes",
+    "D0": [
+      "checkpoint_60m",
+      "p_large_remaining_move",
+      "open_to_decision_cohort_relative_return_bps"
+    ],
+    "D1": "D0_plus_complete_readiness_features",
+    "D2": "D1_plus_complete_pressure_onset_additions",
+    "D3": "D2_plus_confirmation_changes",
+    "configuration": {
+      "C": 1.0,
+      "class_weight": null,
+      "max_iter": 250,
+      "n_jobs": 1,
+      "penalty": "l2",
+      "solver": "liblinear"
+    },
+    "row_weight": "1 / eligible_rows_in_slate"
+  },
+  "observable_only": true,
+  "onset": {
+    "barrier_percentile": 0.75,
+    "barrier_training_scope": "all_eligible_2024_development_paths_by_checkpoint",
+    "cohort_anchor": "leave_one_stock_out_median_within_simultaneous_slate_and_path_bar",
+    "cohort_label": "cohort_relative_not_market_relative",
+    "delayed_entry": "open_t_plus_2",
+    "path_closes": [
+      "t_plus_2",
+      "t_plus_3",
+      "t_plus_4"
+    ]
+  },
+  "order_placement": "disabled",
+  "predecessor": {
+    "commit": "5e80d972d1e003c8366a1ec6ca170d1077288ead",
+    "experiment": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0",
+    "movement_model": "large_remaining_move_M1_frozen_16_observable_features_plus_checkpoint",
+    "prediction_tolerance": 1e-12
+  },
+  "production_runtime_modified": false,
+  "research_only": true,
+  "resource_limits": {
+    "bootstrap_draws": 200,
+    "compact_rows_maximum": 20000,
+    "gpu": false,
+    "logistic_model_specifications_maximum": 8,
+    "null_draws": 50,
+    "plots_maximum": 2,
+    "processes": 1
+  },
+  "safety": {
+    "broker_integration_required": false,
+    "execution_enabled": false,
+    "feasibility_screen": true,
+    "loops_regimes_states_and_structural_paths_forbidden": true,
+    "observable_only": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "research_only": true,
+    "strategy_promotion": false
+  },
+  "seeds": {
+    "bootstrap": 20260720,
+    "economic_random": 20260722,
+    "null": 20260721
+  },
+  "strategy_promotion": false,
+  "support_gates": {
+    "assessment_rows_minimum": 1200,
+    "assessment_sessions_minimum": 100,
+    "assessment_stocks_minimum": 15,
+    "directional_onset_rows_minimum": 250,
+    "down_onsets_minimum": 100,
+    "eligible_stocks_per_evaluated_slate_minimum": 10,
+    "represented_months_minimum": 6,
+    "selected_stock_share_maximum": 0.2,
+    "stock_row_share_maximum": 0.1,
+    "up_onsets_minimum": 100,
+    "valid_stocks_per_source_slate_minimum": 15
+  }
+}

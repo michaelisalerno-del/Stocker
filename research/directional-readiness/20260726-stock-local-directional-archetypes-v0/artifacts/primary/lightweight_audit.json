@@ -1,0 +1,26 @@
+{
+  "bootstrap_draws": 100,
+  "causal_movement_gate_passed": true,
+  "contract_passed": true,
+  "determinism_passed": true,
+  "development_only_beta_passed": true,
+  "fresh_episode_audit_passed": true,
+  "independent_audit_passed": true,
+  "independent_audit_status": "supported",
+  "movement_dependency_audit_passed": true,
+  "null_refits_per_archetype": 10,
+  "oof_preprocessing_exclusion_passed": true,
+  "passed": true,
+  "peer_slate_normalisation_used": false,
+  "protected_boundary_passed": true,
+  "research_only": true,
+  "stock_local_normalisation_passed": true,
+  "subgroup_boundaries": {
+    "development_absolute_movement_q75": 0.013379220378349127,
+    "movement_gate_probability_median": 0.5397251521023274,
+    "prior_close_atm_iv_median": 0.9291,
+    "stock_local_volatility_median": 0.013910849050075308
+  },
+  "temporal_placebos": 3,
+  "trigger_bar_excluded": true
+}

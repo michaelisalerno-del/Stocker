@@ -1,0 +1,12 @@
+{
+  "packages/stocker_research/src/stocker_research/regime_panel_v2.py": "48d42b59ac51efd9e942c8d3921743e79db85fe37af331366d2293cf56f26466",
+  "packages/stocker_research/src/stocker_research/regime_validity_v2.py": "9a3747361299b748a0170c49f513ab0fd461582ce29a856a43a9a348be96e218",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_effective_configuration.json": "f05c4427de62cd686c022a073be79e46916fc77ad940b8fa31a93e0d6199a276",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_parameters.npz": "e267edc80298ff4d2915aa57b00f915cf34659b978ccdbc796d8103c8be4b9d2",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/full_refit_preprocessing.csv": "b03681a1ef94e2118d0ff873334c7bb489730f784557bc7d742921feafb2b0db",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/panel_hashes.json": "b188bc987294f7f85a8f726ba3ce6da561756981e336dbeb0c0472545fe53084",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/posterior_audit_input.parquet": "3b623829e83d0a68b5b8a9018c4ce207d40f3e1e327e6f9d90768a951835534b",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260719-right-censored-regime-refit-v2/primary/pre_repair_source_identity.json": "f979cecb37d94008ba3d9af563849daf2eb656c72e5c7997355d92505bdb3e5f",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260717-directional-signature-atlas-v1.json": "be550e809344b0c2177c2a885b2d7802bf4680d282fd8322e35448d18a0a5741",
+  "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260719-right-censored-regime-refit-v2.json": "7c23ba6c613d79731d3e3f1f37122ff5f97e6e6845274121313ccb1ba1459e88"
+}

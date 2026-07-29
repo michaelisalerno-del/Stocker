@@ -1,0 +1,9 @@
+state,mean_raw_signed_efficiency,orientation_sign,source_rule,orientation_source,development_outcomes_used
+0,-0.055395547427449995,-1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False
+1,0.333071690755,1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False
+2,-0.203212335065,-1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False
+3,-0.3375664845255,-1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False
+4,0.11493754842295,1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False
+5,0.307715591652,1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False
+6,-0.5007230874505,-1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False
+7,0.018349666208665003,1,"sign(mean(raw signed_efficiency_6, raw signed_efficiency_12)); zero maps to +1",audited_outcome_free_frozen_state_centroids,False

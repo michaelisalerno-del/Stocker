@@ -1,0 +1,178 @@
+{
+  "assessment_rows": 6261,
+  "bootstrap_repeated_during_finalization": false,
+  "broker_integration_required": false,
+  "decision": "opening_trajectories_predict_unregistered_events_only",
+  "determinism_check_passed": true,
+  "development_frozen_unregistered_families": true,
+  "development_rows": 9284,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "family_class_order": [
+    "unregistered_primitive_like__5-6-5",
+    "unregistered_primitive_like__2-3-2",
+    "unregistered_primitive_like__2-5-2",
+    "unregistered_primitive_like__4-7-4",
+    "OTHER_UNREGISTERED_FAMILY"
+  ],
+  "feasibility_only": true,
+  "finalized_from_existing_bounded_results": true,
+  "lightweight_audit_passed": true,
+  "null_repeated_during_finalization": false,
+  "opening_phase_only": true,
+  "order_placement": "disabled",
+  "point_estimate_improves_somewhere": true,
+  "positive_stage_a_log_loss_months": 8,
+  "positive_stage_b_log_loss_months": 7,
+  "primary_decision": "opening_trajectories_predict_unregistered_events_only",
+  "primary_models_refit_during_finalization": 0,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "real_increments": {
+    "F1_minus_F0": {
+      "multiclass_brier_improvement": 3.2349802046971465e-05,
+      "multiclass_log_loss_improvement": 0.0040307684790986675,
+      "top_two_accuracy_improvement": -3.198544306959317e-05
+    },
+    "R1_minus_R0": {
+      "auc_improvement": 0.001485239660959592,
+      "brier_improvement": 1.2320043908942147e-06,
+      "log_loss_improvement": 0.0003427723278312811
+    },
+    "U1_minus_U0": {
+      "auc_improvement": 0.009206554946050383,
+      "brier_improvement": 0.0014617054922587969,
+      "log_loss_improvement": 0.004215403556654063,
+      "top_decile_precision_improvement": 0.006087162851116545
+    }
+  },
+  "research_only": true,
+  "selected_hidden_families": [
+    "unregistered_primitive_like__5-6-5",
+    "unregistered_primitive_like__2-3-2",
+    "unregistered_primitive_like__2-5-2",
+    "unregistered_primitive_like__4-7-4"
+  ],
+  "stage_a_checkpoint_log_loss_improvements": {
+    "12": 0.002123588115556574,
+    "6": 0.006307218997751274
+  },
+  "stage_a_conditions": {
+    "auc_not_reduced": true,
+    "bootstrap_90_brier_lower_non_negative": true,
+    "bootstrap_90_log_loss_lower_non_negative": true,
+    "brier_improves": true,
+    "concentration_gates_pass": true,
+    "log_loss_improves": true,
+    "neither_checkpoint_materially_adverse": true,
+    "positive_log_loss_in_six_of_eight_months": true,
+    "real_log_loss_or_brier_exceeds_four_of_five_nulls": true
+  },
+  "stage_a_passes": true,
+  "stage_b_checkpoint_log_loss_improvements": {
+    "12": 0.00734044116376531,
+    "6": -0.00018940739874950818
+  },
+  "stage_b_conditions": {
+    "bootstrap_80_brier_lower_non_negative": false,
+    "bootstrap_80_log_loss_lower_non_negative": true,
+    "concentration_gates_pass": true,
+    "multiclass_brier_improves": true,
+    "multiclass_log_loss_improves": true,
+    "neither_checkpoint_materially_adverse": true,
+    "positive_log_loss_in_five_months": true,
+    "real_log_loss_or_brier_exceeds_four_of_five_nulls": true,
+    "support_available": true,
+    "top_two_not_reduced": false
+  },
+  "stage_b_passes": false,
+  "stage_b_status": "hidden_family_prediction_not_supported",
+  "strategy_promotion": false,
+  "structural_outcome_counts": {
+    "assessment": {
+      "NO_REGISTERED_COMPLETION": 4308,
+      "REGISTERED_COMPLETION": 312,
+      "SOURCE_UNAVAILABLE": 0,
+      "TIED_REGISTERED_COMPLETION": 1,
+      "UNREGISTERED_LOOP": 1641
+    },
+    "development": {
+      "NO_REGISTERED_COMPLETION": 6083,
+      "REGISTERED_COMPLETION": 525,
+      "SOURCE_UNAVAILABLE": 0,
+      "TIED_REGISTERED_COMPLETION": 3,
+      "UNREGISTERED_LOOP": 2676
+    }
+  },
+  "support": {
+    "broker_integration_required": false,
+    "development_frozen_unregistered_families": true,
+    "directional_outcomes_opened": false,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "opening_phase_only": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "stage_a": {
+      "conditions": {
+        "eight_months": true,
+        "maximum_binary_class_share": true,
+        "maximum_stock_share": true,
+        "minimum_no_completion": true,
+        "minimum_registered": true,
+        "minimum_rows": true,
+        "minimum_sessions": true,
+        "minimum_stocks": true,
+        "minimum_trajectory_retention": true,
+        "minimum_unregistered": true
+      },
+      "maximum_binary_class_share": 0.7379012937230475,
+      "maximum_stock_share": 0.050151732950007986,
+      "months": 8,
+      "outcome_counts": {
+        "NO_REGISTERED_COMPLETION": 4308,
+        "REGISTERED_COMPLETION": 312,
+        "UNREGISTERED_LOOP": 1641
+      },
+      "passed": true,
+      "rows": 6261,
+      "sessions": 157,
+      "stocks": 20
+    },
+    "stage_b": {
+      "conditions": {
+        "maximum_family_share": true,
+        "maximum_stock_share": true,
+        "minimum_final_classes": true,
+        "minimum_rows": true,
+        "minimum_sessions": true,
+        "minimum_stocks": true,
+        "two_selected_families_with_20": true
+      },
+      "development_eligible_families": 9,
+      "development_selected_families": 4,
+      "family_counts": {
+        "OTHER_UNREGISTERED_FAMILY": 684,
+        "unregistered_primitive_like__2-3-2": 211,
+        "unregistered_primitive_like__2-5-2": 75,
+        "unregistered_primitive_like__4-7-4": 74,
+        "unregistered_primitive_like__5-6-5": 597
+      },
+      "maximum_family_share": 0.41681901279707495,
+      "maximum_stock_share": 0.05728214503351615,
+      "passed": true,
+      "rows": 1641,
+      "selected_families_with_20": 4,
+      "sessions": 157,
+      "stocks": 20
+    },
+    "strategy_promotion": false,
+    "trajectory_retention": 1.0,
+    "unregistered_structural_event_target": true
+  },
+  "unregistered_structural_event_target": true,
+  "validation_or_promotion": false
+}

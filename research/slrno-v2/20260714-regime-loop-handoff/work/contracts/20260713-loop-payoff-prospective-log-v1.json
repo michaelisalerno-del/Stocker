@@ -1,0 +1,109 @@
+{
+  "contract_id": "20260713-loop-payoff-prospective-log-v1",
+  "status": "specification_only_not_activated",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "position_or_order_functionality_allowed": false,
+  "application_implementation_authorized": false,
+  "purpose": "prospectively separate loop occurrence from cost-adjusted payoff timing without tuning on opened 2023 or 2025 outcomes",
+  "activation_requirements": [
+    "freeze model binary/source hashes, feature schema, cost assumptions, candidate set, clocks, and outcome-opening date before the first logged observation",
+    "create an append-only ledger whose rows cannot be rewritten after outcome opening",
+    "prove the selected sessions were not previously inspected for these hypotheses",
+    "run an independent leakage and exact-replay audit before opening outcomes"
+  ],
+  "observation_unit": {
+    "type": "hypothetical_research_admission_no_order",
+    "candidates": ["cycle_04|state4|anchor_h24", "cycle_07|state5|anchor_h24"],
+    "matched_controls": ["cycle_04|state2|anchor_h24", "cycle_07|state6|anchor_h24"],
+    "baselines": ["unfiltered_frozen_signal", "loop_only"],
+    "primary_cost_bps_per_side": 5,
+    "market_impact_modelled": false,
+    "short_locate_or_borrow_modelled": false
+  },
+  "immutable_identity_fields": [
+    "contract_id",
+    "model_version",
+    "model_source_sha256",
+    "feature_schema_version",
+    "observation_id",
+    "symbol",
+    "session_date",
+    "anchor_timestamp",
+    "hypothetical_admission_timestamp",
+    "candidate_or_control_id"
+  ],
+  "admission_snapshot_available_at_or_before_admission": [
+    "all_20_predicted_parent_loop_probabilities",
+    "top_predicted_parent_loop and probability",
+    "anchor orientation and current completed-bar state",
+    "admission completed-bar state",
+    "current and previous regime",
+    "orientation_survived_to_admission",
+    "regime_age_bars and minutes",
+    "2024-frozen duration percentile and exit-hazard estimate with support",
+    "direction and session phase",
+    "VWAP definition and distance",
+    "ATR14 and causal range percentile",
+    "compression state, body/range, and upper/lower wick ratios",
+    "historical_volume_activity_proxy and support",
+    "predicted cost-adjusted payoff probability with interval, support, and positive/negative/unknown class"
+  ],
+  "causal_path_snapshot_after_each_completed_bar": [
+    "bar_timestamp and bars_since_admission",
+    "current state, regime age, and transition event",
+    "updated parent-loop probabilities without future labels",
+    "orientation valid/invalid/unknown",
+    "detectable parent-loop completion status and first detection timestamp",
+    "close return from hypothetical admission",
+    "running MFE and MAE in bps and prior-admission ATR units",
+    "running peak favorable excursion and causal retracement from that peak",
+    "spread_friction if genuinely available, otherwise unavailable",
+    "path-state prediction with interval and positive/negative/unknown class"
+  ],
+  "outcome_fields_opened_only_after_window_closes": [
+    "gross and 10-bps-cost-adjusted frozen anchor+24 payoff",
+    "MFE, MAE, time-to-MFE, and time-to-MAE",
+    "post-entry-bar conservative excursions",
+    "first causally detectable loop-completion timestamp",
+    "hypothetical next-open price after detectable completion",
+    "eventual parent, child, and morph outcome labelled oracle-only",
+    "eventual regime transitions and durations labelled outcome-only"
+  ],
+  "lifecycle_fields": [
+    "unknown",
+    "emerging",
+    "active",
+    "decaying",
+    "retired"
+  ],
+  "missingness_and_provenance": {
+    "historical_volume": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "quotes_or_ticks": "must be explicitly unavailable unless a separately frozen source exists",
+    "intrabar_ohlc_order": "unknown; admission-bar MAE ordering may not be inferred",
+    "all_feature_values": "store source timestamp, availability timestamp, transform version, and support"
+  },
+  "predeclared_evaluation": {
+    "primary_target": "net payoff after 5 bps per side",
+    "secondary_targets": ["cost-clearing excursion probability", "path-state quality", "detectable loop-completion exit payoff"],
+    "requirements": [
+      "paired advantage over unfiltered, loop-only, and matched orientation controls",
+      "time and quarter stability",
+      "leave-one-stock-out robustness",
+      "cost survival",
+      "uncertainty and coverage",
+      "multiplicity control",
+      "positive/negative/unknown abstention evaluation"
+    ],
+    "forbidden": [
+      "choosing early-exit bars from opened V2 MFE results",
+      "choosing retracement thresholds from opened 2023 or 2025 paths",
+      "using realized child, morph, duration, future state, MFE, MAE, or payoff as an admission feature",
+      "promoting any logged finding directly to live, paper, demo, broker, position, order, deployment, or app functionality"
+    ]
+  }
+}

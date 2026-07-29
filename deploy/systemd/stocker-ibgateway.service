@@ -1,0 +1,48 @@
+[Unit]
+Description=Official IB Gateway with manual paper-account authentication
+Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Wants=network-online.target stocker-ibgateway-window-manager.service stocker-ibgateway-vnc.service stocker-ibgateway-loopback-proxy.socket
+Requires=stocker-ibgateway-display.service ufw.service
+After=network-online.target ufw.service stocker-ibgateway-display.service stocker-ibgateway-window-manager.service
+ConditionPathExists=/opt/ibgateway/current/ibgateway
+ConditionPathExists=/var/lib/ibgateway/.Xauthority
+ConditionPathExists=/usr/local/libexec/stocker-verify-ibgateway
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ibgateway
+Group=ibgateway
+WorkingDirectory=/var/lib/ibgateway
+Environment=HOME=/var/lib/ibgateway
+Environment=DISPLAY=:71
+Environment=XAUTHORITY=/var/lib/ibgateway/.Xauthority
+ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway
+ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway
+ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
+ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
+ExecStart=/opt/ibgateway/current/ibgateway
+# IB Gateway exits successfully during its configured daily auto-restart.
+# Relaunch it so the broker-managed restart session can resume before expiry.
+# An explicit `systemctl stop` still suppresses service restarts.
+Restart=always
+RestartSec=20
+KillSignal=SIGTERM
+SuccessExitStatus=143
+TimeoutStopSec=60
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/ibgateway /tmp
+
+[Install]
+WantedBy=multi-user.target

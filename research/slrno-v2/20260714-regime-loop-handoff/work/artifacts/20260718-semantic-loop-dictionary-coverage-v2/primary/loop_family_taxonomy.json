@@ -1,0 +1,28 @@
+{
+  "broker_connected": false,
+  "contract_hash": "dfb2abfbd0d5b5431e372074ac76155f3b014339202325da0f365007267a4de8",
+  "data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "git_sha": "ee04e735b09f237a4a415c75cbf5c4569a921ed6",
+  "hierarchy": [
+    "NO_LOOP_OR_SESSION_END",
+    "DISTINCT_PRIMITIVE_TIE",
+    "TWO_STATE_OSCILLATION",
+    "THREE_STATE_CYCLE",
+    "FOUR_STATE_CYCLE",
+    "FIVE_TO_SIX_STATE_CYCLE",
+    "LONG_PRIMITIVE_CYCLE"
+  ],
+  "order_placement": "disabled",
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "repeat_status_is_auxiliary": true,
+  "research_only": true,
+  "run_id": "fc05b0eb9dede535bf255bd8",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false,
+  "taxonomy_version": "topology_only_loop_family_v2"
+}

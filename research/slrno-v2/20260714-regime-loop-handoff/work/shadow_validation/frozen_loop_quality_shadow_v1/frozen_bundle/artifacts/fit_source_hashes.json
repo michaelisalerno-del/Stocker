@@ -1,0 +1,12 @@
+{
+  "anchor_panel_train_2024.parquet": "788fd81909d1c5d3e6ee20e3e36e3ebb74199188e41052ea1b04f61c96fa9932",
+  "contract.json": "67d64c463df52f01f360561ef0a69d5772b7eec0409468c93d6eb5a630dee02e",
+  "feature_manifest.json": "47316220eacd56824f3d511c0a3b4b71e540cd7643ef7d89509de1654e14a5ce",
+  "fixed_cycles.csv": "ee0adb9e09226f47a94902ad1ab3ccc996b557592abab00e7338074e8cc055de",
+  "path_gates.json": "a845d03e5adb2f102322148fe2d2571aab3c9283154a839eacbe2d40427a983d",
+  "path_independent_artifact_audit.json": "4f13af359d9ce8471b8c27e8224469f9632c09ca638a03643e795b86b0c87947",
+  "path_model_parameters.npz": "72f7cdf5e9aabc142630c0eb4486e11dace0cb03c1b5b5fd4da2f06d13b8cda7",
+  "price_gates.json": "04bc050ae3c717b0fcd299a3429107305b981065bfcb1ec1597e342ff968802f",
+  "price_independent_artifact_audit.json": "71c3f17672a6263c3fb3bc2f9953eb2c0fff4e4fef729465688bd4430425da49",
+  "runner.py": "7da5e88e603583d3dba7422569bc8e27837171c7165e69bcaafade472738e2ea"
+}

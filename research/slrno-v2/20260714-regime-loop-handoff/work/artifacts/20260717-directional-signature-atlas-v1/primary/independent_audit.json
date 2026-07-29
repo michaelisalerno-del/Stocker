@@ -1,0 +1,133 @@
+{
+  "audit_id": "20260717-directional-signature-atlas-v1-independent-audit",
+  "check_count": 22,
+  "checks": [
+    {
+      "check_id": "contract_identity",
+      "detail": "8916f0cceb4ce0c791973c6474f6f263c053e09bd5d072b79ecdf3a99c7776b9",
+      "passed": true
+    },
+    {
+      "check_id": "feature_schema_identity",
+      "detail": "905e8634eeeb362d4abbd1fd04b90526c7c0561c7c5e9cc7d87779088f1d5a7b",
+      "passed": true
+    },
+    {
+      "check_id": "artifact_manifest",
+      "detail": "66 files; mismatches=[]",
+      "passed": true
+    },
+    {
+      "check_id": "data_snapshot_identity",
+      "detail": "51 sources; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "git_identity",
+      "detail": "git=515d5cf002e33c3cdc000d47cc433205ffcde060; committed_atlas_sources=20; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "sealed_feature_ledger_identity",
+      "detail": "001f34ff630c5426607bc39e9247735c9d4a7374f29f5d337634b6893983f0ff",
+      "passed": true
+    },
+    {
+      "check_id": "opportunity_population_and_clocks",
+      "detail": "rows=24410; ordinals=[12, 36]; clocks=['clock_12', 'clock_36']; local_times=['10:30', '12:30']",
+      "passed": true
+    },
+    {
+      "check_id": "feature_availability_and_leakage",
+      "detail": "enabled_features=44; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "state_motifs_and_loop_summaries",
+      "detail": "motif_rows=22172; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "cost_aware_labels_and_dead_band",
+      "detail": "scored=24096; unavailable=314; targets={'LONG': 10859, 'NEUTRAL': 2311, 'SHORT': 10926}",
+      "passed": true
+    },
+    {
+      "check_id": "entry_terminal_and_provider_reconstruction",
+      "detail": "provider_samples=9; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "movement_permission",
+      "detail": "permitted=5653; unavailable=18757",
+      "passed": true
+    },
+    {
+      "check_id": "candidate_caps_complexity_and_fdr",
+      "detail": "counts={'pairwise': 1610, 'three_condition': 500, 'univariate': 390, 'shallow_tree': 3}; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "sampled_signature_metrics",
+      "detail": "reconstructed=20; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "chronology_and_frozen_libraries",
+      "detail": "discovery=20; survivors=0",
+      "passed": true
+    },
+    {
+      "check_id": "atlas_votes_neutral_and_conflict",
+      "detail": "survivors=0; directional_outputs=0; conflicts=0",
+      "passed": true
+    },
+    {
+      "check_id": "baseline_population_and_logic",
+      "detail": "models=10; rows_per_model=24096",
+      "passed": true
+    },
+    {
+      "check_id": "null_stress_and_concentration",
+      "detail": "nulls=7; stress_rows=945; dimensions=['current_state', 'decision_clock', 'hindsight_episode', 'month', 'parent_loop_family', 'period', 'session', 'state_motif_3', 'symbol']; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "cross_sectional_track_b",
+      "detail": "rows=24096; summary={'absolute_profitability_claim_allowed': False, 'candidate_signatures_examined': 2506, 'discovery_multiplicity_qualified': 1, 'final_scored_signatures': 0, 'frozen_exploratory_signatures': 20, 'sector_relative_status': 'unavailable_no_frozen_sector_membership', 'status': 'completed_secondary_equal_universe_only', 'validation_survivors': 0}; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "prospective_append_only_integrity",
+      "detail": "checked_records=2; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "research_only_safety",
+      "detail": "changed_paths=20; failures=[]",
+      "passed": true
+    },
+    {
+      "check_id": "primary_exact_rerun_byte_identity",
+      "detail": "compared_files=67; mismatches=[]",
+      "passed": true
+    }
+  ],
+  "contract_id": "20260717-directional-signature-atlas-v1",
+  "contract_sha256": "8916f0cceb4ce0c791973c6474f6f263c053e09bd5d072b79ecdf3a99c7776b9",
+  "data_snapshot_sha256": "09f6cae0d89bb99973b1df410df579e4c9b6e33e0bd90b4f3f65dab1627e30aa",
+  "exact_rerun_identity": {
+    "byte_identical": true,
+    "compared_files": 67,
+    "extra_files": [],
+    "hash_mismatches": [],
+    "missing_files": []
+  },
+  "execution_enabled": false,
+  "feature_ledger_sha256": "001f34ff630c5426607bc39e9247735c9d4a7374f29f5d337634b6893983f0ff",
+  "feature_schema_sha256": "905e8634eeeb362d4abbd1fd04b90526c7c0561c7c5e9cc7d87779088f1d5a7b",
+  "git_sha": "515d5cf002e33c3cdc000d47cc433205ffcde060",
+  "passed": true,
+  "passed_check_count": 22,
+  "research_only": true
+}

@@ -1,0 +1,67 @@
+{
+  "assessment": {
+    "end_inclusive": "2025-08-22",
+    "start": "2025-01-01"
+  },
+  "broad_route_conflict_test": true,
+  "broker_integration_required": false,
+  "checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "clean_two_to_three_bar_advance_target": true,
+  "dense_even_checkpoints": true,
+  "development": {
+    "end_inclusive": "2024-12-31",
+    "start": "2024-01-01"
+  },
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "hard_limits": {
+    "gpu": false,
+    "maximum_plots": 1,
+    "n_jobs": 1,
+    "primary_model_fits": 2,
+    "processes": 1,
+    "route_bundle_null_refits": 3,
+    "session_bootstrap_draws": 15
+  },
+  "model": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "next_bar_completions_excluded": true,
+  "one_transition_away_prefixes_excluded": true,
+  "options_outcomes_opened": false,
+  "order_placement": "disabled",
+  "primary_target": "completion_in_bars_2_or_3",
+  "production_runtime_modified": false,
+  "protected_start": "2025-08-23",
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "support_gates": {
+    "advance_positive_outcomes": 400,
+    "advance_rows": 30000,
+    "raw_retention": 0.95,
+    "route_feature_retention": 0.95
+  }
+}

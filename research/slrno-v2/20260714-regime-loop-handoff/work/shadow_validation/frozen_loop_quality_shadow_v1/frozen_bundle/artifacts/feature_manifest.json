@@ -1,0 +1,44 @@
+{
+  "context_width": 17,
+  "cycle_by_current_state": {
+    "scale": 0.5,
+    "width": 160
+  },
+  "cycle_by_history_token": {
+    "scale": 0.25,
+    "width": 12960
+  },
+  "cycle_one_hot": {
+    "scale": 1.0,
+    "width": 20
+  },
+  "future_label_or_outcome_included_as_feature": false,
+  "live_ordering_enabled": false,
+  "numeric_controls": [
+    "b0_entry_numeric",
+    "b0_entry_high_stress",
+    "entry_time_sin",
+    "entry_time_cos",
+    "current_bar_log_return",
+    "return_sum_6",
+    "mean_abs_return_12",
+    "session_return",
+    "bar_range_pct"
+  ],
+  "numeric_medians": {
+    "b0_entry_high_stress": 0.0,
+    "b0_entry_numeric": 0.0,
+    "bar_range_pct": 0.005699951085824075,
+    "current_bar_log_return": 0.0,
+    "entry_time_cos": -0.5000000000000004,
+    "entry_time_sin": 0.3919666098600751,
+    "mean_abs_return_12": 0.0034697407896629017,
+    "return_sum_6": 0.0003632852771070237,
+    "session_return": -0.0019618606079920015
+  },
+  "order_placement": "disabled",
+  "qcycle_width": 13157,
+  "research_only": true,
+  "state_one_hot_width": 8,
+  "stock_identity_included": false
+}

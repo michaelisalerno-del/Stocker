@@ -1,0 +1,118 @@
+{
+  "contract_id": "oriented_route_movement_diagnostic_v1",
+  "created_at_utc": "2026-07-10T23:40:00Z",
+  "scientific_status": "post_outcome_exploratory_development_diagnostic",
+  "post_outcome_route_selection": true,
+  "prospective_validation_claim_permitted": false,
+  "promotion_or_surface_permission": false,
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Diagnose whether the frozen rotation-invariant cycle grades conceal stable current-state-oriented route effects, without refitting any detector, structural model, quality model, threshold, calibration, or probability.",
+  "frozen_parent_contract": "work/contracts/20260710-per-loop-movement-quality-v1.json",
+  "frozen_inputs": {
+    "cycles": "/private/tmp/stocker_per_loop_movement_quality_20260710/fixed_cycles.csv",
+    "causal_2024_oof": "/private/tmp/stocker_per_loop_movement_quality_20260710/oof_predictions_2024.parquet",
+    "development_2025": "/private/tmp/stocker_per_loop_movement_quality_20260710/quality_scoring_2025.parquet",
+    "backward_portability_2023": "/private/tmp/stocker_per_loop_movement_quality_20260710/quality_scoring_2023.parquet",
+    "state_centroids": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/frozen_semimarkov_parameters.npz",
+    "state_feature_manifest": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/frozen_emission_preprocessing.csv"
+  },
+  "forbidden_actions": {
+    "state_refit": true,
+    "structural_loop_refit": true,
+    "quality_model_refit": true,
+    "threshold_or_temperature_change": true,
+    "cycle_dictionary_change": true,
+    "direction_or_signed_return_test": true,
+    "pnl_cost_spread_slippage_or_trading_test": true,
+    "shadow_prediction_or_ledger_change": true,
+    "unqualified_route_surface": true
+  },
+  "diagnostic_unit": {
+    "primary_key": [
+      "cycle_id",
+      "current_state"
+    ],
+    "definition": "A frozen cycle occurrence evaluated only at anchors whose causal current state equals current_state.",
+    "exact_route": "Report the unique oriented closed path when the current state identifies exactly one deduplicated rotation.",
+    "ambiguous_route": "If one current state admits multiple distinct rotations, retain their union exactly as stored and label route_kind=ambiguous_union; do not infer the hidden route.",
+    "known_ambiguous_unit": "cycle_15 at current_state 1",
+    "new_route_probability_model_permitted": false,
+    "existing_qcycle_cycle_by_current_state_block_reused": true
+  },
+  "periods": {
+    "2024_oof": "causal July-December OOF development only",
+    "2025": "already-opened development score",
+    "2023": "already-opened backward portability score using future-fitted 2024 structure",
+    "2026_permitted": false,
+    "clean_holdout_present": false
+  },
+  "outcomes_and_probabilities": {
+    "thresholds": "exactly the frozen parent-contract global 2024 P75 and P90 thresholds",
+    "targets": [
+      "absolute_return_bps",
+      "future_range_bps"
+    ],
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "structural_probability": "reuse s(i,c) without reranking",
+    "conditional_baseline": "reuse qcontext75 and qcontext90",
+    "conditional_candidate": "reuse qcycle75 and qcycle90",
+    "joint_baseline": "reuse s*qcontext",
+    "joint_candidate": "reuse s*qcycle",
+    "positive_overlap_weight": "reuse the frozen inverse-overlap conditional_weight",
+    "provider_volume_used_by_quality_diagnostic": false
+  },
+  "route_support_and_gates": {
+    "support": "Apply the parent per-cycle OOF and scoring-period support counts unchanged to each oriented route.",
+    "endpoint_support": "Apply the parent P75 and P90 positive/negative counts unchanged to each route, target, and horizon.",
+    "conditional_proper_loss": "Apply parent qcycle-versus-qcontext log-loss, Brier, daily upper-bound, quarter, stock-deletion, and calibration gates.",
+    "joint_chain": "Apply parent s*qcycle-versus-s*qcontext gates on every compatible row for the oriented route.",
+    "incremental_lift": "Apply the parent observed-rate/qcontext ratio and five-session residual lower-bound gates.",
+    "structural": "Apply the parent history-path-versus-first-order loss and calibration gates separately within each route; required for 2025 and 2023 grades as in the parent contract.",
+    "high_and_good_rates": "Apply the parent raw P75/P90 and mean-qcycle thresholds unchanged.",
+    "both_targets_required": true,
+    "all_horizons_required_for_global_grade": true,
+    "bootstrap": {
+      "block_sessions": 5,
+      "draws": 5000,
+      "confidence_interval": 0.95,
+      "deterministic_seed_root": 20260710
+    }
+  },
+  "diagnostic_labels": {
+    "high": "diagnostic_high_candidate",
+    "good": "diagnostic_good_candidate",
+    "failed": "diagnostic_unqualified",
+    "unsupported": "diagnostic_not_supported",
+    "meaning": "Post-outcome descriptive labels only; none is a certified quality tier or permission to enter either shadow."
+  },
+  "cross_period_logic": {
+    "horizon_grade": "minimum diagnostic label across 2024 OOF, 2025, and backward-2023",
+    "global_grade": "minimum across all three horizons and all three periods",
+    "later_period_promotion_permitted": false,
+    "prospective_candidate_eligibility": false,
+    "permitted_use": "Generate bounded hypotheses for a separately frozen nested-2024 V2 experiment."
+  },
+  "predeclared_focus_routes": [
+    "cycle_06@state_4 versus cycle_06@state_6",
+    "cycle_09@state_3 versus cycle_09@state_6",
+    "cycle_13@state_5 versus cycle_13@state_7"
+  ],
+  "integrity": {
+    "source_sha256_manifest_required": true,
+    "all_probabilities_must_be_finite_and_in_unit_interval": true,
+    "ordered_quality_probabilities_must_be_nested": true,
+    "no_2026_rows": true,
+    "both_shadow_trees_must_match_before_and_after": true,
+    "both_shadow_ledgers_must_remain_empty": true,
+    "both_shadow_outcomes_must_remain_unopened": true
+  }
+}

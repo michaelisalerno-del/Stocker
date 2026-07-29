@@ -89,7 +89,7 @@ def ohlc_baseline_summary(frame: Any) -> dict[str, float | int]:
     close = pd.to_numeric(data["close"], errors="coerce").dropna()
     if close.empty:
         raise ValueError("Close column contains no numeric values")
-    returns = close.pct_change().dropna()
+    returns = close.pct_change(fill_method=None).dropna()
     equity = (1.0 + returns).cumprod()
     close_start = float(close.iloc[0])
     close_end = float(close.iloc[-1])
@@ -134,7 +134,7 @@ def _strategy_metrics(
     timeframe: str,
     cost_model: CostModel,
 ) -> BaselineMetrics:
-    returns = close.pct_change().fillna(0.0)
+    returns = close.pct_change(fill_method=None).fillna(0.0)
     aligned_position = position.astype(float).reindex(close.index).fillna(0.0)
     gross_returns = aligned_position.shift(1).fillna(0.0) * returns
     position_changes = aligned_position.diff().abs().fillna(aligned_position.abs())

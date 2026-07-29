@@ -1,0 +1,141 @@
+{
+  "contract_id": "20260720-immediate-pair-closure-history-v1",
+  "contract_version": "1.0.0",
+  "title": "Immediate Regime-Pair Closure History Diagnostic V1",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false,
+  "live_ordering_enabled": false,
+  "protected_2026_opened": false,
+  "part_b_contract_reopened": false,
+  "numeric_state_semantic_validity_claimed": false,
+  "promotable": false,
+  "scope": {
+    "purpose": "Test whether causal state history before an observed A-to-B regime transition improves prediction that the next completed regime returns to A, forming the corrected primitive A-to-B-to-A closure.",
+    "interpretation": "Fixed-model structural sensitivity diagnostic only. It cannot validate numeric regime identities, semantic loop dictionaries, price direction, payoff, or trading edge.",
+    "primary_model_lineage": "MODEL_FULL_REFIT_CAUSAL_HYSTERETIC_SEMANTIC",
+    "sensitivity_model_lineage": "MODEL_FULL_REFIT_CAUSAL_HARD_SEMANTIC",
+    "state_count": 8,
+    "development_period": "2024-01-01/2024-12-31",
+    "unchanged_assessment_period": "2025-01-01/2025-12-31",
+    "backward_2023_enabled": false,
+    "protected_2026_enabled": false
+  },
+  "source_identity": {
+    "provider": "EODHD",
+    "provider_dataset_identity": "StockerLocal/source=eodhd/instrument_type=stock/timeframe=5m",
+    "bar_interval": "5m",
+    "bar_timestamp_convention": "provider timestamp is bar start; completed-bar availability is timestamp plus five minutes",
+    "volume_meaning": "provider-reported historical_volume activity field; not order flow, quote flow, exchange-wide volume, or executable liquidity",
+    "development_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+    "assessment_snapshot_hash": "29e82d6539810e5fcebc13e860d07474c38ee0349fe38aedce0378f9aefb67a4",
+    "development_rows_expected": 424583,
+    "assessment_rows_expected": 424827,
+    "stock_count": 22,
+    "benchmark": "VTI"
+  },
+  "state_model_binding": {
+    "source_experiment": "20260719-right-censored-regime-refit-v2",
+    "model_id": "regime_model_v2_full_right_censored_refit",
+    "model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+    "parameter_file_sha256": "e267edc80298ff4d2915aa57b00f915cf34659b978ccdbc796d8103c8be4b9d2",
+    "semantic_mapping_file_sha256": "840e105d3c3a6ef0c63d754656d473a7b5703003b6fea4b08e5786af8c98b523",
+    "preprocessing_file_sha256": "b03681a1ef94e2118d0ff873334c7bb489730f784557bc7d742921feafb2b0db",
+    "part_a_decision": "regime_representation_unstable_loop_dictionary_must_pause",
+    "part_a_gate_is_overridden": false,
+    "semantic_limitation": "Numeric labels are evaluated only inside the frozen fitted representation. Pair identity must not be projected across refits."
+  },
+  "population": {
+    "decision_unit": "first completed bar assigned to each new causal state run",
+    "required_history": "at least one fully completed preceding state run in the same contiguous symbol-session segment",
+    "target": "next completed state equals the immediately preceding state",
+    "positive_label": "IMMEDIATE_PAIR_CLOSURE",
+    "negative_label": "NEXT_STATE_DIFFERS",
+    "censored_labels": [
+      "RIGHT_CENSORED_SESSION_END",
+      "UNAVAILABLE_STRUCTURAL_GAP"
+    ],
+    "primitive_loop_semantics": "A-to-B-to-A with A not equal to B; orientation retained and the unordered pair reported separately",
+    "current_run_duration_as_feature": false,
+    "future_price_or_payoff_columns_allowed": false
+  },
+  "hypothesis": {
+    "primary": "M5_LAST_FIVE_STATES improves 2025 paired log loss and Brier score over M2_IMMEDIATE_PAIR for immediate pair-closure prediction.",
+    "descriptive": "Some A-to-B orientations have closure rates different from other predecessors of the same current state, with directionally consistent 2024 and 2025 estimates.",
+    "rescue_policy": "No posterior, duration, previous-loop, stock, or clock diagnostic may rescue failure of the M5-versus-M2 primary comparison."
+  },
+  "models": {
+    "family": "deterministic hierarchical beta-binomial categorical frequency",
+    "shrinkage_tau": 64.0,
+    "global_prior_alpha": 0.5,
+    "global_prior_beta": 0.5,
+    "M0_GLOBAL": [],
+    "M1_CURRENT_STATE": ["current_state"],
+    "M2_IMMEDIATE_PAIR": ["previous_state_1", "current_state"],
+    "M3_LAST_THREE_STATES": ["previous_state_2", "previous_state_1", "current_state"],
+    "M4_LAST_FOUR_STATES": ["previous_state_3", "previous_state_2", "previous_state_1", "current_state"],
+    "M5_LAST_FIVE_STATES": ["previous_state_4", "previous_state_3", "previous_state_2", "previous_state_1", "current_state"],
+    "diagnostic_only": [
+      "M6_PAIR_PLUS_COMPLETED_DURATIONS",
+      "M7_PAIR_PLUS_PREVIOUS_CLOSURE_RECENCY",
+      "M8_FULL_CAUSAL_CONTEXT"
+    ],
+    "stock_identifier_allowed": false,
+    "hyperparameter_search_allowed": false
+  },
+  "chronology": {
+    "development_folds": "expanding calendar-month folds; first three complete 2024 months train-only",
+    "assessment_fit": "all 2024 evaluable rows only",
+    "assessment_score": "all eligible 2025 rows",
+    "random_cross_validation_allowed": false,
+    "future_fitted_preprocessing_allowed": false
+  },
+  "metrics": {
+    "primary": [
+      "paired_log_loss_improvement_M5_minus_M2",
+      "paired_brier_improvement_M5_minus_M2"
+    ],
+    "secondary": [
+      "roc_auc",
+      "calibration_error",
+      "top_decile_lift",
+      "quarter_direction_consistency",
+      "leave_one_stock_out_direction_consistency"
+    ],
+    "pair_support_minimum_per_period": 200,
+    "pair_stock_minimum_per_period": 10,
+    "pair_session_minimum_per_period": 30
+  },
+  "uncertainty": {
+    "method": "paired session-date block bootstrap",
+    "draws": 2000,
+    "seed": 20260720,
+    "confidence_level": 0.95,
+    "multiplicity": "Benjamini-Hochberg across supported pair orientations"
+  },
+  "decision_gate": {
+    "positive_decision": "fixed_model_history_increment_observed_nonpromotable",
+    "negative_decision": "fixed_model_no_history_increment",
+    "blocked_decision": "blocked_data_chronology_or_reproducibility_failure",
+    "requirements": [
+      "M5 assessment log loss is lower than M2",
+      "M5 assessment Brier score is lower than M2",
+      "paired session-block 95% lower bound for log-loss improvement is above zero",
+      "improvement is positive in at least three of four 2025 calendar quarters",
+      "at least 90 percent of leave-one-stock-out log-loss improvements are positive",
+      "hard-state sensitivity has the same point-estimate direction",
+      "exact rerun is byte-identical",
+      "independent audit passes"
+    ],
+    "promotion_authorized": false,
+    "economic_testing_authorized": false
+  },
+  "random_seeds": {
+    "bootstrap": 20260720
+  }
+}

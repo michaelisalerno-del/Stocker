@@ -1,0 +1,151 @@
+{
+  "D4_status": "available_historical_causal_stock_volume",
+  "ambiguous_path_count": 0,
+  "constant_2024_downside_base_rate": 0.541501976284585,
+  "decision_contract_checks": {
+    "assessment_action_support": false,
+    "assessment_auc_lower_above_half": false,
+    "assessment_spread_ci_above_zero": false,
+    "beats_specified_label_nulls": false,
+    "not_dependent_on_one_support_cell_or_extreme": false,
+    "positive_mean_aligned_return_both_periods": false,
+    "proper_scores_improve_both_periods": false,
+    "put_down_rate_exceeds_call_both_periods": false,
+    "stress_action_support": true,
+    "stress_auc_above_half": false,
+    "stress_spread_same_sign": false
+  },
+  "descriptive_directional_finding": "low_downside_does_not_imply_upside",
+  "directional_diagnostic_decision": "blocked_insufficient_support",
+  "episode_accounting": {
+    "assessment": {
+      "ambiguous_path": 0,
+      "eligible_fresh_episodes": 417,
+      "material_down": 86,
+      "material_movers": 205,
+      "material_up": 119,
+      "no_move": 212,
+      "sessions": 126,
+      "stocks": 20
+    },
+    "development": {
+      "ambiguous_path": 0,
+      "eligible_fresh_episodes": 474,
+      "material_down": 137,
+      "material_movers": 253,
+      "material_up": 116,
+      "no_move": 221,
+      "sessions": 189,
+      "stocks": 19
+    },
+    "stress": {
+      "ambiguous_path": 0,
+      "eligible_fresh_episodes": 525,
+      "material_down": 172,
+      "material_movers": 270,
+      "material_up": 98,
+      "no_move": 255,
+      "sessions": 67,
+      "stocks": 20
+    }
+  },
+  "exact_equality_events_observed": 0,
+  "exact_probability_decomposition_supported": false,
+  "exclusions": {
+    "checkpoint_secondary": {
+      "eligible_rows": 2970,
+      "eligible_rows_missing_market_baseline": 0,
+      "incomplete_fixed_predictors": 0,
+      "incomplete_primary_outcome": 0,
+      "non_primary_phase": 0,
+      "not_high_m1c": 0,
+      "source_rows": 2970
+    },
+    "fresh_episodes": {
+      "eligible_rows": 1416,
+      "eligible_rows_missing_market_baseline": 0,
+      "incomplete_fixed_predictors": 0,
+      "incomplete_primary_outcome": 0,
+      "non_primary_phase": 0,
+      "not_high_m1c": 0,
+      "source_rows": 1416
+    }
+  },
+  "features": [
+    "D1_signed_return_5m",
+    "D2_signed_return_15m",
+    "D3_close_location_15m",
+    "D4_distance_from_session_vwap_iv"
+  ],
+  "frozen_action_thresholds": {
+    "high": 0.6259400485715194,
+    "high_quantile": 0.8,
+    "low": 0.4496220570301589,
+    "low_quantile": 0.2
+  },
+  "joint_probabilities_constructed": false,
+  "model": {
+    "C": 1.0,
+    "algorithm": "sklearn.linear_model.LogisticRegression",
+    "class_weight": null,
+    "coefficients_standardised": {
+      "D1_signed_return_5m": 0.30956991648600596,
+      "D2_signed_return_15m": 0.21247714740183438,
+      "D3_close_location_15m": -0.20665987687244147,
+      "D4_distance_from_session_vwap_iv": -0.3161884538675025
+    },
+    "feature_names": [
+      "D1_signed_return_5m",
+      "D2_signed_return_15m",
+      "D3_close_location_15m",
+      "D4_distance_from_session_vwap_iv"
+    ],
+    "fit_intercept": true,
+    "intercept": 0.16934281110486785,
+    "iterations": 8,
+    "l1_ratio": 0.0,
+    "max_iter": 1000,
+    "penalty": "l2",
+    "random_state": 2026072801,
+    "solver": "lbfgs"
+  },
+  "movement_consumed_conditional_percentile_transform": "not_implemented_existing_tail_phase_has_no_frozen_transform",
+  "option_profitability_tested": false,
+  "order_routing_enabled": false,
+  "orders_placed": false,
+  "primary_decision": "target_mismatch_prevents_exact_probability_decomposition",
+  "protected_2026_outcomes_accessed": false,
+  "research_id": "M1C Asymmetric Downside Residual V1",
+  "retrospective_status": "already_inspected_2025_periods_not_untouched_confirmation",
+  "robustness": {
+    "all_leave_one_stock_month_checkpoint_down_spreads_positive_and_returns_positive": false,
+    "all_stock_month_session_checkpoint_time_concentrations_below_50_percent": false,
+    "assessment_one_percent_winsorised_mean_aligned_return": -0.0026095908575780734,
+    "maximum_acted_concentration": 0.6857142857142857,
+    "stress_one_percent_winsorised_mean_aligned_return": 0.00044370607580315947
+  },
+  "schema_version": "m1c-asymmetric-downside-residual-v1",
+  "standardisation": {
+    "feature_names": [
+      "D1_signed_return_5m",
+      "D2_signed_return_15m",
+      "D3_close_location_15m",
+      "D4_distance_from_session_vwap_iv"
+    ],
+    "fit_scope": "supplied_training_rows_only",
+    "means": {
+      "D1_signed_return_5m": 0.0009873979430856685,
+      "D2_signed_return_15m": 0.0008401836215427775,
+      "D3_close_location_15m": 0.026231116665650336,
+      "D4_distance_from_session_vwap_iv": 0.10138811496531742
+    },
+    "scales": {
+      "D1_signed_return_5m": 0.012083558674045565,
+      "D2_signed_return_15m": 0.020870564651774923,
+      "D3_close_location_15m": 0.6197855619784922,
+      "D4_distance_from_session_vwap_iv": 2.275167006528935
+    },
+    "variance_definition": "population_ddof_0"
+  },
+  "target_mismatch": "frozen M1C uses strict absolute endpoint exceedance; required directional partition includes exact threshold equality"
+}

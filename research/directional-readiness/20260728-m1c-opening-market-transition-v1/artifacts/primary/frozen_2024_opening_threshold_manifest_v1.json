@@ -1,0 +1,45 @@
+{
+  "calibration_period": {
+    "end": "2024-12-31",
+    "future_stock_outcomes_accessed_for_thresholds": false,
+    "option_outcomes_accessed_for_thresholds": false,
+    "predictors_only": true,
+    "start": "2024-01-01"
+  },
+  "checkpoint_v1": 6,
+  "configuration_hash": "6a4b22017192308502cfc53da36e91ef446ddaac48548da8363f2e12a124f6b5",
+  "expected_opening_bar_count_v1": 6,
+  "market_proxy_v1": "VTI",
+  "minimum_predictor_support_v1": 20,
+  "pooling_fallback_used": false,
+  "quantiles": {
+    "method": "numpy_linear",
+    "range": 0.75,
+    "signed_return_lower": 0.1,
+    "signed_return_upper": 0.9
+  },
+  "schema_version": "m1c-opening-market-transition-thresholds-v1",
+  "stock_relative_response_quintile_boundaries_v1": [
+    -1.0019278339119537,
+    1.3089013104132659,
+    2.7915720766164127,
+    5.141678860987508
+  ],
+  "stock_relative_response_quintile_support_v1": 65,
+  "thresholds": {
+    "calibration_complete_v1": true,
+    "calibration_missing_reason_v1": null,
+    "checkpoint_v1": 6,
+    "market_opening_range_q75_v1": 0.003848181718348481,
+    "market_opening_range_support_v1": 247,
+    "market_opening_return_q10_v1": -0.0028896373389661863,
+    "market_opening_return_q90_v1": 0.002255226760464915,
+    "market_opening_return_support_v1": 247,
+    "market_overnight_gap_q10_v1": -0.0038205689075119717,
+    "market_overnight_gap_q90_v1": 0.006379685630897604,
+    "market_overnight_gap_support_v1": 247,
+    "market_total_transition_q10_v1": -0.005360609443825508,
+    "market_total_transition_q90_v1": 0.006437555177674593,
+    "market_total_transition_support_v1": 247
+  }
+}

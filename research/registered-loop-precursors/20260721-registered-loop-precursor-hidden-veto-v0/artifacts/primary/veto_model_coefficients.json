@@ -1,0 +1,86 @@
+{
+  "V0": {
+    "C": 0.25,
+    "class_weight": null,
+    "coefficient": [
+      0.3313647803823708,
+      -0.006913919956863875
+    ],
+    "feature_names": [
+      "logit_B0_probability",
+      "checkpoint_12"
+    ],
+    "intercept": -0.730539324658358,
+    "max_iter": 300,
+    "n_iter": 4,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "scaler_mean": [
+      -0.6164890656960946,
+      0.7390424814565071
+    ],
+    "scaler_scale": [
+      0.5198812989042986,
+      0.4391567966673355
+    ],
+    "solver": "liblinear",
+    "standard_error_intercept_then_coefficients": [
+      0.2501186769378384,
+      0.2205449490889479,
+      0.22362509544347114
+    ]
+  },
+  "V1": {
+    "C": 0.25,
+    "class_weight": null,
+    "coefficient": [
+      0.33415572354609185,
+      -0.009662407439513847,
+      0.015269009165775437
+    ],
+    "feature_names": [
+      "logit_B0_probability",
+      "checkpoint_12",
+      "logit_U1_probability"
+    ],
+    "intercept": -0.7304987656907902,
+    "max_iter": 300,
+    "n_iter": 4,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "scaler_mean": [
+      -0.6164890656960946,
+      0.7390424814565071,
+      -0.4665085434465437
+    ],
+    "scaler_scale": [
+      0.5198812989042986,
+      0.4391567966673355,
+      0.766378418172866
+    ],
+    "solver": "liblinear",
+    "standard_error_intercept_then_coefficients": [
+      0.2501069680318396,
+      0.2246377073282838,
+      0.22753072738470623,
+      0.23243902823602663
+    ]
+  },
+  "V1_hidden_risk_summary": {
+    "assessment_months_with_negative_high_minus_low_rate": 3,
+    "descriptive_standard_error": 0.23243902823602663,
+    "negative": false,
+    "standardised_coefficient": 0.015269009165775437
+  },
+  "broker_integration_required": false,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "hidden_route_diversion_veto_test": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "strategy_promotion": false
+}

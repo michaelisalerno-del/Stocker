@@ -1,0 +1,28 @@
+{
+  "addendum_sha256": "ea76313628e001e97eef6447db76a08a0480be41fcf80eea2aed203be43a6b6a",
+  "audit_kind": "post-score outcome-blind population-clock correction",
+  "base_score_sessions": 68,
+  "base_surface_sessions": 128,
+  "candidate_counts": {
+    "cycle_04|state4": 259,
+    "cycle_07|state5": 432
+  },
+  "candidate_score_sessions": 67,
+  "candidate_surface_sessions": 126,
+  "checks": {
+    "base_surface_calendar_matches_contract": true,
+    "candidate_calendar_indices_replay": true,
+    "candidate_dates_are_subset_of_base_calendar": true,
+    "candidate_population_counts_match_contract": true,
+    "frozen_sources_remain_unchanged": true,
+    "original_audit_only_failed_population_check": true,
+    "recorded_candidate_population_summary_replays": true,
+    "score_flags_replay_from_base_calendar": true
+  },
+  "contract_id": "20260714-causal-payoff-model-paths-v1",
+  "correction": "The frozen V1 auditor incorrectly demanded 128 distinct sessions from the candidate-only research surface. The contract assigns 128 sessions to the underlying accepted-setup surface; candidate opportunities occur on 126 of them.",
+  "passed": 8,
+  "scientific_effect": "none; no payoff, route outcome, prediction, or policy field is read",
+  "supersedes_check": "frozen_population_and_calendar_match",
+  "total": 8
+}

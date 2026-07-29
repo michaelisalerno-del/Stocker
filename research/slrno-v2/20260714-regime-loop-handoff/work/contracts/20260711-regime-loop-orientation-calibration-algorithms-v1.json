@@ -1,0 +1,245 @@
+{
+  "contract_id": "regime_loop_orientation_calibration_algorithms_v1",
+  "contract_frozen_at_utc": "2026-07-11T23:10:00Z",
+  "scientific_status": "post_inspection_2024_causal_oof_algorithm_development_test",
+  "prospective_validation_claim_permitted": false,
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Test whether causal calibration and hierarchical orientation-shrinkage algorithms can preserve the regime-loop joint-event information in the raw full link while eliminating worst-bin miscalibration and cycle-current-state reversals.",
+  "known_before_freeze": {
+    "source_result_is_opened": true,
+    "raw_full_link_pooled_log_loss_improvement": 0.04810046711655895,
+    "raw_full_link_supported_orientation_log_loss_reversals": 7,
+    "raw_full_link_supported_orientation_brier_reversals": 7,
+    "raw_full_link_maximum_supported_bin_error": 0.088513,
+    "fixed_half_shrinkage_pooled_log_loss_improvement": 0.032831789397013374,
+    "fixed_half_shrinkage_orientation_log_loss_reversals": 4,
+    "fixed_half_shrinkage_orientation_brier_reversals": 2,
+    "global_logistic_and_dependency_stack_already_failed": true,
+    "implication": "Every result is post-inspection development evidence. Hyperparameters, feature scales, time bins, and gates are frozen here and cannot be changed after scoring."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_weighted_isotonic",
+      "algorithm": "weighted_isotonic",
+      "question": "Can a monotone weighted isotonic map repair supported probability bins without destroying raw-link proper loss or ranking?",
+      "benefit": "Flexible monotone calibration with no cycle identity memorization.",
+      "stop": "Any raw-link loss degradation, baseline orientation reversal, or unsupported calibration cell rejects it."
+    },
+    {
+      "id": "H2_beta_calibration",
+      "algorithm": "beta_global",
+      "question": "Can a causal two-feature beta calibration correct asymmetric rare-event probability distortion better than the rejected one-logit calibrator?",
+      "benefit": "Smooth global rare-event calibration with fixed complexity.",
+      "stop": "Failure of any complete global reliability gate rejects it."
+    },
+    {
+      "id": "H3_orientation_residual_shrinkage",
+      "algorithm": "orientation_residual",
+      "question": "Can ridge-partial-pooled cycle-current-state intercepts and raw-minus-baseline residual slopes remove local reversals while retaining pooled information?",
+      "benefit": "Directly targets the observed orientation heterogeneity.",
+      "stop": "Any supported orientation remains worse than baseline or any probability cell remains outside calibration limits."
+    },
+    {
+      "id": "H4_orientation_clock_residual_shrinkage",
+      "algorithm": "orientation_clock_residual",
+      "question": "Does adding fixed existing entry-clock-quartile partial pooling explain time attraction without overfitting cycle-regime cells?",
+      "benefit": "Tests the user's regime-loop-time linkage using the already frozen clock partition.",
+      "stop": "Must pass the global algorithm gate before any time slice can qualify; no new clock cut is allowed."
+    }
+  ],
+  "frozen_source": {
+    "linkage_prediction_ledger": {
+      "path": "/private/tmp/stocker_regime_loop_linkage_ideas_v3_20260711/linkage_predictions_2024_sep_dec.parquet",
+      "sha256": "99374428d372711b233cf6dfbe59a18f5667e032ef3039b2ae05df13400cd660",
+      "rows": 130672,
+      "months": ["2024-09", "2024-10", "2024-11", "2024-12"]
+    },
+    "linkage_independent_audit": {
+      "path": "/private/tmp/stocker_regime_loop_linkage_ideas_v3_20260711/independent_audit.json",
+      "sha256": "92343c008f0cd585c3e02c1e3c60905aa4f9cde7e9c9b99111076a2cd8be300f",
+      "required": {"all_passed": true, "checks_passed": 19, "checks_total": 19}
+    },
+    "linkage_contract": {
+      "path": "work/contracts/20260711-regime-loop-linkage-ideas-v3.json",
+      "sha256": "88a60956857e6ccb4fb5e74beb9085e46765e55b31763b26927dc496822ce947"
+    },
+    "linkage_runner": {
+      "path": "work/run_regime_loop_linkage_ideas_v3.py",
+      "sha256": "c0e8786670fd51e3d93290ecd56ba51322ebe6ace0fd7e521803f2fd8c1ce72e"
+    },
+    "source_prediction_change_permitted": false,
+    "detector_or_parent_component_refit_permitted": false
+  },
+  "population_and_causality": {
+    "available_training_months": ["2024-09", "2024-10", "2024-11"],
+    "primary_validation_months": ["2024-11", "2024-12"],
+    "folds": {
+      "2024-11": ["2024-09", "2024-10"],
+      "2024-12": ["2024-09", "2024-10", "2024-11"]
+    },
+    "strictly_earlier_month_training": true,
+    "already_opened_development_evidence": true,
+    "later_period_paths_permitted": false,
+    "partial_2026_permitted": false,
+    "prospective_shadow_read_or_write_permitted": false
+  },
+  "targets": {
+    "joint_event": "loop_occurs_and_frozen_quality_class_at_or_above_tier",
+    "movement_targets": ["absolute_return_bps", "future_range_bps"],
+    "horizons_bars": [6, 12, 24],
+    "tiers": ["p75", "p90"],
+    "cells": 12,
+    "baseline_probability": "link__baseline",
+    "raw_reference_probability": "link__raw_full_link"
+  },
+  "data_labels": {
+    "provider_bars": "regular_session_five_minute_provider_OHLC",
+    "direct_volume_label": "historical_volume_not_used",
+    "direction_or_signed_return_used": false,
+    "cost_or_exit_model": "not_applicable_no_trading_rule"
+  },
+  "probability_processing": {
+    "component_clip": [1e-6, 0.999999],
+    "output_clip": [1e-6, 0.999999],
+    "sample_weight": "inverse_compatible_weight",
+    "one_model_per_target_horizon_tier_fold": true,
+    "post_fit_or_validation_calibration_permitted": false
+  },
+  "algorithms": {
+    "weighted_isotonic": {
+      "class": "sklearn_IsotonicRegression",
+      "input": "raw_full_link_probability",
+      "increasing": true,
+      "out_of_bounds": "clip",
+      "y_min": 1e-6,
+      "y_max": 0.999999,
+      "sample_weight": "inverse_compatible_weight"
+    },
+    "beta_global": {
+      "features": ["log_raw_full_probability", "log_one_minus_raw_full_probability"],
+      "preprocessing": "StandardScaler_fit_on_training_with_sample_weight",
+      "estimator": "fixed_binary_ridge_logistic"
+    },
+    "orientation_residual": {
+      "global_features": ["logit_baseline", "raw_minus_baseline_logit_residual"],
+      "global_feature_preprocessing": "StandardScaler_fit_on_training_with_sample_weight",
+      "orientation_definition": "cycle_id_by_current_state_sorted_from_full_frozen_ledger",
+      "orientation_count_expected": 44,
+      "orientation_intercept_one_hot_scale": 0.25,
+      "orientation_residual_interaction_scale": 0.125,
+      "stock_identity": false,
+      "estimator": "fixed_binary_ridge_logistic"
+    },
+    "orientation_clock_residual": {
+      "inherit_orientation_residual": true,
+      "global_feature_preprocessing": "StandardScaler_fit_on_training_with_sample_weight",
+      "clock_definition": "existing_entry_clock_quartile_from_frozen_ledger",
+      "new_clock_cut_permitted": false,
+      "orientation_clock_intercept_one_hot_scale": 0.125,
+      "orientation_clock_residual_interaction_scale": 0.0625,
+      "stock_identity": false,
+      "estimator": "fixed_binary_ridge_logistic"
+    },
+    "fixed_binary_ridge_logistic": {
+      "class": "sklearn_LogisticRegression_binary",
+      "C": 0.1,
+      "solver": "lbfgs",
+      "max_iter": 2000,
+      "tol": 1e-10,
+      "random_state": 20260711,
+      "class_weight": null,
+      "hyperparameter_grid": false
+    }
+  },
+  "support": {
+    "validation_rows_minimum": 50000,
+    "validation_anchors_minimum": 8000,
+    "sessions_minimum": 40,
+    "stocks_required": 22,
+    "all_20_cycles_and_8_states_required": true,
+    "orientation_slice_rows_minimum": 250,
+    "orientation_slice_joint_positives_across_12_cells_minimum": 15,
+    "calibration_supported_bin_rows_minimum": 250
+  },
+  "evaluation": {
+    "primary_weight": "inverse_compatible_weight",
+    "secondary_weight": "unweighted",
+    "equal_cell_pooling": true,
+    "losses": ["binary_log_loss", "brier"],
+    "calibration": {
+      "fixed_probability_bins": 10,
+      "absolute_maximum_supported_bin_error": 0.02,
+      "candidate_ECE_no_worse_than_raw_reference_all_12_cells": true
+    },
+    "temporal_slices": ["2024-11", "2024-12"],
+    "market_transfer": "leave_one_stock_out_every_symbol",
+    "orientation_slices": "cycle_id_by_current_state",
+    "ranking": "top_three_recall_within_anchor_for_each_target_horizon_tier",
+    "session_bootstrap": {"block_sessions": 5, "draws": 4999, "confidence": 0.95, "seed": 20260711},
+    "paired_test": {
+      "method": "9999_draw_session_level_Rademacher_sign_flip",
+      "comparisons": ["candidate_vs_baseline", "candidate_vs_raw_reference"],
+      "endpoints": ["log_loss", "brier"],
+      "correction": "Holm_within_comparison_and_endpoint_across_four_algorithms",
+      "familywise_alpha": 0.05
+    }
+  },
+  "global_algorithm_gate": {
+    "minimum_pooled_relative_log_loss_improvement_vs_baseline": 0.02,
+    "pooled_log_loss_and_brier_no_worse_than_raw_reference": true,
+    "both_baseline_and_raw_bootstrap_upper_bounds_below_or_equal_zero": true,
+    "all_four_Holm_endpoints_pass": true,
+    "all_12_cells_log_loss_and_brier_no_worse_than_baseline": true,
+    "all_12_cells_ECE_no_worse_than_raw_and_maximum_bin_error_at_or_below_0.02": true,
+    "both_validation_months_log_loss_and_brier_no_worse_than_baseline_and_raw": true,
+    "every_leave_one_stock_out_log_loss_and_brier_no_worse_than_baseline": true,
+    "zero_supported_orientation_log_loss_or_brier_reversals_vs_baseline": true,
+    "top_three_recall_no_worse_than_raw_in_all_12_cells": true
+  },
+  "time_attraction_screen": {
+    "algorithm": "orientation_clock_residual",
+    "dimensions": ["cycle_id", "current_state", "entry_clock_quartile"],
+    "tier": "p75",
+    "support": {"rows_minimum": 250, "joint_positives_across_six_cells_minimum": 25, "stocks_minimum": 10},
+    "all_six_cells_and_both_months_no_worse_than_baseline": true,
+    "maximum_supported_bin_error": 0.03,
+    "Holm_across_supported_slices": true,
+    "global_algorithm_must_pass_first": true,
+    "named_loop_good_or_high_label_permitted": false
+  },
+  "decision": {
+    "candidate_algorithms": [
+      "weighted_isotonic",
+      "beta_global",
+      "orientation_residual",
+      "orientation_clock_residual"
+    ],
+    "priority_if_multiple_pass": [
+      "weighted_isotonic",
+      "beta_global",
+      "orientation_residual",
+      "orientation_clock_residual"
+    ],
+    "passing_label": "development_orientation_calibration_candidate_pending_unseen_validation",
+    "failure_label": "orientation_calibration_algorithms_rejected_or_unconfirmed",
+    "zero_passing_algorithms": "retain_raw_link_as_diagnostic_only_and_do_not_tune_on_same_results",
+    "same_experiment_refinement_permitted": false,
+    "later_period_scoring": false,
+    "prospective_shadow_entry": false,
+    "named_loop_good_or_high_promotion_permitted": false,
+    "trading_rule_or_PnL_model_permitted": false
+  },
+  "integrity": {
+    "independent_audit_required": true,
+    "auditor_may_not_import_runner": true,
+    "replay_source_models_parameters_predictions_losses_calibration_bootstrap_Holm_slices_ranking_gates_and_decision": true,
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "all_safety_flags_exact": true
+  },
+  "planned_artifact_root": "/private/tmp/stocker_regime_loop_orientation_calibration_algorithms_v1_20260711"
+}

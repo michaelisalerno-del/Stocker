@@ -1,0 +1,18 @@
+{
+  "assessment_up_rate": 0.5255474452554745,
+  "binary_down": "strictly negative ten-minute signed log return",
+  "binary_up": "strictly positive ten-minute signed log return",
+  "development_up_rate": 0.49148936170212765,
+  "entry_price": "open of first completed five-minute bar after T",
+  "exact_zero_returns": 10,
+  "exact_zero_returns_excluded_from_binary_fitting": true,
+  "passed": true,
+  "primary_horizon_minutes": 10,
+  "primary_target": "log(close of second future completed bar / entry)",
+  "research_only": true,
+  "secondary_horizons_minutes": [
+    5,
+    15,
+    30
+  ]
+}

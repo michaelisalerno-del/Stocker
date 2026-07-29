@@ -1,0 +1,14 @@
+metric,value,threshold,passed,blocks_primary
+assessment_rows,25518,30000,False,
+assessment_sessions,160,140,True,
+assessment_stocks,20,15,True,
+assessment_months,8,8,True,
+positive_outcomes,1139,500,True,
+feature_retention,0.966178077203205,0.95,True,
+maximum_weighted_stock_share,0.0501807101889339,0.1,True,
+maximum_target_class_share,0.955334851551957,0.9,False,
+route_resolution_state_rows__BROAD_CONFLICT,3712,100,True,False
+route_resolution_state_rows__NARROWING,684,100,True,False
+route_resolution_state_rows__DOMINANT_ROUTE,908,100,True,False
+route_resolution_state_rows__LOW_ROUTE_SUPPORT,5598,100,True,False
+route_resolution_state_rows__OTHER,14616,100,True,False

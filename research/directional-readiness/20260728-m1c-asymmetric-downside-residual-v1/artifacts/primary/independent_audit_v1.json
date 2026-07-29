@@ -1,0 +1,47 @@
+{
+  "assessment_rows": 417,
+  "frozen_system_regression": {
+    "fields": [
+      "episode_id",
+      "existing_fresh_episode_identifier",
+      "M1C_probability",
+      "m1c_high_tail_v1",
+      "m1c_tail_phase_v1",
+      "movement_consumed_v1",
+      "A1_probability_up_v1",
+      "A1_action_v1"
+    ],
+    "passed": true,
+    "rows": 942
+  },
+  "safety_and_artifacts": {
+    "bootstrap_draws_per_result": 1000,
+    "order_routing_enabled": false,
+    "orders_placed": false,
+    "output_hashes_verified": 28,
+    "passed": true,
+    "permutation_draws_per_result": 1000,
+    "protected_2026_outcomes_accessed": false
+  },
+  "schema_version": "m1c-asymmetric-downside-residual-v1-audit",
+  "score_threshold_action_reconstruction": {
+    "high_threshold": 0.6259400485715194,
+    "low_threshold": 0.4496220570301589,
+    "maximum_probability_difference": 0.0,
+    "oof_rows": 213,
+    "passed": true,
+    "rows": 942
+  },
+  "status": "passed",
+  "stress_rows": 525,
+  "target_reconstruction": {
+    "down": 258,
+    "exact_equality": 0,
+    "maximum_implied_denominator_difference": 0.0,
+    "maximum_signed_return_difference": 0.0,
+    "no_move": 467,
+    "passed": true,
+    "rows": 942,
+    "up": 217
+  }
+}

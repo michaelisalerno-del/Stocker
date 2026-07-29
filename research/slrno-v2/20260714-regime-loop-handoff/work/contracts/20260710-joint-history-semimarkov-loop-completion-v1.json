@@ -1,0 +1,180 @@
+{
+  "contract_id": "joint_history_semimarkov_loop_completion_v1",
+  "contract_frozen_at_utc": "2026-07-10T19:46:51Z",
+  "scientific_status": "development_and_backward_portability",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "periods": {
+    "fit": 2024,
+    "development_score": 2025,
+    "backward_portability_score": 2023,
+    "2026_permitted": false,
+    "prospective_validation_claim_permitted": false
+  },
+  "inputs": {
+    "state_model": "frozen eight-state causal forward semi-Markov detector",
+    "destination_model": "frozen 2024 last-three-state multinomial logistic model",
+    "cycles": "frozen 2024 top twenty fixed cycles",
+    "provider_price_or_volume_values_read": false,
+    "run_fields": [
+      "symbol_norm",
+      "session_date",
+      "start_timestamp",
+      "state",
+      "previous_state_2",
+      "previous_state_1",
+      "duration",
+      "next_state"
+    ]
+  },
+  "joint_kernel": {
+    "formula": "P_history(next_state | previous_state_2, previous_state_1, current_state) * P_backoff(dwell_bucket | previous_state_2, previous_state_1, current_state, next_state)",
+    "interpretation": "A normalized joint next-state/dwell kernel by the probability chain rule; destination marginals remain the retained history model.",
+    "dwell_buckets": {
+      "exact": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "overflow_bucket": "duration >= 24"
+    },
+    "duration_fit_excludes_session_end_destination": true,
+    "session_end_reason": "The terminal run duration is truncated by the session boundary rather than an observed natural state departure.",
+    "hierarchy": [
+      "frozen 2024 semi-Markov current-state duration PMF",
+      "current_state + next_state",
+      "previous_state_1 + current_state + next_state",
+      "previous_state_2 + previous_state_1 + current_state + next_state"
+    ],
+    "smoothing": {
+      "current_state_next_state_prior_strength": 256.0,
+      "order2_next_state_prior_strength": 256.0,
+      "order3_next_state_prior_strength": 1024.0,
+      "selection": {
+        "data": "2024 non-terminal runs only",
+        "schedule": "expanding monthly histories scored July through December 2024",
+        "candidate_strengths_each_level": [
+          64.0,
+          256.0,
+          1024.0
+        ],
+        "criterion": "lowest pooled held-forward dwell log loss for the full order-3 conditional PMF",
+        "selected_tuple": [
+          256.0,
+          256.0,
+          1024.0
+        ],
+        "must_reproduce_before_scoring": true
+      }
+    },
+    "parameter_tuning_after_scoring_permitted": false,
+    "destination_refit_permitted": false,
+    "state_refit_permitted": false
+  },
+  "rollout": {
+    "anchors": "every causal state-run entry with zero-based New York clock bar ordinal <= 53",
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "compatible_cycle_outputs_overlap": true,
+    "session_end_destination": 8,
+    "session_end_before_cycle_completion_is_negative": true,
+    "route_context_update": "previous_state_2 <- previous_state_1; previous_state_1 <- current_state; current_state <- hypothesised next_state",
+    "completion_probability": "sum of the dynamically convolved joint transition/dwell mass with total dwell <= horizon over deduplicated compatible cycle rotations",
+    "completion_target": "one when a compatible exact future state route closes within-session and the sum of constituent observed run durations is <= horizon",
+    "price_direction_return_or_range_used": false
+  },
+  "models": {
+    "history_path_only": "retained destination-path probability with no completion-time adjustment",
+    "history_frozen_state_timed": "retained destination probabilities multiplied dynamically by frozen semi-Markov current-state duration PMFs",
+    "history_destination_timed": "retained destination probabilities multiplied dynamically by q1(dwell | current_state, next_state)",
+    "history_order2_timed": "diagnostic retained destination probabilities multiplied dynamically by q2(dwell | previous_state_1, current_state, next_state)",
+    "history_joint_timed": "candidate retained destination probabilities multiplied dynamically by q3(dwell | previous_state_2, previous_state_1, current_state, next_state)"
+  },
+  "support_gates_each_scoring_period_and_horizon": {
+    "minimum_rows": 300000,
+    "minimum_positive_completions": 8000,
+    "required_cycles": 20,
+    "minimum_positive_completions_each_cycle": 40,
+    "minimum_stocks": 18,
+    "required_quarters": 4,
+    "required_current_states": 8
+  },
+  "comparison_gates_each_period": {
+    "primary_comparisons": [
+      "history_joint_timed vs history_frozen_state_timed",
+      "history_joint_timed vs history_destination_timed"
+    ],
+    "minimum_pooled_log_loss_relative_improvement": {
+      "vs_history_frozen_state_timed": 0.005,
+      "vs_history_destination_timed": 0.0025
+    },
+    "daily_uncertainty": {
+      "method": "five-session moving-block bootstrap",
+      "draws": 5000,
+      "confidence_interval": 0.95,
+      "upper_bound_below_zero_for": [
+        "log_loss_difference",
+        "brier_difference"
+      ]
+    },
+    "both_losses_lower_at_every_horizon": true,
+    "both_losses_lower_in_every_quarter": true,
+    "both_losses_lower_under_every_leave_one_stock_out_deletion": true,
+    "fixed_calibration_bins": 10,
+    "minimum_supported_calibration_bin_rows": 500,
+    "ece_no_worse_at_every_horizon": true,
+    "maximum_supported_bin_error_tolerance": 0.01,
+    "minimum_cycles_with_lower_pooled_log_loss": 15,
+    "minimum_top_three_recall_improvement": {
+      "vs_history_frozen_state_timed": 0.005,
+      "vs_history_destination_timed": 0.0
+    }
+  },
+  "path_only_sanity_gate_each_period": {
+    "history_joint_timed_log_loss_and_brier_lower_at_every_horizon": true,
+    "minimum_top_three_recall_improvement": 0.005
+  },
+  "integrity_gates": {
+    "joint_distribution_sums_to_one_every_supported_context": true,
+    "dwell_pmfs_sum_to_one": true,
+    "probabilities_finite_and_in_unit_interval": true,
+    "destination_marginal_matches_retained_history_model": true,
+    "all_source_hashes_frozen": true,
+    "all_labels_and_probabilities_independently_reconstructed": true,
+    "prospective_shadow_tree_unchanged": true,
+    "no_2026_rows": true,
+    "no_price_direction_return_range_pnl_cost_order_or_deployment_columns": true
+  },
+  "decision": {
+    "retain_only_if": "support, both primary comparisons, path-only sanity, and integrity gates pass in both 2025 and backward-2023",
+    "simpler_partial_decision": "If destination-conditioned timing passes versus frozen state-only timing in both periods but full-history timing fails versus destination-conditioned timing, retain only the simpler destination-conditioned dwell hypothesis and keep the full-history kernel rejected.",
+    "failed_experiment_action": "retain the history-only loop identity forecaster and keep joint completion timing rejected",
+    "successful_experiment_interpretation": "research evidence for which compatible loop completes within 6/12/24 bars; not price direction, economic edge, or tradability"
+  }
+}

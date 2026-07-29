@@ -1,0 +1,27 @@
+{
+  "fixture_version": "1",
+  "fixture_id": "prospective-shadow-replay-v1",
+  "score_label": "synthetic_replay_not_frozen_m1",
+  "session_date": "2026-07-24",
+  "required_previous_session": "2026-07-23",
+  "symbol": "AAL",
+  "underlying_contract_id": 265598,
+  "bars": [
+    {"end": "2026-07-24T14:35:00Z", "open": 12.00, "high": 12.08, "low": 11.98, "close": 12.04, "activity": 101.0, "m0": 0.42, "m1": 0.40},
+    {"end": "2026-07-24T14:40:00Z", "open": 12.04, "high": 12.18, "low": 12.03, "close": 12.15, "activity": 119.0, "m0": 0.55, "m1": 0.60},
+    {"end": "2026-07-24T14:45:00Z", "open": 12.15, "high": 12.23, "low": 12.13, "close": 12.21, "activity": 126.0, "m0": 0.56, "m1": 0.62},
+    {"end": "2026-07-24T14:50:00Z", "open": 12.21, "high": 12.22, "low": 12.08, "close": 12.10, "activity": 108.0, "m0": 0.43, "m1": 0.40},
+    {"end": "2026-07-24T14:55:00Z", "open": 12.10, "high": 12.27, "low": 12.09, "close": 12.24, "activity": 132.0, "m0": 0.58, "m1": 0.61}
+  ],
+  "synthetic_threshold": 0.5,
+  "capture_horizons_minutes": [0, 5, 10, 15, 30],
+  "available_expiries": ["2026-07-24", "2026-07-28"],
+  "strikes": [11.0, 12.0, 13.0],
+  "events": [
+    {"type": "connection_lost", "code": 1100},
+    {"type": "connection_restored_data_maintained", "code": 1102},
+    {"type": "connection_lost", "code": 1100},
+    {"type": "connection_restored_data_lost", "code": 1101},
+    {"type": "market_data_budget_exhausted"}
+  ]
+}

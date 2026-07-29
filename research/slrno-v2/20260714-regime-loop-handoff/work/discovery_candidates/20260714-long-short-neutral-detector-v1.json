@@ -1,0 +1,111 @@
+{
+  "candidate_id": "20260714-long-short-neutral-detector-v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "application_modified": false,
+  "scientific_status": "causal_retrospective_three_state_development_on_already_opened_2024_2025_and_partial_2026_not_validation",
+  "sealed_validation_performed": false,
+  "sealed_data_available": false,
+  "primary_decision": {
+    "decision": "all_three_state_detectors_rejected_or_descriptive_only",
+    "reason": "price context and historical-volume activity did not improve probabilistic direction detection portably, and every cost-aware directional policy lost after 5 bps per side"
+  },
+  "population": {
+    "surface": "two fixed non-overlapping clocks per complete stock-session with no setup, loop, regime, or direction filter",
+    "frozen_events": 24410,
+    "scored_outcomes": 24096,
+    "score_rows_2025": 9815,
+    "score_rows_2026": 4501,
+    "stocks_2025": 20,
+    "stocks_2026": 19,
+    "horizon_bars": 24,
+    "primary_cost_bps_per_side": 5
+  },
+  "target": {
+    "long": "upper causal-scale barrier uniquely touched first",
+    "short": "lower causal-scale barrier uniquely touched first",
+    "neutral": "neither touched within 24 bars or first interaction unresolvable within one five-minute bar",
+    "barrier_bps": "clip(4 * prior-12-bar median true range bps, 40, 250)"
+  },
+  "class_rates": {
+    "2025": {
+      "long": 0.240856,
+      "neutral": 0.503311,
+      "short": 0.255833
+    },
+    "2026": {
+      "long": 0.269718,
+      "neutral": 0.495001,
+      "short": 0.235281
+    }
+  },
+  "models": [
+    {
+      "id": "M0_clock_prior",
+      "role": "comparator",
+      "2025_log_loss": 1.041481,
+      "2026_log_loss": 1.04613
+    },
+    {
+      "id": "M1_price_context",
+      "decision": "rejected_or_descriptive_only",
+      "2025_macro_f1": 0.267158,
+      "2025_log_loss": 1.042285,
+      "2025_mean_net_per_directional_bps": -14.8561,
+      "2026_macro_f1": 0.227472,
+      "2026_log_loss": 1.058873,
+      "2026_mean_net_per_directional_bps": -19.3783
+    },
+    {
+      "id": "M2_price_plus_activity",
+      "decision": "rejected_or_descriptive_only",
+      "2025_macro_f1": 0.268608,
+      "2025_log_loss": 1.043408,
+      "2025_mean_net_per_directional_bps": -12.3338,
+      "2026_macro_f1": 0.231012,
+      "2026_log_loss": 1.059484,
+      "2026_mean_net_per_directional_bps": -17.634
+    }
+  ],
+  "main_findings": [
+    "Long, short, and neutral form a meaningful output vocabulary; the target was not degenerate because both directional classes had substantial support.",
+    "The one-shot price equation mainly learned the neutral base rate and failed to identify which side would touch first.",
+    "Small macro-F1 gains came from rare directional class predictions, but log loss worsened and directional precision remained low.",
+    "The cost-aware probability-margin equation emitted many directions, but realised precision stayed near the unconditional class rates and losses were securely negative.",
+    "Historical-volume activity did not provide a portable incremental direction signal.",
+    "Loops were not needed to reach this negative result and remain excluded from the primary directional detector."
+  ],
+  "next_hypothesis": {
+    "name": "dynamic_competing_first_touch_hazards",
+    "status": "prospective_specification_only_not_activated",
+    "reason": "static direction context failed while earlier completed-path research contained the strongest available occurrence-level information",
+    "equation": "separate causal upper-touch and lower-touch hazards plus survival/neutral probability, updated after every completed bar",
+    "state_rule": "emit long or short only when its lower expected-net uncertainty bound is positive; otherwise neutral/unknown",
+    "contract": "../contracts/20260714-dynamic-long-short-neutral-prospective-log-v1.json"
+  },
+  "retired_paths": [
+    "the frozen fixed-clock M0, M1, and M2 equations on opened 2024-2026",
+    "barrier, clamp, horizon, clock, regularisation, or feature tuning on these outcomes",
+    "new static price-feature subsets selected from the opened result",
+    "historical-volume threshold or interaction mining",
+    "treating a macro-F1 increase without log-loss and economic improvement as a detector",
+    "forcing a directional state when neutral/unknown is better supported"
+  ],
+  "provider_volume_label": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "strategy_promotion": false,
+  "integrity": {
+    "focused_tests": "13_of_13_passed",
+    "independent_audit": "12_of_12_passed",
+    "maximum_causal_feature_or_path_error": 0.0,
+    "maximum_sampled_prequential_probability_error": 0.0,
+    "exact_rerun": "all_artifact_files_byte_identical",
+    "pre_score_manifest_sha256": "39d9b9a33d4660709e758bd7504440b22cc6f610796ef7bcf9356d062b50c963",
+    "artifact_manifest_sha256": "83960bb61d91088af7b9dace64bd1b455d2e7cf6457c59132e0f8da03a1bb6f8"
+  },
+  "report": "../reports/20260714-long-short-neutral-detector-v1.md",
+  "primary_artifacts": "../artifacts/20260714-long-short-neutral-detector-v1/primary",
+  "exact_rerun": "../artifacts/20260714-long-short-neutral-detector-v1/exact_rerun"
+}

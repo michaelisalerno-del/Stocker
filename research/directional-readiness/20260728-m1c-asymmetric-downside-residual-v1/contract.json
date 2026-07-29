@@ -1,0 +1,248 @@
+{
+  "schema_version": "m1c-asymmetric-downside-residual-v1",
+  "research_id": "M1C Asymmetric Downside Residual V1",
+  "research_only": true,
+  "base_commit": "1d32190",
+  "cohort": "anchor_frozen_20",
+  "underlying_bar_minutes": 5,
+  "frozen_checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "chronology": {
+    "development": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "assessment": {
+      "start": "2025-01-01",
+      "end": "2025-08-22"
+    },
+    "stress": {
+      "start": "2025-09-01",
+      "end": "2025-12-31"
+    },
+    "protected": {
+      "start": "2026-01-01",
+      "end": null
+    }
+  },
+  "movement_gate": {
+    "model": "M1C/frozen-m1c-v0",
+    "threshold": 0.488333710794033,
+    "comparison": "greater_than_or_equal",
+    "refit_allowed": false,
+    "recalibration_allowed": false,
+    "threshold_search_allowed": false,
+    "probability_is_direction_feature": false
+  },
+  "canonical_m1c_target": {
+    "name": "movement_exceeds_prior_close_iv_15m",
+    "horizon_minutes": 15,
+    "entry_price": "open of the first five-minute bar after the checkpoint",
+    "terminal_price": "close of the third five-minute bar after entry",
+    "movement": "absolute log(terminal_price / entry_price)",
+    "previous_close_implied_denominator": "prior-close ATM IV * sqrt(15 / (252 * 390)) * sqrt(2 / pi)",
+    "material_move_comparison": "strict_greater_than"
+  },
+  "direction_partition": {
+    "method": "signed_endpoint_return",
+    "DOWN_MOVE": "signed endpoint log return <= -previous-close implied denominator",
+    "UP_MOVE": "signed endpoint log return >= previous-close implied denominator",
+    "NO_MOVE": "absolute signed endpoint log return < previous-close implied denominator",
+    "AMBIGUOUS_BOTH_WITHIN_BAR": "used only by the first-breach OHLC audit when both sides first breach in the same bar",
+    "exact_probability_decomposition_supported": false,
+    "mismatch_reason": "The frozen M1C event uses strict absolute_return > denominator, while the required direction partition assigns exact +/- denominator equality to a material direction.",
+    "joint_probability_construction_allowed": false
+  },
+  "primary_population": {
+    "unit": "existing fresh high-M1C episode",
+    "freshness": "unchanged threshold crossing plus frozen 30-minute stock-session spacing",
+    "required_tail_phases": [
+      "FIRST_ENTRY",
+      "RE_ENTRY"
+    ],
+    "persistent_checkpoint_rows_primary_support": false,
+    "complete_predictors_required": true,
+    "complete_primary_outcome_required": true
+  },
+  "features": [
+    {
+      "id": "D1",
+      "name": "signed_return_5m",
+      "formula": "log(current_complete_bar_close / preceding_same_session_bar_close)"
+    },
+    {
+      "id": "D2",
+      "name": "signed_return_15m",
+      "formula": "log(current_complete_bar_close / same_session_close_three_bars_earlier)"
+    },
+    {
+      "id": "D3",
+      "name": "close_location_15m",
+      "formula": "2 * ((current close - trailing three-bar low) / (trailing three-bar high - trailing three-bar low)) - 1",
+      "zero_range": "missing_no_imputation"
+    },
+    {
+      "id": "D4",
+      "name": "distance_from_session_vwap_iv",
+      "formula": "(current close - causal session typical-price VWAP) / (previous-close underlying price * previous-close implied 15-minute absolute log movement)",
+      "vwap": "cumulative volume-weighted typical price using only same-stock same-session completed bars through the checkpoint",
+      "fallback": "If reliable stock volume is unavailable, use only D1-D3; no substitute feature."
+    }
+  ],
+  "feature_exclusions": [
+    "signed_pressure",
+    "tension",
+    "future_filtered_peer_slate",
+    "peer_normalisation",
+    "numerical descendants of contaminated fields",
+    "M1C_probability",
+    "Tail Phase as a fitted feature",
+    "stock identity",
+    "stock intercepts",
+    "month identity",
+    "checkpoint identity",
+    "option outcomes",
+    "future movement",
+    "A1 score",
+    "market direction in the primary model",
+    "sector direction in the primary model",
+    "feature interactions",
+    "polynomial expansion"
+  ],
+  "model": {
+    "kind": "logistic_regression",
+    "conditional_target": "1 for DOWN_MOVE and 0 for UP_MOVE",
+    "training_population": "2024 fresh high-M1C unambiguous material movers with complete fixed predictors",
+    "penalty": "l2",
+    "C": 1.0,
+    "fit_intercept": true,
+    "class_weight": null,
+    "solver": "lbfgs",
+    "max_iter": 1000,
+    "random_state": 2026072801,
+    "continuous_standardisation": "development-training mean and population standard deviation",
+    "imputation": "none",
+    "hyperparameter_search": false
+  },
+  "development_oof_folds": [
+    {
+      "fold": 1,
+      "train_start": "2024-01-01",
+      "train_end": "2024-03-31",
+      "predict_start": "2024-04-01",
+      "predict_end": "2024-06-30"
+    },
+    {
+      "fold": 2,
+      "train_start": "2024-01-01",
+      "train_end": "2024-06-30",
+      "predict_start": "2024-07-01",
+      "predict_end": "2024-09-30"
+    },
+    {
+      "fold": 3,
+      "train_start": "2024-01-01",
+      "train_end": "2024-09-30",
+      "predict_start": "2024-10-01",
+      "predict_end": "2024-12-31"
+    }
+  ],
+  "action_thresholds": {
+    "source": "2024 strictly-forward OOF q_down distribution only",
+    "quantile_method": "linear",
+    "low_quantile": 0.2,
+    "high_quantile": 0.8,
+    "CALL": "q_down <= frozen low threshold",
+    "PUT": "q_down >= frozen high threshold",
+    "ABSTAIN": "otherwise",
+    "absence_of_bearish_trigger_implies_call": false
+  },
+  "score_bins": [
+    [0.0, 0.2],
+    [0.2, 0.4],
+    [0.4, 0.6],
+    [0.6, 0.8],
+    [0.8, 1.0]
+  ],
+  "baselines": [
+    "always_CALL",
+    "always_PUT",
+    "recent_signed_5m_momentum",
+    "recent_signed_15m_momentum",
+    "causal_broad_market_15m_direction",
+    "frozen_A1",
+    "existing_frozen_D2_only_if_its_numerical_lineage_passes_the_contamination_exclusion",
+    "constant_2024_downside_base_rate"
+  ],
+  "tail_phase_diagnostics": {
+    "fitted_feature": false,
+    "gating_allowed": false,
+    "threshold_changes_allowed": false,
+    "phases": [
+      "FIRST_ENTRY",
+      "PERSISTENT",
+      "RE_ENTRY"
+    ],
+    "minimum_rows": 30,
+    "minimum_sessions": 10,
+    "insufficient_label": "blocked_insufficient_support"
+  },
+  "movement_consumed": {
+    "field": "movement_consumed_v1",
+    "frozen_unconditional_2024_median": 1.3986941389121161,
+    "primary_gate": false,
+    "recalibration_allowed": false,
+    "optimisation_allowed": false
+  },
+  "statistical_controls": {
+    "session_cluster_bootstrap_draws": 1000,
+    "session_cluster_bootstrap_seed": 2026072801,
+    "confidence_level": 0.95,
+    "label_permutations": 1000,
+    "label_permutation_seed": 2026072802,
+    "label_permutation_structure": "shuffle downside labels within stock and checkpoint",
+    "temporal_placebo": "existing within-stock prior-episode feature reassignment with the same fixed model procedure",
+    "temporal_placebo_seed": 2026072803,
+    "leave_one_month_out": true,
+    "leave_one_stock_out": true,
+    "extreme_observation_check": "one-percent two-sided winsorised aligned return",
+    "dependency_rule": "removing one stock, month, or checkpoint must preserve the sign of the primary spread and mean aligned return; no single support cell may contribute 50 percent or more"
+  },
+  "decision_labels": [
+    "asymmetric_downside_supported_retrospectively",
+    "asymmetric_downside_ranking_only",
+    "low_downside_does_not_imply_upside",
+    "no_incremental_asymmetric_directional_signal",
+    "target_mismatch_prevents_exact_probability_decomposition",
+    "blocked_insufficient_support",
+    "blocked_data_completeness",
+    "operational_failure"
+  ],
+  "safety": {
+    "protected_outcomes_start": "2026-01-01",
+    "protected_outcomes_access_allowed": false,
+    "option_pnl_calculated": false,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_routing_allowed": false,
+    "broker_access_required": false,
+    "M1C_modified": false,
+    "A1_modified": false,
+    "Tail_Phase_V1_modified": false
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "achieved_pnl_claimed": false,
+  "broker_integration_required": false,
+  "daily_option_high_low_used": false,
+  "execution_enabled": false,
+  "intraday_option_fill_simulated": false,
+  "maximum_required_option_date": "2025-08-22",
+  "maximum_stock_signal_date": "2025-08-22",
+  "option_entry_time_proxy": "same_session_end_of_day_quote",
+  "option_exit_time_proxy": "future_end_of_day_quote_or_expiry_intrinsic",
+  "options_data_granularity": "end_of_day",
+  "order_placement": "disabled",
+  "passed": true,
+  "prospective_validation": false,
+  "protected_option_rows_materialised": 0,
+  "protected_rows_materialised": 0,
+  "protected_start": "2025-08-23",
+  "protected_stock_rows_materialised": 0,
+  "research_only": true,
+  "retrospective_options_strategy_screen": true,
+  "stock_signal_time": "15:30 America/New_York",
+  "strategy_promotion": false
+}

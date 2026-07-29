@@ -1,0 +1,41 @@
+{
+  "back_expiry_bulk_download_enabled": false,
+  "back_expiry_schema_preflight_only": true,
+  "branches_run_independently": true,
+  "broker_integration_required": false,
+  "current_experiment_additional_requests": 0,
+  "current_experiment_bulk_download": false,
+  "daily_stock_context_test": true,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "front_options_only_context_test": true,
+  "future_acquisition_supported": true,
+  "intraday_option_quotes_used": false,
+  "option_pnl_calculated": false,
+  "option_strategy_or_dte_recommendation": false,
+  "order_placement": "disabled",
+  "preflight_status": "supported_noncompact_schema",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "proposed_endpoint": "/mp/unicornbay/options/eod",
+  "proposed_exact_date_filters": [
+    "filter[tradetime_from]",
+    "filter[tradetime_to]"
+  ],
+  "proposed_response_mode": "noncompact",
+  "proposed_sequence": [
+    "construct one exact previous-session stock-date request",
+    "bound expiration to 46\u201390 calendar DTE",
+    "bound strikes to an ATM neighbourhood",
+    "retain noncompact resource identity",
+    "parse in memory and reject non-exact or protected observation dates",
+    "persist no unfiltered provider observation records",
+    "validate the protected boundary before any filtered append",
+    "write an idempotent credential-free receipt"
+  ],
+  "prospective_validation": false,
+  "quick_context_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "underlying_movement_outcomes_opened": true
+}

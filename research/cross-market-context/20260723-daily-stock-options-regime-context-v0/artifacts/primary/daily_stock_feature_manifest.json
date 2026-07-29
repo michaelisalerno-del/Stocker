@@ -1,0 +1,126 @@
+{
+  "activity_field": "EODHD historical activity proxy",
+  "activity_is_confirmed_exchange_volume": false,
+  "broker_integration_required": false,
+  "corporate_action_handling": "continuity adjustment at inferred 0.55/1.80 boundaries",
+  "cross_market_mismatch_test": true,
+  "daily_options_dimensions": true,
+  "daily_stock_dimensions": true,
+  "dimensions": [
+    "daily_compression",
+    "daily_directional_efficiency",
+    "daily_trend_persistence",
+    "daily_extension",
+    "daily_rejection",
+    "daily_volatility_acceleration",
+    "daily_relative_strength",
+    "daily_activity_acceleration"
+  ],
+  "directional_outcomes_primary": false,
+  "economic_strategy_outcomes_opened": false,
+  "execution_enabled": false,
+  "fitted_period": "development_2024_only",
+  "imputation_medians": {},
+  "intraday_option_quotes_used": false,
+  "kind": "daily_stock",
+  "minimum_valid_trailing_sessions_for_20": 15,
+  "missing_indicators": [
+    "daily_range_5_to_20_missing",
+    "daily_rv_5_to_20_missing",
+    "daily_range_overlap_5_missing",
+    "daily_efficiency_5_missing",
+    "daily_efficiency_10_missing",
+    "daily_sign_persistence_5_missing",
+    "daily_extension_20_missing",
+    "daily_extreme_wick_3_missing",
+    "daily_close_location_5_missing",
+    "daily_relative_return_5_missing",
+    "daily_activity_5_to_20_missing"
+  ],
+  "option_pnl_calculated": false,
+  "options_loop_discovery_enabled": false,
+  "order_placement": "disabled",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_daily_context_screen": true,
+  "raw_features": [
+    "daily_range_5_to_20",
+    "daily_rv_5_to_20",
+    "daily_range_overlap_5",
+    "daily_efficiency_5",
+    "daily_efficiency_10",
+    "daily_sign_persistence_5",
+    "daily_extension_20",
+    "daily_extreme_wick_3",
+    "daily_close_location_5",
+    "daily_relative_return_5",
+    "daily_activity_5_to_20"
+  ],
+  "research_only": true,
+  "scales": {
+    "abs_daily_extension_20": {
+      "center": 0.9993136157770333,
+      "scale": 1.27283458822658
+    },
+    "daily_activity_5_to_20": {
+      "center": 0.9648066848774944,
+      "scale": 0.383553404343963
+    },
+    "daily_close_location_5": {
+      "center": 0.4484140352731907,
+      "scale": 0.5683499153907259
+    },
+    "daily_directional_efficiency": {
+      "center": 0.001784227856006789,
+      "scale": 0.765297799431508
+    },
+    "daily_efficiency_10": {
+      "center": 0.304507191803956,
+      "scale": 0.35028636503179655
+    },
+    "daily_efficiency_5": {
+      "center": 0.4407183169585998,
+      "scale": 0.49534253100336056
+    },
+    "daily_extension_20": {
+      "center": -0.04240903525123395,
+      "scale": 2.049467490689837
+    },
+    "daily_extreme_wick_3": {
+      "center": 0.3920213217285571,
+      "scale": 0.1597943887059216
+    },
+    "daily_range_5_to_20": {
+      "center": 0.9777984767502901,
+      "scale": 0.34864426325838316
+    },
+    "daily_range_overlap_5": {
+      "center": 0.6419251029426283,
+      "scale": 0.23063592523202991
+    },
+    "daily_relative_return_5": {
+      "center": -0.0005954711866138739,
+      "scale": 0.13799200475841178
+    },
+    "daily_rv_5_to_20": {
+      "center": 0.9187211751336558,
+      "scale": 0.5137119553480561
+    },
+    "daily_sign_persistence_5": {
+      "center": 0.2,
+      "scale": 0.39999999999999997
+    }
+  },
+  "soft_daily_options_regimes": true,
+  "soft_daily_stock_regimes": true,
+  "strategy_promotion": false,
+  "support": {
+    "assessment_months": 8,
+    "assessment_sessions": 159,
+    "assessment_stocks": 20,
+    "daily_stock_feature_retention": 0.9764780673871583,
+    "passed": true
+  },
+  "underlying_movement_outcomes_opened": true
+}

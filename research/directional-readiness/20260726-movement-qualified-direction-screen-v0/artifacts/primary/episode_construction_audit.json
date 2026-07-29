@@ -1,0 +1,1184 @@
+{
+  "assessment_end": "2025-08-22",
+  "assessment_episodes": 253,
+  "assessment_start": "2025-01-01",
+  "broker_access": false,
+  "call_put_abstain_policy": true,
+  "development_episodes": 285,
+  "direction_model_is_second_stage": true,
+  "direction_models_trained_on_2024_only": true,
+  "entry_is_next_five_minute_bar_open": true,
+  "episodes_by_partition": [
+    {
+      "episodes": 253,
+      "partition": "assessment"
+    },
+    {
+      "episodes": 285,
+      "partition": "development"
+    }
+  ],
+  "episodes_by_stock_and_month": [
+    {
+      "episodes": 2,
+      "month": "2024-02",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-04",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-05",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-06",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-08",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-10",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-11",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-12",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-01",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-03",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-04",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-05",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-07",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-08",
+      "stock": "AAL"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-01",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-02",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-03",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-04",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-05",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-06",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 7,
+      "month": "2024-08",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-09",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-10",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-12",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-01",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-03",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-04",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-05",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-07",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-08",
+      "stock": "AAOI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-02",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-04",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-05",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-06",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 5,
+      "month": "2024-07",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-08",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 5,
+      "month": "2024-09",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-11",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-12",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-01",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-06",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-07",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 6,
+      "month": "2025-08",
+      "stock": "APLD"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-02",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-03",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-04",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-05",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 7,
+      "month": "2024-06",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-07",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-08",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 8,
+      "month": "2024-09",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-10",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-11",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-01",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 9,
+      "month": "2025-02",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-03",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-04",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-05",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-06",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-07",
+      "stock": "ASTS"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-02",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-05",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-06",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-09",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-10",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-11",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-12",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-01",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-02",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 5,
+      "month": "2025-05",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-08",
+      "stock": "CIFR"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-02",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-05",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 7,
+      "month": "2024-06",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 5,
+      "month": "2024-08",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-10",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 6,
+      "month": "2024-12",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-01",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-02",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-03",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-04",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-06",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-07",
+      "stock": "HIMS"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-01",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-02",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-07",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-10",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-11",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-12",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-01",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 7,
+      "month": "2025-02",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-03",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-04",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-05",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 5,
+      "month": "2025-06",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-08",
+      "stock": "IONQ"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-02",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 5,
+      "month": "2024-06",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-08",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-09",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-10",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-11",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-02",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-04",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-05",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-06",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-07",
+      "stock": "IREN"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-02",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-05",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-06",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-07",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 5,
+      "month": "2024-08",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-01",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-02",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-04",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-05",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-07",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-08",
+      "stock": "MARA"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-04",
+      "stock": "MP"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-12",
+      "stock": "MP"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-01",
+      "stock": "MP"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-05",
+      "stock": "MP"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-06",
+      "stock": "MP"
+    },
+    {
+      "episodes": 7,
+      "month": "2025-07",
+      "stock": "MP"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-08",
+      "stock": "MP"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-02",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-05",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-06",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-09",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-11",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-12",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-02",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-03",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-06",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-08",
+      "stock": "MRNA"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-05",
+      "stock": "MSTR"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "MSTR"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-01",
+      "stock": "MSTR"
+    },
+    {
+      "episodes": 6,
+      "month": "2025-03",
+      "stock": "MSTR"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-04",
+      "stock": "MSTR"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-07",
+      "stock": "MSTR"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-06",
+      "stock": "NVTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "NVTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-10",
+      "stock": "NVTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-05",
+      "stock": "NVTS"
+    },
+    {
+      "episodes": 5,
+      "month": "2025-07",
+      "stock": "NVTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-08",
+      "stock": "NVTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-02",
+      "stock": "QBTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-11",
+      "stock": "QBTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-04",
+      "stock": "QBTS"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-06",
+      "stock": "QBTS"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-07",
+      "stock": "QBTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-08",
+      "stock": "QBTS"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-02",
+      "stock": "RGTI"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-03",
+      "stock": "RGTI"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-04",
+      "stock": "RGTI"
+    },
+    {
+      "episodes": 8,
+      "month": "2025-05",
+      "stock": "RGTI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-06",
+      "stock": "RGTI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-08",
+      "stock": "RGTI"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-02",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-06",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-08",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-10",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-11",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-01",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-05",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-06",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 5,
+      "month": "2025-07",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-08",
+      "stock": "RIOT"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-01",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-03",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-04",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-06",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-08",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 7,
+      "month": "2024-11",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 6,
+      "month": "2025-01",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-04",
+      "stock": "RIVN"
+    },
+    {
+      "episodes": 6,
+      "month": "2024-02",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-03",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 6,
+      "month": "2024-05",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-06",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-07",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 6,
+      "month": "2024-08",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-09",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-10",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-01",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-03",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-04",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-06",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-08",
+      "stock": "SMCI"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-02",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-03",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-05",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-07",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 4,
+      "month": "2024-08",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 1,
+      "month": "2024-12",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-01",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-02",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-03",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-04",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-05",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-06",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-07",
+      "stock": "SOFI"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-02",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-04",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 3,
+      "month": "2024-06",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 5,
+      "month": "2024-07",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 5,
+      "month": "2024-08",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-09",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 2,
+      "month": "2024-10",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-01",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-02",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 2,
+      "month": "2025-03",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-04",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 3,
+      "month": "2025-05",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 1,
+      "month": "2025-06",
+      "stock": "WULF"
+    },
+    {
+      "episodes": 4,
+      "month": "2025-08",
+      "stock": "WULF"
+    }
+  ],
+  "episodes_per_session": 2.152,
+  "episodes_per_stock_session_distribution": [
+    {
+      "episodes_per_stock_session": 1,
+      "stock_sessions": 430
+    },
+    {
+      "episodes_per_stock_session": 2,
+      "stock_sessions": 51
+    },
+    {
+      "episodes_per_stock_session": 3,
+      "stock_sessions": 2
+    }
+  ],
+  "fresh_episodes": 538,
+  "fresh_unspaced_crossings": 559,
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "m1_threshold_frozen": 0.49588519865576763,
+  "maximum_episodes_per_stock_session": 3,
+  "minimum_episode_spacing_minutes": 30,
+  "movement_model_frozen": true,
+  "movement_model_refit_allowed": false,
+  "opened_movement_holdout_excluded": true,
+  "option_pnl_calculated": false,
+  "paper_orders_allowed": false,
+  "passed": true,
+  "primary_direction_horizon_minutes": 10,
+  "production_runtime_modified": false,
+  "raw_above_threshold_assessment_rows": 608,
+  "raw_above_threshold_checkpoint_rows": 1266,
+  "raw_above_threshold_development_rows": 658,
+  "raw_checkpoint_rows": 24130,
+  "research_only": true,
+  "retrospective_directional_screen": true,
+  "rows_from_2026_onward_protected": true,
+  "sessions": 250,
+  "signal_is_completed_checkpoint_bar_close": true,
+  "spacing_violations": 0,
+  "strategy_promotion": false
+}

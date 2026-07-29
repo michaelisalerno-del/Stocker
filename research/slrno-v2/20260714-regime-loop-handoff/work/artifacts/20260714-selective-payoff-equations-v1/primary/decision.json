@@ -1,0 +1,75 @@
+{
+  "application_modified": false,
+  "contract_id": "20260714-selective-payoff-equations-v1",
+  "economic_edge_claim": false,
+  "live_ordering_enabled": false,
+  "models": {
+    "context_only": {
+      "checks": {
+        "coverage": false,
+        "incremental_return_block_and_holm": false,
+        "positive_at_7_5_bps_per_side": false,
+        "positive_leave_one_stock_out": false,
+        "positive_month_majority": false,
+        "selected_mean_net_positive": false,
+        "selected_net_block_and_holm": false,
+        "selected_rows": false,
+        "selected_sessions": false,
+        "selected_stocks": false
+      },
+      "decision": "rejected_or_unknown"
+    },
+    "context_plus_loop_mixture": {
+      "checks": {
+        "coverage": false,
+        "incremental_return_block_and_holm": false,
+        "positive_at_7_5_bps_per_side": false,
+        "positive_leave_one_stock_out": false,
+        "positive_month_majority": false,
+        "selected_mean_net_positive": false,
+        "selected_net_block_and_holm": false,
+        "selected_rows": false,
+        "selected_sessions": false,
+        "selected_stocks": false
+      },
+      "decision": "rejected_or_unknown"
+    },
+    "prediction_only": {
+      "checks": {
+        "coverage": false,
+        "incremental_return_block_and_holm": true,
+        "positive_at_7_5_bps_per_side": false,
+        "positive_leave_one_stock_out": false,
+        "positive_month_majority": false,
+        "selected_mean_net_positive": false,
+        "selected_net_block_and_holm": false,
+        "selected_rows": false,
+        "selected_sessions": false,
+        "selected_stocks": false
+      },
+      "decision": "rejected_or_unknown"
+    },
+    "sequential_confirmation": {
+      "checks": {
+        "coverage": false,
+        "incremental_return_block_and_holm": false,
+        "positive_at_7_5_bps_per_side": false,
+        "positive_leave_one_stock_out": false,
+        "positive_month_majority": false,
+        "selected_mean_net_positive": false,
+        "selected_net_block_and_holm": false,
+        "selected_rows": false,
+        "selected_sessions": false,
+        "selected_stocks": false
+      },
+      "decision": "rejected_or_unknown"
+    }
+  },
+  "order_placement": "disabled",
+  "overall_decision": "all_equations_rejected_or_unknown",
+  "research_only": true,
+  "retained_for_prospective_research_only": [],
+  "scientific_status": "post_inspection_causal_retrospective_equation_development_on_opened_2024_not_validation",
+  "strategy_promotion": false,
+  "validation_claim": false
+}

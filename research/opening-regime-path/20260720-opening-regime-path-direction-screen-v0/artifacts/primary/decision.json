@@ -1,0 +1,84 @@
+{
+  "broker_integration_required": false,
+  "decision": "opening_structure_no_increment_over_price",
+  "decision_status": "final",
+  "economic_reference_can_rescue_probability_failure": false,
+  "evidence": {
+    "direction": {
+      "auc_change": 0.034183121371141434,
+      "bootstrap_90_lower_brier": -0.0031558504252388988,
+      "bootstrap_90_lower_log_loss": -0.008509597798249047,
+      "brier_improvement": 9.309989561928633e-05,
+      "checkpoint_brier_improvements": {
+        "12": 0.00046572558691770904,
+        "6": -0.0003065191528440203
+      },
+      "log_loss_improvement": -0.0011144346814589978,
+      "positive_months": 5,
+      "structural_null_90th_percentile": -0.002252415574024574,
+      "structural_null_percentile": 0.99
+    },
+    "direction_increment_passes": false,
+    "integrity_blocker": null,
+    "interaction": {
+      "direction": {
+        "bootstrap_90_lower_brier": -0.005305077729122633,
+        "bootstrap_90_lower_log_loss": -0.01214223810422892,
+        "brier_improvement": -0.0023675146257191304,
+        "log_loss_improvement": -0.005590921549224359,
+        "passes": false,
+        "positive_months": 3,
+        "structural_null_percentile": 0.75
+      },
+      "movement": {
+        "bootstrap_90_lower_brier": -0.0011414404558282687,
+        "bootstrap_90_lower_log_loss": -0.0035519435639134816,
+        "brier_improvement": -0.0007812935268608767,
+        "log_loss_improvement": -0.002434529627665716,
+        "passes": false,
+        "positive_months": 1,
+        "structural_null_percentile": 0.17
+      }
+    },
+    "interaction_increment_passes": false,
+    "movement": {
+      "bootstrap_90_lower_brier": -0.0016971061039611102,
+      "bootstrap_90_lower_log_loss": -0.004289925794575158,
+      "brier_improvement": -0.0009806939413835036,
+      "checkpoint_brier_improvements": {
+        "12": -0.0011267205465932406,
+        "6": -0.0008346673361738222
+      },
+      "log_loss_improvement": -0.001620121215006487,
+      "positive_months": 1,
+      "structural_null_90th_percentile": -0.00035689233203516074,
+      "structural_null_percentile": 0.18
+    },
+    "movement_increment_passes": false,
+    "support": {
+      "actual_large_moves_by_checkpoint": {
+        "12": 681,
+        "6": 635
+      },
+      "actual_large_remaining_moves": 1316,
+      "assessment_rows": 6288,
+      "assessment_sessions": 158,
+      "assessment_stocks": 20,
+      "interaction_support_status": "sufficient",
+      "maximum_current_state_row_share": 0.37070610687022904,
+      "maximum_stock_row_share": 0.05025445292620865,
+      "opening_short_closure_rows": 1238,
+      "primary_support_passes": true,
+      "represented_months": 8
+    }
+  },
+  "exact_rerun_passed": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "independent_audit_passed": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "representation_specific": true,
+  "research_only": true,
+  "strategy_promotion": false
+}

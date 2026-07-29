@@ -1,0 +1,250 @@
+{
+  "contract_id": "frozen_regime_loop_pnl_sanity_v1",
+  "contract_frozen_at_utc": "2026-07-12T00:00:00Z",
+  "scientific_status": "post_inspection_development_and_backward_portability_pnl_sanity_test",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "economic_edge_claim_permitted": false,
+  "strategy_promotion_permitted": false,
+  "question": "Can the already-frozen regime/loop forecasts be translated into positive hypothetical stock-only P&L under a causal, fixed execution rule and explicit friction sensitivity?",
+  "interpretation": {
+    "permitted": [
+      "offline hypothetical P&L diagnostic",
+      "directional falsification",
+      "movement-gated causal breakout diagnostic",
+      "friction sensitivity",
+      "development and backward-portability comparison"
+    ],
+    "forbidden": [
+      "live trading",
+      "paper trading",
+      "demo trading",
+      "broker routing",
+      "order submission",
+      "position management",
+      "deployment",
+      "economic edge claim",
+      "tradability claim",
+      "strategy promotion"
+    ],
+    "known_constraint": "The retained forecast predicts movement magnitude and range, not direction. Therefore direct directional P&L is a falsification and the primary translation obtains direction only after a causal future breakout trigger."
+  },
+  "frozen_inputs": {
+    "fit_period": 2024,
+    "development_score_period": 2025,
+    "backward_portability_period": 2023,
+    "2026_permitted": false,
+    "prospective_shadow_read_or_write_permitted": false,
+    "prediction_files": {
+      "2025": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/price_predictions_2025.parquet",
+      "2023": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/price_predictions_2023.parquet"
+    },
+    "2024_threshold_panel": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+    "frozen_model_parameters": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/outcome_model_parameters.npz",
+    "2025_provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "2023_provider_root": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock",
+    "provider_bars": "regular-session five-minute provider OHLC",
+    "provider_price_basis": "provider OHLC exactly as stored; no independent split/dividend adjustment is added by this test",
+    "provider_volume_label": "historical_volume_not_used",
+    "bid_ask_quotes_available": false,
+    "options_data_available": false,
+    "later_period_interpretation": "2025 is development and 2023 is backward portability; neither can establish prospective profitability."
+  },
+  "representations": [
+    "state_context",
+    "raw_history",
+    "loop_scores"
+  ],
+  "horizons_bars": [
+    6,
+    12,
+    24
+  ],
+  "thresholds": {
+    "source": "reconstruct each representation's frozen 2024 fitted future-range prediction at every 2024 training anchor with the same exact horizon support and bar-53 cutoff as scoring",
+    "gate": "representation- and horizon-specific 75th percentile",
+    "quantile_interpolation": "linear",
+    "comparison_operator": ">=",
+    "outcome_or_pnl_used_to_choose_threshold": false,
+    "post_score_threshold_change_permitted": false
+  },
+  "signal_families": {
+    "directional_falsification": {
+      "strategies": [
+        "direction_state_context_all",
+        "direction_raw_history_all",
+        "direction_loop_scores_all",
+        "direction_state_context_range_p75",
+        "direction_raw_history_range_p75",
+        "direction_loop_scores_range_p75"
+      ],
+      "direction": "long when the matching frozen direction probability is at least 0.5; short otherwise",
+      "gated_variants": "require matching frozen predicted future range at or above its 2024 P75 threshold",
+      "entry": "next regular-session bar open after the completed anchor bar",
+      "exit": "close of the anchor-plus-horizon bar",
+      "retention_permitted": false,
+      "reason": "Direction was already rejected on proper losses and AUC; these cells only measure the economic consequence of that failure."
+    },
+    "causal_breakout": {
+      "strategies": [
+        "breakout_all",
+        "breakout_state_context_range_p75",
+        "breakout_raw_history_range_p75",
+        "breakout_loop_scores_range_p75"
+      ],
+      "gate": "all anchors for breakout_all; matching 2024-P75 predicted-range gate for representation variants",
+      "upper_trigger": "completed anchor-bar high",
+      "lower_trigger": "completed anchor-bar low",
+      "trigger_operators": "upper high >= trigger; lower low <= trigger",
+      "activation": "begin with the next bar and remain armed through the horizon exit bar",
+      "direction": "first exclusive upper trigger is long; first exclusive lower trigger is short",
+      "gap_fill": "long fills at max(upper trigger, triggering-bar open); short fills at min(lower trigger, triggering-bar open)",
+      "open_ordering": "if the triggering bar opens at or beyond exactly one trigger, that open establishes the first side even if the later bar range touches both",
+      "same_bar_both_triggers": "when neither side is established at the open and both triggers are touched in the first event bar, cancel the signal permanently as path ambiguous",
+      "no_trigger": "no trade",
+      "exit": "close of the anchor-plus-horizon bar",
+      "take_profit_or_stop_loss": "none",
+      "retention_candidate": "breakout_loop_scores_range_p75"
+    }
+  },
+  "overlap_and_portfolio": {
+    "overlap_recomputed_within": "each strategy by horizon cell independently",
+    "signal_order": "symbol, session date, anchor timestamp",
+    "one_active_signal_window_per_symbol": true,
+    "greedy_rule": "accept the earliest qualifying anchor; reject later anchors whose completed-bar ordinal is strictly below accepted_anchor_ordinal + horizon, even when a breakout never triggers",
+    "window_convention": "the armed window ends at accepted_anchor_ordinal + horizon close; a new signal formed at that same close may arm for the following bar",
+    "overnight_positions": false,
+    "cohort_preflight_amendment": "Before any P&L score, the backward-2023 frozen prediction file was found to contain twenty stocks while 2025 additionally contained AXTI and OKLO. Both periods are therefore restricted to the exact common twenty-stock universe below.",
+    "fixed_universe": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "session_grid": "ordered union of regular-session dates present in the frozen provider tapes for the fixed universe; every inactive or missing symbol/session is cash with zero return and is never dropped from the denominator",
+    "capital": "twenty fixed equal stock sleeves, each allocated 1/20 of capital when active and otherwise cash",
+    "leverage": false,
+    "within_sleeve_compounding": "compound sequential cash-consistent simple net trade returns as product(1 + r_net) - 1 per stock/session",
+    "daily_portfolio_return": "equal mean of the twenty stock-sleeve arithmetic returns",
+    "leave_one_stock_out": "remove one frozen symbol, keep all thresholds and signals unchanged, and re-average the remaining fixed nineteen sleeves",
+    "cross_strategy_capital_combination": false
+  },
+  "pnl": {
+    "gross_trade_return": "direction * (exit_price / entry_price - 1), using a fully collateralized simple long/short sleeve convention",
+    "gross_trade_return_bps": "10000 * gross_trade_return",
+    "cost_grid_bps_per_side": [
+      0,
+      1,
+      2,
+      5,
+      10
+    ],
+    "primary_cost_bps_per_side": 5,
+    "net_trade_return": "gross_trade_return - 2 * cost_bps_per_side / 10000",
+    "net_trade_return_bps": "10000 * net_trade_return",
+    "cost_interpretation": "sensitivity assumption only; provider OHLC has no executable bid/ask spread",
+    "excluded_friction": [
+      "market impact",
+      "short locate availability",
+      "borrow fees",
+      "tax",
+      "exchange fees beyond the cost grid",
+      "latency beyond next-bar or stop fill rules"
+    ]
+  },
+  "metrics": {
+    "trade": [
+      "signals accepted",
+      "trades filled",
+      "ambiguous bars skipped",
+      "fill rate",
+      "mean and median net bps",
+      "win rate",
+      "profit factor"
+    ],
+    "portfolio": [
+      "cumulative return",
+      "annualized return",
+      "annualized volatility",
+      "descriptive zero-rate Sharpe",
+      "maximum drawdown",
+      "exposure fraction"
+    ],
+    "required_slices": [
+      "period",
+      "horizon",
+      "quarter",
+      "leave-one-stock-out deletion",
+      "cost level"
+    ],
+    "uncertainty": {
+      "unit": "session date",
+      "method": "five-session moving-block bootstrap",
+      "draws": 5000,
+      "confidence_interval": 0.95,
+      "random_state": 20260712,
+      "block_construction": "non-circular overlapping contiguous five-session blocks sampled with replacement, truncated to the ordered full session-grid length",
+      "interval": "2.5th and 97.5th percentile interval",
+      "primary_statistic": "mean daily portfolio return",
+      "paired_comparison": "form the aligned daily difference first so each bootstrap draw uses identical session blocks"
+    },
+    "annualization": "geometric cumulative return raised to 252 divided by full session-grid count",
+    "annualized_volatility": "sample standard deviation of full-grid daily returns times sqrt(252)",
+    "descriptive_sharpe": "full-grid mean daily return divided by sample daily standard deviation times sqrt(252), with zero reference rate",
+    "maximum_drawdown": "minimum compounded-equity divided by prior running maximum minus one, including initial equity one",
+    "profit_factor_edge_case": "positive gross sum divided by absolute negative gross sum; infinity only when positive returns exist and no negative return exists; undefined when no filled trade",
+    "win_definition": "strict net return > 0; ties are not wins",
+    "fill_rate_denominator": "accepted non-overlapping signals",
+    "exposure": "filled holding bars divided by 78 times fixed sleeve count times full session-grid count"
+  },
+  "predeclared_decision": {
+    "primary_candidate": "breakout_loop_scores_range_p75",
+    "primary_cost_bps_per_side": 5,
+    "development_retention_gate": {
+      "positive_annualized_return_each_period_and_horizon": true,
+      "positive_mean_net_trade_bps_each_period_and_horizon": true,
+      "daily_return_bootstrap_lower_bound_above_zero_each_period_and_horizon": true,
+      "positive_return_each_quarter_each_period_and_horizon": true,
+      "positive_return_under_every_leave_one_stock_out_deletion_each_period_and_horizon": true,
+      "paired_daily_return_advantage_over_ungated_breakout_bootstrap_lower_bound_above_zero_each_period_and_horizon": true,
+      "paired_daily_return_advantage_over_state_context_gate_bootstrap_lower_bound_above_zero_each_period_and_horizon": true,
+      "paired_daily_return_advantage_over_raw_history_gate_bootstrap_lower_bound_above_zero_each_period_and_horizon": true
+    },
+    "failure_interpretation": "No P&L support for translating the retained movement forecast with this fixed stock-only breakout rule.",
+    "pass_interpretation": "Development/backward-portability P&L hypothesis only; a separately frozen genuinely prospective test remains mandatory.",
+    "directional_cells_can_promote_candidate": false,
+    "post_score_strategy_parameter_or_gate_change_permitted": false
+  },
+  "integrity": {
+    "contract_runner_and_input_hashes_frozen_before_first_pnl_score": true,
+    "exact_reconstruction_of_thresholds_signals_fills_costs_daily_returns_metrics_and_decision_required": true,
+    "no_2026_rows": true,
+    "no_volume_feature": true,
+    "prospective_shadow_unchanged": true,
+    "artifact_labels_required": {
+      "research_only": true,
+      "live_ordering_enabled": false,
+      "order_placement": "disabled"
+    }
+  }
+}

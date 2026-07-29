@@ -1,0 +1,135 @@
+# Dynamic loop edge-state lead-lag V1
+
+## Baseline
+
+- Branch: `agent/slrno-research-handoff`
+- Frozen pre-V2 baseline: `8baf974f2d13751064dbc4d2c7cf65d02e3a8912`
+- Frozen scored V2 implementation: `ca3537a0f337097a9a75abf87ae4bf419fae6a5d`
+- V2 focused suite before edits: `37 passed`.
+- Arbor evaluator: unavailable in this repository; root tests and frozen V2 artifacts are the applicable evaluators.
+- Safety boundary: research only; live ordering, brokers, paper/demo execution, deployment, orders, positions, and frozen exits are out of scope.
+
+## Exact V2 delay reconstruction before new implementation
+
+The V2 `_delayed_policy` did not move an original opportunity or entry. It shifted the prior *opportunity-session* accepted flag within each period × loop × orientation × horizon and applied it to current opportunities, current entry clocks, and current 24-bar outcomes. Missing cell-opportunity sessions were skipped, so the source policy lag ranged from 1 to 26 calendar sessions.
+
+- Immediate: 286 accepted signals, 275 fills, -9,416.3830 bps.
+- Shifted policy: 268 accepted signals, 259 fills, +9,014.5353 bps.
+- Retained: 55 signals, 53 fills, -5,167.6341 bps.
+- Dropped: 231 signals, 222 fills, -4,248.7489 bps.
+- Introduced: 213 signals, 206 fills, +14,182.1694 bps.
+- Exact delta: introduced minus dropped = +18,430.9183 bps.
+- There was no overlap resolver, capacity allocator, changed entry clock, changed holding period, or changed cost on a retained row.
+
+## Registered hypotheses
+
+1. **Frozen feature overlay leads state by one session.** Target files: new lead-target/metrics module and runner. Benefit: distinguish prediction timing from same-session failure. Safety risk: target-session leakage. Validation: synthetic lead shift, explicit-calendar joins, appended-future invariance, paired lead-1 bootstrap. Stop: reject if full does not improve paired lead-1 calibration and economic state value versus the identical no-feature hierarchy.
+2. **V2 sign reversal is opportunity-population attribution, not delayed execution.** Target files: matching/decomposition module and auditor. Benefit: explain the exact +18,430.92 bps delta. Safety risk: calling a replacement setup a delayed trade. Validation: exact reconstruction and immutable opportunity IDs. Stop: classify as population-confounded if introduced-minus-dropped rows explain the delta.
+3. **A persistent exact setup survives to the next session.** Target files: exact matcher. Benefit: executable timing counterfactual. Safety risk: treating same-loop rows as the same setup. Validation: require persistent opportunity or event-lineage identity; structural lineage is separate. Stop: tradeability unknown if no exact matches exist.
+4. **Only a structurally led episode subtype responds.** Target files: episode attribution. Benefit: narrower descriptive mechanism. Safety risk: hindsight labels entering forecasts. Validation: episode labels joined only after immutable forecasts. Stop: descriptive/unknown if non-monotonic, concentrated, or post-onset.
+5. **Prospective logging remains immutable and execution-free.** Target files: immutable-ledger module and research CLI mode. Benefit: enable genuinely new-session follow-up. Safety risk: runtime coupling or forecast revision. Validation: create-only IDs, separate outcome appends, safety tests. Stop: fail closed on duplicate or revised IDs.
+
+## Pre-agreed public test seams
+
+- Explicit-session forecast-to-target lead join.
+- Paired full/no-feature population and metrics.
+- Exact-setup and structural-lineage matching.
+- Original delay population decomposition.
+- Immutable forecast/outcome ledger append API.
+- Independent auditor output.
+
+## Commands and results
+
+- The first primary command at implementation SHA `07be73486fe8cd658261a65ea287be4318fb8b47`
+  stopped before creating the output directory. A reporting-only conversion tried to cast the
+  nullable mean of an empty active slice (`pd.NA`) to `float`. No model, threshold, feature,
+  target, or metric changed and no artifact was written.
+- The correction maps only that empty descriptive rate to missing (`NaN`). Every model and
+  comparator is regenerated from scratch under the subsequent committed SHA.
+- The next primary command at SHA `00090ce69f300e137598563bfeb3496622614bf4` also stopped
+  before output creation. The post-freeze episode identifier had been attached to the lead ledger
+  but omitted from the paired table's evaluation-only target whitelist, so concentration reporting
+  could not find it. The correction carries only that hindsight diagnostic identifier into the
+  paired output; it remains absent from all forecast features. All outputs are regenerated again.
+- The following command at SHA `891c7e7ce873fa8002242e807994519903685676` reached the
+  registered sensitivity rebuild and stopped before output creation. The frozen decision ledger
+  calls its session `score_session`, while V2's rebuilt raw research surface retains
+  `session_date`; the opportunity-status adapter required an explicit causal alias. The correction
+  renames that already-known session field only for missing/unfilled target classification.
+- The run at SHA `0776ed0969be5105b46e8aef9485e7b7a0375ad7` completed every model and
+  stress rebuild, then failed while rendering the Markdown report because pandas' optional
+  `tabulate` package is not installed. Its incomplete, unmanifested output was quarantined under
+  `/tmp` and is not an experiment result. A local deterministic Markdown renderer removes the
+  optional dependency; every scored comparator is rerun rather than copying the partial tables.
+- Primary and exact scoring completed at SHA `858517e84a8cecf3c46ca5557821887ef804c4d0`.
+  The auditor was then corrected to exclude the exact report's in-directory copy from the generic
+  artifact set; reports remain subject to their separate required hash comparison. This audit-only
+  normalization does not alter scored artifacts, and the audit records its own commit and file hash.
+- Visual QA found that the first chronological structurally-led classification was also a negative
+  false lead, causing both representative plot selectors to choose it. The positive example is now
+  constrained to positive mean episode payoff and the false example to non-positive payoff. Only
+  plots, manifests, and their audit hashes are regenerated; scored tables are unchanged.
+- The required final two-axis review then identified evaluation-contract defects, rather than an
+  unfavourable-model correction: onset precision had thresholded `p_on_next` instead of using the
+  registered frozen non-active-to-active transition; episode survival was joined but not scored;
+  episode attribution allowed a forecast on the onset session to count as leading; and the generic
+  V2 `anchor_id` was not proven persistent across sessions. These are corrected without changing
+  any V2 forecast, feature, threshold, payoff, cost, or target observation. Onset and survival
+  metrics are independently audited, lead attribution is now strictly pre-onset, and only explicitly
+  persistent identity fields can create an exact match.
+- The same review found that the initial prospective smoke mode could replay the opened V2 ledger.
+  It now rejects opened periods/sources, requires a new external frozen forecast surface and data
+  snapshot, enforces a contemporaneous freeze, fails on an empty requested session, and provides a
+  separate create-only outcome append command. The registered decision helper also fails closed
+  unless every support gate is explicitly present, and best/top-five-stock removal stresses rebuild
+  all stock-dependent inputs. The runner's blanket Ruff exemption was removed; it passes the
+  configured rules even with `--ignore-noqa`.
+- Because these are implementation defects relative to the pre-scoring contract, all affected
+  primary/exact artifacts, stress rebuilds, reports, plots, manifests, and independent audit outputs
+  are regenerated from scratch under the post-review scoring commit. The earlier artifact set is
+  retained outside the result path only as a superseded diagnostic and is not reported as final.
+- Corrected primary and exact scoring completed at SHA
+  `2341be2e22a01eec4e290667f8bde2dd08ddced6`. The corrected result retains the same
+  primary payoff-state endpoint, while strict episode attribution changes the descriptive counts
+  and the expanded metric table now records operational onset and survival calibration.
+
+## Scientific decision
+
+`leading_features_no_incremental_value` and
+`original_delay_result_population_confounded`.
+
+- Primary lead-1 paired Brier improvement (control minus full): `-0.0547372`
+  with 95% session-block interval `[-0.0639287, -0.0458031]`.
+- Primary lead-1 paired economic state increment: `-403.6786 bps`.
+- Lead-1 results are calibration-negative in both 2023 (`-0.0603283`) and
+  2025 (`-0.0489708`).
+- Every registered lead has adverse paired Brier performance. The lead-1 feature
+  increment has negative realised-payoff rank association (`rho=-0.04485`).
+- Exact same-setup delayed matches: `0/286`; no restarted-horizon,
+  constant-terminal, or twice-cost executable paired estimate is identifiable.
+- Fully rebuilt leave-one-stock-out calibration improvements: `0/20`; economic
+  increments are positive in `6/20` exclusions.
+- Independent audit: `31/31` checks passed; primary/exact manifest and report
+  hashes are identical.
+
+## Final validation commands
+
+```bash
+rtk env PYTHONPATH=packages/stocker_research/src .venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py --output research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/primary --report research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260715-dynamic-loop-edge-state-lead-lag-v1.md
+rtk env PYTHONPATH=packages/stocker_research/src .venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py --output research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun --report research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun/research_report.md
+rtk env PYTHONPATH=packages/stocker_research/src .venv/bin/python research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py --primary research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/primary --exact research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun --primary-report research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260715-dynamic-loop-edge-state-lead-lag-v1.md --exact-report research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260715-dynamic-loop-edge-state-lead-lag-v1/exact_rerun/research_report.md
+rtk .venv/bin/pytest -q tests/test_dynamic_loop_edge_state_model.py tests/test_dynamic_loop_edge_state_session_payoff.py tests/test_dynamic_loop_edge_state_walkforward.py tests/test_run_dynamic_loop_edge_state_v2.py tests/test_audit_dynamic_loop_edge_state_v2.py
+rtk .venv/bin/pytest -q tests/test_dynamic_loop_edge_state_lead_targets.py tests/test_dynamic_loop_edge_state_trade_delay.py tests/test_dynamic_loop_edge_state_lead_metrics.py tests/test_dynamic_loop_edge_state_immutable_logging.py tests/test_dynamic_loop_edge_state_lead_lag_artifacts.py
+rtk .venv/bin/pytest -q
+rtk .venv/bin/ruff format --check packages/stocker_research/src/stocker_research/dynamic_loop_edge_state_lead_lag research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py tests/test_dynamic_loop_edge_state_lead_targets.py tests/test_dynamic_loop_edge_state_trade_delay.py tests/test_dynamic_loop_edge_state_lead_metrics.py tests/test_dynamic_loop_edge_state_immutable_logging.py tests/test_dynamic_loop_edge_state_lead_lag_artifacts.py
+rtk .venv/bin/ruff check packages/stocker_research/src/stocker_research/dynamic_loop_edge_state_lead_lag research/slrno-v2/20260714-regime-loop-handoff/work/run_dynamic_loop_edge_state_lead_lag_v1.py research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py tests/test_dynamic_loop_edge_state_lead_targets.py tests/test_dynamic_loop_edge_state_trade_delay.py tests/test_dynamic_loop_edge_state_lead_metrics.py tests/test_dynamic_loop_edge_state_immutable_logging.py tests/test_dynamic_loop_edge_state_lead_lag_artifacts.py
+rtk .venv/bin/mypy --strict packages/stocker_research/src/stocker_research/dynamic_loop_edge_state_lead_lag research/slrno-v2/20260714-regime-loop-handoff/work/audit_dynamic_loop_edge_state_lead_lag_v1.py
+rtk .venv/bin/ruff check .
+rtk git diff --check
+```
+
+Results: frozen V2 suite `37 passed`; new suite `30 passed`; full repository
+suite passed with four pre-existing NumPy mean-of-empty-slice warnings; scoped
+format/lint passed for 13 files; strict mypy passed for 7 source files. The
+repository-wide Ruff command remains non-green with 1,153 pre-existing unrelated
+violations, as expected; no unrelated cleanup was performed.

@@ -1,0 +1,31 @@
+{
+  "activity_label": "historical_relative_activity",
+  "archived_signed_pressure_used": false,
+  "cross_sectional_peer_normalisation": false,
+  "market_proxy": "VTI completed five-minute bars",
+  "maximum_feature_timestamp": "close of completed bar T-1",
+  "primitives": [
+    "one-bar log return",
+    "two-bar log return",
+    "four-bar log return",
+    "six-bar log return",
+    "path length",
+    "directional efficiency",
+    "normalised bar range",
+    "close-location value",
+    "upper/lower wick asymmetry",
+    "session VWAP distance",
+    "session VWAP slope",
+    "distance from session open",
+    "distance from opening-range midpoint",
+    "distance from prior completed six-bar high",
+    "distance from prior completed six-bar low",
+    "historical_relative_activity",
+    "market-proxy returns",
+    "stock-minus-market returns"
+  ],
+  "research_only": true,
+  "rolling_windows_end": "T-1",
+  "stock_local_only": true,
+  "trigger_bar_T_excluded": true
+}

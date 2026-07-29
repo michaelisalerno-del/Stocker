@@ -1,0 +1,72 @@
+{
+  "assessment_candidate_rows": 960,
+  "assessment_outcomes_inspected_before_threshold_freeze": false,
+  "assessment_registered_candidates": 233,
+  "assessment_sessions": 154,
+  "assessment_stocks": 20,
+  "broker_integration_required": false,
+  "candidate_membership_sha256": "84161f1d2eaf0477d03d5727463d8909a028f1b090d681efd68b442300d3dc3f",
+  "development_candidate_rows": 1483,
+  "development_candidate_rows_before_archived_intersection": 1486,
+  "development_oof_rows": 7429,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "expected_assessment_population_match": true,
+  "fold_manifest": [
+    {
+      "fold": 1,
+      "positive_train_rows": 257,
+      "prediction_rows": 1864,
+      "prediction_session_end": "2024-06-06",
+      "prediction_session_start": "2024-03-28",
+      "train_rows": 1858,
+      "train_session_end": "2024-03-27",
+      "train_session_start": "2024-01-17"
+    },
+    {
+      "fold": 2,
+      "positive_train_rows": 572,
+      "prediction_rows": 1862,
+      "prediction_session_end": "2024-08-15",
+      "prediction_session_start": "2024-06-07",
+      "train_rows": 3722,
+      "train_session_end": "2024-06-06",
+      "train_session_start": "2024-01-17"
+    },
+    {
+      "fold": 3,
+      "positive_train_rows": 821,
+      "prediction_rows": 1870,
+      "prediction_session_end": "2024-10-22",
+      "prediction_session_start": "2024-08-16",
+      "train_rows": 5584,
+      "train_session_end": "2024-08-15",
+      "train_session_start": "2024-01-17"
+    },
+    {
+      "fold": 4,
+      "positive_train_rows": 1058,
+      "prediction_rows": 1833,
+      "prediction_session_end": "2024-12-31",
+      "prediction_session_start": "2024-10-23",
+      "train_rows": 7454,
+      "train_session_end": "2024-10-22",
+      "train_session_start": "2024-01-17"
+    }
+  ],
+  "frozen_threshold": 0.22125611521102,
+  "hidden_family_competing_route_test": true,
+  "maximum_threshold_difference": 1.3877787807814457e-16,
+  "order_placement": "disabled",
+  "predecessor_reported_threshold": 0.22125611521101987,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "recalculated_threshold": 0.22125611521101987,
+  "registered_loop_recurrence_test": true,
+  "research_only": true,
+  "sequential_causal_updates": true,
+  "strategy_promotion": false,
+  "target_specific_registered_routes": true,
+  "threshold_verified_to_1e_12": true
+}

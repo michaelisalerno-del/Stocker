@@ -1,0 +1,215 @@
+{
+  "bootstrap_repeated": false,
+  "broker_integration_required": false,
+  "checks": {
+    "V0_V1_features_and_actual_hidden_exclusion": {
+      "passed": true
+    },
+    "assessment_candidate_membership": {
+      "assessment_rows": 960,
+      "development_cross_fitted_U1_verified": true,
+      "development_rows": 1483,
+      "passed": true
+    },
+    "dates_and_protected_boundary": {
+      "maximum_session": "2025-08-22",
+      "minimum_session": "2024-01-17",
+      "passed": true,
+      "protected_rows_materialised": 0
+    },
+    "decision_logic": {
+      "candidate_support": false,
+      "passed": true,
+      "precursor_support": false,
+      "reconstructed_primary_decision": "blocked_precursor_support_failure"
+    },
+    "exact_slate_weighting": {
+      "passed": true
+    },
+    "exact_transition_support_and_bh": {
+      "direction_failures": 0,
+      "exact_identity_rows_only": true,
+      "maximum_direction_detail": {
+        "archived": 0.461538461538462,
+        "difference": 4.440892098500626e-16,
+        "field": "p_value",
+        "lookback_bars": 3,
+        "precursor_identity": "unregistered_primitive_like__5-6-5",
+        "precursor_kind": "hidden",
+        "recalculated": 0.46153846153846156,
+        "target_semantic_loop_id": "loop_p_2-6-5-2"
+      },
+      "maximum_direction_null_difference": 4.440892098500626e-16,
+      "passed": true,
+      "rows": 153,
+      "supported_rows": 11
+    },
+    "expanding_B0_predictions_and_candidate_threshold": {
+      "folds": 4,
+      "independently_refitted_folds": 4,
+      "maximum_probability_difference": 0.0,
+      "passed": true,
+      "source_rows": 7429,
+      "threshold": 0.22125611521101987
+    },
+    "fixed_prediction_whole_session_bootstrap": {
+      "draws": 25,
+      "maximum_difference": 4.996003610813204e-16,
+      "models_refit": false,
+      "passed": true
+    },
+    "frozen_U1_quartile_and_quintile_thresholds": {
+      "assignment_failures": 0,
+      "passed": true
+    },
+    "hard_speed_limits": {
+      "passed": true
+    },
+    "hidden_event_target": {
+      "passed": true,
+      "positive_rows": 4317
+    },
+    "log_loss_brier_auc_average_precision": {
+      "differences": {
+        "V0_auc": 2.220446049250313e-16,
+        "V0_average_precision": 2.7755575615628914e-16,
+        "V0_brier_score": 2.7755575615628914e-17,
+        "V0_log_loss": 4.440892098500626e-16,
+        "V1_auc": 4.440892098500626e-16,
+        "V1_average_precision": 2.220446049250313e-16,
+        "V1_brier_score": 2.220446049250313e-16,
+        "V1_log_loss": 2.220446049250313e-16
+      },
+      "passed": true
+    },
+    "manual_probability_reconstruction": {
+      "passed": true,
+      "rows": 100
+    },
+    "model_coefficients_independent_refit": {
+      "passed": true,
+      "refitted_models": 2,
+      "settings": {
+        "C": 0.25,
+        "class_weight": null,
+        "max_iter": 300,
+        "n_jobs": 1,
+        "penalty": "l2",
+        "solver": "liblinear"
+      }
+    },
+    "opening_panel_reconstruction": {
+      "maximum_shared_or_probability_difference": 0.0,
+      "passed": true,
+      "rows": 6262
+    },
+    "opening_timestamps_and_development_cross_fitted_U1": {
+      "cross_fitted_U1_alias_maximum_difference": 0.0,
+      "passed": true,
+      "timestamp_fields": [
+        "feature_available_timestamp_utc",
+        "decision_bar_start_timestamp_utc",
+        "bar_start_timestamp",
+        "bar_complete_timestamp"
+      ],
+      "timestamp_mismatches": 0
+    },
+    "precursor_census_recalculation": {
+      "maximum_difference": 4.440892098500626e-16,
+      "passed": true
+    },
+    "precursor_windows_taxonomy_and_nearest_priority": {
+      "mismatches": {
+        "active_prefix_any": 0,
+        "active_prefix_immediately_before_completion": 0,
+        "any_hidden_unregistered_completion": 0,
+        "any_prior_registered_completion": 0,
+        "any_regime_transition": 0,
+        "different_registered_broad_family": 0,
+        "expected_state_age_change": 0,
+        "hidden_2_3_2": 0,
+        "hidden_2_5_2": 0,
+        "hidden_4_7_4": 0,
+        "hidden_5_6_5": 0,
+        "hidden_other_unregistered_family": 0,
+        "matching_prefix_any": 0,
+        "maximum_prefix_depth": 0,
+        "nearest_precursor_priority": 0,
+        "no_identified_structural_precursor": 0,
+        "other_prefix_any": 0,
+        "posterior_entropy_change": 0,
+        "posterior_transition_probability": 0,
+        "prefix_candidate_count": 0,
+        "regime_transition_count": 0,
+        "same_registered_broad_family_different_identity": 0,
+        "same_registered_identity": 0,
+        "top_state_probability_change": 0,
+        "windows": 0
+      },
+      "passed": true,
+      "rows": 138876
+    },
+    "realised_diversion_diagnostic": {
+      "maximum_difference": 4.85722573273506e-16,
+      "passed": true
+    },
+    "registered_completion_target": {
+      "assessment_positive_rows": 798,
+      "passed": true
+    },
+    "registered_event_deduplication": {
+      "duplicate_identities": 0,
+      "passed": true,
+      "rows": 812
+    },
+    "required_artifacts": {
+      "missing": [],
+      "passed": true
+    },
+    "safety_flags": {
+      "differences": [],
+      "passed": true
+    },
+    "stock_month_clock_matched_precursor_null": {
+      "draws": 25,
+      "match_failures": 0,
+      "passed": true,
+      "periods": {
+        "assessment": {
+          "eligible_observed_events": 668,
+          "events_per_draw": 668,
+          "match_failures": 0,
+          "passed": true
+        },
+        "development": {
+          "eligible_observed_events": 1097,
+          "events_per_draw": 1097,
+          "match_failures": 0,
+          "passed": true
+        }
+      }
+    },
+    "within_slate_hidden_probability_null": {
+      "draws": 5,
+      "fingerprint_or_comparison_failures": 0,
+      "maximum_difference": 9.465084965798454e-17,
+      "passed": true
+    }
+  },
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "hidden_probability_null_models_refit": false,
+  "hidden_route_diversion_veto_test": true,
+  "independent": true,
+  "manual_probability_rows": 100,
+  "maximum_numeric_difference": 0.0,
+  "order_placement": "disabled",
+  "passed": true,
+  "precursor_null_repeated": false,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "strategy_promotion": false
+}

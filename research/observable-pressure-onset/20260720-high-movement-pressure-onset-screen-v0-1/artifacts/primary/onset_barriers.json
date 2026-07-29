@@ -1,0 +1,17 @@
+{
+  "barriers_bps": {
+    "12": 114.06303345896207,
+    "6": 137.38384537217985
+  },
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quantile": 0.75,
+  "research_only": true,
+  "strategy_promotion": false,
+  "training_source": "all_eligible_2024_development_three_bar_residual_paths"
+}

@@ -1,0 +1,35 @@
+{
+  "advance_exclusions": [
+    "first_completion_lead == 1",
+    "any active prefix exactly one transition from completion"
+  ],
+  "advance_target": "completion_in_bars_2_or_3",
+  "all_completing_semantic_identities_preserved_for_audit": true,
+  "broad_route_conflict_test": true,
+  "broker_integration_required": false,
+  "clean_two_to_three_bar_advance_target": true,
+  "definition": "earliest registered semantic-loop completion strictly after the checkpoint within the next three completed five-minute bars",
+  "dense_even_checkpoints": true,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_identity_used_as_model_feature": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "lead_status_rule": "supported only when the pooled A1 gate passes, lead support is at least 100 outcomes/100 sessions/15 stocks, and mean A1 probability exceeds A0; otherwise descriptive_only or insufficient_support",
+  "lead_values": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "next_bar_completions_excluded": true,
+  "one_transition_away_prefixes_excluded": true,
+  "options_outcomes_opened": false,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "same_future_bar_multiple_completions_are_one_timing_outcome": true,
+  "strategy_promotion": false,
+  "unresolved_target_rows": 0
+}

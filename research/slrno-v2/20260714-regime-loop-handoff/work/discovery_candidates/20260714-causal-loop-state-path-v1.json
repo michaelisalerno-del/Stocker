@@ -1,0 +1,132 @@
+{
+  "candidate_id": "20260714-causal-loop-state-path-v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "application_modified": false,
+  "scientific_status": "post_inspection_causal_retrospective_development_not_validation",
+  "sealed_data_available": false,
+  "primary_decision": {
+    "name": "completed_bar_parent_route_event_exit_family",
+    "decision": "rejected",
+    "reason": "the first-terminal-route next-open policy underperformed the frozen anchor+24 close in all four primary candidate-period cells, no endpoint passed Holm, and quarter, leave-one-stock-out, uncertainty, and absolute-cost gates failed"
+  },
+  "loop_prediction_scope": {
+    "parent_identity_conditional_on_completion": "structurally_determined",
+    "opportunity_level_occurrence_or_completion": "not_100_percent",
+    "profitability_accuracy": "separate_unresolved_target",
+    "warning": "Do not equate conditional parent identity with completion inside the payoff window, direction, or positive expectancy."
+  },
+  "frozen_primary_cells": [
+    {
+      "candidate": "cycle_04|state4",
+      "expected_rotation": "4->2->4",
+      "2023": {"rows": 132, "fixed_mean_net_bps": 26.5406},
+      "2025": {"rows": 96, "fixed_mean_net_bps": 30.7493}
+    },
+    {
+      "candidate": "cycle_07|state5",
+      "expected_rotation": "5->6->5",
+      "2023": {"rows": 722, "fixed_mean_net_bps": 7.0203},
+      "2025": {"rows": 713, "fixed_mean_net_bps": 17.0376}
+    }
+  ],
+  "route_payoff_findings": [
+    {
+      "path": "exact_parent_completion",
+      "cycle_04_state4": {
+        "2023": {"rows": 14, "share": 0.1061, "mean_net_bps": 25.8420},
+        "2025": {"rows": 20, "share": 0.2083, "mean_net_bps": 116.3682}
+      },
+      "cycle_07_state5": {
+        "2023": {"rows": 184, "share": 0.2548, "mean_net_bps": -84.3589},
+        "2025": {"rows": 208, "share": 0.2917, "mean_net_bps": -14.6200}
+      },
+      "interpretation": "completion payoff response is loop-specific, not universally positive"
+    },
+    {
+      "path": "expected_leg_then_diversion",
+      "cycle_04_state4": {
+        "2023": {"rows": 21, "share": 0.1591, "mean_net_bps": -39.2229},
+        "2025": {"rows": 15, "share": 0.1563, "mean_net_bps": -51.7295}
+      },
+      "cycle_07_state5": {
+        "2023": {"rows": 118, "share": 0.1634, "mean_net_bps": -65.8821},
+        "2025": {"rows": 131, "share": 0.1837, "mean_net_bps": -4.2062}
+      },
+      "interpretation": "strongest new opened-data hypothesis; freeze for genuinely prospective evaluation only"
+    },
+    {
+      "path": "incompatible_first_transition",
+      "cycle_04_state4": {
+        "2023": {"rows": 97, "share": 0.7348, "mean_net_bps": 40.8789},
+        "2025": {"rows": 60, "share": 0.6250, "mean_net_bps": 16.7976}
+      },
+      "cycle_07_state5": {
+        "2023": {"rows": 375, "share": 0.5194, "mean_net_bps": 51.4770},
+        "2025": {"rows": 306, "share": 0.4292, "mean_net_bps": 24.5308}
+      },
+      "interpretation": "structural incompatibility is not economic invalidation"
+    }
+  ],
+  "primary_policy": {
+    "name": "terminal_route_event_next_open_else_fixed",
+    "event_clock": "detect after completed transition bar; hypothetical exit at following provider open",
+    "results": [
+      {"candidate": "cycle_04|state4", "period": 2023, "action_share": 0.8939, "paired_difference_bps": -55.8537, "ci": [-95.2185, -17.1987]},
+      {"candidate": "cycle_04|state4", "period": 2025, "action_share": 0.9063, "paired_difference_bps": -15.1426, "ci": [-64.3413, 29.8347]},
+      {"candidate": "cycle_07|state5", "period": 2023, "action_share": 0.8809, "paired_difference_bps": -7.3528, "ci": [-23.7819, 9.0911]},
+      {"candidate": "cycle_07|state5", "period": 2025, "action_share": 0.8205, "paired_difference_bps": -11.6434, "ci": [-28.1080, 5.0851]}
+    ],
+    "holm_passes": 0,
+    "positive_leave_one_stock_out_deletions": [0, 0, 0, 0]
+  },
+  "retired_paths": [
+    "state age or exit hazard as a scalar payoff discriminator",
+    "automatic next-open exit on exact completion",
+    "automatic next-open exit on structural route invalidation",
+    "automatic next-open exit on the first state transition",
+    "treating structural completion as synonymous with a profitable move"
+  ],
+  "recommended_next_paths": [
+    {
+      "priority": 1,
+      "path": "direct_causal_payoff_state_model",
+      "target": "cost-adjusted payoff distribution conditional on frozen loop forecast and current information",
+      "output": "positive_negative_or_unknown_with_uncertainty_support_and_coverage"
+    },
+    {
+      "priority": 2,
+      "path": "prospective_route_branch_forecast",
+      "target": "probabilities for intact, expected-leg, completion, incompatible-first, diversion, and unknown route states",
+      "oracle_guard": "realised route child or morph identity cannot be an admission feature"
+    },
+    {
+      "priority": 3,
+      "path": "route_state_joined_to_causal_price_path",
+      "target": "remaining payoff after each completed bar using running excursion, retracement, prior ATR, and volatility support",
+      "threshold_guard": "no threshold selection from opened V2 or V3 paths"
+    },
+    {
+      "priority": 4,
+      "path": "expected_leg_then_diversion_prospective_hypothesis",
+      "target": "new sealed observations only",
+      "status": "post_inspection_hypothesis_not_validated"
+    }
+  ],
+  "prospective_logging_contract": "../contracts/20260714-loop-payoff-prospective-log-v2.json",
+  "provider_volume_label": "historical_volume_activity_proxy_not_used",
+  "quotes_or_ticks_used": false,
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "strategy_promotion": false,
+  "integrity": {
+    "focused_tests": "7_of_7_passed",
+    "independent_audit": "14_of_14_passed",
+    "exact_rerun": "all_17_files_byte_identical",
+    "pre_score_manifest_sha256": "c9433aa9fd08153361b38482dd594a5de35993379822357b6b403d2701e18d38"
+  },
+  "report": "../reports/20260714-causal-loop-state-path-v1.md",
+  "primary_artifacts": "../artifacts/20260714-causal-loop-state-path-v1/primary",
+  "exact_rerun": "../artifacts/20260714-causal-loop-state-path-v1/exact_rerun"
+}

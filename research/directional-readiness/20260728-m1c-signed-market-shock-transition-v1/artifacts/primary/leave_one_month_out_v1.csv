@@ -1,0 +1,13 @@
+period,arm,omitted_dimension,omitted_value,retained_episode_count,retained_session_count,retained_shock_event_count,mean_aligned_return
+assessment,continuation,month_v1,2025-04,4,4,4,0.0023817691567983865
+assessment,continuation,month_v1,2025-05,5,5,5,0.0008379425422143898
+assessment,continuation,month_v1,2025-03,6,6,6,-0.0018579487815610508
+assessment,continuation,month_v1,2025-01,6,6,6,-0.0014962753330041267
+assessment,resistance,month_v1,2025-05,1,1,1,0.005343870860081049
+assessment,resistance,month_v1,2025-01,1,1,1,-0.00925963549036415
+stress,continuation,month_v1,2025-11,13,9,10,-0.003632500211506073
+stress,continuation,month_v1,2025-09,24,15,18,-0.0024481704832200572
+stress,continuation,month_v1,2025-10,17,12,14,0.0004145102136443768
+stress,continuation,month_v1,2025-12,21,12,15,-0.003550037081712248
+stress,resistance,month_v1,2025-10,3,2,2,-0.0039907585828236
+stress,resistance,month_v1,2025-11,1,1,1,0.00026711177264199227

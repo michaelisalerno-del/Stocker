@@ -1,0 +1,41 @@
+{
+  "checks": {
+    "aggregate_predictive_metrics_recomputed": true,
+    "all_causal_features_independently_reconstructed": true,
+    "all_source_hashes_match": true,
+    "all_target_paths_and_payoffs_independently_replayed": true,
+    "economic_state_and_payoff_replayed": true,
+    "event_identity_unique": true,
+    "frozen_outcome_free_ledgers_match": true,
+    "outcome_identity_complete": true,
+    "pre_outcome_ledger_has_no_outcomes": true,
+    "probabilities_normalised": true,
+    "research_only_opened_status_preserved": true,
+    "sampled_prequential_models_independently_refit": true
+  },
+  "contract_id": "20260714-long-short-neutral-detector-v1",
+  "errors": {
+    "aggregate_metric_errors": 0,
+    "causal_feature_errors": 0,
+    "economic_payoff_errors": 0,
+    "economic_state_errors": 0,
+    "forbidden_pre_outcome_columns": [],
+    "frozen_ledgers": 0,
+    "path_categorical_errors": 0,
+    "path_numeric_errors": 0,
+    "prequential_refit_errors": 0,
+    "source_hashes": 0
+  },
+  "live_ordering_enabled": false,
+  "maximum_errors": {
+    "aggregate_metric": 8.326672684688674e-17,
+    "causal_feature": 0.0,
+    "path_numeric": 0.0,
+    "probability_sum": 2.220446049250313e-16,
+    "sampled_prequential_probability": 0.0
+  },
+  "order_placement": "disabled",
+  "passed": 12,
+  "research_only": true,
+  "total": 12
+}

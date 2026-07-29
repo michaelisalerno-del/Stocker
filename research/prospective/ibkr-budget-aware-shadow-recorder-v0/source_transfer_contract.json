@@ -1,0 +1,59 @@
+{
+  "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
+  "valid_sessions_required": 20,
+  "exact_ohlc_equality_required": false,
+  "comparison_groups": [
+    "bar semantics",
+    "feature transfer",
+    "probability transfer",
+    "tail transfer",
+    "episode transfer"
+  ],
+  "probability_metrics": [
+    "pearson",
+    "spearman",
+    "mean_absolute_difference",
+    "median_absolute_difference",
+    "p95_absolute_difference",
+    "mean_signed_bias",
+    "distribution_shift"
+  ],
+  "decision_categories": [
+    "ibkr_transfer_supported_without_recalibration",
+    "ibkr_ranking_supported_probability_scale_shifted",
+    "ibkr_transfer_mixed_stock_or_checkpoint_failures",
+    "ibkr_transfer_not_supported",
+    "blocked_insufficient_valid_sessions",
+    "blocked_bar_semantics_failure",
+    "blocked_m1c_runtime_parity_failure"
+  ],
+  "v1_candidate": {
+    "id": "M1C_IBKR_CALIBRATION_V1_CANDIDATE",
+    "allowed_only_for_scale_shift": true,
+    "inputs": ["IBKR M1C probability distribution"],
+    "forbidden_inputs": ["option P&L", "future movement", "trade outcomes", "win rate"],
+    "original_v0_thresholds_continue_in_parallel": true
+  },
+  "historical_decision": "blocked_insufficient_low_tail_support",
+  "claims_boundary": {
+    "research_only": true,
+    "record_only": true,
+    "frozen_m1c": true,
+    "source_transfer_monitoring": true,
+    "exact_vendor_bar_equality_required": false,
+    "option_shadow_outcomes_only": true,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "full_option_chain_streaming_allowed": false,
+    "tick_by_tick_universe_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "reserved_future_trading_capacity": true,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_methods_available": false,
+    "account_access_required": false,
+    "position_access_required": false,
+    "strategy_promotion": false
+  }
+}

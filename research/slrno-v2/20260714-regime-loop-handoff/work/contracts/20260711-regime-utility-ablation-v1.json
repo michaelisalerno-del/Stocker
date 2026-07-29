@@ -1,0 +1,252 @@
+{
+  "contract_id": "regime_utility_ablation_v1",
+  "contract_frozen_at_utc": "2026-07-11T22:50:09Z",
+  "scientific_status": "2024_internal_causal_forward_development",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "question": "Does the frozen eight-state regime representation add causal out-of-month information about subsequent movement magnitude and range, and which structural layers add further utility?",
+  "interpretation": {
+    "permitted": [
+      "incremental absolute-movement prediction",
+      "incremental future-range prediction",
+      "research-only state/history/departure/loop/burst ablation"
+    ],
+    "forbidden": [
+      "direction",
+      "signed return",
+      "profitability",
+      "P&L",
+      "economic edge",
+      "tradability",
+      "strategy",
+      "position",
+      "order",
+      "broker",
+      "deployment"
+    ],
+    "high_or_good_loop_grade_inferred": false
+  },
+  "periods": {
+    "data_year": 2024,
+    "validation_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "fold_rule": "For validation month m, every fitted object uses only rows with month strictly earlier than m.",
+    "2025_permitted": false,
+    "2023_permitted": false,
+    "2026_permitted": false,
+    "prospective_claim_permitted": false
+  },
+  "sources": {
+    "anchor_panel": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+    "causal_runs": "/private/tmp/stocker_causal_semimarkov_regime_loops_20260710/train_2024_filtered_runs.csv",
+    "fixed_cycles": "/private/tmp/stocker_per_loop_movement_quality_20260710/fixed_cycles.csv",
+    "anchor_requirements": {
+      "regular_session_only": true,
+      "maximum_zero_based_start_bar": 53,
+      "exact_future_support_bars": [
+        6,
+        12,
+        24
+      ],
+      "completed_anchor_bar_available": true,
+      "future_outcome_starts_next_bar": true
+    },
+    "provider_volume_label": "historical_volume_not_used",
+    "direct_volume_feature_used": false,
+    "upstream_detector_note": "The already-frozen detector contains two provider historical_volume transforms; this experiment neither reads nor adds volume."
+  },
+  "targets": {
+    "absolute_return_bps": {
+      "definition": "abs(10000 * log(close[t+h] / close[t]))",
+      "horizons": [
+        6,
+        12,
+        24
+      ]
+    },
+    "future_range_bps": {
+      "definition": "10000 * (max(high[t+1:t+h]) - min(low[t+1:t+h])) / close[t]",
+      "horizons": [
+        6,
+        12,
+        24
+      ]
+    },
+    "raw_bps_fit_and_score": true,
+    "direction_or_signed_return_used": false
+  },
+  "shared_context_without_eight_state_regime": {
+    "numeric_columns": [
+      "b0_entry_numeric",
+      "b0_entry_high_stress",
+      "entry_time_sin",
+      "entry_time_cos",
+      "current_bar_log_return",
+      "return_sum_6",
+      "mean_abs_return_12",
+      "session_return",
+      "bar_range_pct"
+    ],
+    "numeric_width": 9,
+    "stock_identity_feature_used": false,
+    "future_state_duration_price_or_end_clock_feature_used": false,
+    "missing_values": "training-fold median"
+  },
+  "structural_fold_models": {
+    "destination_history_model": {
+      "target": "next state 0..7, with session end as explicit destination 8",
+      "features": "648-way (previous_state_2, previous_state_1, current_state) token",
+      "class": "multinomial LogisticRegression",
+      "C": 0.2,
+      "solver": "lbfgs",
+      "max_iter": 500,
+      "random_state": 20260711,
+      "loop_probability": "sum over compatible rotations of products of fold-fitted destination probabilities through each frozen cycle",
+      "fit_scope": "all causal state runs in months strictly before validation month"
+    },
+    "departure_three_bar_proxy": {
+      "target": "current run duration <= 3 five-minute bars",
+      "features": "current-state one-hot, 648-way history token, B0 numeric/stress, and entry clock sine/cosine",
+      "class": "binary LogisticRegression",
+      "C": 0.2,
+      "solver": "lbfgs",
+      "max_iter": 500,
+      "random_state": 20260711,
+      "scaler": "StandardScaler(with_mean=false), fit inside fold",
+      "fit_scope": "all causal state runs in months strictly before validation month",
+      "retained_isotonic_model_equivalence_claimed": false,
+      "note": "This is a causal run-entry departure-risk proxy for the ablation, not a reconstruction of the retained posterior-marginalized isotonic probability."
+    }
+  },
+  "nested_feature_layers": [
+    {
+      "index": 0,
+      "name": "context",
+      "adds": "nine shared numeric controls",
+      "width": 9
+    },
+    {
+      "index": 1,
+      "name": "state",
+      "adds": "eight-state one-hot",
+      "width": 17
+    },
+    {
+      "index": 2,
+      "name": "history",
+      "adds": "648-way last-three-state token one-hot",
+      "width": 665
+    },
+    {
+      "index": 3,
+      "name": "departure",
+      "adds": "one fold-fitted three-bar departure-risk score",
+      "width": 666
+    },
+    {
+      "index": 4,
+      "name": "loops",
+      "adds": "twenty fold-fitted fixed-loop path probabilities",
+      "width": 686
+    },
+    {
+      "index": 5,
+      "name": "burst",
+      "adds": "for each of thirteen two-state cycles: log1p prior repeat count, log1p prior pair duration, prior-durable flag, and loop-probability times log1p prior repeat count",
+      "width": 738
+    }
+  ],
+  "burst_causality": {
+    "past_runs_only": true,
+    "current_realized_duration_used": false,
+    "next_or_return_duration_used": false,
+    "future_loop_label_used": false,
+    "future_price_used": false
+  },
+  "outcome_model": {
+    "one_multioutput_model_per_layer_and_fold": true,
+    "class": "Ridge",
+    "alpha": 10.0,
+    "solver": "lsqr",
+    "targets": 6,
+    "scaler": "StandardScaler(with_mean=false), fit on the training anchors inside each fold",
+    "fit_scope": "anchor rows in months strictly before validation month",
+    "prediction_clipping": false
+  },
+  "metrics": {
+    "primary": "mean squared error",
+    "secondary": "mean absolute error",
+    "relative_improvement": "100 * (baseline loss - candidate loss) / baseline loss",
+    "required_slices": [
+      "pooled",
+      "each horizon",
+      "each validation month",
+      "every leave-one-stock-out deletion"
+    ],
+    "uncertainty": {
+      "unit": "session date",
+      "method": "five-session moving-block bootstrap on normalized daily MSE differences",
+      "draws": 5000,
+      "confidence_interval": 0.95,
+      "random_state": 20260711,
+      "normalization": "within each target/horizon, divide row squared-error difference by that baseline cell's pooled MSE; then average horizons within date"
+    }
+  },
+  "predeclared_decisions": {
+    "incremental_comparisons": [
+      "state_vs_context",
+      "history_vs_state",
+      "departure_vs_history",
+      "loops_vs_departure",
+      "burst_vs_loops"
+    ],
+    "robust_increment_retained_if": {
+      "pooled_mse_and_mae_improvement_positive_for_both_target_families": true,
+      "mse_improvement_positive_at_all_six_target_horizon_cells": true,
+      "mse_improvement_positive_in_at_least_four_of_six_months_for_each_target_family": true,
+      "mse_improvement_positive_under_every_leave_one_stock_out_deletion_at_all_six_target_horizon_cells": true,
+      "bootstrap_upper_bound_below_zero_for_each_target_family": true
+    },
+    "descriptive_only_if_any_retention_gate_fails": true,
+    "regime_is_reliably_useful_definition": "state_vs_context passes every robust-increment retention gate",
+    "final_stack_magnitude_gate_vs_context": {
+      "absolute_return_pooled_mse_minimum_improvement": 0.01,
+      "future_range_pooled_mse_minimum_improvement": 0.03,
+      "all_horizons_positive": true,
+      "every_leave_one_stock_out_positive_at_all_horizons": true,
+      "bootstrap_upper_bound_below_zero_for_each_target_family": true
+    },
+    "layer_selection_or_post_score_tuning_permitted": false
+  },
+  "integrity": {
+    "contract_must_be_hashed_before_first_score": true,
+    "source_and_runner_hashes_recorded": true,
+    "independent_prediction_and_metric_reconstruction_required": true,
+    "all_fold_train_months_strictly_precede_validation_month": true,
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "no_later_period_rows": true,
+    "forbidden_output_columns": [
+      "direction",
+      "signed_return",
+      "pnl",
+      "profit",
+      "cost",
+      "spread",
+      "slippage",
+      "position",
+      "order",
+      "broker",
+      "strategy",
+      "deployment"
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "additional_interactions_created": false,
+  "behavioural_trajectory_test": true,
+  "broker_integration_required": false,
+  "clip_bounds": null,
+  "coarse_loop_family_target": true,
+  "development_only_clip_quantiles": [
+    0.01,
+    0.99
+  ],
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "interaction_count": 6,
+  "interactions": [
+    {
+      "feature": "transition_probability_x_arousal_change",
+      "regime_term": "transition_probability",
+      "trajectory_term": "arousal_change"
+    },
+    {
+      "feature": "posterior_entropy_x_frustration_change",
+      "regime_term": "posterior_entropy",
+      "trajectory_term": "frustration_change"
+    },
+    {
+      "feature": "top_second_margin_x_conviction_change",
+      "regime_term": "top_second_margin",
+      "trajectory_term": "conviction_change"
+    },
+    {
+      "feature": "transition_probability_x_signed_pressure_acceleration",
+      "regime_term": "transition_probability",
+      "trajectory_term": "signed_pressure_acceleration"
+    },
+    {
+      "feature": "posterior_entropy_x_tension_acceleration",
+      "regime_term": "posterior_entropy",
+      "trajectory_term": "tension_acceleration"
+    },
+    {
+      "feature": "top_state_probability_x_signed_exhaustion_change",
+      "regime_term": "top_state_probability",
+      "trajectory_term": "signed_exhaustion_change"
+    }
+  ],
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "status": "not_fitted_due_to_pre_model_support_blocker",
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

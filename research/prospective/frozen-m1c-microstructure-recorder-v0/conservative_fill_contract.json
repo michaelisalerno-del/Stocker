@@ -1,0 +1,47 @@
+{
+  "contract_version": "m1c-conservative-fill-v0",
+  "research_only": true,
+  "original_low_movement_decision_preserved": true,
+  "original_decision": "blocked_insufficient_low_tail_support",
+  "retrospective_gate_relaxation_allowed": false,
+  "m1c_frozen": true,
+  "m1c_bottom_5_threshold": 0.115697407847643,
+  "m1c_bottom_10_threshold": 0.135896965695626,
+  "m1c_bottom_20_threshold": 0.167095528962669,
+  "primary_quiet_state": "bottom_10_percent",
+  "prospective_record_only": true,
+  "option_shadow_outcomes_only": true,
+  "defined_risk_short_premium_only": true,
+  "naked_short_options_allowed": false,
+  "paper_orders_allowed": false,
+  "live_orders_allowed": false,
+  "broker_order_methods_allowed": false,
+  "strategy_promotion": false,
+  "protected_historical_start": "2026-01-01",
+  "opening": {
+    "short_legs": "observed_bid",
+    "long_protective_legs": "observed_ask"
+  },
+  "closing": {
+    "short_legs": "observed_ask",
+    "long_protective_legs": "observed_bid"
+  },
+  "long_premium_entry": "observed_ask",
+  "long_premium_exit": "observed_bid",
+  "exit_horizons_minutes": [5, 10, 15, 30, 60],
+  "session_end": "record_when_supported",
+  "midpoint_pnl_primary": false,
+  "commission_free_pnl_recorded": true,
+  "configured_commission_sensitivity_recorded": true,
+  "maximum_defined_risk_recorded": true,
+  "touch_and_cross_diagnostics_recorded": true,
+  "touch_path_source": "retained_underlying_level_i_and_tick_trades_only",
+  "option_callback_underlying_reference_path_fallback_allowed": false,
+  "underlying_path_unavailable_disqualifies_strict_quality": true,
+  "underlying_halted_disqualifies_strict_quality": true,
+  "quality_populations": [
+    "all_attempted_structures",
+    "complete_quote_quality_structures",
+    "strict_quote_quality_structures"
+  ]
+}

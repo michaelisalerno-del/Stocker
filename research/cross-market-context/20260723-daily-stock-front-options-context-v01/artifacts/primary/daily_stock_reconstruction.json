@@ -1,0 +1,121 @@
+{
+  "back_expiry_bulk_download_enabled": false,
+  "back_expiry_schema_preflight_only": true,
+  "branches_run_independently": true,
+  "broker_integration_required": false,
+  "canonical_centroids": [
+    {
+      "daily_activity_acceleration": 0.9945709966403592,
+      "daily_compression": -0.5686229821544257,
+      "daily_directional_efficiency": 0.5768689029071745,
+      "daily_extension": 1.2883500697818566,
+      "daily_rejection": -0.42060843949159077,
+      "daily_relative_strength": 1.3760691051826486,
+      "daily_trend_persistence": 0.9859512610376066,
+      "daily_volatility_acceleration": 0.28302456595963316
+    },
+    {
+      "daily_activity_acceleration": 0.4850793426248051,
+      "daily_compression": -0.4240402148360719,
+      "daily_directional_efficiency": -0.30381365508885333,
+      "daily_extension": 0.08342429368612571,
+      "daily_rejection": 0.1791638288520659,
+      "daily_relative_strength": 0.0057772394337911835,
+      "daily_trend_persistence": -0.010341072926067944,
+      "daily_volatility_acceleration": 0.6130216569345696
+    },
+    {
+      "daily_activity_acceleration": 0.2748443844876325,
+      "daily_compression": 0.008196681868191441,
+      "daily_directional_efficiency": 0.6520898315174901,
+      "daily_extension": -0.8959786240606359,
+      "daily_rejection": -0.48576618635267826,
+      "daily_relative_strength": -0.8023876811390082,
+      "daily_trend_persistence": 0.8021179874324984,
+      "daily_volatility_acceleration": -0.12100618040745949
+    },
+    {
+      "daily_activity_acceleration": -0.3695455580187119,
+      "daily_compression": 0.32347330669427754,
+      "daily_directional_efficiency": -0.1277496040713777,
+      "daily_extension": -0.03288361024108947,
+      "daily_rejection": 0.1573832945209161,
+      "daily_relative_strength": -0.09777207356035492,
+      "daily_trend_persistence": 0.034050359424899784,
+      "daily_volatility_acceleration": -0.3750407434044588
+    }
+  ],
+  "canonical_to_original": [
+    3,
+    2,
+    0,
+    1
+  ],
+  "daily_stock_context_test": true,
+  "daily_stock_regime_mapping_mismatches": 0,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "front_options_only_context_test": true,
+  "frozen_model_reused_without_refit": true,
+  "intraday_option_quotes_used": false,
+  "maximum_daily_stock_dimension_difference": 0.0,
+  "maximum_daily_stock_posterior_difference": 4.884981308350689e-15,
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "passed": true,
+  "predecessor_daily_stock_dimensions_sha256": "8b00d32608f1ab75fd1c26f30c8bdc84d4d9732eb70a95da71d6e7d2da7b5a78",
+  "predecessor_daily_stock_mapping_sha256": "bb2822c0784f1e57d9af3ceb4feebbc70a1daccb5eeac3d55717889a8a280fcb",
+  "predecessor_daily_stock_raw_sha256": "1c9c7603e5b17a3c770210470e0baaaebd134b0ca8c0605a148c60fecc6bc16f",
+  "predecessor_experiment": "Daily Stock \u00d7 Options Regime Context Quick Screen V0",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_context_screen": true,
+  "regime_support": {
+    "0": {
+      "hard_rows": 445,
+      "months": 8,
+      "posterior_mass": 0.14703547040082207,
+      "sessions": 123,
+      "stocks": 20,
+      "supported": true
+    },
+    "1": {
+      "hard_rows": 835,
+      "months": 8,
+      "posterior_mass": 0.2743466153288346,
+      "sessions": 155,
+      "stocks": 20,
+      "supported": true
+    },
+    "2": {
+      "hard_rows": 370,
+      "months": 8,
+      "posterior_mass": 0.1227733091380294,
+      "sessions": 102,
+      "stocks": 20,
+      "supported": true
+    },
+    "3": {
+      "hard_rows": 1422,
+      "months": 8,
+      "posterior_mass": 0.45584460513231395,
+      "sessions": 158,
+      "stocks": 20,
+      "supported": true
+    }
+  },
+  "research_only": true,
+  "row_identity_mismatches": 0,
+  "rows": 7519,
+  "strategy_promotion": false,
+  "support": {
+    "assessment_months": 8,
+    "assessment_rows": 3072,
+    "assessment_sessions": 159,
+    "assessment_stocks": 20,
+    "daily_stock_feature_retention": 0.9764780673871583,
+    "passed": true
+  },
+  "underlying_movement_outcomes_opened": true
+}

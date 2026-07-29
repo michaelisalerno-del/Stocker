@@ -1,0 +1,24 @@
+{
+  "broker_connected": false,
+  "byte_identical": true,
+  "compared_artifact_count": 47,
+  "economic_outcomes_used": false,
+  "exact_artifact_manifest_hash": "bf72ba7544ee7fa50ebfabfc495a4cacfa2fa3f5df6e854f39722461811125b2",
+  "excluded_self_referential_files": [
+    "artifact_manifest.json",
+    "exact_rerun_manifest.json",
+    "independent_audit.json",
+    "post_run_tree_manifest.json"
+  ],
+  "execution_enabled": false,
+  "manifest_hash": "772ba443d21764b675e6759ebc0e1ccf746cc24c3ab5c451a78ea053a5780d1f",
+  "manifest_version": "regime_model_validity_v2_exact_rerun",
+  "mismatched_files": [],
+  "missing_or_extra_files": [],
+  "order_placement": "disabled",
+  "payoff_selection_used": false,
+  "primary_artifact_manifest_hash": "bf72ba7544ee7fa50ebfabfc495a4cacfa2fa3f5df6e854f39722461811125b2",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

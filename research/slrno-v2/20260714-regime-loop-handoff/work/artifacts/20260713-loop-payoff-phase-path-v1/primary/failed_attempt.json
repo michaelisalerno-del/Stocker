@@ -1,0 +1,11 @@
+{
+  "attempt": "initial_pre_score_run",
+  "scored_artifacts_produced": false,
+  "payoff_results_inspected": false,
+  "failure": "state-run positions are global within symbol while execution bar ordinals are session-local",
+  "scientific_contract_changed": false,
+  "implementation_fix": "translate admission and frozen-exit ordinals to the state-run global coordinate using anchor_start_pos minus bar_ordinal",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled"
+}

@@ -1,0 +1,15 @@
+{
+  "contract_hash": "87c6b0d6349dfb6607f26ec369308cb853bc2ce6d83c72e30fd6928c39ef707b",
+  "contract_id": "20260717-profitable-loop-episode-anatomy-v1",
+  "data_snapshot_id": "bebb812b038d17ba4bf3f48a17a9205276657cdf04d7f1df630c65d1f80e8a8b",
+  "fixed_run_timestamp": "2026-07-17T00:00:00+00:00",
+  "git_branch": "agent/slrno-research-handoff",
+  "git_head": "d199bed1e1d66199ba63b3f5e12df03768728484",
+  "git_identity_kind": "contract_starting_commit",
+  "predictive_model_built": false,
+  "primary_horizon": 24,
+  "python": "3.12.13",
+  "read_only_research": true,
+  "run_id": "profitable-loop-episode-anatomy-v1-frozen-run",
+  "trading_rule_built": false
+}

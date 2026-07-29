@@ -1,0 +1,70 @@
+{
+  "assessment_holm_adjusted_p_values": {
+    "continuation": 0.9630369630369631,
+    "resistance": 0.9630369630369631
+  },
+  "assessment_observed": {
+    "continuation": -0.0003051693023393129,
+    "resistance": -0.001957882315141551
+  },
+  "assessment_one_sided_raw_p_values": {
+    "continuation": 0.48151848151848153,
+    "resistance": 0.6403596403596403
+  },
+  "primary_null_audit": [
+    {
+      "donor_rows": 13914,
+      "draws": 1000,
+      "eligible_predictor_rows": 9,
+      "grouping": [
+        "stock",
+        "checkpoint",
+        "period"
+      ],
+      "outcome_completeness_preserved": true,
+      "period": "assessment",
+      "same_session_allowed": false,
+      "seed": 2026072805
+    },
+    {
+      "donor_rows": 18136,
+      "draws": 1000,
+      "eligible_predictor_rows": 29,
+      "grouping": [
+        "stock",
+        "checkpoint",
+        "period"
+      ],
+      "outcome_completeness_preserved": true,
+      "period": "stress",
+      "same_session_allowed": false,
+      "seed": 2026072805
+    }
+  ],
+  "temporal_placebo": [
+    {
+      "amplifying_minus_resisting_follow_shock_rate": null,
+      "construction": "next_eligible_fresh_high_m1c_outcome_same_stock_checkpoint_period",
+      "continuation_material_direction_accuracy": null,
+      "continuation_mean_aligned_return": 0.0054371397892856235,
+      "continuous_ranking_auc": null,
+      "cross_chronology_allowed": false,
+      "paired_episode_count": 4,
+      "period": "assessment",
+      "resistance_material_direction_accuracy": null,
+      "resistance_mean_aligned_return": -0.0029375110070023257
+    },
+    {
+      "amplifying_minus_resisting_follow_shock_rate": -0.5,
+      "construction": "next_eligible_fresh_high_m1c_outcome_same_stock_checkpoint_period",
+      "continuation_material_direction_accuracy": 0.5,
+      "continuation_mean_aligned_return": -0.001439351041278703,
+      "continuous_ranking_auc": 0.5,
+      "cross_chronology_allowed": false,
+      "paired_episode_count": 13,
+      "period": "stress",
+      "resistance_material_direction_accuracy": 0.0,
+      "resistance_mean_aligned_return": -0.01071946302010941
+    }
+  ]
+}

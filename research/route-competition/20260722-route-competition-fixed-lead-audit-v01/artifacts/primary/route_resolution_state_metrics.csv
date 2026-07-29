@@ -1,0 +1,6 @@
+route_resolution_state,all_rows,advance_rows,sessions,stocks,bars_two_to_three_positive_outcomes,next_bar_completion_rate,clean_bars_two_to_three_completion_rate,one_transition_away_prefix_frequency,A1_minus_A0_log_loss_improvement,A1_minus_A0_brier_improvement,inference_supported
+BROAD_CONFLICT,3712,3333,159,20,114,0.00833156012597155,0.0342915982223752,0.102101293103448,,,True
+NARROWING,684,371,126,20,3,0.0511860707037978,0.00806870192988251,0.457602339181287,,,False
+DOMINANT_ROUTE,908,0,0,0,0,0.0640149280529407,,1,,,False
+LOW_ROUTE_SUPPORT,5598,5598,160,20,19,0,0.0033847766710136,0,,,False
+OTHER,14616,9266,160,20,102,0.0221187507248493,0.0109851392331794,0.366037219485495,,,True

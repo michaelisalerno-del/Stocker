@@ -1,0 +1,7 @@
+family,model,group,rows,observed_mean,ci_lower,ci_upper,p_one_sided,draws,sessions,holm_adjusted_p,passes_holm_0_05
+sequential_route_plus_price,sequential_route_plus_price_path,pooled,401,0.0,0.0,0.0,1.0,5000,67,1.0,False
+sequential_route_plus_price,sequential_route_plus_price_path,cycle_04|state4,112,0.0,0.0,0.0,1.0,5000,46,1.0,False
+sequential_route_plus_price,sequential_route_plus_price_path,cycle_07|state5,289,0.0,0.0,0.0,1.0,5000,64,1.0,False
+sequential_route_only,sequential_route_state_only,pooled,401,0.0,0.0,0.0,1.0,5000,67,1.0,False
+sequential_route_only,sequential_route_state_only,cycle_04|state4,112,0.0,0.0,0.0,1.0,5000,46,1.0,False
+sequential_route_only,sequential_route_state_only,cycle_07|state5,289,0.0,0.0,0.0,1.0,5000,64,1.0,False

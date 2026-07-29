@@ -1,0 +1,18 @@
+{
+  "action_decision_mismatches": 0,
+  "bootstrap_draws_reused_without_redraw": true,
+  "episode_identity_mismatches": 0,
+  "final_decision_match": true,
+  "maximum_aligned_return_difference": 0.0,
+  "maximum_development_oof_probability_difference": 0.0,
+  "maximum_feature_difference": 0.0,
+  "maximum_metric_difference": 0.0,
+  "maximum_probability_difference": 0.0,
+  "maximum_score_difference": 0.0,
+  "maximum_target_difference": 0.0,
+  "maximum_threshold_difference": 0.0,
+  "movement_probability_max_difference": 0.0,
+  "null_assignments_reused_without_redraw": true,
+  "passed": true,
+  "pretrigger_timestamp_mismatches": 0
+}

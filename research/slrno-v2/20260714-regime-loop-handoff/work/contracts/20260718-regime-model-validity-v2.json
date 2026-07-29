@@ -1,0 +1,195 @@
+{
+  "contract_id": "20260718-regime-model-validity-v2",
+  "contract_version": "2.0.0",
+  "title": "Regime Model Validity and Loop-Regime Interaction Foundations V2 — Part A",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false,
+  "scope": {
+    "purpose": "audit and validate the causal regime/state representation before any loop-regime interaction scoring",
+    "part": "A",
+    "next_loop_predictor": false,
+    "profitable_loop_selector": false,
+    "trading_runtime_changes": false,
+    "protected_future_opened": false,
+    "forbidden_selection_inputs": [
+      "payoff",
+      "pnl",
+      "profit",
+      "future_return",
+      "mfe",
+      "mae",
+      "execution_outcome",
+      "hindsight_positive_episode"
+    ],
+    "forbidden_runtime_import_tokens": [
+      "stocker_execution",
+      "broker",
+      "order",
+      "position",
+      "deployment"
+    ]
+  },
+  "source_identity": {
+    "implementation_target_git_sha": "66cd706fa727ac5873b299d5c22388221203f451",
+    "implementation_target_branch": "agent/slrno-research-handoff",
+    "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+    "state_count": 8,
+    "frozen_state_parameters": "research/slrno-v2/20260714-regime-loop-handoff/work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state/frozen_semimarkov_parameters.npz",
+    "frozen_preprocessing": "research/slrno-v2/20260714-regime-loop-handoff/work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state/frozen_emission_preprocessing.csv",
+    "frozen_historical_runner": "research/slrno-v2/20260714-regime-loop-handoff/work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/lineage/run_causal_semimarkov_regime_loops.py",
+    "audited_loop_event_contract": "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260718-loop-event-semantics-v2.json",
+    "audited_dictionary_contract": "research/slrno-v2/20260714-regime-loop-handoff/work/contracts/20260718-semantic-loop-dictionary-coverage-v2.json",
+    "fail_closed_on_identity_mismatch": true
+  },
+  "periods": {
+    "development": {
+      "start": "2024-01-01T00:00:00Z",
+      "end": "2024-12-31T23:59:59Z",
+      "purpose": "fit, expanding-fold threshold selection, and structural preregistration"
+    },
+    "unchanged_retrospective_assessment": {
+      "start": "2025-01-01T00:00:00Z",
+      "end": "2025-12-31T23:59:59Z",
+      "may_change_model_or_thresholds": false
+    },
+    "backward_portability": {
+      "year": 2023,
+      "enabled": false,
+      "status_if_enabled": "portability_falsification_only"
+    },
+    "protected_future": {
+      "starts": "2026-01-01T00:00:00Z",
+      "read_enabled": false
+    }
+  },
+  "current_model_reconstruction": {
+    "emission_feature_count": 14,
+    "imputation": "training_median",
+    "scaling": "RobustScaler_quantile_range_25_75",
+    "training_sample": "deterministic_stride_bounded_to_200000_rows",
+    "clusterer": "MiniBatchKMeans",
+    "cluster_batch_size": 4096,
+    "cluster_n_init": 10,
+    "cluster_max_iter": 300,
+    "cluster_seed": 20260710,
+    "variance_floor": 0.05,
+    "transition_pseudocount": 0.5,
+    "initial_pseudocount": 0.5,
+    "legacy_maximum_duration_bars": 24,
+    "audited_maximum_duration_bars": 78,
+    "tail_window_bars": 6,
+    "bar_duration_minutes": 5,
+    "semantic_remap": "ascending_mean_activity_then_direction",
+    "exact_match_required": true
+  },
+  "cleaning_variants": {
+    "CLEANING_0": "no_short_run_cleanup",
+    "CLEANING_1": "frozen_two_pass_neighbor_aware_cleanup_minimum_run_2",
+    "CLEANING_CAUSAL": "past_current_only_persistence_rule_minimum_confirmations_2",
+    "winner_selection_allowed": false
+  },
+  "posterior_diagnostics": {
+    "low_margin_bands": [0.02, 0.05],
+    "entropy_band": "development_top_quartile",
+    "low_new_state_probability": 0.5,
+    "diagnostic_only": true,
+    "hysteresis": {
+      "switch_probability": 0.55,
+      "switch_margin": 0.1,
+      "future_rows_allowed": false
+    },
+    "soft_support": {
+      "low_support_below": 0.25,
+      "robust_support_at_or_above": 0.5,
+      "hard_event_creation_allowed": false,
+      "diagnostic_only": true
+    }
+  },
+  "k_seed_sensitivity": {
+    "state_counts": [6, 8, 10, 12],
+    "seeds": [20260710, 20260711, 20260712, 20260713, 20260714],
+    "same_training_period": true,
+    "same_causal_assessment_period": true,
+    "selection_by_economic_outcome": false,
+    "alignment_weights": {
+      "centroid_distance": 0.6,
+      "transition_profile_distance": 0.25,
+      "duration_profile_distance": 0.15
+    },
+    "alignment_method": "Hungarian_minimum_weighted_structural_distance"
+  },
+  "training_samples": {
+    "bounded_row_count": 200000,
+    "seed": 20260718,
+    "variants": {
+      "SAMPLE_A": "existing_deterministic_stride",
+      "SAMPLE_B": "stock_stratified_random",
+      "SAMPLE_C": "stock_month_stratified_random",
+      "SAMPLE_D": "stock_month_broad_clock_phase_stratified_random"
+    }
+  },
+  "emission_representations": {
+    "MODEL_COMBINED": "exact_current_14_feature_model",
+    "MODEL_STOCK_ONLY": "stock_specific_features_only",
+    "MODEL_HIERARCHICAL": "market_regime_x_stock_behavioural_state",
+    "market_state_count_candidates": [3, 4],
+    "market_state_count_selection": "development_only_expanding_fold_likelihood_and_stability",
+    "hierarchical_identity": "market_state::stock_state",
+    "selection_by_economic_outcome": false
+  },
+  "frozen_structural_thresholds": {
+    "posterior_normalization_tolerance": 1e-10,
+    "state_age_normalization_tolerance": 1e-10,
+    "minimum_state_occupancy": 0.01,
+    "maximum_single_stock_share_per_state": 0.25,
+    "maximum_period_centroid_drift_scaled_rms": 3.0,
+    "maximum_median_period_centroid_drift_scaled_rms": 1.5,
+    "minimum_major_transition_cosine_similarity": 0.7,
+    "duration_median_ratio_lower": 0.5,
+    "duration_median_ratio_upper": 2.0,
+    "minimum_seed_bar_agreement_nmi": 0.5,
+    "minimum_training_sample_dictionary_coverage_ratio": 0.75,
+    "maximum_combined_stability_deficit": 0.1,
+    "hysteretic_same_primitive_minimum": 0.75,
+    "hysteretic_allowed_timestamp_shift_bars": 2,
+    "k8_positive_structural_excess_seed_count": 4,
+    "k8_positive_structural_excess_seed_denominator": 5,
+    "state_declared_stable_only_if_all_component_gates_pass": true
+  },
+  "part_a_decisions": [
+    "regime_representation_validated_for_loop_dictionary",
+    "regime_representation_valid_with_required_sensitivity",
+    "regime_representation_requires_targeted_repair",
+    "regime_representation_unstable_loop_dictionary_must_pause",
+    "hierarchical_market_stock_regime_representation_preferred",
+    "regime_validity_audit_blocked"
+  ],
+  "part_b_authorized_decisions": [
+    "regime_representation_validated_for_loop_dictionary",
+    "regime_representation_valid_with_required_sensitivity",
+    "hierarchical_market_stock_regime_representation_preferred"
+  ],
+  "part_b_access_gate": {
+    "decision_written_before_access": true,
+    "decision_hash_frozen_before_access": true,
+    "independent_audit_passed_before_access": true,
+    "failed_part_a_stops_scoring": true
+  },
+  "exact_rerun": {
+    "required": true,
+    "byte_identity_required": true,
+    "parquet_deterministic_writer_required": true,
+    "excluded_self_referential_files": [
+      "artifact_manifest.json",
+      "independent_audit.json",
+      "exact_rerun_manifest.json",
+      "post_run_tree_manifest.json"
+    ]
+  }
+}

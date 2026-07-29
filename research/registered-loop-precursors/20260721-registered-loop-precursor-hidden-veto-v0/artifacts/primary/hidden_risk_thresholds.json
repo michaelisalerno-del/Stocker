@@ -1,0 +1,24 @@
+{
+  "applied_unchanged_to_assessment": true,
+  "broker_integration_required": false,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "hidden_route_diversion_veto_test": true,
+  "high_minimum": 0.5067959467876102,
+  "low_maximum": 0.2687478541109559,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "quintile_boundaries": [
+    0.2463750092141129,
+    0.334491605616591,
+    0.42582901938405676,
+    0.546506438934597
+  ],
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "source": "2024 high-candidate population with valid cross-fitted U1",
+  "source_rows": 1483,
+  "strategy_promotion": false
+}

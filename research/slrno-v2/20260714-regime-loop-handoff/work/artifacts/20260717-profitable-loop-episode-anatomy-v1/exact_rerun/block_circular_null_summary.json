@@ -1,0 +1,25 @@
+{
+  "block_length": 5,
+  "block_null_lower_95": 0.5958083832335329,
+  "block_null_mean_multi_pair_positive_session_share": 0.6408181111919014,
+  "block_null_upper_95": 0.6851895119418484,
+  "eligibility_mask_preserved": true,
+  "observed_exactly_one": 112,
+  "observed_exactly_three": 59,
+  "observed_exactly_two": 114,
+  "observed_four_or_more": 37,
+  "observed_maximum_positive_pairs": 6,
+  "observed_minus_null_share": 0.011355801851576919,
+  "observed_multi_pair_positive_session_share": 0.6521739130434783,
+  "one_sided_empirical_p": 0.3153423288355822,
+  "pair_positive_counts_preserved": true,
+  "period_boundaries_preserved": true,
+  "period_multi_pair_share": {
+    "2023": 0.5849056603773585,
+    "2025": 0.7177914110429447
+  },
+  "resamples": 2000,
+  "run_id": "profitable-loop-episode-anatomy-v1-frozen-run",
+  "seed": 20260717,
+  "source_hash": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3"
+}

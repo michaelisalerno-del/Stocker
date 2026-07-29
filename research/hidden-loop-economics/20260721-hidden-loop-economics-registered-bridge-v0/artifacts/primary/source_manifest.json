@@ -1,0 +1,6245 @@
+{
+  "broker_integration_required": false,
+  "date_predicate_applied_before_materialisation": true,
+  "execution_enabled": false,
+  "frozen_hidden_families": true,
+  "maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+  "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+  "order_placement": "disabled",
+  "post_completion_economic_diagnostic": true,
+  "predecessor_artifacts": {
+    "research/unregistered-loop-families/20260721-opening-trajectory-unregistered-families-v0/artifacts/primary/assessment_predictions.parquet": "1bf693b3419759e3f76bc732dcd4c562a6224d445745cc3e456ad180a095954e",
+    "research/unregistered-loop-families/20260721-opening-trajectory-unregistered-families-v0/artifacts/primary/hidden_family_mapping.json": "d7ae5e3f6205304ced6ced2ef3bb1cf4841adc75a9d7a4757a931ba1f7e7d81c",
+    "research/unregistered-loop-families/20260721-opening-trajectory-unregistered-families-v0/artifacts/primary/model_coefficients.json": "ddfff6ce20140e4ce0c27572f3afcdfd6b57fbd7ab9521d2a3359a3051e95e58",
+    "research/unregistered-loop-families/20260721-opening-trajectory-unregistered-families-v0/artifacts/primary/model_configurations.json": "7d46efa8593530e10c57e62e704ed57315f6ed57ed9764a1dd41b99e077f6f26",
+    "research/unregistered-loop-families/20260721-opening-trajectory-unregistered-families-v0/artifacts/primary/unregistered_path_ledger.parquet": "00ec43ebda225b5383e8dfb3f370731df8ab355a30248665aeb608dccf1e811c"
+  },
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "protected_files_touched": [],
+  "protected_rows_materialised": 0,
+  "quick_feasibility_screen": true,
+  "raw_market_source": {
+    "broker_integration_required": false,
+    "date_predicate_applied_before_materialisation": true,
+    "execution_enabled": false,
+    "frozen_hidden_families": true,
+    "materialised_rows": 648013,
+    "maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+    "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+    "order_placement": "disabled",
+    "post_completion_economic_diagnostic": true,
+    "production_runtime_modified": false,
+    "prospective_validation": false,
+    "protected_files_touched": [],
+    "protected_rows_materialised": 0,
+    "provider": "EODHD",
+    "quick_feasibility_screen": true,
+    "registered_loop_bridge_test": true,
+    "regular_session_maximum_timestamp": "2025-08-22 19:55:00+00:00",
+    "regular_session_minimum_timestamp": "2024-01-02 14:30:00+00:00",
+    "regular_session_rows": 639927,
+    "regular_session_rows_by_symbol_and_month": [
+      {
+        "rows": 1638,
+        "symbol": "AAL",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAL",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAL",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "AAL",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "AAL",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "AAL",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "AAL",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "AAL",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAL",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "AAL",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "AAL",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "AAL",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAL",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "AAL",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "AAL",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "AAL",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "AAL",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAL",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "AAL",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "AAL",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "AAOI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAOI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAOI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "AAOI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "AAOI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "AAOI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "AAOI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "AAOI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAOI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "AAOI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "AAOI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "AAOI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAOI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "AAOI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "AAOI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "AAOI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "AAOI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "AAOI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "AAOI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "AAOI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "APLD",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "APLD",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "APLD",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "APLD",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "APLD",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "APLD",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "APLD",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "APLD",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "APLD",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "APLD",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "APLD",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "APLD",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "APLD",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "APLD",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "APLD",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "APLD",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "APLD",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "APLD",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "APLD",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "APLD",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "ASTS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "ASTS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "ASTS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "ASTS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "ASTS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "ASTS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "ASTS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "ASTS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "ASTS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "ASTS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "ASTS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "ASTS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "ASTS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "ASTS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "ASTS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "ASTS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "ASTS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "ASTS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "ASTS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "ASTS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "CIFR",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "CIFR",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "CIFR",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "CIFR",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "CIFR",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "CIFR",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "CIFR",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "CIFR",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "CIFR",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "CIFR",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "CIFR",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "CIFR",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "CIFR",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "CIFR",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "CIFR",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1639,
+        "symbol": "CIFR",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "CIFR",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "CIFR",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "CIFR",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "CIFR",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "HIMS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "HIMS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "HIMS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "HIMS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "HIMS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "HIMS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "HIMS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "HIMS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "HIMS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "HIMS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "HIMS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "HIMS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "HIMS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "HIMS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "HIMS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "HIMS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "HIMS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "HIMS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "HIMS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "HIMS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "IONQ",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IONQ",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IONQ",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "IONQ",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "IONQ",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "IONQ",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "IONQ",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "IONQ",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IONQ",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "IONQ",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "IONQ",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "IONQ",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IONQ",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "IONQ",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "IONQ",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1639,
+        "symbol": "IONQ",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "IONQ",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IONQ",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "IONQ",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "IONQ",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "IREN",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IREN",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IREN",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "IREN",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "IREN",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "IREN",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "IREN",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "IREN",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IREN",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "IREN",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "IREN",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "IREN",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IREN",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "IREN",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "IREN",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1639,
+        "symbol": "IREN",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "IREN",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "IREN",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "IREN",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "IREN",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MARA",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MARA",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MARA",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MARA",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MARA",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MARA",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MARA",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MARA",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MARA",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "MARA",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "MARA",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "MARA",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MARA",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MARA",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MARA",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MARA",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MARA",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MARA",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MARA",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "MARA",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MP",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MP",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MP",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MP",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MP",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MP",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MP",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MP",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MP",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "MP",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "MP",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "MP",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MP",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MP",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MP",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MP",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MP",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MP",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MP",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "MP",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MRNA",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MRNA",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MRNA",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MRNA",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MRNA",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MRNA",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MRNA",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MRNA",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MRNA",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "MRNA",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "MRNA",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "MRNA",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MRNA",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MRNA",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MRNA",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MRNA",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MRNA",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MRNA",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MRNA",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "MRNA",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MSTR",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MSTR",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MSTR",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MSTR",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MSTR",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MSTR",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MSTR",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "MSTR",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MSTR",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "MSTR",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "MSTR",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "MSTR",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MSTR",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "MSTR",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MSTR",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MSTR",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "MSTR",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "MSTR",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "MSTR",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "MSTR",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "NVTS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "NVTS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "NVTS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "NVTS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "NVTS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "NVTS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "NVTS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "NVTS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "NVTS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "NVTS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "NVTS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "NVTS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "NVTS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "NVTS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "NVTS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1639,
+        "symbol": "NVTS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "NVTS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "NVTS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "NVTS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "NVTS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "QBTS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "QBTS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "QBTS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "QBTS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "QBTS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "QBTS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "QBTS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "QBTS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "QBTS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "QBTS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "QBTS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "QBTS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "QBTS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "QBTS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "QBTS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "QBTS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "QBTS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "QBTS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "QBTS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "QBTS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RGTI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RGTI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RGTI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RGTI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RGTI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "RGTI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "RGTI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RGTI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RGTI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "RGTI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "RGTI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "RGTI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RGTI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "RGTI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RGTI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RGTI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RGTI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RGTI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "RGTI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "RGTI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RIOT",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIOT",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIOT",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RIOT",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RIOT",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "RIOT",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "RIOT",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RIOT",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIOT",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "RIOT",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "RIOT",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "RIOT",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIOT",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "RIOT",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RIOT",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1639,
+        "symbol": "RIOT",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RIOT",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIOT",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "RIOT",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "RIOT",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RIVN",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIVN",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIVN",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RIVN",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RIVN",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "RIVN",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "RIVN",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "RIVN",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIVN",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "RIVN",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "RIVN",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "RIVN",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIVN",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "RIVN",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RIVN",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1639,
+        "symbol": "RIVN",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "RIVN",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "RIVN",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "RIVN",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "RIVN",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SMCI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SMCI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SMCI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "SMCI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "SMCI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "SMCI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "SMCI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "SMCI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SMCI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "SMCI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "SMCI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "SMCI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SMCI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "SMCI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SMCI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SMCI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SMCI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SMCI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "SMCI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "SMCI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SOFI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SOFI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SOFI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "SOFI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "SOFI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "SOFI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "SOFI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "SOFI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SOFI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "SOFI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "SOFI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "SOFI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SOFI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "SOFI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SOFI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SOFI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "SOFI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "SOFI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "SOFI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "SOFI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1638,
+        "symbol": "WULF",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1560,
+        "symbol": "WULF",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1560,
+        "symbol": "WULF",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1716,
+        "symbol": "WULF",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1716,
+        "symbol": "WULF",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1482,
+        "symbol": "WULF",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "WULF",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1716,
+        "symbol": "WULF",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1560,
+        "symbol": "WULF",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1794,
+        "symbol": "WULF",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1525,
+        "symbol": "WULF",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1603,
+        "symbol": "WULF",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1560,
+        "symbol": "WULF",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1482,
+        "symbol": "WULF",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1638,
+        "symbol": "WULF",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1639,
+        "symbol": "WULF",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1638,
+        "symbol": "WULF",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1560,
+        "symbol": "WULF",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1681,
+        "symbol": "WULF",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1248,
+        "symbol": "WULF",
+        "year_month": "2025-08"
+      }
+    ],
+    "research_only": true,
+    "rows_by_symbol_and_month": [
+      {
+        "rows": 1659,
+        "symbol": "AAL",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAL",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAL",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "AAL",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "AAL",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "AAL",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "AAL",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "AAL",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAL",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "AAL",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "AAL",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "AAL",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAL",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "AAL",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "AAL",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "AAL",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1657,
+        "symbol": "AAL",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAL",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "AAL",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1264,
+        "symbol": "AAL",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "AAOI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAOI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAOI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "AAOI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "AAOI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "AAOI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "AAOI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "AAOI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAOI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "AAOI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "AAOI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "AAOI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAOI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "AAOI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "AAOI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "AAOI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "AAOI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "AAOI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "AAOI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1264,
+        "symbol": "AAOI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "APLD",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "APLD",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "APLD",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "APLD",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "APLD",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1500,
+        "symbol": "APLD",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "APLD",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "APLD",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "APLD",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1816,
+        "symbol": "APLD",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "APLD",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "APLD",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "APLD",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "APLD",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "APLD",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "APLD",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1659,
+        "symbol": "APLD",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "APLD",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "APLD",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1264,
+        "symbol": "APLD",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "ASTS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "ASTS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "ASTS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "ASTS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "ASTS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "ASTS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "ASTS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "ASTS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "ASTS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "ASTS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "ASTS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "ASTS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "ASTS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "ASTS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "ASTS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1658,
+        "symbol": "ASTS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "ASTS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "ASTS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "ASTS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "ASTS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "CIFR",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "CIFR",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "CIFR",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "CIFR",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "CIFR",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "CIFR",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "CIFR",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "CIFR",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "CIFR",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1816,
+        "symbol": "CIFR",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "CIFR",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "CIFR",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "CIFR",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "CIFR",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "CIFR",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "CIFR",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "CIFR",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "CIFR",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "CIFR",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "CIFR",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "HIMS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "HIMS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "HIMS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "HIMS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "HIMS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "HIMS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "HIMS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "HIMS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "HIMS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "HIMS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "HIMS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "HIMS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "HIMS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "HIMS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "HIMS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "HIMS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1657,
+        "symbol": "HIMS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "HIMS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "HIMS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1264,
+        "symbol": "HIMS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "IONQ",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IONQ",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IONQ",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "IONQ",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "IONQ",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "IONQ",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "IONQ",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "IONQ",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IONQ",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "IONQ",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "IONQ",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "IONQ",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IONQ",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "IONQ",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "IONQ",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "IONQ",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "IONQ",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IONQ",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "IONQ",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "IONQ",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "IREN",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IREN",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IREN",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "IREN",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "IREN",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "IREN",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1701,
+        "symbol": "IREN",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "IREN",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IREN",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "IREN",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "IREN",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1624,
+        "symbol": "IREN",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IREN",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "IREN",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "IREN",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "IREN",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "IREN",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "IREN",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "IREN",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "IREN",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MARA",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MARA",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MARA",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MARA",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MARA",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MARA",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "MARA",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MARA",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MARA",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1816,
+        "symbol": "MARA",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1543,
+        "symbol": "MARA",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1624,
+        "symbol": "MARA",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MARA",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MARA",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MARA",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MARA",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "MARA",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MARA",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "MARA",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "MARA",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MP",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MP",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MP",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MP",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MP",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MP",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "MP",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MP",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MP",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1816,
+        "symbol": "MP",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "MP",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "MP",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MP",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MP",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MP",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MP",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "MP",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MP",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "MP",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1264,
+        "symbol": "MP",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MRNA",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MRNA",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MRNA",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MRNA",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MRNA",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MRNA",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "MRNA",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MRNA",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MRNA",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "MRNA",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "MRNA",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1624,
+        "symbol": "MRNA",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MRNA",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MRNA",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MRNA",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MRNA",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "MRNA",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MRNA",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "MRNA",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1264,
+        "symbol": "MRNA",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MSTR",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MSTR",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MSTR",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MSTR",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1737,
+        "symbol": "MSTR",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MSTR",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "MSTR",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "MSTR",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MSTR",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "MSTR",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "MSTR",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1624,
+        "symbol": "MSTR",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MSTR",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "MSTR",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "MSTR",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1658,
+        "symbol": "MSTR",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "MSTR",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "MSTR",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "MSTR",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "MSTR",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "NVTS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "NVTS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "NVTS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "NVTS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "NVTS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "NVTS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "NVTS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "NVTS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "NVTS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "NVTS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "NVTS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1624,
+        "symbol": "NVTS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "NVTS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "NVTS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "NVTS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "NVTS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "NVTS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "NVTS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "NVTS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "NVTS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "QBTS",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "QBTS",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "QBTS",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "QBTS",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "QBTS",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "QBTS",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "QBTS",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "QBTS",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "QBTS",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "QBTS",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "QBTS",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "QBTS",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "QBTS",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "QBTS",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "QBTS",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "QBTS",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "QBTS",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "QBTS",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "QBTS",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "QBTS",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RGTI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RGTI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RGTI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "RGTI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "RGTI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "RGTI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "RGTI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "RGTI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RGTI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1816,
+        "symbol": "RGTI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1543,
+        "symbol": "RGTI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "RGTI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RGTI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "RGTI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RGTI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1658,
+        "symbol": "RGTI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "RGTI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RGTI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "RGTI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "RGTI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RIOT",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIOT",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIOT",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "RIOT",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "RIOT",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "RIOT",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "RIOT",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "RIOT",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIOT",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "RIOT",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1542,
+        "symbol": "RIOT",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "RIOT",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIOT",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "RIOT",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RIOT",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RIOT",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RIOT",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIOT",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "RIOT",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "RIOT",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RIVN",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIVN",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIVN",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "RIVN",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "RIVN",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "RIVN",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "RIVN",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "RIVN",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIVN",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1816,
+        "symbol": "RIVN",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "RIVN",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "RIVN",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIVN",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "RIVN",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RIVN",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "RIVN",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "RIVN",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "RIVN",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "RIVN",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "RIVN",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "SMCI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SMCI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SMCI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "SMCI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1737,
+        "symbol": "SMCI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "SMCI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "SMCI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1738,
+        "symbol": "SMCI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SMCI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1816,
+        "symbol": "SMCI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "SMCI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "SMCI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1564,
+        "symbol": "SMCI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "SMCI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "SMCI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "SMCI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "SMCI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SMCI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "SMCI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "SMCI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "SOFI",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SOFI",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SOFI",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "SOFI",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "SOFI",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "SOFI",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1703,
+        "symbol": "SOFI",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "SOFI",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SOFI",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "SOFI",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1542,
+        "symbol": "SOFI",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "SOFI",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SOFI",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "SOFI",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "SOFI",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "SOFI",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1657,
+        "symbol": "SOFI",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "SOFI",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "SOFI",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "SOFI",
+        "year_month": "2025-08"
+      },
+      {
+        "rows": 1659,
+        "symbol": "WULF",
+        "year_month": "2024-01"
+      },
+      {
+        "rows": 1580,
+        "symbol": "WULF",
+        "year_month": "2024-02"
+      },
+      {
+        "rows": 1580,
+        "symbol": "WULF",
+        "year_month": "2024-03"
+      },
+      {
+        "rows": 1738,
+        "symbol": "WULF",
+        "year_month": "2024-04"
+      },
+      {
+        "rows": 1738,
+        "symbol": "WULF",
+        "year_month": "2024-05"
+      },
+      {
+        "rows": 1501,
+        "symbol": "WULF",
+        "year_month": "2024-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "WULF",
+        "year_month": "2024-07"
+      },
+      {
+        "rows": 1737,
+        "symbol": "WULF",
+        "year_month": "2024-08"
+      },
+      {
+        "rows": 1580,
+        "symbol": "WULF",
+        "year_month": "2024-09"
+      },
+      {
+        "rows": 1817,
+        "symbol": "WULF",
+        "year_month": "2024-10"
+      },
+      {
+        "rows": 1544,
+        "symbol": "WULF",
+        "year_month": "2024-11"
+      },
+      {
+        "rows": 1623,
+        "symbol": "WULF",
+        "year_month": "2024-12"
+      },
+      {
+        "rows": 1580,
+        "symbol": "WULF",
+        "year_month": "2025-01"
+      },
+      {
+        "rows": 1501,
+        "symbol": "WULF",
+        "year_month": "2025-02"
+      },
+      {
+        "rows": 1659,
+        "symbol": "WULF",
+        "year_month": "2025-03"
+      },
+      {
+        "rows": 1659,
+        "symbol": "WULF",
+        "year_month": "2025-04"
+      },
+      {
+        "rows": 1658,
+        "symbol": "WULF",
+        "year_month": "2025-05"
+      },
+      {
+        "rows": 1580,
+        "symbol": "WULF",
+        "year_month": "2025-06"
+      },
+      {
+        "rows": 1702,
+        "symbol": "WULF",
+        "year_month": "2025-07"
+      },
+      {
+        "rows": 1263,
+        "symbol": "WULF",
+        "year_month": "2025-08"
+      }
+    ],
+    "source_files_touched": [
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+      "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet"
+    ],
+    "source_hashes": {
+      "AAL": "f5c2206c55e64391dffa896a9419f49d0bbfdbf3ce9fced6ade866daa59855ad",
+      "AAOI": "3b7fdfbeaa5f5d880023c76850764587d186daee5c8c6e3c377c43ffc93f0901",
+      "APLD": "2f80ee3c3cb5f3720e9cfb29214212be4ee8087fa2d8a28ee097794c8c38ae73",
+      "ASTS": "70ba2866df310333253f5120c0c9eb07c5001cfd048bbe827d29516c983724fa",
+      "CIFR": "6de8cb7378b322bcd41321d91eb69add6ee9aa72513b420f1579483d166010ef",
+      "HIMS": "92e40332d7416cf51da0905c4678a7ef24fca1d54b723db86fd2c7fa5c9c1032",
+      "IONQ": "5b7b6325e6e8de1b689dca5a21abef805ec9be3835cd11fb1dc2cefcef6494ce",
+      "IREN": "b10db5ee6fb5af776f0819a05417515025f362c26ae55f292bdc161403f81471",
+      "MARA": "bdc4c7b0a48d831a3296a969ed9f4864a953ae7e45da9741b1d04897b6928619",
+      "MP": "433b6f30f5ef70f1461dc159a628291f56012dfc7f15e69fc26981de81315a25",
+      "MRNA": "c83a4b505ab3975c46f0898c2bf5f718fecedc6cdeb266c9c90805d4c70981ab",
+      "MSTR": "103a3cc0e2697f5f7c91b52522177e13c3c208abc96d8b97471f35853f276ef4",
+      "NVTS": "fbb607e5c39b050952d2fdf0ca275e0057bc14462050826b5b8da5f44aef8718",
+      "QBTS": "244a42e18390e13380fb23993ae3beffbc3574b895526f5e1157843b7f8a394b",
+      "RGTI": "9003303e270718e59b2edd768a45f7a1228a645b72d6d0e8b397064a928e60a4",
+      "RIOT": "7886f7e13fff310362b803d3aaa40dabf9f6c17b94fd430dcebef267996e72e3",
+      "RIVN": "2ef6ef196aa9f22561a0b1bd0c4485767b4eb845d5b41ab7dff6cadf22ca1ac4",
+      "SMCI": "95ecce4c8ccb760f558689107d0c0a0046f4e658294d3d5f0628124aa3a853da",
+      "SOFI": "a4d30109e6e9011f5c431d7f1e698af6864d4749a6399b719bce7de55b2ffc26",
+      "WULF": "6ebf3e2552b1c12eceb21840f6707b5330a8b07888a0c39bce6410d7df182e29"
+    },
+    "strategy_promotion": false,
+    "symbols": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "timeframe": "5m"
+  },
+  "registered_loop_bridge_test": true,
+  "research_only": true,
+  "rows_by_symbol_and_month": [
+    {
+      "rows": 1659,
+      "symbol": "AAL",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAL",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAL",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "AAL",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "AAL",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "AAL",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "AAL",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "AAL",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAL",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "AAL",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "AAL",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "AAL",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAL",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "AAL",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "AAL",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "AAL",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1657,
+      "symbol": "AAL",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAL",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "AAL",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1264,
+      "symbol": "AAL",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "AAOI",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAOI",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAOI",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "AAOI",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "AAOI",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "AAOI",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "AAOI",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "AAOI",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAOI",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "AAOI",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "AAOI",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "AAOI",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAOI",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "AAOI",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "AAOI",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "AAOI",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "AAOI",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "AAOI",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "AAOI",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1264,
+      "symbol": "AAOI",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "APLD",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "APLD",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "APLD",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "APLD",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "APLD",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1500,
+      "symbol": "APLD",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "APLD",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "APLD",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "APLD",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1816,
+      "symbol": "APLD",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "APLD",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "APLD",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "APLD",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "APLD",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "APLD",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "APLD",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1659,
+      "symbol": "APLD",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "APLD",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "APLD",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1264,
+      "symbol": "APLD",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "ASTS",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "ASTS",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "ASTS",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "ASTS",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "ASTS",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "ASTS",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "ASTS",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "ASTS",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "ASTS",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "ASTS",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "ASTS",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "ASTS",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "ASTS",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "ASTS",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "ASTS",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1658,
+      "symbol": "ASTS",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "ASTS",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "ASTS",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "ASTS",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "ASTS",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "CIFR",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "CIFR",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "CIFR",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "CIFR",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "CIFR",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "CIFR",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "CIFR",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "CIFR",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "CIFR",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1816,
+      "symbol": "CIFR",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "CIFR",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "CIFR",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "CIFR",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "CIFR",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "CIFR",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "CIFR",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "CIFR",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "CIFR",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "CIFR",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "CIFR",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "HIMS",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "HIMS",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "HIMS",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "HIMS",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "HIMS",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "HIMS",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "HIMS",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "HIMS",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "HIMS",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "HIMS",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "HIMS",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "HIMS",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "HIMS",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "HIMS",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "HIMS",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "HIMS",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1657,
+      "symbol": "HIMS",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "HIMS",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "HIMS",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1264,
+      "symbol": "HIMS",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "IONQ",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IONQ",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IONQ",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "IONQ",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "IONQ",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "IONQ",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "IONQ",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "IONQ",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IONQ",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "IONQ",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "IONQ",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "IONQ",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IONQ",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "IONQ",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "IONQ",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "IONQ",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "IONQ",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IONQ",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "IONQ",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "IONQ",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "IREN",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IREN",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IREN",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "IREN",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "IREN",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "IREN",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1701,
+      "symbol": "IREN",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "IREN",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IREN",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "IREN",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "IREN",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1624,
+      "symbol": "IREN",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IREN",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "IREN",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "IREN",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "IREN",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "IREN",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "IREN",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "IREN",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "IREN",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MARA",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MARA",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MARA",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MARA",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MARA",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MARA",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "MARA",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MARA",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MARA",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1816,
+      "symbol": "MARA",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1543,
+      "symbol": "MARA",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1624,
+      "symbol": "MARA",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MARA",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MARA",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MARA",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MARA",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "MARA",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MARA",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "MARA",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "MARA",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MP",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MP",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MP",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MP",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MP",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MP",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "MP",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MP",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MP",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1816,
+      "symbol": "MP",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "MP",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "MP",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MP",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MP",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MP",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MP",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "MP",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MP",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "MP",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1264,
+      "symbol": "MP",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MRNA",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MRNA",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MRNA",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MRNA",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MRNA",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MRNA",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "MRNA",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MRNA",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MRNA",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "MRNA",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "MRNA",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1624,
+      "symbol": "MRNA",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MRNA",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MRNA",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MRNA",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MRNA",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "MRNA",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MRNA",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "MRNA",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1264,
+      "symbol": "MRNA",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MSTR",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MSTR",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MSTR",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MSTR",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1737,
+      "symbol": "MSTR",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MSTR",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "MSTR",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "MSTR",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MSTR",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "MSTR",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "MSTR",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1624,
+      "symbol": "MSTR",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MSTR",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "MSTR",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "MSTR",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1658,
+      "symbol": "MSTR",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "MSTR",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "MSTR",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "MSTR",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "MSTR",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "NVTS",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "NVTS",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "NVTS",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "NVTS",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "NVTS",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "NVTS",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "NVTS",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "NVTS",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "NVTS",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "NVTS",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "NVTS",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1624,
+      "symbol": "NVTS",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "NVTS",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "NVTS",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "NVTS",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "NVTS",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "NVTS",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "NVTS",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "NVTS",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "NVTS",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "QBTS",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "QBTS",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "QBTS",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "QBTS",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "QBTS",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "QBTS",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "QBTS",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "QBTS",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "QBTS",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "QBTS",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "QBTS",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "QBTS",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "QBTS",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "QBTS",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "QBTS",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "QBTS",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "QBTS",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "QBTS",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "QBTS",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "QBTS",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RGTI",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RGTI",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RGTI",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "RGTI",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "RGTI",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "RGTI",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "RGTI",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "RGTI",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RGTI",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1816,
+      "symbol": "RGTI",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1543,
+      "symbol": "RGTI",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "RGTI",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RGTI",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "RGTI",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RGTI",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1658,
+      "symbol": "RGTI",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "RGTI",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RGTI",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "RGTI",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "RGTI",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RIOT",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIOT",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIOT",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "RIOT",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "RIOT",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "RIOT",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "RIOT",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "RIOT",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIOT",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "RIOT",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1542,
+      "symbol": "RIOT",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "RIOT",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIOT",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "RIOT",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RIOT",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RIOT",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RIOT",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIOT",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "RIOT",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "RIOT",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RIVN",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIVN",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIVN",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "RIVN",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "RIVN",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "RIVN",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "RIVN",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "RIVN",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIVN",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1816,
+      "symbol": "RIVN",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "RIVN",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "RIVN",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIVN",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "RIVN",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RIVN",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "RIVN",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "RIVN",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "RIVN",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "RIVN",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "RIVN",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "SMCI",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SMCI",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SMCI",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "SMCI",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1737,
+      "symbol": "SMCI",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "SMCI",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "SMCI",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1738,
+      "symbol": "SMCI",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SMCI",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1816,
+      "symbol": "SMCI",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "SMCI",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "SMCI",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1564,
+      "symbol": "SMCI",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "SMCI",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "SMCI",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "SMCI",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "SMCI",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SMCI",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "SMCI",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "SMCI",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "SOFI",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SOFI",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SOFI",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "SOFI",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "SOFI",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "SOFI",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1703,
+      "symbol": "SOFI",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "SOFI",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SOFI",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "SOFI",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1542,
+      "symbol": "SOFI",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "SOFI",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SOFI",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "SOFI",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "SOFI",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "SOFI",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1657,
+      "symbol": "SOFI",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "SOFI",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "SOFI",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "SOFI",
+      "year_month": "2025-08"
+    },
+    {
+      "rows": 1659,
+      "symbol": "WULF",
+      "year_month": "2024-01"
+    },
+    {
+      "rows": 1580,
+      "symbol": "WULF",
+      "year_month": "2024-02"
+    },
+    {
+      "rows": 1580,
+      "symbol": "WULF",
+      "year_month": "2024-03"
+    },
+    {
+      "rows": 1738,
+      "symbol": "WULF",
+      "year_month": "2024-04"
+    },
+    {
+      "rows": 1738,
+      "symbol": "WULF",
+      "year_month": "2024-05"
+    },
+    {
+      "rows": 1501,
+      "symbol": "WULF",
+      "year_month": "2024-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "WULF",
+      "year_month": "2024-07"
+    },
+    {
+      "rows": 1737,
+      "symbol": "WULF",
+      "year_month": "2024-08"
+    },
+    {
+      "rows": 1580,
+      "symbol": "WULF",
+      "year_month": "2024-09"
+    },
+    {
+      "rows": 1817,
+      "symbol": "WULF",
+      "year_month": "2024-10"
+    },
+    {
+      "rows": 1544,
+      "symbol": "WULF",
+      "year_month": "2024-11"
+    },
+    {
+      "rows": 1623,
+      "symbol": "WULF",
+      "year_month": "2024-12"
+    },
+    {
+      "rows": 1580,
+      "symbol": "WULF",
+      "year_month": "2025-01"
+    },
+    {
+      "rows": 1501,
+      "symbol": "WULF",
+      "year_month": "2025-02"
+    },
+    {
+      "rows": 1659,
+      "symbol": "WULF",
+      "year_month": "2025-03"
+    },
+    {
+      "rows": 1659,
+      "symbol": "WULF",
+      "year_month": "2025-04"
+    },
+    {
+      "rows": 1658,
+      "symbol": "WULF",
+      "year_month": "2025-05"
+    },
+    {
+      "rows": 1580,
+      "symbol": "WULF",
+      "year_month": "2025-06"
+    },
+    {
+      "rows": 1702,
+      "symbol": "WULF",
+      "year_month": "2025-07"
+    },
+    {
+      "rows": 1263,
+      "symbol": "WULF",
+      "year_month": "2025-08"
+    }
+  ],
+  "semantic_dictionary": {
+    "dictionary_hash": "497142c8d0ab880e59385da123d9eb2189469e9e3a4a631e0f63eb6fc77030d3",
+    "dictionary_version": "semantic_loop_dictionary_v2",
+    "registered_definition_count": 20,
+    "semantic_loop_ids": [
+      "loop_c_929da7e5",
+      "loop_p_0-1-0",
+      "loop_p_0-2-0",
+      "loop_p_0-4-0",
+      "loop_p_1-2-1",
+      "loop_p_2-4-2",
+      "loop_p_2-5-6-2",
+      "loop_p_2-6-2",
+      "loop_p_2-6-5-2",
+      "loop_p_4-5-4",
+      "loop_p_4-6-4",
+      "loop_p_6-7-6",
+      "loop_r2_0-1-0",
+      "loop_r2_1-2-1",
+      "loop_r2_2-4-2",
+      "loop_r2_4-5-4",
+      "loop_r2_4-6-4",
+      "loop_r3_0-1-0",
+      "loop_r3_1-2-1",
+      "loop_r4_0-1-0"
+    ],
+    "source_sha256": "9550810616f9249f3a8adf32b08fe17c0e6fdc1cf582466d9d10ee6df639cb7a"
+  },
+  "source_hashes": {
+    "AAL": "f5c2206c55e64391dffa896a9419f49d0bbfdbf3ce9fced6ade866daa59855ad",
+    "AAOI": "3b7fdfbeaa5f5d880023c76850764587d186daee5c8c6e3c377c43ffc93f0901",
+    "APLD": "2f80ee3c3cb5f3720e9cfb29214212be4ee8087fa2d8a28ee097794c8c38ae73",
+    "ASTS": "70ba2866df310333253f5120c0c9eb07c5001cfd048bbe827d29516c983724fa",
+    "CIFR": "6de8cb7378b322bcd41321d91eb69add6ee9aa72513b420f1579483d166010ef",
+    "HIMS": "92e40332d7416cf51da0905c4678a7ef24fca1d54b723db86fd2c7fa5c9c1032",
+    "IONQ": "5b7b6325e6e8de1b689dca5a21abef805ec9be3835cd11fb1dc2cefcef6494ce",
+    "IREN": "b10db5ee6fb5af776f0819a05417515025f362c26ae55f292bdc161403f81471",
+    "MARA": "bdc4c7b0a48d831a3296a969ed9f4864a953ae7e45da9741b1d04897b6928619",
+    "MP": "433b6f30f5ef70f1461dc159a628291f56012dfc7f15e69fc26981de81315a25",
+    "MRNA": "c83a4b505ab3975c46f0898c2bf5f718fecedc6cdeb266c9c90805d4c70981ab",
+    "MSTR": "103a3cc0e2697f5f7c91b52522177e13c3c208abc96d8b97471f35853f276ef4",
+    "NVTS": "fbb607e5c39b050952d2fdf0ca275e0057bc14462050826b5b8da5f44aef8718",
+    "QBTS": "244a42e18390e13380fb23993ae3beffbc3574b895526f5e1157843b7f8a394b",
+    "RGTI": "9003303e270718e59b2edd768a45f7a1228a645b72d6d0e8b397064a928e60a4",
+    "RIOT": "7886f7e13fff310362b803d3aaa40dabf9f6c17b94fd430dcebef267996e72e3",
+    "RIVN": "2ef6ef196aa9f22561a0b1bd0c4485767b4eb845d5b41ab7dff6cadf22ca1ac4",
+    "SMCI": "95ecce4c8ccb760f558689107d0c0a0046f4e658294d3d5f0628124aa3a853da",
+    "SOFI": "a4d30109e6e9011f5c431d7f1e698af6864d4749a6399b719bce7de55b2ffc26",
+    "WULF": "6ebf3e2552b1c12eceb21840f6707b5330a8b07888a0c39bce6410d7df182e29"
+  },
+  "strategy_promotion": false,
+  "v2_state_source": {
+    "broker_integration_required": false,
+    "coarse_loop_family_target": true,
+    "date_predicate_applied_before_materialisation": true,
+    "development_emission_panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "maximum_target_bar_ordinal": 30,
+    "maximum_timestamp_read": "2025-08-22 19:55:00+00:00",
+    "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+    "order_placement": "disabled",
+    "pre_loop_prediction": true,
+    "production_runtime_modified": false,
+    "protected_rows_materialised": 0,
+    "provider": "EODHD",
+    "quick_feasibility_screen": true,
+    "raw_data_downloaded": false,
+    "research_only": true,
+    "soft_regime_mixture": true,
+    "source_hashes": {
+      "AAL": "2ac4ebceb5664606b872a628d5a74136c8cf74492b8df29c6cd5f73f4249cf01",
+      "AAOI": "b6c167d0613e739c19bef5b890d4d7de66e5adfa0413154e19fa234629f10dfd",
+      "APLD": "ad2171c9959edb2274bfaf10be08dd5154a2003e018640fcb74c4345a2bbff81",
+      "ASTS": "1900c2baaaed80a3fbf86f271f4fbfe41dc2d19c2617b568851d596d9feaa747",
+      "AXTI": "105560c1a8bd6955a98724a16fd31d4a7ca703f4dbf8bde2aa44b81f9e617307",
+      "CIFR": "055f9bced79ca9c3fb6e65254fc2229e95a9f1a07c147c1b60bcc2cdd75d693b",
+      "HIMS": "92fc9fb34c5c525f85c40147e37600ef0cf1670f1427797f741454eb73eddea7",
+      "IONQ": "4d9d6f75da9a9f2daadb9d81244343f94647dcbd90a426c03ad2b550e9a23b29",
+      "IREN": "a32fe0464ac2fff115db5db6cc744db591b304c0cbb08f330ed7c37dcebac50b",
+      "MARA": "34d6a2385300e8d0c1eb3b890273943d50a8655b00293d028a19fd9b220ae013",
+      "MP": "62df3853fd345c658a8301add74fe802622cd9c70c24a94ecd486aee9359d1e7",
+      "MRNA": "60487e33398b4ac48f69e0da402e5103f6f2798d8a1abc7c5d813c9cffafb400",
+      "MSTR": "c8a13768c3b96156051426c79775103c8eb157f6da1b20a692934ad3b3bf4276",
+      "NVTS": "03715f3f026a1c2e029c83a07625edd11b785bec63e4285b0b04c08db340222c",
+      "OKLO": "0e15f1d3ed63b358219fdb2a8363752b373a76ebc91e63028ab58fb1cbaa5749",
+      "QBTS": "403a474b3a3b39365e74470852f48056bd0161d60caa26e883a7ab4e45022f81",
+      "RGTI": "233088673f12790eadba650647c3d10f74f011e7baae69b10d52c02d8fbab042",
+      "RIOT": "f217b7abb3404783e87320296d57b3148f26d0bb065d9640db0f4d346e6677d9",
+      "RIVN": "c7ab04d8a205be771320a8eccaaa88c1dfa4ff919fd469fe35e99c5cf03e15e6",
+      "SMCI": "141b6f08c5d2b1840024493aef6b7059f3d41deb28cc2d6dcf609aa589818066",
+      "SOFI": "e3f6d0e05f3bf29a18b0cdb30ce3fe03312628705fa23e46bcb51ef135242353",
+      "VTI": "4797ccc19ea22cf323e5e4286f0b3921fb686738fe100ed22faa76c53dddaa32",
+      "WULF": "cc5c3ad83d8af2d639a59986e65eea5513b658966be513e51628ab23970d54c2"
+    },
+    "source_row_counts": {
+      "AAL": 32402,
+      "AAOI": 32403,
+      "APLD": 32402,
+      "ASTS": 32400,
+      "AXTI": 32401,
+      "CIFR": 32400,
+      "HIMS": 32402,
+      "IONQ": 32401,
+      "IREN": 32401,
+      "MARA": 32401,
+      "MP": 32402,
+      "MRNA": 32405,
+      "MSTR": 32402,
+      "NVTS": 32403,
+      "OKLO": 32393,
+      "QBTS": 32402,
+      "RGTI": 32400,
+      "RIOT": 32401,
+      "RIVN": 32401,
+      "SMCI": 32385,
+      "SOFI": 32399,
+      "VTI": 32402,
+      "WULF": 32401
+    },
+    "state_rows_filtered": 255194,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "timeframe": "5m"
+  }
+}

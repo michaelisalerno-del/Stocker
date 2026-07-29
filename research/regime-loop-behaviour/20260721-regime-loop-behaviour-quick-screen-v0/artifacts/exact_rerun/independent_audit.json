@@ -1,0 +1,110 @@
+{
+  "audit_scope": "fail_closed_support_blocker",
+  "auditor_imported_runner": false,
+  "behavioural_ledger": {
+    "decisions_checked": 6489,
+    "maximum_absolute_error": 0.0,
+    "passed": true,
+    "timestamp_mismatches": 0
+  },
+  "broker_integration_required": false,
+  "checks": {
+    "assessment_only_scoring": true,
+    "brier_log_loss_auc": true,
+    "candidate_semantic_ids": true,
+    "candidate_weighting": true,
+    "dates_and_protected_boundary": true,
+    "decision_logic": true,
+    "decision_timestamps": true,
+    "development_only_fitting": true,
+    "first_event_target": true,
+    "five_interactions": true,
+    "frozen_behavioural_values": true,
+    "manual_probability_reconstruction": true,
+    "model_coefficients": true,
+    "safety_flags": true,
+    "session_block_bootstrap": true,
+    "six_bar_horizon": true,
+    "structural_features": true,
+    "ten_behavioural_dimensions": true,
+    "tie_exclusions": true,
+    "v2_active_prefix_membership": true,
+    "within_slate_behavioural_null": true
+  },
+  "chronology": {
+    "chronology_failures": 0,
+    "maximum_decision_timestamp": "2025-08-22 14:30:00+00:00",
+    "minimum_decision_timestamp": "2024-01-17 15:00:00+00:00",
+    "passed": true,
+    "protected_rows": 0,
+    "rows_checked": 9666
+  },
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "first_event_target": {
+    "decisions_checked": 6493,
+    "horizon_completed_bars": 6,
+    "passed": true,
+    "target_failures": 0,
+    "tie_decisions_reconstructed": 4
+  },
+  "not_applicable_after_support_blocker": [
+    "model_fit",
+    "model_coefficients",
+    "manual_probability_reconstruction",
+    "candidate_metrics",
+    "bootstrap",
+    "behavioural_null"
+  ],
+  "order_placement": "disabled",
+  "passed": true,
+  "pre_completion_context_only": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "structural_prediction_only": true,
+  "support_and_decision": {
+    "assessment": {
+      "active_prefix_decisions": 2557,
+      "candidate_rows": 3750,
+      "maximum_loop_positive_completion_share": 0.2,
+      "maximum_stock_candidate_row_share": 0.08026666666666667,
+      "multi_candidate_decisions": 713,
+      "positive_candidate_completions": 155,
+      "represented_months": 8,
+      "semantic_candidate_loops": 20,
+      "sessions": 157,
+      "stocks": 20
+    },
+    "decision_logic_passed": true,
+    "independently_failed_support_gates": [
+      "positive_candidate_completions"
+    ],
+    "passed": true,
+    "stored_value_mismatches": 0
+  },
+  "v2_prefix_population": {
+    "candidate_rows_checked": 9666,
+    "complete_membership_mismatches": 0,
+    "duplicate_observed_memberships": 0,
+    "expected_active_prefix_decisions": 6493,
+    "expected_candidate_rows_before_tie_exclusion": 9715,
+    "frozen_behavioural_decisions_checked": 15549,
+    "independently_reconstructed_no_active_decisions": 9056,
+    "maximum_current_posterior_error": 0.0,
+    "membership_failures": 0,
+    "observed_active_prefix_decisions": 6493,
+    "observed_candidate_rows_before_tie_exclusion": 9715,
+    "passed": true,
+    "semantic_loop_support": 20
+  },
+  "weighting_and_interactions": {
+    "candidate_rows_checked": 9666,
+    "candidate_weighting_passed": true,
+    "five_interactions_passed": true,
+    "maximum_interaction_error": 0.0,
+    "maximum_weight_error": 0.0,
+    "passed": true
+  }
+}

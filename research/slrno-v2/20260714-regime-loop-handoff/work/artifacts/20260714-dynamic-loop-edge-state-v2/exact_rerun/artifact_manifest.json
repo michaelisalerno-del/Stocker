@@ -1,0 +1,97 @@
+{
+  "files": [
+    {
+      "bytes": 15536,
+      "name": "calibration_results.csv",
+      "sha256": "60a9a029177fca8875e01cca57a8cb3f3d0de2b36190d88bf65a66b62cb15575"
+    },
+    {
+      "bytes": 3179231,
+      "name": "causal_edge_state_forecasts.parquet",
+      "sha256": "352c670fac8c8eae79ae9e79edc0b805ae12d62d7018865c4fe31c8cdf66f797"
+    },
+    {
+      "bytes": 343505,
+      "name": "causal_feature_panel.parquet",
+      "sha256": "6873455f8ecdf57b04a3c6ffb253931de97d7d05f945253e8b89a2f4e1b271f2"
+    },
+    {
+      "bytes": 1429,
+      "name": "change_point_diagnostics.csv",
+      "sha256": "185dc180e5a416593ce42893c3d3e4ca77cd69275bf990215e3530869cacb6c9"
+    },
+    {
+      "bytes": 669,
+      "name": "concentration_analysis.csv",
+      "sha256": "7a8e7c219bdde6ca4d1f1666d8828ed9ca33a7b3f8ee9a5cdec2db56a04f156f"
+    },
+    {
+      "bytes": 228858,
+      "name": "episode_0016-cycle_05-state_0-2023.png",
+      "sha256": "7918f6f235d05778932aadeef42b74e4962a262c585243676bc4464e9d8cbaa7"
+    },
+    {
+      "bytes": 220608,
+      "name": "episode_0200-cycle_13-state_5-2025.png",
+      "sha256": "7c4e2232856c1f32d6d0608bf394f22638ef450bb59fb09fcee67bba3503355e"
+    },
+    {
+      "bytes": 212667,
+      "name": "episode_0205-cycle_13-state_7-2025.png",
+      "sha256": "c3264f770ffe345e2e7f67783758ae0b7cc0491e7475252081bf90c44c568a79"
+    },
+    {
+      "bytes": 38581,
+      "name": "hindsight_episode_diagnostics.parquet",
+      "sha256": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be"
+    },
+    {
+      "bytes": 473190,
+      "name": "hindsight_episode_states.parquet",
+      "sha256": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3"
+    },
+    {
+      "bytes": 9673,
+      "name": "model_comparison_metrics.csv",
+      "sha256": "48f7e3150712b93e8a50e1fc7eb18b7a6dbf67f170829b589c4250b42b607a9b"
+    },
+    {
+      "bytes": 1663696,
+      "name": "prequential_scored_targets.parquet",
+      "sha256": "5ad3a1b3877c5063db8ce6dee883a08826802dafbde9978861ea5f9b2c36e6a4"
+    },
+    {
+      "bytes": 13449,
+      "name": "run_metadata.json",
+      "sha256": "cb9f663173ac2863a798607116ebe8389be93f5094e28d79dcd72f6351cf5656"
+    },
+    {
+      "bytes": 576937,
+      "name": "session_payoff_panel.parquet",
+      "sha256": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7"
+    },
+    {
+      "bytes": 18110,
+      "name": "stress_test_results.csv",
+      "sha256": "dd58a3247b798d30162f647ab8ede38146eca98241839c7e261029469244df8b"
+    },
+    {
+      "bytes": 4986195,
+      "name": "trade_decisions.parquet",
+      "sha256": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f"
+    },
+    {
+      "bytes": 47546,
+      "name": "trading_slices.csv",
+      "sha256": "9032507a79966629d47e0928fdcf5254ef949d349d6b5d7c8bdaf6f84c26461d"
+    },
+    {
+      "bytes": 15731,
+      "name": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/reports/20260714-dynamic-loop-edge-state-v2-exact-rerun.md",
+      "sha256": "1d46c721a1db590c618df82db580dcc6bfcc40b4e456e2fc0a8d283c715af0af"
+    }
+  ],
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true
+}

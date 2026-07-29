@@ -1,0 +1,39 @@
+{
+  "broker_integration_required": false,
+  "dimension_columns": [
+    "arousal",
+    "conviction",
+    "frustration",
+    "tension",
+    "signed_pressure",
+    "pressure_magnitude",
+    "exhaustion_magnitude",
+    "signed_exhaustion",
+    "independence",
+    "signed_independence"
+  ],
+  "economic_outcomes_opened": false,
+  "exact_rerun_ledger_to_compact_maximum_absolute_error": 0.0,
+  "execution_enabled": false,
+  "maximum_absolute_error": 0.0,
+  "natural_key_columns": [
+    "symbol",
+    "session",
+    "decision_ordinal",
+    "decision_timestamp"
+  ],
+  "order_placement": "disabled",
+  "passed": true,
+  "pre_completion_context_only": true,
+  "predecessor_commit": "ef9c2e4a6636d5404fbc2767a50ecb10a413f14a",
+  "predecessor_decision": "behavioural_descriptions_only_no_predictive_increment",
+  "primary_exact_rerun_file_hashes_match": true,
+  "primary_ledger_to_compact_maximum_absolute_error": 0.0,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "required_maximum_absolute_error": 1e-12,
+  "research_only": true,
+  "rows": 15549,
+  "strategy_promotion": false,
+  "structural_prediction_only": true
+}

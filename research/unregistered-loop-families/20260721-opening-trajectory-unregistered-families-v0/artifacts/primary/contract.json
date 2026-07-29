@@ -1,0 +1,204 @@
+{
+  "broker_integration_required": false,
+  "canonicalisation": {
+    "fallback": "stable canonical forward path plus structural motif, never discovery rank",
+    "family_id_format": "unregistered_<motif>__<canonical_closed_path>",
+    "frozen_before_assessment_family_support": true,
+    "input": "exact causal closed state-transition path of the first unregistered event",
+    "maximum_transition_length": 8,
+    "motif_types": [
+      "primitive_like",
+      "repeat_like",
+      "composite_like"
+    ],
+    "orientation_metadata_retained": true,
+    "repeat_depth_retained": true,
+    "reverse_orientation": "separate family unless reverse traversal is itself a forward rotation",
+    "rotation_invariance": "forward rotations only, matching V2 registered-loop semantics",
+    "state_transition_order_preserved": true,
+    "v2_decompose_closed_path_used_when_supported": true
+  },
+  "development_frozen_unregistered_families": true,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "experiment_id": "20260721-opening-trajectory-unregistered-families-v0",
+  "experiment_name": "Opening Behavioural Trajectory → Unregistered Loop Families Quick Screen V0",
+  "hard_limits": {
+    "clustering_search": false,
+    "feature_search": false,
+    "gpu": false,
+    "hyperparameter_tuning": false,
+    "maximum_plots": 1,
+    "maximum_primary_models": 6,
+    "model_search": false,
+    "one_minute_data": false,
+    "one_process": true,
+    "raw_data_download": false,
+    "trajectory_window_search": false
+  },
+  "hidden_family_selection": {
+    "fallback_class": "OTHER_UNREGISTERED_FAMILY",
+    "fit": "2024_only",
+    "maximum_selected_families": 4,
+    "maximum_stock_share": 0.3,
+    "minimum_eligible_families": 2,
+    "minimum_months": 4,
+    "minimum_outcomes": 30,
+    "minimum_sessions": 20,
+    "minimum_stocks": 8,
+    "tie_break": "stable_canonical_family_id"
+  },
+  "opening_phase_only": true,
+  "order_placement": "disabled",
+  "population": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "decision_ordinals": [
+      6,
+      12
+    ],
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "future_horizon_completed_five_minute_bars": 6,
+    "local_clocks_america_new_york": [
+      "10:00",
+      "10:30"
+    ],
+    "one_row_per": "stock_x_session_x_checkpoint",
+    "protected_start": "2025-08-23",
+    "trajectory_anchors": {
+      "12": [
+        4,
+        8,
+        12
+      ],
+      "6": [
+        2,
+        4,
+        6
+      ]
+    }
+  },
+  "predecessor": {
+    "commit": "8191bc7fa9dc689d2ca998e759bebab094bc1ade",
+    "decision": "trajectory_main_effects_only",
+    "experiment": "Behavioural-Trajectory Funnel V0.1 — Corrected Anchors and Later Loops"
+  },
+  "primary_decision_categories": [
+    "opening_trajectories_predict_unregistered_events_and_families",
+    "opening_trajectories_predict_unregistered_events_only",
+    "opening_trajectories_predict_hidden_families_only",
+    "opening_trajectory_signal_descriptive_only",
+    "no_opening_trajectory_unregistered_increment",
+    "blocked_opening_population_not_reconstructable",
+    "blocked_trajectory_features_not_reconstructable",
+    "blocked_stage_a_support_failure",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_quick_unregistered_family_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "resampling": {
+    "bootstrap_refits": false,
+    "grouped_attribution_permutations_per_group": 20,
+    "session_bootstrap_draws": 25,
+    "trajectory_bundle_permuted_within_session_checkpoint": true,
+    "trajectory_null_draws": 5
+  },
+  "research_only": true,
+  "stage_a": {
+    "binary_model": {
+      "C": 0.25,
+      "class_weight": null,
+      "max_iter": 300,
+      "n_jobs": 1,
+      "penalty": "l2",
+      "preprocessing_fit": "2024_only",
+      "row_weight": "1 / eligible_stocks_in_session_checkpoint",
+      "solver": "liblinear"
+    },
+    "diagnostic_target": "REGISTERED_COMPLETION_vs_NO_REGISTERED_COMPLETION",
+    "material_checkpoint_adversity": {
+      "metric": "log_loss_improvement",
+      "minimum": -0.001,
+      "source": "frozen_predecessor_quick-screen_convention"
+    },
+    "models": [
+      "U0",
+      "U1",
+      "R0",
+      "R1"
+    ],
+    "primary_target": "UNREGISTERED_LOOP_vs_REGISTERED_COMPLETION_or_NO_REGISTERED_COMPLETION",
+    "quantile_thresholds": {
+      "assessment_threshold_tuning": false,
+      "fit": "2024_predictions_only",
+      "top_decile": 0.9,
+      "top_quintile": 0.8,
+      "weighted_quantile": true
+    }
+  },
+  "stage_b": {
+    "material_checkpoint_adversity": {
+      "metric": "multiclass_log_loss_improvement",
+      "minimum": -0.001
+    },
+    "models": [
+      "F0",
+      "F1"
+    ],
+    "multinomial_model": {
+      "C": 0.25,
+      "class_weight": null,
+      "max_iter": 300,
+      "multi_class": "multinomial",
+      "n_jobs": 1,
+      "penalty": "l2",
+      "preprocessing_fit": "2024_only",
+      "solver": "lbfgs"
+    }
+  },
+  "stage_b_status_categories": [
+    "hidden_family_prediction_supported",
+    "hidden_family_prediction_not_supported",
+    "hidden_family_support_insufficient"
+  ],
+  "strategy_promotion": false,
+  "trajectory_groups": {
+    "AROUSAL_TRAJECTORY": [
+      "arousal_change",
+      "arousal_acceleration",
+      "arousal_reversal"
+    ],
+    "CONVICTION_TRAJECTORY": [
+      "conviction_change",
+      "conviction_acceleration",
+      "conviction_reversal"
+    ],
+    "FRUSTRATION_TRAJECTORY": [
+      "frustration_change",
+      "frustration_acceleration",
+      "frustration_reversal"
+    ],
+    "SIGNED_EXHAUSTION_TRAJECTORY": [
+      "signed_exhaustion_change",
+      "signed_exhaustion_acceleration",
+      "signed_exhaustion_reversal"
+    ],
+    "SIGNED_PRESSURE_TRAJECTORY": [
+      "signed_pressure_change",
+      "signed_pressure_acceleration",
+      "signed_pressure_reversal"
+    ],
+    "TENSION_TRAJECTORY": [
+      "tension_change",
+      "tension_acceleration",
+      "tension_reversal"
+    ]
+  },
+  "unregistered_structural_event_target": true
+}

@@ -1,0 +1,3 @@
+population,source_opportunities,matched_opportunities,match_rate,immediate_net_payoff_bps,delayed_restarted_horizon_net_bps,paired_difference_bps,constant_terminal_available,twice_cost_paired_difference_bps,identity_limitation,match_category_counts_json
+exact_same_setup_primary,286,0,0,,,,0,,no persistent setup identifier survived across sessions,"{""same_structural_lineage_not_exact_setup"": 29, ""setup_no_longer_available"": 257}"
+structural_lineage_diagnostic_not_exact,286,29,0.101398601399,-729.595196472,3276.07373263,,,,same structural lineage is explicitly not the same setup,"{""same_structural_lineage_not_exact_setup"": 29, ""setup_no_longer_available"": 257}"

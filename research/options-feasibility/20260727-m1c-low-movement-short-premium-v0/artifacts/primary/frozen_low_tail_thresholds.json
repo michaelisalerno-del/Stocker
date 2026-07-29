@@ -1,0 +1,45 @@
+{
+  "M0": {
+    "bottom_10_percent": 0.157941884144402,
+    "bottom_20_percent": 0.18399660668102125,
+    "bottom_5_percent": 0.1414447134557799
+  },
+  "M1C": {
+    "bottom_10_percent": 0.13589696569562607,
+    "bottom_20_percent": 0.1670955289626688,
+    "bottom_5_percent": 0.11569740784764339
+  },
+  "archived_contaminated_m1_excluded": true,
+  "binding_tail": "M1C probability <= M1C bottom_10_percent threshold",
+  "broker_access": false,
+  "cross_sectional_future_filtered_features_excluded": true,
+  "defined_risk_structures_only_for_future_recording": true,
+  "fit_period": "2024 only",
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "low_tail_thresholds_fit_on_2024_only": true,
+  "m1c_causal_feature_surface": true,
+  "m1c_frozen": true,
+  "method": "candidate-normalised weighted midpoint-CDF",
+  "naked_short_options_authorised": false,
+  "option_pnl_calculated": false,
+  "paper_orders_allowed": false,
+  "primary_horizon_minutes": 15,
+  "primary_low_tail": "bottom_10_percent",
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "retrospective_low_movement_screen": true,
+  "short_option_pnl_claim": false,
+  "strategy_promotion": false,
+  "subgroup_boundaries": {
+    "market_large_move_15m_q90": 0.0021961200758348538,
+    "market_volatility_median": 0.0005142134647315597,
+    "previous_close_atm_iv_median": 0.921449999998063,
+    "previous_close_atm_iv_quartiles": [
+      0.6594,
+      0.921449999998063,
+      1.17665
+    ],
+    "stock_local_volatility_median": 0.004358694205547144
+  }
+}

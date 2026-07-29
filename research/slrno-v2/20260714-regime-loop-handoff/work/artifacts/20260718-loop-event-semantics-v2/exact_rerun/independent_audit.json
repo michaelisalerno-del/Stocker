@@ -1,0 +1,281 @@
+{
+  "auditor": "independent_loop_event_semantics_v2",
+  "broker_connected": false,
+  "check_count": 16,
+  "checks": [
+    {
+      "check": "artifact_manifest_input_hashes",
+      "evidence": {
+        "files": 37,
+        "mismatches": []
+      },
+      "passed": true
+    },
+    {
+      "check": "source_identities",
+      "evidence": {
+        "hash_mismatches": [],
+        "source_files": 23
+      },
+      "passed": true
+    },
+    {
+      "check": "committed_v2_source_identity",
+      "evidence": {
+        "mismatches": [],
+        "source_commit": "59e535ede1aaf77a6482002718cb2b77dfb691c0",
+        "source_files": 12
+      },
+      "passed": true
+    },
+    {
+      "check": "frozen_historical_file_immutability",
+      "evidence": {
+        "baseline_commit": "6d43807dbe3287afb1587f7ab4f5dafdeedad426",
+        "files": 1087,
+        "mismatches": []
+      },
+      "passed": true
+    },
+    {
+      "check": "feature_availability",
+      "evidence": {
+        "b0_availability_violations": 0,
+        "completed_bar_violations": 0,
+        "forbidden_columns": [],
+        "manifest_failures": [],
+        "manifest_provenance_violations": 0,
+        "rows": 424583
+      },
+      "passed": true
+    },
+    {
+      "check": "b0_provenance_audit",
+      "evidence": {
+        "assignment_mismatches": [],
+        "b0_changed_runs": 0,
+        "consumer_rows": 128,
+        "frozen_AST_source_position_proved": true,
+        "independent_counts": [
+          {
+            "field": "b0_high_stress",
+            "size": 110949,
+            "sum": 0
+          },
+          {
+            "field": "b0_state_numeric",
+            "size": 110949,
+            "sum": 0
+          },
+          {
+            "field": "clock_cos",
+            "size": 110949,
+            "sum": 70488
+          },
+          {
+            "field": "clock_sin",
+            "size": 110949,
+            "sum": 70028
+          }
+        ],
+        "stored_values_explicitly_reconstructed": true
+      },
+      "passed": true
+    },
+    {
+      "check": "primitive_root_semantic_ids_orientation_and_migration",
+      "evidence": {
+        "identity_mismatches": [],
+        "migration_rows": 20,
+        "orientation_mismatches": [],
+        "reverse_direction_remains_distinct": true
+      },
+      "passed": true
+    },
+    {
+      "check": "prefix_progression_first_completion_ties_no_loop_session_reset",
+      "evidence": {
+        "completion_ledger_exact": true,
+        "exhaustive_decisions": 424583,
+        "exhaustive_sessions": 5539,
+        "expected_completion_rows": 487721,
+        "independent_primary_counts": {
+          "NO_REGISTERED_LOOP_WITHIN_HORIZON": 10961,
+          "SESSION_END": 30329,
+          "TIED_REGISTERED_COMPLETION": 11003,
+          "UNAVAILABLE": 26279,
+          "UNREGISTERED_LOOP": 271500,
+          "loop_c_929da7e5": 148,
+          "loop_p_0-1-0": 12582,
+          "loop_p_0-2-0": 1448,
+          "loop_p_0-4-0": 1019,
+          "loop_p_1-2-1": 15233,
+          "loop_p_2-4-2": 16303,
+          "loop_p_2-5-6-2": 1525,
+          "loop_p_2-6-2": 2466,
+          "loop_p_2-6-5-2": 2470,
+          "loop_p_4-5-4": 4214,
+          "loop_p_4-6-4": 15961,
+          "loop_p_6-7-6": 1142
+        },
+        "label_mismatches": [],
+        "prefix_mismatches": [],
+        "recorded_completion_rows": 487721,
+        "recorded_primary_counts": {
+          "NO_REGISTERED_LOOP_WITHIN_HORIZON": 10961,
+          "SESSION_END": 30329,
+          "TIED_REGISTERED_COMPLETION": 11003,
+          "UNAVAILABLE": 26279,
+          "UNREGISTERED_LOOP": 271500,
+          "loop_c_929da7e5": 148,
+          "loop_p_0-1-0": 12582,
+          "loop_p_0-2-0": 1448,
+          "loop_p_0-4-0": 1019,
+          "loop_p_1-2-1": 15233,
+          "loop_p_2-4-2": 16303,
+          "loop_p_2-5-6-2": 1525,
+          "loop_p_2-6-2": 2466,
+          "loop_p_2-6-5-2": 2470,
+          "loop_p_4-5-4": 4214,
+          "loop_p_4-6-4": 15961,
+          "loop_p_6-7-6": 1142
+        },
+        "tie_mismatches": []
+      },
+      "passed": true
+    },
+    {
+      "check": "legacy_vs_v2_target_difference",
+      "evidence": {
+        "comparison_mismatches": [],
+        "legacy_mismatches": [],
+        "synthetic_legacy": [],
+        "synthetic_v2": "loop_p_2-4-2"
+      },
+      "passed": true
+    },
+    {
+      "check": "duration_24_tail_and_censoring",
+      "evidence": {
+        "duration_greater_than_24_runs": 491,
+        "exact_duration_24_runs": 390,
+        "exact_horizon_edge_failures": 0,
+        "gap_invalidated_runs_excluded": 8974,
+        "hazard24_max": 0.584095209208949,
+        "hazard25_max": 0.15475681072600198,
+        "maximum_duration": 78,
+        "probability_conservation_failures": 0,
+        "remaining_session_truncation_failures": 0,
+        "right_censored_terminal_runs": 5128,
+        "sessions": 5128
+      },
+      "passed": true
+    },
+    {
+      "check": "state_posterior_normalization_and_population",
+      "evidence": {
+        "expected_rows": 424583,
+        "forced_exit_rows_at_or_beyond_24": 0,
+        "long_hard_age_rows": 7281,
+        "next_state_probability_violations": 0,
+        "rows": 424583,
+        "state_age_posterior_support": 78,
+        "state_age_probability_violations": 0,
+        "state_probability_violations": 0,
+        "timing_violations": 0,
+        "top_state_violations": 0
+      },
+      "passed": true
+    },
+    {
+      "check": "per_bar_population",
+      "evidence": {
+        "decision_rows": 424583,
+        "provider_structural_rows": 424583,
+        "unique_decision_ids": true
+      },
+      "passed": true
+    },
+    {
+      "check": "semi_markov_null_reconstruction",
+      "evidence": {
+        "all_primary_draws_exact": true,
+        "draws": 2000,
+        "sample_observed_exact": true,
+        "sample_sessions": 264
+      },
+      "passed": true
+    },
+    {
+      "check": "dictionary_metrics_and_selection",
+      "evidence": {
+        "candidate_rows": 8608,
+        "dependency_failures": [],
+        "metric_mismatches": [],
+        "null_metric_mismatches": [],
+        "observed_count_mismatch": false,
+        "rank_differs_from_raw_frequency": true,
+        "recomputed_selection": [
+          "loop_p_0-1-0",
+          "loop_r3_0-1-0",
+          "loop_r2_0-1-0",
+          "loop_r4_0-1-0",
+          "loop_p_4-5-4",
+          "loop_r2_4-5-4",
+          "loop_p_4-6-4",
+          "loop_p_1-2-1",
+          "loop_r2_4-6-4",
+          "loop_p_2-4-2",
+          "loop_r2_1-2-1",
+          "loop_p_2-6-5-2",
+          "loop_r2_2-4-2",
+          "loop_p_2-6-2",
+          "loop_p_6-7-6",
+          "loop_p_0-4-0",
+          "loop_p_0-2-0",
+          "loop_r3_1-2-1",
+          "loop_p_2-5-6-2",
+          "loop_c_929da7e5"
+        ],
+        "selected_rows": 20,
+        "selection_exact": true,
+        "support_excluded_candidates": 8445,
+        "support_exclusion_status_valid": true
+      },
+      "passed": true
+    },
+    {
+      "check": "artifact_safety_flags",
+      "evidence": {
+        "audited_files": 38,
+        "failures": []
+      },
+      "passed": true
+    },
+    {
+      "check": "exact_rerun_identity",
+      "evidence": {
+        "compared_files": 36,
+        "mismatches": []
+      },
+      "passed": true
+    }
+  ],
+  "contract_hash": "e193fb8979c231eebd1876b8e6390d837006a454fcc911a94cdc196ab015ecd6",
+  "data_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "dictionary_version": "semantic_loop_dictionary_v2",
+  "exact_rerun_status": "byte_identical",
+  "execution_enabled": false,
+  "failed_checks": [],
+  "git_sha": "59e535ede1aaf77a6482002718cb2b77dfb691c0",
+  "order_placement": "disabled",
+  "overall_pass": true,
+  "passed_checks": 16,
+  "production_v2_imported": false,
+  "research_only": true,
+  "run_id_v2": "864601cf54c8c758fee528e6",
+  "scientific_decision": "loop_event_v2_ready_with_known_limitations",
+  "source_artifact_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false
+}

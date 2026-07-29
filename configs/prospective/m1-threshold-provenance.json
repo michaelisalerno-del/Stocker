@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "model": "M1",
+  "value": 0.49588519865576763,
+  "source": "weighted_2024_development_predictions",
+  "frozen_before_holdout_outcomes": true,
+  "source_artifact": "research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/frozen_tail_thresholds.json",
+  "source_artifact_sha256": "0f291a281410818591b64d3c4ed6bf668032a9dac229a3c50e7a1d961437c5c3",
+  "source_field": "M1_top_5_percent_threshold",
+  "source_method": "deterministic_midpoint_cdf_weighted_quantile",
+  "source_fitted_period": "2024-01-01_through_2024-12-31",
+  "registration_note": "Mechanically registered from the local pre-outcome frozen threshold artifact; not refit or reselected."
+}

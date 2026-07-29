@@ -1,0 +1,82 @@
+{
+  "archived_contaminated_m1_excluded": true,
+  "broker_access": false,
+  "cross_sectional_future_filtered_features_excluded": true,
+  "defined_risk_structures_only_for_future_recording": true,
+  "definition": "excursion_sigma_ratio_15m >= 1.5",
+  "extreme_definition": "excursion_sigma_ratio_15m >= 2.0",
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "low_tail_thresholds_fit_on_2024_only": true,
+  "m1c_causal_feature_surface": true,
+  "m1c_frozen": true,
+  "naked_short_options_authorised": false,
+  "option_pnl_calculated": false,
+  "paper_orders_allowed": false,
+  "periods": {
+    "assessment": {
+      "checkpoints": [
+        28,
+        32,
+        34
+      ],
+      "count": 10,
+      "maximum_month_share": 0.3,
+      "maximum_stock_share": 0.2,
+      "months": [
+        "2025-01",
+        "2025-02",
+        "2025-03",
+        "2025-05",
+        "2025-06",
+        "2025-07"
+      ],
+      "rate": 0.032467532467532464,
+      "stocks": [
+        "ASTS",
+        "IREN",
+        "MARA",
+        "MSTR",
+        "RGTI",
+        "RIOT",
+        "SMCI",
+        "SOFI",
+        "WULF"
+      ]
+    },
+    "stress": {
+      "checkpoints": [
+        24,
+        26,
+        32,
+        34
+      ],
+      "count": 11,
+      "maximum_month_share": 0.6363636363636364,
+      "maximum_stock_share": 0.2727272727272727,
+      "months": [
+        "2025-09",
+        "2025-10",
+        "2025-12"
+      ],
+      "rate": 0.02033271719038817,
+      "stocks": [
+        "AAOI",
+        "APLD",
+        "IONQ",
+        "MRNA",
+        "MSTR",
+        "RIVN",
+        "SMCI",
+        "SOFI"
+      ]
+    }
+  },
+  "primary_horizon_minutes": 15,
+  "primary_low_tail": "bottom_10_percent",
+  "protected_start": "2026-01-01",
+  "research_only": true,
+  "retrospective_low_movement_screen": true,
+  "short_option_pnl_claim": false,
+  "strategy_promotion": false
+}

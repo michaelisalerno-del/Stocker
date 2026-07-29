@@ -1,0 +1,3985 @@
+{
+  "broker_integration_required": false,
+  "causal_feature_exclusion_count": 68,
+  "causal_feature_exclusions": [
+    {
+      "decision_ordinal": 6,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-07-09",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-07-09",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-12-27",
+      "symbol": "NVTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-12-27",
+      "symbol": "NVTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-01-18",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-01-18",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-01-17",
+      "symbol": "RGTI"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "incomplete_causal_historical_activity_proxy",
+      "session": "2024-01-17",
+      "symbol": "RGTI"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "IONQ"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "IONQ"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-04",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "IONQ"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "IONQ"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-05",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "IONQ"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "IONQ"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-03-06",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-03",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-03",
+      "symbol": "IREN"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-03",
+      "symbol": "RGTI"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-03",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-03",
+      "symbol": "IREN"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-03",
+      "symbol": "RGTI"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-06",
+      "symbol": "ASTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-06",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-06",
+      "symbol": "ASTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2024-05-06",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "AAL"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "AAOI"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "APLD"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "ASTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MARA"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MRNA"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MSTR"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "RGTI"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "SMCI"
+    },
+    {
+      "decision_ordinal": 6,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "SOFI"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "AAL"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "AAOI"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "APLD"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "ASTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "HIMS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MARA"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MP"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MRNA"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "MSTR"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "QBTS"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "RGTI"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "SMCI"
+    },
+    {
+      "decision_ordinal": 12,
+      "reason": "parent_slate_below_15_valid_stocks",
+      "session": "2025-04-10",
+      "symbol": "SOFI"
+    }
+  ],
+  "continuous_behavioural_dimensions": true,
+  "date_predicate_applied_before_materialisation": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+  "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+  "observable_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "provider": "EODHD",
+  "provider_activity_label": "historical_activity_proxy",
+  "research_only": true,
+  "source_gap_ledger": [
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-10-01",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-13",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "AAL"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-06-18",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-10-25",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "AAOI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-13",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "APLD"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-04-15",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-04-23",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-04-25",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-04-15",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "ASTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "off_grid_source_row",
+      "session": "2025-04-10",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "CIFR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "HIMS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "HIMS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "HIMS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "HIMS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "HIMS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "HIMS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "invalid_price|off_grid_source_row",
+      "session": "2025-04-10",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-04-25",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "IONQ"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "off_grid_source_row",
+      "session": "2025-04-10",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "IREN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-18",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "MARA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "MP"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "MP"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "MP"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "MP"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "MP"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "MP"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "MRNA"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-02-01",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-02-06",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-02-23",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-06-24",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-06-26",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-07-10",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "MSTR"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-10-25",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "off_grid_source_row",
+      "session": "2025-04-10",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-04-15",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "NVTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-01-09",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-01-17",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-01-29",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-01-31",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-02-07",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-04-19",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-01",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-08",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-09-24",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-03-12",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "incomplete_regular_session|invalid_price|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "QBTS"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-01-05",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-01-23",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-04-25",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-01",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-06-27",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-07-29",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-08-14",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-08-22",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-10-04",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-10-08",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "RGTI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price|off_grid_source_row",
+      "session": "2025-04-10",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-04-15",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "RIOT"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "off_grid_source_row",
+      "session": "2025-04-10",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "RIVN"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "SMCI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-04-15",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "SOFI"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-04",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-05",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-03-06",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-03",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-05-06",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2024-06-28",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-07-03",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-11-29",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2024-12-24",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "off_grid_source_row",
+      "session": "2025-04-10",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-04-15",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "invalid_price",
+      "session": "2025-05-05",
+      "symbol": "WULF"
+    },
+    {
+      "reason": "incomplete_regular_session|ordinal_grid_failure",
+      "session": "2025-07-03",
+      "symbol": "WULF"
+    }
+  ],
+  "source_gap_ledger_rejected_session_records": 233,
+  "source_paths_are_logical_not_local_absolute": true,
+  "source_rows_by_symbol_month": [
+    {
+      "row_count": 1659,
+      "symbol": "AAL",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAL",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAL",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "AAL",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "AAL",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "AAL",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "AAL",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "AAL",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAL",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "AAL",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "AAL",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "AAL",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAL",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "AAL",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "AAL",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "AAL",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1657,
+      "symbol": "AAL",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAL",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "AAL",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1264,
+      "symbol": "AAL",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "AAOI",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAOI",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAOI",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "AAOI",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "AAOI",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "AAOI",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "AAOI",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "AAOI",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAOI",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "AAOI",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "AAOI",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "AAOI",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAOI",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "AAOI",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "AAOI",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "AAOI",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "AAOI",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "AAOI",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "AAOI",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1264,
+      "symbol": "AAOI",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "APLD",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "APLD",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "APLD",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "APLD",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "APLD",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1500,
+      "symbol": "APLD",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "APLD",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "APLD",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "APLD",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1816,
+      "symbol": "APLD",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "APLD",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "APLD",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "APLD",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "APLD",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "APLD",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "APLD",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "APLD",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "APLD",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "APLD",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1264,
+      "symbol": "APLD",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "ASTS",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "ASTS",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "ASTS",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "ASTS",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "ASTS",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "ASTS",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "ASTS",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "ASTS",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "ASTS",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "ASTS",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "ASTS",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "ASTS",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "ASTS",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "ASTS",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "ASTS",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "ASTS",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "ASTS",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "ASTS",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "ASTS",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "ASTS",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "CIFR",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "CIFR",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "CIFR",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "CIFR",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "CIFR",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "CIFR",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "CIFR",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "CIFR",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "CIFR",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1816,
+      "symbol": "CIFR",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "CIFR",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "CIFR",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "CIFR",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "CIFR",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "CIFR",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "CIFR",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "CIFR",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "CIFR",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "CIFR",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "CIFR",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "HIMS",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "HIMS",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "HIMS",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "HIMS",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "HIMS",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "HIMS",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "HIMS",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "HIMS",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "HIMS",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "HIMS",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "HIMS",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "HIMS",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "HIMS",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "HIMS",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "HIMS",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "HIMS",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1657,
+      "symbol": "HIMS",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "HIMS",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "HIMS",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1264,
+      "symbol": "HIMS",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "IONQ",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IONQ",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IONQ",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "IONQ",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "IONQ",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "IONQ",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "IONQ",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "IONQ",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IONQ",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "IONQ",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "IONQ",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "IONQ",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IONQ",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "IONQ",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "IONQ",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "IONQ",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "IONQ",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IONQ",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "IONQ",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "IONQ",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "IREN",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IREN",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IREN",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "IREN",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "IREN",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "IREN",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1701,
+      "symbol": "IREN",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "IREN",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IREN",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "IREN",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "IREN",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1624,
+      "symbol": "IREN",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IREN",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "IREN",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "IREN",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "IREN",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "IREN",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "IREN",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "IREN",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "IREN",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MARA",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MARA",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MARA",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MARA",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MARA",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MARA",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "MARA",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MARA",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MARA",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1816,
+      "symbol": "MARA",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1543,
+      "symbol": "MARA",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1624,
+      "symbol": "MARA",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MARA",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MARA",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MARA",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MARA",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "MARA",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MARA",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "MARA",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "MARA",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MP",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MP",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MP",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MP",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MP",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MP",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "MP",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MP",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MP",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1816,
+      "symbol": "MP",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "MP",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "MP",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MP",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MP",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MP",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MP",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "MP",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MP",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "MP",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1264,
+      "symbol": "MP",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MRNA",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MRNA",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MRNA",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MRNA",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MRNA",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MRNA",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "MRNA",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MRNA",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MRNA",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "MRNA",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "MRNA",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1624,
+      "symbol": "MRNA",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MRNA",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MRNA",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MRNA",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MRNA",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "MRNA",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MRNA",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "MRNA",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1264,
+      "symbol": "MRNA",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MSTR",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MSTR",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MSTR",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MSTR",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "MSTR",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MSTR",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "MSTR",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "MSTR",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MSTR",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "MSTR",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "MSTR",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1624,
+      "symbol": "MSTR",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MSTR",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "MSTR",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "MSTR",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "MSTR",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "MSTR",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "MSTR",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "MSTR",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "MSTR",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "NVTS",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "NVTS",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "NVTS",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "NVTS",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "NVTS",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "NVTS",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "NVTS",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "NVTS",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "NVTS",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "NVTS",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "NVTS",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1624,
+      "symbol": "NVTS",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "NVTS",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "NVTS",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "NVTS",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "NVTS",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "NVTS",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "NVTS",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "NVTS",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "NVTS",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "QBTS",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "QBTS",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "QBTS",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "QBTS",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "QBTS",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "QBTS",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "QBTS",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "QBTS",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "QBTS",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "QBTS",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "QBTS",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "QBTS",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "QBTS",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "QBTS",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "QBTS",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "QBTS",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "QBTS",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "QBTS",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "QBTS",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "QBTS",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RGTI",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RGTI",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RGTI",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "RGTI",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "RGTI",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "RGTI",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "RGTI",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "RGTI",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RGTI",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1816,
+      "symbol": "RGTI",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1543,
+      "symbol": "RGTI",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "RGTI",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RGTI",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "RGTI",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RGTI",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "RGTI",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "RGTI",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RGTI",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "RGTI",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "RGTI",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RIOT",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIOT",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIOT",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "RIOT",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "RIOT",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "RIOT",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "RIOT",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "RIOT",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIOT",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "RIOT",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1542,
+      "symbol": "RIOT",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "RIOT",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIOT",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "RIOT",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RIOT",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RIOT",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RIOT",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIOT",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "RIOT",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "RIOT",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RIVN",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIVN",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIVN",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "RIVN",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "RIVN",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "RIVN",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "RIVN",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "RIVN",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIVN",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1816,
+      "symbol": "RIVN",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "RIVN",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "RIVN",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIVN",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "RIVN",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RIVN",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "RIVN",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "RIVN",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "RIVN",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "RIVN",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "RIVN",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "SMCI",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SMCI",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SMCI",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "SMCI",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "SMCI",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "SMCI",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "SMCI",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "SMCI",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SMCI",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1816,
+      "symbol": "SMCI",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "SMCI",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "SMCI",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1564,
+      "symbol": "SMCI",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "SMCI",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "SMCI",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "SMCI",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "SMCI",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SMCI",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "SMCI",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "SMCI",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "SOFI",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SOFI",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SOFI",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "SOFI",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "SOFI",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "SOFI",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1703,
+      "symbol": "SOFI",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "SOFI",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SOFI",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "SOFI",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1542,
+      "symbol": "SOFI",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "SOFI",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SOFI",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "SOFI",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "SOFI",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "SOFI",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1657,
+      "symbol": "SOFI",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "SOFI",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "SOFI",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "SOFI",
+      "year_month": "2025-08"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "WULF",
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "WULF",
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "WULF",
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "WULF",
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 1738,
+      "symbol": "WULF",
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "WULF",
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "WULF",
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 1737,
+      "symbol": "WULF",
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "WULF",
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 1817,
+      "symbol": "WULF",
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 1544,
+      "symbol": "WULF",
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 1623,
+      "symbol": "WULF",
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "WULF",
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 1501,
+      "symbol": "WULF",
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "WULF",
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 1659,
+      "symbol": "WULF",
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 1658,
+      "symbol": "WULF",
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 1580,
+      "symbol": "WULF",
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 1702,
+      "symbol": "WULF",
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 1263,
+      "symbol": "WULF",
+      "year_month": "2025-08"
+    }
+  ],
+  "sources": [
+    {
+      "bounded_safe_hash": "2ac4ebceb5664606b872a628d5a74136c8cf74492b8df29c6cd5f73f4249cf01",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+      "symbol": "AAL",
+      "vendor_qa_sha256": "9726400fab8ae7389fa16dc3c69e82f962d1608cbd6912a9eb13b5da2c7e7df8",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "b6c167d0613e739c19bef5b890d4d7de66e5adfa0413154e19fa234629f10dfd",
+      "bounded_safe_rows": 32403,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+      "symbol": "AAOI",
+      "vendor_qa_sha256": "6fcfb9e7eb8ba4c8660119ffa89af9f249da157ecfd7e6b3537238a7177d5c6b",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "ad2171c9959edb2274bfaf10be08dd5154a2003e018640fcb74c4345a2bbff81",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+      "symbol": "APLD",
+      "vendor_qa_sha256": "26dd3035545c48de9fd0dd872494eb023de63b3c4457add5991d5d7923a98c8d",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "1900c2baaaed80a3fbf86f271f4fbfe41dc2d19c2617b568851d596d9feaa747",
+      "bounded_safe_rows": 32400,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+      "symbol": "ASTS",
+      "vendor_qa_sha256": "e30dd92b518e433737e07a53b16063805aadb4b9c3ce00d7b6d72982c6cd8089",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "055f9bced79ca9c3fb6e65254fc2229e95a9f1a07c147c1b60bcc2cdd75d693b",
+      "bounded_safe_rows": 32400,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+      "symbol": "CIFR",
+      "vendor_qa_sha256": "2f5d4befe2d27fdce5f8a6589ae6ba2e144028433ce29e548d8999b78e651567",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "92fc9fb34c5c525f85c40147e37600ef0cf1670f1427797f741454eb73eddea7",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+      "symbol": "HIMS",
+      "vendor_qa_sha256": "6fc865319846f3b3ea9c1b936a33f249dba7d556afa435051aa05f92b20ca4b0",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "4d9d6f75da9a9f2daadb9d81244343f94647dcbd90a426c03ad2b550e9a23b29",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+      "symbol": "IONQ",
+      "vendor_qa_sha256": "1958c644db60c196d6ad49fa2aee4df0820f142e2a495641a720a54db5fc0abb",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "a32fe0464ac2fff115db5db6cc744db591b304c0cbb08f330ed7c37dcebac50b",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+      "symbol": "IREN",
+      "vendor_qa_sha256": "9aeaae8de6c1fa74e6394da2c5ac399c6de2a7e21edadd73877a8e11c0d744c8",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "34d6a2385300e8d0c1eb3b890273943d50a8655b00293d028a19fd9b220ae013",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+      "symbol": "MARA",
+      "vendor_qa_sha256": "24787d4ccc2480f415d8c8bf6c5c8f40de82b56648ffff06914ef271128e48a9",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "62df3853fd345c658a8301add74fe802622cd9c70c24a94ecd486aee9359d1e7",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+      "symbol": "MP",
+      "vendor_qa_sha256": "4a4d94e2ec08619e48b954a19978e1587575a597e15264e2c0b3610aa66ab839",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "60487e33398b4ac48f69e0da402e5103f6f2798d8a1abc7c5d813c9cffafb400",
+      "bounded_safe_rows": 32405,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+      "symbol": "MRNA",
+      "vendor_qa_sha256": "010d4980595ec8249a2ead44e7ea010b1e97ef94287bd022b2f474eb2ae2ecb3",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "c8a13768c3b96156051426c79775103c8eb157f6da1b20a692934ad3b3bf4276",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+      "symbol": "MSTR",
+      "vendor_qa_sha256": "dab185e58680bd6089e9b540c250052969e749f6e2d5b4763c658c68edb46ad5",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "03715f3f026a1c2e029c83a07625edd11b785bec63e4285b0b04c08db340222c",
+      "bounded_safe_rows": 32403,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+      "symbol": "NVTS",
+      "vendor_qa_sha256": "3bdaada1623479080a7490d44ebd19567e481dde6c00d46ad327a1dfd7e85c62",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "403a474b3a3b39365e74470852f48056bd0161d60caa26e883a7ab4e45022f81",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+      "symbol": "QBTS",
+      "vendor_qa_sha256": "749987027a5c27092cbbd1a6f694b473c5c15a3039a1f078a407d2edb534ec9f",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "233088673f12790eadba650647c3d10f74f011e7baae69b10d52c02d8fbab042",
+      "bounded_safe_rows": 32400,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+      "symbol": "RGTI",
+      "vendor_qa_sha256": "d451680d7a6244da1a089269e7a5699db5112010ced271087618d7a828006bda",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "f217b7abb3404783e87320296d57b3148f26d0bb065d9640db0f4d346e6677d9",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+      "symbol": "RIOT",
+      "vendor_qa_sha256": "8a4900d54c9cad60a0c998e34df13f6221c8a7199dc5fb221dee087cbd90f8b2",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "c7ab04d8a205be771320a8eccaaa88c1dfa4ff919fd469fe35e99c5cf03e15e6",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+      "symbol": "RIVN",
+      "vendor_qa_sha256": "2b76b675e9deed5b27fa4a689c64d66c49a8c8561cdf04fa8929ce33a6cc8c69",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "141b6f08c5d2b1840024493aef6b7059f3d41deb28cc2d6dcf609aa589818066",
+      "bounded_safe_rows": 32385,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+      "symbol": "SMCI",
+      "vendor_qa_sha256": "7fc214ee0b1291cda0afd915f1e98a6e71119f12e25477c3ab6ee637ce703d78",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "e3f6d0e05f3bf29a18b0cdb30ce3fe03312628705fa23e46bcb51ef135242353",
+      "bounded_safe_rows": 32399,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+      "symbol": "SOFI",
+      "vendor_qa_sha256": "ba5ae8e8f699d35680eb276d1d242563168ba55fa83a2512f06f08fe5d14d8fd",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "cc5c3ad83d8af2d639a59986e65eea5513b658966be513e51628ab23970d54c2",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet",
+      "symbol": "WULF",
+      "vendor_qa_sha256": "eab29301a684fb535011428ffe31fefe561b26ac9097307a589592ab18d80811",
+      "vendor_qa_status": "warning"
+    }
+  ],
+  "strategy_promotion": false,
+  "symbol_predicate_applied_before_materialisation": true,
+  "vendor_qa": [
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/AAL_5m_eodhd_qa.json",
+      "sha256": "9726400fab8ae7389fa16dc3c69e82f962d1608cbd6912a9eb13b5da2c7e7df8",
+      "status": "pass",
+      "symbol": "AAL",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/AAOI_5m_eodhd_qa.json",
+      "sha256": "6fcfb9e7eb8ba4c8660119ffa89af9f249da157ecfd7e6b3537238a7177d5c6b",
+      "status": "warning",
+      "symbol": "AAOI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/APLD_5m_eodhd_qa.json",
+      "sha256": "26dd3035545c48de9fd0dd872494eb023de63b3c4457add5991d5d7923a98c8d",
+      "status": "warning",
+      "symbol": "APLD",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/ASTS_5m_eodhd_qa.json",
+      "sha256": "e30dd92b518e433737e07a53b16063805aadb4b9c3ce00d7b6d72982c6cd8089",
+      "status": "warning",
+      "symbol": "ASTS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/CIFR_5m_eodhd_qa.json",
+      "sha256": "2f5d4befe2d27fdce5f8a6589ae6ba2e144028433ce29e548d8999b78e651567",
+      "status": "warning",
+      "symbol": "CIFR",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/HIMS_5m_eodhd_qa.json",
+      "sha256": "6fc865319846f3b3ea9c1b936a33f249dba7d556afa435051aa05f92b20ca4b0",
+      "status": "warning",
+      "symbol": "HIMS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/IONQ_5m_eodhd_qa.json",
+      "sha256": "1958c644db60c196d6ad49fa2aee4df0820f142e2a495641a720a54db5fc0abb",
+      "status": "warning",
+      "symbol": "IONQ",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/IREN_5m_eodhd_qa.json",
+      "sha256": "9aeaae8de6c1fa74e6394da2c5ac399c6de2a7e21edadd73877a8e11c0d744c8",
+      "status": "warning",
+      "symbol": "IREN",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MARA_5m_eodhd_qa.json",
+      "sha256": "24787d4ccc2480f415d8c8bf6c5c8f40de82b56648ffff06914ef271128e48a9",
+      "status": "pass",
+      "symbol": "MARA",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MP_5m_eodhd_qa.json",
+      "sha256": "4a4d94e2ec08619e48b954a19978e1587575a597e15264e2c0b3610aa66ab839",
+      "status": "warning",
+      "symbol": "MP",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MRNA_5m_eodhd_qa.json",
+      "sha256": "010d4980595ec8249a2ead44e7ea010b1e97ef94287bd022b2f474eb2ae2ecb3",
+      "status": "warning",
+      "symbol": "MRNA",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MSTR_5m_eodhd_qa.json",
+      "sha256": "dab185e58680bd6089e9b540c250052969e749f6e2d5b4763c658c68edb46ad5",
+      "status": "warning",
+      "symbol": "MSTR",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/NVTS_5m_eodhd_qa.json",
+      "sha256": "3bdaada1623479080a7490d44ebd19567e481dde6c00d46ad327a1dfd7e85c62",
+      "status": "warning",
+      "symbol": "NVTS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/QBTS_5m_eodhd_qa.json",
+      "sha256": "749987027a5c27092cbbd1a6f694b473c5c15a3039a1f078a407d2edb534ec9f",
+      "status": "warning",
+      "symbol": "QBTS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/RGTI_5m_eodhd_qa.json",
+      "sha256": "d451680d7a6244da1a089269e7a5699db5112010ced271087618d7a828006bda",
+      "status": "warning",
+      "symbol": "RGTI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/RIOT_5m_eodhd_qa.json",
+      "sha256": "8a4900d54c9cad60a0c998e34df13f6221c8a7199dc5fb221dee087cbd90f8b2",
+      "status": "pass",
+      "symbol": "RIOT",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/RIVN_5m_eodhd_qa.json",
+      "sha256": "2b76b675e9deed5b27fa4a689c64d66c49a8c8561cdf04fa8929ce33a6cc8c69",
+      "status": "warning",
+      "symbol": "RIVN",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/SMCI_5m_eodhd_qa.json",
+      "sha256": "7fc214ee0b1291cda0afd915f1e98a6e71119f12e25477c3ab6ee637ce703d78",
+      "status": "warning",
+      "symbol": "SMCI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/SOFI_5m_eodhd_qa.json",
+      "sha256": "ba5ae8e8f699d35680eb276d1d242563168ba55fa83a2512f06f08fe5d14d8fd",
+      "status": "pass",
+      "symbol": "SOFI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/WULF_5m_eodhd_qa.json",
+      "sha256": "eab29301a684fb535011428ffe31fefe561b26ac9097307a589592ab18d80811",
+      "status": "warning",
+      "symbol": "WULF",
+      "validation_error_count": 0
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "assessment_end": "2025-08-22",
+  "assessment_outcomes_used": false,
+  "assessment_start": "2025-01-01",
+  "broker_access": false,
+  "call_put_abstain_policy": true,
+  "cross_fitting_required": false,
+  "development_episode_outcomes_used": false,
+  "direction_model_is_second_stage": true,
+  "direction_models_trained_on_2024_only": true,
+  "fallback_empirical_bayes_contract": {
+    "complete_session_blocked_folds": 4,
+    "minimum_raw_support": 20,
+    "prior_equivalent_sample_size": 50
+  },
+  "intraday_option_quotes_used": false,
+  "live_orders_allowed": false,
+  "m1_threshold_frozen": 0.49588519865576763,
+  "movement_model_frozen": true,
+  "movement_model_refit_allowed": false,
+  "opened_movement_holdout_excluded": true,
+  "option_pnl_calculated": false,
+  "orientation_map_fitted_from_direction_outcomes": false,
+  "paper_orders_allowed": false,
+  "passed": true,
+  "primary_direction_horizon_minutes": 10,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "retrospective_directional_screen": true,
+  "rows_from_2026_onward_protected": true,
+  "status": "not_required_outcome_free_audited_orientation",
+  "strategy_promotion": false
+}

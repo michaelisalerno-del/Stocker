@@ -1,0 +1,160 @@
+{
+  "behavioural_component_ledger": {
+    "logical_repository_path": "research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/primary/behavioural_component_ledger.parquet",
+    "sha256": "96fad90eeeb6edf8b2f82ba809fb6939ad3ce5b7d5bf8193abacd90f471a91cb",
+    "size_bytes": 10981603
+  },
+  "behavioural_trajectory_test": true,
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "dates_read": {
+    "end_inclusive": "2025-08-22",
+    "protected_start": "2025-08-23",
+    "start": "2024-01-01"
+  },
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "predecessor": {
+    "artifacts": [
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/decision_panel.parquet",
+        "sha256": "8e6919c03e207e3eee2f05a47271dbff0129c02a0cb0f04c0b6eb1410a65dca5",
+        "size_bytes": 10644003
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/assessment_predictions.parquet",
+        "sha256": "7336e25c4ad619e77672030d8203293028a9355c6d727ac6f07e4d1378d498f1",
+        "size_bytes": 1167660
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/model_coefficients.json",
+        "sha256": "0daeaa4c4f261f8b0a24fa5c3aaefea3b262a9ac9480c4951056ce53542f77e9",
+        "size_bytes": 19114
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/model_configurations.json",
+        "sha256": "312436ece283e6121161b6c4fbb2485827fc99fca1a9310fd01974922fa6e2ea",
+        "size_bytes": 3210
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/pooled_metrics.csv",
+        "sha256": "2516ef382cee52d460d2b95cf886b82b0ba6923955184a24d820267c359f9398",
+        "size_bytes": 2060
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/decision.json",
+        "sha256": "71c97bd13f8893e4ccc17ffd6574592b616b005b41e1ded354d6c9b1bc085b24",
+        "size_bytes": 5719
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/lightweight_audit.json",
+        "sha256": "cf7a2084819a71528d3e90627d3cd9a261bb266bf5e2e88d728b8316c465271b",
+        "size_bytes": 4485
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/determinism_check.json",
+        "sha256": "b47563eb81740abebc1d9882203c93634ec8422cbea67946f1ee459450df497c",
+        "size_bytes": 837
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/protected_boundary_audit.json",
+        "sha256": "d2d4387c8cdbc891913199e6d3e210a8d050111f66495f434ecf1558f9ccb2e8",
+        "size_bytes": 632
+      },
+      {
+        "repository_relative_path": "research/loop-funnel/20260721-emotion-regime-coarse-loop-family-v0/artifacts/primary/source_manifest.json",
+        "sha256": "747809c81edd82d837b85f318d67a125ebb036fddccb3b699e69b14180373a5c",
+        "size_bytes": 6427
+      }
+    ],
+    "audit_passed": true,
+    "commit": "29c61bbe74f45d0a00c5f2a12cdcd5d996131a23",
+    "decision": "descriptive_coarse_funnel_only",
+    "determinism_passed": true,
+    "experiment": "Emotion × Regime-Mix Coarse Loop-Family Funnel V0"
+  },
+  "predecessor_market_source": {
+    "broker_integration_required": false,
+    "coarse_loop_family_target": true,
+    "date_predicate_applied_before_materialisation": true,
+    "development_emission_panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "maximum_target_bar_ordinal": 17,
+    "maximum_timestamp_read": "2025-08-22 19:55:00+00:00",
+    "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+    "order_placement": "disabled",
+    "pre_loop_prediction": true,
+    "production_runtime_modified": false,
+    "protected_rows_materialised": 0,
+    "provider": "EODHD",
+    "quick_feasibility_screen": true,
+    "raw_data_downloaded": false,
+    "research_only": true,
+    "soft_regime_mixture": true,
+    "source_hashes": {
+      "AAL": "2ac4ebceb5664606b872a628d5a74136c8cf74492b8df29c6cd5f73f4249cf01",
+      "AAOI": "b6c167d0613e739c19bef5b890d4d7de66e5adfa0413154e19fa234629f10dfd",
+      "APLD": "ad2171c9959edb2274bfaf10be08dd5154a2003e018640fcb74c4345a2bbff81",
+      "ASTS": "1900c2baaaed80a3fbf86f271f4fbfe41dc2d19c2617b568851d596d9feaa747",
+      "AXTI": "105560c1a8bd6955a98724a16fd31d4a7ca703f4dbf8bde2aa44b81f9e617307",
+      "CIFR": "055f9bced79ca9c3fb6e65254fc2229e95a9f1a07c147c1b60bcc2cdd75d693b",
+      "HIMS": "92fc9fb34c5c525f85c40147e37600ef0cf1670f1427797f741454eb73eddea7",
+      "IONQ": "4d9d6f75da9a9f2daadb9d81244343f94647dcbd90a426c03ad2b550e9a23b29",
+      "IREN": "a32fe0464ac2fff115db5db6cc744db591b304c0cbb08f330ed7c37dcebac50b",
+      "MARA": "34d6a2385300e8d0c1eb3b890273943d50a8655b00293d028a19fd9b220ae013",
+      "MP": "62df3853fd345c658a8301add74fe802622cd9c70c24a94ecd486aee9359d1e7",
+      "MRNA": "60487e33398b4ac48f69e0da402e5103f6f2798d8a1abc7c5d813c9cffafb400",
+      "MSTR": "c8a13768c3b96156051426c79775103c8eb157f6da1b20a692934ad3b3bf4276",
+      "NVTS": "03715f3f026a1c2e029c83a07625edd11b785bec63e4285b0b04c08db340222c",
+      "OKLO": "0e15f1d3ed63b358219fdb2a8363752b373a76ebc91e63028ab58fb1cbaa5749",
+      "QBTS": "403a474b3a3b39365e74470852f48056bd0161d60caa26e883a7ab4e45022f81",
+      "RGTI": "233088673f12790eadba650647c3d10f74f011e7baae69b10d52c02d8fbab042",
+      "RIOT": "f217b7abb3404783e87320296d57b3148f26d0bb065d9640db0f4d346e6677d9",
+      "RIVN": "c7ab04d8a205be771320a8eccaaa88c1dfa4ff919fd469fe35e99c5cf03e15e6",
+      "SMCI": "141b6f08c5d2b1840024493aef6b7059f3d41deb28cc2d6dcf609aa589818066",
+      "SOFI": "e3f6d0e05f3bf29a18b0cdb30ce3fe03312628705fa23e46bcb51ef135242353",
+      "VTI": "4797ccc19ea22cf323e5e4286f0b3921fb686738fe100ed22faa76c53dddaa32",
+      "WULF": "cc5c3ad83d8af2d639a59986e65eea5513b658966be513e51628ab23970d54c2"
+    },
+    "source_row_counts": {
+      "AAL": 32402,
+      "AAOI": 32403,
+      "APLD": 32402,
+      "ASTS": 32400,
+      "AXTI": 32401,
+      "CIFR": 32400,
+      "HIMS": 32402,
+      "IONQ": 32401,
+      "IREN": 32401,
+      "MARA": 32401,
+      "MP": 32402,
+      "MRNA": 32405,
+      "MSTR": 32402,
+      "NVTS": 32403,
+      "OKLO": 32393,
+      "QBTS": 32402,
+      "RGTI": 32400,
+      "RIOT": 32401,
+      "RIVN": 32401,
+      "SMCI": 32385,
+      "SOFI": 32399,
+      "VTI": 32402,
+      "WULF": 32401
+    },
+    "state_rows_filtered": 148226,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "timeframe": "5m"
+  },
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "quick_feasibility_screen": true,
+  "raw_data_downloaded": false,
+  "raw_market_data_read": false,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

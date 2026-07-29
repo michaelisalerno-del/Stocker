@@ -1,0 +1,56 @@
+{
+  "broker_integration_required": false,
+  "canonicalisation_contract": {
+    "fallback": "stable canonical forward path plus structural motif, never discovery rank",
+    "family_id_format": "unregistered_<motif>__<canonical_closed_path>",
+    "frozen_before_assessment_family_support": true,
+    "input": "exact causal closed state-transition path of the first unregistered event",
+    "maximum_transition_length": 8,
+    "motif_types": [
+      "primitive_like",
+      "repeat_like",
+      "composite_like"
+    ],
+    "orientation_metadata_retained": true,
+    "repeat_depth_retained": true,
+    "reverse_orientation": "separate family unless reverse traversal is itself a forward rotation",
+    "rotation_invariance": "forward rotations only, matching V2 registered-loop semantics",
+    "state_transition_order_preserved": true,
+    "v2_decompose_closed_path_used_when_supported": true
+  },
+  "development_frozen_unregistered_families": true,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "eligible_development_families": 9,
+  "execution_enabled": false,
+  "fit_period": "2024_only",
+  "frozen_before_assessment_family_support": true,
+  "opening_phase_only": true,
+  "order_placement": "disabled",
+  "other_family": "OTHER_UNREGISTERED_FAMILY",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "selected_families": [
+    "unregistered_primitive_like__5-6-5",
+    "unregistered_primitive_like__2-3-2",
+    "unregistered_primitive_like__2-5-2",
+    "unregistered_primitive_like__4-7-4"
+  ],
+  "selected_family_count": 4,
+  "selection_contract": {
+    "fallback_class": "OTHER_UNREGISTERED_FAMILY",
+    "fit": "2024_only",
+    "maximum_selected_families": 4,
+    "maximum_stock_share": 0.3,
+    "minimum_eligible_families": 2,
+    "minimum_months": 4,
+    "minimum_outcomes": 30,
+    "minimum_sessions": 20,
+    "minimum_stocks": 8,
+    "tie_break": "stable_canonical_family_id"
+  },
+  "stage_b_development_support_available": true,
+  "strategy_promotion": false,
+  "unregistered_structural_event_target": true
+}

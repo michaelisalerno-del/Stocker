@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+data/vendor/eodhd/options/
 
 .venv/
 __pycache__/
@@ -31,6 +32,8 @@ data/reports/*
 !data/reports/.gitkeep
 
 *.parquet
+!research/observable-behavioural-state/20260721-behavioural-state-dimensions-screen-v0/artifacts/**/*.parquet
+!research/directional-readiness/20260726-pretrigger-quiet-accumulation-direction-v0/artifacts/primary/*.parquet
 *.feather
 *.duckdb
 *.db

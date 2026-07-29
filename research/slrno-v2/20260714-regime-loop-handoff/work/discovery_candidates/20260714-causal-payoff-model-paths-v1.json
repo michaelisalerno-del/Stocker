@@ -1,0 +1,154 @@
+{
+  "candidate_id": "20260714-causal-payoff-model-paths-v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "application_modified": false,
+  "scientific_status": "opened_retrospective_cross_surface_development_not_validation",
+  "sealed_validation_performed": false,
+  "sealed_data_available": false,
+  "primary_decision": {
+    "decision": "all_tested_model_paths_rejected_or_unknown",
+    "reason": "the direct and sequential uncertainty-aware payoff models abstained on every scored row, the route forecast did not securely beat its prior, causal route probabilities did not add value in both candidates, and the diversion-specific hypothesis remained sealed"
+  },
+  "loop_prediction_scope": {
+    "parent_identity_conditional_on_completion": "structurally_determined",
+    "opportunity_level_occurrence_or_completion": "not_100_percent",
+    "profitability_accuracy": "separate_unresolved_target",
+    "warning": "Do not equate conditional parent identity with completion inside the payoff window, direction, or positive expectancy."
+  },
+  "development_surface": {
+    "period": 2024,
+    "name": "causal_setup_conditions_v1 OCO anchor breakouts",
+    "setup": "oco_anchor_breakout_all",
+    "family": "oco_baseline",
+    "relationship_to_2023_2025_surface": "different causal breakout surface for mechanism transfer only",
+    "base_sessions": 128,
+    "warmup_sessions": 60,
+    "score_sessions": 68,
+    "full_rows": 691,
+    "score_rows": 401,
+    "primary_cost_bps_per_side": 5
+  },
+  "candidate_baselines": [
+    {
+      "candidate": "cycle_04|state4",
+      "full_rows": 259,
+      "score_rows": 112,
+      "score_candidate_sessions": 46,
+      "unfiltered_mean_net_bps": -15.1673,
+      "interpretation": "negative on this opened cross-surface development sample"
+    },
+    {
+      "candidate": "cycle_07|state5",
+      "full_rows": 432,
+      "score_rows": 289,
+      "score_candidate_sessions": 64,
+      "unfiltered_mean_net_bps": 102.8219,
+      "interpretation": "positive descriptive transfer on a different opened surface; not validation or a rule"
+    }
+  ],
+  "tested_paths": [
+    {
+      "id": "H1_direct_admission_payoff_state",
+      "decision": "rejected_or_unknown",
+      "models": [
+        "admission_only_bayesian_ridge",
+        "admission_plus_causal_route_probabilities_bayesian_ridge"
+      ],
+      "score_rows": 401,
+      "uncertainty_positive_coverage": 0.0,
+      "unknown_share": 1.0,
+      "key_failure": "both variants abstained everywhere and had worse RMSE than the expanding baseline in both candidates"
+    },
+    {
+      "id": "H2_route_branch_forecast",
+      "decision": "rejected_or_unknown",
+      "model": "five_way_L2_multinomial_logistic",
+      "log_loss_improvement": {
+        "pooled": -0.01458,
+        "cycle_04_state4": -0.05442,
+        "cycle_07_state5": 0.00086
+      },
+      "holm_passes": 0,
+      "key_failure": "no group had a positive lower session-block bound and cycle_04 was worse than its prior in log loss and Brier score"
+    },
+    {
+      "id": "H3_predicted_route_adds_to_direct_payoff",
+      "decision": "rejected_or_unknown",
+      "key_failure": "route probabilities worsened RMSE and the point diagnostic for cycle_04, so incremental value did not hold in both candidates"
+    },
+    {
+      "id": "H4_sequential_route_plus_price_path",
+      "decision": "rejected_or_unknown",
+      "checkpoint_rows": 1200,
+      "signals": 400,
+      "uncertainty_action_coverage": 0.0,
+      "unknown_share": 1.0,
+      "point_diagnostic_paired_difference_bps": {
+        "pooled": -15.1465,
+        "cycle_04_state4": 0.1389,
+        "cycle_07_state5": -21.0703
+      },
+      "key_failure": "route plus MFE, MAE, ATR, retracement, and volatility state abstained everywhere; forced point action reduced payoff overall and for cycle_07"
+    },
+    {
+      "id": "H5_expected_leg_then_diversion",
+      "decision": "deferred_no_sealed_data",
+      "key_guard": "no diversion-specific payoff or exit table was opened"
+    }
+  ],
+  "nonqualifying_diagnostics": {
+    "warning": "point-mean policies ignored frozen predictive uncertainty and cannot qualify",
+    "admission_only_paired_difference_bps": {
+      "pooled": 5.6159,
+      "cycle_04_state4": 12.6117,
+      "cycle_07_state5": 2.9047
+    },
+    "admission_plus_route_paired_difference_bps": {
+      "pooled": 7.8608,
+      "cycle_04_state4": 10.4435,
+      "cycle_07_state5": 6.8599
+    },
+    "why_not_promoted": "zero conservative coverage, no predeclared block test for point diagnostics, and negative selected mean payoff for cycle_04"
+  },
+  "retired_paths": [
+    "frozen compact admission-only BayesianRidge on opened 2024",
+    "frozen admission-plus-route BayesianRidge on opened 2024",
+    "frozen five-way multinomial route forecast on opened 2024",
+    "frozen quartile-checkpoint route-only and route-plus-price BayesianRidge models on opened 2024",
+    "uncertainty-ignoring point selectors",
+    "further feature, model, threshold, checkpoint, child, morph, or diversion tuning on opened 2023, 2024, or 2025"
+  ],
+  "next_path": {
+    "name": "prospective_immutable_payoff_ledger",
+    "status": "specification_only_not_activated",
+    "purpose": "collect enough genuinely unseen admissions and completed-bar route/price paths to evaluate nonzero conservative payoff-state coverage",
+    "requirements": [
+      "activation timestamp before observation",
+      "append-only admission, completed-bar, and sealed-outcome ledgers",
+      "direct payoff, route forecast, and remaining payoff kept as separate targets",
+      "5 bps per side primary cost",
+      "paired session-block uncertainty, multiplicity, time stability, leave-one-stock-out, and cost survival",
+      "expected-leg diversion remains a secondary prospectively frozen hypothesis",
+      "no application or execution implementation without separate authorization"
+    ]
+  },
+  "prospective_logging_contract": "../contracts/20260714-loop-payoff-prospective-log-v3.json",
+  "provider_volume_label": "historical_volume_activity_proxy_not_used",
+  "quotes_or_ticks_used": false,
+  "economic_edge_claim": false,
+  "prospective_validation_claim": false,
+  "strategy_promotion": false,
+  "integrity": {
+    "focused_tests": "9_of_9_passed",
+    "frozen_independent_audit": "15_unaffected_checks_passed_1_population_check_superseded",
+    "population_audit_addendum": "8_of_8_passed",
+    "exact_rerun": "all_30_files_byte_identical",
+    "pre_score_manifest_sha256": "0b717f57be949f4764bc0fcbaa545a5067e2dcf79eb745ee32a64171be85ed1a",
+    "artifact_manifest_sha256": "06407441f2a0db1aed7e7e18aef7baa0f4b2dd56db8747e8d26a0ba583c492b6"
+  },
+  "report": "../reports/20260714-causal-payoff-model-paths-v1.md",
+  "primary_artifacts": "../artifacts/20260714-causal-payoff-model-paths-v1/primary",
+  "exact_rerun": "../artifacts/20260714-causal-payoff-model-paths-v1/exact_rerun"
+}

@@ -1,0 +1,86 @@
+{
+  "bars": "five_minute",
+  "claims": {
+    "option_profitability_claim": false,
+    "orders_allowed": false,
+    "research_only": true,
+    "shadow_only": true,
+    "validated_directional_evidence": false
+  },
+  "cohort": "frozen_20_stock_us_cohort",
+  "descriptive_thresholds": {
+    "overnight_gap_q10": -0.00382056890751,
+    "overnight_gap_q90": 0.0063796856309,
+    "total_transition_q10": -0.00536060944383,
+    "total_transition_q90": 0.00643755517767
+  },
+  "entry": "10:00_next_bar_open",
+  "entry_bar_excluded_from_predictors": true,
+  "final_included_bar": "09:55:00_to_10:00:00",
+  "frozen_checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "included_bar_ordinals": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "material_threshold_formula": "prior_close_ATM_IV*sqrt(15/(252*390))*sqrt(2/pi)",
+  "opening_window_new_york": "09:30:00_inclusive_to_10:00:00_exclusive",
+  "retrospective_decision": "blocked_insufficient_support",
+  "rule": {
+    "checkpoint": 6,
+    "direction_formula": "prediction_sign_v1=-opening_transition_sign_v1",
+    "experiment_id": "m1c-prospective-opening-reversal-v1",
+    "experiment_version": "1",
+    "m1c_probability_threshold": 0.488333710794033,
+    "market_proxy": "VTI",
+    "maximum_promoted_underlyings": 1,
+    "opening_range_q75": 0.00384818171835,
+    "opening_return_q10": -0.00288963733897,
+    "opening_return_q90": 0.00225522676046,
+    "optional_feed_degradation_order": [
+      "neutral_control",
+      "additional_strike",
+      "3_to_5_dte_comparison",
+      "0dte_comparison",
+      "tick_by_tick",
+      "additional_underlying_diagnostic"
+    ],
+    "order_methods_available": false,
+    "order_routing_enabled": false,
+    "primary_expiry": "1DTE",
+    "primary_horizon_minutes": 15,
+    "reserved_market_data_lines": 12,
+    "tail_phase_required": "FIRST_ENTRY"
+  },
+  "rule_hash": "7a2a40170fa1dffb148cb51144c1c9bfcb029c5d797ea9680164cfd9fbce1ea7",
+  "statistics": {
+    "cluster_bootstrap_replications": 2000,
+    "cluster_confidence_level": 0.95,
+    "event_cluster_seed": 2026072903,
+    "primary_null_replications": 1000,
+    "primary_null_seed": 2026072901,
+    "session_cluster_seed": 2026072902,
+    "temporal_placebo": "next eligible outcome for same stock and cohort",
+    "winsor_fraction": 0.01
+  },
+  "threshold_equality_partition": "NO_MATERIAL_MOVE"
+}

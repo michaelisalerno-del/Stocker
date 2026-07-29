@@ -1,0 +1,83 @@
+{
+  "broker_order_methods_allowed": false,
+  "defined_risk_short_premium_only": true,
+  "frame_details": [
+    {
+      "artifact": "checkpoint_vs_episode_concentration.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "equal_exposure_sensitivities.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "leave_one_checkpoint_group_out.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "leave_one_month_out.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "leave_one_stock_out.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "quiet_state_runs.parquet",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "stress_month_exposure_audit.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "stress_month_tail_incidence.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "surprise_concentration_metrics.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "surprise_event_clusters.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    },
+    {
+      "artifact": "surprise_mover_row_audit.csv",
+      "maximum_floating_difference": 0.0,
+      "value_mismatches": 0
+    }
+  ],
+  "live_orders_allowed": false,
+  "m1c_bottom_10_threshold": 0.135896965695626,
+  "m1c_bottom_20_threshold": 0.167095528962669,
+  "m1c_bottom_5_threshold": 0.115697407847643,
+  "m1c_frozen": true,
+  "maximum_floating_difference": 0.0,
+  "naked_short_options_allowed": false,
+  "option_shadow_outcomes_only": true,
+  "original_decision": "blocked_insufficient_low_tail_support",
+  "original_low_movement_decision_preserved": true,
+  "paper_orders_allowed": false,
+  "passed": true,
+  "primary_quiet_state": "bottom_10_percent",
+  "prospective_record_only": true,
+  "protected_historical_start": "2026-01-01",
+  "requirement": "maximum_floating_difference <= 1e-12",
+  "research_only": true,
+  "retrospective_frame_value_mismatches": 0,
+  "retrospective_gate_relaxation_allowed": false,
+  "retrospective_payload_mismatches": 0,
+  "stored_fixture_replays": 2,
+  "strategy_promotion": false
+}

@@ -1,0 +1,22 @@
+{
+  "assessment_end_inclusive": "2025-08-22",
+  "assessment_start": "2025-01-01",
+  "broker_integration_required": false,
+  "development_end_inclusive": "2024-12-31",
+  "development_start": "2024-01-01",
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "hidden_route_diversion_veto_test": true,
+  "maximum_timestamp_read": "2025-08-22 19:55:00+00:00",
+  "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "protected_start": "2025-08-23",
+  "quick_feasibility_screen": true,
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "strategy_promotion": false
+}

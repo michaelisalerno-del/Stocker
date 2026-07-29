@@ -1,0 +1,15 @@
+{
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "fit_year": 2024,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quantile": 0.75,
+  "research_only": true,
+  "strategy_promotion": false,
+  "thresholds_bps": {
+    "12": 221.44649301323093,
+    "36": 168.08746567899962
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "Q0_numeric": [
+    "stock_return_5m_tminus1",
+    "stock_return_10m_tminus1",
+    "stock_return_20m_tminus1",
+    "market_return_5m_tminus1",
+    "market_return_10m_tminus1",
+    "market_return_20m_tminus1",
+    "stock_minus_market_return_5m_tminus1",
+    "stock_minus_market_return_10m_tminus1",
+    "distance_from_vwap_tminus1",
+    "distance_from_session_open_tminus1",
+    "distance_from_opening_range_midpoint_tminus1",
+    "distance_from_previous_six_bar_high_tminus1",
+    "distance_from_previous_six_bar_low_tminus1",
+    "clv_tminus1",
+    "wick_asymmetry_tminus1"
+  ],
+  "Q1_numeric": [
+    "stock_return_5m_tminus1",
+    "stock_return_10m_tminus1",
+    "stock_return_20m_tminus1",
+    "market_return_5m_tminus1",
+    "market_return_10m_tminus1",
+    "market_return_20m_tminus1",
+    "stock_minus_market_return_5m_tminus1",
+    "stock_minus_market_return_10m_tminus1",
+    "distance_from_vwap_tminus1",
+    "distance_from_session_open_tminus1",
+    "distance_from_opening_range_midpoint_tminus1",
+    "distance_from_previous_six_bar_high_tminus1",
+    "distance_from_previous_six_bar_low_tminus1",
+    "clv_tminus1",
+    "wick_asymmetry_tminus1",
+    "pressure_sum_25",
+    "pressure_persistence_25",
+    "pressure_slope_25",
+    "signed_absorption_divergence_25",
+    "accumulation_sign_persistence_25",
+    "activity_without_displacement_25",
+    "mean_clv_25",
+    "mean_wick_asymmetry_25",
+    "break_failure_asymmetry_25",
+    "range_compression_25",
+    "path_compression_25",
+    "relative_resilience_25",
+    "mean_vwap_distance_25",
+    "vwap_side_balance_25",
+    "vwap_reclaim_balance_25",
+    "quietness_25",
+    "quiet_absorption_score_25"
+  ],
+  "QS_numeric": [
+    "quiet_absorption_score_25",
+    "quietness_25"
+  ],
+  "categorical_fixed_effects": [
+    "stock",
+    "checkpoint_indicator",
+    "day_of_week_indicator"
+  ],
+  "group_A": [
+    "activity_without_displacement_25",
+    "mean_clv_25",
+    "mean_wick_asymmetry_25",
+    "break_failure_asymmetry_25"
+  ],
+  "group_C": [
+    "range_compression_25",
+    "path_compression_25",
+    "relative_resilience_25",
+    "mean_vwap_distance_25",
+    "vwap_side_balance_25",
+    "vwap_reclaim_balance_25",
+    "quietness_25",
+    "quiet_absorption_score_25"
+  ],
+  "group_P": [
+    "pressure_sum_25",
+    "pressure_persistence_25",
+    "pressure_slope_25",
+    "signed_absorption_divergence_25",
+    "accumulation_sign_persistence_25"
+  ],
+  "missing_indicators": "one_per_numeric_model_feature",
+  "post_trigger_features": [],
+  "primary_window_bars": 5,
+  "primary_window_minutes": 25,
+  "quiet_signed_components": [
+    "pressure_sum_25",
+    "pressure_persistence_25",
+    "pressure_slope_25",
+    "signed_absorption_divergence_25",
+    "activity_without_displacement_25",
+    "relative_resilience_25",
+    "mean_clv_25",
+    "mean_wick_asymmetry_25",
+    "break_failure_asymmetry_25",
+    "mean_vwap_distance_25",
+    "vwap_side_balance_25",
+    "vwap_reclaim_balance_25",
+    "accumulation_sign_persistence_25"
+  ],
+  "route_orientation_features": [],
+  "secondary_windows_bars": [
+    3,
+    9
+  ],
+  "secondary_windows_minutes": [
+    15,
+    45
+  ],
+  "secondary_windows_role": "descriptive_only",
+  "trigger_bar_direction_features": []
+}

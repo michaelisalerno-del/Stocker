@@ -110,6 +110,32 @@ def _sample_frame(
     )
 
 
+def _intraday_frame(symbol: str, sessions: int = 2, bars_per_session: int = 78) -> pd.DataFrame:
+    chunks = []
+    for session_start in pd.date_range("2026-06-25 13:30", periods=sessions, freq="B", tz="UTC"):
+        chunks.append(pd.date_range(session_start, periods=bars_per_session, freq="5min"))
+    timestamps = chunks[0]
+    for chunk in chunks[1:]:
+        timestamps = timestamps.append(chunk)
+    close_series = pd.Series([100.0 + index * 0.01 for index in range(len(timestamps))])
+    return pd.DataFrame(
+        {
+            "source": "eodhd",
+            "symbol": symbol,
+            "instrument_type": "stock",
+            "timeframe": "5m",
+            "timestamp": timestamps,
+            "open": close_series.shift(1).fillna(close_series.iloc[0]),
+            "high": close_series + 0.05,
+            "low": close_series - 0.05,
+            "close": close_series,
+            "volume": 10_000,
+            "currency": "USD",
+            "timezone": "UTC",
+        }
+    )
+
+
 def test_universe_load_save_validate_and_research_ready_export(tmp_path: Path) -> None:
     universe_path = _write_universe(
         tmp_path,
@@ -604,6 +630,56 @@ def test_universe_qualify_rejects_and_exports_research_ready(tmp_path: Path) -> 
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["qualified_symbols"] == [{"symbol": "GOOD.US"}]
     assert (data_dir / "reports" / "universes" / "us_test_1d_qualification.md").exists()
+
+
+def test_universe_qualify_supports_intraday_row_and_session_rules(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    universe_path = _write_universe(
+        tmp_path,
+        _universe_payload(
+            [
+                {"symbol": "GOOD.US", "exchange": "US"},
+                {"symbol": "SHORTROWS.US", "exchange": "US"},
+                {"symbol": "ONESESSION.US", "exchange": "US"},
+            ]
+        ),
+    )
+    for symbol, frame in [
+        ("GOOD.US", _intraday_frame("GOOD.US", sessions=2, bars_per_session=78)),
+        ("SHORTROWS.US", _intraday_frame("SHORTROWS.US", sessions=2, bars_per_session=20)),
+        ("ONESESSION.US", _intraday_frame("ONESESSION.US", sessions=1, bars_per_session=78)),
+    ]:
+        write_parquet(
+            frame,
+            dataset_path(
+                DatasetKey(source="eodhd", instrument_type="stock", symbol=symbol, timeframe="5m"),
+                data_dir=data_dir,
+            ),
+        )
+    output = tmp_path / "ready_5m.json"
+
+    result = qualify_universe(
+        universe=load_universe(universe_path),
+        data_dir=data_dir,
+        timeframe="5m",
+        source="eodhd",
+        rules=UniverseQualificationRules(
+            min_history_days=0,
+            min_last_close=0,
+            min_median_dollar_volume_60d=0,
+            min_row_count=100,
+            min_sessions=2,
+            max_validation_errors=0,
+            max_missing_session_warnings=0,
+        ),
+        output_path=output,
+        market_calendar="XNYS",
+    )
+
+    assert result.qualified_symbols == ["GOOD.US"]
+    rejected = {item.symbol: item.reasons for item in result.rejected_symbols}
+    assert "insufficient_rows" in rejected["SHORTROWS.US"]
+    assert "insufficient_sessions" in rejected["ONESESSION.US"]
 
 
 def test_universe_health_counts_datasets_and_qualification(tmp_path: Path) -> None:

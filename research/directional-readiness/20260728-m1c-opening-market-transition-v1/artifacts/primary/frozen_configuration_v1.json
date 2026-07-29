@@ -1,0 +1,122 @@
+{
+  "bar_frequency": "5m",
+  "bootstrap": {
+    "opening_transition_event_seed": 2026072807,
+    "replications": 5000,
+    "session_seed": 2026072806
+  },
+  "checkpoint": 6,
+  "chronology": {
+    "assessment": [
+      "2025-01-01",
+      "2025-08-22"
+    ],
+    "development": [
+      "2024-01-01",
+      "2024-12-31"
+    ],
+    "protected_start": "2026-01-01",
+    "stress": [
+      "2025-09-01",
+      "2025-12-31"
+    ]
+  },
+  "cohort": "frozen_20_stock_us_cohort",
+  "configuration_sha256": "6a4b22017192308502cfc53da36e91ef446ddaac48548da8363f2e12a124f6b5",
+  "execution_boundaries": {
+    "broker_access": false,
+    "option_profitability": "Not tested",
+    "order_routing": false,
+    "orders": false
+  },
+  "expected_opening_bar_count": 6,
+  "experiment": "M1C Opening Market Transition V1",
+  "frozen_response_quintiles": {
+    "calibration_complete_v1": true,
+    "calibration_missing_reason_v1": null,
+    "q20_v1": -1.0019278339119537,
+    "q40_v1": 1.3089013104132659,
+    "q60_v1": 2.7915720766164127,
+    "q80_v1": 5.141678860987508,
+    "support_v1": 65
+  },
+  "frozen_thresholds": {
+    "calibration_complete_v1": true,
+    "calibration_missing_reason_v1": null,
+    "checkpoint_v1": 6,
+    "market_opening_range_q75_v1": 0.003848181718348481,
+    "market_opening_range_support_v1": 247,
+    "market_opening_return_q10_v1": -0.0028896373389661863,
+    "market_opening_return_q90_v1": 0.002255226760464915,
+    "market_opening_return_support_v1": 247,
+    "market_overnight_gap_q10_v1": -0.0038205689075119717,
+    "market_overnight_gap_q90_v1": 0.006379685630897604,
+    "market_overnight_gap_support_v1": 247,
+    "market_total_transition_q10_v1": -0.005360609443825508,
+    "market_total_transition_q90_v1": 0.006437555177674593,
+    "market_total_transition_support_v1": 247
+  },
+  "m1c_probability_threshold": 0.488333710794033,
+  "market_proxy": "VTI",
+  "mechanisms": [
+    "market_transition_following",
+    "amplification_continuation",
+    "resistance_reversal"
+  ],
+  "null": {
+    "preserve": [
+      "stock",
+      "checkpoint",
+      "period",
+      "outcome_completeness"
+    ],
+    "replications": 1000,
+    "same_session_forbidden": true,
+    "seed": 2026072808
+  },
+  "opening_window": {
+    "end": "final_complete_bar_available_at_checkpoint_6_signal",
+    "entry_bar_excluded": true,
+    "imputation": false,
+    "partial_bars_excluded": true,
+    "session_crossing": false,
+    "start": "current_nyse_regular_session_open"
+  },
+  "population": {
+    "fresh_episode_definition": "unchanged_frozen_minimum_30_minute_spacing",
+    "later_checkpoints_in_primary_population": false,
+    "persistent_rows_independent_support": false,
+    "re_entry_rows_included": false,
+    "tail_phase": "FIRST_ENTRY"
+  },
+  "primary_state_inputs": [
+    "market_opening_return_v1",
+    "market_opening_range_v1"
+  ],
+  "research_only": true,
+  "schema_version": "m1c-opening-market-transition-contract-v1",
+  "support": {
+    "maximum_event_share": 0.2,
+    "maximum_session_share": 0.2,
+    "maximum_stock_share": 0.25,
+    "minimum_call_predictions": 8,
+    "minimum_negative_transition_episodes": 8,
+    "minimum_positive_transition_episodes": 8,
+    "minimum_put_predictions": 8,
+    "minimum_sessions": 15,
+    "minimum_stock_episodes": 30,
+    "minimum_stocks": 8,
+    "minimum_transition_events": 15
+  },
+  "threshold_quantiles": {
+    "method": "numpy_linear",
+    "opening_range": 0.75,
+    "opening_return_lower": 0.1,
+    "opening_return_upper": 0.9,
+    "overnight_gap_descriptive_lower": 0.1,
+    "overnight_gap_descriptive_upper": 0.9,
+    "predictor_year": 2024,
+    "total_transition_descriptive_lower": 0.1,
+    "total_transition_descriptive_upper": 0.9
+  }
+}

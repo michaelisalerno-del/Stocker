@@ -1,0 +1,10 @@
+{
+  "activation_timestamp_utc": "2026-07-29T06:39:44.466604+00:00",
+  "experiment_id": "m1c-prospective-opening-reversal-v1",
+  "experiment_version": "1",
+  "reason": "development decision has not supported confirmation",
+  "receipt_hash": "26f7f4598efa84bd317612622a47823c8b7e941d5b93cde9bc74525eb1d91404",
+  "receipt_type": "confirmation_start",
+  "scientific_result_issued": false,
+  "status": "not_created"
+}

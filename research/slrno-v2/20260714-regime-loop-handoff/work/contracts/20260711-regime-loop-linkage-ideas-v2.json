@@ -1,0 +1,69 @@
+{
+  "contract_id": "regime_loop_linkage_ideas_v2",
+  "contract_frozen_at_utc": "2026-07-11T22:20:00Z",
+  "scientific_status": "post_inspection_2024_causal_oof_linkage_development_test_after_pre_score_identity_amendment",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "prospective_validation_claim_permitted": false,
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "semantic_parent": {
+    "path": "work/contracts/20260711-regime-loop-linkage-ideas-v1.json",
+    "sha256": "3a8812b1c8a7980565329ab46c88f60ae1cb80bbfe5f738767cb15969589e950",
+    "inherit_all_hypotheses_models_evaluation_gates_decision_and_safety_rules_except_the_explicit_amendments_below": true
+  },
+  "implementation_parent": {
+    "path": "work/run_regime_loop_linkage_ideas_v1.py",
+    "sha256": "e134f01f4d6da58581205fe8070f90a2f17d0fc0945dea0b42a2ca1c96bfa51a",
+    "use": "immutable_algorithm_body_with_v2_contract_loader_population_identity_rule_and_artifact_root"
+  },
+  "v1_fail_closed_record": {
+    "joint_scores_or_metrics_calculated": false,
+    "meta_models_fitted": false,
+    "artifact_root_created": false,
+    "all_quality_rows_joined": true,
+    "cycle_state_current_state_loop_label_and_month_identity_matches": true,
+    "failed_assumption": "factor_qhistory_equals_quality_parent_loop_probability_within_1e-12",
+    "observed_structural_probability_diagnostic": {
+      "rows": 216438,
+      "mean_absolute_difference": 0.003654320057239144,
+      "maximum_absolute_difference": 0.19691494400959958,
+      "correlation": 0.9890693311267802,
+      "interpretation": "factor_qhistory_is_a_fold_local_reconstruction_while_quality_loop_probability_is_the_parent_anchor_loop_score; they are related but not interchangeable"
+    },
+    "movement_outcomes_or_linkage_results_used_to_make_amendment": false
+  },
+  "explicit_amendments": {
+    "occurrence_probability_for_every_v2_composition": "factor_occurrence_oof.qhistory",
+    "quality_parent_loop_probability_role": "identity_diagnostic_only_and_excluded_from_every_fixed_or_learned_link_probability",
+    "reason": "qcontext_qroute_topology_and_qhier_are_conditional_movement_probabilities_fitted_on_realized_loop_rows_and_can_be composed_with_the_fold_local_factor_occurrence_probability_without_using_the_quality_parent_structural_score",
+    "replace_parent_qhistory_equality_gate_with": {
+      "minimum_correlation": 0.98,
+      "maximum_mean_absolute_difference": 0.005,
+      "maximum_absolute_difference": 0.20,
+      "diagnostic_only": true
+    },
+    "planned_artifact_root": "/private/tmp/stocker_regime_loop_linkage_ideas_v2_20260711"
+  },
+  "unchanged_boundaries": {
+    "source_prediction_months": ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"],
+    "primary_evaluation_months": ["2024-09", "2024-10", "2024-11", "2024-12"],
+    "meta_training_strictly_prior_months": true,
+    "candidate_variants": [
+      "minimal_time_topology",
+      "raw_full_link",
+      "partial_full_link",
+      "calibrated_raw_product",
+      "dependency_stack"
+    ],
+    "same_experiment_refinement_permitted": false,
+    "later_period_scoring": false,
+    "prospective_shadow_read_or_write_permitted": false,
+    "named_loop_good_or_high_promotion_permitted": false,
+    "trading_rule_or_PnL_model_permitted": false,
+    "direction_or_signed_return_used": false,
+    "direct_volume_label": "historical_volume_not_used",
+    "independent_audit_required": true
+  }
+}

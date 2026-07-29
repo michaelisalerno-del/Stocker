@@ -14,6 +14,7 @@ REGISTERED_TEMPLATES = {
     "pullback_in_uptrend",
     "mean_reversion_after_large_down_day",
     "volatility_breakout",
+    "opening_range_breakout",
 }
 
 
@@ -124,6 +125,7 @@ class Hypothesis(BaseModel):
         "pullback_in_uptrend",
         "mean_reversion_after_large_down_day",
         "volatility_breakout",
+        "opening_range_breakout",
     ] = "moving_average_momentum"
     entry_logic: str = Field(min_length=1)
     exit_logic: str = Field(min_length=1)

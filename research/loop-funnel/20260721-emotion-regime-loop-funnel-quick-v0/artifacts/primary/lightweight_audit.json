@@ -1,0 +1,102 @@
+{
+  "audit": "independent_lightweight_audit_v0",
+  "behavioural_regime_gating_test": true,
+  "blocked_support_audit": true,
+  "broker_integration_required": false,
+  "check_count": 13,
+  "checks": [
+    {
+      "check": "required_artifacts",
+      "missing": [],
+      "passed": true
+    },
+    {
+      "check": "safety_flags",
+      "passed": true
+    },
+    {
+      "check": "dates_and_protected_boundary",
+      "maximum_session": "2025-08-22",
+      "minimum_session": "2024-01-17",
+      "passed": true
+    },
+    {
+      "check": "frozen_behavioural_values",
+      "frozen_source_rows": 15549,
+      "joined_panel_rows": 15549,
+      "maximum_formula_reconstruction_error": 0.0,
+      "maximum_frozen_source_error": 0.0,
+      "passed": true
+    },
+    {
+      "check": "v2_posterior_values",
+      "frozen_source_rows": 15617,
+      "hard_state_matches": true,
+      "joined_panel_rows": 15549,
+      "maximum_derived_error": 6.661338147750939e-16,
+      "maximum_frozen_source_error": 2.220446049250313e-16,
+      "passed": true
+    },
+    {
+      "check": "checkpoint_timestamps",
+      "passed": true
+    },
+    {
+      "check": "six_bar_first_event_target",
+      "horizon_mismatches": 0,
+      "passed": true,
+      "rows_checked": 15549,
+      "target_mismatches": 0
+    },
+    {
+      "check": "tie_and_unavailable_exclusions",
+      "passed": true,
+      "tied_rows": 4,
+      "unavailable_rows": 0
+    },
+    {
+      "check": "development_only_loop_selection",
+      "independently_selected": {
+        "loop_p_0-2-0|loop_p_0-2-0__o_2-0-2": "LOOP_2",
+        "loop_p_2-6-2|loop_p_2-6-2__o_6-2-6": "LOOP_1"
+      },
+      "passed": true
+    },
+    {
+      "check": "final_target_mapping_and_pooling",
+      "passed": true,
+      "status": "not_formed_after_development_vocabulary_gate_failed"
+    },
+    {
+      "check": "model_feature_ladder",
+      "passed": true
+    },
+    {
+      "bound_error": 0.0,
+      "check": "all_20_interactions_and_development_clipping",
+      "development_rows": 9284,
+      "finite_bounds": true,
+      "interaction_error": 0.0,
+      "passed": true
+    },
+    {
+      "check": "support_blocker_decision_logic",
+      "independently_eligible_exact_oriented_loops": 2,
+      "passed": true,
+      "prescribed_model_determinism": "not_applicable",
+      "required": 4,
+      "support_gate_reproducibility_passed": true
+    }
+  ],
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "passed": true,
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

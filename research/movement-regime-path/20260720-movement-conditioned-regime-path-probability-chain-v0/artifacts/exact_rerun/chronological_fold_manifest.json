@@ -1,0 +1,251 @@
+{
+  "all_upstream_predictions_out_of_fold": true,
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "folds": [
+    {
+      "fold_id": "fold_01",
+      "layer": "movement",
+      "score_month": "2024-07",
+      "score_start": "2024-07-01",
+      "scored_rows": 856,
+      "strictly_earlier": true,
+      "trained_through": "2024-06-28",
+      "training_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06"
+      ],
+      "training_rows": 4427
+    },
+    {
+      "fold_id": "fold_02",
+      "layer": "movement",
+      "score_month": "2024-08",
+      "score_start": "2024-08-01",
+      "scored_rows": 877,
+      "strictly_earlier": true,
+      "trained_through": "2024-07-31",
+      "training_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07"
+      ],
+      "training_rows": 5283
+    },
+    {
+      "fold_id": "fold_03",
+      "layer": "movement",
+      "score_month": "2024-09",
+      "score_start": "2024-09-03",
+      "scored_rows": 799,
+      "strictly_earlier": true,
+      "trained_through": "2024-08-30",
+      "training_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08"
+      ],
+      "training_rows": 6160
+    },
+    {
+      "fold_id": "fold_04",
+      "layer": "movement",
+      "score_month": "2024-10",
+      "score_start": "2024-10-01",
+      "scored_rows": 915,
+      "strictly_earlier": true,
+      "trained_through": "2024-09-30",
+      "training_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09"
+      ],
+      "training_rows": 6959
+    },
+    {
+      "fold_id": "fold_05",
+      "layer": "movement",
+      "score_month": "2024-11",
+      "score_start": "2024-11-01",
+      "scored_rows": 780,
+      "strictly_earlier": true,
+      "trained_through": "2024-10-31",
+      "training_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+        "2024-10"
+      ],
+      "training_rows": 7874
+    },
+    {
+      "fold_id": "fold_06",
+      "layer": "movement",
+      "score_month": "2024-12",
+      "score_start": "2024-12-02",
+      "scored_rows": 819,
+      "strictly_earlier": true,
+      "trained_through": "2024-11-29",
+      "training_months": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+        "2024-10",
+        "2024-11"
+      ],
+      "training_rows": 8654
+    },
+    {
+      "fold_id": "fold_02",
+      "layer": "burst",
+      "score_month": "2024-08",
+      "scored_rows": 877,
+      "trained_through": "2024-07-31",
+      "training_rows": 856,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_03",
+      "layer": "burst",
+      "score_month": "2024-09",
+      "scored_rows": 799,
+      "trained_through": "2024-08-30",
+      "training_rows": 1733,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_04",
+      "layer": "burst",
+      "score_month": "2024-10",
+      "scored_rows": 915,
+      "trained_through": "2024-09-30",
+      "training_rows": 2532,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_05",
+      "layer": "burst",
+      "score_month": "2024-11",
+      "scored_rows": 780,
+      "trained_through": "2024-10-31",
+      "training_rows": 3447,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_06",
+      "layer": "burst",
+      "score_month": "2024-12",
+      "scored_rows": 819,
+      "trained_through": "2024-11-29",
+      "training_rows": 4227,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_03",
+      "layer": "closure",
+      "score_month": "2024-09",
+      "scored_rows": 799,
+      "trained_through": "2024-08-30",
+      "training_burst_rows_only": true,
+      "training_rows": 810,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_04",
+      "layer": "closure",
+      "score_month": "2024-10",
+      "scored_rows": 915,
+      "trained_through": "2024-09-30",
+      "training_burst_rows_only": true,
+      "training_rows": 1525,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_05",
+      "layer": "closure",
+      "score_month": "2024-11",
+      "scored_rows": 780,
+      "trained_through": "2024-10-31",
+      "training_burst_rows_only": true,
+      "training_rows": 2306,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_06",
+      "layer": "closure",
+      "score_month": "2024-12",
+      "scored_rows": 819,
+      "trained_through": "2024-11-29",
+      "training_burst_rows_only": true,
+      "training_rows": 2876,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_04",
+      "layer": "direction",
+      "score_month": "2024-10",
+      "scored_rows": 915,
+      "trained_through": "2024-09-30",
+      "training_large_move_rows_only": true,
+      "training_rows": 178,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_05",
+      "layer": "direction",
+      "score_month": "2024-11",
+      "scored_rows": 780,
+      "trained_through": "2024-10-31",
+      "training_large_move_rows_only": true,
+      "training_rows": 371,
+      "upstream_predictions_oof_only": true
+    },
+    {
+      "fold_id": "fold_06",
+      "layer": "direction",
+      "score_month": "2024-12",
+      "scored_rows": 819,
+      "trained_through": "2024-11-29",
+      "training_large_move_rows_only": true,
+      "training_rows": 688,
+      "upstream_predictions_oof_only": true
+    }
+  ],
+  "in_sample_stacked_features": 0,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

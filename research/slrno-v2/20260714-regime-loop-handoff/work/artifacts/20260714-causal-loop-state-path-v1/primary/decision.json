@@ -1,0 +1,26 @@
+{
+  "application_modified": false,
+  "checks": {
+    "absolute_mean_net_positive_at_5bps_per_side_all_four": false,
+    "actionable_terminal_events_at_least_30_all_four": true,
+    "all_four_primary_endpoints_pass_holm": false,
+    "at_least_16_positive_stock_deletions_all_four": false,
+    "at_least_three_positive_quarters_all_four": false,
+    "block_interval_lower_positive_all_four": false,
+    "candidate_support_at_least_50_all_four": true,
+    "four_primary_cells_present": true,
+    "paired_mean_positive_all_four": false
+  },
+  "decision": "path_event_family_not_supported",
+  "economic_edge_claim": false,
+  "live_ordering_enabled": false,
+  "maximum_allowed_action": "prospective immutable research logging only",
+  "order_placement": "disabled",
+  "primary_cost_bps_per_side": 5.0,
+  "primary_gate_passed_on_opened_retrospective_data": false,
+  "research_only": true,
+  "sealed_validation_performed": false,
+  "strategy_promotion": false,
+  "terminal_route_beats_first_transition_ci_lower_positive_all_four": false,
+  "terminal_route_beats_first_transition_observed_all_four": false
+}

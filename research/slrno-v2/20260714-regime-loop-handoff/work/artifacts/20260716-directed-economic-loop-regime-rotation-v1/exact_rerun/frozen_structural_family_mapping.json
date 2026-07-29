@@ -1,0 +1,166 @@
+{
+  "construction": "Frozen topology only: every eligible parent is a two-transition return cycle and the current frozen regime state supplies the orientation family. No payoff, activation, episode, or experiment result was used.",
+  "destination_families": [
+    "two_transition_return_cycle__state_0",
+    "two_transition_return_cycle__state_1",
+    "two_transition_return_cycle__state_2",
+    "two_transition_return_cycle__state_3",
+    "two_transition_return_cycle__state_4",
+    "two_transition_return_cycle__state_5",
+    "two_transition_return_cycle__state_6",
+    "two_transition_return_cycle__state_7"
+  ],
+  "fallback_rule": "Any pair absent from the explicit frozen mapping is assigned unknown_topology and is excluded from promotable family-level results.",
+  "mapping_id": "directed-economic-rotation-topology-family-v1",
+  "pairs": [
+    {
+      "cycle": "1->3->1",
+      "destination_family": "two_transition_return_cycle__state_1",
+      "loop_id": "cycle_01",
+      "orientation": "state_1"
+    },
+    {
+      "cycle": "1->3->1",
+      "destination_family": "two_transition_return_cycle__state_3",
+      "loop_id": "cycle_01",
+      "orientation": "state_3"
+    },
+    {
+      "cycle": "1->2->1",
+      "destination_family": "two_transition_return_cycle__state_1",
+      "loop_id": "cycle_02",
+      "orientation": "state_1"
+    },
+    {
+      "cycle": "1->2->1",
+      "destination_family": "two_transition_return_cycle__state_2",
+      "loop_id": "cycle_02",
+      "orientation": "state_2"
+    },
+    {
+      "cycle": "2->4->2",
+      "destination_family": "two_transition_return_cycle__state_2",
+      "loop_id": "cycle_04",
+      "orientation": "state_2"
+    },
+    {
+      "cycle": "2->4->2",
+      "destination_family": "two_transition_return_cycle__state_4",
+      "loop_id": "cycle_04",
+      "orientation": "state_4"
+    },
+    {
+      "cycle": "0->3->0",
+      "destination_family": "two_transition_return_cycle__state_0",
+      "loop_id": "cycle_05",
+      "orientation": "state_0"
+    },
+    {
+      "cycle": "0->3->0",
+      "destination_family": "two_transition_return_cycle__state_3",
+      "loop_id": "cycle_05",
+      "orientation": "state_3"
+    },
+    {
+      "cycle": "4->6->4",
+      "destination_family": "two_transition_return_cycle__state_4",
+      "loop_id": "cycle_06",
+      "orientation": "state_4"
+    },
+    {
+      "cycle": "4->6->4",
+      "destination_family": "two_transition_return_cycle__state_6",
+      "loop_id": "cycle_06",
+      "orientation": "state_6"
+    },
+    {
+      "cycle": "5->6->5",
+      "destination_family": "two_transition_return_cycle__state_5",
+      "loop_id": "cycle_07",
+      "orientation": "state_5"
+    },
+    {
+      "cycle": "5->6->5",
+      "destination_family": "two_transition_return_cycle__state_6",
+      "loop_id": "cycle_07",
+      "orientation": "state_6"
+    },
+    {
+      "cycle": "3->4->3",
+      "destination_family": "two_transition_return_cycle__state_3",
+      "loop_id": "cycle_08",
+      "orientation": "state_3"
+    },
+    {
+      "cycle": "3->4->3",
+      "destination_family": "two_transition_return_cycle__state_4",
+      "loop_id": "cycle_08",
+      "orientation": "state_4"
+    },
+    {
+      "cycle": "3->6->3",
+      "destination_family": "two_transition_return_cycle__state_3",
+      "loop_id": "cycle_09",
+      "orientation": "state_3"
+    },
+    {
+      "cycle": "3->6->3",
+      "destination_family": "two_transition_return_cycle__state_6",
+      "loop_id": "cycle_09",
+      "orientation": "state_6"
+    },
+    {
+      "cycle": "1->4->1",
+      "destination_family": "two_transition_return_cycle__state_1",
+      "loop_id": "cycle_10",
+      "orientation": "state_1"
+    },
+    {
+      "cycle": "1->4->1",
+      "destination_family": "two_transition_return_cycle__state_4",
+      "loop_id": "cycle_10",
+      "orientation": "state_4"
+    },
+    {
+      "cycle": "2->5->2",
+      "destination_family": "two_transition_return_cycle__state_2",
+      "loop_id": "cycle_11",
+      "orientation": "state_2"
+    },
+    {
+      "cycle": "2->5->2",
+      "destination_family": "two_transition_return_cycle__state_5",
+      "loop_id": "cycle_11",
+      "orientation": "state_5"
+    },
+    {
+      "cycle": "5->7->5",
+      "destination_family": "two_transition_return_cycle__state_5",
+      "loop_id": "cycle_13",
+      "orientation": "state_5"
+    },
+    {
+      "cycle": "5->7->5",
+      "destination_family": "two_transition_return_cycle__state_7",
+      "loop_id": "cycle_13",
+      "orientation": "state_7"
+    },
+    {
+      "cycle": "2->3->2",
+      "destination_family": "two_transition_return_cycle__state_2",
+      "loop_id": "cycle_20",
+      "orientation": "state_2"
+    },
+    {
+      "cycle": "2->3->2",
+      "destination_family": "two_transition_return_cycle__state_3",
+      "loop_id": "cycle_20",
+      "orientation": "state_3"
+    }
+  ],
+  "registered_before_scoring": true,
+  "source_cycle_dictionary": "shadow_validation/frozen_loop_quality_shadow_v1/frozen_bundle/artifacts/fixed_cycles.csv",
+  "source_cycle_dictionary_sha256": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253",
+  "structural_family": "two_transition_return_cycle",
+  "unknown_family": "unknown_topology"
+}

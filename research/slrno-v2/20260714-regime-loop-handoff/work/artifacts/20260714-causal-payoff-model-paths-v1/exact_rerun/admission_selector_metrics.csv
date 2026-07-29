@@ -1,0 +1,13 @@
+model,policy_type,group,rows,selected_rows,coverage,unfiltered_mean_net_bps,selector_mean_per_opportunity_bps,selected_mean_net_bps,paired_difference_bps
+admission_only,uncertainty_aware,pooled,401,0,0.0,69.86728523388526,0.0,,-69.86728523388526
+admission_only,point_mean_diagnostic,pooled,401,292,0.7281795511221946,69.86728523388526,75.48315846987924,103.66009091240268,5.615873235993988
+admission_only,uncertainty_aware,cycle_04|state4,112,0,0.0,-15.16734665132054,0.0,,15.16734665132054
+admission_only,point_mean_diagnostic,cycle_04|state4,112,55,0.49107142857142855,-15.16734665132054,-2.555632067004607,-5.2041962091730225,12.61171458431593
+admission_only,uncertainty_aware,cycle_07|state5,289,0,0.0,102.82188305790967,0.0,,-102.82188305790967
+admission_only,point_mean_diagnostic,cycle_07|state5,289,237,0.8200692041522492,102.82188305790967,105.72656518313528,128.92395501234637,2.9046821252256194
+admission_plus_causal_route_probabilities,uncertainty_aware,pooled,401,0,0.0,69.86728523388526,0.0,,-69.86728523388526
+admission_plus_causal_route_probabilities,point_mean_diagnostic,pooled,401,315,0.7855361596009975,69.86728523388526,77.72808782231849,98.9490895769832,7.860802588433207
+admission_plus_causal_route_probabilities,uncertainty_aware,cycle_04|state4,112,0,0.0,-15.16734665132054,0.0,,15.16734665132054
+admission_plus_causal_route_probabilities,point_mean_diagnostic,cycle_04|state4,112,63,0.5625,-15.16734665132054,-4.723855417216605,-8.397965186162855,10.443491234103934
+admission_plus_causal_route_probabilities,uncertainty_aware,cycle_07|state5,289,0,0.0,102.82188305790967,0.0,,-102.82188305790967
+admission_plus_causal_route_probabilities,point_mean_diagnostic,cycle_07|state5,289,252,0.8719723183391004,102.82188305790967,109.68178208815907,125.78585326776972,6.859899030249393

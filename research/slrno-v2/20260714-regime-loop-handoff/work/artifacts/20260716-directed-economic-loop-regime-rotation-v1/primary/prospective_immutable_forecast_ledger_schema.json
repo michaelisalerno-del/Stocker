@@ -1,0 +1,26 @@
+{
+  "execution_enabled": false,
+  "forecast_create_only": true,
+  "new_data_snapshot_required_for_holdout": true,
+  "opened_historical_sources_rejected_in_holdout_mode": true,
+  "outcome_create_only": true,
+  "required_forecast_fields": [
+    "run_id",
+    "git_sha",
+    "contract_hash",
+    "data_snapshot_hash",
+    "forecast_id",
+    "forecast_session",
+    "forecast_timestamp",
+    "destination_family",
+    "source_family_state_vector_json",
+    "predicted_activation_probability",
+    "probability_no_activation",
+    "probability_multiple_activation",
+    "prediction_state",
+    "feature_availability_timestamp",
+    "training_cutoff",
+    "forecast_freeze_timestamp"
+  ],
+  "schema_version": "directed_economic_rotation_prospective_v1"
+}

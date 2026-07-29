@@ -1,0 +1,72 @@
+{
+  "audit_scope": "independent_fail_closed_options_screen_audit",
+  "cache_path_ignored_by_git": true,
+  "chronology_and_protected_boundary": true,
+  "credential_redaction": {
+    "exposure_files": [],
+    "passed": true
+  },
+  "decision_logic": true,
+  "exact_required_prior_close_dates": true,
+  "official_endpoint_schema_mapping": true,
+  "passed": true,
+  "request_plan": {
+    "chunk_hashes_and_strike_bounds_valid": true,
+    "chunks": 400,
+    "passed": true,
+    "required_dates": 402
+  },
+  "run_specific": {
+    "blocker_verified": true,
+    "bulk_page_requests_completed": 0,
+    "cached_response_hashes_verified": true,
+    "cached_response_token_scan_performed": true,
+    "cached_response_token_value_absent": true,
+    "covered_symbols": 20,
+    "evidence_projection_verified": true,
+    "no_bulk_or_downstream_materialisation": true,
+    "official_observation_date_filter_absent": true,
+    "pagination_metadata_verified": true,
+    "passed": true,
+    "preflight_option_records": 10,
+    "provider_setup_http_requests_attempted": 2,
+    "provider_setup_logical_requests_completed": 2,
+    "quote_observation_dates_match_resources": true,
+    "request_accounting_verified": true,
+    "requested_session_date": "2025-08-21",
+    "returned_resource_observation_dates": [
+      "2025-09-03",
+      "2025-09-04",
+      "2025-09-05",
+      "2025-09-08",
+      "2025-09-09",
+      "2025-09-10",
+      "2025-09-11",
+      "2025-09-12",
+      "2025-09-15",
+      "2025-09-16"
+    ],
+    "setup_request_identities_verified": true,
+    "setup_response_bytes": 55135,
+    "tradetime_dates": [
+      "2025-08-21"
+    ]
+  },
+  "safety_flags": true,
+  "structural_panel_reconstruction": {
+    "A0_A1_predictions_finite": true,
+    "frozen_feature_surfaces_match": true,
+    "maximum_shared_field_difference": 0.0,
+    "passed": true,
+    "route_state_mismatches": 0,
+    "row_identity_mismatches": 0,
+    "rows": 87443,
+    "slate_and_dense_checkpoint_weights_valid": true
+  },
+  "unadjusted_underlying_prices": {
+    "maximum_unadjusted_close_difference": 0.0,
+    "passed": true,
+    "protected_rows_materialised": 0,
+    "rows": 8040
+  }
+}

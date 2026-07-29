@@ -1,0 +1,254 @@
+{
+  "contract_id": "exact_oriented_route_quality_screen_v1",
+  "contract_frozen_at_utc": "2026-07-11T18:50:32Z",
+  "scientific_status": "post_inspection_causal_2024_development_screen",
+  "post_outcome_motivation_acknowledged": true,
+  "prospective_validation_claim_permitted": false,
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Narrow the frozen twenty rotation-invariant cycles into exact current-regime-oriented route and horizon development candidates that are structurally forecastable and add movement-quality information beyond causal current-state context.",
+  "known_before_freeze": {
+    "oriented_diagnostic_already_opened": true,
+    "factor_conditioned_occurrence_result_already_opened": true,
+    "known_2024_focus_route": "cycle_09@state_3_h6_was_the_only_prior_diagnostic_good_horizon",
+    "known_later_result": "no_prior_oriented_route_retained_a_good_or_high_cross_period_grade",
+    "implication": "Every result from this screen is development-only and may generate a smaller hypothesis set but cannot validate or promote a route."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_exact_route_identity",
+      "question": "Does exact directed route identity improve causal movement-tier probability over current-state context at a named horizon?",
+      "benefit": "Separates route information from movement already implied by the entry regime.",
+      "stop": "No exact route-horizon passes both targets, structural reliability, proper-loss, calibration, robustness, and multiplicity gates."
+    },
+    {
+      "id": "H2_split_cycle_15_state_1",
+      "question": "Do the two distinct cycle_15 state-1 paths behave differently enough to merit separate future investigation?",
+      "benefit": "Removes the only ambiguous two-path union in the 44-unit oriented dictionary.",
+      "stop": "Either split lacks support or lacks an exact frozen structural probability; such a split may be reported descriptively but cannot qualify."
+    },
+    {
+      "id": "H3_horizon_specific_quality",
+      "question": "Can a route qualify at 6, 12, or 24 bars without implying quality at the other horizons?",
+      "benefit": "Produces honest horizon-specific candidates for a separately frozen second-stage test.",
+      "stop": "A route-horizon fails either absolute-return or future-range P75 requirements; high additionally requires both P90 requirements."
+    }
+  ],
+  "frozen_parent_lineage": {
+    "parent_contract": {
+      "path": "work/contracts/20260710-per-loop-movement-quality-v1.json",
+      "sha256": "67d64c463df52f01f360561ef0a69d5772b7eec0409468c93d6eb5a630dee02e"
+    },
+    "parent_runner": {
+      "path": "work/run_per_loop_movement_quality.py",
+      "sha256": "7da5e88e603583d3dba7422569bc8e27837171c7165e69bcaafade472738e2ea"
+    },
+    "anchor_panel_2024": {
+      "path": "/private/tmp/stocker_frozen_loop_price_consequence_20260710/anchor_panel_train_2024.parquet",
+      "sha256": "788fd81909d1c5d3e6ee20e3e36e3ebb74199188e41052ea1b04f61c96fa9932"
+    },
+    "parent_oof_2024": {
+      "path": "/private/tmp/stocker_per_loop_movement_quality_20260710/oof_predictions_2024.parquet",
+      "sha256": "689b8853ec482c07a46faea48f49665df8c92612ef28bc9934fe2df2e97e7d30"
+    },
+    "fixed_cycles": {
+      "path": "/private/tmp/stocker_per_loop_movement_quality_20260710/fixed_cycles.csv",
+      "sha256": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253"
+    },
+    "parent_pre_score_audit": "/private/tmp/stocker_per_loop_movement_quality_20260710/pre_score_audit.json",
+    "parent_audit_required_pass": true,
+    "detector_refit_permitted": false,
+    "cycle_dictionary_refit_permitted": false,
+    "parent_threshold_change_permitted": false,
+    "parent_probability_change_permitted": false
+  },
+  "period_and_phase_lock": {
+    "fit_and_evaluate": "2024_only",
+    "outer_oof_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "outer_training_rule": "strictly_earlier_2024_months",
+    "later_period_paths_permitted": false,
+    "partial_2026_permitted": false,
+    "prospective_shadow_read_or_write_permitted": false,
+    "result_use": "freeze_a_development_candidate_set_for_a_separate_later_contract"
+  },
+  "exact_route_dictionary": {
+    "source_cycles": 20,
+    "parent_oriented_units": 44,
+    "exact_units": 45,
+    "construction": "Deduplicate every closed rotation of each frozen cycle by its full directed state sequence. Use cycle_id plus exact closed path as the unit.",
+    "ordinary_unit": "Every parent cycle-current_state unit with one exact path remains one exact route.",
+    "split_unit": {
+      "parent": "cycle_15@state_1",
+      "children": [
+        "1->2->1->3->1",
+        "1->3->1->2->1"
+      ]
+    },
+    "exact_occurrence_label": "All future filtered state destinations after the anchor must match the exact route through its return to the entry state.",
+    "session_end_before_completion": "negative",
+    "overlapping_routes_allowed": true,
+    "positive_weight": "Reuse the parent inverse-positive-cycle overlap weight. Splitting cycle_15@state_1 must assign its positive weight to exactly one child and must not change each anchor's total positive weight.",
+    "split_structural_probability": "unavailable_from_the_frozen_union_probability",
+    "split_qualification_rule": "Both split children fail closed on structural and joint-chain qualification. Conditional quality is descriptive only until a separately frozen exact-path occurrence model exists."
+  },
+  "outcomes": {
+    "provider_bars": "regular_session_five_minute_provider_OHLC",
+    "volume_label": "historical_volume_not_used",
+    "direction_or_signed_return_used": false,
+    "targets": [
+      "absolute_return_bps",
+      "future_range_bps"
+    ],
+    "horizons_bars": [6, 12, 24],
+    "thresholds": "Reuse the exact parent 2024 P75 and P90 thresholds and strict greater-than comparison.",
+    "future_bars_begin_after_anchor": true,
+    "quality_classes": [0, 1, 2]
+  },
+  "models": {
+    "frozen_baselines": [
+      "parent_qcontext",
+      "parent_qcycle"
+    ],
+    "candidate": "qexact",
+    "fit_rows": "exact_route_occurs_equals_one_only",
+    "fit_weights": "parent_conditional_weight",
+    "prediction_rows": "every compatible exact-route row in each outer validation month",
+    "qexact_features": {
+      "shared_context": "the exact parent eight-state one-hot plus nine causal numeric controls",
+      "exact_route_one_hot_width": 45,
+      "exact_route_scale": 0.5,
+      "stock_identity": false,
+      "future_state_or_outcome_feature": false
+    },
+    "numeric_processing": {
+      "imputation": "training_prefix_anchor_level_median",
+      "scaler": "StandardScaler_with_mean_false_fit_on_training_prefix_realized_route_rows_with_conditional_weights",
+      "validation_recentered": false
+    },
+    "estimator": {
+      "class": "sklearn_LogisticRegression_multinomial",
+      "C": 0.2,
+      "solver": "lbfgs",
+      "max_iter": 1000,
+      "tol": 0.0001,
+      "random_state": 20260711,
+      "required_classes": [0, 1, 2]
+    },
+    "one_model_per_target_and_horizon": true,
+    "raw_probabilities_primary": true,
+    "temperature_or_post_hoc_calibration_permitted": false,
+    "ordered_probability_requirement": "0_le_q90_le_q75_le_1"
+  },
+  "support_gates_each_route": {
+    "compatible_rows_minimum": 1000,
+    "realized_rows_minimum": 250,
+    "realized_stocks_minimum": 15,
+    "required_quarters": ["2024_q3", "2024_q4"],
+    "realized_rows_each_quarter_minimum": 75,
+    "p75_positive_and_negative_rows_each_target_horizon_minimum": 50,
+    "p90_positive_rows_each_target_horizon_minimum": 25,
+    "p90_negative_rows_each_target_horizon_minimum": 50
+  },
+  "structural_gate_each_route": {
+    "exact_frozen_structural_probability_required": true,
+    "history_log_loss_below_first_order": true,
+    "history_brier_below_first_order": true,
+    "history_ece_no_worse_than_first_order": true,
+    "maximum_supported_bin_error_no_more_than_first_order_plus": 0.01,
+    "minimum_supported_bin_rows": 250
+  },
+  "quality_gates_each_route_target_horizon_tier": {
+    "conditional_qexact_vs_qcontext": {
+      "minimum_relative_log_loss_improvement": 0.005,
+      "brier_difference_below_zero": true,
+      "five_session_5000_draw_log_loss_and_brier_upper_bounds_below_zero": true,
+      "both_quarters_below_zero": true,
+      "every_leave_one_stock_out_difference_below_zero": true
+    },
+    "joint_qexact_vs_qcontext": {
+      "minimum_relative_log_loss_improvement": 0.0025,
+      "brier_difference_below_zero": true,
+      "five_session_5000_draw_log_loss_and_brier_upper_bounds_below_zero": true,
+      "both_quarters_below_zero": true,
+      "every_leave_one_stock_out_difference_below_zero": true
+    },
+    "qexact_noninferiority_to_parent_qcycle": {
+      "conditional_relative_log_loss_degradation_maximum": 0.0025,
+      "conditional_brier_difference_maximum": 0.0001,
+      "joint_relative_log_loss_degradation_maximum": 0.0025,
+      "joint_brier_difference_maximum": 0.0001
+    },
+    "calibration": {
+      "fixed_bins": 10,
+      "conditional_supported_bin_rows_minimum": 50,
+      "joint_supported_bin_rows_minimum": 250,
+      "conditional_qexact_ECE_no_worse_than_both_baselines": true,
+      "joint_qexact_ECE_no_worse_than_both_baselines": true,
+      "conditional_absolute_maximum_supported_bin_error": 0.02,
+      "joint_absolute_maximum_supported_bin_error": 0.01
+    },
+    "lift": {
+      "observed_minus_qcontext_five_session_lower_bound_above_zero": true
+    }
+  },
+  "multiplicity": {
+    "primary_family": "All supported exact-route by horizon by target conditional P75 qexact-minus-qcontext daily log-loss tests.",
+    "test": "9999_draw_session_level_Rademacher_sign_flip_of_daily_weighted_loss_differences",
+    "seed": 20260711,
+    "p_value": "one_plus_number_of_null_means_less_than_or_equal_to_observed_negative_mean_divided_by_10000",
+    "correction": "Holm_familywise_alpha_0.05",
+    "candidate_requirement": "Both target tests for the route-horizon must pass Holm. High additionally requires both P90 tests to pass a separately Holm-corrected P90 family."
+  },
+  "horizon_grade_rules": {
+    "development_good_screen_candidate": {
+      "both_targets_P75_all_support_structural_quality_calibration_robustness_lift_and_Holm_gates": true,
+      "minimum_observed_P75_rate": 0.3,
+      "minimum_mean_qexact_P75": 0.3,
+      "minimum_observed_rate_divided_by_mean_qcontext": 1.1
+    },
+    "development_high_screen_candidate": {
+      "must_first_pass_good": true,
+      "minimum_observed_P75_rate": 0.35,
+      "minimum_mean_qexact_P75": 0.35,
+      "both_targets_P90_all_gates_and_Holm": true,
+      "minimum_observed_P90_rate": 0.15,
+      "minimum_mean_qexact_P90": 0.15,
+      "minimum_observed_P90_rate_divided_by_mean_qcontext": 1.2
+    },
+    "development_unqualified": "Any required gate fails.",
+    "global_all_horizon_grade_forbidden": true,
+    "single_target_candidate_forbidden": true
+  },
+  "decision_and_stop_rules": {
+    "candidate_set": "Every exact route-horizon with a good or high development screen grade.",
+    "candidate_cap": 12,
+    "more_than_cap": "Rank-free fail closed; do not choose the best after seeing results and require a new contract.",
+    "zero_candidates": "Stop and report that the present exact-route screen did not narrow to a qualified development hypothesis.",
+    "one_to_twelve_candidates": "Freeze their exact IDs, grades, hashes, and evidence. Do not refine them in the same experiment.",
+    "later_period_scoring": false,
+    "prospective_shadow_entry": false,
+    "parent_grade_change": false,
+    "good_or_high_certification": false
+  },
+  "integrity": {
+    "independent_audit_required": true,
+    "production_imports_for_auditor_permitted": false,
+    "reconstruct_exact_route_dictionary_labels_weights_features_folds_predictions_metrics_Holm_and_grades": true,
+    "no_later_period_path_resolution": true,
+    "no_2026_or_shadow_read_or_write": true,
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "all_safety_flags_exact": true
+  },
+  "planned_artifact_root": "/private/tmp/stocker_exact_oriented_route_quality_screen_v1_20260711"
+}

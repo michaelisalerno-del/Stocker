@@ -1,0 +1,22 @@
+{
+  "assessment_end_inclusive": "2025-08-22",
+  "assessment_start": "2025-01-01",
+  "broker_integration_required": false,
+  "development_end_inclusive": "2024-12-31",
+  "development_start": "2024-01-01",
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+  "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+  "observable_only": true,
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "protected_files_touched": [],
+  "protected_outcome_files_opened": [],
+  "protected_rows_materialised": 0,
+  "protected_start": "2025-08-23",
+  "research_only": true,
+  "strategy_promotion": false
+}

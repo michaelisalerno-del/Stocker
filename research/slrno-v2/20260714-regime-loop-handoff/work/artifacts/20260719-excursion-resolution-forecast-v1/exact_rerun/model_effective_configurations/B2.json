@@ -1,0 +1,195 @@
+{
+  "broker_connected": false,
+  "contract_hash": "bdba55b4243a4bfe18cea04d89b2cacabe817322eb581e3ec4461a5f3c4e8737",
+  "data_snapshot_hash": "2b2efafb8d7c0cebbd7b392493ecbc0a279f71ee1d4f74197e18d99ecd8c43a7",
+  "development_only_selection": true,
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "final_configuration": {
+    "coefficient_hash": "f9abfd123aea2f2888a7905c3fc9f1c27742dd702ada451030eb384b7eb9be49",
+    "effective_estimator": {
+      "classes": [
+        "RETURN_TO_ORIGIN",
+        "PARTIAL_RETURN",
+        "CONTINUE_AWAY",
+        "ROTATE_TO_NEW_REGION",
+        "SESSION_END",
+        "UNAVAILABLE"
+      ],
+      "coefficients": [
+        [
+          0.02088276210349195,
+          0.1492899680474859,
+          -0.14928996804748562,
+          0.10382466783751432,
+          0.21592810306274127,
+          -0.2405402634718359
+        ],
+        [
+          0.31586679626448383,
+          0.07306287796204748,
+          -0.07306287796204733,
+          -0.022106873297091736,
+          0.06981756610408846,
+          -0.040830675469240525
+        ],
+        [
+          -0.2224289383302193,
+          0.016670898979556793,
+          -0.016670898979556762,
+          -0.01354573362075203,
+          0.041095897730849755,
+          -0.02367986018682568
+        ],
+        [
+          0.12044214307532888,
+          0.43833118743861266,
+          -0.43833118743861305,
+          -0.1169158885875348,
+          0.07666687411565787,
+          0.0166356342046899
+        ],
+        [
+          -0.20917495254836202,
+          -0.7568531070590889,
+          0.7568531070590838,
+          -0.10352432159342732,
+          -0.5004571493957848,
+          0.4665205237150093
+        ],
+        [
+          -0.025587810564762285,
+          0.07949817463125045,
+          -0.07949817463124231,
+          0.1522681492611232,
+          0.09694870838257148,
+          -0.1781053587917852
+        ]
+      ],
+      "fallback_probabilities": [
+        0.0013020141361534782,
+        0.0038263272572673646,
+        0.0031354626135940904,
+        0.1344528883456449,
+        0.7985066695009831,
+        0.058776638146357016
+      ],
+      "features": [
+        "bars_since_departure",
+        "bars_remaining_in_session",
+        "session_fraction",
+        "clock_phase_early",
+        "clock_phase_middle",
+        "clock_phase_late"
+      ],
+      "fitted_classes": [
+        "CONTINUE_AWAY",
+        "PARTIAL_RETURN",
+        "RETURN_TO_ORIGIN",
+        "ROTATE_TO_NEW_REGION",
+        "SESSION_END",
+        "UNAVAILABLE"
+      ],
+      "intercepts": [
+        -2.1608398904445987,
+        -1.8905696199444397,
+        -1.9563167435789033,
+        1.5412058521574543,
+        3.3170068754996858,
+        1.1495135263106786
+      ],
+      "means": [
+        8.414824067184012,
+        13.850058467098968,
+        0.8201291108168964,
+        0.05270011693419794,
+        0.07768151376634422,
+        0.8696183692994579
+      ],
+      "medians": [
+        7.0,
+        9.0,
+        0.8831168831168831,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scales": [
+        5.596923774125576,
+        14.66595556838711,
+        0.19046695543359884,
+        0.22343413931026698,
+        0.2676697520925992,
+        0.3367228252976171
+      ]
+    },
+    "features": [
+      "bars_since_departure",
+      "bars_remaining_in_session",
+      "session_fraction",
+      "clock_phase_early",
+      "clock_phase_middle",
+      "clock_phase_late"
+    ],
+    "preprocessor_hash": "1bc92dda5153825f7f77c8911d98a6f30f09fcc7f769d32f69a5bc18f8acfa3f",
+    "regularization_c": 0.1,
+    "training_rows": 37628,
+    "unique_training_events": 3142
+  },
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "e0bec27d320343054ccfc584b0ad10e3830babff9e6eceb2d8a1a7f2ea19a86a",
+  "model": "B2",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "oof_configuration": {
+    "features": [
+      "bars_since_departure",
+      "bars_remaining_in_session",
+      "session_fraction",
+      "clock_phase_early",
+      "clock_phase_middle",
+      "clock_phase_late"
+    ],
+    "fold_configurations": [
+      {
+        "coefficient_hash": "38bf348b59588623c696c216dc7515761e8281512435901adfba676a95e3914d",
+        "fold": 1,
+        "preprocessor_hash": "497e5e71e6eb368c3a88dca1368bf7340ced0fec61b126f273658c290d58733b",
+        "regularization_c": 0.1,
+        "training_rows": 636,
+        "validation_rows": 868
+      },
+      {
+        "coefficient_hash": "f649a3b54bae829c8b254b59ade70ac8002d8f6688e02085f2b164f6baf78f02",
+        "fold": 2,
+        "preprocessor_hash": "e1ac268e4d1653c168a8a06b072ff3c8e2d45df8f41132ae6e4fe576da986470",
+        "regularization_c": 0.1,
+        "training_rows": 1504,
+        "validation_rows": 831
+      },
+      {
+        "coefficient_hash": "78fb3dfaa9d248b12ae7289cd2ea6e6d8ceaf8259a533ff577f3c0267310bb88",
+        "fold": 3,
+        "preprocessor_hash": "676b57672ae2c6356730d6f7ee32730119eeb302e7b74d8dcb0afce087d523c7",
+        "regularization_c": 0.1,
+        "training_rows": 2335,
+        "validation_rows": 807
+      }
+    ],
+    "kind": "multinomial_logistic",
+    "regularization_c": 0.1
+  },
+  "order_placement": "disabled",
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "da1131234856d62549b728d5",
+  "selected_candidate": false,
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "excursion_resolution_structural_forecast_v1",
+  "strategy_promotion": false,
+  "strongest_simple_baseline": true,
+  "unchanged_validation": true
+}

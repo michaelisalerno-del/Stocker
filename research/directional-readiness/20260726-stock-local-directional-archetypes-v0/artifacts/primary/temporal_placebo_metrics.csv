@@ -1,0 +1,4 @@
+archetype,shift,shift_applied_before_folds_and_period_split,log_loss,brier_score,auc,selective_accuracy,mean_aligned_return,confidence_boundary,actions,real_predictive_quality_beats_placebo,real_mean_return_beats_placebo,real_beats_temporal_placebo
+C1,feature bundle shifted to next fresh episode in same stock,True,0.6994956860519442,0.25303814491256144,0.523670465337132,0.5384615384615384,-0.0010225631719863566,0.09839356873424965,79,False,True,False
+A1,feature bundle shifted to next fresh episode in same stock,True,0.6952248369320888,0.25059464044654856,0.5584283000949668,0.5384615384615384,3.39764674882972e-05,0.1139345305441643,79,False,True,False
+R1,feature bundle shifted to next fresh episode in same stock,True,0.7698251436100506,0.272190521986464,0.46566951566951564,0.43478260869565216,-0.0019985323983620815,0.09875837538414689,142,True,True,True

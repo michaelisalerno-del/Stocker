@@ -1,0 +1,62 @@
+{
+  "assessment_outcomes_inspected_before_freeze": false,
+  "broker_integration_required": false,
+  "definition": "80th percentile of valid 2024 expanding OOF B0 probabilities",
+  "development_candidate_rows_before_U1_intersection": 1486,
+  "development_candidate_rows_with_valid_cross_fitted_U1": 1483,
+  "development_source_rows": 7429,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "fold_manifest": [
+    {
+      "fold": 1,
+      "positive_train_rows": 257,
+      "prediction_rows": 1864,
+      "prediction_session_end": "2024-06-06",
+      "prediction_session_start": "2024-03-28",
+      "train_rows": 1858,
+      "train_session_end": "2024-03-27",
+      "train_session_start": "2024-01-17"
+    },
+    {
+      "fold": 2,
+      "positive_train_rows": 572,
+      "prediction_rows": 1862,
+      "prediction_session_end": "2024-08-15",
+      "prediction_session_start": "2024-06-07",
+      "train_rows": 3722,
+      "train_session_end": "2024-06-06",
+      "train_session_start": "2024-01-17"
+    },
+    {
+      "fold": 3,
+      "positive_train_rows": 821,
+      "prediction_rows": 1870,
+      "prediction_session_end": "2024-10-22",
+      "prediction_session_start": "2024-08-16",
+      "train_rows": 5584,
+      "train_session_end": "2024-08-15",
+      "train_session_start": "2024-01-17"
+    },
+    {
+      "fold": 4,
+      "positive_train_rows": 1058,
+      "prediction_rows": 1833,
+      "prediction_session_end": "2024-12-31",
+      "prediction_session_start": "2024-10-23",
+      "train_rows": 7454,
+      "train_session_end": "2024-10-22",
+      "train_session_start": "2024-01-17"
+    }
+  ],
+  "folds": 4,
+  "hidden_route_diversion_veto_test": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "threshold": 0.22125611521101987
+}

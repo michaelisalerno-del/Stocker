@@ -1,0 +1,395 @@
+{
+  "contract_id": "20260716-directed-economic-loop-regime-rotation-v1",
+  "experiment_version": "directed_economic_loop_regime_rotation_v1.0.0",
+  "registered_before_scoring": true,
+  "scientific_status": "opened_2023_2024_2025_and_partial_2026_research_attribution_not_validation",
+  "purpose": "Test whether the causal economic decay or retirement of one structural loop family incrementally predicts which different family begins a hindsight-positive economic episode within the next three trading sessions.",
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "ig_integration_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "application_runtime_changed": false,
+    "position_management_changed": false,
+    "existing_exit_logic_changed": false,
+    "api_keys_or_secrets_used": false,
+    "strategy_promotion_allowed": false
+  },
+  "opened_data_status": {
+    "opened_periods": [2023, 2024, 2025, 2026],
+    "scored_periods": [2023, 2025],
+    "permitted_claim": "retrospective causal mechanism attribution or justification for a frozen execution-free prospective logger",
+    "forbidden_claims": ["validation", "live_edge", "strategy_approval", "deployment_approval"]
+  },
+  "frozen_lineage": {
+    "branch": "agent/slrno-research-handoff",
+    "starting_commit": "688898e2d83f21b11bda5c7f14faee48e65bda71",
+    "sequential_veto_scored_commit": "78c380dfa80ee396af7293de9447820a283da068",
+    "v2_scored_commit": "ca3537a0f337097a9a75abf87ae4bf419fae6a5d",
+    "v2_contract": "20260714-dynamic-loop-edge-state-v2",
+    "lead_lag_contract": "20260715-dynamic-loop-edge-state-lead-lag-v1",
+    "sequential_veto_contract": "20260715-sequential-loop-competitor-veto-v1",
+    "fixed_horizon_bars": 24,
+    "cost_bps_per_side": 5.0,
+    "economic_state_source": "hierarchical_payoff_history_change_point",
+    "leading_features_enabled": false,
+    "rejected_breadth_coherence_overlay_reuse_allowed": false,
+    "existing_models_may_be_retuned": false
+  },
+  "inputs": {
+    "v2_primary_root": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary",
+    "causal_edge_state_forecasts": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/causal_edge_state_forecasts.parquet",
+      "sha256": "352c670fac8c8eae79ae9e79edc0b805ae12d62d7018865c4fe31c8cdf66f797"
+    },
+    "session_payoff_panel": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/session_payoff_panel.parquet",
+      "sha256": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7"
+    },
+    "hindsight_episode_states": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/hindsight_episode_states.parquet",
+      "sha256": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3"
+    },
+    "hindsight_episode_diagnostics": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/hindsight_episode_diagnostics.parquet",
+      "sha256": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be"
+    },
+    "trade_decisions": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/trade_decisions.parquet",
+      "sha256": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f"
+    },
+    "one_bar_delay_outcomes": {
+      "path": "../artifacts/20260715-sequential-loop-competitor-veto-v1/primary/constant_terminal_remaining_payoff_outcomes.parquet",
+      "status": "hash_verified_at_run_time_from_sequential_veto_manifest"
+    },
+    "cycle_dictionary": {
+      "path": "../shadow_validation/frozen_loop_quality_shadow_v1/frozen_bundle/artifacts/fixed_cycles.csv",
+      "sha256": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253"
+    },
+    "family_mapping": {
+      "path": "20260716-directed-economic-loop-regime-rotation-v1-family-mapping.json",
+      "sha256": "f897dff5581c259208361b6e83050b15a2c546ddf855008c04559ee4e506fefa"
+    },
+    "v2_rebuild_runner": {
+      "path": "../run_dynamic_loop_edge_state_v2.py",
+      "sha256": "d498275dc306ed347372e94a1b6ea9394e3ed4be7f9236566439ec9879cf7570"
+    },
+    "v2_rebuild_config": {
+      "path": "20260714-dynamic-loop-edge-state-v2.json",
+      "sha256": "8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373"
+    }
+  },
+  "prior_experiment_boundary": {
+    "already_tested": [
+      "same-pair rolling loop by current-regime profitability and adjacent-block persistence",
+      "same-pair Student-t BOCPD activation, decay, and retirement",
+      "same-pair structural breadth and coherence lead-lag attribution",
+      "same-orientation structural loop recurrence and burst continuation",
+      "within-opportunity compatible-loop competitor elimination",
+      "current and recent regime-history movement utility",
+      "static full loop-score payoff equations"
+    ],
+    "not_previously_tested": [
+      "P(destination family activates soon conditional on a different source family becoming decaying or retired)",
+      "cross-pair economic rotation separated from same-pair persistence",
+      "family-to-family economic rotation with no, one, and multiple activation outcomes",
+      "a causal past-only directed economic source-to-destination transition graph",
+      "incremental M3 directed-family calibration versus identical destination-own-history population M1"
+    ]
+  },
+  "hypotheses": [
+    {
+      "id": "H1_directed_family_increment",
+      "target": "M3 versus M1 paired three-session family activation prediction",
+      "expected_research_benefit": "isolate whether other families add information beyond destination own history",
+      "safety_risk": "future episode labels or payoffs entering graph counts",
+      "validation": "appended-future invariance, label-availability checks, and independent graph reconstruction",
+      "stop_condition": "reject directed rotation if paired Brier and log-loss improvements are not positive"
+    },
+    {
+      "id": "H2_directionality",
+      "target": "M3 versus M2",
+      "expected_research_benefit": "separate directed source identity from broad transition pressure",
+      "safety_risk": "M2 and M3 populations or destination inputs differ",
+      "validation": "paired forecast keys and feature-schema audit",
+      "stop_condition": "retain undirected pressure only if M3 does not improve on M2"
+    },
+    {
+      "id": "H3_economic_translation",
+      "target": "post-forecast eligible destination opportunities with frozen h24 payoff",
+      "expected_research_benefit": "distinguish episode-label prediction from an economically available opportunity",
+      "safety_risk": "missing opportunities are replaced by another family",
+      "validation": "explicit family, session, and opportunity joins with no replacement",
+      "stop_condition": "classify tradeability unknown or negative if eligible predicted-family payoff is not positive"
+    },
+    {
+      "id": "H4_null_falsification",
+      "target": "time-shifted, source-permuted, and destination-label-permuted controls",
+      "expected_research_benefit": "show the pipeline does not manufacture rotation",
+      "safety_risk": "null construction changes target population",
+      "validation": "identical forecast keys and fixed random seed",
+      "stop_condition": "reject if nulls reproduce the directed increment"
+    },
+    {
+      "id": "H5_pair_refinement",
+      "target": "supported pair-level deviations shrunk to family predictions",
+      "expected_research_benefit": "determine whether pair refinement deserves prospective work",
+      "safety_risk": "selecting the best sparse historical edge",
+      "validation": "minimum support, Holm control, and no ranked promotion",
+      "stop_condition": "leave unsupported pair edges unknown"
+    }
+  ],
+  "family_taxonomy": {
+    "mapping_id": "directed-economic-rotation-topology-family-v1",
+    "construction": "all eligible parents share the frozen two-transition return-cycle topology; current frozen regime state is the orientation family",
+    "destination_family_key": "two_transition_return_cycle__state_N",
+    "family_count": 8,
+    "unknown_fallback": "unknown_topology",
+    "payoff_used_to_define_mapping": false,
+    "post_score_mapping_changes_allowed": false,
+    "taxonomy_sensitivity_registered": false
+  },
+  "economic_state": {
+    "pair_source_model": "hierarchical_payoff_history_change_point",
+    "frozen_pair_states": ["unknown", "active", "decaying", "retired"],
+    "family_state_precedence": "active if any mapped pair is active; otherwise decaying if any is decaying; otherwise retired only if at least one is retired and no mapped pair is unknown; otherwise unknown",
+    "family_probability_aggregation": "retain maximum and capped-effective-sample-size-weighted mean across mapped pairs",
+    "family_posterior_mean_aggregation": "capped-effective-sample-size-weighted mean",
+    "pair_weight_clip": [1.0, 50.0],
+    "source_transition_events": ["newly_active", "newly_decaying", "newly_retired", "active"],
+    "newly_decaying": "prior family state active and current family state decaying",
+    "newly_retired": "prior family state active or decaying and current family state retired",
+    "newly_active": "prior family state not active and current family state active",
+    "same_family_source_destination_edges_allowed": false,
+    "pair_payoff_support_unit": "session by loop by orientation by fixed h24 horizon",
+    "raw_fills_are_independent_support": false
+  },
+  "activation_target": {
+    "primary_window_sessions": 3,
+    "sensitivity_windows_sessions": [1, 5],
+    "window_start": "next trading session after forecast",
+    "calendar": "explicit sorted V2 score-session calendar within period",
+    "episode_source": "frozen V2 hindsight-positive episode diagnostics mapped to the frozen family taxonomy and unioned within family",
+    "hindsight_labels_are_features": false,
+    "new_activation": "family hindsight-positive union changes from inactive to active inside the future window",
+    "current_active_episode_is_new_activation": false,
+    "destination_candidate_states": ["unknown", "decaying", "retired"],
+    "missing_future_support": "target_unavailable_not_zero",
+    "target_available_rule": "the full calendar window stays inside one period and at least one settled mapped-family payoff observation exists in the target window",
+    "multiple_activations": "preserved as multi-label outcomes",
+    "no_activation": "explicit only when the target is available and no family onset is observed",
+    "label_availability": "after target-window settlement and, for a positive label, after the associated hindsight episode end is fully observed",
+    "primary_window_may_change_after_scoring": false
+  },
+  "directed_graph": {
+    "source_event_types": ["active", "newly_decaying", "newly_retired"],
+    "destination_horizon_sessions": 3,
+    "counts": "only matured cross-family target rows with label_availability strictly before forecast freeze",
+    "beta_prior_alpha": 1.0,
+    "beta_prior_beta": 1.0,
+    "empirical_bayes_pooling_strength": 20.0,
+    "shrinkage_sensitivities": [10.0, 40.0],
+    "minimum_source_event_sessions": 8,
+    "minimum_pair_edge_sessions": 20,
+    "minimum_pair_edge_activations": 4,
+    "log_lift_clip": [-1.38629436112, 1.38629436112],
+    "zero_counts_create_impossibility": false,
+    "period_reset": true,
+    "past_only": true
+  },
+  "models": {
+    "form": "deterministic online ridge-logistic cause-specific multi-label hazards with destination-specific models and a past-only base-rate offset",
+    "M0": "past-only beta-binomial destination activation base rate",
+    "M1": "destination own causal economic state and history only",
+    "M2": "M1 plus compact undirected system lifecycle counts",
+    "M3": "M2 plus directed source-event graph scores",
+    "M4": "supported pair activation probabilities shrunk to M3 family probabilities",
+    "M5": "frozen payoff-only BOCPD destination comparator aggregated to the same family population",
+    "M6": "frozen V1 selector destination comparator aggregated to the same family population",
+    "primary_comparison": "M3 versus M1",
+    "secondary_comparison": "M3 versus M2",
+    "learning_rate": 0.05,
+    "learning_rate_decay": "inverse_square_root_updates",
+    "ridge_penalty": 0.05,
+    "feature_clip": 5.0,
+    "coefficient_clip": 4.0,
+    "minimum_training_rows_per_destination": 30,
+    "minimum_training_activations_per_destination": 4,
+    "hyperparameter_search_allowed": false,
+    "selection_from_final_pnl_allowed": false
+  },
+  "features": {
+    "M1_destination_own": [
+      "destination_state_indicators",
+      "destination_max_p_edge_active",
+      "destination_max_p_on_next",
+      "destination_mean_p_off_next",
+      "destination_weighted_posterior_mean_bps",
+      "destination_posterior_mean_change",
+      "destination_active_probability_change",
+      "destination_state_age",
+      "sessions_since_destination_active",
+      "destination_support",
+      "destination_uncertainty",
+      "past_only_activation_base_rate"
+    ],
+    "M2_system": [
+      "active_family_fraction",
+      "decaying_family_fraction",
+      "newly_retired_family_fraction",
+      "newly_decaying_family_fraction",
+      "unknown_family_fraction",
+      "active_family_entropy",
+      "market_wide_family_transition_fraction"
+    ],
+    "M3_directed": [
+      "directed_active_log_lift_score",
+      "directed_newly_decaying_log_lift_score",
+      "directed_newly_retired_log_lift_score",
+      "maximum_supported_positive_directed_log_lift",
+      "supported_source_edge_fraction"
+    ],
+    "full_raw_loop_score_vector_included": false,
+    "rejected_breadth_coherence_included": false,
+    "future_structural_route_included": false
+  },
+  "prediction_rule": {
+    "abstention_supported": true,
+    "minimum_predicted_lift_over_base": 1.25,
+    "maximum_probability_interval_width": 0.5,
+    "minimum_training_rows": 30,
+    "minimum_training_activations": 4,
+    "already_active_destination_nominatable": false,
+    "period_boundary_nominatable": false,
+    "always_choose_top_family": false,
+    "sensitivity_minimum_lifts": [1.0, 1.5],
+    "threshold_selection_from_opened_pnl_allowed": false
+  },
+  "causal_walk_forward": {
+    "order": [
+      "load only frozen pair-state rows created before the current session",
+      "mature target examples whose label availability is strictly before the current freeze",
+      "update destination base rates and online models",
+      "update past-only directed graph counts",
+      "construct current destination, source, and system features",
+      "freeze M0 through M6 forecasts",
+      "attach future targets later without modifying forecasts"
+    ],
+    "forecast_freeze": "V2 regular-session-open decision timestamp",
+    "feature_availability_must_not_exceed_freeze": true,
+    "period_reset": true,
+    "random_shuffle_split_allowed": false,
+    "dataframe_ordering_is_sufficient_causality": false
+  },
+  "economic_translation": {
+    "state_activation_and_trade_opportunity_analyses_separate": true,
+    "eligible_opportunity": "a frozen no-filter V2 opportunity from the predicted destination family appearing after forecast inside the registered target window",
+    "entry_exit_overlap_and_cost_rules": "unchanged from V2",
+    "net_payoff_column": "primary_net_payoff_bps",
+    "cost_bps_round_trip": 10.0,
+    "twice_cost_net": "gross payoff minus 20 bps round trip",
+    "one_bar_delay": "use hash-pinned sequential-veto fixed_bar_1 constant-terminal outcome where available; otherwise unavailable not zero",
+    "missing_destination_opportunity": "explicit_no_tradeable_opportunity",
+    "replacement_family_allowed": false,
+    "capacity_refill_allowed": false,
+    "fabricated_family_trade_allowed": false
+  },
+  "required_baselines": [
+    "destination_activation_base_rate",
+    "most_historically_frequent_destination",
+    "destination_own_history",
+    "current_winner_stays_winner",
+    "most_recently_retired_family_reactivates",
+    "undirected_system_state",
+    "random_destination_from_past_only_activation_frequencies",
+    "time_shifted_source_state_null",
+    "source_family_permutation_null",
+    "destination_label_permutation_null",
+    "structurally_unrelated_opposite_state_source_control",
+    "payoff_only_BOCPD",
+    "V1_where_matched"
+  ],
+  "negative_controls": {
+    "wrong_source_lag_sessions": 10,
+    "source_permutation": "within period with fixed seed, target population unchanged",
+    "destination_label_permutation": "within period after forecast generation, target availability unchanged",
+    "structurally_unrelated_control": "source state orientation offset by four modulo eight",
+    "expected_null_decision": "directed increment must not be reproducibly positive"
+  },
+  "evaluation": {
+    "calibration_bins": 10,
+    "bootstrap_resamples": 2000,
+    "bootstrap_session_block_length": 5,
+    "bootstrap_confidence": 0.95,
+    "bootstrap_seed": 20260716,
+    "familywise_adjustment": "Holm",
+    "primary_metrics": ["paired_brier_improvement_M3_vs_M1", "paired_log_loss_improvement_M3_vs_M1"],
+    "secondary_metrics": ["paired_brier_improvement_M3_vs_M2", "paired_log_loss_improvement_M3_vs_M2"],
+    "multi_label_and_first_activation_results_separate": true,
+    "missing_targets_excluded_not_imputed": true
+  },
+  "stress_tests": {
+    "activation_windows_sessions": [1, 3, 5],
+    "primary_window_sessions": 3,
+    "twice_costs": true,
+    "one_bar_execution_delay_where_available": true,
+    "median_economic_aggregation_fully_rebuilt": true,
+    "fully_rebuilt_leave_one_stock_out": true,
+    "remove_best_stock": true,
+    "remove_top_five_stocks": true,
+    "remove_best_episode": true,
+    "remove_top_five_episodes": true,
+    "periods_separately": [2023, 2025],
+    "minimum_two_bar_state_dwell": "unavailable_for_session_level_frozen_economic_state_source_and_reported_as_not_applicable_without_changing_primary_states",
+    "taxonomy_sensitivity": "none_registered",
+    "graph_pooling_strength": [10.0, 20.0, 40.0],
+    "time_shifted_null": true,
+    "source_state_permutation_null": true,
+    "unbounded_grid_search_allowed": false
+  },
+  "prospective_logging": {
+    "execution_enabled": false,
+    "forecast_rows_immutable": true,
+    "outcomes_append_separately": true,
+    "duplicate_ids_fail_closed": true,
+    "opened_historical_sources_rejected_in_holdout_mode": true,
+    "new_data_snapshot_required_for_holdout": true,
+    "forecast_rewrite_after_outcome_allowed": false
+  },
+  "decision_rule": {
+    "requirements_for_provisional_support": [
+      "M3 paired Brier improves over M1",
+      "M3 paired log loss improves over M1",
+      "M3 improves over M2",
+      "period support or defensible frozen heterogeneity",
+      "adequately supported family-level graph",
+      "session-block interval support",
+      "fully rebuilt leave-one-stock-out directional stability",
+      "null controls do not reproduce improvement",
+      "forecast precedes most episode payoff",
+      "predicted-family opportunities are positive after costs",
+      "twice-cost and one-bar delay stability where available",
+      "no dominant stock edge pair or episode",
+      "non-trivial abstention",
+      "exact rerun and independent audit pass"
+    ],
+    "allowed_conclusions": [
+      "directed_family_rotation_supported_prospectively_only_required",
+      "activation_rotation_predictive_tradeability_unknown",
+      "family_rotation_predictive_pair_refinement_unsupported",
+      "undirected_transition_pressure_only",
+      "destination_own_history_sufficient",
+      "rotation_detected_but_too_late",
+      "activation_prediction_not_economically_useful",
+      "pair_transition_sparse_or_concentrated",
+      "no_directed_rotation",
+      "hypothesis_rejected",
+      "experiment_blocked_by_missing_state_or_family_identity"
+    ],
+    "no_result_driven_retuning": true
+  },
+  "random_seed": 20260716
+}

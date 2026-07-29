@@ -1,0 +1,84 @@
+{
+  "binding": {
+    "binding_hash": "7ee16263f339a362fdbe95f14c46dcec594f8d53e8ef3940aff10439aa354cf9",
+    "decision": "regime_representation_requires_targeted_repair",
+    "hysteresis_policy": [
+      [
+        "switch_margin",
+        0.1
+      ],
+      [
+        "switch_probability",
+        0.55
+      ]
+    ],
+    "posterior_support_fields": [
+      "posterior_entropy",
+      "top_second_margin",
+      "expected_state_age",
+      "departure_probability"
+    ],
+    "state_alignment_hash": "687093d11d2f3aa37ff20fa49df72d87ac985ba2adfc2c18e7a828f1fba63bf5",
+    "state_count": 8,
+    "state_model_hash": "d5fb65d1512f625c91e93564da9c5596ff84b02956a3b46faab65a7126f491c2",
+    "state_representation": "legacy_hard_map_with_hysteretic_and_posterior_sensitivity"
+  },
+  "blocking_findings": [
+    "frozen state-duration fit treated terminal training runs as exact exits",
+    "historical panel-base source dependency is absent for byte-exact KMeans refit"
+  ],
+  "broker_connected": false,
+  "contract_hash": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+  "data_snapshot_hash": "4b613ea262583ab77426813fc39b0210e2e737e0dbb042996feb5f4201c64349",
+  "decision": "regime_representation_requires_targeted_repair",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "dictionary_work_may_proceed": false,
+  "economic_outcomes_used": false,
+  "exact_next_step": "right-censored state-duration refit with archived deterministic panel order",
+  "execution_enabled": false,
+  "gate_diagnostics": {
+    "maximum_duration_median_ratio": 1.0,
+    "maximum_period_centroid_drift_scaled_rms": 0.22608998850497786,
+    "median_period_centroid_drift_scaled_rms": 0.0684896965809749,
+    "minimum_duration_median_ratio": 0.3333333333333333,
+    "minimum_k8_seed_nmi": 0.4541473247807942,
+    "minimum_sample_event_agreement": 0.010758082497212933,
+    "minimum_transition_cosine_similarity": 0.9754647540668338,
+    "soft_support_rows": 5247,
+    "soft_supported_robust_rows": 2884
+  },
+  "gate_evidence": {
+    "combined_stability_deficit": 0.0012941288294839315,
+    "critical_future_leakage": false,
+    "exact_reconstruction_pass": true,
+    "hierarchical_materially_more_stable": false,
+    "hierarchical_reproducible": false,
+    "hysteretic_same_primitive_fraction": 0.8574196048043394,
+    "independent_audit_reproducible": false,
+    "k8_selected_loop_seed_gate_pass": true,
+    "mathematical_audit_pass": true,
+    "maximum_single_stock_share": 0.20239329124658437,
+    "minimum_state_occupancy": 0.045352734329919,
+    "posterior_duration_pass": false,
+    "recoverable_local_defect": true,
+    "representation_sensitive": true,
+    "semantic_drift_pass": false,
+    "source_available": true,
+    "training_sample_dictionary_coverage_ratio": 0.12882603641999224,
+    "usable_with_sensitivity": false
+  },
+  "git_sha": "66cd706fa727ac5873b299d5c22388221203f451",
+  "implementation_source_hash": "eb12d895260f52d0b8e83a7aa90f5f86d9d27612f9b853237d4db645a89c4ec9",
+  "independent_audit_status": "pending",
+  "order_placement": "disabled",
+  "part_b_accessed": false,
+  "part_b_authorized": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "3b8fb195297cf76edbc309e6",
+  "state_model_hash": "d5fb65d1512f625c91e93564da9c5596ff84b02956a3b46faab65a7126f491c2",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "strategy_promotion": false
+}

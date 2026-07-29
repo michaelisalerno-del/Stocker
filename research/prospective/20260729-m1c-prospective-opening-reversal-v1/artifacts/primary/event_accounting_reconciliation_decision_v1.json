@@ -1,0 +1,9 @@
+{
+  "aggregation_bug_found": false,
+  "cause": "The old total counted unique severe events with at least one eligible checkpoint-6 stock episode. The old positive and negative columns counted all severe VTI sessions, including sessions with no eligible stock episode.",
+  "corrected_artifact": "event_accounting_v2.csv",
+  "original_artifact_preserved": "research/directional-readiness/20260728-m1c-opening-market-transition-v1/artifacts/primary/event_accounting_v1.csv",
+  "outcome": "event_label_ambiguity_corrected",
+  "prior_scientific_interpretation_changes": false,
+  "session_with_both_signs_found": false
+}

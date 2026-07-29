@@ -23,7 +23,7 @@ class MeanReversionTemplate(StrategyTemplate):
         if hold_bars <= 0:
             raise ValueError("hold_bars must be positive")
         close = pd.to_numeric(frame["close"], errors="coerce")
-        prior_return = close.pct_change().shift(1)
+        prior_return = close.pct_change(fill_method=None).shift(1)
         entries = prior_return <= threshold
         position = pd.Series(0.0, index=frame.index)
         for index, is_entry in enumerate(entries):

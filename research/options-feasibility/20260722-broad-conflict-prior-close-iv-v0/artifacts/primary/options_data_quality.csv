@@ -1,0 +1,5 @@
+metric,value,status
+raw_records,0,blocked_historical_options_date_unavailable
+canonical_records,0,blocked_historical_options_date_unavailable
+duplicate_records,0,blocked_historical_options_date_unavailable
+rejected_records,0,blocked_historical_options_date_unavailable

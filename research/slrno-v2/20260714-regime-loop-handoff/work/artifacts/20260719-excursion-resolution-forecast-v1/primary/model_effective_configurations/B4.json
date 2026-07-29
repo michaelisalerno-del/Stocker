@@ -1,0 +1,31 @@
+{
+  "broker_connected": false,
+  "contract_hash": "bdba55b4243a4bfe18cea04d89b2cacabe817322eb581e3ec4461a5f3c4e8737",
+  "data_snapshot_hash": "2b2efafb8d7c0cebbd7b392493ecbc0a279f71ee1d4f74197e18d99ecd8c43a7",
+  "development_only_selection": true,
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "final_configuration": {},
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "e0bec27d320343054ccfc584b0ad10e3830babff9e6eceb2d8a1a7f2ea19a86a",
+  "model": "B4",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "oof_configuration": {
+    "kind": "frequency",
+    "regularization_c": null
+  },
+  "order_placement": "disabled",
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "da1131234856d62549b728d5",
+  "selected_candidate": false,
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "excursion_resolution_structural_forecast_v1",
+  "strategy_promotion": false,
+  "strongest_simple_baseline": false,
+  "unchanged_validation": true
+}

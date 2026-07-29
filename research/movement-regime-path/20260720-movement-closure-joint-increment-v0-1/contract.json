@@ -1,0 +1,120 @@
+{
+  "contract_id": "20260720-movement-closure-joint-increment-v0-1",
+  "title": "Movement x Closure-History Joint Increment V0.1",
+  "registered_at": "2026-07-20T00:00:00Z",
+  "research_only": true,
+  "feasibility_screen": true,
+  "representation_specific": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "retrospective": true,
+  "prospective_validation": false,
+  "scope": {
+    "questions": [
+      "Does frozen observable movement probability improve immediate pair-closure prediction beyond the frozen M5 history probability?",
+      "Does frozen M5 closure-history probability improve large-movement prediction beyond the frozen observable movement probability?",
+      "Can the two frozen probabilities predict their joint event?"
+    ],
+    "allowed_conclusion_levels": [
+      "movement_predictability",
+      "closure_predictability",
+      "mutual_incremental_information",
+      "joint_event_predictability"
+    ],
+    "forbidden_conclusion_levels": [
+      "directional_price_predictability",
+      "economic_payoff",
+      "executable_net_edge"
+    ]
+  },
+  "frozen_inputs": {
+    "movement_experiment": "20260720-movement-conditioned-regime-path-probability-chain-v0",
+    "movement_commit": "e111cfd259c1ed9ad988903f6cf9d79c32ea80da",
+    "closure_experiment": "20260720-immediate-pair-closure-history-v1",
+    "closure_source_commit": "04c6d45589e0c114dc0b03f6f98b4858bde7dffe",
+    "state_model_id": "regime_model_v2_full_right_censored_refit",
+    "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+    "representation": "CAUSAL_HARD_SEMANTIC",
+    "regime_refit_allowed": false,
+    "loop_dictionary_regeneration_allowed": false,
+    "exact_sequence_search_allowed": false
+  },
+  "population": {
+    "movement_cohort_only": true,
+    "decision_ordinals": [12, 36],
+    "development_year": 2024,
+    "assessment_year": 2025,
+    "joint_end_exclusive": "2025-08-23T00:00:00Z",
+    "protected_years": [2026],
+    "maximum_joined_rows": 10000,
+    "join_anchor": "feature_available_timestamp_utc",
+    "pair_deduplication": "earliest eligible fixed clock after pair creation"
+  },
+  "models": {
+    "class": "LogisticRegression",
+    "C": 1.0,
+    "penalty": "l2",
+    "solver": "liblinear",
+    "max_iter": 250,
+    "class_weight": null,
+    "n_jobs": 1,
+    "hyperparameter_search": false,
+    "scaler_fit_period": 2024,
+    "fitted_primary_models": ["A2", "A3", "B0", "B1", "C1"],
+    "interaction_sensitivities": {
+      "A4": "not_fitted_to_respect_six_model_hard_cap",
+      "B2": "not_fitted_to_respect_six_model_hard_cap",
+      "C2": "not_fitted_to_respect_six_model_hard_cap"
+    },
+    "actual_primary_secondary_fit_count": 5,
+    "hard_fit_cap": 6,
+    "cap_resolution": "Primary comparisons take precedence because no interaction sensitivity may rescue a primary failure."
+  },
+  "uncertainty": {
+    "session_block_bootstrap_draws": 500,
+    "bootstrap_seed": 20260720,
+    "whole_session_null_draws_per_primary_increment": 100,
+    "closure_null_seed": 20260721,
+    "movement_null_seed": 20260722,
+    "session_shift_preservation": [
+      "decision_ordinal",
+      "exact_joined_stock_cross_section"
+    ],
+    "identity_session_mapping_allowed": false,
+    "infeasible_shift_action": "blocked_join_semantics_failure"
+  },
+  "compute": {
+    "processes": 1,
+    "gpu": false,
+    "maximum_plots": 2,
+    "full_repository_rerun": false
+  },
+  "support": {
+    "minimum_assessment_rows": 1500,
+    "minimum_assessment_sessions": 75,
+    "minimum_stocks": 15,
+    "minimum_immediate_closures": 250,
+    "minimum_large_moves": 250,
+    "minimum_joint_events": 100,
+    "maximum_stock_fraction": 0.125,
+    "maximum_month_fraction": 0.25,
+    "maximum_pair_orientation_fraction": 0.20
+  },
+  "decision_vocabulary": [
+    "mutually_informative_movement_closure_process",
+    "movement_adds_to_closure_only",
+    "closure_history_adds_to_movement_only",
+    "joint_interaction_only",
+    "separate_predictable_processes_no_increment",
+    "blocked_missing_frozen_joint_inputs",
+    "blocked_join_semantics_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_insufficient_joint_increment_support",
+    "blocked_model_convergence_failure",
+    "blocked_quick_screen_resource_limit",
+    "blocked_reproducibility_or_audit_failure"
+  ]
+}

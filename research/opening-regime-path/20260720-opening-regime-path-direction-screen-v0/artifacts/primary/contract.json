@@ -1,0 +1,162 @@
+{
+  "broker_integration_required": false,
+  "contract_id": "20260720-opening-regime-path-direction-screen-v0",
+  "decision_policy": {
+    "categories": [
+      "opening_regime_path_adds_movement_and_direction",
+      "opening_regime_path_adds_movement_only",
+      "opening_regime_path_adds_direction_only",
+      "opening_loop_regime_interaction_only",
+      "opening_structure_no_increment_over_price",
+      "blocked_missing_frozen_regime_inputs",
+      "blocked_protected_boundary_failure",
+      "blocked_chronology_or_leakage_failure",
+      "blocked_insufficient_opening_path_support",
+      "blocked_model_convergence_failure",
+      "blocked_quick_screen_resource_limit",
+      "blocked_reproducibility_or_audit_failure"
+    ],
+    "checkpoint_material_adversity_brier": -0.001,
+    "increment_definition": "baseline_metric_minus_candidate_metric",
+    "interaction": {
+      "bootstrap_90_lower_bound_non_negative_for_brier_and_log_loss": true,
+      "minimum_positive_assessment_months": 5,
+      "must_beat_additive_model_on_brier_and_log_loss_for_at_least_one_primary_target": true,
+      "null_percentile_strictly_above": 0.9,
+      "support_required": true
+    },
+    "movement": {
+      "bootstrap_90_lower_bound_non_negative_for_brier_and_log_loss": true,
+      "minimum_positive_assessment_months": 5,
+      "must_beat_price_model_on_brier_and_log_loss": true,
+      "neither_checkpoint_may_be_materially_adverse": true,
+      "null_percentile_strictly_above": 0.9
+    },
+    "primary_direction": {
+      "auc_may_not_decline": true,
+      "bootstrap_90_lower_bound_non_negative_for_brier_and_log_loss": true,
+      "minimum_positive_assessment_months": 5,
+      "must_beat_price_model_on_brier_and_log_loss": true,
+      "neither_checkpoint_may_be_materially_adverse": true,
+      "null_percentile_strictly_above": 0.9
+    }
+  },
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "frozen_regime_representation": {
+    "development_panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+    "development_source_snapshot_hash": "48d2141ef993928d4e8a01d6b3c24dff665280c67f4167115b453613460cc661",
+    "model_id": "regime_model_v2_full_right_censored_refit",
+    "model_parameter_hash": "4a5ef83fa37dc0dfb435ebaf27d425c303d313a30a8c644155beae47637c59eb",
+    "state_count": 8,
+    "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+    "use": "causal_filter_hard_state_and_posterior_only"
+  },
+  "model_ladder": {
+    "M0": "checkpoint_indicator_only",
+    "M1": "M0_plus_frozen_16_observable_opening_price_features",
+    "M2": "M1_plus_additive_current_regime_and_opening_path_topology",
+    "M3": "M2_plus_exactly_four_preregistered_current_state_interaction_families",
+    "configuration": {
+      "C": 1.0,
+      "class_weight": null,
+      "max_iter": 250,
+      "n_jobs": 1,
+      "penalty": "l2",
+      "solver": "liblinear"
+    },
+    "targets": [
+      "large_remaining_move",
+      "up_given_large_move",
+      "remaining_direction_up"
+    ]
+  },
+  "order_placement": "disabled",
+  "outcome": {
+    "cohort_anchor": "leave_one_stock_out_median_within_simultaneous_stock_session_checkpoint_slate",
+    "cohort_label": "cohort_relative_not_market_relative",
+    "delayed_entry": "open_of_repo_zero_based_bar_start_ordinal_t_plus_2",
+    "direction_primary_population": "actual_large_remaining_moves_only",
+    "movement_threshold": "checkpoint_specific_2024_absolute_residual_return_q75",
+    "terminal": "regular_session_final_close"
+  },
+  "population": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "compact_row_limit": 22000,
+    "decision_ordinals_completed_bar_count": [
+      6,
+      12
+    ],
+    "decision_times_america_new_york": [
+      "10:00",
+      "10:30"
+    ],
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "protected_start": "2025-08-23",
+    "regular_session_grid": "09:30_inclusive_16:00_exclusive_america_new_york_five_minute",
+    "symbols": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ]
+  },
+  "production_runtime_modified": false,
+  "representation_specific": true,
+  "research_only": true,
+  "resource_limits": {
+    "bootstrap_draws": 300,
+    "gpu": false,
+    "null_draws": 100,
+    "plots_maximum": 3,
+    "processes": 1,
+    "regime_refit": false
+  },
+  "safety": {
+    "broker_integration_required": false,
+    "execution_enabled": false,
+    "feasibility_screen": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "representation_specific": true,
+    "research_only": true,
+    "strategy_promotion": false
+  },
+  "scope_levels": {
+    "executable_net_edge": false,
+    "gross_fixed_terminal_association": true,
+    "opening_movement_predictability": true,
+    "opening_structural_path_predictability": true,
+    "remaining_direction_predictability": true
+  },
+  "strategy_promotion": false,
+  "support_gates": {
+    "actual_large_moves_each_checkpoint_minimum": 250,
+    "actual_large_moves_minimum": 600,
+    "assessment_rows_minimum": 3000,
+    "assessment_sessions_minimum": 100,
+    "assessment_stocks_minimum": 15,
+    "closure_rows_for_interactions_minimum": 100,
+    "current_state_row_share_maximum": 0.4,
+    "represented_months_minimum": 6,
+    "stock_row_share_maximum": 0.1
+  }
+}

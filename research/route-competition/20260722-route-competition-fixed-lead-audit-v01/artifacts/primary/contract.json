@@ -1,0 +1,74 @@
+{
+  "broker_integration_required": false,
+  "checkpoints": [
+    6,
+    10,
+    14,
+    18,
+    22,
+    26,
+    30,
+    34
+  ],
+  "dates": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "protected_start": "2025-08-23"
+  },
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "fixed_lead_audit": true,
+  "hard_limits": {
+    "checkpoints": 8,
+    "gpu": false,
+    "maximum_plots": 1,
+    "n_jobs": 1,
+    "one_minute_data": false,
+    "primary_model_fits": 4,
+    "processes": 1,
+    "route_feature_null_refits_per_target": 3,
+    "session_bootstrap_draws": 15
+  },
+  "model": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "random_state": 20260722,
+    "solver": "liblinear"
+  },
+  "near_complete_prefix_excluded_from_advance_test": true,
+  "next_bar_completion_test": true,
+  "options_outcomes_opened": false,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "stop_on_advance_positive_shortfall": true,
+  "strategy_promotion": false,
+  "support_gates": {
+    "advance_assessment_rows": 18000,
+    "advance_feature_retention": 0.9,
+    "advance_positive_outcomes": 250,
+    "immediate_positive_outcomes": 300,
+    "maximum_weighted_stock_share": 0.1,
+    "predecessor_assessment_rows": 24000,
+    "predecessor_retention": 0.95
+  },
+  "targets": {
+    "advance": "completion_in_bars_2_or_3",
+    "immediate": "completion_next_1_bar",
+    "lead_values": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "title": "Route-Competition Fixed-Lead Audit Quick Screen V0.1",
+  "two_to_three_bar_advance_test": true
+}

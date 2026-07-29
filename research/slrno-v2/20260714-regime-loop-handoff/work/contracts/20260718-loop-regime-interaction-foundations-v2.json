@@ -1,0 +1,208 @@
+{
+  "contract_id": "20260718-loop-regime-interaction-foundations-v2",
+  "contract_version": "2.0.0-proposed",
+  "title": "Regime Model Validity and Loop-Regime Interaction Foundations V2 — Part B",
+  "contract_status": "proposed_blocked_scoring_not_open",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "economic_outcomes_used": false,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "strategy_promotion": false,
+  "scope": {
+    "purpose": "preregister the causal population and structural-attribution surface without opening interaction results",
+    "part": "B",
+    "next_loop_predictor": false,
+    "profitable_loop_selector": false,
+    "economic_edge_decision": false,
+    "interaction_scoring_enabled": false,
+    "population_source_rows_read": false,
+    "protected_future_opened": false
+  },
+  "frozen_part_a_binding": {
+    "part_a_contract_hash": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+    "part_a_decision": "regime_representation_requires_targeted_repair",
+    "part_a_decision_file_hash": "12093823e58b3e44f0ae5cf76949260edef7673ed53f36d53fec3864560f1d94",
+    "part_a_binding_hash": "7ee16263f339a362fdbe95f14c46dcec594f8d53e8ef3940aff10439aa354cf9",
+    "part_a_independent_audit_status": "pass",
+    "part_a_independent_audit_file_hash": "67116e22d29f839343b53c0d77414eab0ba4f1a019363227576e3b03c03c9f08",
+    "part_a_exact_rerun_byte_identical": true,
+    "part_a_exact_rerun_manifest_file_hash": "b0f42bf066fc6cccf174ed4d2e9f9923c8e86803f6f0e38638bbd86f398a7568",
+    "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+    "state_model_hash": "d5fb65d1512f625c91e93564da9c5596ff84b02956a3b46faab65a7126f491c2",
+    "state_count": 8,
+    "state_representation": "legacy_hard_map_with_hysteretic_and_posterior_sensitivity",
+    "hysteresis_policy": {
+      "switch_probability": 0.55,
+      "switch_margin": 0.1
+    },
+    "posterior_support_fields": [
+      "posterior_entropy",
+      "top_second_margin",
+      "expected_state_age",
+      "departure_probability"
+    ],
+    "state_alignment_hash": "687093d11d2f3aa37ff20fa49df72d87ac985ba2adfc2c18e7a828f1fba63bf5",
+    "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+    "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918"
+  },
+  "access_gate": {
+    "authorized_part_a_decisions": [
+      "regime_representation_validated_for_loop_dictionary",
+      "regime_representation_valid_with_required_sensitivity",
+      "hierarchical_market_stock_regime_representation_preferred"
+    ],
+    "current_decision_authorizes_scoring": false,
+    "independent_audit_required": true,
+    "byte_identical_rerun_required": true,
+    "decision_and_representation_hash_bound_before_access": true,
+    "part_b_scoring_accessed": false,
+    "fail_closed": true
+  },
+  "corrected_first_event_target": {
+    "selected_primitive_loop_classes": "one_class_per_selected_primitive_loop",
+    "other_classes": [
+      "OTHER_PRIMITIVE_LOOP",
+      "NO_LOOP_WITHIN_HORIZON",
+      "SESSION_END",
+      "DISTINCT_PRIMITIVE_TIE",
+      "UNAVAILABLE_SOURCE",
+      "UNAVAILABLE_STRUCTURAL_GAP"
+    ],
+    "legacy_overlapping_cycle_labels_allowed": false,
+    "repeat_depth_is_primary_class": false,
+    "composite_motif_is_primary_class": false,
+    "hard_completion_from_soft_mass_allowed": false
+  },
+  "causal_population_schema": {
+    "loop_structure": [
+      "active_primitive_prefix_ids",
+      "prefix_progress",
+      "transitions_completed",
+      "transitions_remaining",
+      "required_next_state",
+      "competing_prefix_count",
+      "required_next_state_agreement",
+      "previous_completed_primitive_loop",
+      "previous_two_primitive_loops",
+      "same_loop_repeat_depth",
+      "bars_since_previous_completion"
+    ],
+    "current_regime": [
+      "frozen_current_hard_state",
+      "hysteretic_state",
+      "state_posterior",
+      "posterior_entropy",
+      "top_two_margin",
+      "hard_state_age",
+      "expected_state_age",
+      "departure_probability",
+      "most_likely_next_state"
+    ],
+    "regime_history": [
+      "previous_completed_state_1",
+      "previous_completed_state_2",
+      "previous_completed_state_3",
+      "previous_completed_state_4",
+      "completed_state_durations",
+      "history_token",
+      "state_transition_surprise",
+      "entered_from_expected_loop_leg"
+    ],
+    "market_context": [
+      "market_regime",
+      "market_regime_age",
+      "market_regime_posterior",
+      "breadth",
+      "dispersion",
+      "stock_minus_market_movement",
+      "broad_clock_phase"
+    ],
+    "provenance_required_for_every_field": true,
+    "completed_bar_availability_required": true,
+    "session_history_reset_required": true
+  },
+  "orientation": {
+    "identity_components": [
+      "primitive_loop_id",
+      "registered_oriented_path",
+      "prefix_position",
+      "current_state",
+      "required_next_state"
+    ],
+    "prefix_position_required_even_when_state_repeats": true,
+    "current_state_alone_is_orientation": false,
+    "reverse_traversal_equivalent": false
+  },
+  "chronology": {
+    "development_year": 2024,
+    "unchanged_retrospective_assessment_year": 2025,
+    "backward_2023_enabled": false,
+    "protected_2026_enabled": false,
+    "folds": "expanding_chronological",
+    "preprocessing_fit_on_training_fold_only": true,
+    "validation_may_change_features_or_thresholds": false
+  },
+  "frozen_bins": {
+    "fit_period": "development_2024_only",
+    "method": "deterministic_quantiles",
+    "state_age_quantiles": [0.25, 0.5, 0.75],
+    "departure_hazard_quantiles": [0.25, 0.5, 0.75],
+    "posterior_confidence_quantiles": [0.25, 0.5, 0.75],
+    "arbitrary_threshold_search_allowed": false,
+    "values_fitted": false
+  },
+  "support_gate": {
+    "minimum_decision_rows": 200,
+    "minimum_completion_events": 40,
+    "minimum_stocks": 10,
+    "minimum_sessions": 30,
+    "minimum_months": 4,
+    "maximum_single_stock_share": 0.25,
+    "fail_closed": true
+  },
+  "attribution_models": [
+    "M0_global_class_frequency",
+    "M1_current_state_only",
+    "M2_current_state_plus_state_age",
+    "M3_last_three_state_history",
+    "M4_active_prefix_only",
+    "M5_active_prefix_plus_orientation",
+    "M6_prefix_orientation_plus_current_state",
+    "M7_prefix_orientation_plus_posterior_and_age",
+    "M8_prefix_orientation_plus_state_history",
+    "M9_prefix_orientation_plus_history_posterior_age",
+    "M10_M9_plus_market_regime"
+  ],
+  "model_constraints": {
+    "same_decision_rows_for_every_paired_comparison": true,
+    "allowed_families": [
+      "regularized_multinomial_logistic_regression",
+      "empirical_transition_model"
+    ],
+    "large_boosted_models_allowed": false,
+    "neural_networks_allowed": false,
+    "small_regularization_grid_frozen_in_development": true,
+    "economic_outcomes_allowed": false
+  },
+  "counterfactual_inference": {
+    "resampling": "session_clustered_or_moving_block_bootstrap",
+    "multiplicity": "Benjamini-Hochberg_within_preregistered_family",
+    "effect_sizes_required": true,
+    "distribution_overlap_required": true,
+    "economic_rule_formation_allowed": false
+  },
+  "blocked_output_policy": {
+    "allowed_outputs": [
+      "part_b_population_scaffold.json",
+      "20260718-loop-regime-interaction-foundations-v2.json",
+      "part_b_blocker_report.json"
+    ],
+    "interaction_rows_allowed": false,
+    "interaction_metrics_allowed": false,
+    "scientific_part_b_decision_allowed": false,
+    "part_b_markdown_report_allowed": false
+  }
+}

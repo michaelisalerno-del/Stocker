@@ -1,0 +1,106 @@
+{
+  "assessment_class_support": {
+    "NO_REGISTERED_COMPLETION": 4308,
+    "REGISTERED_COMPLETION": 312,
+    "UNREGISTERED_LOOP": 1641
+  },
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "development_class_support": {
+    "NO_REGISTERED_COMPLETION": 6083,
+    "REGISTERED_COMPLETION": 525,
+    "UNREGISTERED_LOOP": 2676
+  },
+  "development_support_passed": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "fallback_is_preregistered_not_support_failure": true,
+  "fallback_required": true,
+  "final_development_class_support": {
+    "NO_REGISTERED_COMPLETION": {
+      "maximum_stock_share": 0.0550715107677133,
+      "months": 12,
+      "outcomes": 6083,
+      "sessions": 234,
+      "stocks": 20
+    },
+    "REGISTERED_COMPLETION": {
+      "maximum_stock_share": 0.12380952380952381,
+      "months": 12,
+      "outcomes": 525,
+      "sessions": 205,
+      "stocks": 20
+    },
+    "UNREGISTERED_LOOP": {
+      "maximum_stock_share": 0.06053811659192825,
+      "months": 12,
+      "outcomes": 2676,
+      "sessions": 234,
+      "stocks": 20
+    }
+  },
+  "final_target_classes": [
+    "REGISTERED_COMPLETION",
+    "UNREGISTERED_LOOP",
+    "NO_REGISTERED_COMPLETION"
+  ],
+  "frozen_mapping": {
+    "NO_REGISTERED_COMPLETION": "NO_REGISTERED_COMPLETION",
+    "REGISTERED_COMPOSITE": "REGISTERED_COMPLETION",
+    "REGISTERED_PRIMITIVE": "REGISTERED_COMPLETION",
+    "REGISTERED_REPEAT": "REGISTERED_COMPLETION",
+    "UNREGISTERED_LOOP": "UNREGISTERED_LOOP"
+  },
+  "initial_mapping": {
+    "REGISTERED_COMPOSITE": "OTHER_REGISTERED_COMPLETION",
+    "REGISTERED_PRIMITIVE": "REGISTERED_PRIMITIVE",
+    "REGISTERED_REPEAT": "OTHER_REGISTERED_COMPLETION"
+  },
+  "order_placement": "disabled",
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_subtype_pass": {
+    "REGISTERED_COMPOSITE": false,
+    "REGISTERED_PRIMITIVE": true,
+    "REGISTERED_REPEAT": false
+  },
+  "registered_subtype_rule": {
+    "maximum_stock_share": 0.3,
+    "minimum_months": 4,
+    "minimum_outcomes": 75,
+    "minimum_sessions": 30,
+    "minimum_stocks": 8
+  },
+  "registered_subtype_support": {
+    "REGISTERED_COMPOSITE": {
+      "maximum_stock_share": null,
+      "months": 0,
+      "outcomes": 0,
+      "sessions": 0,
+      "stocks": 0
+    },
+    "REGISTERED_PRIMITIVE": {
+      "maximum_stock_share": 0.12380952380952381,
+      "months": 12,
+      "outcomes": 525,
+      "sessions": 205,
+      "stocks": 20
+    },
+    "REGISTERED_REPEAT": {
+      "maximum_stock_share": null,
+      "months": 0,
+      "outcomes": 0,
+      "sessions": 0,
+      "stocks": 0
+    }
+  },
+  "research_only": true,
+  "selection_interval": "2024-01-01_through_2024-12-31_only",
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "target_variant": "three_class_fallback",
+  "tied_exclusions": 4,
+  "unavailable_exclusions": 0
+}

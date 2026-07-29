@@ -1,0 +1,62 @@
+{
+  "availability": "completed_bar_start_plus_five_minutes",
+  "broker_connected": false,
+  "combined_feature_count": 14,
+  "contract_hash": "7c23ba6c613d79731d3e3f1f37122ff5f97e6e6845274121313ccb1ba1459e88",
+  "data_snapshot_hash": "67417cf1fd1267cb4a945de8dff854916bd4d5bbde0c55f5d6545b1c4b6881e3",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "future_rows_required": false,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "177788fe59872f782f56492a52f86c3b5177023ac875c509339d328f5ce5306f",
+  "market_features": [
+    "regime_log_market_dispersion",
+    "vti__signed_efficiency_12",
+    "regime_market_breadth_centered"
+  ],
+  "model_lineage": "MODEL_FULL_REFIT",
+  "order_placement": "disabled",
+  "ordered_features": [
+    "regime_log_activity_3",
+    "regime_log_activity_12",
+    "regime_activity_acceleration",
+    "signed_efficiency_6",
+    "signed_efficiency_12",
+    "regime_log_bar_range",
+    "close_location_value",
+    "regime_wick_balance",
+    "log_relative_historical_volume",
+    "log_relative_cumulative_historical_volume",
+    "regime_log_market_dispersion",
+    "regime_stock_minus_market_scaled",
+    "vti__signed_efficiency_12",
+    "regime_market_breadth_centered"
+  ],
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "partitions_are_disjoint": true,
+  "partitions_are_explicit": true,
+  "payoff_selection_used": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "143cc35bbab621d585cb9bf2",
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "regime_model_v2_full_right_censored_refit",
+  "stock_features": [
+    "regime_log_activity_3",
+    "regime_log_activity_12",
+    "regime_activity_acceleration",
+    "signed_efficiency_6",
+    "signed_efficiency_12",
+    "regime_log_bar_range",
+    "close_location_value",
+    "regime_wick_balance",
+    "log_relative_historical_volume",
+    "log_relative_cumulative_historical_volume"
+  ],
+  "stock_relative_features": [
+    "regime_stock_minus_market_scaled"
+  ],
+  "strategy_promotion": false
+}

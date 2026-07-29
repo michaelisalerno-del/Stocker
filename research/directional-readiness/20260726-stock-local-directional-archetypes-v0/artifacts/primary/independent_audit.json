@@ -1,0 +1,162 @@
+{
+  "baseline_reconstruction": {
+    "identity_mismatches": 0,
+    "maximum_metric_difference": 9.616873269946424e-17,
+    "nan_pattern_mismatches": 0
+  },
+  "beta_reconstruction": {
+    "fit_scopes_rebuilt": [
+      "full_2024",
+      "oof_fold_0",
+      "oof_fold_1",
+      "oof_fold_2",
+      "oof_fold_3"
+    ],
+    "identity_mismatches": 0,
+    "maximum_beta_difference": 4.440892098500626e-16,
+    "maximum_difference_by_scope": {
+      "full_2024": 4.440892098500626e-16,
+      "oof_fold_0": 4.440892098500626e-16,
+      "oof_fold_1": 4.440892098500626e-16,
+      "oof_fold_2": 4.440892098500626e-16,
+      "oof_fold_3": 4.440892098500626e-16
+    }
+  },
+  "episode_chronology_reconstruction": {
+    "direction_marker_bar": "T-1",
+    "entry_timestamp_mismatches": 0,
+    "episodes_checked": 891,
+    "marker_ordinal_mismatches": 0,
+    "marker_timestamp_mismatches": 0,
+    "maximum_feature_bar_ordinal_relative_to_checkpoint": -2,
+    "signal_timestamp_mismatches": 0,
+    "spacing_violations": 0,
+    "trigger_bar_excluded": true,
+    "trigger_ordinal_mismatches": 0
+  },
+  "feature_probability_action_reconstruction": {
+    "action_decision_mismatches": {
+      "A1": 0,
+      "C1": 0,
+      "R1": 0
+    },
+    "maximum_normalised_feature_difference": {
+      "A1": 0.0,
+      "C1": 0.0,
+      "R1": 4.156675004196586e-13
+    },
+    "maximum_probability_difference": {
+      "A1": 1.1102230246251565e-16,
+      "C1": 1.1102230246251565e-16,
+      "R1": 9.992007221626409e-16
+    },
+    "maximum_raw_feature_difference": {
+      "A1": 0.0,
+      "C1": 0.0,
+      "R1": 8.348877145181177e-14
+    },
+    "normalisation_formula_reimplemented_independently": true,
+    "rows_manually_reconstructed_per_archetype": 100
+  },
+  "gate_reconstruction": {
+    "episode_identity_mismatches": 0,
+    "maximum_probability_difference": 0.0,
+    "maximum_threshold_difference": 0.0,
+    "model_refit": {
+      "intercept_difference": 0.0,
+      "iterations": 5,
+      "maximum_coefficient_difference": 0.0,
+      "maximum_mean_difference": 0.0,
+      "maximum_median_difference": 0.0,
+      "maximum_scale_difference": 0.0
+    },
+    "rebuilt_episode_count": 891,
+    "rows_manually_reconstructed": 100,
+    "stock_local_weight_total_maximum_difference": 0.0
+  },
+  "independent_program": "/Users/michaelsalerno/Documents/Codex/2026-07-26-you-are-working-in-the-github-3/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/audit_screen_v0.py",
+  "manual_causal_gate_probabilities": 100,
+  "manual_feature_rows_per_archetype": 100,
+  "manual_probabilities_and_actions_per_archetype": 100,
+  "maximum_beta_difference": 4.440892098500626e-16,
+  "maximum_bootstrap_interval_difference": 9.71445146547012e-17,
+  "maximum_session_read": "2025-08-22",
+  "normalisation_fit_reconstruction": {
+    "comparisons": {
+      "full_2024": {
+        "identity_mismatches": 0,
+        "maximum_parameter_difference": 1.376676550535194e-13,
+        "string_value_mismatches": 0
+      },
+      "oof_fold_0": {
+        "identity_mismatches": 0,
+        "maximum_parameter_difference": 1.021405182655144e-13,
+        "string_value_mismatches": 0
+      },
+      "oof_fold_1": {
+        "identity_mismatches": 0,
+        "maximum_parameter_difference": 1.2567724638756772e-13,
+        "string_value_mismatches": 0
+      },
+      "oof_fold_2": {
+        "identity_mismatches": 0,
+        "maximum_parameter_difference": 1.2434497875801753e-13,
+        "string_value_mismatches": 0
+      },
+      "oof_fold_3": {
+        "identity_mismatches": 0,
+        "maximum_parameter_difference": 1.2878587085651816e-13,
+        "string_value_mismatches": 0
+      }
+    },
+    "development_checkpoint_rows_reconstructed": 18596,
+    "fit_scopes_rebuilt": [
+      "full_2024",
+      "oof_fold_0",
+      "oof_fold_1",
+      "oof_fold_2",
+      "oof_fold_3"
+    ],
+    "heldout_sessions_excluded_from_each_oof_fit": true,
+    "identity_mismatches": 0,
+    "maximum_parameter_difference": 1.376676550535194e-13,
+    "string_value_mismatches": 0
+  },
+  "overlap_reconstruction": {
+    "identity_mismatches": 0,
+    "maximum_metric_difference": 9.985502008591496e-17,
+    "nan_pattern_mismatches": 0
+  },
+  "passed": true,
+  "protected_rows_read": 0,
+  "research_only": true,
+  "source_hash_checks": {
+    "completed_five_minute_stock_and_market_bars": true,
+    "exact_previous_close_historical_options_context": true,
+    "unfiltered_dense_causal_checkpoint_surface": true
+  },
+  "structural_audits": {
+    "bootstrap_passed": true,
+    "contaminated_lineage_passed": true,
+    "contract_passed": true,
+    "decision_contract_passed": true,
+    "decision_logic_passed": true,
+    "development_only_beta_passed": true,
+    "evidence_reconstruction_passed": true,
+    "independently_derived_overall_decision": "archetype_agreement_descriptive_only",
+    "label_nulls_passed": true,
+    "no_peer_slate_normalisation_passed": true,
+    "oof_beta_exclusion_passed": true,
+    "oof_normalisation_exclusion_passed": true,
+    "stock_local_normalisation_passed": true,
+    "support_gate_logic_passed": true,
+    "support_reconstruction_passed": true,
+    "temporal_placebos_passed": true,
+    "transitive_dependency_removal_passed": true
+  },
+  "target_and_aligned_return_reconstruction": {
+    "maximum_aligned_return_difference": 0.0,
+    "maximum_target_difference": 0.0,
+    "rows_manually_reconstructed": 100
+  }
+}

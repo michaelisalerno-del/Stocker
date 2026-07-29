@@ -1,0 +1,152 @@
+version: personality_rulebook_v0_20260701
+research_only: true
+source_report: data/reports/research/personality_rulebook_validation_v0/personality_rulebook_validation_v0_20260701T122951Z
+rules:
+  - rule_id: dead_chop_vwap_offset_h6
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 6
+    expected_direction: 0
+    regime_field: compression_x_efficiency_regime
+    regime_value: normal_compression|mixed_efficiency
+    rule_kind: single
+    feature: distance_from_vwap_pct
+    operator: ">="
+    threshold: 0.000425036
+    filter_rule: distance_from_vwap_pct >= 0.000425036
+    source_note: strongest transferred no-trade filter
+
+  - rule_id: dead_chop_opening_high_location_h24
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 24
+    expected_direction: 0
+    regime_field: efficiency_regime
+    regime_value: mixed_efficiency
+    rule_kind: single
+    feature: distance_from_opening_range_high_pct
+    operator: ">="
+    threshold: -0.00825485
+    filter_rule: distance_from_opening_range_high_pct >= -0.00825485
+    source_note: broad transferred no-trade filter
+
+  - rule_id: dead_chop_low_range_near_mid_h6
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 6
+    expected_direction: 0
+    regime_field: auction_opening_mid_location
+    regime_value: near
+    rule_kind: single
+    feature: rolling_intraday_range_pct
+    operator: "<="
+    threshold: 0.00999194
+    filter_rule: rolling_intraday_range_pct <= 0.00999194
+    source_note: low-range chop transfer rule
+
+  - rule_id: dead_chop_compressed_opening_high_h6
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 6
+    expected_direction: 0
+    regime_field: compression_x_efficiency_regime
+    regime_value: compressed|mixed_efficiency
+    rule_kind: single
+    feature: distance_from_opening_range_high_pct
+    operator: ">="
+    threshold: -0.00825454
+    filter_rule: distance_from_opening_range_high_pct >= -0.00825454
+    source_note: compressed mixed-efficiency no-trade filter
+
+  - rule_id: dead_chop_low_range_near_mid_h24
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 24
+    expected_direction: 0
+    regime_field: auction_opening_mid_location
+    regime_value: near
+    rule_kind: single
+    feature: rolling_intraday_range_pct
+    operator: "<="
+    threshold: 0.0108275
+    filter_rule: rolling_intraday_range_pct <= 0.0108275
+    source_note: longer-horizon low-range chop filter
+
+  - rule_id: dead_chop_mixed_efficiency_h6
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 6
+    expected_direction: 0
+    regime_field: auction_opening_mid_location
+    regime_value: near
+    rule_kind: single
+    feature: directional_efficiency_12
+    operator: ">="
+    threshold: 0.143301
+    filter_rule: directional_efficiency_12 >= 0.143301
+    source_note: noisy mixed-efficiency chop filter
+
+  - rule_id: dead_chop_morning_low_eff_low_range_h24
+    personality: dead_chop_noise
+    role: no_trade_filter
+    horizon: 24
+    expected_direction: 0
+    regime_field: bar_index_bucket
+    regime_value: morning
+    rule_kind: and
+    feature: directional_efficiency_6
+    operator: "<="
+    threshold: 0.199994
+    feature_b: rolling_intraday_range_pct
+    operator_b: "<="
+    threshold_b: 0.0108275
+    filter_rule: (directional_efficiency_6 <= 0.199994) AND (rolling_intraday_range_pct <= 0.0108275)
+    source_note: morning low-efficiency no-trade filter
+
+  - rule_id: pullback_near_open_recent_high_h24
+    personality: pullback_continuation
+    role: long_continuation
+    horizon: 24
+    expected_direction: 1
+    regime_field: auction_session_open_location
+    regime_value: near
+    rule_kind: and
+    feature: distance_from_vwap_pct
+    operator: "<="
+    threshold: 0.00515978
+    feature_b: distance_from_recent_high_pct
+    operator_b: "<="
+    threshold_b: -0.00319827
+    filter_rule: (distance_from_vwap_pct <= 0.00515978) AND (distance_from_recent_high_pct <= -0.00319827)
+    source_note: transferred but modest long-continuation rule
+
+  - rule_id: pullback_near_open_depth_h24
+    personality: pullback_continuation
+    role: long_continuation
+    horizon: 24
+    expected_direction: 1
+    regime_field: auction_session_open_location
+    regime_value: near
+    rule_kind: and
+    feature: distance_from_vwap_pct
+    operator: "<="
+    threshold: 0.00515978
+    feature_b: pullback_depth_from_recent_high
+    operator_b: "<="
+    threshold_b: -0.00319827
+    filter_rule: (distance_from_vwap_pct <= 0.00515978) AND (pullback_depth_from_recent_high <= -0.00319827)
+    source_note: duplicate-family pullback continuation confirmation
+
+  - rule_id: active_liquidation_low_compression_h12
+    personality: active_liquidation
+    role: short_or_long_blocker
+    horizon: 12
+    expected_direction: -1
+    regime_field: opening_mid_x_range_regime
+    regime_value: below|low_range
+    rule_kind: single
+    feature: compression_zscore
+    operator: "<="
+    threshold: -0.291076
+    filter_rule: compression_zscore <= -0.291076
+    source_note: marginal transferred active-liquidation blocker

@@ -23,6 +23,9 @@ risk boundaries.
   backtest interfaces.
 - `packages/stocker_execution/`: broker interface, orders, paper broker placeholder,
   risk checks, and execution state.
+- `packages/stocker_prospective/`: isolated record-only/shadow evidence recorder,
+  immutable bundle contract, SQLite ledgers, optional market-data-only IBKR adapter,
+  deterministic replay, and read-only web application.
 
 ## Python And Dependency Management
 
@@ -79,9 +82,22 @@ bash scripts/bootstrap_server.sh
 The server bootstrap installs only core and `server` dependency groups:
 
 ```bash
-uv sync --no-default-groups --group server
-uv run --no-default-groups --group server stocker server dry-run --config configs/server.example.yaml
+uv sync --locked --no-editable --no-default-groups --group server
+uv run --no-sync stocker server dry-run --config configs/server.example.yaml
 ```
+
+The dedicated prospective recorder has a separate, no-order process boundary:
+
+```bash
+export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
+uv run --no-sync stocker-prospective replay run \
+  --config configs/prospective/replay.example.yaml
+uv run --no-sync stocker-prospective web run \
+  --config configs/prospective/replay.example.yaml
+```
+
+See [the prospective architecture](docs/architecture/prospective-evidence-recorder.md)
+and [dedicated-server runbook](docs/operations/prospective-server-runbook.md).
 
 ## Tests And Checks
 
@@ -94,12 +110,13 @@ bash scripts/check.sh
 
 ## Intentionally Not Implemented Yet
 
-- No broker integration.
+- No broker order integration; the optional IBKR adapter is market-data-only.
 - No live trading.
 - No API keys or secrets.
 - No vendor credentials in the repo.
 - No strategy optimization.
-- No Docker, systemd, or deployment automation.
+- No remote deployment automation; example hardened systemd units are provided for
+  explicit operator installation.
 - No event-driven accounting engine beyond an explicit placeholder.
 
 ## Data Pipeline

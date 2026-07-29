@@ -1,0 +1,21 @@
+ChatGPT Pro/Extended Pro Project Guidance
+Generated: 2026-07-23
+Project: michaelisalerno-del/Stocker
+
+Original task/spec:
+Implement and run the Stock/Options Cross-Market Information Quick Screen V0
+without reducing its scientific, safety, chronology, support, determinism, or
+audit requirements.
+
+How to use this guidance:
+- Use repository evidence and the user's frozen contract as authority.
+- Do not reduce scope or relax a support gate.
+- Verify every claim against local artifacts.
+
+============================================================
+Kickoff availability
+============================================================
+The required logged-in Chrome browser surface was unavailable, so neither Pro
+prompt could be sent. No alternative model or browser was substituted. Local
+predecessor artifacts, source code, contracts, tests, and cached-data manifests
+were used to derive the implementation plan.

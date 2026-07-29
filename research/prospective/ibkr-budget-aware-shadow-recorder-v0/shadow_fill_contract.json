@@ -1,0 +1,51 @@
+{
+  "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
+  "credit_structure_open": {
+    "short_legs": "observed bid",
+    "long_legs": "observed ask"
+  },
+  "credit_structure_close": {
+    "short_legs": "observed ask",
+    "long_legs": "observed bid"
+  },
+  "long_premium_open": "observed ask",
+  "long_premium_close": "observed bid",
+  "fixed_horizons_minutes": [15, 30, 60],
+  "primary_engineering_horizon_minutes": 30,
+  "session_end": "record when the bounded stream covers the exchange close; otherwise persist an explicit skip",
+  "diagnostics": [
+    "midpoint",
+    "spread burden",
+    "opening credit",
+    "maximum risk",
+    "return on maximum risk",
+    "maximum favourable mark",
+    "maximum adverse mark",
+    "short-strike touches",
+    "wing touches",
+    "quote freshness",
+    "missing-leg conditions"
+  ],
+  "actual_fill_probability_inferred": false,
+  "claims_boundary": {
+    "research_only": true,
+    "record_only": true,
+    "frozen_m1c": true,
+    "source_transfer_monitoring": true,
+    "exact_vendor_bar_equality_required": false,
+    "option_shadow_outcomes_only": true,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "full_option_chain_streaming_allowed": false,
+    "tick_by_tick_universe_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "reserved_future_trading_capacity": true,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_methods_available": false,
+    "account_access_required": false,
+    "position_access_required": false,
+    "strategy_promotion": false
+  }
+}

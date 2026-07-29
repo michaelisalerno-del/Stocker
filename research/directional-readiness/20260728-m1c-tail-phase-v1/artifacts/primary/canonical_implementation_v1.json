@@ -1,0 +1,28 @@
+{
+  "a1_refit": false,
+  "authoritative_implementation": "committed 20260726 frozen archetype artifacts plus later no-fit prospective runtimes at repository HEAD",
+  "authority_evidence": [
+    "committed machine-readable M1C and A1 artifacts",
+    "known-row regression tests for frozen M1C and A1",
+    "later recorder commits bind to the no-fit runtime schemas",
+    "hash-verified local source loader is newer than the stale alternate checkout"
+  ],
+  "code_paths": {
+    "chronology_guards": [
+      "packages/stocker_prospective/src/stocker_prospective/tail_phase_v1.py",
+      "research/directional-readiness/20260726-stock-local-directional-archetypes-v0/run_screen_v0.py"
+    ],
+    "fresh_episode_retrospective": "packages/stocker_research/src/stocker_research/stock_local_directional_archetypes_v0.py#construct_fresh_episodes",
+    "fresh_episode_runtime": "packages/stocker_prospective/src/stocker_prospective/frozen_m1c.py#FreshEpisodeTracker",
+    "frozen_a1": "packages/stocker_prospective/src/stocker_prospective/direction.py",
+    "frozen_m1c_probabilities": "packages/stocker_prospective/src/stocker_prospective/frozen_m1c.py",
+    "ibkr_prospective_records": "packages/stocker_prospective/src/stocker_prospective/recorder_repository.py",
+    "previous_close_option_implied_movement": "packages/stocker_research/src/stocker_research/m1c_low_movement_v0.py#iv_expected_absolute",
+    "report_and_artifact_conventions": "research/directional-readiness/<date>-<study>/artifacts/primary",
+    "session_and_checkpoint_sequence": "packages/stocker_prospective/src/stocker_prospective/m1c_features.py",
+    "ten_and_fifteen_minute_outcomes": "packages/stocker_research/src/stocker_research/m1c_low_movement_v0.py#calculate_checkpoint_outcomes",
+    "top_5_percent_threshold": "packages/stocker_prospective/src/stocker_prospective/contract.py"
+  },
+  "duplicated_m1c_logic": false,
+  "m1c_refit": false
+}

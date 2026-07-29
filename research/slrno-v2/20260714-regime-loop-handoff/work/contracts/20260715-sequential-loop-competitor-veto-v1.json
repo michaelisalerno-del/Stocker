@@ -1,0 +1,338 @@
+{
+  "contract_id": "20260715-sequential-loop-competitor-veto-v1",
+  "experiment_version": "sequential_loop_competitor_veto_v1.0.0",
+  "registered_before_scoring": true,
+  "scientific_status": "opened_2023_2024_2025_and_partial_2026_research_attribution_not_validation",
+  "purpose": "Test whether a causal checkpoint sequence improves positive remaining-payoff prediction and negative veto value by eliminating economically bad compatible loop alternatives before the frozen anchor-plus-24 terminal time.",
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "ig_integration_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "application_runtime_changed": false,
+    "position_or_frozen_exit_logic_changed": false,
+    "strategy_promotion_allowed": false
+  },
+  "opened_data_status": {
+    "opened_periods": [2023, 2024, 2025, 2026],
+    "scored_periods": [2023, 2025],
+    "permitted_claim": "retrospective causal mechanism attribution or a frozen prospective logging hypothesis",
+    "forbidden_claims": ["validation", "live_edge", "strategy_approval", "deployment_approval"]
+  },
+  "frozen_lineage": {
+    "branch": "agent/slrno-research-handoff",
+    "starting_commit": "5a3a5f3c93c3050a6591830bfc9fa0fbbb4c4f93",
+    "v1_contract": "20260713-dynamic-loop-context-edge-v1",
+    "v2_contract": "20260714-dynamic-loop-edge-state-v2",
+    "lead_lag_contract": "20260715-dynamic-loop-edge-state-lead-lag-v1",
+    "fixed_horizon_bars": 24,
+    "cost_bps_per_side": 5.0,
+    "fixed_cycle_dictionary_sha256": "ee0adb9e09226f47a94902ad1ab3ccc996b557592abab00e7338074e8cc055de",
+    "lead_lag_conclusion": "leading_features_no_incremental_value",
+    "lead_lag_feature_overlay_reuse_allowed": false
+  },
+  "inputs": {
+    "scoring_predictions": {
+      "2023": {
+        "path": "/private/tmp/stocker_hierarchical_loop_quality_algorithm_v1_20260711/scoring_predictions_2023.parquet",
+        "sha256": "16ea8a4d1611a432b0fa7e6b895c41e0331a57659831f940bb5bcf47d86a35c7"
+      },
+      "2025": {
+        "path": "/private/tmp/stocker_hierarchical_loop_quality_algorithm_v1_20260711/scoring_predictions_2025.parquet",
+        "sha256": "13d52ca52ffba83145deede48fbe646e69f46b041b8512617f1eff704a31f245"
+      }
+    },
+    "accepted_signal_ledger": {
+      "path": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/accepted_signal_ledger.parquet",
+      "sha256": "97b846c3efe0c87a4c9daae5294a07410c7b31e1fea188749dec2ffc7e1308b4"
+    },
+    "execution_anchors": {
+      "2023": {
+        "path": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/execution_anchors_2023.parquet",
+        "sha256": "be0b738c26785e3d0c82f2a57f7b30abe5d328147011541d8c1d7d246a1aa1cf"
+      },
+      "2025": {
+        "path": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/execution_anchors_2025.parquet",
+        "sha256": "69916e2c5e2f2311aa0c7de7b8aabe4a3d39200cf669c81a9bf1a9feb54acad5"
+      }
+    },
+    "v1_source_hashes": {
+      "path": "/private/tmp/stocker_frozen_regime_loop_pnl_sanity_v1_20260712/source_hashes.json",
+      "sha256": "35fbfd2a1dfd731c4cec3f482868e62eda4129f711dc05d56fc86685008ad514"
+    },
+    "v2_primary_root": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary",
+    "v2_artifacts": {
+      "causal_edge_state_forecasts.parquet": "352c670fac8c8eae79ae9e79edc0b805ae12d62d7018865c4fe31c8cdf66f797",
+      "trade_decisions.parquet": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f",
+      "session_payoff_panel.parquet": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7",
+      "hindsight_episode_states.parquet": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3",
+      "hindsight_episode_diagnostics.parquet": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be"
+    },
+    "v2_rebuild_runner": {
+      "path": "run_dynamic_loop_edge_state_v2.py",
+      "sha256": "d498275dc306ed347372e94a1b6ea9394e3ed4be7f9236566439ec9879cf7570"
+    },
+    "v2_rebuild_config": {
+      "path": "contracts/20260714-dynamic-loop-edge-state-v2.json",
+      "sha256": "8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373"
+    },
+    "provider_2025_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "provider_2025_hash_source": "v1_source_hashes.provider_2025_*",
+    "provider_2023_status": "full intermediate tape unavailable; frozen execution anchors retain anchor next-open and terminal prices only",
+    "named_path_artifact": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/artifacts/20260713-loop-payoff-phase-path-v2/primary/signal_level_path_diagnostics.parquet"
+  },
+  "prior_experiment_boundary": {
+    "already_tested": [
+      "top predicted loop and absolute top-loop score",
+      "static loop by current-regime rolling profitability",
+      "static full twenty-loop compatibility-score regression",
+      "one-to-three completed price-bar confirmation equation",
+      "realised parent-route completion and incompatibility as causal exit events",
+      "same-session and one-session-lag breadth/coherence payoff overlays"
+    ],
+    "not_previously_tested": [
+      "normalised compatible-loop posterior with explicit unknown residual",
+      "training-only good bad unknown economic classification for every compatible competitor",
+      "one-versus-rest structural elimination through registered checkpoints",
+      "sequential bad-mass fall versus identical anchor-only odds",
+      "constant-terminal remaining payoff after competitor resolution",
+      "fixed-population veto accounting with no replacement opportunities"
+    ]
+  },
+  "hypotheses": [
+    {
+      "id": "H1_sequence_increment",
+      "target": "paired first-elimination checkpoint prediction versus its own anchor-only forecast",
+      "expected_benefit": "establish whether the causal sequence adds payoff information beyond the initial score mixture",
+      "safety_risk": "future transitions or realised loop identity entering the checkpoint",
+      "validation": "synthetic prefix-elimination tests and independent timestamp/posterior reconstruction",
+      "stop": "reject if paired Brier and remaining-payoff increment are not positive"
+    },
+    {
+      "id": "H2_negative_veto",
+      "target": "losses avoided minus profits mistakenly rejected on an immutable base population",
+      "expected_benefit": "identify a useful abstention overlay even without exact-loop prediction",
+      "safety_risk": "replacement opportunities or overlap changes create a different population",
+      "validation": "one source opportunity remains one accounting row under every policy",
+      "stop": "reject operational value if veto value is non-positive or coverage becomes trivial"
+    },
+    {
+      "id": "H3_named_mechanism",
+      "target": "cycle_04 from state 4 and cycle_07 from state 5 only",
+      "expected_benefit": "test the two frozen multiplicity-exposed mechanisms without replacement-family search",
+      "safety_risk": "choosing a new family after observing failure",
+      "validation": "contract and auditor pin named targets and controls",
+      "stop": "retain a negative or descriptive conclusion when either named target fails"
+    },
+    {
+      "id": "H4_earliness",
+      "target": "resolution-lag ratio and constant-terminal capturable payoff",
+      "expected_benefit": "separate structural resolution from economically timely resolution",
+      "safety_risk": "crediting payoff earned before the checkpoint",
+      "validation": "next-open entry and original terminal clock are independently replayed",
+      "stop": "classify as too late if most positive payoff is already unavailable"
+    },
+    {
+      "id": "H5_general_prior_only",
+      "target": "pre-session settled-payoff good bad unknown classifications",
+      "expected_benefit": "test generalisation without static post-inspection family labels",
+      "safety_risk": "current scoring payoff classifies itself",
+      "validation": "reuse only frozen no-leading-feature V2 forecasts with strict settlement support",
+      "stop": "return insufficient support when good and bad mass cannot be established"
+    }
+  ],
+  "population": {
+    "primary_surface": "breakout_loop_scores_range_p75 h24 source opportunities after the frozen 60-session warmup",
+    "periods": [2023, 2025],
+    "warmup_completed_sessions": 60,
+    "universe_size": 20,
+    "base_populations": [
+      "v1_h24_source_candidates",
+      "frozen_named_family_candidates",
+      "frozen_matched_controls"
+    ],
+    "or_stack_population": "unavailable as an exact compatible source in the frozen ledger and therefore omitted",
+    "replacement_opportunities_allowed": false,
+    "overlap_or_capacity_refill_allowed": false
+  },
+  "named_families": {
+    "targets": [
+      {"loop_id": "cycle_04", "orientation": "state_4", "cycle": "2->4->2"},
+      {"loop_id": "cycle_07", "orientation": "state_5", "cycle": "5->6->5"}
+    ],
+    "negative_control": {"loop_id": "cycle_07", "orientation": "state_6", "selection_basis": "frozen prior reports show negative h24 payoff in both opened periods"},
+    "neutral_control": {"loop_id": "cycle_04", "orientation": "state_2", "selection_basis": "frozen prior reports classify support as too sparse for a directional conclusion"},
+    "replacement_target_selection_allowed": false
+  },
+  "economic_classification": {
+    "source_model": "hierarchical_payoff_history_change_point",
+    "leading_features_enabled": false,
+    "classification_freeze": "regular-session open before current-session anchors",
+    "good": "support passes, posterior mean is positive, and frozen one-sided 90 percent lower bound is above zero",
+    "bad": "support passes and the reconstructed one-sided 90 percent upper bound is below zero",
+    "unknown": "all other cases, including missing cells",
+    "upper_bound_z": 1.6448536269514722,
+    "minimum_independent_sessions": 8,
+    "minimum_independent_stocks": 5,
+    "minimum_effective_sample_size": 12.0,
+    "maximum_posterior_std_bps": 80.0,
+    "missing_is_zero": false
+  },
+  "structural_unit": "opportunity anchor by stock by session by loop orientation by checkpoint",
+  "economic_support_unit": "session by loop by orientation by fixed h24 horizon",
+  "posterior": {
+    "initial_known_mass": "the frozen causal loop_probability for every compatible loop at the anchor",
+    "initial_unknown_mass": "one minus the sum of compatible raw loop probabilities; observed sums above one fail closed",
+    "candidate_orientation": "parent cycle plus anchor current state",
+    "hard_elimination": "zero only after the completed observed transition prefix is incompatible with every rotation beginning at the anchor state",
+    "completed_candidate": "remains compatible after its registered parent path completes",
+    "unseen_possible_minimum_likelihood": 0.05,
+    "clock_lift_smoothing_alpha": 1.0,
+    "timing_likelihood_smoothing_alpha": 1.0,
+    "empirical_bayes_pooling_strength": 10.0,
+    "clock_lift_clip": [0.25, 4.0],
+    "score_likelihood_ratio_clip": [0.25, 4.0],
+    "unknown_likelihood": 1.0,
+    "training_history": "all strictly earlier completed sessions inside the same period",
+    "period_reset": true,
+    "loop_occurs_usage": "training-only census label; never loaded for the scored anchor or checkpoint",
+    "future_realised_loop_usage": false
+  },
+  "context": {
+    "primary_clock_bins": {"open": [0, 11], "middle": [12, 35], "late": [36, 77]},
+    "coarse_clock_bins": {"early": [0, 23], "late": [24, 77]},
+    "dwell_lag_bins": [1, 2, 4, 7, 13],
+    "history_token": "frozen causal three-state token at the anchor or observed transition",
+    "huge_sparse_lookup_allowed": false
+  },
+  "checkpoints": {
+    "event": [
+      "anchor_freeze",
+      "first_completed_transition",
+      "second_completed_transition",
+      "exact_parent_completion",
+      "first_route_diversion",
+      "first_incompatible_transition"
+    ],
+    "fixed_bars_after_anchor": [1, 2, 3, 6],
+    "availability": "a transition checkpoint freezes only after the first bar carrying the new state has completed",
+    "primary_endpoint_checkpoint": "the first registered event that eliminates at least one anchor-compatible loop, with at least six bars remaining",
+    "no_best_checkpoint_selection": true,
+    "minimum_bars_remaining_for_resolution": 6,
+    "fixed_bar_2023_economic_status": "missing_source_data_not_zero",
+    "fixed_bar_2023_structural_status": "available from state-run boundaries"
+  },
+  "remaining_payoff": {
+    "primary": "constant_terminal",
+    "entry": "next causally available provider open after checkpoint",
+    "terminal": "original anchor plus 24 bars close",
+    "cost_bps_per_side": 5.0,
+    "direction": "outcome-only frozen source direction, absent from posterior inputs",
+    "after_terminal": "unavailable_not_zero",
+    "secondary": "restarted_h24_from_checkpoint_next_open",
+    "restarted_and_constant_must_remain_separate": true,
+    "capturable_fraction_denominator": "positive original net payoff only; non-positive denominators are missing",
+    "execution_interpretation": "delayed admission is executable only after the original trigger direction is causally known; conditional payoff labels before that time are predictive targets only"
+  },
+  "decision": {
+    "states": ["unresolved", "reject", "admit"],
+    "default": "unresolved",
+    "bad_mass_veto_threshold": 0.5,
+    "minimum_good_to_bad_odds": 1.0,
+    "maximum_unknown_mass_for_admit": 0.5,
+    "maximum_normalised_entropy_for_admit": 0.65,
+    "minimum_bars_remaining_for_admit": 6,
+    "admit": "good mass dominates bad mass, unknown and entropy pass, conservative expected remaining net is positive, support passes, and a good loop remains compatible",
+    "reject": "target named family is eliminated, or bad mass reaches the frozen veto threshold with non-positive conservative remaining net, or unresolved unknown survives until fewer than six bars remain",
+    "reconsider_after_reject": false,
+    "existing_position_action": "unchanged",
+    "threshold_tuning_on_opened_pnl_allowed": false
+  },
+  "primary_comparison": {
+    "treatment": "full sequential transition dwell and clock posterior at first competitor-elimination event",
+    "control": "the identical full posterior frozen at that opportunity's anchor",
+    "target": "positive constant-terminal remaining net payoff at the first-elimination checkpoint",
+    "primary_metrics": ["paired_brier_improvement", "paired_log_loss_improvement", "paired_remaining_net_increment_bps"],
+    "bootstrap_resamples": 2000,
+    "bootstrap_session_block_length": 5,
+    "bootstrap_confidence": 0.95,
+    "bootstrap_seed": 20260715,
+    "paired_population_required": true
+  },
+  "baselines": [
+    "no_rejection",
+    "top_predicted_loop_only",
+    "absolute_target_loop_score",
+    "static_good_mass_at_anchor",
+    "static_good_to_bad_odds_at_anchor",
+    "v1_60_session_selector",
+    "payoff_only_change_point",
+    "static_complete_loop_score_equation_unavailable_on_exact_population",
+    "sequential_compatibility_only",
+    "sequential_transition_dwell_clock_posterior"
+  ],
+  "veto_policies": [
+    "base_no_rejection",
+    "bad_mass_veto",
+    "good_to_bad_odds_veto",
+    "full_sequential_conservative_veto",
+    "delayed_admit_after_resolution"
+  ],
+  "stress_tests": {
+    "twice_costs": true,
+    "one_additional_bar_execution_delay": true,
+    "median_session_aggregation": true,
+    "fully_rebuilt_leave_one_stock_out": true,
+    "remove_best_stock": true,
+    "remove_top_five_stocks": true,
+    "remove_best_episode": true,
+    "remove_top_five_episodes": true,
+    "periods_separately": [2023, 2025],
+    "exclude_weakest_liquidity_quantile": 0.2,
+    "minimum_two_bar_state_dwell": true,
+    "coarse_clock_bins": true,
+    "prior_smoothing_alpha": [0.5, 2.0],
+    "unbounded_grid_search_allowed": false
+  },
+  "prospective_logging": {
+    "execution_enabled": false,
+    "forecast_rows_immutable": true,
+    "outcomes_append_separately": true,
+    "duplicate_ids_fail_closed": true,
+    "opened_historical_sources_rejected_in_holdout_mode": true,
+    "persistent_event_lineage_required": true,
+    "empty_requested_session_fails": true
+  },
+  "decision_rule": {
+    "requirements": [
+      "paired sequential prediction improves over anchor",
+      "paired economic increment is positive",
+      "losses avoided exceed profits rejected after costs",
+      "coverage is non-trivial",
+      "resolution precedes most positive payoff",
+      "period stability",
+      "no material concentration",
+      "fully rebuilt leave-one-stock-out stability",
+      "twice-cost and one-bar-delay stability where executable",
+      "independent audit and exact rerun pass",
+      "fixed population and no replacement",
+      "no realised loop identity or future state input"
+    ],
+    "allowed_conclusions": [
+      "sequential_competitor_veto_supported_prospectively_only_required",
+      "competitor_elimination_predictive_but_too_late",
+      "rejection_value_supported_admission_unknown",
+      "named_family_mechanism_descriptive_only",
+      "static_anchor_information_sufficient_no_sequence_increment",
+      "competitor_posterior_not_payoff_informative",
+      "insufficient_support",
+      "concentrated_or_unstable",
+      "hypothesis_rejected",
+      "experiment_blocked_by_missing_identity_or_data"
+    ]
+  },
+  "random_seed": 20260715
+}

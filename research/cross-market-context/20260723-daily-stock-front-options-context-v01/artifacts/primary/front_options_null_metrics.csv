@@ -1,0 +1,4 @@
+null_refit,seed,log_loss_improvement,brier_improvement,auc_improvement,average_precision_improvement,real_exceeds_null_log_loss_improvement,real_exceeds_null_brier_improvement,real_exceeds_null_auc_improvement,real_exceeds_null_average_precision_improvement
+0,20260723,-0.000858593922158063,-0.00018842757960835926,0.0019716680846256773,0.00038164248697182546,True,True,False,False
+1,20260724,-0.0010175937253914247,-0.00023582743747308302,-0.005196130853900582,-0.001266796664257476,True,True,False,False
+2,20260725,-0.0001008029768282126,-2.118777101772773e-05,-0.006048628119292632,-0.0014299685774405366,True,True,False,True

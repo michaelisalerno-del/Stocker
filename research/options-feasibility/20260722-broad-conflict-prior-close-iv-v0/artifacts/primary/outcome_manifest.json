@@ -1,0 +1,21 @@
+{
+  "annual_trading_minutes": 98280,
+  "directional_outcomes_primary": false,
+  "entry_price": "open of first completed five-minute bar after checkpoint",
+  "intraday_option_fill_simulated": false,
+  "option_pnl_calculated": false,
+  "primary_binary": "movement_exceeds_iv_expected_absolute",
+  "primary_continuous": "iv_absolute_residual_15m",
+  "primary_horizon": "next three completed five-minute bars only",
+  "primary_underlying_outcomes": [
+    "absolute_log_return_15m",
+    "realised_range_15m",
+    "maximum_absolute_excursion_15m",
+    "realised_variance_15m"
+  ],
+  "secondary_descriptive_horizons_minutes": [
+    10,
+    30,
+    60
+  ]
+}

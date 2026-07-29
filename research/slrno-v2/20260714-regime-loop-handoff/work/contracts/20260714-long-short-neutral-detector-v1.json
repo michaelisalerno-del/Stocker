@@ -1,0 +1,377 @@
+{
+  "contract_id": "20260714-long-short-neutral-detector-v1",
+  "frozen_before_target_construction_or_scoring": true,
+  "scientific_status": "causal_retrospective_three_state_development_on_already_opened_2024_2025_and_partial_2026_not_validation",
+  "purpose": "Test whether a compact causal model can distinguish an economically meaningful upward path, downward path, or neutral/unresolvable path before loops or setup dictionaries are considered.",
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "position_or_order_functionality_allowed": false,
+    "application_code_modification_allowed": false,
+    "repository_write_allowed": false,
+    "strategy_promotion_allowed": false
+  },
+  "opened_data_status": {
+    "genuinely_unseen_sessions_available": false,
+    "validation_claim_allowed": false,
+    "economic_edge_claim_allowed": false,
+    "warning": "All source periods have participated elsewhere in the research lineage. This is a frozen causal retrospective development test only.",
+    "do_not_tune_after_scoring": [
+      "decision clocks",
+      "barrier multiple or clamps",
+      "horizon",
+      "feature list",
+      "model regularisation",
+      "training window",
+      "cost-aware decision equation",
+      "class definitions"
+    ]
+  },
+  "data": {
+    "provider": "EODHD historical five-minute bars",
+    "provider_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "timeframe": "5m",
+    "timezone": "America/New_York",
+    "regular_session": "09:30 inclusive to 16:00 exclusive",
+    "source_columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "volume_label": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "quotes_or_ticks_used": false,
+    "intrabar_ohlc_order": "unknown",
+    "off_grid_policy": "Exclude and count rows not exactly on the five-minute regular-session grid; never round timestamps.",
+    "period_bounds": {
+      "2024": [
+        "2024-01-01T00:00:00Z",
+        "2025-01-01T00:00:00Z"
+      ],
+      "2025": [
+        "2025-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z"
+      ],
+      "2026": [
+        "2026-01-01T00:00:00Z",
+        "2026-06-30T00:00:00Z"
+      ]
+    },
+    "symbols_2024_2025": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "symbols_2026": [
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "aal_2026_excluded": true,
+    "aal_2026_reason": "Preserve the existing frozen 2026 source boundary after terminal AAL rows were previously exposed during schema inspection."
+  },
+  "population": {
+    "unit": "fixed stock-session decision anchor",
+    "decision_bar_ordinals": [
+      12,
+      36
+    ],
+    "reason": "Two predeclared non-overlapping 24-bar outcome windows per complete regular session avoid setup-selection bias and overlapping labels.",
+    "requirements": [
+      "exact decision bar exists on grid",
+      "the prior 12 bars are contiguous within the same session segment",
+      "all elapsed regular-session bars from ordinal 0 through the decision bar are present because session-return, session-mean, and opening-range features use them",
+      "all OHLC values are finite, positive, and internally ordered",
+      "causal prior scale is finite and positive"
+    ],
+    "post_seal_path_policy": "After the outcome-free population is hashed, require the next-open admission bar and all 24 outcome bars to be exact and contiguous; retain and count any population row that cannot be scored.",
+    "no_setup_filter": true,
+    "no_loop_filter": true,
+    "no_direction_filter": true
+  },
+  "causal_clock": {
+    "decision": "Features and class probabilities use the completed decision bar and earlier data only.",
+    "admission": "Economic translation begins at the exact next provider open; this is a research counterfactual only.",
+    "outcome": "Future highs, lows, closes, class labels, barrier hits, and payoffs remain sealed until the pre-outcome ledger and hashes are written.",
+    "training": "A scored session may use labels only from completed earlier sessions; no same-session label enters fitting.",
+    "execution": "No order or position exists."
+  },
+  "target": {
+    "name": "symmetric_causal_scale_triple_barrier_24",
+    "prior_scale_bps": "Median true-range bps of the prior 12 contiguous completed bars, excluding the decision bar.",
+    "barrier_bps": "clip(4 * prior_scale_bps, 40, 250)",
+    "barrier_rationale": "A four-bar-range scale asks for a substantial horizon move while preserving a genuine no-touch neutral class; the multiple and clamps are frozen rather than outcome-selected.",
+    "entry": "Exact next-bar open.",
+    "upper_barrier": "entry * (1 + barrier_bps / 10000)",
+    "lower_barrier": "entry * (1 - barrier_bps / 10000)",
+    "horizon_bars": 24,
+    "long": "The upper barrier is uniquely touched before the lower barrier.",
+    "short": "The lower barrier is uniquely touched before the upper barrier.",
+    "neutral": "Neither barrier is touched within 24 bars, or the first boundary interaction touches both barriers in the same five-minute bar and cannot be ordered.",
+    "same_bar_dual_touch": "Label neutral/unresolvable for classification and score either hypothetical directional position conservatively as a stop loss.",
+    "gap_rule": "A bar open beyond one barrier establishes that barrier first; an open cannot be beyond both symmetric barriers.",
+    "no_touch_economic_exit": "Exit a hypothetical directional position at the close of outcome bar 24.",
+    "accuracy_warning": "Neutral means no uniquely observable usable direction under this bar resolution; it does not mean the price was literally flat."
+  },
+  "causal_features": {
+    "categorical": [
+      "decision_clock"
+    ],
+    "price_numeric": [
+      "barrier_bps",
+      "current_range_scale",
+      "current_body_scale",
+      "current_close_location",
+      "current_upper_wick_fraction",
+      "current_lower_wick_fraction",
+      "return_1_scale",
+      "return_3_scale",
+      "return_6_scale",
+      "return_12_scale",
+      "mean_abs_return_6_scale",
+      "compression_3_to_12",
+      "session_return_scale",
+      "session_mean_distance_scale",
+      "opening_range_position",
+      "opening_range_width_scale"
+    ],
+    "activity_numeric": [
+      "current_activity_ratio_12",
+      "activity_trend_3_to_12"
+    ],
+    "activity_caveat": "Both activity fields use provider historical bar volume as an activity proxy only.",
+    "excluded": [
+      "loop scores or realised loop identity",
+      "regime labels",
+      "future bars or extrema",
+      "future volume",
+      "target labels or payoff fields",
+      "quotes, ticks, spread, order book, broker, position, and order state",
+      "symbol identity"
+    ]
+  },
+  "models": [
+    {
+      "id": "M0_clock_prior",
+      "features": [
+        "decision_clock"
+      ],
+      "role": "causal base-rate comparator"
+    },
+    {
+      "id": "M1_price_context",
+      "features": "decision_clock plus all price_numeric fields",
+      "role": "primary three-state detector"
+    },
+    {
+      "id": "M2_price_plus_activity",
+      "features": "M1 plus both activity_numeric fields",
+      "role": "predeclared activity-proxy increment"
+    }
+  ],
+  "model_fit": {
+    "equation": "L2-regularised multinomial logistic regression",
+    "solver": "lbfgs",
+    "C": 0.1,
+    "maximum_iterations": 1000,
+    "numeric_preprocessing": "training-window median imputation followed by standard scaling",
+    "categorical_preprocessing": "one-hot encoding with unknown levels ignored",
+    "class_weight": null,
+    "training_window_completed_sessions": 120,
+    "minimum_training_sessions": 60,
+    "minimum_training_rows": 1500,
+    "refit": "Every scored session using only prior completed sessions across 2024 onward.",
+    "score_periods": [
+      2025,
+      2026
+    ],
+    "random_seed": 20260714
+  },
+  "outputs": {
+    "probabilities": [
+      "p_long",
+      "p_short",
+      "p_neutral"
+    ],
+    "classification_state": "Argmax of the three probabilities, with deterministic class-name tie breaking.",
+    "economic_state": {
+      "long_proxy_ev_bps": "(p_long - p_short) * barrier_bps - 10",
+      "short_proxy_ev_bps": "(p_short - p_long) * barrier_bps - 10",
+      "state": "Choose the higher positive directional proxy EV; otherwise neutral.",
+      "warning": "The proxy treats neutral gross payoff as zero. Actual path payoff is evaluated separately and governs conclusions."
+    }
+  },
+  "economic_scoring": {
+    "primary_cost_bps_per_side": 5,
+    "round_trip_bps": 10,
+    "cost_sensitivity_bps_per_side": [
+      2.5,
+      5,
+      7.5,
+      10
+    ],
+    "correct_direction": "barrier_bps gross before cost",
+    "wrong_direction": "negative barrier_bps gross before cost",
+    "same_bar_dual_touch": "negative barrier_bps gross before cost for either direction",
+    "no_touch": "signed close-24 return from entry before cost",
+    "neutral_prediction": "zero payoff and no hypothetical position",
+    "short_borrow_modelled": false,
+    "market_impact_modelled": false
+  },
+  "evaluation": {
+    "predictive_metrics": [
+      "three-class accuracy",
+      "balanced accuracy",
+      "macro F1",
+      "multiclass log loss",
+      "multiclass Brier score",
+      "per-class precision and recall",
+      "confusion matrix"
+    ],
+    "economic_metrics": [
+      "directional coverage",
+      "mean net bps per directional output",
+      "mean net bps per full eligible opportunity",
+      "long and short precision",
+      "monthly stability",
+      "leave-one-stock-out stability",
+      "cost sensitivity"
+    ],
+    "bootstrap_draws": 5000,
+    "bootstrap_seed": 20260714,
+    "session_block_length": 5,
+    "multiplicity": "Holm control across both score periods for M1 versus M0, M2 versus M1, and the economic-policy endpoints.",
+    "minimum_support": {
+      "2025_directional_outputs": 300,
+      "2026_directional_outputs": 150,
+      "minimum_stocks": 15,
+      "minimum_directional_coverage": 0.05
+    },
+    "qualification": [
+      "Macro-F1 improvement over M0 has a paired session-block lower bound above zero in both score periods.",
+      "Log-loss improvement over M0 is positive in both periods and survives Holm control.",
+      "Both long and short output precision are at least 55% in both periods.",
+      "Economic directional mean net has a session-block lower bound above zero in both periods.",
+      "Full-opportunity mean net remains positive at 7.5 bps per side in both periods.",
+      "At least half of months are positive and every leave-one-stock-out deletion remains positive in both periods.",
+      "Coverage, stock breadth, exact rerun, leakage, and independent audit gates pass."
+    ],
+    "decision": "Any failed qualification gate yields rejected_or_descriptive_only; no retrospective model may be promoted."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_three_state_price_context",
+      "question": "Does compact causal price geometry improve long/short/neutral discrimination over clock-specific prior probabilities?",
+      "target_files": [
+        "work/run_long_short_neutral_detector_v1.py",
+        "work/tests/test_long_short_neutral_detector_v1.py"
+      ],
+      "expected_research_benefit": "Separates direction learnability from loop occurrence and entry-pattern selection.",
+      "safety_risk": "A high neutral prevalence could inflate headline accuracy.",
+      "validation_command": "pytest work/tests/test_long_short_neutral_detector_v1.py -q",
+      "stop_condition": "Reject unless macro F1 and log loss improve portably, with class-specific metrics reported."
+    },
+    {
+      "id": "H2_activity_increment",
+      "question": "Does causal historical-volume activity add information after price context?",
+      "target_files": [
+        "work/run_long_short_neutral_detector_v1.py"
+      ],
+      "expected_research_benefit": "Tests one compact information increment instead of a large sparse dictionary.",
+      "safety_risk": "Provider volume may be mistaken for quote flow or order-book participation.",
+      "validation_command": "pytest work/tests/test_long_short_neutral_detector_v1.py -q",
+      "stop_condition": "Reject the increment if it does not improve both score periods after multiplicity control."
+    },
+    {
+      "id": "H3_cost_aware_abstention",
+      "question": "Can three-state probabilities support a cost-aware long/short/neutral decision with positive realised path payoff?",
+      "target_files": [
+        "work/run_long_short_neutral_detector_v1.py",
+        "work/audit_long_short_neutral_detector_v1.py"
+      ],
+      "expected_research_benefit": "Prevents forced direction and connects classification to actual post-cost paths.",
+      "safety_risk": "The proxy EV simplifies neutral-path magnitude and cannot establish a tradable rule by itself.",
+      "validation_command": "python work/audit_long_short_neutral_detector_v1.py --artifact-root work/artifacts/20260714-long-short-neutral-detector-v1/primary",
+      "stop_condition": "Reject unless realised rather than proxy payoff passes every economic gate."
+    },
+    {
+      "id": "H4_directional_symmetry",
+      "question": "Is any detected edge present in both long and short states rather than one period-specific side?",
+      "target_files": [
+        "work/run_long_short_neutral_detector_v1.py"
+      ],
+      "expected_research_benefit": "Distinguishes genuine direction classification from a market-drift shortcut.",
+      "safety_risk": "Short counterfactuals omit borrow availability and fees.",
+      "validation_command": "pytest work/tests/test_long_short_neutral_detector_v1.py -q",
+      "stop_condition": "Reject qualification if either side misses frozen precision or support gates."
+    }
+  ],
+  "integrity": {
+    "seal_before_score": [
+      "contract hash",
+      "runner hash",
+      "auditor hash",
+      "test hash",
+      "all provider source hashes",
+      "outcome-free event ledger hash",
+      "coverage ledger hash"
+    ],
+    "forbidden_pre_outcome_tokens": [
+      "label",
+      "target_class",
+      "future",
+      "upper_hit",
+      "lower_hit",
+      "payoff",
+      "net_bps",
+      "mfe",
+      "mae"
+    ],
+    "required": [
+      "causal feature reconstruction",
+      "all path labels and payoffs independently replayed",
+      "prequential model refit checked",
+      "source and outcome-seal hashes checked",
+      "exact byte-identical rerun"
+    ]
+  }
+}

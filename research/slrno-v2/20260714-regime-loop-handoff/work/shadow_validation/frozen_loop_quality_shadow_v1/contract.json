@@ -1,0 +1,133 @@
+{
+  "contract_id": "frozen_loop_quality_shadow_v1",
+  "contract_frozen_at_utc": "2026-07-10T21:45:00Z",
+  "scientific_status": "final_development_portability_certified_prospective_shadow_dormant",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "purpose": "Record frozen structural and conditional movement-quality probabilities before outcomes only for cycles that passed every frozen good/high gate.",
+  "lineage": {
+    "development_contract_id": "per_loop_movement_quality_v1",
+    "development_contract_sha256": "67d64c463df52f01f360561ef0a69d5772b7eec0409468c93d6eb5a630dee02e",
+    "state_model": "frozen eight-state causal forward semi-Markov detector fitted on 2024",
+    "structural_loop_model": "frozen 2024-fitted last-three-state fixed-loop identity model",
+    "conditional_quality_model": "frozen 2024 per-loop multinomial movement-quality model",
+    "targets": [
+      "absolute_return_bps",
+      "future_range_bps"
+    ],
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "provider_volume_used_by_quality_model": false,
+    "historical_volume_note": "The upstream frozen state detector uses provider historical_volume features. This is neither exchange-wide volume nor order flow. The movement-quality model has no direct volume input.",
+    "refit_recalibration_cycle_substitution_or_gate_change_permitted": false
+  },
+  "eligibility_freeze": {
+    "permitted_grades": [
+      "good_movement_quality",
+      "high_movement_quality"
+    ],
+    "required_final_grade_source": "final_cycle_tiers.csv produced by sealed development/backward-portability scoring",
+    "final_cycle_tiers_sha256": "2d4e4bd2ef26db396244fe7cd20a8485aba1814eaeacf5326916823225d7c598",
+    "final_gates_sha256": "0e64c9a9dee02b1860117078a811387f64ec6324e7edb2ec2b4b2104ee3b7637",
+    "required_grade_logic": "minimum of 2024 OOF provisional, 2025 development, and backward-2023 portability grades",
+    "promotion_after_2024_provisional_freeze_permitted": false,
+    "provisional_tiers_2024_sha256": "2a46df0499d9abd2bdf8b144d8b4353c6e90560b5b4f1c64971238630d6bf973",
+    "provisional_global_grade_counts": {
+      "high_movement_quality": 0,
+      "good_movement_quality": 0,
+      "unqualified": 20
+    },
+    "final_grade_counts": {
+      "high_movement_quality": 0,
+      "good_movement_quality": 0,
+      "unqualified": 20
+    },
+    "all_twenty_unqualified_in_each_period": {
+      "2024_oof": true,
+      "development_2025": true,
+      "backward_2023": true,
+      "final": true
+    },
+    "eligible_cycle_ids": [],
+    "activation_state": "dormant_no_eligible_cycles",
+    "dormant_reason": "Every cycle is globally unqualified in the frozen 2024 OOF provisional tier. Because later periods may only demote and never promote, no final good/high cycle is mathematically possible under this contract.",
+    "unqualified_cycles_may_surface": false,
+    "activation_by_mutating_this_contract_permitted": false,
+    "new_separately_frozen_contract_required_for_any_future_candidate": true
+  },
+  "prediction_semantics": {
+    "one_row": "one causal state-run-entry anchor and one eligible frozen cycle",
+    "structural_probability": "s(i,c) = frozen probability that loop c's exact future state path occurs",
+    "conditional_quality_probability": "q75/q90(i,c) = frozen movement-threshold exceedance probability conditional on loop c occurring",
+    "joint_probability": "j75/j90(i,c) = s(i,c) multiplied by q75/q90(i,c)",
+    "required_reported_axes": [
+      "structural_probability",
+      "conditional_q75",
+      "conditional_q90",
+      "joint_j75",
+      "joint_j90"
+    ],
+    "structural_and_conditional_probabilities_must_remain_separate": true,
+    "chain_rule_must_hold_rowwise": true,
+    "probabilities_may_not_be_summed_across_overlapping_cycles": true,
+    "direction_signed_return_or_long_short_interpretation_permitted": false,
+    "pnl_tradability_or_trading_performance_interpretation_permitted": false
+  },
+  "issuance": {
+    "new_predictions_must_be_recorded_before_outcomes_exist": true,
+    "completed_regular_session_bar_only": true,
+    "append_only_hash_chained_ledger": true,
+    "current_issuance_permitted": false,
+    "dormant_check_must_run_before_reading_a_candidate_batch": true,
+    "outcome_fields_in_prediction_batches_permitted": false,
+    "outcome_evaluator_in_this_runtime_permitted": false
+  },
+  "prospective_interpretation": {
+    "2025_is_development_not_prospective": true,
+    "backward_2023_is_portability_not_prospective": true,
+    "partial_2026_is_not_clean_holdout": true,
+    "current_prospective_claim": false,
+    "zero_eligible_cycles_means_no_quality_hypothesis_is_currently_in_shadow_validation": true
+  },
+  "final_certification": {
+    "sealed_scoring_complete": true,
+    "independent_post_score_audit_status": "complete_passed",
+    "independent_post_score_audit_sha256": "2f969f2bb751da5d781227feb8edb0af5d1166cfb3a09758806cdb6f94c713a7",
+    "independent_post_score_audit_check_count": 48,
+    "independent_post_score_audit_all_passed": true,
+    "final_grade_is_minimum_of_2024_oof_2025_2023": true,
+    "qualified_good_or_high_cycles": 0,
+    "high_cycles": 0,
+    "no_unqualified_cycle_may_surface": true,
+    "prospective_validation_pending": true,
+    "audited_safety": {
+      "research_only": true,
+      "live_ordering_enabled": false,
+      "order_placement": "disabled",
+      "no_2026_rows": true,
+      "no_execution_surface": true,
+      "aggregate_shadow_ledger_lines": 0,
+      "aggregate_shadow_outcomes_opened": false
+    }
+  },
+  "integrity": {
+    "existing_aggregate_shadow_must_remain_unchanged": true,
+    "existing_aggregate_shadow_content_snapshot_sha256": "ffc5f1ccb572e120b8001cb0d9a93cfb4d37946e53c2ac39c3d6970fb8e8d766",
+    "existing_aggregate_shadow_files_only_snapshot_definition": "canonical JSON of the 22 files inside the aggregate runtime tree, with relative path, byte size, and SHA-256; directory metadata and workspace source files excluded",
+    "broader_protected_path_snapshot_tree_sha256": "38e90e9db3ae2974db2f6726bb69dfadde0410c2b200e7ce9e080fcbd22bc267",
+    "broader_protected_path_snapshot_definition": "the quality scorer's 40-entry protected-path snapshot including workspace contract, manifest, core, runner, tests, reports, and aggregate runtime entries with kind, mode, size, and content hash",
+    "snapshot_hashes_are_not_expected_to_match": true,
+    "existing_aggregate_prediction_ledger_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "quality_fit_complete_sha256": "5e1a95ffc1490973d54b07590bb09f12a4fb0d92f0b66389846a81fd3a51dffc",
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "ordered_probability_nesting_required": true,
+    "outcomes_opened": false
+  }
+}

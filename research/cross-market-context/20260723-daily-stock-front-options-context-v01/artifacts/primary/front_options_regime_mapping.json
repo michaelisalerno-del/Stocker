@@ -1,0 +1,247 @@
+{
+  "back_expiry_bulk_download_enabled": false,
+  "back_expiry_schema_preflight_only": true,
+  "branches_run_independently": true,
+  "broker_integration_required": false,
+  "canonical_centroids": [
+    {
+      "front_options_directional_positioning": -0.11193728902993151,
+      "front_options_downside_asymmetry": 0.05293289373784202,
+      "front_options_implied_tension": -0.2716362308841843,
+      "front_options_liquidity_stress": -0.1726445960877277,
+      "front_options_positioning_concentration": 0.20069683386565002,
+      "front_options_premium_richness": -0.275044939920876,
+      "front_options_surface_disagreement": -0.06168069524270413
+    },
+    {
+      "front_options_directional_positioning": -0.14223270516247566,
+      "front_options_downside_asymmetry": -0.9122614786132291,
+      "front_options_implied_tension": 0.26575278300911903,
+      "front_options_liquidity_stress": 1.3425280996895579,
+      "front_options_positioning_concentration": 0.4011632977939506,
+      "front_options_premium_richness": 0.2758004761340241,
+      "front_options_surface_disagreement": 1.2319684388767174
+    },
+    {
+      "front_options_directional_positioning": 0.2192739085992159,
+      "front_options_downside_asymmetry": -0.6354453025065266,
+      "front_options_implied_tension": 0.43300796665053964,
+      "front_options_liquidity_stress": 0.9107540455723473,
+      "front_options_positioning_concentration": -0.09119283862497614,
+      "front_options_premium_richness": 0.3985059438848325,
+      "front_options_surface_disagreement": 1.3465640741868694
+    },
+    {
+      "front_options_directional_positioning": 0.16193518642634777,
+      "front_options_downside_asymmetry": 40.523692196450355,
+      "front_options_implied_tension": 0.7492240326528866,
+      "front_options_liquidity_stress": 2.101948280308531,
+      "front_options_positioning_concentration": -1.191014100456752,
+      "front_options_premium_richness": 0.6957066673615775,
+      "front_options_surface_disagreement": 37.35912637850435
+    }
+  ],
+  "canonical_covariances": [
+    [
+      0.1913357700323286,
+      0.2515863756410441,
+      0.16384051502398522,
+      0.0713085899301033,
+      0.45057142792300214,
+      0.3815184410364054,
+      0.05810482645782532,
+      1e-05,
+      1e-05,
+      1e-05
+    ],
+    [
+      0.7048172373733417,
+      0.739312303766959,
+      7.13844925784351,
+      1.7126884439999246,
+      2.1774100214607,
+      2.2248078723044475,
+      2.2841927262676025,
+      1e-05,
+      1e-05,
+      1e-05
+    ],
+    [
+      0.4055713898687708,
+      0.547420965874822,
+      5.174237909269192,
+      0.881574500107069,
+      0.7743683379293033,
+      1.4231907172949834,
+      1.4137874190461335,
+      1e-05,
+      1e-05,
+      1e-05
+    ],
+    [
+      1.0000000001332268e-05,
+      1.0000000001110224e-05,
+      1.0000003865352483e-05,
+      1.0000000010658142e-05,
+      1.000000000333067e-05,
+      1.0000000000058981e-05,
+      1.0000003183231457e-05,
+      1e-05,
+      1e-05,
+      1e-05
+    ]
+  ],
+  "canonical_dimensions": [
+    "front_options_implied_tension",
+    "front_options_premium_richness",
+    "front_options_downside_asymmetry",
+    "front_options_liquidity_stress",
+    "front_options_positioning_concentration"
+  ],
+  "canonical_input_means": [
+    [
+      -0.2716362308841843,
+      -0.275044939920876,
+      0.05293289373784202,
+      -0.1726445960877277,
+      0.20069683386565002,
+      -0.11193728902993151,
+      -0.06168069524270413,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.26575278300911903,
+      0.2758004761340241,
+      -0.9122614786132291,
+      1.3425280996895579,
+      0.4011632977939506,
+      -0.14223270516247566,
+      1.2319684388767174,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.43300796665053964,
+      0.3985059438848325,
+      -0.6354453025065266,
+      0.9107540455723473,
+      -0.09119283862497614,
+      0.2192739085992159,
+      1.3465640741868694,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.7492240326528866,
+      0.6957066673615775,
+      40.523692196450355,
+      2.101948280308531,
+      -1.191014100456752,
+      0.16193518642634777,
+      37.35912637850435,
+      0.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "canonical_to_original": [
+    0,
+    2,
+    1,
+    3
+  ],
+  "canonical_weights": [
+    0.5512660615491036,
+    0.15280000000000013,
+    0.2951339384508962,
+    0.0008000000000000025
+  ],
+  "converged": true,
+  "covariance_type": "diag",
+  "daily_stock_context_test": true,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "fitted_period": "development_2024_only",
+  "front_options_only_context_test": true,
+  "input_columns": [
+    "front_options_implied_tension",
+    "front_options_premium_richness",
+    "front_options_downside_asymmetry",
+    "front_options_liquidity_stress",
+    "front_options_positioning_concentration",
+    "front_options_directional_positioning",
+    "front_options_surface_disagreement",
+    "skew_25d_missing",
+    "near_spot_oi_concentration_missing",
+    "call_put_oi_imbalance_missing"
+  ],
+  "input_medians": [
+    -0.0579820762718455,
+    -0.042547730775555695,
+    -0.006206588916560054,
+    4.093799362289334e-17,
+    -7.054090384733813e-17,
+    3.01950305037213e-17,
+    0.1617618161316724,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "intraday_option_quotes_used": false,
+  "iterations": 50,
+  "max_iter": 300,
+  "n_components": 4,
+  "n_init": 5,
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "original_to_canonical": [
+    0,
+    2,
+    1,
+    3
+  ],
+  "prefix": "front_options_regime",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_context_screen": true,
+  "random_state": 20260723,
+  "reg_covar": 1e-05,
+  "research_only": true,
+  "strategy_promotion": false,
+  "support": {
+    "0": {
+      "hard_rows": 725,
+      "months": 8,
+      "posterior_mass": 0.7771420269263041,
+      "stocks": 20,
+      "supported": true
+    },
+    "1": {
+      "hard_rows": 51,
+      "months": 8,
+      "posterior_mass": 0.05489773950484392,
+      "stocks": 9,
+      "supported": true
+    },
+    "2": {
+      "hard_rows": 153,
+      "months": 8,
+      "posterior_mass": 0.16796023356885204,
+      "stocks": 18,
+      "supported": true
+    },
+    "3": {
+      "hard_rows": 0,
+      "months": 0,
+      "posterior_mass": 0.0,
+      "stocks": 0,
+      "supported": false
+    }
+  },
+  "underlying_movement_outcomes_opened": true
+}

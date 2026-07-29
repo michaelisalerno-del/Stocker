@@ -1,0 +1,12 @@
+{
+  "assessment_tuning": false,
+  "directional_optimisation": false,
+  "fit_period": "2024 only",
+  "method": "weighted midpoint-CDF",
+  "model": "M1C",
+  "quantile": 0.95,
+  "research_only": true,
+  "threshold": 0.4883337107940334,
+  "threshold_universe_includes_rows_before_target_validity_filter": true,
+  "weight_definition": "1 / causal checkpoints in the same stock-session"
+}

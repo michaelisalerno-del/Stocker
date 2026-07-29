@@ -1,0 +1,60 @@
+{
+  "archived_checkpoint_membership_permitted": false,
+  "archived_row_weights_permitted": false,
+  "archived_signed_pressure_permitted": false,
+  "contaminated_population_and_weight_descendants": [
+    "future_dependent_checkpoint_membership",
+    "eligible_stocks_in_session",
+    "eligible_advance_rows_for_stock_session",
+    "sequential_row_weight",
+    "archived_checkpoint_universe",
+    "archived_branch_c_checkpoint_membership"
+  ],
+  "contaminated_roots": [
+    "future_filtered_peer_slate",
+    "future_bar_target_validity"
+  ],
+  "directly_contaminated_group_i": [
+    "signed_pressure",
+    "tension"
+  ],
+  "future_filtered_peer_slates_permitted": false,
+  "other_peer_normalised_group_i_excluded": [
+    "posterior_entropy",
+    "transition_probability",
+    "persistence_probability",
+    "expected_state_age",
+    "top_state_probability",
+    "top_second_margin",
+    "any_registered_completion_prior_6",
+    "any_registered_completion_prior_12",
+    "same_identity_active_prefix_with_prior_completion",
+    "any_hidden_event_prior_6",
+    "hidden_2_3_2_prior_6",
+    "bars_since_latest_registered_completion"
+  ],
+  "research_only": true,
+  "transitive_descendants": [
+    "M1_coefficients",
+    "M1_probability",
+    "archived_branch_c_checkpoint_membership",
+    "archived_checkpoint_universe",
+    "archived_episode_identity",
+    "archived_weighted_threshold",
+    "eligible_advance_rows_for_stock_session",
+    "eligible_stocks_in_session",
+    "fresh_episode_identity",
+    "frozen_threshold_membership",
+    "future_dependent_checkpoint_membership",
+    "future_filtered_peer_median_absolute_progress",
+    "future_filtered_peer_median_signed_progress",
+    "raw_component__absolute_progress",
+    "raw_component__signed_progress",
+    "raw_signed_progress",
+    "sequential_row_weight",
+    "signed_pressure",
+    "tension",
+    "z_component__absolute_progress",
+    "z_component__signed_progress"
+  ]
+}

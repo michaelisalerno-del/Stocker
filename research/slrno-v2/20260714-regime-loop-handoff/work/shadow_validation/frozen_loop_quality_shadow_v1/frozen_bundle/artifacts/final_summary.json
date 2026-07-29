@@ -1,0 +1,207 @@
+{
+  "algorithm": "per_loop_conditional_movement_quality",
+  "fit_period": 2024,
+  "gates": {
+    "economic_edge_claim": false,
+    "final_grade_is_minimum_of_2024_oof_2025_2023": true,
+    "high_cycles": 0,
+    "live_ordering_enabled": false,
+    "no_unqualified_cycle_may_surface": true,
+    "order_placement": "disabled",
+    "prospective_validation_pending": true,
+    "qualified_good_or_high_cycles": 0,
+    "research_only": true
+  },
+  "interpretation": "Movement/range quality only. No direction, signed return, P&L, economic edge, tradability, order, or deployment claim.",
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "prospective_shadow_unchanged": true,
+  "qualified_tiers": [
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_01",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_02",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_03",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_04",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_05",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_06",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_07",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_08",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_09",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_10",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_11",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_12",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_13",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_14",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_15",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_16",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_17",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_18",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_19",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    },
+    {
+      "backward_2023_grade": "unqualified",
+      "cycle_id": "cycle_20",
+      "development_2025_grade": "unqualified",
+      "economic_edge_claim": false,
+      "final_grade": "unqualified",
+      "prospective_validated": false,
+      "provisional_2024_oof_grade": "unqualified"
+    }
+  ],
+  "research_only": true,
+  "scientific_status": "development_and_backward_portability_not_prospective",
+  "scoring_periods": [
+    2025,
+    2023
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "audit_id": "20260716-directed-economic-loop-regime-rotation-v1-independent-audit",
+  "auditor_sha256": "3bf4472501d6141b0295ce8bf62780c858067ad4d91a65a8e2a66ead14ef1378",
+  "checks": [
+    {
+      "detail": "contract=f982891bfb8e3b539ed5f6816b71b94a92979b57ae8a29dd121cfa888805a813",
+      "name": "contract_identity",
+      "passed": true
+    },
+    {
+      "detail": "snapshot=728b145c73c2f82fe2ba707a077a9ff52f597e065876ded40790f0818c5de684",
+      "name": "data_snapshot_identity",
+      "passed": true
+    },
+    {
+      "detail": "mapping=directed-economic-rotation-topology-family-v1; pairs=24",
+      "name": "family_mapping_frozen_and_outcome_free",
+      "passed": true
+    },
+    {
+      "detail": "reconstructed 3040 family-state rows",
+      "name": "economic_lifecycle_state_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": "reconstructed 3040 causal source-event rows",
+      "name": "source_event_timestamp_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": "checked 9120 targets; failures=[]",
+      "name": "activation_target_and_calendar_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": "independently reconstructed 336 final graph edges; failures=[]",
+      "name": "past_only_graph_and_shrinkage_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": "reconstructed paired primary losses over 1994 rows",
+      "name": "forecast_freeze_population_and_metric_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": "checked 2569 same-family later opportunities, all costs and clocks",
+      "name": "economic_translation_and_cost_reconstruction",
+      "passed": true
+    },
+    {
+      "detail": "pair edges=804; supported=12",
+      "name": "unsupported_pair_edges_remain_unknown",
+      "passed": true
+    },
+    {
+      "detail": "exclusions=0; blocked_fail_closed=True",
+      "name": "leave_one_stock_out_rebuild_or_fail_closed_blocker",
+      "passed": true
+    },
+    {
+      "detail": "nulls=['destination_label_permutation', 'source_permutation', 'wrong_lag_10']",
+      "name": "registered_null_family",
+      "passed": true
+    },
+    {
+      "detail": "rows=61",
+      "name": "concentration_accounting",
+      "passed": true
+    },
+    {
+      "detail": "verified 41 hashes and 6 plots; failures=[]",
+      "name": "primary_machine_and_plot_hashes",
+      "passed": true
+    },
+    {
+      "detail": "verified 42 hashes and 6 plots; failures=[]",
+      "name": "exact_machine_and_plot_hashes",
+      "passed": true
+    },
+    {
+      "detail": "{\"byte_identical\": true, \"compared_files\": 35, \"extra_files\": [], \"hash_mismatches\": [], \"missing_files\": []}",
+      "name": "primary_exact_rerun_identity",
+      "passed": true
+    },
+    {
+      "detail": "git=1b89071b41139b87640de28c8f9abba17cd750a0; changed=22; prohibited=[]",
+      "name": "git_identity_and_research_only_safety",
+      "passed": true
+    },
+    {
+      "detail": "schema=directed_economic_rotation_prospective_v1",
+      "name": "prospective_logger_execution_free",
+      "passed": true
+    }
+  ],
+  "failed_checks": [],
+  "independent_reconstruction": {
+    "beta_smoothing_and_shrinkage": true,
+    "economic_cost_and_identity_joins": true,
+    "family_state_aggregation": true,
+    "paired_primary_losses": true,
+    "past_only_graph_counts": true,
+    "source_event_timestamps": true,
+    "target_windows": true
+  },
+  "passed_checks": 18,
+  "research_only": true,
+  "status": "pass",
+  "total_checks": 18
+}

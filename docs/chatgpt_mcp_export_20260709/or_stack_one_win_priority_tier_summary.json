@@ -1,0 +1,163 @@
+{
+  "additive_harvest_forward_2026": [
+    {
+      "addon_confirmed_mean_r": -0.10337635219524502,
+      "addon_confirmed_total_r": -0.8270108175619602,
+      "addon_confirmed_win_rate": 0.5,
+      "addon_events": 8,
+      "addon_source_mean_r": 0.65,
+      "addon_source_total_r": 5.2,
+      "addon_source_win_rate": 0.875,
+      "base_events": 29,
+      "base_total_r": 21.774751207706334,
+      "candidate_events": 8,
+      "config": "2025_to_2026|5d|thr=1.1|refresh|all|top3",
+      "confirmed_combined_events": 37,
+      "confirmed_combined_mean_r": 0.5661551456795777,
+      "confirmed_combined_total_r": 20.947740390144375,
+      "confirmed_combined_win_rate": 0.8378378378378378,
+      "median_delay_min": 12.5,
+      "overlap_with_or_stack": 0,
+      "source_combined_events": 37,
+      "source_combined_mean_r": 0.729047329938009,
+      "source_combined_total_r": 26.974751207706333,
+      "source_combined_win_rate": 0.918918918918919
+    },
+    {
+      "addon_confirmed_mean_r": 0.07936265294891273,
+      "addon_confirmed_total_r": 0.87298918243804,
+      "addon_confirmed_win_rate": 0.5454545454545454,
+      "addon_events": 11,
+      "addon_source_mean_r": 0.3699209583249527,
+      "addon_source_total_r": 4.06913054157448,
+      "addon_source_win_rate": 0.7272727272727273,
+      "base_events": 29,
+      "base_total_r": 21.774751207706334,
+      "candidate_events": 11,
+      "config": "pre2026_to_2026|5d|thr=1.0|refresh|all|top5",
+      "confirmed_combined_events": 40,
+      "confirmed_combined_mean_r": 0.5661935097536095,
+      "confirmed_combined_total_r": 22.647740390144378,
+      "confirmed_combined_win_rate": 0.825,
+      "median_delay_min": 15.0,
+      "overlap_with_or_stack": 0,
+      "source_combined_events": 40,
+      "source_combined_mean_r": 0.6460970437320205,
+      "source_combined_total_r": 25.84388174928082,
+      "source_combined_win_rate": 0.875
+    },
+    {
+      "addon_confirmed_mean_r": 0.14533134093968597,
+      "addon_confirmed_total_r": 1.4533134093968598,
+      "addon_confirmed_win_rate": 0.6,
+      "addon_events": 10,
+      "addon_source_mean_r": 0.186908853737408,
+      "addon_source_total_r": 1.86908853737408,
+      "addon_source_win_rate": 0.6,
+      "base_events": 29,
+      "base_total_r": 21.774751207706334,
+      "candidate_events": 10,
+      "config": "pre2026_to_2026|10d|thr=1.0|refresh|first2_per_window|top1",
+      "confirmed_combined_events": 39,
+      "confirmed_combined_mean_r": 0.5955914004385434,
+      "confirmed_combined_total_r": 23.228064617103193,
+      "confirmed_combined_win_rate": 0.8461538461538461,
+      "median_delay_min": 12.5,
+      "overlap_with_or_stack": 0,
+      "source_combined_events": 39,
+      "source_combined_mean_r": 0.606252301155908,
+      "source_combined_total_r": 23.643839745080413,
+      "source_combined_win_rate": 0.8461538461538461
+    },
+    {
+      "addon_confirmed_mean_r": 0.10444278411640497,
+      "addon_confirmed_total_r": 1.2533134093968596,
+      "addon_confirmed_win_rate": 0.5833333333333334,
+      "addon_events": 12,
+      "addon_source_mean_r": 0.13909071144783997,
+      "addon_source_total_r": 1.6690885373740796,
+      "addon_source_win_rate": 0.5833333333333334,
+      "base_events": 29,
+      "base_total_r": 21.774751207706334,
+      "candidate_events": 12,
+      "config": "2025_to_2026|10d|thr=1.0|refresh|loop_first|top2",
+      "confirmed_combined_events": 41,
+      "confirmed_combined_mean_r": 0.5616601126122731,
+      "confirmed_combined_total_r": 23.028064617103198,
+      "confirmed_combined_win_rate": 0.8292682926829268,
+      "median_delay_min": 15.0,
+      "overlap_with_or_stack": 0,
+      "source_combined_events": 41,
+      "source_combined_mean_r": 0.5718009693922053,
+      "source_combined_total_r": 23.443839745080417,
+      "source_combined_win_rate": 0.8292682926829268
+    }
+  ],
+  "dedupe_rule": "earliest source-visible row per future_loop_key: max delay_min, tie lower book_rank",
+  "forward_2026": {
+    "or_stack_all": {
+      "events": 29,
+      "mean_r": 0.7508534899209081,
+      "total_r": 21.774751207706334,
+      "win_rate": 0.9310344827586207
+    },
+    "or_stack_first_win_next5": {
+      "events": 9,
+      "mean_r": 0.8999999999999999,
+      "total_r": 8.1,
+      "win_rate": 1.0
+    },
+    "or_stack_last_prior_winner": {
+      "events": 9,
+      "mean_r": 0.8526771119882001,
+      "total_r": 7.6740940078938005,
+      "win_rate": 1.0
+    },
+    "tier_a_or_stack_one_win_warm": {
+      "events": 10,
+      "mean_r": 0.85740940078938,
+      "total_r": 8.5740940078938,
+      "win_rate": 1.0
+    },
+    "tier_b_or_stack_not_one_win_warm": {
+      "events": 19,
+      "mean_r": 0.6947714315690812,
+      "total_r": 13.200657199812541,
+      "win_rate": 0.8947368421052632
+    }
+  },
+  "hybrid_forward_2026": {
+    "all_source_if_available": {
+      "events": 29,
+      "mean_r": 0.7508534899209081,
+      "source_entry_events": 0,
+      "total_r": 21.774751207706334,
+      "win_rate": 0.9310344827586207
+    },
+    "confirmed_only": {
+      "events": 29,
+      "mean_r": 0.7508534899209081,
+      "source_entry_events": 0,
+      "total_r": 21.774751207706334,
+      "win_rate": 0.9310344827586207
+    },
+    "tier_a_source_if_available_b_confirmed": {
+      "events": 29,
+      "mean_r": 0.7508534899209081,
+      "source_entry_events": 0,
+      "total_r": 21.774751207706334,
+      "win_rate": 0.9310344827586207
+    }
+  },
+  "inputs": {
+    "captured_events": "/private/tmp/stocker_one_win_warm_state_idea_sweep_20260709/captured_events_with_one_win_warm_state_and_or_stack.csv",
+    "source_visible_pairs": "/private/tmp/stocker_smid24_source_visible_candidate_book_fresh_20260708/loop_source_visible_candidate_book_v0_20260707T230822Z/source_visible_paired_entry_timing_detail.csv",
+    "train_selected_harvest_candidates": "/private/tmp/stocker_activation_candidate_harvest_topk_test_20260709/train_selected_forward_candidates.csv"
+  },
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true,
+  "source_pair_duplicate_future_loop_keys": 26,
+  "source_pair_rows": 543,
+  "source_pair_unique_future_loop_keys": 517
+}

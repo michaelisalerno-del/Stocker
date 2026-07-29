@@ -1,0 +1,183 @@
+{
+  "broker_integration_required": false,
+  "continuous_behavioural_dimensions": true,
+  "contract_id": "20260721-observable-behavioural-state-dimensions-screen-v0",
+  "decision_gate_constants": {
+    "bootstrap_interval": 0.9,
+    "checkpoint_material_adversity_brier": -0.001,
+    "minimum_positive_months": 5,
+    "null_percentile_threshold": 0.9,
+    "null_real_comparator": "strictly_greater_than_q90"
+  },
+  "decision_categories": [
+    "behavioural_dimensions_add_movement_and_direction",
+    "behavioural_dimensions_add_movement_only",
+    "behavioural_dimensions_add_direction_only",
+    "behavioural_conjunctions_only",
+    "behavioural_descriptions_only_no_predictive_increment",
+    "no_behavioural_state_increment",
+    "blocked_observable_predecessor_not_reconstructable",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_insufficient_behavioural_support",
+    "blocked_quick_behavioural_screen_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ],
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "fixed_behavioural_dimensions": [
+    "arousal",
+    "conviction",
+    "frustration",
+    "tension",
+    "signed_pressure",
+    "pressure_magnitude",
+    "exhaustion_magnitude",
+    "signed_exhaustion",
+    "independence",
+    "signed_independence"
+  ],
+  "fixed_conjunctions": [
+    "active_conviction",
+    "active_frustration",
+    "pressurised_tension",
+    "pressurised_exhaustion",
+    "independent_pressure"
+  ],
+  "descriptive_differences_gate": {
+    "minimum_absolute_movement_rate_difference": 0.01,
+    "minimum_represented_months": 6,
+    "minimum_rows": 100,
+    "minimum_stocks": 15,
+    "predictive_or_economic_override": false
+  },
+  "eligibility": {
+    "causal_activity_missing": "exclude_row_and_record",
+    "complete_causal_feature_history_required": true,
+    "minimum_parent_slate_stocks": 15,
+    "undersized_parent_slate": "exclude_slate_and_record"
+  },
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_ladder": {
+    "direction": {
+      "D0": "checkpoint_and_open_to_decision_cohort_relative_return",
+      "D1": "exact_frozen_observable_predecessor",
+      "D2": "D1_features_plus_ten_fixed_dimensions",
+      "D3": "D2_features_plus_five_fixed_conjunctions"
+    },
+    "movement": {
+      "P0": "checkpoint_only",
+      "P1": "exact_frozen_observable_predecessor",
+      "P2": "P1_features_plus_ten_fixed_dimensions",
+      "P3": "P2_features_plus_five_fixed_conjunctions"
+    },
+    "specification": {
+      "C": 1.0,
+      "class_weight": null,
+      "max_iter": 250,
+      "n_jobs": 1,
+      "penalty": "l2",
+      "solver": "liblinear"
+    }
+  },
+  "observable_only": true,
+  "order_placement": "disabled",
+  "outcomes": {
+    "cohort_reference": "leave_one_stock_out_median_within_simultaneous_slate",
+    "direction": "unchanged_up_given_large_move",
+    "entry": "open_of_bar_t_plus_2",
+    "movement": "unchanged_large_remaining_move",
+    "terminal": "regular_session_final_close",
+    "thresholds": "exact_frozen_2024_checkpoint_specific_thresholds"
+  },
+  "population": {
+    "assessment_end_inclusive": "2025-08-22",
+    "assessment_start": "2025-01-01",
+    "decision_ordinals": [
+      6,
+      12
+    ],
+    "decision_times_america_new_york": [
+      "10:00",
+      "10:30"
+    ],
+    "development_end_inclusive": "2024-12-31",
+    "development_start": "2024-01-01",
+    "minimum_parent_slate_stocks": 15,
+    "protected_start": "2025-08-23",
+    "regular_session_grid": "09:30_inclusive_16:00_exclusive_america_new_york_five_minute",
+    "symbols": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ]
+  },
+  "predecessor": {
+    "commit": "5e80d972d1e003c8366a1ec6ca170d1077288ead",
+    "experiment": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0",
+    "maximum_aggregate_metric_error": 1e-12,
+    "maximum_row_probability_error": 1e-12,
+    "models": [
+      "large_remaining_move__M1",
+      "up_given_large_move__M1"
+    ]
+  },
+  "production_runtime_modified": false,
+  "research_only": true,
+  "scaling": {
+    "clip": [
+      -5.0,
+      5.0
+    ],
+    "fit_interval": "2024_only_by_checkpoint",
+    "method": "median_iqr"
+  },
+  "resource_limits": {
+    "bootstrap_draws": 200,
+    "gpu": false,
+    "maximum_primary_fitted_models": 8,
+    "maximum_rows": 20000,
+    "null_draws": 50,
+    "plots_maximum": 3,
+    "processes": 1
+  },
+  "safety": {
+    "broker_integration_required": false,
+    "continuous_behavioural_dimensions": true,
+    "execution_enabled": false,
+    "feasibility_screen": true,
+    "loops_regimes_states_and_structural_paths_forbidden": true,
+    "observable_only": true,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "research_only": true,
+    "strategy_promotion": false
+  },
+  "scope_levels": {
+    "behavioural_description": true,
+    "delayed_gross_economic_association": true,
+    "direction_conditional_on_large_movement": true,
+    "executable_net_edge": false,
+    "extreme_tail_ranking": true,
+    "large_movement_prediction": true
+  },
+  "strategy_promotion": false
+}

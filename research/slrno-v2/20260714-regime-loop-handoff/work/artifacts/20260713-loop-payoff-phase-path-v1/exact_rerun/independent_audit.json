@@ -1,0 +1,36 @@
+{
+  "audit": "independent_loop_payoff_phase_path_v1",
+  "checks": {
+    "admission_state_and_hazard_replay": true,
+    "candidate_metric_replay": true,
+    "decision_replay": true,
+    "feature_leakage_scan": true,
+    "frozen_population": true,
+    "net_return_identity": true,
+    "path_class_replay": true,
+    "safety_contract": true,
+    "safety_decision": true,
+    "source_hashes": true,
+    "stock_deletion_replay": true,
+    "top_loop_replay": true
+  },
+  "checks_passed": 12,
+  "checks_total": 12,
+  "live_ordering_enabled": false,
+  "metrics": {
+    "admission_state_errors": 0,
+    "maximum_candidate_mean_net_error_bps": 1.7763568394002505e-15,
+    "maximum_duration_percentile_error": 0.0,
+    "maximum_hazard_auc_error": 5.551115123125783e-17,
+    "maximum_hazard_error": 0.0,
+    "maximum_hazard_support_error": 0,
+    "maximum_net_identity_error_bps": 0.0,
+    "maximum_top_loop_probability_error": 0.0,
+    "path_class_count_error": 0,
+    "stock_deletion_replay_errors": 0,
+    "top_loop_mismatches": 0
+  },
+  "order_placement": "disabled",
+  "pass": true,
+  "research_only": true
+}

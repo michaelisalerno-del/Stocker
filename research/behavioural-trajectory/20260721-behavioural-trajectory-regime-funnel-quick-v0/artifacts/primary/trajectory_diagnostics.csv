@@ -1,0 +1,7 @@
+emotion,scope,level_mean,level_standard_deviation,change_mean,change_standard_deviation,acceleration_mean,acceleration_standard_deviation,reversal_frequency,persistence_frequency,peak_displacement_mean,correlation_with_current_level,correlation_with_each_other_trajectory,development_target_class_rate_by_frozen_quintile,assessment_target_class_rate_by_frozen_quintile,level_and_change_opposite_sign_percent,reverses_before_decision_percent,at_local_peak_at_decision_percent,status
+arousal,pooled_assessment,0.20206917730061724,0.72712019499553748,,,,,,,,,,,,,,,not_calculated_blocked_insufficient_trajectory_support
+conviction,pooled_assessment,0.045338144050389877,0.63772370643473997,,,,,,,,,,,,,,,not_calculated_blocked_insufficient_trajectory_support
+frustration,pooled_assessment,-0.0070915398353852245,0.70759513314146105,,,,,,,,,,,,,,,not_calculated_blocked_insufficient_trajectory_support
+tension,pooled_assessment,-0.10719898516242889,1.0664927437223655,,,,,,,,,,,,,,,not_calculated_blocked_insufficient_trajectory_support
+signed_pressure,pooled_assessment,0.0078192813904624219,0.6547717238324362,,,,,,,,,,,,,,,not_calculated_blocked_insufficient_trajectory_support
+signed_exhaustion,pooled_assessment,0.10476065798749981,1.3957713940242344,,,,,,,,,,,,,,,not_calculated_blocked_insufficient_trajectory_support

@@ -1,0 +1,51 @@
+{
+  "broker_integration_required": false,
+  "counts": {
+    "assessment": {
+      "NO_REGISTERED_COMPLETION": 4308,
+      "REGISTERED_COMPLETION": 312,
+      "SOURCE_UNAVAILABLE": 0,
+      "TIED_REGISTERED_COMPLETION": 1,
+      "UNREGISTERED_LOOP": 1641
+    },
+    "development": {
+      "NO_REGISTERED_COMPLETION": 6083,
+      "REGISTERED_COMPLETION": 525,
+      "SOURCE_UNAVAILABLE": 0,
+      "TIED_REGISTERED_COMPLETION": 3,
+      "UNREGISTERED_LOOP": 2676
+    }
+  },
+  "development_frozen_unregistered_families": true,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "excluded": [
+    "TIED_REGISTERED_COMPLETION",
+    "SOURCE_UNAVAILABLE"
+  ],
+  "execution_enabled": false,
+  "horizon_completed_five_minute_bars": 6,
+  "opening_phase_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_completion_diagnostic": {
+    "binding": false,
+    "negative": "NO_REGISTERED_COMPLETION",
+    "population": [
+      "REGISTERED_COMPLETION",
+      "NO_REGISTERED_COMPLETION"
+    ],
+    "positive": "REGISTERED_COMPLETION"
+  },
+  "research_only": true,
+  "strategy_promotion": false,
+  "unregistered_event": {
+    "negative": [
+      "REGISTERED_COMPLETION",
+      "NO_REGISTERED_COMPLETION"
+    ],
+    "positive": "UNREGISTERED_LOOP"
+  },
+  "unregistered_structural_event_target": true
+}

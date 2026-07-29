@@ -1,0 +1,1243 @@
+{
+  "contract_id": "20260714-first-class-profitable-move-detectors-v1",
+  "control_rows": 8656,
+  "environment": {
+    "numpy": "2.4.6",
+    "pandas": "2.3.3",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "pyarrow": "24.0.0",
+    "python": "3.12.13"
+  },
+  "event_rows": 8656,
+  "event_rows_by_period_detector": [
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 5,
+      "period": 2025,
+      "symbol_norm": "AAL"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 110,
+      "period": 2025,
+      "symbol_norm": "AAL"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 60,
+      "period": 2025,
+      "symbol_norm": "AAL"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 22,
+      "period": 2025,
+      "symbol_norm": "AAL"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 4,
+      "period": 2025,
+      "symbol_norm": "AAL"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 51,
+      "period": 2025,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 146,
+      "period": 2025,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 68,
+      "period": 2025,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 20,
+      "period": 2025,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 43,
+      "period": 2025,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 51,
+      "period": 2025,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 163,
+      "period": 2025,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 60,
+      "period": 2025,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 20,
+      "period": 2025,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 39,
+      "period": 2025,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 38,
+      "period": 2025,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 156,
+      "period": 2025,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 64,
+      "period": 2025,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 19,
+      "period": 2025,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 32,
+      "period": 2025,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 63,
+      "period": 2025,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 148,
+      "period": 2025,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 62,
+      "period": 2025,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 26,
+      "period": 2025,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 44,
+      "period": 2025,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 35,
+      "period": 2025,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 163,
+      "period": 2025,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 64,
+      "period": 2025,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 42,
+      "period": 2025,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 25,
+      "period": 2025,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 38,
+      "period": 2025,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 149,
+      "period": 2025,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 60,
+      "period": 2025,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 28,
+      "period": 2025,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 36,
+      "period": 2025,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 37,
+      "period": 2025,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 152,
+      "period": 2025,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 70,
+      "period": 2025,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 25,
+      "period": 2025,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 25,
+      "period": 2025,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 18,
+      "period": 2025,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 164,
+      "period": 2025,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 64,
+      "period": 2025,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 22,
+      "period": 2025,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 14,
+      "period": 2025,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 28,
+      "period": 2025,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 147,
+      "period": 2025,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 74,
+      "period": 2025,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 21,
+      "period": 2025,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 21,
+      "period": 2025,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 11,
+      "period": 2025,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 141,
+      "period": 2025,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 57,
+      "period": 2025,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 17,
+      "period": 2025,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 11,
+      "period": 2025,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 19,
+      "period": 2025,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 156,
+      "period": 2025,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 62,
+      "period": 2025,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 26,
+      "period": 2025,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 16,
+      "period": 2025,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 57,
+      "period": 2025,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 140,
+      "period": 2025,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 73,
+      "period": 2025,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 24,
+      "period": 2025,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 48,
+      "period": 2025,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 41,
+      "period": 2025,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 163,
+      "period": 2025,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 53,
+      "period": 2025,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 26,
+      "period": 2025,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 35,
+      "period": 2025,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 54,
+      "period": 2025,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 158,
+      "period": 2025,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 78,
+      "period": 2025,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 17,
+      "period": 2025,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 45,
+      "period": 2025,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 31,
+      "period": 2025,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 155,
+      "period": 2025,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 67,
+      "period": 2025,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 35,
+      "period": 2025,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 20,
+      "period": 2025,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 11,
+      "period": 2025,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 142,
+      "period": 2025,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 67,
+      "period": 2025,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 20,
+      "period": 2025,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 7,
+      "period": 2025,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 16,
+      "period": 2025,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 155,
+      "period": 2025,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 65,
+      "period": 2025,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 27,
+      "period": 2025,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 13,
+      "period": 2025,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 7,
+      "period": 2025,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 125,
+      "period": 2025,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 66,
+      "period": 2025,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 18,
+      "period": 2025,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 7,
+      "period": 2025,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 52,
+      "period": 2025,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 163,
+      "period": 2025,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 73,
+      "period": 2025,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 27,
+      "period": 2025,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 39,
+      "period": 2025,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 30,
+      "period": 2026,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 72,
+      "period": 2026,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 26,
+      "period": 2026,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 12,
+      "period": 2026,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 24,
+      "period": 2026,
+      "symbol_norm": "AAOI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 14,
+      "period": 2026,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 64,
+      "period": 2026,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 30,
+      "period": 2026,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 11,
+      "period": 2026,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 10,
+      "period": 2026,
+      "symbol_norm": "APLD"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 25,
+      "period": 2026,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 68,
+      "period": 2026,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 23,
+      "period": 2026,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 17,
+      "period": 2026,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 21,
+      "period": 2026,
+      "symbol_norm": "ASTS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 22,
+      "period": 2026,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 76,
+      "period": 2026,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 31,
+      "period": 2026,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 16,
+      "period": 2026,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 17,
+      "period": 2026,
+      "symbol_norm": "CIFR"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 13,
+      "period": 2026,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 77,
+      "period": 2026,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 31,
+      "period": 2026,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 9,
+      "period": 2026,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 13,
+      "period": 2026,
+      "symbol_norm": "HIMS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 15,
+      "period": 2026,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 83,
+      "period": 2026,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 31,
+      "period": 2026,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 14,
+      "period": 2026,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 13,
+      "period": 2026,
+      "symbol_norm": "IONQ"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 14,
+      "period": 2026,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 84,
+      "period": 2026,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 28,
+      "period": 2026,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 11,
+      "period": 2026,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 12,
+      "period": 2026,
+      "symbol_norm": "IREN"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 17,
+      "period": 2026,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 77,
+      "period": 2026,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 38,
+      "period": 2026,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 13,
+      "period": 2026,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 10,
+      "period": 2026,
+      "symbol_norm": "MARA"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 5,
+      "period": 2026,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 65,
+      "period": 2026,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 22,
+      "period": 2026,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 10,
+      "period": 2026,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 5,
+      "period": 2026,
+      "symbol_norm": "MP"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 6,
+      "period": 2026,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 71,
+      "period": 2026,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 31,
+      "period": 2026,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 7,
+      "period": 2026,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 6,
+      "period": 2026,
+      "symbol_norm": "MRNA"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 6,
+      "period": 2026,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 82,
+      "period": 2026,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 36,
+      "period": 2026,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 16,
+      "period": 2026,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 3,
+      "period": 2026,
+      "symbol_norm": "MSTR"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 25,
+      "period": 2026,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 72,
+      "period": 2026,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 25,
+      "period": 2026,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 13,
+      "period": 2026,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 21,
+      "period": 2026,
+      "symbol_norm": "NVTS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 12,
+      "period": 2026,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 77,
+      "period": 2026,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 23,
+      "period": 2026,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 14,
+      "period": 2026,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 11,
+      "period": 2026,
+      "symbol_norm": "QBTS"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 15,
+      "period": 2026,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 70,
+      "period": 2026,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 31,
+      "period": 2026,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 15,
+      "period": 2026,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 11,
+      "period": 2026,
+      "symbol_norm": "RGTI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 21,
+      "period": 2026,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 77,
+      "period": 2026,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 41,
+      "period": 2026,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 17,
+      "period": 2026,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 18,
+      "period": 2026,
+      "symbol_norm": "RIOT"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 2,
+      "period": 2026,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 62,
+      "period": 2026,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 34,
+      "period": 2026,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 10,
+      "period": 2026,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 2,
+      "period": 2026,
+      "symbol_norm": "RIVN"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 4,
+      "period": 2026,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 71,
+      "period": 2026,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 29,
+      "period": 2026,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 12,
+      "period": 2026,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 2,
+      "period": 2026,
+      "symbol_norm": "SMCI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 1,
+      "period": 2026,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 67,
+      "period": 2026,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 29,
+      "period": 2026,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 7,
+      "period": 2026,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 1,
+      "period": 2026,
+      "symbol_norm": "SOFI"
+    },
+    {
+      "detector": "H1_downside_expansion_exhaustion_long",
+      "events": 15,
+      "period": 2026,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H2_failed_breakdown_reclaim_long",
+      "events": 76,
+      "period": 2026,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H3_two_bar_reversal_confirmation_long",
+      "events": 40,
+      "period": 2026,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H4_opening_range_failed_breakdown_long",
+      "events": 16,
+      "period": 2026,
+      "symbol_norm": "WULF"
+    },
+    {
+      "detector": "H5_activity_activated_downside_expansion_long",
+      "events": 12,
+      "period": 2026,
+      "symbol_norm": "WULF"
+    }
+  ],
+  "frozen_file_sha256": {
+    "data_coverage.csv": "2dea0822ad4b82f36424e2a906e711f94993f487ec9c0dca43d5a89075ad9c69",
+    "event_counts.csv": "303fdc588254b0662ae2f4f1ecfd8b1f007491c0965a99b75c1da56f1fae098f",
+    "pre_outcome_controls.parquet": "bba8c8de2d3118002dc1c4ed47a7d8308c2c86cf00ac0f060d4da7b49ddd1371",
+    "pre_outcome_events.parquet": "a3fce429fca51437b87be3adaa354e918ea1a2da28a9f95fe3aa48d0f3ae114e"
+  },
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true,
+  "scientific_status": "retrospective_portability_development_on_opened_2025_and_partial_2026_not_validation",
+  "source_sha256": {
+    "auditor": "62b9d9013317abba0bc936e2fc7952076b722add79c59b343ff1d083b550bd57",
+    "contract": "00a80375accbc0f29f36900c5d5d78e7a37e0ca495c097f38365d52d873cd8a9",
+    "origin_report_1": "05ddbfb291deaba7a1679eedda4c80ddd06ff93399cc1a67d7c7f479573d25e3",
+    "origin_report_2": "831243216707a44782c2a0337a202ee391fefaa67495ca9bdd9910bb4823e22c",
+    "origin_report_3": "a9c2bc4b896c0e5e7ee9f0cd2d4e753fe8908a5e46424171a071bdc2a3f18856",
+    "origin_report_4": "239c9fd49c213bca3133fd0193e979588b106c6f9cfe143b83bcb0f73b4da9ea",
+    "provider_2025_AAL": "f5c2206c55e64391dffa896a9419f49d0bbfdbf3ce9fced6ade866daa59855ad",
+    "provider_2025_AAOI": "3b7fdfbeaa5f5d880023c76850764587d186daee5c8c6e3c377c43ffc93f0901",
+    "provider_2025_APLD": "2f80ee3c3cb5f3720e9cfb29214212be4ee8087fa2d8a28ee097794c8c38ae73",
+    "provider_2025_ASTS": "70ba2866df310333253f5120c0c9eb07c5001cfd048bbe827d29516c983724fa",
+    "provider_2025_CIFR": "6de8cb7378b322bcd41321d91eb69add6ee9aa72513b420f1579483d166010ef",
+    "provider_2025_HIMS": "92e40332d7416cf51da0905c4678a7ef24fca1d54b723db86fd2c7fa5c9c1032",
+    "provider_2025_IONQ": "5b7b6325e6e8de1b689dca5a21abef805ec9be3835cd11fb1dc2cefcef6494ce",
+    "provider_2025_IREN": "b10db5ee6fb5af776f0819a05417515025f362c26ae55f292bdc161403f81471",
+    "provider_2025_MARA": "bdc4c7b0a48d831a3296a969ed9f4864a953ae7e45da9741b1d04897b6928619",
+    "provider_2025_MP": "433b6f30f5ef70f1461dc159a628291f56012dfc7f15e69fc26981de81315a25",
+    "provider_2025_MRNA": "c83a4b505ab3975c46f0898c2bf5f718fecedc6cdeb266c9c90805d4c70981ab",
+    "provider_2025_MSTR": "103a3cc0e2697f5f7c91b52522177e13c3c208abc96d8b97471f35853f276ef4",
+    "provider_2025_NVTS": "fbb607e5c39b050952d2fdf0ca275e0057bc14462050826b5b8da5f44aef8718",
+    "provider_2025_QBTS": "244a42e18390e13380fb23993ae3beffbc3574b895526f5e1157843b7f8a394b",
+    "provider_2025_RGTI": "9003303e270718e59b2edd768a45f7a1228a645b72d6d0e8b397064a928e60a4",
+    "provider_2025_RIOT": "7886f7e13fff310362b803d3aaa40dabf9f6c17b94fd430dcebef267996e72e3",
+    "provider_2025_RIVN": "2ef6ef196aa9f22561a0b1bd0c4485767b4eb845d5b41ab7dff6cadf22ca1ac4",
+    "provider_2025_SMCI": "95ecce4c8ccb760f558689107d0c0a0046f4e658294d3d5f0628124aa3a853da",
+    "provider_2025_SOFI": "a4d30109e6e9011f5c431d7f1e698af6864d4749a6399b719bce7de55b2ffc26",
+    "provider_2025_WULF": "6ebf3e2552b1c12eceb21840f6707b5330a8b07888a0c39bce6410d7df182e29",
+    "provider_2026_AAOI": "3b7fdfbeaa5f5d880023c76850764587d186daee5c8c6e3c377c43ffc93f0901",
+    "provider_2026_APLD": "2f80ee3c3cb5f3720e9cfb29214212be4ee8087fa2d8a28ee097794c8c38ae73",
+    "provider_2026_ASTS": "70ba2866df310333253f5120c0c9eb07c5001cfd048bbe827d29516c983724fa",
+    "provider_2026_CIFR": "6de8cb7378b322bcd41321d91eb69add6ee9aa72513b420f1579483d166010ef",
+    "provider_2026_HIMS": "92e40332d7416cf51da0905c4678a7ef24fca1d54b723db86fd2c7fa5c9c1032",
+    "provider_2026_IONQ": "5b7b6325e6e8de1b689dca5a21abef805ec9be3835cd11fb1dc2cefcef6494ce",
+    "provider_2026_IREN": "b10db5ee6fb5af776f0819a05417515025f362c26ae55f292bdc161403f81471",
+    "provider_2026_MARA": "bdc4c7b0a48d831a3296a969ed9f4864a953ae7e45da9741b1d04897b6928619",
+    "provider_2026_MP": "433b6f30f5ef70f1461dc159a628291f56012dfc7f15e69fc26981de81315a25",
+    "provider_2026_MRNA": "c83a4b505ab3975c46f0898c2bf5f718fecedc6cdeb266c9c90805d4c70981ab",
+    "provider_2026_MSTR": "103a3cc0e2697f5f7c91b52522177e13c3c208abc96d8b97471f35853f276ef4",
+    "provider_2026_NVTS": "fbb607e5c39b050952d2fdf0ca275e0057bc14462050826b5b8da5f44aef8718",
+    "provider_2026_QBTS": "244a42e18390e13380fb23993ae3beffbc3574b895526f5e1157843b7f8a394b",
+    "provider_2026_RGTI": "9003303e270718e59b2edd768a45f7a1228a645b72d6d0e8b397064a928e60a4",
+    "provider_2026_RIOT": "7886f7e13fff310362b803d3aaa40dabf9f6c17b94fd430dcebef267996e72e3",
+    "provider_2026_RIVN": "2ef6ef196aa9f22561a0b1bd0c4485767b4eb845d5b41ab7dff6cadf22ca1ac4",
+    "provider_2026_SMCI": "95ecce4c8ccb760f558689107d0c0a0046f4e658294d3d5f0628124aa3a853da",
+    "provider_2026_SOFI": "a4d30109e6e9011f5c431d7f1e698af6864d4749a6399b719bce7de55b2ffc26",
+    "provider_2026_WULF": "6ebf3e2552b1c12eceb21840f6707b5330a8b07888a0c39bce6410d7df182e29",
+    "runner": "4a8eacf8b57abf0971c2e9d5e43cef4bc1685d88a7cfce028c1e4ab06a64b5ed",
+    "tests": "21968371caaa6284d7232dc2c700623f5fff3c4fc0ba08b214717e9ff030c730"
+  }
+}

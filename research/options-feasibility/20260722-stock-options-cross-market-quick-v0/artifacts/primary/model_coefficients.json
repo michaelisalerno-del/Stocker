@@ -1,0 +1,21 @@
+{
+  "broker_integration_required": false,
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "intraday_option_quotes_used": false,
+  "models": {},
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "previous_close_options_only": true,
+  "primary_models_fitted": 0,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_cross_market_screen": true,
+  "reason": "blocked_insufficient_cached_options_coverage",
+  "research_only": true,
+  "ridge_models_fitted": 0,
+  "strategy_promotion": false,
+  "test_a_options_to_stock": true,
+  "test_b_stock_to_options_movement": true,
+  "underlying_movement_outcomes_opened": true
+}

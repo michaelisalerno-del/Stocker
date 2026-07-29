@@ -1,0 +1,123 @@
+{
+  "audit_hash": "66ce30105412af92a5c4b1a9bf50305b74b92477b797c7a9d9285251f95f2a0e",
+  "audit_version": "regime_model_validity_v2_independent_audit",
+  "broker_connected": false,
+  "checks": {
+    "all_opened_data_bound": true,
+    "artifact_manifest": true,
+    "artifact_safety_flags": true,
+    "bounded_source_components_complete": true,
+    "bounded_source_snapshot": true,
+    "cleanup_future_neighbor_classification": true,
+    "cleanup_reconstruction": true,
+    "cleanup_run_change_reconstruction": true,
+    "cluster_assignment_centroids": true,
+    "contract_hash": true,
+    "contract_safety": true,
+    "departure_probability_reconstruction": true,
+    "emission_prefix_invariance": true,
+    "exact_rerun": true,
+    "expected_age_reconstruction": true,
+    "feature_availability_provenance": true,
+    "frozen_historical_tree_unchanged": true,
+    "gaussian_emission_sample": true,
+    "hard_map_reconstruction": true,
+    "hysteretic_sample_reconstruction": true,
+    "implementation_source_manifest": true,
+    "imputation_scaling_sample": true,
+    "independent_hard_hysteretic_loop_events": true,
+    "independent_k8_structural_excess_gate": true,
+    "independent_k_seed_fits_alignment_and_nulls": true,
+    "k8_structural_excess_gate": true,
+    "k_seed_registry": true,
+    "legacy_hard_state_reconstruction": true,
+    "loop_event_agreement": true,
+    "panel_identity": true,
+    "part_a_gate_reconstruction": true,
+    "posterior_state_age_reconstruction": true,
+    "refit_difference_reproduced": true,
+    "report_sections": true,
+    "sample_row_identity": true,
+    "semantic_mapping_reconstruction": true,
+    "session_reset": true,
+    "source_file_hashes": true,
+    "source_manifest_baseline": true,
+    "state_alignment_integrity": true
+  },
+  "contract_hash": "dd44ce458f41a16f023a49b9be7ab3f762ed31b07d42fc6e1ba673f233546c55",
+  "data_snapshot_hash": "4b613ea262583ab77426813fc39b0210e2e737e0dbb042996feb5f4201c64349",
+  "dictionary_hash": "9f39bf57c2637dfa7f465103306ac6c7d17a321a036b175cc222dc1a204cd918",
+  "dictionary_version": "semantic_loop_dictionary_first_event_v2",
+  "economic_outcomes_used": false,
+  "exact_rerun_manifest_hash": "772ba443d21764b675e6759ebc0e1ccf746cc24c3ab5c451a78ea053a5780d1f",
+  "execution_enabled": false,
+  "git_sha": "66cd706fa727ac5873b299d5c22388221203f451",
+  "independent_audit_reproducible": true,
+  "metrics": {
+    "cluster_centroid_max_abs_difference": 2.6560975641132245e-12,
+    "departure_sample_max_abs_difference": 4.996003610813204e-16,
+    "emission_prefix_invariance": {
+      "compared_rows": 5133,
+      "cutoff_count": 3,
+      "failures": [],
+      "maximum_absolute_difference": 0.0
+    },
+    "emission_sample_max_abs_difference": 0.0,
+    "expected_age_sample_max_abs_difference": 2.842170943040401e-14,
+    "independent_cleanup_changed_share": 0.17769906001888913,
+    "independent_gate_inputs": {
+      "k8_positive_structural_excess_counts": {
+        "loop_p_4-6-4": 5,
+        "loop_p_5-6-5": 5
+      },
+      "mathematical_and_causal_core_pass": true,
+      "minimum_hard_hysteretic_selected_loop_agreement": 0.8574196048043394,
+      "minimum_k8_nmi": 0.4541473247807942,
+      "terminal_censoring_parameter_pass": false,
+      "terminal_training_run_count": 5539
+    },
+    "independent_hard_hysteretic_event_agreement": {
+      "loop_p_4-6-4": 0.8831661092530658,
+      "loop_p_5-6-5": 0.8574196048043394
+    },
+    "independent_k_seed_audit": {
+      "independent_k8_positive_structural_excess_counts": {
+        "loop_p_4-6-4": 5,
+        "loop_p_5-6-5": 5
+      },
+      "independent_minimum_k8_nmi": 0.4541473247807942,
+      "independently_fitted_model_count": 20,
+      "maximum_absolute_differences": {
+        "alignment_total_cost": 4.988787161153141e-13,
+        "causal_negative_log_likelihood": 4.845901457883883e-11,
+        "iid_mixture_negative_log_likelihood": 4.856559598920285e-11,
+        "normalized_mutual_information": 4.434785871865188e-13,
+        "structural_null_rate_ratio": 4.870326364425637e-12,
+        "training_objective": 0.0
+      }
+    },
+    "independent_refit_parameter_differences": {
+      "duration_hazard": 0.45833333333333337,
+      "initial": 0.011365686451380141,
+      "means": 0.14582231408534252,
+      "occupancy": 0.008961649791444384,
+      "transitions": 0.022366550146914604,
+      "variances": 0.10667771456949382
+    },
+    "posterior_sample_max_abs_difference": 1.887379141862766e-15,
+    "safety_failures": [],
+    "scaled_sample_max_abs_difference": 0.0,
+    "state_age_sample_max_abs_difference": 7.771561172376096e-16
+  },
+  "order_placement": "disabled",
+  "part_b_accessed": false,
+  "part_b_authorized": false,
+  "payoff_selection_used": false,
+  "primary_decision_reproduced": "regime_representation_requires_targeted_repair",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "state_model_hash": "d5fb65d1512f625c91e93564da9c5596ff84b02956a3b46faab65a7126f491c2",
+  "state_model_version": "causal_semimarkov_posterior_export_v2_tail78",
+  "status": "pass",
+  "strategy_promotion": false
+}

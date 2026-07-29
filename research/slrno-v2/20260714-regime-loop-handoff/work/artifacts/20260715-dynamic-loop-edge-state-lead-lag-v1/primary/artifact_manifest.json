@@ -1,0 +1,156 @@
+{
+  "execution_enabled": false,
+  "files": [
+    {
+      "bytes": 41667,
+      "name": "calibration_lead_0_1.png",
+      "sha256": "e1a61274e3d33988b1143bf498b8ae2599982c6b86d9a64cd40fd2e6195be980"
+    },
+    {
+      "bytes": 11480,
+      "name": "concentration_results.csv",
+      "sha256": "b26eaa205b2b059cd7429ec0a0d5ed7e7e5dcb4a7dd21b42811ee9118a28b3f5"
+    },
+    {
+      "bytes": 6690,
+      "name": "constant_terminal_time_delayed_trades.parquet",
+      "sha256": "fa6711ff191b37565329aa86eea38fd2a853260bdfda9982ac049f0c7e1b196d"
+    },
+    {
+      "bytes": 676,
+      "name": "exact_matched_trade_delay_results.csv",
+      "sha256": "05aedbccccaf4e0f0dfe3a75ba5b563d24598072b46c95f2b93f5bb795f948f6"
+    },
+    {
+      "bytes": 24327,
+      "name": "example_false_structural_lead.png",
+      "sha256": "95777de406eae179da8e0df827bba02202ffe5e032e34367a8be3c77ab5e1ae1"
+    },
+    {
+      "bytes": 29427,
+      "name": "example_structurally_led_episode.png",
+      "sha256": "d03a56f394174d6d8aa21e85ca251d2875a2cb4d25a0f69ab315c899aa90ecde"
+    },
+    {
+      "bytes": 3539306,
+      "name": "feature_contribution_predictions.parquet",
+      "sha256": "c7ac63feb79da4a7c2f21423ca461819a0396c751d21d5cfc4075848758f689e"
+    },
+    {
+      "bytes": 2424,
+      "name": "feature_contribution_summary.csv",
+      "sha256": "6b792ca7ecd1bf97790af629b8eeafeaab0b2492066d4eaa6a75871f8f2bddd0"
+    },
+    {
+      "bytes": 40176,
+      "name": "feature_contribution_vs_t1_payoff.png",
+      "sha256": "237bf294fdddc07c6f337c2d492b121b56badc9907125ba22149fb9dc94f435b"
+    },
+    {
+      "bytes": 19013516,
+      "name": "forecast_to_target_lead_joins.parquet",
+      "sha256": "7b4020ce7306e458408c05b622e696e52aa78fb50b0677675ce89371bfc6e1cd"
+    },
+    {
+      "bytes": 6262499,
+      "name": "frozen_forecast_ledger.parquet",
+      "sha256": "dff7786c69c48c3b4917383ea30abf89251a4ab9a1aa8ea6f7cac957670813f9"
+    },
+    {
+      "bytes": 3529511,
+      "name": "full_vs_no_feature_paired_predictions.parquet",
+      "sha256": "ada16604dcce7bf7d455cbd1ecc75d3eee6dc43ccada94a0ab6f09728b107ba2"
+    },
+    {
+      "bytes": 55444,
+      "name": "hindsight_episode_attribution.parquet",
+      "sha256": "e1f60e0f0480b689ab4d80e31099cad32473bdb1140cdc0a7d1ba459e2c1c5c0"
+    },
+    {
+      "bytes": 17161,
+      "name": "lead_calibration_bins.csv",
+      "sha256": "174172348bf6835b3db196364c2fdd57136a60c12e1913675397617ff9240153"
+    },
+    {
+      "bytes": 9083,
+      "name": "lead_calibration_metrics.csv",
+      "sha256": "44f219942bfacb297b6909219fe86e87356567e420f3b63b30aeb49998643007"
+    },
+    {
+      "bytes": 80493,
+      "name": "lead_economic_metrics.csv",
+      "sha256": "9dff8ccdef19a9e7b312955760e4e253ee57e733423f3b5230890cf3c9995d1d"
+    },
+    {
+      "bytes": 23246,
+      "name": "lead_paired_brier_improvement.png",
+      "sha256": "85dcda09707388998456d296e538d9b3f424e397fa7d49a3a1dffa05439f7c74"
+    },
+    {
+      "bytes": 30567,
+      "name": "lead_paired_economic_increment.png",
+      "sha256": "36b1ce876449faf2440321f650dddb25de729bf1407380c413acf496237cc5db"
+    },
+    {
+      "bytes": 7960,
+      "name": "leave_one_stock_out_results.csv",
+      "sha256": "46ba7a5afdcf9dfe7df653f964e9ebea262a41432783f92a91e6b34014a2345f"
+    },
+    {
+      "bytes": 4055,
+      "name": "opportunity_population_decomposition.csv",
+      "sha256": "955a8e2747b0c8d04b79685ac92d479115dab590841d947004faed763e698a9d"
+    },
+    {
+      "bytes": 2333446,
+      "name": "original_v2_delay_reconstruction.parquet",
+      "sha256": "ed353238288b9651e392327fd17c7552b4796b578ff40a6ab6984370d3c91a23"
+    },
+    {
+      "bytes": 576,
+      "name": "original_v2_delay_summary.csv",
+      "sha256": "7fed25fca0c43666dee94574b3825a5908dbec895f0384cb63d109d4b5922c2a"
+    },
+    {
+      "bytes": 21684,
+      "name": "original_vs_corrected_delay_population.png",
+      "sha256": "28f8731fa12d333d5e25246800f8936ab3aeebf04a53a4e017a8cade8d6950e5"
+    },
+    {
+      "bytes": 3133,
+      "name": "paired_lead_metrics.csv",
+      "sha256": "7fc0dc48f7f637a8b38fd8c460011662392c34f578e589a8836c0fbc633533e6"
+    },
+    {
+      "bytes": 9758,
+      "name": "restarted_horizon_delayed_trades.parquet",
+      "sha256": "2bda80465dd413f8b89f7b0dfeea36491e14881fbda73a6ea40e740a9b19835a"
+    },
+    {
+      "bytes": 4563,
+      "name": "run_metadata.json",
+      "sha256": "6ed50c8cdd1a2d8b8fe9e79e6552469edc528cfc79f12d8765dfd1c329af527e"
+    },
+    {
+      "bytes": 11092,
+      "name": "same_setup_match_classification.parquet",
+      "sha256": "5e7b83c06709a1f54296c65e3fa2623c71321fb45c0491c8bd0629568d6a4fa4"
+    },
+    {
+      "bytes": 680973,
+      "name": "settled_outcome_ledger.parquet",
+      "sha256": "cd89c5b59edfc1a9a21d074cad97650f3a71e7dbbcd7508c1810c6772f654443"
+    },
+    {
+      "bytes": 4269,
+      "name": "stress_test_results.csv",
+      "sha256": "80630092c1c75baa947c6d8c2834374b89d6958ea540b0cc0d67b33b05d12724"
+    },
+    {
+      "bytes": 12094,
+      "name": "research_report.md",
+      "sha256": "f1835f392324be65c7f148272085bbeedc0f53a81bbb7aa8f56b2ea72bcebbba"
+    }
+  ],
+  "research_only": true
+}

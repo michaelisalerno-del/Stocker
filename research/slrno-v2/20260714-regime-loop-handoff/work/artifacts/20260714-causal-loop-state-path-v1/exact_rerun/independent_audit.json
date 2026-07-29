@@ -1,0 +1,49 @@
+{
+  "checks": {
+    "aggregate_policy_metrics_replay": true,
+    "artifact_manifest_complete_and_valid": true,
+    "bootstrap_and_holm_replay": true,
+    "event_actions_rederived_exactly": true,
+    "event_logic_leakage_scan": true,
+    "every_action_exits_strictly_next_open": true,
+    "fixed_and_event_payoffs_replay": true,
+    "no_pre_entry_event_treated_as_post_entry_action": true,
+    "path_topology_rederived_exactly": true,
+    "pre_entry_clock_rederived_exactly": true,
+    "pre_score_and_artifact_source_hashes_match": true,
+    "primary_population_counts_match": true,
+    "research_only_safety_boundary": true,
+    "state_event_provider_timestamps_match": true
+  },
+  "contract_id": "20260714-causal-loop-state-path-v1",
+  "errors": {
+    "actions": 0,
+    "aggregate_counts": 0,
+    "manifest": 0,
+    "population": 0,
+    "pre_entry": 0,
+    "pre_entry_action": 0,
+    "same_bar": 0,
+    "timestamps": 0,
+    "topology": 0
+  },
+  "leakage_scan": {
+    "forbidden_event_arguments": [],
+    "passes": true,
+    "structural_forbidden_token_hits": []
+  },
+  "live_ordering_enabled": false,
+  "maximum_errors": {
+    "aggregate_metric_replay": 7.105427357601002e-15,
+    "bootstrap_replay": 1.4210854715202004e-14,
+    "contrast_bootstrap_replay": 4.440892098500626e-16,
+    "fixed_replay": 0.0,
+    "holm_replay": 8.881784197001252e-16,
+    "policy_price_replay": 0.0,
+    "policy_return_replay": 0.0
+  },
+  "order_placement": "disabled",
+  "passed": 14,
+  "research_only": true,
+  "total": 14
+}

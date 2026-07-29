@@ -1,0 +1,290 @@
+{
+  "file_count": 40,
+  "files": [
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/contracts/20260710-frozen-loop-movement-shadow-v1-manifest.json",
+      "sha256": "f74c215ab91e7456a2bb37784dd382ae415caa6febd08ec7d6dd52800450cea9",
+      "size": 6457
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/contracts/20260710-frozen-loop-movement-shadow-v1.json",
+      "sha256": "4bc8462935e4bfe165b93d48224d0abb82fde51c7e9ec06fc4fd7e15b94370f2",
+      "size": 5439
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/frozen_loop_movement_shadow_core.py",
+      "sha256": "4e4ea6ee278da33d30803a4ce0bab3dee8e192e3d9578c87a0eebe5d8cb34b75",
+      "size": 38350
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/reports/20260710-frozen-loop-movement-prospective-shadow-contract.md",
+      "sha256": "4f1bf50a4a7aa39220bf3b25e59b842921d3b229344881042cb49bd96db62ca9",
+      "size": 5834
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/reports/20260710-frozen-loop-movement-shadow-harness.md",
+      "sha256": "0c56c8ce1fd36f03591f308d8d3aa7afba9598789c2e893bef2506bac237b339",
+      "size": 4624
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/run_frozen_loop_movement_shadow.py",
+      "sha256": "b9d5d4007e038d682310f9c71218db5611f69f2f935e16eea896ca2961355c75",
+      "size": 53729
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1",
+      "sha256": null,
+      "size": 288
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/contract.json",
+      "sha256": "4bc8462935e4bfe165b93d48224d0abb82fde51c7e9ec06fc4fd7e15b94370f2",
+      "size": 5439
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/evaluation",
+      "sha256": null,
+      "size": 64
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/freeze_manifest.json",
+      "sha256": "f74c215ab91e7456a2bb37784dd382ae415caa6febd08ec7d6dd52800450cea9",
+      "size": 6457
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle",
+      "sha256": null,
+      "size": 128
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts",
+      "sha256": null,
+      "size": 160
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/path",
+      "sha256": null,
+      "size": 128
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/path/gates.json",
+      "sha256": "a845d03e5adb2f102322148fe2d2571aab3c9283154a839eacbe2d40427a983d",
+      "size": 2634
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/path/model_parameters.npz",
+      "sha256": "72f7cdf5e9aabc142630c0eb4486e11dace0cb03c1b5b5fd4da2f06d13b8cda7",
+      "size": 63659
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/price",
+      "sha256": null,
+      "size": 224
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/price/feature_manifest.json",
+      "sha256": "47316220eacd56824f3d511c0a3b4b71e540cd7643ef7d89509de1654e14a5ce",
+      "size": 1694
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/price/gates.json",
+      "sha256": "04bc050ae3c717b0fcd299a3429107305b981065bfcb1ec1597e342ff968802f",
+      "size": 4981
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/price/independent_artifact_audit.json",
+      "sha256": "71c3f17672a6263c3fb3bc2f9953eb2c0fff4e4fef729465688bd4430425da49",
+      "size": 9014
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/price/outcome_model_parameters.npz",
+      "sha256": "0763687fab341d382e4086553a0f4a74ae1c2604b508e0daaeba161a3461ca07",
+      "size": 61216
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/price/source_hashes.json",
+      "sha256": "b63b51dc41c7868fc54cb0a9b1114e9095b2fdd89a9510baaec7c375db1da619",
+      "size": 6998
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state",
+      "sha256": null,
+      "size": 160
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state/fixed_cycle_shuffled_nulls.csv",
+      "sha256": "5695f09a7573a110034d251b5abdc40c2f37a11cc7198b196636a624c7d1ad22",
+      "size": 1909
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state/frozen_emission_preprocessing.csv",
+      "sha256": "453988be81e1dd54dd892316ab0da41423197c5aec4afb691e9010e97e05fc67",
+      "size": 1147
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/artifacts/state/frozen_semimarkov_parameters.npz",
+      "sha256": "909858ed7c9c02c1c113661202cb5d7c6bfabd243f1cc428b8a5fb1a3c022251",
+      "size": 4710
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance",
+      "sha256": null,
+      "size": 128
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/lineage",
+      "sha256": null,
+      "size": 192
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/lineage/audit_frozen_loop_price_consequence_test.py",
+      "sha256": "5e60f1b7a03869f8e9f52ca768af5a06468fdd95154e8c8729cb6df25efde2b9",
+      "size": 31358
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/lineage/run_causal_loop_prefix_path_forecast.py",
+      "sha256": "426447e0c218802d4d533550769db57a71b2b9d0b80ee9c7ece9d81cba6fdcb9",
+      "size": 35595
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/lineage/run_causal_semimarkov_regime_loops.py",
+      "sha256": "9d325f70d5ff088e58d7f3325a78db80df996bc6324706ab1a0225419b6abed4",
+      "size": 41571
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/lineage/run_frozen_loop_price_consequence_test.py",
+      "sha256": "9e92e742dda533252d79a3b45171a9d6633063c4e7cb0b0bed2786bd8ee7ade9",
+      "size": 45971
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/shadow",
+      "sha256": null,
+      "size": 192
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/shadow/20260710-frozen-loop-movement-prospective-shadow-contract.md",
+      "sha256": "4f1bf50a4a7aa39220bf3b25e59b842921d3b229344881042cb49bd96db62ca9",
+      "size": 5834
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/shadow/frozen_loop_movement_shadow_core.py",
+      "sha256": "4e4ea6ee278da33d30803a4ce0bab3dee8e192e3d9578c87a0eebe5d8cb34b75",
+      "size": 38350
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/shadow/run_frozen_loop_movement_shadow.py",
+      "sha256": "b9d5d4007e038d682310f9c71218db5611f69f2f935e16eea896ca2961355c75",
+      "size": 53729
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/frozen_bundle/provenance/shadow/test_frozen_loop_movement_shadow.py",
+      "sha256": "9d6a1f7b3ea7d4a4167e270919b3cc6a11d287de6f7950b1bdff07ba7aebcf94",
+      "size": 6539
+    },
+    {
+      "kind": "directory",
+      "mode": 493,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/prediction_batches",
+      "sha256": null,
+      "size": 64
+    },
+    {
+      "kind": "file",
+      "mode": 384,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/prediction_ledger.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/shadow_validation/frozen_loop_movement_shadow_v1/runtime_metadata.json",
+      "sha256": "a94ad1f2c38ee2d91d670085047fe8a72c83f14fd19122a26c341503e3c71f53",
+      "size": 4432
+    },
+    {
+      "kind": "file",
+      "mode": 420,
+      "path": "work/tests/test_frozen_loop_movement_shadow.py",
+      "sha256": "9d6a1f7b3ea7d4a4167e270919b3cc6a11d287de6f7950b1bdff07ba7aebcf94",
+      "size": 6539
+    }
+  ],
+  "ledger_lines": 0,
+  "ledger_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "ledger_size": 0,
+  "runtime_outcomes_opened": false,
+  "tree_sha256": "38e90e9db3ae2974db2f6726bb69dfadde0410c2b200e7ce9e080fcbd22bc267"
+}

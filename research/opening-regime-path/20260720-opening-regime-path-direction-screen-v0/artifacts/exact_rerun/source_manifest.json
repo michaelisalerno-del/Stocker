@@ -1,0 +1,470 @@
+{
+  "broker_integration_required": false,
+  "combined_safe_panel_feature_hash": "0bcef7ada94979e9aedbc7e32060c993220c4967bcac8e2fdd3504d4a8e2fc4d",
+  "combined_safe_snapshot_hash": "a7656a7d5ba6d087bb9ac263dcef575e7a1b6f60a06e307e8078447603962da4",
+  "date_predicate_applied_before_materialisation": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "provider": "EODHD five-minute historical activity proxy",
+  "representation_specific": true,
+  "research_only": true,
+  "source_paths_are_logical_not_local_absolute": true,
+  "source_rows_by_year_month": [
+    {
+      "row_count": 38153,
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 36340,
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 36340,
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 39974,
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 39968,
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 34521,
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 39153,
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 39964,
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 36340,
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 41783,
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 35506,
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 37334,
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 36324,
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 34523,
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 38157,
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 38154,
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 38133,
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 36340,
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 39146,
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 29056,
+      "year_month": "2025-08"
+    }
+  ],
+  "sources": [
+    {
+      "complete_safe_bounded_hash": "2ac4ebceb5664606b872a628d5a74136c8cf74492b8df29c6cd5f73f4249cf01",
+      "complete_safe_bounded_rows": 32402,
+      "development_bounded_hash": "fc4c823f69a282c58ba256cfe412b1152d46e36288f1acb0d7794e27dc4fda2d",
+      "development_bounded_rows": 19800,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+      "symbol": "AAL"
+    },
+    {
+      "complete_safe_bounded_hash": "b6c167d0613e739c19bef5b890d4d7de66e5adfa0413154e19fa234629f10dfd",
+      "complete_safe_bounded_rows": 32403,
+      "development_bounded_hash": "23d5239452a5c9dfdafca4977649b1e26b2424b47e6fa6332ffffca87bfb0fa5",
+      "development_bounded_rows": 19800,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+      "symbol": "AAOI"
+    },
+    {
+      "complete_safe_bounded_hash": "ad2171c9959edb2274bfaf10be08dd5154a2003e018640fcb74c4345a2bbff81",
+      "complete_safe_bounded_rows": 32402,
+      "development_bounded_hash": "c45cb19ff7cb92c89ea060953ef36f831c659175d3f3a3624f460dfb83a3426b",
+      "development_bounded_rows": 19798,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+      "symbol": "APLD"
+    },
+    {
+      "complete_safe_bounded_hash": "1900c2baaaed80a3fbf86f271f4fbfe41dc2d19c2617b568851d596d9feaa747",
+      "complete_safe_bounded_rows": 32400,
+      "development_bounded_hash": "bc9994ee861c8dcbb02be7fa45cd519d1abeef28abbb5013dbe0d34dfb88e397",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+      "symbol": "ASTS"
+    },
+    {
+      "complete_safe_bounded_hash": "105560c1a8bd6955a98724a16fd31d4a7ca703f4dbf8bde2aa44b81f9e617307",
+      "complete_safe_bounded_rows": 32401,
+      "development_bounded_hash": "5d3f8641f95a7937bd46a55e69a98ec9237e22befb8122e7c5ab202817d0c433",
+      "development_bounded_rows": 19798,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AXTI/timeframe=5m/data.parquet",
+      "symbol": "AXTI"
+    },
+    {
+      "complete_safe_bounded_hash": "055f9bced79ca9c3fb6e65254fc2229e95a9f1a07c147c1b60bcc2cdd75d693b",
+      "complete_safe_bounded_rows": 32400,
+      "development_bounded_hash": "dab0144fc80f9f3498baee725f0f429cde814203dc086ec372834677997ebaf3",
+      "development_bounded_rows": 19798,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+      "symbol": "CIFR"
+    },
+    {
+      "complete_safe_bounded_hash": "92fc9fb34c5c525f85c40147e37600ef0cf1670f1427797f741454eb73eddea7",
+      "complete_safe_bounded_rows": 32402,
+      "development_bounded_hash": "41db4a5cb21e7f713ddf52495b7b6c0d5c9b53cf46cd66c2d7e6b07420ce3a38",
+      "development_bounded_rows": 19800,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+      "symbol": "HIMS"
+    },
+    {
+      "complete_safe_bounded_hash": "4d9d6f75da9a9f2daadb9d81244343f94647dcbd90a426c03ad2b550e9a23b29",
+      "complete_safe_bounded_rows": 32401,
+      "development_bounded_hash": "a922318e2636c63c1704b8735201cbcf116b9186eca201848c4d2585a5745f10",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+      "symbol": "IONQ"
+    },
+    {
+      "complete_safe_bounded_hash": "a32fe0464ac2fff115db5db6cc744db591b304c0cbb08f330ed7c37dcebac50b",
+      "complete_safe_bounded_rows": 32401,
+      "development_bounded_hash": "5b0ea2266fa1c350f334d41c41d7312d83b530868ce0c5bf8bdffc0c682bcf34",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+      "symbol": "IREN"
+    },
+    {
+      "complete_safe_bounded_hash": "34d6a2385300e8d0c1eb3b890273943d50a8655b00293d028a19fd9b220ae013",
+      "complete_safe_bounded_rows": 32401,
+      "development_bounded_hash": "635745a34cd85fb5e9bec227f18161a8a462f2805a0c00d200e955111dac2dd7",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+      "symbol": "MARA"
+    },
+    {
+      "complete_safe_bounded_hash": "62df3853fd345c658a8301add74fe802622cd9c70c24a94ecd486aee9359d1e7",
+      "complete_safe_bounded_rows": 32402,
+      "development_bounded_hash": "bc6b68e2b772b912eaa3627b1fbc615a451b01def10d1eca441f7386fa943a36",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+      "symbol": "MP"
+    },
+    {
+      "complete_safe_bounded_hash": "60487e33398b4ac48f69e0da402e5103f6f2798d8a1abc7c5d813c9cffafb400",
+      "complete_safe_bounded_rows": 32405,
+      "development_bounded_hash": "c29f7d1381e81f5cd6227e46dd42a78a6957c63901b2f2637c6139bb6ce51a40",
+      "development_bounded_rows": 19802,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+      "symbol": "MRNA"
+    },
+    {
+      "complete_safe_bounded_hash": "c8a13768c3b96156051426c79775103c8eb157f6da1b20a692934ad3b3bf4276",
+      "complete_safe_bounded_rows": 32402,
+      "development_bounded_hash": "34bc5a47b706a7772d8d4211fa5105a2fef557213f7495892f4b875f4d64f7b4",
+      "development_bounded_rows": 19801,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+      "symbol": "MSTR"
+    },
+    {
+      "complete_safe_bounded_hash": "03715f3f026a1c2e029c83a07625edd11b785bec63e4285b0b04c08db340222c",
+      "complete_safe_bounded_rows": 32403,
+      "development_bounded_hash": "fcdaffecc20342ce0ad38d240e6b0ba155d79858bf4b65f605685a944a243cf6",
+      "development_bounded_rows": 19801,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+      "symbol": "NVTS"
+    },
+    {
+      "complete_safe_bounded_hash": "0e15f1d3ed63b358219fdb2a8363752b373a76ebc91e63028ab58fb1cbaa5749",
+      "complete_safe_bounded_rows": 32393,
+      "development_bounded_hash": "561ca9857da506a3281b0569fe208c56f63b93032833e738b0678d740acd256d",
+      "development_bounded_rows": 19791,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=OKLO/timeframe=5m/data.parquet",
+      "symbol": "OKLO"
+    },
+    {
+      "complete_safe_bounded_hash": "403a474b3a3b39365e74470852f48056bd0161d60caa26e883a7ab4e45022f81",
+      "complete_safe_bounded_rows": 32402,
+      "development_bounded_hash": "0b89191f2ad16f828c7a04c4db5abb560bc30a92119d12ef9773c7f2c5db23fc",
+      "development_bounded_rows": 19800,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+      "symbol": "QBTS"
+    },
+    {
+      "complete_safe_bounded_hash": "233088673f12790eadba650647c3d10f74f011e7baae69b10d52c02d8fbab042",
+      "complete_safe_bounded_rows": 32400,
+      "development_bounded_hash": "f70e9cc0dbf11f1e09eca57f4a0cccd32957c52fd092b080c9d499b6800d1ff3",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+      "symbol": "RGTI"
+    },
+    {
+      "complete_safe_bounded_hash": "f217b7abb3404783e87320296d57b3148f26d0bb065d9640db0f4d346e6677d9",
+      "complete_safe_bounded_rows": 32401,
+      "development_bounded_hash": "cb3b8c52daf18516261d89ed39fc6659bf6ff38c4be8734e9d2f893ecf4fd73e",
+      "development_bounded_rows": 19798,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+      "symbol": "RIOT"
+    },
+    {
+      "complete_safe_bounded_hash": "c7ab04d8a205be771320a8eccaaa88c1dfa4ff919fd469fe35e99c5cf03e15e6",
+      "complete_safe_bounded_rows": 32401,
+      "development_bounded_hash": "4ccf030f3a92eda91242fed9fa28ff4bc7ef0690c9d09d53bb564662c4dbc666",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+      "symbol": "RIVN"
+    },
+    {
+      "complete_safe_bounded_hash": "141b6f08c5d2b1840024493aef6b7059f3d41deb28cc2d6dcf609aa589818066",
+      "complete_safe_bounded_rows": 32385,
+      "development_bounded_hash": "33c567b25f3d41281f6b8528672b368d495e0d4ea14a48ce167f099a38b4352f",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+      "symbol": "SMCI"
+    },
+    {
+      "complete_safe_bounded_hash": "e3f6d0e05f3bf29a18b0cdb30ce3fe03312628705fa23e46bcb51ef135242353",
+      "complete_safe_bounded_rows": 32399,
+      "development_bounded_hash": "c6ba702220863b7ae954c553c3081bca32da882e8ee5ba6ef266eb2e7c75aecb",
+      "development_bounded_rows": 19798,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+      "symbol": "SOFI"
+    },
+    {
+      "complete_safe_bounded_hash": "cc5c3ad83d8af2d639a59986e65eea5513b658966be513e51628ab23970d54c2",
+      "complete_safe_bounded_rows": 32401,
+      "development_bounded_hash": "8d76f04e6c3051161a91ef23bf88125acf13ee1026b578c510ed927a55408e7b",
+      "development_bounded_rows": 19799,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet",
+      "symbol": "WULF"
+    },
+    {
+      "complete_safe_bounded_hash": "4797ccc19ea22cf323e5e4286f0b3921fb686738fe100ed22faa76c53dddaa32",
+      "complete_safe_bounded_rows": 32402,
+      "development_bounded_hash": "b1c46d7e5efa9cd26e36ee656e0ecd0f19a0b3e20b698308f91e22994ef9e848",
+      "development_bounded_rows": 19800,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=VTI.US/timeframe=5m/data.parquet",
+      "symbol": "VTI"
+    }
+  ],
+  "strategy_promotion": false,
+  "symbol_predicate_applied_before_materialisation": true,
+  "vendor_qa": [
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/AAL_5m_eodhd_qa.json",
+      "sha256": "9726400fab8ae7389fa16dc3c69e82f962d1608cbd6912a9eb13b5da2c7e7df8",
+      "status": "pass",
+      "symbol": "AAL"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/AAOI_5m_eodhd_qa.json",
+      "sha256": "6fcfb9e7eb8ba4c8660119ffa89af9f249da157ecfd7e6b3537238a7177d5c6b",
+      "status": "warning",
+      "symbol": "AAOI"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/APLD_5m_eodhd_qa.json",
+      "sha256": "26dd3035545c48de9fd0dd872494eb023de63b3c4457add5991d5d7923a98c8d",
+      "status": "warning",
+      "symbol": "APLD"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/ASTS_5m_eodhd_qa.json",
+      "sha256": "e30dd92b518e433737e07a53b16063805aadb4b9c3ce00d7b6d72982c6cd8089",
+      "status": "warning",
+      "symbol": "ASTS"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/AXTI_5m_eodhd_qa.json",
+      "sha256": "bcefacafb6ab9be59b663cbac0f8dc27ce792ff490a97337745c81f91b491843",
+      "status": "warning",
+      "symbol": "AXTI"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/CIFR_5m_eodhd_qa.json",
+      "sha256": "2f5d4befe2d27fdce5f8a6589ae6ba2e144028433ce29e548d8999b78e651567",
+      "status": "warning",
+      "symbol": "CIFR"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/HIMS_5m_eodhd_qa.json",
+      "sha256": "6fc865319846f3b3ea9c1b936a33f249dba7d556afa435051aa05f92b20ca4b0",
+      "status": "warning",
+      "symbol": "HIMS"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/IONQ_5m_eodhd_qa.json",
+      "sha256": "1958c644db60c196d6ad49fa2aee4df0820f142e2a495641a720a54db5fc0abb",
+      "status": "warning",
+      "symbol": "IONQ"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/IREN_5m_eodhd_qa.json",
+      "sha256": "9aeaae8de6c1fa74e6394da2c5ac399c6de2a7e21edadd73877a8e11c0d744c8",
+      "status": "warning",
+      "symbol": "IREN"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/MARA_5m_eodhd_qa.json",
+      "sha256": "24787d4ccc2480f415d8c8bf6c5c8f40de82b56648ffff06914ef271128e48a9",
+      "status": "pass",
+      "symbol": "MARA"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/MP_5m_eodhd_qa.json",
+      "sha256": "4a4d94e2ec08619e48b954a19978e1587575a597e15264e2c0b3610aa66ab839",
+      "status": "warning",
+      "symbol": "MP"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/MRNA_5m_eodhd_qa.json",
+      "sha256": "010d4980595ec8249a2ead44e7ea010b1e97ef94287bd022b2f474eb2ae2ecb3",
+      "status": "warning",
+      "symbol": "MRNA"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/MSTR_5m_eodhd_qa.json",
+      "sha256": "dab185e58680bd6089e9b540c250052969e749f6e2d5b4763c658c68edb46ad5",
+      "status": "warning",
+      "symbol": "MSTR"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/NVTS_5m_eodhd_qa.json",
+      "sha256": "3bdaada1623479080a7490d44ebd19567e481dde6c00d46ad327a1dfd7e85c62",
+      "status": "warning",
+      "symbol": "NVTS"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/OKLO_5m_eodhd_qa.json",
+      "sha256": "378c63e525a3378d11bd4c226e949fd65c668ec44414ffe4cd9539cecde1bfbc",
+      "status": "warning",
+      "symbol": "OKLO"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/QBTS_5m_eodhd_qa.json",
+      "sha256": "749987027a5c27092cbbd1a6f694b473c5c15a3039a1f078a407d2edb534ec9f",
+      "status": "warning",
+      "symbol": "QBTS"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/RGTI_5m_eodhd_qa.json",
+      "sha256": "d451680d7a6244da1a089269e7a5699db5112010ced271087618d7a828006bda",
+      "status": "warning",
+      "symbol": "RGTI"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/RIOT_5m_eodhd_qa.json",
+      "sha256": "8a4900d54c9cad60a0c998e34df13f6221c8a7199dc5fb221dee087cbd90f8b2",
+      "status": "pass",
+      "symbol": "RIOT"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/RIVN_5m_eodhd_qa.json",
+      "sha256": "2b76b675e9deed5b27fa4a689c64d66c49a8c8561cdf04fa8929ce33a6cc8c69",
+      "status": "warning",
+      "symbol": "RIVN"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/SMCI_5m_eodhd_qa.json",
+      "sha256": "7fc214ee0b1291cda0afd915f1e98a6e71119f12e25477c3ab6ee637ce703d78",
+      "status": "warning",
+      "symbol": "SMCI"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/SOFI_5m_eodhd_qa.json",
+      "sha256": "ba5ae8e8f699d35680eb276d1d242563168ba55fa83a2512f06f08fe5d14d8fd",
+      "status": "pass",
+      "symbol": "SOFI"
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "logical_path": "external_vendor_qa/WULF_5m_eodhd_qa.json",
+      "sha256": "eab29301a684fb535011428ffe31fefe561b26ac9097307a589592ab18d80811",
+      "status": "warning",
+      "symbol": "WULF"
+    },
+    {
+      "adjusted_close_differences": null,
+      "adjusted_close_present": null,
+      "logical_path": null,
+      "sha256": null,
+      "status": "not_available",
+      "symbol": "VTI"
+    }
+  ]
+}

@@ -1,0 +1,348 @@
+{
+  "contract_id": "per_loop_movement_quality_v1",
+  "contract_frozen_at_utc": "2026-07-10T20:39:18Z",
+  "scientific_status": "development_and_backward_portability",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "periods": {
+    "fit_and_internal_forward_validation": 2024,
+    "internal_forward_validation_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12"
+    ],
+    "development_score": 2025,
+    "backward_portability_score": 2023,
+    "2026_permitted": false,
+    "prospective_validation_claim_permitted": false
+  },
+  "frozen_lineage": {
+    "state_model": "frozen eight-state causal forward semi-Markov detector fitted on 2024",
+    "structural_loop_model": "retained 2024-fitted last-three-state fixed-loop identity model",
+    "cycles": "the frozen twenty fixed cycles",
+    "structural_probability_symbol": "s(i,c)",
+    "structural_probability_definition": "P(loop c's exact required future state path occurs | causal last-three-state history at anchor i)",
+    "state_or_structural_refit_permitted": false,
+    "cycle_change_permitted": false,
+    "prospective_movement_model_or_ledger_change_permitted": false
+  },
+  "cohort": {
+    "anchor": "exact causal state-run entry merged to the completed provider bar",
+    "regular_session_only": true,
+    "maximum_zero_based_start_bar": 53,
+    "required_exact_future_bar_spacing_minutes": 5,
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "compatible_cycle_rows_overlap": true,
+    "realized_loop_label": "one when any deduplicated rotation of the compatible frozen cycle exactly matches the next required within-session state transitions",
+    "session_end_before_path_completion_is_negative": true,
+    "quality_fit_rows": "realized_loop_label == 1 only",
+    "positive_overlap_weight": "1 / number of positive frozen-cycle labels at the anchor",
+    "future_loop_identity_is_training_label_not_inference_feature": true,
+    "provider_volume_used": false,
+    "direction_or_signed_return_used": false
+  },
+  "outcomes": {
+    "decision_information_includes_completed_anchor_bar": true,
+    "future_bars_begin_after_anchor": true,
+    "absolute_return_bps": "abs(10000 * log(close[t+h] / close[t]))",
+    "future_range_bps": "10000 * (max(high[t+1:t+h]) - min(low[t+1:t+h])) / close[t]",
+    "threshold_fit_period": 2024,
+    "quantile_interpolation": "linear",
+    "comparison_operator": ">",
+    "thresholds_bps": {
+      "absolute_return_bps": {
+        "6": {
+          "p75": 116.9594286396164,
+          "p90": 200.72998029354338
+        },
+        "12": {
+          "p75": 158.55477362021094,
+          "p90": 269.3043689982858
+        },
+        "24": {
+          "p75": 212.95262152537344,
+          "p90": 354.9152270049836
+        }
+      },
+      "future_range_bps": {
+        "6": {
+          "p75": 217.39112318840534,
+          "p90": 333.7890582759158
+        },
+        "12": {
+          "p75": 295.50341925592556,
+          "p90": 443.43894920629566
+        },
+        "24": {
+          "p75": 396.8727211744621,
+          "p90": 577.2272790601467
+        }
+      }
+    },
+    "ordered_classes": {
+      "class_0": "outcome <= p75",
+      "class_1": "p75 < outcome <= p90",
+      "class_2": "outcome > p90"
+    },
+    "quality_probabilities": {
+      "q75": "P(class_1) + P(class_2)",
+      "q90": "P(class_2)",
+      "nesting_requirement": "0 <= q90 <= q75 <= 1"
+    }
+  },
+  "causal_controls": {
+    "current_state_one_hot_width": 8,
+    "numeric_columns": [
+      "b0_entry_numeric",
+      "b0_entry_high_stress",
+      "entry_time_sin",
+      "entry_time_cos",
+      "current_bar_log_return",
+      "return_sum_6",
+      "mean_abs_return_12",
+      "session_return",
+      "bar_range_pct"
+    ],
+    "missing_numeric_values": "fill with 2024 training median",
+    "scaler": "StandardScaler(with_mean=False), fit on applicable 2024 training rows only",
+    "stock_identity_feature_permitted": false,
+    "future_state_duration_price_or_end_clock_feature_permitted": false
+  },
+  "models": {
+    "one_ordered_model_per_target_and_horizon": true,
+    "qcontext": {
+      "definition": "conditional ordered movement distribution given that a frozen loop occurs, without cycle identity",
+      "class": "multinomial LogisticRegression",
+      "C": 0.2,
+      "solver": "lbfgs",
+      "max_iter": 1000,
+      "random_state": 20260710,
+      "features": "shared causal controls only"
+    },
+    "qcycle": {
+      "definition": "conditional ordered movement distribution given that loop c occurs, with shared causal controls and hierarchically shrunk cycle identity",
+      "class": "multinomial LogisticRegression",
+      "C": 0.2,
+      "solver": "lbfgs",
+      "max_iter": 1000,
+      "random_state": 20260710,
+      "shared_features": "exactly the qcontext causal controls",
+      "cycle_feature_blocks": [
+        {
+          "name": "cycle_one_hot",
+          "width": 20,
+          "feature_scale": 1.0,
+          "effective_relative_l2_penalty": 1.0
+        },
+        {
+          "name": "cycle_by_current_state",
+          "width": 160,
+          "feature_scale": 0.5,
+          "effective_relative_l2_penalty": 4.0
+        },
+        {
+          "name": "cycle_by_history_token",
+          "width": 12960,
+          "feature_scale": 0.25,
+          "effective_relative_l2_penalty": 16.0
+        }
+      ],
+      "history_token_width": 648,
+      "backoff_interpretation": "unseen or weak interactions shrink toward cycle main effects and then shared context"
+    },
+    "post_score_hyperparameter_or_feature_change_permitted": false
+  },
+  "internal_2024_oof_and_calibration": {
+    "schedule": "for each July-December 2024 month, fit only on strictly earlier 2024 months and predict that month",
+    "rows_used_for_model_loss_and_calibration": "realized loop-positive anchor-cycle rows with inverse-overlap weights",
+    "temperature_grid": [
+      0.75,
+      1.0,
+      1.25,
+      1.5,
+      2.0
+    ],
+    "temperature_application": "softmax(log(max(class_probability, 1e-12)) / temperature)",
+    "selection_criterion": "lowest weighted July-December OOF multinomial log loss separately for each model, target, and horizon",
+    "tie_break": "temperature nearest 1.0, then lower numeric value",
+    "full_fit_after_selection": "refit the same model on all eligible 2024 realized-loop-positive rows and attach the selected OOF temperature",
+    "must_complete_and_freeze_before_2025_or_2023_row_level_outcomes_are_read": true
+  },
+  "chain_rule_outputs": {
+    "conditional_quality": {
+      "context": "qcontext75(i,c), qcontext90(i,c)",
+      "cycle": "qcycle75(i,c), qcycle90(i,c)"
+    },
+    "joint_baseline": {
+      "p75": "s(i,c) * qcontext75(i,c)",
+      "p90": "s(i,c) * qcontext90(i,c)"
+    },
+    "joint_candidate": {
+      "p75": "s(i,c) * qcycle75(i,c)",
+      "p90": "s(i,c) * qcycle90(i,c)"
+    },
+    "joint_target": "realized_loop_label * movement_threshold_exceedance_label",
+    "interpretation": "exact probability chain rule because q is explicitly conditional on loop occurrence",
+    "no_independence_claim": true,
+    "no_sum_across_overlapping_cycles": true,
+    "structural_probability_and_quality_probability_must_be_reported_separately": true
+  },
+  "structural_reliability_gate_each_cycle_and_scoring_period": {
+    "history_path_log_loss_lower_than_first_order": true,
+    "history_path_brier_lower_than_first_order": true,
+    "history_path_ece_no_worse_than_first_order": true,
+    "maximum_supported_bin_error_tolerance": 0.01,
+    "purpose": "a movement-qualified cycle must also remain structurally forecastable"
+  },
+  "support_gates": {
+    "full_2024_fit_eligibility_each_cycle": {
+      "minimum_compatible_anchor_cycle_rows": 5000,
+      "minimum_realized_loop_rows": 500,
+      "minimum_stocks_with_realized_loop": 18,
+      "required_quarters": 4,
+      "minimum_realized_loop_rows_each_quarter": 50
+    },
+    "july_december_2024_oof_provisional_tier_each_cycle": {
+      "minimum_realized_loop_rows": 250,
+      "minimum_stocks_with_realized_loop": 15,
+      "required_quarters": [
+        3,
+        4
+      ],
+      "minimum_realized_loop_rows_each_required_quarter": 75,
+      "good_minimum_p75_positive_and_negative_rows_each_target_horizon": 50,
+      "high_minimum_p90_positive_rows_each_target_horizon": 25,
+      "high_minimum_p90_negative_rows_each_target_horizon": 50
+    },
+    "each_full_scoring_period_each_cycle": {
+      "minimum_compatible_anchor_cycle_rows": 5000,
+      "minimum_realized_loop_rows": 500,
+      "minimum_stocks_with_realized_loop": 18,
+      "required_quarters": 4,
+      "minimum_realized_loop_rows_each_quarter": 50,
+      "good_minimum_p75_positive_and_negative_rows_each_target_horizon": 100,
+      "high_minimum_p90_positive_rows_each_target_horizon": 50,
+      "high_minimum_p90_negative_rows_each_target_horizon": 100
+    },
+    "support_failure_grade": "unqualified"
+  },
+  "common_quality_gates": {
+    "daily_uncertainty": {
+      "method": "five-session moving-block bootstrap",
+      "draws": 5000,
+      "confidence_interval": 0.95
+    },
+    "conditional_candidate_vs_context": {
+      "minimum_relative_log_loss_improvement": 0.005,
+      "brier_difference_below_zero": true,
+      "daily_log_loss_and_brier_difference_upper_bounds_below_zero": true
+    },
+    "joint_chain_candidate_vs_context": {
+      "minimum_relative_log_loss_improvement": 0.0025,
+      "brier_difference_below_zero": true,
+      "daily_log_loss_and_brier_difference_upper_bounds_below_zero": true
+    },
+    "lift_test": {
+      "residual": "movement_exceedance_label - qcontext_probability on realized-loop rows",
+      "daily_residual_moving_block_lower_bound_above_zero": true
+    },
+    "robustness": {
+      "conditional_and_joint_log_loss_and_brier_lower_in_every_required_quarter": true,
+      "conditional_and_joint_log_loss_and_brier_lower_under_every_leave_one_stock_out_deletion": true
+    },
+    "calibration": {
+      "fixed_probability_bins": 10,
+      "oof_minimum_supported_conditional_bin_rows": 50,
+      "oof_minimum_supported_joint_bin_rows": 250,
+      "scoring_minimum_supported_conditional_bin_rows": 100,
+      "scoring_minimum_supported_joint_bin_rows": 500,
+      "ece_no_worse_than_baseline": true,
+      "conditional_maximum_supported_bin_error_tolerance": 0.02,
+      "joint_maximum_supported_bin_error_tolerance": 0.01
+    }
+  },
+  "tier_rules_each_cycle_and_horizon": {
+    "unqualified": "any required support, structural, target, proper-loss, uncertainty, robustness, calibration, rate, or lift gate fails",
+    "good": {
+      "required_targets": [
+        "absolute_return_bps",
+        "future_range_bps"
+      ],
+      "threshold": "p75",
+      "minimum_observed_conditional_exceedance_rate": 0.3,
+      "minimum_mean_calibrated_qcycle_probability": 0.3,
+      "minimum_observed_rate_divided_by_mean_qcontext_probability": 1.1,
+      "common_quality_gates_apply": true
+    },
+    "high": {
+      "must_first_pass_good": true,
+      "required_targets": [
+        "absolute_return_bps",
+        "future_range_bps"
+      ],
+      "minimum_p75_observed_conditional_exceedance_rate": 0.35,
+      "minimum_p75_mean_calibrated_qcycle_probability": 0.35,
+      "p90_minimum_observed_conditional_exceedance_rate": 0.15,
+      "p90_minimum_mean_calibrated_qcycle_probability": 0.15,
+      "p90_minimum_observed_rate_divided_by_mean_qcontext_probability": 1.2,
+      "common_quality_gates_apply_to_p90": true
+    },
+    "single_target_pass_cannot_qualify": true
+  },
+  "provisional_and_final_grade_logic": {
+    "provisional_source": "temperature-calibrated causal July-December 2024 OOF predictions only",
+    "provisional_required_slices": "both represented quarters and every leave-one-stock-out deletion",
+    "horizon_grades": "calculate high, good, or unqualified separately at 6, 12, and 24 bars",
+    "global_cycle_grade": {
+      "high": "all three horizon grades are high",
+      "good": "all three horizon grades are at least good and at least one is good",
+      "unqualified": "one or more horizon grades are unqualified"
+    },
+    "full_period_2025_grade": "recalculate every support, structural, tier, loss, interval, all-four-quarter, stock-deletion, and calibration gate on the full 2025 development period",
+    "full_period_2023_grade": "recalculate every support, structural, tier, loss, interval, all-four-quarter, stock-deletion, and calibration gate on the full backward-2023 period",
+    "final_grade": "minimum of the frozen 2024 OOF provisional grade, 2025 grade, and 2023 grade",
+    "promotion_after_2024_provisional_freeze_permitted": false,
+    "high_may_demote_to_good": true,
+    "failed_good_demotes_to_unqualified": true,
+    "post_score_cycle_substitution_threshold_tuning_or_gate_change_permitted": false
+  },
+  "interpretation_and_surface_rule": {
+    "permitted_tier_labels": [
+      "high_movement_quality",
+      "good_movement_quality",
+      "unqualified"
+    ],
+    "qualified_cycle_requires_structural_and_quality_evidence": true,
+    "structural_ranking_remains_the_frozen_model": true,
+    "quality_layer_may_not_refit_or_reorder_structural_probabilities": true,
+    "report_s_q75_q90_j75_j90_separately": true,
+    "direction_long_short_signed_return_pnl_or_trading_interpretation_permitted": false
+  },
+  "prospective_separation": {
+    "existing_frozen_movement_shadow_contract_unchanged": true,
+    "existing_prediction_ledger_unchanged": true,
+    "this_development_quality_layer_may_not_enter_the_existing_shadow_predictions_or_gates": true,
+    "new_post_development_prospective_contract_required_before_any_forward_quality_claim": true,
+    "2025_2023_and_partial_2026_are_not_new_prospective_holdouts": true
+  },
+  "integrity_gates": {
+    "contract_and_source_hashes_frozen_before_scoring": true,
+    "independent_reconstruction_of_thresholds_loop_labels_features_models_probabilities_and_tiers": true,
+    "ordered_probability_nesting_exact": true,
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "no_2026_rows": true,
+    "no_direction_signed_return_pnl_cost_spread_slippage_position_order_broker_strategy_or_deployment_columns": true,
+    "prospective_shadow_tree_unchanged": true
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
+  "migration": "packages/stocker_prospective/src/stocker_prospective/migrations/0010_ibkr_budget_transfer_v0.sql",
+  "new_tables": [
+    "ibkr_runtime_capacity_v0",
+    "subscription_lifecycle_event_v0",
+    "option_episode_allocation_v0",
+    "skipped_recording_v0",
+    "provider_m1c_observation_v0",
+    "source_transfer_session_v0",
+    "prospective_session_phase_v0"
+  ],
+  "extended_tables": [
+    "m1c_checkpoint_v0",
+    "quiet_state_shadow_outcome_v0",
+    "shadow_quote_outcome_v0",
+    "shadow_structure_outcome_v0"
+  ],
+  "m1c_checkpoint_fields": [
+    "symbol",
+    "session_date",
+    "checkpoint",
+    "bar_identity",
+    "feature_values_json",
+    "probability",
+    "model_hash",
+    "configuration_hash",
+    "claims_json"
+  ],
+  "episode_allocation_fields": [
+    "episode_id",
+    "requested_subscriptions_json",
+    "approved_subscriptions_json",
+    "queued_subscriptions_json",
+    "denied_subscriptions_json",
+    "degradation_reason",
+    "capacity_before_json",
+    "capacity_after_json",
+    "cohort_phase",
+    "scientific_option_evidence"
+  ],
+  "daily_report_files": [
+    "session_summary.json",
+    "ibkr_bar_quality.csv",
+    "m1c_ibkr_predictions.csv",
+    "eodhd_ibkr_bar_comparison.csv",
+    "eodhd_ibkr_feature_comparison.csv",
+    "eodhd_ibkr_probability_comparison.csv",
+    "tail_membership_comparison.csv",
+    "episode_comparison.csv",
+    "market_data_budget_report.json",
+    "subscription_lifecycle.csv",
+    "option_episode_quality.csv",
+    "shadow_outcomes.csv",
+    "skipped_recordings.csv",
+    "report.md"
+  ],
+  "append_only_report_generations": true,
+  "claims_boundary": {
+    "research_only": true,
+    "record_only": true,
+    "frozen_m1c": true,
+    "source_transfer_monitoring": true,
+    "exact_vendor_bar_equality_required": false,
+    "option_shadow_outcomes_only": true,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "full_option_chain_streaming_allowed": false,
+    "tick_by_tick_universe_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "reserved_future_trading_capacity": true,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_methods_available": false,
+    "account_access_required": false,
+    "position_access_required": false,
+    "strategy_promotion": false
+  }
+}

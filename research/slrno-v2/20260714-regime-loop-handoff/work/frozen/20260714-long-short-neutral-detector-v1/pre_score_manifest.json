@@ -1,0 +1,149 @@
+{
+  "contract_id": "20260714-long-short-neutral-detector-v1",
+  "event_rows": 24410,
+  "frozen_files": {
+    "data_coverage.csv": {
+      "bytes": 5406,
+      "sha256": "fdb2dbce218882c9ed5c12efaa225d24da7867bf9dd5246b24fdf36a2cbe0658"
+    },
+    "population_counts.csv": {
+      "bytes": 282487,
+      "sha256": "6d9a798b806d0e34efa53a99270e86754fe7bf118ab3e94e37d6afcdd5369713"
+    },
+    "pre_outcome_events.parquet": {
+      "bytes": 4466889,
+      "sha256": "3e1b1cc0e076e12a2df158a069d6ea94fdae5b72b8abf8554059523fbf20470a"
+    },
+    "source_hashes.json": {
+      "bytes": 6731,
+      "sha256": "763a8fbb26b1dc0610314f03ef553ce3d1ca6851a2a403076202e7bc0d344b3a"
+    }
+  },
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true,
+  "sessions": 624,
+  "source_hashes": {
+    "auditor": {
+      "bytes": 23709,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/audit_long_short_neutral_detector_v1.py",
+      "sha256": "4482e2abd87d881891e5f43e291841187699680e086887444d88d00c8fe65623"
+    },
+    "contract": {
+      "bytes": 15141,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/contracts/20260714-long-short-neutral-detector-v1.json",
+      "sha256": "11d9a61bc72fe95cd5fa3c6809f971b1eeb053392c8175334f3d090210d751d1"
+    },
+    "provider_AAL": {
+      "bytes": 1307671,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+      "sha256": "f5c2206c55e64391dffa896a9419f49d0bbfdbf3ce9fced6ade866daa59855ad"
+    },
+    "provider_AAOI": {
+      "bytes": 1422328,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+      "sha256": "3b7fdfbeaa5f5d880023c76850764587d186daee5c8c6e3c377c43ffc93f0901"
+    },
+    "provider_APLD": {
+      "bytes": 1438146,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+      "sha256": "2f80ee3c3cb5f3720e9cfb29214212be4ee8087fa2d8a28ee097794c8c38ae73"
+    },
+    "provider_ASTS": {
+      "bytes": 1566235,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+      "sha256": "70ba2866df310333253f5120c0c9eb07c5001cfd048bbe827d29516c983724fa"
+    },
+    "provider_CIFR": {
+      "bytes": 1361531,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+      "sha256": "6de8cb7378b322bcd41321d91eb69add6ee9aa72513b420f1579483d166010ef"
+    },
+    "provider_HIMS": {
+      "bytes": 1462307,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+      "sha256": "92e40332d7416cf51da0905c4678a7ef24fca1d54b723db86fd2c7fa5c9c1032"
+    },
+    "provider_IONQ": {
+      "bytes": 1482776,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+      "sha256": "5b7b6325e6e8de1b689dca5a21abef805ec9be3835cd11fb1dc2cefcef6494ce"
+    },
+    "provider_IREN": {
+      "bytes": 1471346,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+      "sha256": "b10db5ee6fb5af776f0819a05417515025f362c26ae55f292bdc161403f81471"
+    },
+    "provider_MARA": {
+      "bytes": 1421075,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+      "sha256": "bdc4c7b0a48d831a3296a969ed9f4864a953ae7e45da9741b1d04897b6928619"
+    },
+    "provider_MP": {
+      "bytes": 1365374,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+      "sha256": "433b6f30f5ef70f1461dc159a628291f56012dfc7f15e69fc26981de81315a25"
+    },
+    "provider_MRNA": {
+      "bytes": 1504989,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+      "sha256": "c83a4b505ab3975c46f0898c2bf5f718fecedc6cdeb266c9c90805d4c70981ab"
+    },
+    "provider_MSTR": {
+      "bytes": 1860345,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+      "sha256": "103a3cc0e2697f5f7c91b52522177e13c3c208abc96d8b97471f35853f276ef4"
+    },
+    "provider_NVTS": {
+      "bytes": 1328538,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+      "sha256": "fbb607e5c39b050952d2fdf0ca275e0057bc14462050826b5b8da5f44aef8718"
+    },
+    "provider_QBTS": {
+      "bytes": 1470982,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+      "sha256": "244a42e18390e13380fb23993ae3beffbc3574b895526f5e1157843b7f8a394b"
+    },
+    "provider_RGTI": {
+      "bytes": 1479543,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+      "sha256": "9003303e270718e59b2edd768a45f7a1228a645b72d6d0e8b397064a928e60a4"
+    },
+    "provider_RIOT": {
+      "bytes": 1387568,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+      "sha256": "7886f7e13fff310362b803d3aaa40dabf9f6c17b94fd430dcebef267996e72e3"
+    },
+    "provider_RIVN": {
+      "bytes": 1328107,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+      "sha256": "2ef6ef196aa9f22561a0b1bd0c4485767b4eb845d5b41ab7dff6cadf22ca1ac4"
+    },
+    "provider_SMCI": {
+      "bytes": 1672490,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+      "sha256": "95ecce4c8ccb760f558689107d0c0a0046f4e658294d3d5f0628124aa3a853da"
+    },
+    "provider_SOFI": {
+      "bytes": 1409503,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+      "sha256": "a4d30109e6e9011f5c431d7f1e698af6864d4749a6399b719bce7de55b2ffc26"
+    },
+    "provider_WULF": {
+      "bytes": 1377268,
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet",
+      "sha256": "6ebf3e2552b1c12eceb21840f6707b5330a8b07888a0c39bce6410d7df182e29"
+    },
+    "runner": {
+      "bytes": 58654,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/run_long_short_neutral_detector_v1.py",
+      "sha256": "71581388a32d028f91c40feafbba2df1e0ca572a17227a9ae7c992138e78f45f"
+    },
+    "tests": {
+      "bytes": 6448,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-13-continue-my-research-only-slrno-v2/work/tests/test_long_short_neutral_detector_v1.py",
+      "sha256": "6dfdc61bfaa472ca032bf242bc9360c454b4ebe9f13d12905a3c39942c797371"
+    }
+  },
+  "symbols": 20
+}

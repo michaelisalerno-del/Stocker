@@ -1,0 +1,32 @@
+{
+  "base_frozen_experiment_configuration": "research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/frozen_experiment_configuration_v1.json",
+  "base_frozen_rule_manifest": "research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/frozen_rule_manifest_v1.json",
+  "corrected_retrospective_event_summary": "research/prospective/20260729-m1c-prospective-opening-reversal-v1/reports/corrected_retrospective_opening_transition_event_summary_v2.md",
+  "event_count_reconciliation": "research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/opening_transition_event_count_reconciliation_v1.csv",
+  "v1_1_runtime_artifacts": [
+    "causal_barrier_audits_v1_1.csv",
+    "engineering_session_report_v1_1.csv",
+    "market_data_capacity_snapshot_v1_1.csv",
+    "prediction_receipts_v1_1.csv",
+    "eligible_episode_table_v1_1.csv",
+    "promoted_episode_table_v1_1.csv",
+    "non_promoted_eligible_episode_table_v1_1.csv",
+    "underlying_outcomes_v1_1.csv",
+    "primary_option_bid_ask_outcomes_v1_1.csv",
+    "optional_comparison_outcomes_v1_1.csv",
+    "optional_feed_degradation_events_v1_1.csv",
+    "contract_discovery_audit_v1_1.csv",
+    "baseline_comparisons_v1_1.csv",
+    "a1_comparisons_v1_1.csv",
+    "stock_response_descriptive_strata_v1_1.csv",
+    "session_cluster_bootstrap_results_v1_1.csv",
+    "event_cluster_bootstrap_results_v1_1.csv",
+    "primary_null_results_v1_1.csv",
+    "temporal_placebo_results_v1_1.csv",
+    "leave_one_stock_out_results_v1_1.csv",
+    "leave_one_session_out_results_v1_1.csv",
+    "leave_one_event_out_results_v1_1.csv",
+    "concentration_report_v1_1.csv"
+  ],
+  "v1_1_timing_configuration": "frozen_timing_addendum_configuration_v1_1.json"
+}

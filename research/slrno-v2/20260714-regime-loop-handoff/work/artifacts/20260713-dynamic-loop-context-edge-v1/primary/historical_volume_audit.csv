@@ -1,0 +1,3 @@
+period,provider_rows_in_causal_lookback,target_year_rows,target_sessions,valid_volume_ratios,unknown_volume_ratios,zero_historical_volume_rows_in_lookback,volume_label,quotes_or_ticks_used
+2025,778189,387605,250,387605,0,0,historical_volume_activity_proxy,False
+2023,509753,384917,250,384892,25,0,historical_volume_activity_proxy,False

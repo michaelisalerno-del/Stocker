@@ -1,0 +1,48 @@
+{
+  "broker_integration_required": false,
+  "continuous_behavioural_dimensions": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "fit_interval": "2024_only",
+  "labels": [
+    "CALM",
+    "TENSE",
+    "CONFLICTED",
+    "BULLISH_PRESSURE",
+    "BEARISH_PRESSURE",
+    "UPWARD_PRESSURE_EXHAUSTING",
+    "DOWNWARD_PRESSURE_EXHAUSTING",
+    "INDEPENDENT"
+  ],
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_feature_use": false,
+  "observable_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "release_label_forbidden": true,
+  "reporting_only": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "thresholds": {
+    "12": {
+      "arousal_q30": -0.3294789533048169,
+      "conviction_q60": 0.14457901444260965,
+      "exhaustion_magnitude_q70": 0.7392012471773601,
+      "frustration_q70": 0.26839485886696807,
+      "independence_q70": 0.7632971185240576,
+      "signed_pressure_q30": -0.34536995276521054,
+      "signed_pressure_q70": 0.35376122401351834,
+      "tension_q70": 0.4203110986078143
+    },
+    "6": {
+      "arousal_q30": -0.3167864598527278,
+      "conviction_q60": 0.05678490310066672,
+      "exhaustion_magnitude_q70": 0.7156538062325822,
+      "frustration_q70": 0.28408399490293057,
+      "independence_q70": 0.7694514690236757,
+      "signed_pressure_q30": -0.35771158893519184,
+      "signed_pressure_q70": 0.3581017306526211,
+      "tension_q70": 0.41960894532761783
+    }
+  }
+}

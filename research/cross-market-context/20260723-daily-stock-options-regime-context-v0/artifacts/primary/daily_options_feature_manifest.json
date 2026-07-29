@@ -1,0 +1,91 @@
+{
+  "back_pair_rule": "nearest 46-90 DTE common call/put strike",
+  "broker_integration_required": false,
+  "cross_market_mismatch_test": true,
+  "daily_options_dimensions": true,
+  "daily_stock_dimensions": true,
+  "dimensions": [
+    "options_implied_tension",
+    "options_premium_richness",
+    "options_downside_asymmetry",
+    "options_front_urgency",
+    "options_liquidity_stress",
+    "options_positioning_concentration",
+    "options_directional_positioning",
+    "options_surface_disagreement"
+  ],
+  "directional_outcomes_primary": false,
+  "economic_strategy_outcomes_opened": false,
+  "execution_enabled": false,
+  "fitted_period": "not_fitted",
+  "front_pair_rule": "nearest 7-45 DTE common call/put strike by abs(log(strike/close))",
+  "intraday_option_quotes_used": false,
+  "missing_indicators": [
+    "skew_missing",
+    "back_expiry_missing",
+    "oi_concentration_missing",
+    "call_put_oi_imbalance_missing"
+  ],
+  "newly_downloaded_bytes": 0,
+  "newly_downloaded_records": 0,
+  "option_pnl_calculated": false,
+  "options_loop_discovery_enabled": false,
+  "order_placement": "disabled",
+  "previous_close_options_only": true,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_daily_context_screen": true,
+  "raw_features": [
+    "atm_iv",
+    "straddle_mid_pct",
+    "call_put_iv_gap",
+    "skew_25d",
+    "front_term_urgency",
+    "combined_relative_spread",
+    "iv_minus_realised_20d",
+    "near_spot_oi_concentration",
+    "call_put_oi_imbalance"
+  ],
+  "reason": "front coverage or development support for a frozen raw options feature is insufficient",
+  "research_only": true,
+  "skew_delta_targets": {
+    "call": 0.25,
+    "maximum_error": 0.1,
+    "put": -0.25
+  },
+  "soft_daily_options_regimes": true,
+  "soft_daily_stock_regimes": true,
+  "status": "blocked_before_dimension_fit",
+  "strategy_promotion": false,
+  "support": {
+    "assessment_clean_checkpoint_rows": 10422,
+    "assessment_front_pair_stock_sessions": 929,
+    "assessment_months": 8,
+    "assessment_sessions": 154,
+    "assessment_stocks": 20,
+    "back_pair_stock_sessions": 0,
+    "broad_conflict_rows": 2159,
+    "development_finite_raw_feature_counts": {
+      "atm_iv": 1250,
+      "call_put_iv_gap": 1250,
+      "call_put_oi_imbalance": 1250,
+      "combined_relative_spread": 1250,
+      "front_term_urgency": 0,
+      "iv_minus_realised_20d": 1250,
+      "near_spot_oi_concentration": 1250,
+      "skew_25d": 1059,
+      "straddle_mid_pct": 1250
+    },
+    "development_front_pair_stock_sessions": 1250,
+    "dimension_fit_supported": false,
+    "low_route_support_rows": 2915,
+    "open_interest_surface_stock_sessions": 2179,
+    "passed": false,
+    "required_stock_sessions": 7903,
+    "skew_stock_sessions": 1937,
+    "unsupported_development_raw_features": [
+      "front_term_urgency"
+    ]
+  },
+  "underlying_movement_outcomes_opened": true
+}

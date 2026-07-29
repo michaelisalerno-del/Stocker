@@ -1,0 +1,67 @@
+{
+  "files": [
+    {
+      "bytes": 3620,
+      "name": "cohort_metrics.csv",
+      "sha256": "af540102ff3209da92c3d3576496f725934e545e3b4bfc648c294fdd2a0f9851"
+    },
+    {
+      "bytes": 3189,
+      "name": "data_coverage.csv",
+      "sha256": "1b8179ad5352473c78332973246dcfdee45b2ac949160a74ed16d0a5c97a44af"
+    },
+    {
+      "bytes": 707,
+      "name": "decision.json",
+      "sha256": "1a125941c7158e7eb2dbaf24e3515d80fd34225d8aef680c9931524a24e95ed8"
+    },
+    {
+      "bytes": 626,
+      "name": "hazard_auc_bootstraps.csv",
+      "sha256": "711f7d19e498d6f63d0f45d541a4135685399d70b84392d254773c1af200faad"
+    },
+    {
+      "bytes": 1102,
+      "name": "independent_audit.json",
+      "sha256": "be1679a8a33e55c611521aea2cd4b5e0b07b9df7da875db9132606b764b7b985"
+    },
+    {
+      "bytes": 2115,
+      "name": "path_class_metrics.csv",
+      "sha256": "0493edaaa4e2446450572f14f70715a2fd3d5fd11afc4d1a18a8ede5d7f32e2e"
+    },
+    {
+      "bytes": 1383,
+      "name": "profitable_vs_losing_features.csv",
+      "sha256": "03e54c60df85cf5f86eacc2f5577a640fc3bef60c2c395bf29e3e5563dcd2744"
+    },
+    {
+      "bytes": 1476,
+      "name": "quarter_metrics.csv",
+      "sha256": "cc36392e624a6c9c6e535935b91ff875d7a2bf77fe4b303aca951d0dc372e078"
+    },
+    {
+      "bytes": 2442807,
+      "name": "signal_level_path_diagnostics.parquet",
+      "sha256": "bd51c464ea55999a85b05849b1bc1ac9c4ee9fe5951f3f4a4468d8faee03579d"
+    },
+    {
+      "bytes": 4982,
+      "name": "source_hashes.json",
+      "sha256": "c86d8116f0dc0a9e12afaa4e7927ca0f91be2147e4373c47243f70cb2f7bcfda"
+    },
+    {
+      "bytes": 5569,
+      "name": "stock_deletion_metrics.csv",
+      "sha256": "99120db2d35d69118a90d2ff83f6a77be630197729911fa7827a973b731f3388"
+    },
+    {
+      "bytes": 11903,
+      "name": "summary.json",
+      "sha256": "92afb73492f8a22efdb006e55709c1179a29f9676e95bbd4c701b36203b27480"
+    }
+  ],
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true
+}

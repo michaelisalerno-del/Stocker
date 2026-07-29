@@ -1,0 +1,5 @@
+hypothesis_id,expected_sign,lookbacks,p_value,joint_rule,q_value,q_le_0_10
+H1,positive,[12],0.0384615384615385,maximum one-sided p across required lookbacks,0.0384615384615385,True
+H2,positive,[12],0.0384615384615385,maximum one-sided p across required lookbacks,0.0384615384615385,True
+H3,positive,"[6, 12]",0.0384615384615385,maximum one-sided p across required lookbacks,0.0384615384615385,True
+H4,negative,[6],0.0384615384615385,maximum one-sided p across required lookbacks,0.0384615384615385,True

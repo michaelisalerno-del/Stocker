@@ -29,7 +29,7 @@ def _reports_dir(data_dir: str | Path) -> Path:
 
 def _return_summary(frame: pd.DataFrame) -> dict[str, float]:
     close = pd.to_numeric(frame["close"], errors="coerce")
-    returns = close.pct_change().dropna()
+    returns = close.pct_change(fill_method=None).dropna()
     if returns.empty:
         return {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
     return {
@@ -42,7 +42,7 @@ def _return_summary(frame: pd.DataFrame) -> dict[str, float]:
 
 def _largest_bars(frame: pd.DataFrame, count: int = 3) -> dict[str, list[dict[str, Any]]]:
     data = frame.copy()
-    data["return"] = pd.to_numeric(data["close"], errors="coerce").pct_change()
+    data["return"] = pd.to_numeric(data["close"], errors="coerce").pct_change(fill_method=None)
     up = data.nlargest(count, "return")[["timestamp", "open", "high", "low", "close", "return"]]
     down = data.nsmallest(count, "return")[["timestamp", "open", "high", "low", "close", "return"]]
     up_records = cast(list[dict[str, Any]], up.to_dict("records"))

@@ -1,0 +1,10 @@
+family,endpoint,rows,observed_mean,ci_lower,ci_upper,p_one_sided,sessions,holm_adjusted_p,passes_holm_0_05
+absolute_selected_net,context_only,0,,,,,0,,False
+absolute_selected_net,context_plus_loop_mixture,0,,,,,0,,False
+absolute_selected_net,prediction_only,0,,,,,0,,False
+absolute_selected_net,sequential_confirmation,0,,,,,0,,False
+incremental_return,context_only_minus_prediction_only,1645,0.0,0.0,0.0,1.0,68,1.0,False
+incremental_return,context_plus_loop_minus_context_only,1645,0.0,0.0,0.0,1.0,68,1.0,False
+incremental_return,sequential_confirmation_minus_context_plus_loop,1645,0.0,0.0,0.0,1.0,68,1.0,False
+predictive_log_loss,context_loss_improvement_vs_prediction,1645,0.003966649326554592,-0.005522408064331987,0.014132712710162944,0.22255548890221954,68,0.4451109778044391,False
+predictive_log_loss,loop_loss_improvement_vs_context,1645,-0.005092306604186444,-0.009688716629874854,-0.0004752731764408355,0.9846030793841232,68,0.9846030793841232,False

@@ -1,0 +1,31 @@
+{
+  "assessment_row_identity_mismatches": 0,
+  "bootstrap_repeated": false,
+  "broker_integration_required": false,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "expected_feature_hash": "3ee948c1b7ba42596603750b45473de74656f443c4b62d752860687556ead3cc",
+  "feature_hash_match": true,
+  "final_decision_match": true,
+  "maximum_coefficient_difference": 0.0,
+  "maximum_pooled_metric_difference": 3.608224830031759e-16,
+  "maximum_probability_difference": 0.0,
+  "models_refit": [
+    "H0",
+    "H1"
+  ],
+  "passed": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_completion_hazard": true,
+  "reloaded_feature_hash": "3ee948c1b7ba42596603750b45473de74656f443c4b62d752860687556ead3cc",
+  "required_maximum_probability_difference": 1e-12,
+  "research_only": true,
+  "route_competition_features": true,
+  "route_null_refits_repeated": false,
+  "route_resolution_label_mismatches": 0,
+  "row_identity_mismatches": 0,
+  "strategy_promotion": false
+}

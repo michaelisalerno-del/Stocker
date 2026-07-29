@@ -1,0 +1,23 @@
+{
+  "behavioural_regime_gating_test": true,
+  "broker_integration_required": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "final_decision_equal": true,
+  "maximum_probability_difference": null,
+  "method": "reload_panel_and_repeat_development_loop_vocabulary_gate",
+  "order_placement": "disabled",
+  "passed": true,
+  "pre_loop_prediction": true,
+  "prescribed_model_determinism_applicable": false,
+  "prescribed_model_determinism_status": "not_applicable_due_development_loop_vocabulary_blocker",
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "selected_count_equal": true,
+  "selected_mapping_equal": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "support_gate_reproducibility_passed": true
+}

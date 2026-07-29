@@ -1,0 +1,164 @@
+{
+  "binding_question": "Does behavioural condition improve prediction of the broad structural family that appears next, and does the soft regime mixture materially filter how that behaviour is expressed?",
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "decision": "descriptive_coarse_funnel_only",
+  "descriptive_funnel_change": true,
+  "determinism_check_passed": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "independent_audit_passed": true,
+  "m1_versus_m0": {
+    "baseline": "M0",
+    "brier_improvement": 0.0014766655465444645,
+    "candidate": "M1",
+    "checkpoint_log_loss_improvements": {
+      "12": 0.0029846454102240294,
+      "6": 0.0038313913846168557
+    },
+    "gates": {
+      "bootstrap_90_lower_brier_non_negative": false,
+      "bootstrap_90_lower_log_loss_non_negative": false,
+      "brier_improves": true,
+      "concentration_gates_pass": true,
+      "log_loss_improves": true,
+      "neither_checkpoint_materially_adverse": true,
+      "positive_log_loss_months_at_least_five": true,
+      "real_log_loss_or_brier_exceeds_matching_null_q90": true,
+      "top_two_not_reduced": true
+    },
+    "log_loss_improvement": 0.0034080183974204425,
+    "monthly_log_loss_improvements": {
+      "2025-01": 0.003070434975109171,
+      "2025-02": 0.01136913281022478,
+      "2025-03": 0.0015674949103449132,
+      "2025-04": 0.0020991805952890186,
+      "2025-05": -0.0001803397403248308,
+      "2025-06": 0.0003324176782650845,
+      "2025-07": 0.010561162266418012,
+      "2025-08": -0.0026306441173771233
+    },
+    "null": {
+      "m1_minus_m0_brier_improvement": {
+        "null_q90": 9.677839976057638e-06,
+        "real_percentile": 1.0,
+        "real_value": 0.0014766655465444645
+      },
+      "m1_minus_m0_log_loss_improvement": {
+        "null_q90": 5.810294757743188e-05,
+        "real_percentile": 1.0,
+        "real_value": 0.0034080183974204425
+      }
+    },
+    "passes": false,
+    "positive_log_loss_months": 6,
+    "top_two_improvement": 0.0003184713375796733
+  },
+  "m2_versus_m1": {
+    "baseline": "M1",
+    "brier_improvement": 0.0005550390775278524,
+    "candidate": "M2",
+    "checkpoint_log_loss_improvements": {
+      "12": 0.0008296325113708036,
+      "6": 0.002656812768770944
+    },
+    "gates": {
+      "bootstrap_90_lower_brier_non_negative": false,
+      "bootstrap_90_lower_log_loss_non_negative": true,
+      "brier_improves": true,
+      "concentration_gates_pass": true,
+      "log_loss_improves": true,
+      "neither_checkpoint_materially_adverse": true,
+      "positive_log_loss_months_at_least_five": true,
+      "real_log_loss_or_brier_exceeds_matching_null_q90": true,
+      "top_two_not_reduced": true
+    },
+    "log_loss_improvement": 0.001743222640070874,
+    "monthly_log_loss_improvements": {
+      "2025-01": -0.002052394493038845,
+      "2025-02": 0.006669182021952769,
+      "2025-03": -0.0018191536237939232,
+      "2025-04": 0.0006296999368113898,
+      "2025-05": 0.005411100748552999,
+      "2025-06": 0.0036939524145073177,
+      "2025-07": 0.0027082248327472414,
+      "2025-08": -0.0015841357156660685
+    },
+    "null": {
+      "m2_minus_m1_brier_improvement": {
+        "null_q90": -0.00029715305740216644,
+        "real_percentile": 1.0,
+        "real_value": 0.0005550390775278524
+      },
+      "m2_minus_m1_log_loss_improvement": {
+        "null_q90": -0.0003827191551987408,
+        "real_percentile": 1.0,
+        "real_value": 0.001743222640070874
+      },
+      "m2_minus_m1_top_two_improvement": {
+        "null_q90": 3.1847133757967215e-05,
+        "real_percentile": 1.0,
+        "real_value": 0.0006369426751593465
+      }
+    },
+    "passes": false,
+    "positive_log_loss_months": 5,
+    "top_two_improvement": 0.0006369426751593465
+  },
+  "order_placement": "disabled",
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true,
+  "support": {
+    "assessment_class_support": {
+      "NO_REGISTERED_COMPLETION": 4308,
+      "REGISTERED_COMPLETION": 312,
+      "UNREGISTERED_LOOP": 1641
+    },
+    "assessment_months": 8,
+    "assessment_rows": 6261,
+    "assessment_sessions": 157,
+    "assessment_stocks": 20,
+    "broker_integration_required": false,
+    "coarse_loop_family_target": true,
+    "development_class_support": {
+      "NO_REGISTERED_COMPLETION": 6083,
+      "REGISTERED_COMPLETION": 525,
+      "UNREGISTERED_LOOP": 2676
+    },
+    "development_rows": 9284,
+    "development_sessions": 234,
+    "development_stocks": 20,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "gates": {
+      "assessment_months_at_least_6": true,
+      "assessment_rows_at_least_3000": true,
+      "assessment_sessions_at_least_100": true,
+      "assessment_stocks_at_least_15": true,
+      "every_assessment_class_at_least_50": true,
+      "every_development_class_at_least_75": true,
+      "final_target_classes_at_least_3": true,
+      "maximum_class_share_at_most_75_percent": true,
+      "maximum_stock_share_at_most_10_percent": true
+    },
+    "maximum_assessment_class_share": 0.6880689985625299,
+    "maximum_assessment_stock_share": 0.050151732950007986,
+    "order_placement": "disabled",
+    "passed": true,
+    "pre_loop_prediction": true,
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "soft_regime_mixture": true,
+    "strategy_promotion": false,
+    "structural_outcomes_only": true,
+    "tied_exclusions": 4,
+    "total_rows_including_exclusions": 15549,
+    "unavailable_exclusions": 0
+  }
+}

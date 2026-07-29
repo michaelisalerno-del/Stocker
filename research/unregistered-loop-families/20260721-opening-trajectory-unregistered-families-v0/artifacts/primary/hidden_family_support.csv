@@ -1,0 +1,11 @@
+period,year,hidden_family_class,selected_family,development_family_eligible,outcomes,sessions,stocks,months,maximum_stock_share
+development,2024,unregistered_primitive_like__5-6-5,True,True,967,215,20,12,0.12409513960703206
+assessment,2025,unregistered_primitive_like__5-6-5,True,True,597,125,20,8,0.08207705192629816
+development,2024,unregistered_primitive_like__2-3-2,True,True,447,157,20,12,0.12527964205816555
+assessment,2025,unregistered_primitive_like__2-3-2,True,True,211,94,20,8,0.15165876777251186
+development,2024,unregistered_primitive_like__2-5-2,True,True,125,92,20,12,0.104
+assessment,2025,unregistered_primitive_like__2-5-2,True,True,75,52,20,8,0.21333333333333335
+development,2024,unregistered_primitive_like__4-7-4,True,True,99,66,17,11,0.2727272727272727
+assessment,2025,unregistered_primitive_like__4-7-4,True,True,74,53,17,8,0.13513513513513514
+development,2024,OTHER_UNREGISTERED_FAMILY,False,False,1038,227,20,12,0.08188824662813102
+assessment,2025,OTHER_UNREGISTERED_FAMILY,False,False,684,147,20,8,0.07748538011695906

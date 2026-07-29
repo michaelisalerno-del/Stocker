@@ -1,0 +1,29 @@
+{
+  "ambiguous_path_events": 0,
+  "canonical_m1c_target": {
+    "entry_price": "open of the first five-minute bar after the checkpoint",
+    "horizon_minutes": 15,
+    "material_move_comparison": "strict_greater_than",
+    "movement": "absolute log(terminal_price / entry_price)",
+    "name": "movement_exceeds_prior_close_iv_15m",
+    "previous_close_implied_denominator": "prior-close ATM IV * sqrt(15 / (252 * 390)) * sqrt(2 / pi)",
+    "terminal_price": "close of the third five-minute bar after entry"
+  },
+  "canonical_target_reconstruction_passed": true,
+  "decision": "target_mismatch_prevents_exact_probability_decomposition",
+  "direction_partition": {
+    "AMBIGUOUS_BOTH_WITHIN_BAR": "used only by the first-breach OHLC audit when both sides first breach in the same bar",
+    "DOWN_MOVE": "signed endpoint log return <= -previous-close implied denominator",
+    "NO_MOVE": "absolute signed endpoint log return < previous-close implied denominator",
+    "UP_MOVE": "signed endpoint log return >= previous-close implied denominator",
+    "exact_probability_decomposition_supported": false,
+    "joint_probability_construction_allowed": false,
+    "method": "signed_endpoint_return",
+    "mismatch_reason": "The frozen M1C event uses strict absolute_return > denominator, while the required direction partition assigns exact +/- denominator equality to a material direction."
+  },
+  "endpoint_absolute_movement_reconstruction_tolerance": 1e-12,
+  "exact_equality_events_observed": 0,
+  "exact_probability_decomposition_supported": false,
+  "previous_close_denominator_reconstruction_tolerance": 1e-12,
+  "primary_horizon_minutes": 15
+}

@@ -1,0 +1,63 @@
+{
+  "assessment_events": 1641,
+  "broker_integration_required": false,
+  "deduplicated_rows_removed": 0,
+  "development_events": 2676,
+  "event_identity_sha256": "85726394bdc5b5e6511345500af9eeed706d27c7207bb32a0afc8620a731d498",
+  "execution_enabled": false,
+  "frozen_family_assessment_events": 957,
+  "frozen_family_development_events": 1638,
+  "frozen_hidden_families": true,
+  "identity_columns": [
+    "symbol",
+    "session",
+    "event_timestamp_utc",
+    "family_id"
+  ],
+  "maximum_shared_field_difference": 0.0,
+  "opening_population_manifest": {
+    "broker_integration_required": false,
+    "development_frozen_unregistered_families": true,
+    "directional_outcomes_opened": false,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "maximum_row_weight_difference": 0.0,
+    "maximum_session": "2025-08-22",
+    "minimum_session": "2024-01-17",
+    "opening_phase_only": true,
+    "opening_rows": 15549,
+    "order_placement": "disabled",
+    "passed": true,
+    "population_key_sha256": "c5bf22b32cefe1f0e04041b0effdd12bae9e0ede98039dd816fac1b433a8d2d4",
+    "predecessor_opening_key_sha256": "c5bf22b32cefe1f0e04041b0effdd12bae9e0ede98039dd816fac1b433a8d2d4",
+    "predecessor_rows": 31070,
+    "production_runtime_modified": false,
+    "protected_rows_materialised": 0,
+    "quick_feasibility_screen": true,
+    "research_only": true,
+    "rows_by_checkpoint": {
+      "12": 7774,
+      "6": 7775
+    },
+    "rows_by_year": {
+      "2024": 9287,
+      "2025": 6262
+    },
+    "sessions": 391,
+    "stocks": 20,
+    "strategy_promotion": false,
+    "unregistered_structural_event_target": true
+  },
+  "order_placement": "disabled",
+  "passed": true,
+  "post_completion_economic_diagnostic": true,
+  "predecessor_path_rows": 4317,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_bridge_test": true,
+  "research_only": true,
+  "strategy_promotion": false,
+  "tolerance": 1e-12,
+  "unique_event_rows": 4317
+}

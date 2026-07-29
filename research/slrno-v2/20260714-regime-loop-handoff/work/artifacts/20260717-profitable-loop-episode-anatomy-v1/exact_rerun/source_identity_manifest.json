@@ -1,0 +1,69 @@
+{
+  "contract_hash": "87c6b0d6349dfb6607f26ec369308cb853bc2ce6d83c72e30fd6928c39ef707b",
+  "contract_id": "20260717-profitable-loop-episode-anatomy-v1",
+  "data_snapshot_id": "bebb812b038d17ba4bf3f48a17a9205276657cdf04d7f1df630c65d1f80e8a8b",
+  "missing_originals": [
+    "2023 original anchor panel provider path from the V1 contract",
+    "2024 original anchor panel provider path from the V1 contract",
+    "2025 original anchor panel provider path from the V1 contract",
+    "original accepted-signal ledger path from the V1 contract",
+    "original execution manifest path from the V1 contract",
+    "2023 provider root referenced by the V1 contract",
+    "formal Frozen Named-Loop T0 Execution Realism V1 Markdown report"
+  ],
+  "run_id": "profitable-loop-episode-anatomy-v1-frozen-run",
+  "sources": {
+    "atlas_outcome_free_feature_ledger.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/atlas_outcome_free_feature_ledger.parquet",
+      "sha256": "f9e420ab676996b046849b8e34fd0adf79019a33d2fa69fc6b342046bcba6f04"
+    },
+    "causal_route_signal_path_events.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/causal_route_signal_path_events.parquet",
+      "sha256": "afa6bfb11e931a64be785ee23e0f9a60df962e041d5fd61f3e0c595469ab7f69"
+    },
+    "rotation_same_regime_episode_attribution.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/rotation_same_regime_episode_attribution.parquet",
+      "sha256": "ee3d9dfd1d90aa229d6241b378ab2de0a886171413108b65478ff33f2663eb1f"
+    },
+    "sequential_hindsight_episode_attribution.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/sequential_hindsight_episode_attribution.parquet",
+      "sha256": "b6df80bd2b191c5ca5ea20a5c539ab76ced868e38310881945cbf7de1e553a2d"
+    },
+    "sequential_path_diagnostics.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/sequential_path_diagnostics.parquet",
+      "sha256": "d51dd775a7786a84f8b0e0c6c86530ca924a8163a46ee24eb036447a6594b42d"
+    },
+    "t0_historical_control_reference_ledger.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/t0_historical_control_reference_ledger.parquet",
+      "sha256": "9a4da2c2c26ec1cd16ae19d9fd760163f12ae4cdd385a14c4582bd89112cb4fa"
+    },
+    "t0_historical_named_reference_ledger.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/t0_historical_named_reference_ledger.parquet",
+      "sha256": "2b1326f11714c296b12e4ff84c6659f957529226dae96e16462eebaabf93d123"
+    },
+    "t0_payoff_envelope_ledger.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/t0_payoff_envelope_ledger.parquet",
+      "sha256": "b08fded53c0f03b0e38ff2458cf758b756763179b723c2767e9d97e45cba2bc5"
+    },
+    "v2_causal_feature_panel.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/v2_causal_feature_panel.parquet",
+      "sha256": "6873455f8ecdf57b04a3c6ffb253931de97d7d05f945253e8b89a2f4e1b271f2"
+    },
+    "v2_hindsight_episode_diagnostics.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/v2_hindsight_episode_diagnostics.parquet",
+      "sha256": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be"
+    },
+    "v2_hindsight_episode_states.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/v2_hindsight_episode_states.parquet",
+      "sha256": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3"
+    },
+    "v2_session_payoff_panel.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/v2_session_payoff_panel.parquet",
+      "sha256": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7"
+    },
+    "v2_trade_decisions.parquet": {
+      "path": "research/slrno-v2/20260714-regime-loop-handoff/work/frozen/20260717-profitable-loop-episode-anatomy-v1/v2_trade_decisions.parquet",
+      "sha256": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f"
+    }
+  }
+}

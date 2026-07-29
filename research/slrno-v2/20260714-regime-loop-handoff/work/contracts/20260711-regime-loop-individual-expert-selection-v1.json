@@ -1,0 +1,231 @@
+{
+  "contract_id": "regime_loop_individual_expert_selection_v1",
+  "contract_frozen_at_utc": "2026-07-11T23:48:00Z",
+  "scientific_status": "post_inspection_2024_causal_oof_individual_expert_development_test",
+  "prospective_validation_claim_permitted": false,
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "movement_quality_not_trading_performance": true,
+  "objective": "Test whether selecting different frozen probability algorithms for individual regimes, loops, loop-regime orientations, or supported loop-regime-time cells improves causal joint loop-and-movement probabilities without sacrificing calibration or local reliability.",
+  "known_before_freeze": {
+    "all_2024_source_months_are_opened_development_evidence": true,
+    "raw_full_link_is_the_strongest_parent_global_candidate": true,
+    "raw_full_link_pooled_log_loss_improvement_vs_baseline": 0.04810046711655895,
+    "raw_full_link_supported_orientation_log_loss_reversals_vs_baseline": 7,
+    "raw_full_link_supported_orientation_brier_reversals_vs_baseline": 7,
+    "raw_full_link_maximum_supported_bin_error": 0.088513,
+    "orientation_clock_residual_best_opened_pooled_improvement_vs_baseline": 0.061202,
+    "orientation_clock_residual_still_failed_global_gate": true,
+    "cycle_13_state_5_clock_1_is_already_visible": true,
+    "implication": "This experiment tests causal specialization mechanics only. No result may be called new validation, and no selector rule may be changed after scoring."
+  },
+  "hypotheses": [
+    {
+      "id": "H1_regime_specialization",
+      "selector": "regime_best",
+      "question": "Do the eight current states prefer different frozen probability experts?",
+      "stop": "Reject if it does not beat the raw full link under the complete reliability gate."
+    },
+    {
+      "id": "H2_loop_specialization",
+      "selector": "loop_best",
+      "question": "Do the twenty fixed loops prefer different frozen probability experts?",
+      "stop": "Reject if specialization is unstable or fails any complete reliability gate."
+    },
+    {
+      "id": "H3_loop_regime_specialization",
+      "selector": "loop_regime_best",
+      "question": "Can each supported loop-current-state orientation choose its own earlier-month expert?",
+      "stop": "Reject if raw hard selection overfits months, stocks, calibration bins, or supported orientations."
+    },
+    {
+      "id": "H4_guarded_loop_regime_specialization",
+      "selector": "guarded_loop_regime_best",
+      "question": "Does a fixed improvement margin make orientation-specific expert choice safer?",
+      "stop": "Reject if the guard does not eliminate local reversals and preserve raw-link loss."
+    },
+    {
+      "id": "H5_hierarchical_time_specialization",
+      "selector": "hierarchical_clock_best",
+      "question": "Can loop, loop-regime, and existing clock cells specialize with causal support-based backoff?",
+      "stop": "Reject if added granularity fails temporal, calibration, ranking, or orientation gates."
+    }
+  ],
+  "frozen_source": {
+    "prediction_ledger": {
+      "path": "/private/tmp/stocker_regime_loop_linkage_ideas_v3_20260711/linkage_predictions_2024_sep_dec.parquet",
+      "sha256": "99374428d372711b233cf6dfbe59a18f5667e032ef3039b2ae05df13400cd660",
+      "rows": 130672,
+      "months": ["2024-09", "2024-10", "2024-11", "2024-12"]
+    },
+    "independent_audit": {
+      "path": "/private/tmp/stocker_regime_loop_linkage_ideas_v3_20260711/independent_audit.json",
+      "sha256": "92343c008f0cd585c3e02c1e3c60905aa4f9cde7e9c9b99111076a2cd8be300f",
+      "required": {"all_passed": true, "checks_passed": 19, "checks_total": 19}
+    },
+    "source_contract": {
+      "path": "work/contracts/20260711-regime-loop-linkage-ideas-v3.json",
+      "sha256": "88a60956857e6ccb4fb5e74beb9085e46765e55b31763b26927dc496822ce947"
+    },
+    "source_runner": {
+      "path": "work/run_regime_loop_linkage_ideas_v3.py",
+      "sha256": "c0e8786670fd51e3d93290ecd56ba51322ebe6ace0fd7e521803f2fd8c1ce72e"
+    },
+    "source_prediction_change_permitted": false,
+    "detector_or_parent_component_refit_permitted": false
+  },
+  "population_and_causality": {
+    "selection_months_by_validation_month": {
+      "2024-11": ["2024-09", "2024-10"],
+      "2024-12": ["2024-09", "2024-10", "2024-11"]
+    },
+    "primary_validation_months": ["2024-11", "2024-12"],
+    "selection_uses_strictly_earlier_causal_oof_predictions_and_outcomes": true,
+    "one_expert_assignment_shared_across_all_12_cells_per_unit": true,
+    "validation_outcome_may_not_affect_its_assignment": true,
+    "later_period_paths_permitted": false,
+    "partial_2026_permitted": false,
+    "prospective_shadow_read_or_write_permitted": false
+  },
+  "targets": {
+    "joint_event": "loop_occurs_and_frozen_quality_class_at_or_above_tier",
+    "movement_targets": ["absolute_return_bps", "future_range_bps"],
+    "horizons_bars": [6, 12, 24],
+    "tiers": ["p75", "p90"],
+    "cells": 12,
+    "primary_reference": "raw_full_link",
+    "null_reference": "baseline"
+  },
+  "data_labels": {
+    "provider_bars": "regular_session_five_minute_provider_OHLC",
+    "direct_volume_label": "historical_volume_not_used",
+    "direction_or_signed_return_used": false,
+    "cost_or_exit_model": "not_applicable_no_trading_rule"
+  },
+  "experts": {
+    "selectable": [
+      "baseline",
+      "minimal_time_topology",
+      "raw_full_link",
+      "partial_full_link",
+      "calibrated_raw_product",
+      "dependency_stack"
+    ],
+    "conservative_tie_priority": [
+      "baseline",
+      "partial_full_link",
+      "minimal_time_topology",
+      "raw_full_link",
+      "calibrated_raw_product",
+      "dependency_stack"
+    ],
+    "tie_tolerance": 1e-12,
+    "new_expert_fit_permitted": false,
+    "diagnostic_occurrence_only_or_topology_only_selectable": false
+  },
+  "selection_objective": {
+    "metric": "equal_mean_of_12_inverse_compatible_weighted_binary_log_losses",
+    "probability_clip": [1e-12, 0.999999999999],
+    "post_selection_refit_or_calibration_permitted": false,
+    "guarded_absolute_log_loss_margin": 0.0005,
+    "support": {
+      "regime": {"rows_minimum": 500, "joint_positives_across_12_cells_minimum": 30},
+      "loop": {"rows_minimum": 500, "joint_positives_across_12_cells_minimum": 30},
+      "loop_regime": {"rows_minimum": 300, "joint_positives_across_12_cells_minimum": 24},
+      "loop_regime_clock": {"rows_minimum": 150, "joint_positives_across_12_cells_minimum": 12}
+    },
+    "unsupported_unit_fallback": "global_best",
+    "guarded_unit_fallback": "global_best",
+    "hierarchy": ["global", "loop", "loop_regime", "loop_regime_clock"],
+    "hierarchical_child_must_beat_current_parent_on_child_rows_by_margin": true
+  },
+  "selectors": {
+    "global_best": {"group": "global", "eligible_for_final_selection": false},
+    "regime_best": {"group": ["current_state"], "guarded": false},
+    "loop_best": {"group": ["cycle_id"], "guarded": false},
+    "loop_regime_best": {"group": ["cycle_id", "current_state"], "guarded": false},
+    "guarded_loop_regime_best": {"group": ["cycle_id", "current_state"], "guarded": true},
+    "hierarchical_clock_best": {
+      "levels": [
+        ["cycle_id"],
+        ["cycle_id", "current_state"],
+        ["cycle_id", "current_state", "entry_clock_quartile"]
+      ],
+      "guarded": true
+    }
+  },
+  "evaluation": {
+    "primary_weight": "inverse_compatible_weight",
+    "secondary_weight": "unweighted",
+    "equal_cell_pooling": true,
+    "losses": ["binary_log_loss", "brier"],
+    "calibration": {
+      "fixed_probability_bins": 10,
+      "supported_bin_rows_minimum": 250,
+      "absolute_maximum_supported_bin_error": 0.02,
+      "candidate_ECE_no_worse_than_raw_reference_all_12_cells": true
+    },
+    "temporal_slices": ["2024-11", "2024-12"],
+    "market_transfer": "leave_one_stock_out_every_symbol",
+    "orientation_slices": "cycle_id_by_current_state",
+    "orientation_support": {"rows_minimum": 250, "joint_positives_across_12_cells_minimum": 15},
+    "ranking": "top_three_recall_within_anchor_for_each_target_horizon_tier",
+    "assignment_stability": "same unit expert between the November and December frozen maps",
+    "session_bootstrap": {"block_sessions": 5, "draws": 4999, "confidence": 0.95, "seed": 20260711},
+    "paired_test": {
+      "method": "9999_draw_session_level_Rademacher_sign_flip",
+      "comparisons": ["candidate_vs_baseline", "candidate_vs_raw_full_link", "candidate_vs_global_best"],
+      "endpoints": ["log_loss", "brier"],
+      "correction": "Holm_within_comparison_and_endpoint_across_five_individual_selectors",
+      "familywise_alpha": 0.05
+    }
+  },
+  "complete_selector_gate": {
+    "pooled_log_loss_and_brier_no_worse_than_raw_full_link": true,
+    "baseline_and_raw_bootstrap_upper_bounds_below_or_equal_zero": true,
+    "both_raw_Holm_endpoints_pass": true,
+    "all_12_cells_log_loss_and_brier_no_worse_than_raw_full_link": true,
+    "all_12_cells_ECE_no_worse_than_raw_and_maximum_bin_error_at_or_below_0.02": true,
+    "both_validation_months_log_loss_and_brier_no_worse_than_raw_full_link": true,
+    "every_leave_one_stock_out_log_loss_and_brier_no_worse_than_raw_full_link": true,
+    "zero_supported_orientation_log_loss_or_brier_reversals_vs_baseline": true,
+    "top_three_recall_no_worse_than_raw_full_link_in_all_12_cells": true,
+    "at_least_two_experts_used": true,
+    "shared_unit_assignment_stability_minimum": 0.5
+  },
+  "decision": {
+    "candidate_selectors": [
+      "regime_best",
+      "loop_best",
+      "loop_regime_best",
+      "guarded_loop_regime_best",
+      "hierarchical_clock_best"
+    ],
+    "priority_if_multiple_pass": [
+      "guarded_loop_regime_best",
+      "hierarchical_clock_best",
+      "loop_regime_best",
+      "loop_best",
+      "regime_best"
+    ],
+    "passing_label": "development_individual_expert_selector_pending_unseen_validation",
+    "failure_label": "individual_expert_selectors_rejected_or_unconfirmed",
+    "zero_passing_selectors": "retain_global_models_as_diagnostics_and_do_not_retune_on_same_results",
+    "same_experiment_refinement_permitted": false,
+    "later_period_scoring": false,
+    "prospective_shadow_entry": false,
+    "named_loop_good_or_high_promotion_permitted": false,
+    "trading_rule_or_PnL_model_permitted": false
+  },
+  "integrity": {
+    "independent_audit_required": true,
+    "auditor_may_not_import_runner": true,
+    "replay_expert_losses_assignments_predictions_metrics_bootstrap_Holm_slices_ranking_gates_and_decision": true,
+    "all_probabilities_finite_and_in_unit_interval": true,
+    "all_safety_flags_exact": true
+  },
+  "planned_artifact_root": "/private/tmp/stocker_regime_loop_individual_expert_selection_v1_20260711"
+}

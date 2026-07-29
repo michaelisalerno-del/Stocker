@@ -1,0 +1,10 @@
+metric,real_value,draw_mean,interval_90_lower,interval_90_upper,interval_95_lower,interval_95_upper,draw_count,planned_draw_count,seed,status
+t1_minus_t0_log_loss_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t1_minus_t0_brier_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t1_minus_t0_top_two_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t1_minus_t0_realised_probability_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t2_minus_t1_log_loss_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t2_minus_t1_brier_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t2_minus_t1_top_two_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t2_minus_t1_realised_probability_improvement,,,,,,,0,50,20260722,not_run_pre_model_support_blocker
+t2_minus_t1_prediction_entropy_reduction,,,,,,,0,50,20260722,not_run_pre_model_support_blocker

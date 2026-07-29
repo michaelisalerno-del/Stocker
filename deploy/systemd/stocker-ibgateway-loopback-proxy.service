@@ -1,0 +1,30 @@
+[Unit]
+Description=Loopback-only proxy to the explicitly configured IB Gateway socket
+Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Requires=stocker-ibgateway.service
+After=stocker-ibgateway.service
+PartOf=stocker-ibgateway.service
+StartLimitIntervalSec=5min
+StartLimitBurst=3
+
+[Service]
+Type=notify
+User=ibgateway
+Group=ibgateway
+ExecStart=/usr/local/libexec/stocker-ibgateway-loopback-proxy
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=78
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost

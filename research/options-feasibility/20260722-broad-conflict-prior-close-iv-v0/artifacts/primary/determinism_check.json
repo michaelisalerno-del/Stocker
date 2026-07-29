@@ -1,0 +1,14 @@
+{
+  "bootstrap_repeated": false,
+  "joined_row_mismatches": null,
+  "maximum_movement_difference": null,
+  "maximum_option_feature_difference": null,
+  "maximum_probability_difference": null,
+  "passed": false,
+  "reason": "blocked_historical_options_date_unavailable",
+  "request_plan_rebuild_match": true,
+  "route_null_refits_repeated": false,
+  "selected_contract_mismatches": null,
+  "status": "blocked_before_options_data",
+  "structural_reconstruction_repeatable": true
+}

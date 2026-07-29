@@ -1,0 +1,19 @@
+{
+  "application_modified": false,
+  "checks": {
+    "all_four_hazard_endpoints_pass_holm": false,
+    "hazard_leave_one_stock_out_at_least_16_all_four_cells": false,
+    "negative_hazard_auc_above_half_all_four_cells": false,
+    "orientation_survival_difference_positive_all_four_cells": false,
+    "support_at_least_50_all_four_cells": true
+  },
+  "decision": "phase_hazard_features_not_supported_as_payoff_admission_discriminator",
+  "economic_edge_claim": false,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "primary_cost_bps_per_side": 5,
+  "prospective_validation_claim": false,
+  "research_only": true,
+  "sealed_validation_performed": false,
+  "strategy_promotion": false
+}

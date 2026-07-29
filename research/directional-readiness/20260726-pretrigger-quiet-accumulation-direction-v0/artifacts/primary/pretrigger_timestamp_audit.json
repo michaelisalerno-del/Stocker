@@ -1,0 +1,21 @@
+{
+  "assessment_pressure_complete_primary_windows": 0,
+  "assessment_retained": 253,
+  "development_pressure_complete_primary_windows": 0,
+  "development_retained": 285,
+  "episodes_before_pretrigger_history_requirement": 538,
+  "episodes_dropped": 0,
+  "episodes_retained": 538,
+  "marker_equals_T_minus_1_close": true,
+  "passed": true,
+  "pressure_complete_primary_windows": 0,
+  "pressure_interpolation_or_forward_fill": false,
+  "pressure_on_non_snapshot_bars_is_missing": true,
+  "pretrigger_timestamp_mismatches": 0,
+  "primary_window_bars": 5,
+  "primary_window_minutes": 25,
+  "primary_window_mismatches": 0,
+  "secondary_45m_missing_rows": 459,
+  "trigger_bar_excluded": true,
+  "trigger_bar_intrusions": 0
+}

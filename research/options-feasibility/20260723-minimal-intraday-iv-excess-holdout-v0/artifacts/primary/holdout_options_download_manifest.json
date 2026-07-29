@@ -1,0 +1,1259 @@
+{
+  "broker_integration_required": false,
+  "bytes_downloaded": 317272704,
+  "canonical_records_accepted": 222627,
+  "canonical_records_rejected": 66071,
+  "compact": false,
+  "complete_receipt_bytes_downloaded": 317093163,
+  "complete_receipt_records_returned": 349802,
+  "daily_stock_features_excluded": true,
+  "detail": "blocked_options_download_resource_limit: raw-record ceiling",
+  "directional_outcomes_primary": false,
+  "endpoint": "/mp/unicornbay/options/eod",
+  "exact_date_records_rejected_incomplete": 163,
+  "exact_date_records_retained": 288698,
+  "exact_date_records_returned": 288861,
+  "execution_enabled": false,
+  "extra_date_records_rejected": 61139,
+  "frozen_holdout_validation": true,
+  "hand_built_mismatch_features_excluded": true,
+  "holdout_end": "2025-12-31",
+  "holdout_start": "2025-09-01",
+  "incomplete_raw_responses": 1,
+  "incomplete_request_bytes_downloaded": 179541,
+  "incomplete_request_exact_date_records": 163,
+  "incomplete_request_extra_date_records": 35,
+  "incomplete_request_protected_date_records": 0,
+  "incomplete_request_records_excluded": 198,
+  "incomplete_request_records_returned": 198,
+  "intraday_option_quotes_used": false,
+  "maximum_new_bytes": 1000000000,
+  "maximum_new_records": 350000,
+  "minimal_options_plus_intraday_h0_model": true,
+  "nonstandard_contract_records_rejected": 0,
+  "option_pnl_calculated": false,
+  "order_placement": "disabled",
+  "overall_decision": "blocked_quick_resource_limit",
+  "pair_coverage_by_stock_and_month": [
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAL"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAL"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAL"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAL"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAOI"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAOI"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAOI"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "AAOI"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "APLD"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "APLD"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "APLD"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "APLD"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "ASTS"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "ASTS"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "ASTS"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "ASTS"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "CIFR"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "CIFR"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "CIFR"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "CIFR"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "HIMS"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "HIMS"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "HIMS"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "HIMS"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IONQ"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IONQ"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IONQ"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IONQ"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IREN"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IREN"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IREN"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "IREN"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MARA"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MARA"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MARA"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MARA"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MP"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MP"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MP"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MP"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MRNA"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MRNA"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MRNA"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MRNA"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MSTR"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MSTR"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MSTR"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "MSTR"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "NVTS"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "NVTS"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "NVTS"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "NVTS"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "QBTS"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "QBTS"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "QBTS"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "QBTS"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RGTI"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RGTI"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RGTI"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RGTI"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIOT"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIOT"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIOT"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIOT"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIVN"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIVN"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIVN"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "RIVN"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SMCI"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SMCI"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SMCI"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SMCI"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SOFI"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SOFI"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SOFI"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "SOFI"
+    },
+    {
+      "month": "2025-09",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "WULF"
+    },
+    {
+      "month": "2025-10",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "WULF"
+    },
+    {
+      "month": "2025-11",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "WULF"
+    },
+    {
+      "month": "2025-12",
+      "selected_pair_sessions": null,
+      "status": "blocked_before_pair_selection",
+      "symbol": "WULF"
+    }
+  ],
+  "partial_cache_not_used_for_modeling": true,
+  "partial_stock_subgroup_not_selected": true,
+  "previous_close_options_only": true,
+  "prior_reference_period_not_used_for_tuning": true,
+  "production_runtime_modified": false,
+  "protected_date_records_rejected": 1833,
+  "records_returned": 350000,
+  "request_coverage_by_stock_and_month": [
+    {
+      "canonical_records": 1768,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "AAL"
+    },
+    {
+      "canonical_records": 2050,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "AAL"
+    },
+    {
+      "canonical_records": 1572,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "AAL"
+    },
+    {
+      "canonical_records": 1971,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "AAL"
+    },
+    {
+      "canonical_records": 1834,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "AAOI"
+    },
+    {
+      "canonical_records": 2095,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "AAOI"
+    },
+    {
+      "canonical_records": 1168,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "AAOI"
+    },
+    {
+      "canonical_records": 2008,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "AAOI"
+    },
+    {
+      "canonical_records": 2808,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "APLD"
+    },
+    {
+      "canonical_records": 4222,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "APLD"
+    },
+    {
+      "canonical_records": 2979,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "APLD"
+    },
+    {
+      "canonical_records": 4060,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "APLD"
+    },
+    {
+      "canonical_records": 3806,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "ASTS"
+    },
+    {
+      "canonical_records": 5204,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "ASTS"
+    },
+    {
+      "canonical_records": 3268,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "ASTS"
+    },
+    {
+      "canonical_records": 4757,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "ASTS"
+    },
+    {
+      "canonical_records": 1659,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "CIFR"
+    },
+    {
+      "canonical_records": 2925,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "CIFR"
+    },
+    {
+      "canonical_records": 2487,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "CIFR"
+    },
+    {
+      "canonical_records": 2636,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "CIFR"
+    },
+    {
+      "canonical_records": 4195,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "HIMS"
+    },
+    {
+      "canonical_records": 4646,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "HIMS"
+    },
+    {
+      "canonical_records": 3652,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "HIMS"
+    },
+    {
+      "canonical_records": 3912,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "HIMS"
+    },
+    {
+      "canonical_records": 4263,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "IONQ"
+    },
+    {
+      "canonical_records": 5356,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "IONQ"
+    },
+    {
+      "canonical_records": 3914,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "IONQ"
+    },
+    {
+      "canonical_records": 4008,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "IONQ"
+    },
+    {
+      "canonical_records": 3582,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "IREN"
+    },
+    {
+      "canonical_records": 5973,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "IREN"
+    },
+    {
+      "canonical_records": 4223,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "IREN"
+    },
+    {
+      "canonical_records": 4349,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "IREN"
+    },
+    {
+      "canonical_records": 2825,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "MARA"
+    },
+    {
+      "canonical_records": 3750,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "MARA"
+    },
+    {
+      "canonical_records": 2027,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "MARA"
+    },
+    {
+      "canonical_records": 2003,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "MARA"
+    },
+    {
+      "canonical_records": 3600,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "MP"
+    },
+    {
+      "canonical_records": 4975,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "MP"
+    },
+    {
+      "canonical_records": 3290,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "MP"
+    },
+    {
+      "canonical_records": 3095,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "MP"
+    },
+    {
+      "canonical_records": 2384,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "MRNA"
+    },
+    {
+      "canonical_records": 2821,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "MRNA"
+    },
+    {
+      "canonical_records": 1974,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "MRNA"
+    },
+    {
+      "canonical_records": 2250,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "MRNA"
+    },
+    {
+      "canonical_records": 6800,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "MSTR"
+    },
+    {
+      "canonical_records": 7625,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "MSTR"
+    },
+    {
+      "canonical_records": 5161,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "MSTR"
+    },
+    {
+      "canonical_records": 6030,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "MSTR"
+    },
+    {
+      "canonical_records": 1032,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "NVTS"
+    },
+    {
+      "canonical_records": 2011,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "NVTS"
+    },
+    {
+      "canonical_records": 1362,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "NVTS"
+    },
+    {
+      "canonical_records": 1396,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "NVTS"
+    },
+    {
+      "canonical_records": 2834,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "QBTS"
+    },
+    {
+      "canonical_records": 4643,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "QBTS"
+    },
+    {
+      "canonical_records": 3140,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "QBTS"
+    },
+    {
+      "canonical_records": 3681,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "QBTS"
+    },
+    {
+      "canonical_records": 2806,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "RGTI"
+    },
+    {
+      "canonical_records": 5130,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "RGTI"
+    },
+    {
+      "canonical_records": 3029,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "RGTI"
+    },
+    {
+      "canonical_records": 3016,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "RGTI"
+    },
+    {
+      "canonical_records": 2518,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "RIOT"
+    },
+    {
+      "canonical_records": 3414,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "RIOT"
+    },
+    {
+      "canonical_records": 2204,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "RIOT"
+    },
+    {
+      "canonical_records": 2274,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "RIOT"
+    },
+    {
+      "canonical_records": 2181,
+      "month": "2025-09",
+      "requests_completed": 21,
+      "requests_planned": 21,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 21,
+      "symbol": "RIVN"
+    },
+    {
+      "canonical_records": 2231,
+      "month": "2025-10",
+      "requests_completed": 23,
+      "requests_planned": 23,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 23,
+      "symbol": "RIVN"
+    },
+    {
+      "canonical_records": 2141,
+      "month": "2025-11",
+      "requests_completed": 19,
+      "requests_planned": 19,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 19,
+      "symbol": "RIVN"
+    },
+    {
+      "canonical_records": 2806,
+      "month": "2025-12",
+      "requests_completed": 22,
+      "requests_planned": 22,
+      "requests_remaining": 0,
+      "requests_with_exact_records": 22,
+      "symbol": "RIVN"
+    },
+    {
+      "canonical_records": 818,
+      "month": "2025-09",
+      "requests_completed": 5,
+      "requests_planned": 21,
+      "requests_remaining": 16,
+      "requests_with_exact_records": 5,
+      "symbol": "SMCI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-10",
+      "requests_completed": 0,
+      "requests_planned": 23,
+      "requests_remaining": 23,
+      "requests_with_exact_records": 0,
+      "symbol": "SMCI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-11",
+      "requests_completed": 0,
+      "requests_planned": 19,
+      "requests_remaining": 19,
+      "requests_with_exact_records": 0,
+      "symbol": "SMCI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-12",
+      "requests_completed": 0,
+      "requests_planned": 22,
+      "requests_remaining": 22,
+      "requests_with_exact_records": 0,
+      "symbol": "SMCI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-09",
+      "requests_completed": 0,
+      "requests_planned": 21,
+      "requests_remaining": 21,
+      "requests_with_exact_records": 0,
+      "symbol": "SOFI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-10",
+      "requests_completed": 0,
+      "requests_planned": 23,
+      "requests_remaining": 23,
+      "requests_with_exact_records": 0,
+      "symbol": "SOFI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-11",
+      "requests_completed": 0,
+      "requests_planned": 19,
+      "requests_remaining": 19,
+      "requests_with_exact_records": 0,
+      "symbol": "SOFI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-12",
+      "requests_completed": 0,
+      "requests_planned": 22,
+      "requests_remaining": 22,
+      "requests_with_exact_records": 0,
+      "symbol": "SOFI"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-09",
+      "requests_completed": 0,
+      "requests_planned": 21,
+      "requests_remaining": 21,
+      "requests_with_exact_records": 0,
+      "symbol": "WULF"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-10",
+      "requests_completed": 0,
+      "requests_planned": 23,
+      "requests_remaining": 23,
+      "requests_with_exact_records": 0,
+      "symbol": "WULF"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-11",
+      "requests_completed": 0,
+      "requests_planned": 19,
+      "requests_remaining": 19,
+      "requests_with_exact_records": 0,
+      "symbol": "WULF"
+    },
+    {
+      "canonical_records": 0,
+      "month": "2025-12",
+      "requests_completed": 0,
+      "requests_planned": 22,
+      "requests_remaining": 22,
+      "requests_with_exact_records": 0,
+      "symbol": "WULF"
+    }
+  ],
+  "requests_completed": 1450,
+  "requests_planned": 1700,
+  "requests_remaining": 250,
+  "research_only": true,
+  "resource_ceiling_reached": true,
+  "route_competition_features_excluded": true,
+  "route_state_features_excluded": true,
+  "status": "blocked",
+  "strategy_promotion": false,
+  "top_5_percent_tail_frozen": true,
+  "training_end": "2024-12-31"
+}

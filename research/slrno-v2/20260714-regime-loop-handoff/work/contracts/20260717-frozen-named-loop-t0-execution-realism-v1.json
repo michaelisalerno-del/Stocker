@@ -1,0 +1,400 @@
+{
+  "contract_id": "20260717-frozen-named-loop-t0-execution-realism-v1",
+  "experiment_name": "Frozen Named-Loop T0 Execution Realism V1",
+  "model_version": "frozen_named_loop_t0_execution_v1.0.0",
+  "registration_date": "2026-07-17",
+  "registered_before_prospective_collection": true,
+  "rule_source": "the user-supplied experiment specification fixed the populations, F0/F5/F10/F15/F20 envelope, primary F10 endpoint, terminal, controls, completion rule, and no-filter boundary before implementation; a read-only feasibility reconstruction did not alter any rule",
+  "scientific_status": "all 2023 and 2025 observations are opened retrospective development evidence; only records created after this contract with a new snapshot identity can enter the prospective cohort",
+  "frozen_lineage": {
+    "branch": "agent/slrno-research-handoff",
+    "inspected_head_before_editing": "444549146fbd0d53fb3d6c381f2f6be650f69d2b",
+    "latest_known_latency_execution_commit": "1e0e1a4149961589b3213940d56fb6dd9450565d",
+    "latency_report_artifact_commit": "444549146fbd0d53fb3d6c381f2f6be650f69d2b"
+  },
+  "safety": {
+    "research_only": true,
+    "execution_enabled": false,
+    "broker_connection_enabled": false,
+    "ig_order_placement_enabled": false,
+    "live_ordering_enabled": false,
+    "paper_or_demo_ordering_enabled": false,
+    "position_management_changed": false,
+    "existing_strategy_exits_changed": false,
+    "deployment_enabled": false,
+    "application_runtime_changed": false,
+    "api_keys_or_secrets_accessed": false,
+    "strategy_promotion_allowed": false
+  },
+  "inputs": {
+    "family_mapping": {
+      "path": "20260717-frozen-named-loop-t0-execution-realism-v1-family-mapping.json",
+      "sha256": "365fb6805f4d0387ba772865fc9364c3e1355781868c38ad3060c1e16fcc3858"
+    },
+    "v2_trade_decisions": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/trade_decisions.parquet",
+      "sha256": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f",
+      "model_name": "no_payoff_state_filter"
+    },
+    "sequential_veto_population_identity": {
+      "path": "../artifacts/20260715-sequential-loop-competitor-veto-v1/primary/sequential_rejection_decisions.parquet",
+      "sha256": "98f3e3dad7f90724f0a00f3e24a5a03ee1ad912c4b3795b815346749c6427004",
+      "use": "identity only; no veto enters the primary rule"
+    },
+    "named_source_reconciliation": {
+      "path": "../artifacts/20260716-clean-anchor-price-acceptance-v1/primary/named_source_opportunity_ledger.parquet",
+      "sha256": "5a6e938600fd4cb2e749d6a437ce019c984733830a58328c1f337fbbf583c281",
+      "use": "source identity and stored-field reconciliation only; no acceptance rule enters"
+    },
+    "control_source_reconciliation": {
+      "path": "../artifacts/20260716-clean-anchor-price-acceptance-v1/primary/control_source_opportunity_ledger.parquet",
+      "sha256": "38b48df08d91a69660273941bf1173367c44de87b838d9d9bef2fb2332f1739e",
+      "use": "source identity and stored-field reconciliation only"
+    },
+    "hindsight_episode_diagnostics": {
+      "path": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary/hindsight_episode_diagnostics.parquet",
+      "sha256": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be",
+      "use": "historical attribution only; forbidden in prospective admission or settlement"
+    },
+    "provider_2025_hash_manifest": {
+      "path": "../artifacts/20260713-dynamic-loop-context-edge-v1/primary/source_hashes.json",
+      "sha256": "754ae356440a37a8c0fb6430fb247e72b174046131cac6cb18251d1b67eed438",
+      "provider_hash_prefix": "provider_2025_"
+    },
+    "provider_2023_hash_manifest": {
+      "path": "../artifacts/20260713-loop-payoff-phase-path-v1/exact_rerun/source_hashes.json",
+      "sha256": "c86d8116f0dc0a9e12afaa4e7927ca0f91be2147e4373c47243f70cb2f7bcfda",
+      "provider_hash_prefix": "provider_2023_"
+    },
+    "fixed_cycle_catalogue": {
+      "path": "../shadow_validation/frozen_loop_quality_shadow_v1/frozen_bundle/artifacts/fixed_cycles.csv",
+      "sha256": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253"
+    },
+    "latency_contract": {
+      "path": "20260716-fixed-one-bar-entry-latency-v1.json",
+      "sha256": "35fa576fd87acc85220105807beafdc3103db87fbf3c0a7dd0044afe4877ff84"
+    },
+    "latency_paired_reference": {
+      "path": "../artifacts/20260716-fixed-one-bar-entry-latency-v1/primary/primary_paired_metrics.csv",
+      "sha256": "f428162858a9952cf7e83ac25c0cc37405559bf5348c842dba62b4b7610d9ff5"
+    },
+    "original_oco_runner": {
+      "path": "../run_frozen_regime_loop_pnl_sanity_v1.py",
+      "sha256": "923541554cd54c0b31ba1fca462946a08be53a1a9e68bcb91d33bb26adae5462"
+    },
+    "v2_runner": {
+      "path": "../run_dynamic_loop_edge_state_v2.py",
+      "sha256": "d498275dc306ed347372e94a1b6ea9394e3ed4be7f9236566439ec9879cf7570"
+    },
+    "latency_runner": {
+      "path": "../run_fixed_one_bar_entry_latency_v1.py",
+      "sha256": "a65fd790543468d59acbf2116a511c24c5d6cea26598d92e78d297768b5b6ddb"
+    },
+    "provider_2025_root": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock",
+    "expired_provider_2023_root": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock"
+  },
+  "data_limitations": {
+    "historical_2025_market_data": "five-minute OHLC only; provider timestamps identify bar starts",
+    "historical_2025_ticks_or_trades": false,
+    "historical_2025_quotes": false,
+    "historical_2025_one_minute_bars": false,
+    "historical_2025_volume_used": false,
+    "within_bar_crossing_timestamp_observable": false,
+    "within_bar_oco_order_observable": false,
+    "opening_gap_price_observable": true,
+    "prospective_supported_evidence": [
+      "five-minute OHLC supplied as a new immutable snapshot",
+      "independently imported trade or quote observations",
+      "independently imported shadow-fill observations"
+    ],
+    "market_data_fetching_or_ordering_implemented": false
+  },
+  "populations": {
+    "primary_named": ["cycle_04|state_4", "cycle_07|state_5"],
+    "controls": ["cycle_04|state_2", "cycle_07|state_6"],
+    "family_results_must_remain_separate": true,
+    "combined_named_is_secondary_only": true,
+    "combined_controls_is_secondary_only": true,
+    "replacement_family_allowed": false,
+    "new_loop_allowed": false,
+    "failed_family_can_be_replaced": false,
+    "expected_historical_source_counts": {
+      "2023": {
+        "cycle_04|state_4": 132,
+        "cycle_07|state_5": 722,
+        "cycle_04|state_2": 8,
+        "cycle_07|state_6": 331
+      },
+      "2025": {
+        "cycle_04|state_4": 96,
+        "cycle_07|state_5": 713,
+        "cycle_04|state_2": 6,
+        "cycle_07|state_6": 296
+      }
+    }
+  },
+  "source_identity": {
+    "source_model": "dynamic_loop_edge_state_v2 no_payoff_state_filter",
+    "source_strategy": "breakout_loop_scores_range_p75",
+    "source_status": "filled",
+    "source_horizon_bars": 24,
+    "primary_key": "opportunity_id",
+    "required_identity_fields": [
+      "opportunity_id",
+      "anchor_id",
+      "event_lineage_id",
+      "source_run_id",
+      "symbol",
+      "period",
+      "session",
+      "loop_id",
+      "orientation",
+      "state",
+      "direction"
+    ],
+    "pre_existing_source_admission_is_preserved_as_identity_not_reimplemented_or_tuned": true,
+    "future_payoff_may_change_classification": false,
+    "future_route_completion_may_change_classification": false
+  },
+  "no_additional_admission_logic": {
+    "static_anchor_veto": false,
+    "sequential_competitor_veto": false,
+    "price_acceptance": false,
+    "range_permission": false,
+    "bocpd": false,
+    "hierarchical_payoff_state": false,
+    "structural_breadth_or_coherence": false,
+    "directed_rotation": false,
+    "current_profitability": false,
+    "recent_winners": false,
+    "same_phase_profitability_threshold": false,
+    "volume_or_activity_filter": false,
+    "vwap_filter": false,
+    "additional_regime_filter": false,
+    "child_or_morph_gate": false,
+    "entry_delay": false,
+    "alternative_holding_period": false,
+    "new_exit_logic": false
+  },
+  "frozen_t0_rule": {
+    "anchor_bar_timestamp": "provider five-minute bar start",
+    "threshold_known_timestamp": "anchor_timestamp plus five minutes, after the anchor OHLC is complete",
+    "long_threshold": "anchor_high",
+    "short_threshold": "anchor_low",
+    "scan": "the next 24 exact five-minute bars in chronological order",
+    "open_precedence": "on each bar evaluate open >= long threshold and open <= short threshold before high/low crossings",
+    "opening_gap_long_fill": "max(long_threshold, trigger_bar_open), which equals the observed open when triggered",
+    "opening_gap_short_fill": "min(short_threshold, trigger_bar_open), which equals the observed open when triggered",
+    "intrabar_long_fill": "long_threshold when high crosses it and the short side is not crossed in that bar",
+    "intrabar_short_fill": "short_threshold when low crosses it and the long side is not crossed in that bar",
+    "dual_side_same_bar": "AMBIGUOUS_WITHIN_BAR_ORDER and unavailable; direction is not selected",
+    "direction": "first non-ambiguous OCO side; never selected from payoff",
+    "stored_reference_entry_timestamp": "trigger provider bar start label",
+    "stored_reference_entry_price": "frozen gap/open-or-threshold convention above",
+    "same_bar_lookahead_status": "an intrabar threshold fill is a historical reference convention; five-minute OHLC cannot prove its exact timestamp or executable price"
+  },
+  "signal_fill_separation": {
+    "signal_time": "for an opening gap, the trigger-bar open; for an intrabar cross, exact trigger time is unavailable and the five-minute bar only proves the cross at bar close",
+    "reference_fill": "the exact historical frozen open-or-threshold convention",
+    "executable_stress_fill": "the frozen reference entry multiplied by the non-cumulative adverse-entry factor for F5/F10/F15/F20",
+    "historical_reference_may_be_described_as_observed_execution": false
+  },
+  "fill_evidence": {
+    "classes": [
+      "EXACTLY_OBSERVABLE",
+      "BOUNDED_BUT_NOT_EXACT",
+      "GAP_FILL_OBSERVABLE",
+      "AMBIGUOUS_WITHIN_BAR_ORDER",
+      "MISSING_MARKET_DATA",
+      "SIGNAL_OR_FILL_TIME_AMBIGUOUS",
+      "UNAVAILABLE"
+    ],
+    "primary_valid_classes": ["EXACTLY_OBSERVABLE", "GAP_FILL_OBSERVABLE"],
+    "five_minute_intrabar_threshold_default": "BOUNDED_BUT_NOT_EXACT with SIGNAL_OR_FILL_TIME_AMBIGUOUS timing status",
+    "ambiguous_rows_count_as_executable": false,
+    "missing_rows_count_as_zero": false
+  },
+  "adverse_entry_envelope": {
+    "fill_models": {"F0": 0.0, "F5": 5.0, "F10": 10.0, "F15": 15.0, "F20": 20.0},
+    "primary": "F10",
+    "long": "reference_entry_price * (1 + adverse_bps / 10000)",
+    "short": "reference_entry_price * (1 - adverse_bps / 10000)",
+    "base_for_every_stress": "FROZEN_REFERENCE_FILL",
+    "cumulative_application": false,
+    "most_profitable_model_selection_allowed": false,
+    "observed_shadow_fill_separate_field_only": true
+  },
+  "return_and_cost_model": {
+    "gross_bps": "10000 * direction * (terminal_price / stressed_entry_price - 1)",
+    "historical_entry_cost_bps": 5.0,
+    "historical_exit_cost_bps": 5.0,
+    "historical_round_trip_cost_bps": 10.0,
+    "cost_type": "fixed basis points",
+    "timestamp_dependent": false,
+    "spread_dependent": false,
+    "direction_dependent": false,
+    "price_dependent": false,
+    "quote_or_component_decomposition_available": false,
+    "additional_entry_stress_is_part_of_existing_cost": false,
+    "additional_entry_stress_application": "encoded only in stressed entry price and never subtracted again as a cost",
+    "exit_slippage": "unchanged frozen aggregate 5 bps exit-side cost",
+    "financing": "not separately modelled for the frozen intraday horizon",
+    "twice_cost_analysis": "secondary only and must remain separate from the adverse-entry envelope"
+  },
+  "terminal": {
+    "timestamp": "anchor_timestamp plus 125 minutes",
+    "price": "close of the provider bar at anchor_timestamp plus 120 minutes",
+    "same_for_all_fill_models": true,
+    "restart_horizon": false,
+    "loop_completion_exit": false,
+    "route_incompatibility_exit": false,
+    "trailing_stop": false,
+    "holding_period_optimisation": false
+  },
+  "historical_reproduction": {
+    "period_2025": "required and hash-pinned",
+    "numerical_tolerance_bps": 1e-8,
+    "reconcile_source_count_direction_entry_step_trigger_type_terminal_cost_and_payoff": true,
+    "paired_latency_reference_808_rows": "must also reconcile +15087.32 bps T0 at the source tolerance while the full T0 source contains 809 named rows",
+    "mismatch_action": "stop economic scoring and report discrepancy",
+    "exact_rerun": "all common machine-readable outputs must be byte-identical"
+  },
+  "provider_2023_archive": {
+    "required_match": "every registered provider_2023_<symbol> SHA-256",
+    "fresh_download_allowed": false,
+    "equivalent_looking_tape_allowed": false,
+    "imputation_allowed": false,
+    "search_roots": [
+      "/Users/michaelsalerno/Documents/Codex",
+      "/Users/michaelsalerno/StockerLocal",
+      "/private/tmp",
+      "/Users/michaelsalerno/Downloads",
+      "/Users/michaelsalerno/Desktop",
+      "/Users/michaelsalerno/Google Drive"
+    ],
+    "search_date": "2026-07-17",
+    "parquet_candidates_hashed": 886,
+    "matching_files": 0,
+    "status": "unavailable_no_matching_original_2023_provider_files"
+  },
+  "prospective_logging": {
+    "record_stages": ["opportunity", "trigger_fill", "settlement"],
+    "each_stage_create_only": true,
+    "original_record_mutation_allowed": false,
+    "duplicate_record_overwrite_allowed": false,
+    "changed_contract_or_data_hash": "fail_closed",
+    "opened_periods_forbidden": [2023, 2025],
+    "opened_snapshot_hashes_forbidden": true,
+    "new_data_snapshot_required": true,
+    "terminal_must_be_mature_before_settlement": true,
+    "outcome_may_mutate_opportunity_or_trigger": false,
+    "interim_economic_performance_visible": false,
+    "interim_administrative_fields": [
+      "counts",
+      "data_quality",
+      "missing_settlements",
+      "fill_evidence_classifications",
+      "safety_status"
+    ]
+  },
+  "prospective_completion_rule": {
+    "minimum_settled_named_total": 100,
+    "minimum_cycle_04_state_4": 25,
+    "minimum_cycle_07_state_5": 50,
+    "minimum_settled_controls_total": 20,
+    "minimum_distinct_sessions": 60,
+    "minimum_independent_stocks": 10,
+    "minimum_completed_calendar_months": 3,
+    "all_conditions_required": true,
+    "historical_frequency_basis": "2025 produced 809 named and 302 control rows over the opened evaluation surface, so the user-suggested rule is feasible without lowering it",
+    "may_change_after_first_opportunity": false,
+    "interim_pnl_may_change_stopping": false
+  },
+  "endpoints": {
+    "primary_economic": "each named-family mean net payoff under F10, reported separately",
+    "primary_comparative": "cycle_04|state_4 minus cycle_04|state_2 and cycle_07|state_5 minus cycle_07|state_6 under F10",
+    "combined_named_minus_controls": "secondary only",
+    "reported_fill_models": ["F0", "F5", "F10", "F15", "F20"],
+    "reported_statistics": [
+      "mean_net_payoff_bps",
+      "median_net_payoff_bps",
+      "total_net_payoff_bps",
+      "positive_payoff_rate",
+      "profit_factor",
+      "maximum_drawdown_bps",
+      "valid_fill_coverage",
+      "opportunities",
+      "independent_stocks",
+      "sessions",
+      "months"
+    ]
+  },
+  "uncertainty": {
+    "bootstrap_resamples": 2000,
+    "session_block_length": 5,
+    "confidence": 0.95,
+    "random_seed": 20260717,
+    "session_positive_percentage": true,
+    "monthly_stability": true,
+    "leave_one_stock_out_is_deterministic_row_deletion_not_model_refit": true,
+    "remove_best_stock": true,
+    "remove_top_five_stocks": true,
+    "remove_best_episode_historical_only": true,
+    "remove_top_five_episodes_historical_only": true
+  },
+  "break_even_slippage": {
+    "diagnostic_only": true,
+    "definition": "maximum additional adverse entry bps at which family mean net payoff equals zero under the exact return convention",
+    "bootstrap": "five-session blocks",
+    "may_become_new_threshold_for_same_cohort": false,
+    "compare_f10_to_break_even": true
+  },
+  "controls_and_nulls": {
+    "frozen_controls": true,
+    "direction_flipped_same_entry_and_terminal": true,
+    "timestamp_shift_bars": 1,
+    "timestamp_shift_may_replace_primary": false,
+    "random_opportunity_label_permutation_within_period_repetitions": 500,
+    "random_named_control_label_permutation_within_parent_loop_repetitions": 500,
+    "random_seed": 20260717,
+    "nulls_may_create_replacement_rules": false
+  },
+  "concentration": {
+    "dimensions": [
+      "family",
+      "parent_loop",
+      "orientation",
+      "symbol",
+      "direction",
+      "trigger_type",
+      "session",
+      "month",
+      "quarter",
+      "anchor_regime",
+      "entry_step",
+      "hindsight_episode_historical_only"
+    ],
+    "metrics": ["top_one_absolute_share", "top_five_absolute_share", "herfindahl_index"],
+    "dominance_classification_required": true
+  },
+  "historical_decision_labels": [
+    "historical_reference_survives_f10_execution_stress",
+    "historical_reference_fails_execution_stress",
+    "named_orientation_effect_not_stronger_than_controls",
+    "execution_result_concentrated_or_unstable",
+    "reference_fill_not_provably_executable",
+    "historical_execution_attribution_blocked_by_missing_data"
+  ],
+  "prospective_decision_labels": [
+    "prospective_named_t0_edge_supported_for_further_paper_validation",
+    "prospective_reference_positive_but_f10_not_supported",
+    "prospective_cycle_04_only_descriptive",
+    "prospective_cycle_07_only_descriptive",
+    "prospective_named_not_stronger_than_controls",
+    "prospective_result_concentrated_or_unstable",
+    "prospective_reference_fill_not_achievable",
+    "prospective_hypothesis_rejected",
+    "prospective_sample_incomplete"
+  ],
+  "current_prospective_decision": "prospective_sample_incomplete"
+}

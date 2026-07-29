@@ -1,0 +1,21 @@
+{
+  "behavioural_trajectory_test": true,
+  "broker_integration_required": false,
+  "coarse_loop_family_target": true,
+  "date_predicate_inherited_from_frozen_predecessor": true,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "maximum_timestamp_materialised": "2025-08-22 19:55:00+00:00",
+  "order_placement": "disabled",
+  "passed": true,
+  "production_runtime_modified": false,
+  "protected_rows_materialised": 0,
+  "protected_start": "2025-08-23",
+  "quick_feasibility_screen": true,
+  "read_end_inclusive": "2025-08-22",
+  "read_start": "2024-01-01",
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

@@ -1,0 +1,17 @@
+{
+  "broker_integration_required": false,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "quantile": 0.75,
+  "research_only": true,
+  "strategy_promotion": false,
+  "thresholds": {
+    "12": 0.3003493391782974,
+    "6": 0.30288693685048057
+  },
+  "training_source": "finite_2024_expanding_monthly_OOF_probabilities_only"
+}

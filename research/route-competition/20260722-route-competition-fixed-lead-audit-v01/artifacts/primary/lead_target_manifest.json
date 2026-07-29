@@ -1,0 +1,26 @@
+{
+  "broker_integration_required": false,
+  "definition": "earliest registered semantic-loop completion strictly after checkpoint and within three completed bars; zero when absent",
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "exact_identity_descriptive_only": true,
+  "exact_route_identity_modelled": false,
+  "execution_enabled": false,
+  "fixed_lead_audit": true,
+  "lead_values": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "near_complete_prefix_excluded_from_advance_test": true,
+  "next_bar_completion_test": true,
+  "options_outcomes_opened": false,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "same_bar_multiple_completions_are_one_positive": true,
+  "strategy_promotion": false,
+  "two_to_three_bar_advance_test": true,
+  "unresolved_rows_excluded": 0
+}

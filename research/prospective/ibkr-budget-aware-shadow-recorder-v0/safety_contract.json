@@ -1,0 +1,49 @@
+{
+  "contract_version": "ibkr-budget-aware-shadow-recorder-v0",
+  "runtime_gate": "assert_no_broker_mutation_surface",
+  "official_eclient_boundary": "explicit_market_data_only_facade",
+  "forbidden_methods": [
+    "placeOrder",
+    "cancelOrder",
+    "reqOpenOrders",
+    "reqPositions",
+    "reqAccountUpdates",
+    "reqAccountSummary",
+    "reqGlobalCancel",
+    "exerciseOptions"
+  ],
+  "forbidden_routes": [
+    "orders",
+    "account",
+    "positions",
+    "portfolio",
+    "buy",
+    "sell"
+  ],
+  "defined_risk_only": true,
+  "naked_short_structures_allowed": false,
+  "permanent_banner": "RESEARCH ONLY — RECORD ONLY — NO ORDERS",
+  "credentials_committed": false,
+  "broker_account_identifiers_committed": false,
+  "claims_boundary": {
+    "research_only": true,
+    "record_only": true,
+    "frozen_m1c": true,
+    "source_transfer_monitoring": true,
+    "exact_vendor_bar_equality_required": false,
+    "option_shadow_outcomes_only": true,
+    "engineering_phase_sessions": 20,
+    "market_data_budget_enforced": true,
+    "market_data_limits_runtime_discovered": true,
+    "full_option_chain_streaming_allowed": false,
+    "tick_by_tick_universe_streaming_allowed": false,
+    "level2_universe_streaming_allowed": false,
+    "reserved_future_trading_capacity": true,
+    "paper_orders_allowed": false,
+    "live_orders_allowed": false,
+    "order_methods_available": false,
+    "account_access_required": false,
+    "position_access_required": false,
+    "strategy_promotion": false
+  }
+}

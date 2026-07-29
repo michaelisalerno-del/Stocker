@@ -1,0 +1,54 @@
+{
+  "broker_integration_required": false,
+  "continuous_behavioural_dimensions": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "observable_only": true,
+  "order_placement": "disabled",
+  "predecessor_artifacts": [
+    {
+      "repository_relative_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/opening_decision_panel.parquet",
+      "sha256": "a6ab58f870a2b356ab2174011988d075b408612045c36e74017c772e5c8cd78a",
+      "size_bytes": 4106108
+    },
+    {
+      "repository_relative_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/assessment_predictions.parquet",
+      "sha256": "f5db0db6540e2ea60270df04c36efd64a5cfe9af42058d799abcab954e089d65",
+      "size_bytes": 2380955
+    },
+    {
+      "repository_relative_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/model_coefficients.json",
+      "sha256": "7c3a55a84d2caca53e7206bcfc5cb67c65627b3324f77833c039e12f02b983e0",
+      "size_bytes": 76920
+    },
+    {
+      "repository_relative_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/movement_metrics.csv",
+      "sha256": "2941ba9e34961032da12cf7e0a9dc4acd7a3a4ca1de30a59d9104640c56a3479",
+      "size_bytes": 755
+    },
+    {
+      "repository_relative_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/direction_metrics.csv",
+      "sha256": "59f0c70307715027294328944539248110773c8d000a8ebee63f8a055a80b318",
+      "size_bytes": 1371
+    },
+    {
+      "repository_relative_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/development_movement_thresholds.json",
+      "sha256": "b19d6eda1c58eeac2dde38b2919d6e669eb9a142e98688469ecee23359f921a4",
+      "size_bytes": 436
+    },
+    {
+      "repository_relative_path": "research/opening-regime-path/20260720-opening-regime-path-direction-screen-v0/artifacts/primary/source_manifest.json",
+      "sha256": "1f1c8b08038f866c96afef33a6754eb2825ac32d7e9909ce01aca1598d58c100",
+      "size_bytes": 18492
+    },
+    {
+      "repository_relative_path": "research/observable-pressure-onset/20260720-high-movement-pressure-onset-screen-v0-1/artifacts/primary/source_manifest.json",
+      "sha256": "1cd7687dde51b27451b0e533bf62e39ea9e1d92d1519567bce151c54ea33b071",
+      "size_bytes": 18559
+    }
+  ],
+  "production_runtime_modified": false,
+  "research_only": true,
+  "strategy_promotion": false
+}

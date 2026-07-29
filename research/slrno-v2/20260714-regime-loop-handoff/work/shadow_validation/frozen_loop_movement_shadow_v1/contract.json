@@ -1,0 +1,157 @@
+{
+  "contract_id": "frozen_loop_movement_shadow_v1",
+  "contract_frozen_at_utc": "2026-07-10T18:29:16Z",
+  "eligible_session_rule": "session_date > 2026-07-10",
+  "scientific_status": "prospective_shadow_validation",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "economic_edge_claim": false,
+  "deployment_enabled": false,
+  "data": {
+    "provider": "EODHD",
+    "bar_interval": "5m",
+    "session": "America/New_York regular session, 09:30 <= timestamp < 16:00",
+    "provider_volume_label": "historical_volume",
+    "provider_volume_is_exchange_wide": false,
+    "provider_volume_is_order_flow": false,
+    "movement_model_uses_volume_directly": false,
+    "state_detector_uses_historical_volume_features": true,
+    "frozen_stock_universe": [
+      "AAL",
+      "AAOI",
+      "APLD",
+      "ASTS",
+      "AXTI",
+      "CIFR",
+      "HIMS",
+      "IONQ",
+      "IREN",
+      "MARA",
+      "MP",
+      "MRNA",
+      "MSTR",
+      "NVTS",
+      "OKLO",
+      "QBTS",
+      "RGTI",
+      "RIOT",
+      "RIVN",
+      "SMCI",
+      "SOFI",
+      "WULF"
+    ],
+    "required_market_proxy": "VTI",
+    "minimum_symbols_present_at_issue": 18
+  },
+  "frozen_model": {
+    "structural_training_period": 2024,
+    "state_count": 8,
+    "state_filter": "causal_forward_semimarkov",
+    "state_duration_cap_bars": 24,
+    "loop_identity_model": "last_three_state_history",
+    "loop_count": 20,
+    "representations_scored": [
+      "state_context",
+      "loop_scores"
+    ],
+    "targets_scored": [
+      "absolute_return_bps",
+      "future_range_bps"
+    ],
+    "horizons_bars": [
+      6,
+      12,
+      24
+    ],
+    "maximum_anchor_bar_ordinal_zero_based": 53,
+    "direction_excluded": true,
+    "signed_return_excluded": true,
+    "raw_history_excluded_from_primary_decision": true,
+    "refitting_permitted": false,
+    "recalibration_permitted": false,
+    "threshold_tuning_permitted": false
+  },
+  "prediction_issue_protocol": {
+    "anchor": "exact causal filtered-state run entry",
+    "provider_as_of_must_equal_anchor_timestamp": true,
+    "provider_rows_after_as_of_are_excluded_before_feature_calculation": true,
+    "completed_bar_delay_minutes": 5,
+    "latest_issue_minutes_after_anchor": 29,
+    "reason_for_latest_issue": "The six-bar outcome begins to become observable at anchor timestamp plus 30 minutes.",
+    "all_three_horizon_predictions_required_per_anchor": true,
+    "append_only_hash_chained_ledger": true,
+    "duplicate_prediction_ids_forbidden": true,
+    "issue_command_may_read_outcomes": false,
+    "status_command_may_read_outcomes": false,
+    "predictions_visible_during_accumulation": true,
+    "outcome_metrics_embargoed_until_support": true
+  },
+  "cohort_close_rule": {
+    "rule": "first append-only ledger prefix satisfying every issuance support gate",
+    "minimum_issued_anchors": 65000,
+    "minimum_distinct_session_dates": 200,
+    "minimum_distinct_symbols": 18,
+    "minimum_distinct_calendar_quarters": 4,
+    "required_states": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "optional_stopping_permitted": false,
+    "predictions_after_closing_prefix_enter_primary_evaluation": false
+  },
+  "outcome_protocol": {
+    "minimum_exact_outcome_anchors": 60000,
+    "evaluation_not_before_latest_anchor_minutes": 125,
+    "timestamp_support_is_sealed_on_first_eligible_evaluation_attempt": true,
+    "exact_five_minute_spacing_required_through_all_horizons": true,
+    "absolute_return_bps": "10000 * abs(log(close[t+H] / close[t]))",
+    "future_range_bps": "10000 * (max(high[t+1:t+H]) - min(low[t+1:t+H])) / close[t]",
+    "outcomes_begin_after_completed_anchor_bar": true,
+    "support_failure_action": "seal a timestamp-only support failure on the first mature evaluation attempt; calculate no losses, correlations, or decisions"
+  },
+  "evaluation": {
+    "candidate": "loop_scores",
+    "baseline": "state_context",
+    "primary_loss": "mean_squared_error",
+    "secondary_loss": "mean_absolute_error",
+    "daily_uncertainty": {
+      "method": "moving_block_bootstrap",
+      "block_session_dates": 5,
+      "draws": 5000,
+      "seed": 20260710,
+      "confidence_interval": 0.95
+    },
+    "absolute_return_bps": {
+      "minimum_mse_relative_improvement": 0.01,
+      "minimum_mse_relative_improvement_each_horizon": 0.01,
+      "minimum_mse_relative_improvement_each_leave_one_symbol_out": 0.01
+    },
+    "future_range_bps": {
+      "minimum_mse_relative_improvement": 0.03,
+      "minimum_mse_relative_improvement_each_horizon": 0.03,
+      "minimum_mse_relative_improvement_each_leave_one_symbol_out": 0.03
+    },
+    "common_required_gates": [
+      "daily moving-block 95% upper bound below zero for MSE difference",
+      "daily moving-block 95% upper bound below zero for MAE difference",
+      "candidate MSE and MAE lower in every represented calendar quarter",
+      "candidate-outcome correlation exceeds baseline at every horizon"
+    ],
+    "overall_pass_rule": "both movement targets pass every frozen gate",
+    "economic_edge_inference_permitted": false,
+    "tradability_inference_permitted": false
+  },
+  "separation": {
+    "large_movement_probability_or_quantile_development_is_separate": true,
+    "joint_history_duration_kernel_development_is_separate": true,
+    "alternative_regime_discovery_v2_is_separate": true,
+    "trading_rule_or_pnl_model_permitted": false
+  }
+}

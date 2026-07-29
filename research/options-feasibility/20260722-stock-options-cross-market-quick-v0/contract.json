@@ -1,0 +1,133 @@
+{
+  "assessment_end_inclusive": "2025-08-22",
+  "assessment_start": "2025-01-01",
+  "bootstrap_draws": 10,
+  "bootstrap_interval_levels": [
+    0.8,
+    0.9,
+    0.95
+  ],
+  "bootstrap_seed": 20260722,
+  "broker_integration_required": false,
+  "cross_market_disagreement_features": [
+    "complacent_conflict",
+    "structural_tension_gap",
+    "route_vs_priced_move",
+    "directional_agreement",
+    "transition_vs_term_urgency"
+  ],
+  "development_end_inclusive": "2024-12-31",
+  "development_start": "2024-01-01",
+  "directional_outcomes_primary": false,
+  "execution_enabled": false,
+  "experiment": "Stock \u2194 Options Cross-Market Information Quick Screen V0",
+  "frozen_checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "frozen_cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "gpu": false,
+  "intraday_option_quotes_used": false,
+  "maximum_plots": 2,
+  "maximum_primary_model_fits": 6,
+  "model": {
+    "C": 0.25,
+    "class_weight": null,
+    "max_iter": 300,
+    "n_jobs": 1,
+    "penalty": "l2",
+    "solver": "liblinear"
+  },
+  "n_jobs": 1,
+  "option_pnl_calculated": false,
+  "options_feature_null_refits": 3,
+  "options_feature_null_seeds": [
+    20260723,
+    20260724,
+    20260725
+  ],
+  "options_information_time": "exact_previous_us_trading_session_close",
+  "options_pair_selection": {
+    "expiry": "nearest expiry satisfying 7 <= DTE <= 45",
+    "fallback_after_quality_failure": false,
+    "pair_quality": "frozen predecessor requirements",
+    "strike": "common call/put strike minimizing abs(log(strike / previous_close_underlying_price))",
+    "tie_break": [
+      "abs_log_moneyness ascending",
+      "minimum_pair_open_interest descending",
+      "combined_relative_spread ascending",
+      "absolute_call_put_iv_gap ascending",
+      "strike ascending",
+      "call_contract_id ascending",
+      "put_contract_id ascending"
+    ]
+  },
+  "order_placement": "disabled",
+  "primary_models": [
+    "S0",
+    "S1",
+    "S2",
+    "O0",
+    "O1",
+    "O2"
+  ],
+  "processes": 1,
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "protected_start": "2025-08-23",
+  "previous_close_options_only": true,
+  "quick_cross_market_screen": true,
+  "research_only": true,
+  "ridge_alpha": 10.0,
+  "ridge_diagnostics": [
+    "R0",
+    "R1"
+  ],
+  "route_feature_null_refits": 3,
+  "route_feature_null_seeds": [
+    20260726,
+    20260727,
+    20260728
+  ],
+  "strategy_promotion": false,
+  "test_a_options_to_stock": true,
+  "test_a_target": "registered_completion_clean_bars_2_or_3",
+  "test_b_primary_target": "movement_exceeds_prior_close_iv",
+  "test_b_stock_to_options_movement": true,
+  "test_b_target_horizon_minutes": 15,
+  "underlying_movement_outcomes_opened": true
+}

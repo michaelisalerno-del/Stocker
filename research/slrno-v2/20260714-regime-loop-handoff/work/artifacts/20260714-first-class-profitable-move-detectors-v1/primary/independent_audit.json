@@ -1,0 +1,34 @@
+{
+  "checks": {
+    "aal_2026_excluded": true,
+    "aggregate_metrics_replayed": true,
+    "artifact_manifest_complete_and_valid": true,
+    "bootstrap_and_holm_replayed": true,
+    "event_and_control_paths_replayed": true,
+    "event_set_and_causal_values_reconstructed": true,
+    "frozen_pre_outcome_files_match": true,
+    "frozen_source_hashes_match": true,
+    "matched_controls_reconstructed_without_outcomes": true,
+    "no_regime_or_loop_detector_fields": true,
+    "pre_outcome_ledgers_exclude_outcomes": true,
+    "research_only_opened_data_status": true
+  },
+  "contract_id": "20260714-first-class-profitable-move-detectors-v1",
+  "errors": {
+    "control_replay": 0,
+    "event_replay": 0,
+    "manifest": 0
+  },
+  "live_ordering_enabled": false,
+  "maximum_errors": {
+    "aggregate": 1.7763568394002505e-15,
+    "bootstrap_holm": 3.552713678800501e-15,
+    "control_numeric": 0.0,
+    "event_numeric": 0.0,
+    "outcome_numeric": 0.0
+  },
+  "order_placement": "disabled",
+  "passed": 12,
+  "research_only": true,
+  "total": 12
+}

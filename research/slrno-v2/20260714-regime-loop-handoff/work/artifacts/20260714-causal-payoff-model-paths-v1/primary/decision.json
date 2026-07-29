@@ -1,0 +1,50 @@
+{
+  "application_modified": false,
+  "decisions": {
+    "direct_payoff_state": "rejected_or_unknown",
+    "diversion_specific_payoff": "deferred_no_sealed_data",
+    "predicted_route_increment": "rejected_or_unknown",
+    "route_branch_forecast": "rejected_or_unknown",
+    "sequential_route_plus_price": "rejected_or_unknown"
+  },
+  "development_surface": "causal_setup_conditions_v1 OCO anchor breakouts",
+  "direct_checks": {
+    "at_least_16_positive_stock_deletions_pooled": false,
+    "block_lower_positive_and_holm_all_groups": false,
+    "forecast_spearman_positive_all_groups": false,
+    "paired_mean_positive_all_groups": false,
+    "positive_coverage_at_least_5pct_all_groups": false,
+    "positive_month_majority_both_candidates": false,
+    "selected_mean_net_positive_all_groups": false,
+    "support_at_least_50_all_groups": true
+  },
+  "economic_edge_claim": false,
+  "live_ordering_enabled": false,
+  "maximum_allowed_action": "prospective immutable research logging only",
+  "order_placement": "disabled",
+  "primary_cost_bps_per_side": 5.0,
+  "research_only": true,
+  "route_checks": {
+    "block_lower_positive_and_holm_all_groups": false,
+    "brier_lower_than_prior_all_groups": false,
+    "log_loss_improvement_positive_all_groups": false,
+    "positive_month_majority_both_candidates": false,
+    "support_at_least_50_all_groups": true
+  },
+  "route_increment_checks": {
+    "plus_route_rmse_lower_both_candidates": false,
+    "plus_route_selector_higher_both_candidates": false
+  },
+  "sealed_validation_performed": false,
+  "sequential_checks": {
+    "absolute_policy_mean_net_positive_all_groups": false,
+    "at_least_16_positive_stock_deletions_pooled": false,
+    "block_lower_positive_and_holm_all_groups": false,
+    "exit_coverage_at_least_5pct_all_groups": false,
+    "paired_mean_positive_all_groups": false,
+    "positive_month_majority_both_candidates": false,
+    "route_plus_price_higher_than_route_only_both_candidates": false,
+    "support_at_least_50_all_groups": true
+  },
+  "strategy_promotion": false
+}

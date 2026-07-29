@@ -1,0 +1,72 @@
+{
+  "files": [
+    {
+      "bytes": 3623,
+      "name": "cohort_metrics.csv",
+      "sha256": "12713381ef597c4417185e2847c5243aa823ba4ffa87133ae8f1f75701e86267"
+    },
+    {
+      "bytes": 3189,
+      "name": "data_coverage.csv",
+      "sha256": "1b8179ad5352473c78332973246dcfdee45b2ac949160a74ed16d0a5c97a44af"
+    },
+    {
+      "bytes": 707,
+      "name": "decision.json",
+      "sha256": "1a125941c7158e7eb2dbaf24e3515d80fd34225d8aef680c9931524a24e95ed8"
+    },
+    {
+      "bytes": 612,
+      "name": "hazard_auc_bootstraps.csv",
+      "sha256": "8f35019210c38fd633d009ae0a7570634369b1c78980d261ec78d24e6c31416a"
+    },
+    {
+      "bytes": 881,
+      "name": "independent_audit.json",
+      "sha256": "61778d4b2ff6bc514e93332234eec24fa651e96e7175f0c7b5f06f048fae69ea"
+    },
+    {
+      "bytes": 2107,
+      "name": "path_class_metrics.csv",
+      "sha256": "7b14aa0b2c3d70473797d2b1a868618e20e45a2c337b1e49f14bc76b872e0613"
+    },
+    {
+      "bytes": 1389,
+      "name": "profitable_vs_losing_features.csv",
+      "sha256": "f6c21420f77b01a574aaec15a738c5b47b9a5fe0f2d834902d17d4bd5465805e"
+    },
+    {
+      "bytes": 1249,
+      "name": "quarter_metrics.csv",
+      "sha256": "c952f02d96c2f4c68db8a1df11ec2ddf0b481763d3ebd3544b4ad9bb1b3fa2e4"
+    },
+    {
+      "bytes": 6875,
+      "name": "score_calendar.json",
+      "sha256": "db95fdb47378086bc7d2491ffd281645617f46dd9eebe498360aaee59c239e3d"
+    },
+    {
+      "bytes": 1860362,
+      "name": "signal_level_path_diagnostics.parquet",
+      "sha256": "d51dd775a7786a84f8b0e0c6c86530ca924a8163a46ee24eb036447a6594b42d"
+    },
+    {
+      "bytes": 5163,
+      "name": "source_hashes.json",
+      "sha256": "e19a4e3cb7736e503850b742a779e0931e65abe0e3f0ef09285ec9e8e35f233d"
+    },
+    {
+      "bytes": 5514,
+      "name": "stock_deletion_metrics.csv",
+      "sha256": "eed735496936c826f3d489348db66ef9aaca86eef0448c839645c3149b0961fc"
+    },
+    {
+      "bytes": 12188,
+      "name": "summary.json",
+      "sha256": "a3639320f4efbe61540329747b7a93f4f1f9e2c510ca6547c05636bafca96174"
+    }
+  ],
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "research_only": true
+}

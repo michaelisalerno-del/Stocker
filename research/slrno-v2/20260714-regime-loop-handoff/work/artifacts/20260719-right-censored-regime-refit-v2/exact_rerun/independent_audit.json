@@ -1,0 +1,154 @@
+{
+  "audit_passed": true,
+  "audit_version": "right_censored_regime_refit_v2_independent_v1",
+  "broker_connected": false,
+  "checks": {
+    "cleanup_and_semantics": {
+      "cleanup_sample_reconstructed": true,
+      "cleanup_sample_rows": 624,
+      "semantic_labels_reconstructed": true,
+      "semantic_mapping_reconstructed": true
+    },
+    "comparisons_and_unchanged_gates": {
+      "dictionary_coverage_matches": true,
+      "dictionary_coverage_reconstructed": {
+        "MODEL_DURATION_REPAIR": 0.09288407684716533,
+        "MODEL_FROZEN": 0.09324207516551535,
+        "MODEL_FULL_REFIT": 0.059733903618373795
+      },
+      "exact_loop_event_agreement": 0.06202005001438467,
+      "frozen_vs_full_bar_agreement": 0.6061688762856733,
+      "frozen_vs_full_nmi": 0.5272457166569086,
+      "gate_row_count": 9,
+      "k_seed_registry_complete": true,
+      "part_b_remained_closed": true,
+      "training_sample_policies_complete": true,
+      "unchanged_thresholds_match_previous_contract": true
+    },
+    "duration_only_identity": {
+      "duration_array_changed": true,
+      "duration_support": 78,
+      "model_id_distinct": true,
+      "non_duration_arrays_identical": true
+    },
+    "emissions": {
+      "all_fourteen_emissions_match": true,
+      "feature_checks": {
+        "close_location_value": true,
+        "log_relative_cumulative_historical_volume": true,
+        "log_relative_historical_volume": true,
+        "regime_activity_acceleration": true,
+        "regime_log_activity_12": true,
+        "regime_log_activity_3": true,
+        "regime_log_bar_range": true,
+        "regime_log_market_dispersion": true,
+        "regime_market_breadth_centered": true,
+        "regime_stock_minus_market_scaled": true,
+        "regime_wick_balance": true,
+        "signed_efficiency_12": true,
+        "signed_efficiency_6": true,
+        "vti__signed_efficiency_12": true
+      },
+      "no_future_feature_availability": true,
+      "sample_rows": 2045
+    },
+    "frozen_tree": {
+      "baseline_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+      "frozen_historical_tree_unchanged": true,
+      "modified_preexisting_files": []
+    },
+    "manifest_and_exact_rerun": {
+      "artifact_count": 83,
+      "artifact_manifest_matches": true,
+      "exact_rerun_byte_identical": true,
+      "exact_rerun_compared_artifacts": 83,
+      "parameter_hashes_match": true,
+      "posterior_hashes_match": true,
+      "state_assignment_hashes_match": true,
+      "training_row_hashes_match": true
+    },
+    "panel": {
+      "completed_bar_availability_pass": true,
+      "deterministic_order": true,
+      "natural_keys_unique": true,
+      "panel_row_count": 424583,
+      "row_key_hash_matches": true,
+      "row_key_hash_reconstructed": "2248079ba30c6fb7aa780f12ee50006391ffdac6a882a1aa9a04e1bebee12080",
+      "segments": 8151,
+      "within_segment_ordinals_contiguous": true
+    },
+    "posterior_and_gap_reset": {
+      "departure_probability_reconstructed": true,
+      "expected_age_reconstructed": true,
+      "gap_reset_count": 2620,
+      "hard_state_reconstructed": true,
+      "posterior_normalization_maximum_error": 4.440892098500626e-16,
+      "posterior_reconstructed": true,
+      "posterior_sample_rows": 624,
+      "row_likelihood_reconstructed": true
+    },
+    "preprocessing_and_kmeans": {
+      "kmeans_assignment_sample_reconstructed": true,
+      "preprocessing_csv_serialization_within_tolerance": true,
+      "preprocessing_reconstructed": true,
+      "training_position_unique": true,
+      "training_rows": 212292
+    },
+    "run_endings_and_duration": {
+      "at_risk_counts_match": true,
+      "censored_counts_match": true,
+      "duration_24_exact": true,
+      "duration_78_representable": true,
+      "ending_status_counts": {
+        "INCOMPLETE_OR_UNAVAILABLE_SESSION": 5037,
+        "INVALIDATED_BY_SOURCE_GAP": 3757,
+        "OBSERVED_STATE_EXIT": 77481,
+        "RIGHT_CENSORED_SESSION_END": 5080
+      },
+      "ending_status_counts_match": true,
+      "exit_counts_match": true,
+      "forced_age_24_exit": false,
+      "forced_final_age_exit": false,
+      "hazards_match": true,
+      "probability_mass_maximum_error": 2.220446049250313e-16,
+      "survival_matches": true,
+      "survival_non_increasing": true,
+      "training_run_count": 91355
+    },
+    "safety": {
+      "artifact_safety_flag_failures": [],
+      "contract_safety_flags_pass": true,
+      "dictionary_promotion_disabled": true,
+      "part_b_disabled": true,
+      "prohibited_runtime_imports": []
+    },
+    "source_identity": {
+      "frozen_state_hash_matches": true,
+      "pre_freeze_source_hashes_match": true,
+      "previous_contract_hash_matches": true,
+      "provider_source_count": 23,
+      "provider_source_hashes_match": true
+    }
+  },
+  "contract_hash": "7c23ba6c613d79731d3e3f1f37122ff5f97e6e6845274121313ccb1ba1459e88",
+  "data_snapshot_hash": "67417cf1fd1267cb4a945de8dff854916bd4d5bbde0c55f5d6545b1c4b6881e3",
+  "economic_outcomes_used": false,
+  "execution_enabled": false,
+  "failed_required_check_count": 0,
+  "git_sha": "91996a9cf747a614ff6d9e08eaafc3583a58b91c",
+  "implementation_source_hash": "177788fe59872f782f56492a52f86c3b5177023ac875c509339d328f5ce5306f",
+  "model_lineage": "MODEL_FULL_REFIT",
+  "order_placement": "disabled",
+  "panel_hash": "801c0bf9d69ecdd58b21fb2ba4392137048b466668344ebfc4c8faf6a0d3e2f1",
+  "part_b_interaction_scoring_enabled": false,
+  "payoff_selection_used": false,
+  "primary_fit_functions_imported": false,
+  "primary_summary_generation_functions_imported": false,
+  "production_runtime_modified": false,
+  "research_only": true,
+  "run_id": "143cc35bbab621d585cb9bf2",
+  "semantic_dictionary_promotion_enabled": false,
+  "state_model_hash": "4fc1a02dce9ac2311dabaeb4623a559d37286dfe58baffef53828cc7415a3425",
+  "state_model_version": "regime_model_v2_full_right_censored_refit",
+  "strategy_promotion": false
+}

@@ -1,0 +1,185 @@
+{
+  "contract_id": "20260714-first-class-profitable-move-prospective-log-v1",
+  "status": "specification_only_not_activated",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "broker_connection_enabled": false,
+  "paper_or_demo_execution_enabled": false,
+  "deployment_enabled": false,
+  "position_or_order_functionality_allowed": false,
+  "application_implementation_authorized": false,
+  "strategy_promotion_allowed": false,
+  "purpose": "Collect genuinely prospective, outcome-sealed observations for a selective profitable-move detector that can abstain, without requiring a loop forecast.",
+  "opened_development_evidence": {
+    "artifact": "../artifacts/20260714-first-class-profitable-move-detectors-v1/primary",
+    "periods": [2025, 2026],
+    "scientific_status": "retrospective_portability_development_on_opened_data_not_validation",
+    "do_not_retest_or_tune": true,
+    "result": "All five frozen bar-pattern detectors failed their accuracy, paired-control, net-payoff, stability, robustness, and cost gates."
+  },
+  "problem_decomposition": [
+    {
+      "stage": "setup_alert",
+      "question": "Has price entered a state in which a usable move may begin?",
+      "action": "log_only_no_hypothetical_admission"
+    },
+    {
+      "stage": "causal_confirmation",
+      "question": "Has the move begun in the forecast direction without invalidating the setup?",
+      "action": "update_probability_after_each_completed_bar"
+    },
+    {
+      "stage": "selective_admission",
+      "question": "Is the conservative cost-adjusted expectancy positive now?",
+      "action": "positive_negative_or_unknown_abstain_counterfactual_only"
+    },
+    {
+      "stage": "active_path",
+      "question": "Given only the completed path, is remaining expectancy still positive?",
+      "action": "log_next_open_counterfactuals_only"
+    }
+  ],
+  "activation_requirements": [
+    "Set an immutable activation timestamp before the first prospective observation.",
+    "Freeze detector source, feature schema, label clock, risk construction, costs, uncertainty method, evaluation code, and source hashes before opening outcomes.",
+    "Keep append-only alert, confirmation, admission, completed-bar, and sealed-outcome ledgers separate.",
+    "Do not use 2023, 2024, 2025, or already-opened partial-2026 outcomes for activation-time feature, model, threshold, horizon, risk, or confirmation selection.",
+    "Any optional finer-bar source must be timestamp-audited and frozen before use; five-minute dual-touch rows remain ambiguous unless a valid finer path exists.",
+    "Activation or implementation through the trading application requires separate explicit authorization and remains outside this contract."
+  ],
+  "observation_population": {
+    "unit": "every_causally_eligible_completed_bar",
+    "selection": "log the full eligible population before any detector or abstention filter",
+    "loops_required": false,
+    "loop_fields": "optional_context_only_and_never_a_substitute_for_payoff_prediction",
+    "direction": ["long", "short", "unknown"],
+    "primary_cost_bps_per_side": 5,
+    "market_impact_modelled": false,
+    "short_locate_or_borrow_modelled": false
+  },
+  "immutable_identity_fields": [
+    "contract_id",
+    "model_version",
+    "model_source_sha256",
+    "feature_schema_version",
+    "label_version",
+    "observation_id",
+    "symbol",
+    "session_date",
+    "decision_timestamp",
+    "next_provider_open_timestamp"
+  ],
+  "causal_feature_families": {
+    "price_location": [
+      "opening_range_position",
+      "prior_completed_bar_VWAP_distance",
+      "distance_from_prior_session_extremes"
+    ],
+    "bar_structure": [
+      "body_to_prior_scale",
+      "range_to_prior_scale",
+      "close_location",
+      "upper_and_lower_wick_ratios",
+      "causal_compression_or_expansion"
+    ],
+    "path_state": [
+      "completed_bar_return_since_alert",
+      "running_MFE_and_MAE_since_alert",
+      "time_to_running_extremes",
+      "causal_retracement",
+      "setup_invalidation_status"
+    ],
+    "activity": [
+      "historical_volume_activity_proxy_with_prior_only_normalisation",
+      "provider_quote_count_only_if_separately_available_and_timestamp_audited"
+    ],
+    "time_and_support": [
+      "session_phase",
+      "bars_since_alert",
+      "prior_only_ATR_and_range_percentiles",
+      "feature_support_and_missingness"
+    ]
+  },
+  "forbidden_features": [
+    "future bars or future extrema",
+    "realised target, stop, MFE, MAE, time-to-excursion, return, regime duration, loop, child, or morph outcome",
+    "same-bar intrabar ordering inferred from five-minute OHLC",
+    "future-normalised volume",
+    "order-book or quote-flow claims from provider historical volume"
+  ],
+  "primary_outcome": {
+    "name": "target_before_structural_invalidation",
+    "entry_clock": "next provider open after a completed-bar admission",
+    "target": "frozen reward distance derived causally at admission",
+    "stop": "frozen structural invalidation derived causally at admission",
+    "same_bar_target_and_stop": "failure_unless_a_pre_frozen_finer_bar_source_resolves_order",
+    "no_touch": "frozen_time_exit",
+    "net": "gross payoff minus 5 bps per side",
+    "gaps": "realised conservatively at the first available open"
+  },
+  "detector_output": {
+    "classes": ["positive", "negative", "unknown_abstain"],
+    "probabilities": [
+      "target_before_invalidation",
+      "invalidation_before_target",
+      "ambiguous_or_no_touch"
+    ],
+    "required_metadata": [
+      "calibrated_probability",
+      "uncertainty_interval",
+      "support",
+      "expected_gross_bps",
+      "expected_net_bps",
+      "conservative_expected_net_lower_bound",
+      "abstention_reason"
+    ],
+    "positive_rule": "emit positive only when the lower uncertainty bound of cost-adjusted expectancy is above zero",
+    "forced_ranking_forbidden": true
+  },
+  "accuracy_definition": {
+    "primary": "selective target-before-invalidation precision over every emitted positive admission",
+    "coverage": "positive admissions divided by the full eligible population",
+    "accuracy_without_coverage": "insufficient",
+    "risk_specific_break_even": "required; a fixed hit-rate threshold cannot replace net expectancy",
+    "calibration": "report predicted-versus-realised probability by predeclared bins with confidence intervals"
+  },
+  "path_counterfactuals_logged_without_execution": [
+    "next open after setup alert",
+    "next open after each frozen confirmation state",
+    "next open after positive, negative, or unknown detector state change",
+    "frozen time exit",
+    "frozen structural target and invalidation path"
+  ],
+  "predeclared_evaluation": {
+    "primary_cost_bps_per_side": 5,
+    "comparators": [
+      "full eligible population",
+      "matched symbol-month-clock outcome-blind controls",
+      "setup alert without confirmation",
+      "simple prior-only probability baseline"
+    ],
+    "requirements": [
+      "minimum support and predeclared minimum coverage",
+      "paired session-block uncertainty",
+      "positive conservative net expectancy",
+      "precision and calibration conditional on coverage",
+      "time and quarter stability",
+      "leave-one-stock-out robustness",
+      "2.5, 5, 7.5, and 10 bps per-side cost sensitivity",
+      "multiplicity control across all detector, direction, horizon, and confirmation endpoints",
+      "independent leakage, timestamp, source-hash, outcome-seal, and exact-rerun audit"
+    ]
+  },
+  "post_inspection_hypothesis": {
+    "name": "alert_then_confirm_then_test_continuation",
+    "status": "prospective_only_not_a_rule",
+    "motivation": "V1 showed that expansion alerts did not separate target-first from stop-first paths; confirmation must be evaluated as a new causal admission clock rather than as hindsight filtering.",
+    "guard": "No reclaim level, bar count, stop width, target width, or continuation horizon may be chosen from the opened V1 outcomes."
+  },
+  "provenance_and_missingness": {
+    "historical_volume": "historical_volume_activity_proxy_not_quote_flow_or_order_book_volume",
+    "five_minute_intrabar_order": "unknown",
+    "all_features": "store source timestamp, availability timestamp, transform version, missingness reason, and support"
+  }
+}

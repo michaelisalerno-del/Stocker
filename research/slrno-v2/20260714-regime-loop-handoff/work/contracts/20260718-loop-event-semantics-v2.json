@@ -1,0 +1,117 @@
+{
+  "contract_id": "20260718-loop-event-semantics-v2",
+  "contract_version": "2.0.0",
+  "title": "Loop Event Semantics and Causal Infrastructure V2",
+  "research_only": true,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_connected": false,
+  "strategy_promotion": false,
+  "scope": {
+    "purpose": "structural loop-event reconstruction and migration audit only",
+    "forbidden_targets": [
+      "payoff",
+      "return_outcome",
+      "profitability",
+      "MFE",
+      "MAE",
+      "order",
+      "position",
+      "execution"
+    ],
+    "predictive_model_training": false,
+    "economic_edge_claim": false
+  },
+  "source": {
+    "frozen_lineage_baseline_commit": "6d43807dbe3287afb1587f7ab4f5dafdeedad426",
+    "provider": "authorised local EODHD-derived five-minute stock bars",
+    "provider_timestamps": "bar_start",
+    "bar_duration_minutes": 5,
+    "development_start": "2024-01-01T00:00:00Z",
+    "development_end": "2024-12-31T23:59:59Z",
+    "comparison_2025_enabled": false,
+    "protected_prospective_data_enabled": false,
+    "state_count": 8
+  },
+  "state_representations": {
+    "legacy_hard_map": "exact frozen causal state labels for comparison",
+    "causal_hysteretic_state": {
+      "switch_probability": 0.55,
+      "switch_margin": 0.1,
+      "selection_population": "2024 development only"
+    },
+    "soft_posterior": "forward-only state-by-age posterior; no Viterbi and no smoothing",
+    "state_duration_tail": {
+      "legacy_exact_ages": [1, 23],
+      "legacy_forced_exit_age_replaced": 24,
+      "v2_maximum_age": 78,
+      "tail_estimator": "state_specific_geometric_exit_hazard_from_frozen_ages_18_through_23",
+      "forced_exit_at_age_24": false
+    }
+  },
+  "event_contract": {
+    "hard_event_state_representation": "legacy_hard_map",
+    "decision_surface": "every eligible completed regular-session bar",
+    "forecast_horizon_bars": 24,
+    "session_prefix_policy": "reset",
+    "missing_state_event_policy": "fail_closed_and_reset",
+    "incomplete_session_policy": "posterior_segments_reset_at_gaps; whole session excluded from duration, dictionary, and structural null estimation",
+    "overnight_prefix_policy": "forbidden",
+    "primary_precedence": [
+      "UNAVAILABLE",
+      "SESSION_END_WHEN_NO_FUTURE_STATE_EVENT",
+      "ONE_EARLIEST_REGISTERED_EVENT",
+      "TIED_REGISTERED_COMPLETION",
+      "UNREGISTERED_LOOP",
+      "NO_REGISTERED_LOOP_WITHIN_HORIZON"
+    ],
+    "structural_ties": "preserved_without_lexical_tiebreak"
+  },
+  "dictionary": {
+    "legacy_version": "legacy_dictionary_v1",
+    "semantic_version": "semantic_loop_dictionary_v2",
+    "allowed_primitive_transition_lengths": [2, 3, 4, 5],
+    "allowed_composite_transition_lengths": [4, 5, 6, 7, 8],
+    "maximum_event_transitions": 8,
+    "maximum_selected_entries": 20,
+    "minimum_candidate_occurrences": 100,
+    "minimum_stock_breadth": 10,
+    "minimum_month_breadth": 6,
+    "maximum_fdr_q_value": 0.1,
+    "minimum_rate_ratio": 1.05,
+    "selection_uses_economic_outcomes": false
+  },
+  "duration": {
+    "model": "exact_discrete_survival_with_right_censoring",
+    "maximum_regular_session_bars": 78,
+    "exact_horizon_bars": 24,
+    "overflow_definition": "strictly_greater_than_78",
+    "terminal_runs": "right_censored",
+    "smoothing_strength": 8.0
+  },
+  "nulls": {
+    "primary": "fitted_semi_markov",
+    "primary_draws": 2000,
+    "primary_empirical_population": "deterministic balanced 2024 session sample for bounded runtime",
+    "primary_empirical_sessions_per_symbol": 12,
+    "clock_conditioned_draws": 500,
+    "seed": 20260718,
+    "clock_phases": {
+      "opening": [0, 12],
+      "middle": [12, 60],
+      "late": [60, 78]
+    },
+    "analytical_control": "first_order_conditional_motif_expectation",
+    "whole_session_control": "circular_state_duration_blocks"
+  },
+  "scientific_decisions": [
+    "loop_event_v2_ready_for_next_loop_forecast",
+    "loop_event_v2_ready_with_known_limitations",
+    "causality_provenance_failure_requires_upstream_rebuild",
+    "prefix_event_reconstruction_blocked",
+    "duration_model_blocked",
+    "source_data_missing",
+    "implementation_audit_incomplete"
+  ],
+  "exact_next_experiment": "A separately preregistered structural forecast comparing simple baselines and competing-event models for first next-loop identity and arrival time, with no payoff or economic target."
+}

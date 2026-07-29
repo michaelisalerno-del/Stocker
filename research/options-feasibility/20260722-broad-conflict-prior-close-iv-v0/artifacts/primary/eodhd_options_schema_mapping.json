@@ -1,0 +1,85 @@
+{
+  "authentication": {
+    "artifact_redaction_required": true,
+    "location": "query",
+    "parameter": "api_token"
+  },
+  "base_url": "https://eodhd.com/api",
+  "canonical_mapping": {
+    "ask": "ask",
+    "ask_date": "documented ask observation timestamp in America/New_York; must match trade_date",
+    "ask_size": "ask_size",
+    "bid": "bid",
+    "bid_date": "documented bid observation timestamp in America/New_York; must match trade_date",
+    "bid_size": "bid_size",
+    "contract": "contract_id",
+    "delta": "delta",
+    "dte": "dte",
+    "exp_date": "expiration_date",
+    "gamma": "gamma",
+    "last": "last",
+    "midpoint": "midpoint",
+    "moneyness": "moneyness",
+    "open_interest": "open_interest",
+    "resource.id": "JSON:API resource identity; its official observation-date suffix maps to trade_date",
+    "rho": "rho",
+    "strike": "strike",
+    "theoretical": "theoretical_value",
+    "theta": "theta",
+    "tradetime": "last-trade activity date/time mapped only to trade_timestamp; never to trade_date",
+    "type": "option_type",
+    "underlying_symbol": "underlying_symbol",
+    "vega": "vega",
+    "volatility": "implied_volatility",
+    "volume": "volume"
+  },
+  "endpoints": {
+    "contract_discovery": "/mp/unicornbay/options/contracts",
+    "historical_end_of_day": "/mp/unicornbay/options/eod",
+    "underlying_symbol_coverage": "/mp/unicornbay/options/underlying-symbols"
+  },
+  "historical_eod": {
+    "compact_mode": "compact=1 with meta.fields",
+    "field_selection": "fields[options-eod]",
+    "filters": [
+      "underlying_symbol",
+      "tradetime_eq",
+      "tradetime_from",
+      "tradetime_to",
+      "exp_date_eq",
+      "exp_date_from",
+      "exp_date_to",
+      "strike_eq",
+      "strike_from",
+      "strike_to",
+      "type"
+    ],
+    "historical_observation_date_filter": "not present in the official OpenAPI 2.0.0 endpoint schema",
+    "pagination": {
+      "limit_maximum": 1000,
+      "offset_maximum": 10000,
+      "offset_minimum": 0
+    },
+    "permanent_no_retry": [
+      401,
+      403,
+      404,
+      422
+    ],
+    "rate_limit_response": 429,
+    "tradetime_filter_semantics": "last-trade activity window",
+    "transient_retries": [
+      429,
+      500,
+      502,
+      503,
+      504
+    ]
+  },
+  "official_openapi_commit": "786448faebd9d3b3c870c95ad86a4a955cee53d6",
+  "official_openapi_repository": "https://github.com/EodHistoricalData/EODHD-openapi",
+  "official_openapi_version": "2.0.0",
+  "undocumented_fields_required": false,
+  "verified": true,
+  "verified_on": "2026-07-22"
+}

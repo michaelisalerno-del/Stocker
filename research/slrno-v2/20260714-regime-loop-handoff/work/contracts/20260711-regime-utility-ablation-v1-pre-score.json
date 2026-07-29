@@ -1,0 +1,15 @@
+{
+  "pre_score_frozen_at_utc": "2026-07-11T22:50:09Z",
+  "contract_id": "regime_utility_ablation_v1",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "later_period_outcomes_permitted": false,
+  "sha256": {
+    "contract": "f5869446b675626d324d5d43a14cc104a6997cd1ef69b2690e4b1cb07a001644",
+    "runner": "9e88ff700c663d0985f02082a8a9a13a1e5e4d5825048c11c9cd256f58ae7cf5",
+    "anchor_panel": "788fd81909d1c5d3e6ee20e3e36e3ebb74199188e41052ea1b04f61c96fa9932",
+    "causal_runs": "9557298a1a1bc32d47e15a3be31c453f81e019c5a9b1cf76401e4ad4613614d0",
+    "fixed_cycles": "bf9292fa51de1e545e5a319fa2e2faf2088926acd5315b9106597b1da318b253"
+  }
+}

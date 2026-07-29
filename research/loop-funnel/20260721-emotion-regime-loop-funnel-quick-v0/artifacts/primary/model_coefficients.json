@@ -1,0 +1,15 @@
+{
+  "behavioural_regime_gating_test": true,
+  "broker_integration_required": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "models": {},
+  "order_placement": "disabled",
+  "pre_loop_prediction": true,
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "research_only": true,
+  "soft_regime_mixture": true,
+  "strategy_promotion": false,
+  "structural_outcomes_only": true
+}

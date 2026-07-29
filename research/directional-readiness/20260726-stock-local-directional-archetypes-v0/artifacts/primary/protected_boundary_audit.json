@@ -1,0 +1,11 @@
+{
+  "maximum_directional_session_used": "2025-08-22",
+  "maximum_state_session_read": "2025-12-31",
+  "opened_period_directionally_excluded": true,
+  "opened_period_use": "movement-gate stress only",
+  "passed": true,
+  "protected_outcomes_materialised": false,
+  "protected_rows_read": 0,
+  "protected_start": "2026-01-01",
+  "research_only": true
+}

@@ -1,0 +1,19 @@
+{
+  "approximate_or_imputed_reconstruction_allowed": false,
+  "current_2025_files_matching_2023_hashes": [],
+  "expected_hash_manifest": "/Users/michaelsalerno/Documents/Codex/2026-07-14-you-are-working-inside-my-stocker/research/slrno-v2/20260714-regime-loop-handoff/work/artifacts/20260713-loop-payoff-phase-path-v1/exact_rerun/source_hashes.json",
+  "expected_hash_manifest_sha256": "c86d8116f0dc0a9e12afaa4e7927ca0f91be2147e4373c47243f70cb2f7bcfda",
+  "expired_original_root": "/private/tmp/stocker_eodhd_pre2024_intraday_20260710/source=eodhd/instrument_type=stock",
+  "expired_original_root_exists": false,
+  "fresh_download_allowed": false,
+  "pre_score_candidate_files_hashed": 20,
+  "pre_score_exact_hash_matches": 0,
+  "pre_score_search_roots": [
+    "/Users/michaelsalerno/Documents/Codex",
+    "/Users/michaelsalerno/StockerLocal",
+    "/private/tmp"
+  ],
+  "required_symbols": 20,
+  "status": "unavailable_no_matching_original_2023_provider_files",
+  "t1_outcomes_imputed": false
+}

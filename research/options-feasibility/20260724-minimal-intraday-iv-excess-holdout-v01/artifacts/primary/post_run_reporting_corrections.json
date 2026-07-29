@@ -1,0 +1,20 @@
+{
+  "correction_date": "2026-07-24",
+  "holdout_data_authorisation": {
+    "actual_xnys_sessions_corrected_from": 68,
+    "actual_xnys_sessions_corrected_to": 85,
+    "joined_outcome_sessions_added": 68
+  },
+  "holdout_coverage_preflight": {
+    "pair_selected_stock_sessions_added": 1214,
+    "planned_session_count_added": 85,
+    "total_holdout_stock_sessions_corrected_from": 1214,
+    "total_holdout_stock_sessions_corrected_to": 1700
+  },
+  "reason": "Independent review found selected-pair coverage was mislabeled as the planned holdout universe.",
+  "reporting_only": true,
+  "scientific_surfaces_changed": false,
+  "predictions_changed": false,
+  "tail_membership_changed": false,
+  "bootstrap_or_null_repeated": false
+}

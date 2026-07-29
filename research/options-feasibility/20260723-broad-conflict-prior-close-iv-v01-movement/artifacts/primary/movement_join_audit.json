@@ -1,0 +1,15 @@
+{
+  "assessment_iv_relative_rows": 39,
+  "assessment_sessions": 1,
+  "assessment_stocks": 3,
+  "clean_underlying_movement_rows": 96,
+  "development_iv_relative_rows": 47,
+  "passed": true,
+  "protected_rows_materialised": 0,
+  "same_day_or_future_options_joins": 0,
+  "sampled_stock_dates": 9,
+  "stock_dates_with_exact_previous_close_chain": 9,
+  "stock_dates_with_valid_primary_pair": 8,
+  "structural_reconstruction_passed": true,
+  "valid_pair_iv_relative_rows": 86
+}

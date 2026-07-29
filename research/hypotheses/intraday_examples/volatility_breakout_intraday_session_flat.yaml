@@ -1,0 +1,58 @@
+id: volatility_breakout_intraday_session_flat_v1
+name: Volatility Breakout Intraday Session Flat
+description: Intraday 5m session-flat scoring variant of the existing volatility-breakout template.
+hypothesis_version: 1
+market_universe: us_test_5_intraday_smoke
+instrument_type: stock
+symbol_filter: "*"
+timeframe: 5m
+data_source: eodhd
+template: volatility_breakout
+signal_family: volatility_breakout
+direction: long_only
+entry_logic: Long when a prior 5m close breaks above a prior rolling high plus a range buffer.
+exit_logic: Flat when the breakout condition no longer holds; session-flat overlay forces flat before close.
+holding_period: Intraday signal persistence scored through the session-flat position policy.
+expected_edge_reason: >
+  A liquid-stock intraday breakout signal may be worth rejecting or studying only
+  after it survives session-flat scoring and higher intraday costs.
+invalidation_rules:
+  - Rejected if net test return is not positive after intraday costs.
+  - Rejected if train-side selection fails.
+  - Rejected if the session-flat scored positions are not compliant.
+  - Rejected if trade count is too low.
+minimum_evidence:
+  min_trades: 20
+  min_profitable_split_pct: 0.6
+  min_stability_score: 0.5
+holding_policy:
+  preferred_style: intraday
+  allow_intraday: true
+  allow_overnight: false
+  allow_weekend: false
+  max_holding_sessions: 1
+  flatten_before_close_minutes: 10
+  entry_cutoff_before_close_minutes: 30
+  require_exceptional_evidence_for_swing: true
+  require_gap_risk_report: true
+  max_gap_return_contribution_pct: 0.0
+  max_weekend_exposure_count: 0
+  max_overnight_exposure_count: 0
+parameter_space:
+  lookback: [36, 72]
+  range_multiplier: [0.25, 0.5]
+maximum_parameter_sets: 4
+costs:
+  spread_bps: 3
+  commission_bps: 0.5
+  slippage_bps: 3
+risk:
+  max_drawdown: 0.25
+walkforward:
+  mode: rolling
+  train_bars: 3900
+  test_bars: 780
+  embargo_bars: 1
+  step_bars: 3900
+  minimum_rows: 4681
+created_at: "2026-06-28T00:00:00Z"

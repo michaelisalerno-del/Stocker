@@ -1,0 +1,11 @@
+category,count
+closure_forecasts_inspected,105240
+exact_joined_rows,8614
+excluded_closure_unavailable,249
+excluded_duplicate_later_clock,68
+excluded_movement_target_unavailable,99
+excluded_no_active_pair,2310
+excluded_representation_mismatch,0
+excluded_resolved_before_clock,0
+excluded_source_gap,0
+movement_rows_inspected,11340

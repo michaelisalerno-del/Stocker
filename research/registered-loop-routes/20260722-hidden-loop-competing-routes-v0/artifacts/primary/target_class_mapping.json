@@ -1,0 +1,84 @@
+{
+  "assessment_support_inspected_before_freeze": false,
+  "at_least_one_exact_target_supported": true,
+  "at_least_three_final_classes": true,
+  "broker_integration_required": false,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "final_target_classes": [
+    "NO_REGISTERED_COMPLETION",
+    "OTHER_REGISTERED_COMPLETION",
+    "loop_p_2-5-6-2",
+    "loop_p_2-6-2",
+    "loop_p_4-6-4"
+  ],
+  "fit_period": "2024_only",
+  "hidden_family_competing_route_test": true,
+  "order_placement": "disabled",
+  "pooled_exact_targets": [],
+  "preregistered_targets": [
+    "loop_p_2-5-6-2",
+    "loop_p_2-6-2",
+    "loop_p_4-6-4"
+  ],
+  "production_runtime_modified": false,
+  "quick_feasibility_screen": true,
+  "registered_loop_recurrence_test": true,
+  "research_only": true,
+  "retained_exact_targets": [
+    "loop_p_2-5-6-2",
+    "loop_p_2-6-2",
+    "loop_p_4-6-4"
+  ],
+  "sequential_causal_updates": true,
+  "strategy_promotion": false,
+  "support": {
+    "loop_p_2-5-6-2": {
+      "checks": {
+        "maximum_stock_share_at_most_0_30": true,
+        "months_at_least_4": true,
+        "outcomes_at_least_50": true,
+        "sessions_at_least_30": true,
+        "stocks_at_least_8": true
+      },
+      "maximum_stock_share": 0.1037037037037037,
+      "months": 12,
+      "outcomes": 135,
+      "sessions": 85,
+      "stocks": 18,
+      "supported": true
+    },
+    "loop_p_2-6-2": {
+      "checks": {
+        "maximum_stock_share_at_most_0_30": true,
+        "months_at_least_4": true,
+        "outcomes_at_least_50": true,
+        "sessions_at_least_30": true,
+        "stocks_at_least_8": true
+      },
+      "maximum_stock_share": 0.08636363636363636,
+      "months": 12,
+      "outcomes": 220,
+      "sessions": 106,
+      "stocks": 20,
+      "supported": true
+    },
+    "loop_p_4-6-4": {
+      "checks": {
+        "maximum_stock_share_at_most_0_30": true,
+        "months_at_least_4": true,
+        "outcomes_at_least_50": true,
+        "sessions_at_least_30": true,
+        "stocks_at_least_8": true
+      },
+      "maximum_stock_share": 0.11428571428571428,
+      "months": 12,
+      "outcomes": 210,
+      "sessions": 94,
+      "stocks": 19,
+      "supported": true
+    }
+  },
+  "target_specific_registered_routes": true
+}

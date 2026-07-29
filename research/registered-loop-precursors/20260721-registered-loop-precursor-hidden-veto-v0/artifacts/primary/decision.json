@@ -1,0 +1,436 @@
+{
+  "V1_hidden_risk_coefficient": 0.015269009165775437,
+  "V1_hidden_risk_standard_error": 0.23243902823602663,
+  "broker_integration_required": false,
+  "candidate_threshold": 0.22125611521101987,
+  "candidate_veto_removal": {
+    "candidate_retention": 0.8010870688659343,
+    "candidate_rows": 960,
+    "failed_candidates_removed": 0.19765042197650423,
+    "failure_removal_to_success_removal_ratio": 0.9743729182121983,
+    "successful_completions_removed": 0.2028488459420216,
+    "vetoed_rows": 190
+  },
+  "determinism_check_passed": true,
+  "directional_outcomes_opened": false,
+  "economic_outcomes_opened": false,
+  "execution_enabled": false,
+  "hidden_risk_thresholds": {
+    "applied_unchanged_to_assessment": true,
+    "broker_integration_required": false,
+    "directional_outcomes_opened": false,
+    "economic_outcomes_opened": false,
+    "execution_enabled": false,
+    "hidden_route_diversion_veto_test": true,
+    "high_minimum": 0.5067959467876102,
+    "low_maximum": 0.2687478541109559,
+    "order_placement": "disabled",
+    "production_runtime_modified": false,
+    "quick_feasibility_screen": true,
+    "quintile_boundaries": [
+      0.2463750092141129,
+      0.334491605616591,
+      0.42582901938405676,
+      0.546506438934597
+    ],
+    "registered_loop_precursor_census": true,
+    "research_only": true,
+    "source": "2024 high-candidate population with valid cross-fitted U1",
+    "source_rows": 1483,
+    "strategy_promotion": false
+  },
+  "hidden_route_diversion_veto_test": true,
+  "lightweight_audit_passed": true,
+  "order_placement": "disabled",
+  "permission_to_trade": false,
+  "plots": [
+    "/Users/michaelsalerno/Documents/Codex/2026-07-21-you-are-working-in-the-github-8/research/registered-loop-precursors/20260721-registered-loop-precursor-hidden-veto-v0/artifacts/primary/precursor_enrichment_matched_null.png",
+    "/Users/michaelsalerno/Documents/Codex/2026-07-21-you-are-working-in-the-github-8/research/registered-loop-precursors/20260721-registered-loop-precursor-hidden-veto-v0/artifacts/primary/registered_completion_by_hidden_risk_quintile.png"
+  ],
+  "precursor_gate": {
+    "broad_precursor_results": [
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 3,
+        "passed": false,
+        "precursor_type": "any_prior_registered_completion"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 3,
+        "passed": false,
+        "precursor_type": "any_hidden_unregistered_completion"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 3,
+        "passed": false,
+        "precursor_type": "matching_prefix_any"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 3,
+        "passed": false,
+        "precursor_type": "other_prefix_any"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 3,
+        "passed": false,
+        "precursor_type": "any_regime_transition"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 6,
+        "passed": false,
+        "precursor_type": "any_prior_registered_completion"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": false,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 6,
+        "passed": false,
+        "precursor_type": "any_hidden_unregistered_completion"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 6,
+        "passed": false,
+        "precursor_type": "matching_prefix_any"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 6,
+        "passed": false,
+        "precursor_type": "other_prefix_any"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 6,
+        "passed": false,
+        "precursor_type": "any_regime_transition"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 12,
+        "passed": false,
+        "precursor_type": "any_prior_registered_completion"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": false,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 12,
+        "passed": false,
+        "precursor_type": "any_hidden_unregistered_completion"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 12,
+        "passed": false,
+        "precursor_type": "matching_prefix_any"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 12,
+        "passed": false,
+        "precursor_type": "other_prefix_any"
+      },
+      {
+        "checks": {
+          "above_90th_null_percentile": true,
+          "positive_enrichment": true,
+          "positive_in_five_months": true,
+          "same_sign_both_checkpoints": false
+        },
+        "lookback_bars": 12,
+        "passed": false,
+        "precursor_type": "any_regime_transition"
+      }
+    ],
+    "complete_12_bar_history_rate": 0.8226600985221675,
+    "exact_precursor_relationship_passed": true,
+    "exact_supported_relationships": [
+      {
+        "assessment_enrichment": 0.05796407185628743,
+        "development_enrichment": 0.022898814949863264,
+        "development_matched_occurrences": 29,
+        "development_matched_prevalence": 0.02643573381950775,
+        "development_mean_null_occurrences": 3.88,
+        "development_mean_null_prevalence": 0.003536918869644485,
+        "development_occurrences": 32,
+        "eligible_events": 812,
+        "lookback_bars": 6,
+        "matched_assessment_occurrences": 44,
+        "matched_assessment_prevalence": 0.0658682634730539,
+        "maximum_month_share": 0.2765957446808511,
+        "maximum_stock_share": 0.14893617021276595,
+        "mean_null_occurrences": 5.28,
+        "mean_null_prevalence": 0.007904191616766467,
+        "months": 8,
+        "occurrences": 47,
+        "p_value": 0.038461538461538464,
+        "period": "assessment",
+        "precursor_identity": "loop_p_4-6-4",
+        "precursor_kind": "registered",
+        "prevalence": 0.05788177339901478,
+        "q_le_0_10": true,
+        "q_value": 0.038461538461538464,
+        "same_direction_development_assessment": true,
+        "sessions": 29,
+        "stocks": 16,
+        "support_passed": true,
+        "target_semantic_loop_id": "loop_p_4-6-4"
+      },
+      {
+        "assessment_enrichment": 0.01311377245508982,
+        "development_enrichment": 0.013309024612579764,
+        "development_matched_occurrences": 34,
+        "development_matched_prevalence": 0.03099361896080219,
+        "development_mean_null_occurrences": 19.4,
+        "development_mean_null_prevalence": 0.017684594348222425,
+        "development_occurrences": 42,
+        "eligible_events": 812,
+        "lookback_bars": 12,
+        "matched_assessment_occurrences": 19,
+        "matched_assessment_prevalence": 0.02844311377245509,
+        "maximum_month_share": 0.24,
+        "maximum_stock_share": 0.24,
+        "mean_null_occurrences": 10.24,
+        "mean_null_prevalence": 0.01532934131736527,
+        "months": 7,
+        "occurrences": 25,
+        "p_value": 0.038461538461538464,
+        "period": "assessment",
+        "precursor_identity": "unregistered_primitive_like__5-6-5",
+        "precursor_kind": "hidden",
+        "prevalence": 0.03078817733990148,
+        "q_le_0_10": true,
+        "q_value": 0.038461538461538464,
+        "same_direction_development_assessment": true,
+        "sessions": 20,
+        "stocks": 12,
+        "support_passed": true,
+        "target_semantic_loop_id": "loop_p_2-5-6-2"
+      },
+      {
+        "assessment_enrichment": 0.01676646706586826,
+        "development_enrichment": 0.0033546034639927065,
+        "development_matched_occurrences": 26,
+        "development_matched_prevalence": 0.023701002734731084,
+        "development_mean_null_occurrences": 22.32,
+        "development_mean_null_prevalence": 0.020346399270738377,
+        "development_occurrences": 34,
+        "eligible_events": 812,
+        "lookback_bars": 12,
+        "matched_assessment_occurrences": 25,
+        "matched_assessment_prevalence": 0.0374251497005988,
+        "maximum_month_share": 0.25,
+        "maximum_stock_share": 0.21428571428571427,
+        "mean_null_occurrences": 13.8,
+        "mean_null_prevalence": 0.02065868263473054,
+        "months": 7,
+        "occurrences": 28,
+        "p_value": 0.038461538461538464,
+        "period": "assessment",
+        "precursor_identity": "unregistered_primitive_like__5-6-5",
+        "precursor_kind": "hidden",
+        "prevalence": 0.034482758620689655,
+        "q_le_0_10": true,
+        "q_value": 0.038461538461538464,
+        "same_direction_development_assessment": true,
+        "sessions": 17,
+        "stocks": 14,
+        "support_passed": true,
+        "target_semantic_loop_id": "loop_p_2-6-2"
+      },
+      {
+        "assessment_enrichment": 0.07011976047904192,
+        "development_enrichment": 0.025086599817684595,
+        "development_matched_occurrences": 32,
+        "development_matched_prevalence": 0.02917046490428441,
+        "development_mean_null_occurrences": 4.48,
+        "development_mean_null_prevalence": 0.004083865086599818,
+        "development_occurrences": 35,
+        "eligible_events": 812,
+        "lookback_bars": 12,
+        "matched_assessment_occurrences": 53,
+        "matched_assessment_prevalence": 0.07934131736526946,
+        "maximum_month_share": 0.2857142857142857,
+        "maximum_stock_share": 0.125,
+        "mean_null_occurrences": 6.16,
+        "mean_null_prevalence": 0.009221556886227545,
+        "months": 8,
+        "occurrences": 56,
+        "p_value": 0.038461538461538464,
+        "period": "assessment",
+        "precursor_identity": "loop_p_4-6-4",
+        "precursor_kind": "registered",
+        "prevalence": 0.06896551724137931,
+        "q_le_0_10": true,
+        "q_value": 0.038461538461538464,
+        "same_direction_development_assessment": true,
+        "sessions": 30,
+        "stocks": 16,
+        "support_passed": true,
+        "target_semantic_loop_id": "loop_p_4-6-4"
+      }
+    ],
+    "registered_precursor_structure_passed": false,
+    "stock_clock_null_matched_completions": 668,
+    "stock_clock_null_unmatched_completions": 144,
+    "support_checks": {
+      "complete_12_bar_history_at_least_90pct": false,
+      "months_at_least_6": true,
+      "sessions_at_least_120": true,
+      "stocks_at_least_15": true,
+      "unique_completions_at_least_500": true
+    },
+    "support_passed": false,
+    "unique_registered_completions": 812
+  },
+  "precursor_status": "insufficient_support",
+  "predictive_veto_gate": {
+    "gate_checks": {
+      "V1_auc_not_reduced_more_than_0_002": true,
+      "V1_hidden_coefficient_negative": false,
+      "V1_improves_brier": true,
+      "V1_improves_log_loss": true,
+      "brier_80pct_lower_nonnegative": true,
+      "concentration_gates_pass": false,
+      "high_hidden_completion_rate_lower": false,
+      "high_minus_low_80pct_upper_nonpositive": false,
+      "log_loss_80pct_lower_nonnegative": true,
+      "negative_in_five_months": false,
+      "neither_checkpoint_materially_opposite": false,
+      "proper_score_increment_exceeds_four_of_five_nulls": true
+    },
+    "hidden_coefficient": 0.015269009165775437,
+    "high_minus_low_completion_rate": 0.03723815875290276,
+    "increments": {
+      "auc_improvement": 8.452727942132032e-05,
+      "brier_improvement": 8.138889692618778e-05,
+      "log_loss_improvement": 0.00020858874136775452
+    },
+    "maximum_stock_share": 0.14166666666666666,
+    "maximum_target_class_share": 0.7572916666666667,
+    "null_draws_exceeded": {
+      "auc_improvement": 3,
+      "brier_improvement": 5,
+      "log_loss_improvement": 5
+    },
+    "predictive_hidden_veto_passed": false,
+    "support_checks": {
+      "actual_hidden_events_at_least_150": true,
+      "high_hidden_risk_rows_at_least_200": false,
+      "low_hidden_risk_rows_at_least_200": true,
+      "no_stock_above_10pct": false,
+      "no_target_class_above_85pct": true,
+      "registered_completions_at_least_150": true,
+      "rows_at_least_1000": false,
+      "sessions_at_least_120": true,
+      "stocks_at_least_15": true
+    },
+    "support_passed": false
+  },
+  "predictive_veto_status": "insufficient_support",
+  "primary_decision": "blocked_precursor_support_failure",
+  "production_runtime_modified": false,
+  "prospective_validation": false,
+  "protected_rows_materialised": 0,
+  "quick_feasibility_screen": true,
+  "realised_diversion_gate": {
+    "failed_minus_successful_hidden_event_rate": 0.2758463333930701,
+    "gate_checks": {
+      "failed_minus_successful_80pct_lower_nonnegative": true,
+      "hidden_events_more_common_among_failures": true,
+      "positive_in_five_months": true,
+      "same_positive_sign_both_checkpoints": true
+    },
+    "realised_diversion_passed": false,
+    "support_checks": {
+      "actual_hidden_events_at_least_150": true,
+      "high_hidden_risk_rows_at_least_200": false,
+      "low_hidden_risk_rows_at_least_200": true,
+      "no_stock_above_10pct": false,
+      "no_target_class_above_85pct": true,
+      "registered_completions_at_least_150": true,
+      "rows_at_least_1000": false,
+      "sessions_at_least_120": true,
+      "stocks_at_least_15": true
+    },
+    "support_passed": false
+  },
+  "realised_diversion_status": "insufficient_support",
+  "registered_loop_precursor_census": true,
+  "research_only": true,
+  "retrospective_only": true,
+  "strategy_promotion": false
+}

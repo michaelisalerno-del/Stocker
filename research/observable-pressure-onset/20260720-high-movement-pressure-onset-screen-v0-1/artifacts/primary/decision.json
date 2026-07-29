@@ -1,0 +1,237 @@
+{
+  "broker_integration_required": false,
+  "checkpoint_improvements": {
+    "A2_minus_A1_brier": {
+      "12": 0.0013596362271041385,
+      "6": 0.0010943956036556235
+    },
+    "A2_minus_A1_log_loss": {
+      "12": 0.005957214763274266,
+      "6": 0.003677353514514481
+    },
+    "D2_minus_D1_brier": {
+      "12": -0.027401915725401738,
+      "6": -0.008440523468533023
+    },
+    "D2_minus_D1_log_loss": {
+      "12": -0.06348479582209554,
+      "6": -0.02353360309666841
+    }
+  },
+  "concentration": {
+    "all_concentration_gates_pass": false,
+    "economic_not_dominated_by_largest_stock": true,
+    "largest_admitted_row_stock": "QBTS",
+    "largest_stock_model_contribution_share": 0.18972250260094609,
+    "largest_stock_model_selection_share": 0.15384615384615385,
+    "maximum_economic_contribution_share": 0.18972250260094609,
+    "maximum_primary_row_stock_share": 0.10961538461538461,
+    "maximum_selected_stock_share": 0.15384615384615385,
+    "maximum_stock_share_by_checkpoint": {
+      "12": 0.11335012594458438,
+      "6": 0.10574412532637076
+    },
+    "maximum_stock_share_by_month": {
+      "2025-01": 0.1342281879194631,
+      "2025-02": 0.1320754716981132,
+      "2025-03": 0.14285714285714285,
+      "2025-04": 0.11,
+      "2025-05": 0.15,
+      "2025-06": 0.1746031746031746,
+      "2025-07": 0.11194029850746269,
+      "2025-08": 0.15384615384615385
+    },
+    "primary_row_concentration_passes": false,
+    "selected_concentration_passes": true
+  },
+  "concentration_decision_conditions": {
+    "delete_largest_no_material_adversity": false,
+    "delete_largest_principal_increments_non_negative": false,
+    "delete_largest_same_signed_conclusions": true,
+    "economic_not_dominated_by_largest_stock": true,
+    "raw_ten_percent_gate_passes": false
+  },
+  "conclusions": {
+    "direction_conditional_on_onset": "retrospective_feasibility_only",
+    "executable_net_edge": "not_addressed",
+    "gross_delayed_economic_association": "synthetic_reference_only",
+    "increment_from_one_bar_confirmation": "reported_not_promoted",
+    "increment_from_pressure_onset_variables": "reported_not_promoted",
+    "remaining_movement_readiness": "measured_by_frozen_observable_M1",
+    "short_horizon_directional_onset_probability": "retrospective_feasibility_only"
+  },
+  "conditional_direction_status": "evaluated",
+  "confirmation_direction_gates": {
+    "bootstrap_90_lower_brier_non_negative": false,
+    "brier_improvement_positive": false,
+    "concentration_gates_pass": true,
+    "delayed_economic_result_not_worsened": false,
+    "log_loss_improvement_positive": false,
+    "positive_brier_months_at_least_five": false
+  },
+  "confirmation_occurrence_gates": {
+    "bootstrap_90_lower_brier_non_negative": false,
+    "brier_improvement_positive": false,
+    "concentration_gates_pass": true,
+    "delayed_economic_result_not_worsened": false,
+    "log_loss_improvement_positive": false,
+    "positive_brier_months_at_least_five": false
+  },
+  "decision": "no_pressure_onset_increment",
+  "direction_gates": {
+    "auc_not_reduced": false,
+    "bootstrap_90_lower_brier_non_negative": false,
+    "bootstrap_90_lower_log_loss_non_negative": false,
+    "brier_improvement_positive": false,
+    "concentration_gates_pass": true,
+    "log_loss_improvement_positive": false,
+    "neither_checkpoint_materially_adverse": false,
+    "positive_brier_months_at_least_five": false,
+    "real_brier_increment_exceeds_null_q90": false
+  },
+  "economic_reference_cannot_override_probability_gates": true,
+  "evidence": {
+    "confirmation_direction_passes": false,
+    "confirmation_occurrence_passes": false,
+    "direction_passes": false,
+    "occurrence_passes": false,
+    "readiness_useful": false
+  },
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "increments": {
+    "A2_minus_A1_brier": 0.0012293962799493074,
+    "A2_minus_A1_log_loss": 0.00483774443215268,
+    "A3_minus_A2_brier": -0.0018928269319696545,
+    "A3_minus_A2_log_loss": -0.006252735438418755,
+    "D2_minus_D1_brier": -0.017350428787472838,
+    "D2_minus_D1_log_loss": -0.04230655709393227,
+    "D3_minus_D2_brier": -0.009598450709517703,
+    "D3_minus_D2_log_loss": -0.025288154559101272
+  },
+  "largest_stock_deletion": {
+    "assessment_primary_rows_after_deletion": 1389,
+    "deleted_symbol": "QBTS",
+    "deletion_increments": {
+      "A2_minus_A1_brier": 0.0019305169961104929,
+      "A2_minus_A1_log_loss": 0.004794207198046907,
+      "A3_minus_A2_brier": -0.003118975751697922,
+      "A3_minus_A2_log_loss": -0.008876187421669957,
+      "D2_minus_D1_brier": -0.013668040720808794,
+      "D2_minus_D1_log_loss": -0.0351646864794799,
+      "D3_minus_D2_brier": -0.012007991678002705,
+      "D3_minus_D2_log_loss": -0.03156028875079353
+    },
+    "development_rows_after_deletion": 1104,
+    "main_increments": {
+      "A2_minus_A1_brier": 0.0012293962799493074,
+      "A2_minus_A1_log_loss": 0.00483774443215268,
+      "A3_minus_A2_brier": -0.0018928269319696545,
+      "A3_minus_A2_log_loss": -0.006252735438418755,
+      "D2_minus_D1_brier": -0.017350428787472838,
+      "D2_minus_D1_log_loss": -0.04230655709393227,
+      "D3_minus_D2_brier": -0.009598450709517703,
+      "D3_minus_D2_log_loss": -0.025288154559101272
+    },
+    "no_materially_adverse_checkpoint": false,
+    "principal_increments_non_negative": false,
+    "same_signed_predictive_conclusions": true,
+    "selection_basis": "largest_admitted_row_share_only"
+  },
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "model_results_previously_opened": false,
+  "monthly_brier_improvements": {
+    "A2_minus_A1": {
+      "2025-01": -0.0023993508473983127,
+      "2025-02": 0.0008975161194889059,
+      "2025-03": 0.0012665599905663238,
+      "2025-04": 0.008202843382141167,
+      "2025-05": 0.0012113334942927545,
+      "2025-06": -0.003410807536884747,
+      "2025-07": -0.00017275337903654986,
+      "2025-08": 0.010407628256673601
+    },
+    "A3_minus_A2": {
+      "2025-01": 0.0014456569966708743,
+      "2025-02": 0.003046506708179797,
+      "2025-03": -0.009708518187696635,
+      "2025-04": -0.009277583332841122,
+      "2025-05": 0.005409243411871573,
+      "2025-06": 0.0007609534781496952,
+      "2025-07": -0.004574004883288546,
+      "2025-08": -0.009551226209056352
+    },
+    "D2_minus_D1": {
+      "2025-01": -0.02857048469861942,
+      "2025-02": -0.013725662304955366,
+      "2025-03": -0.0031525400989175223,
+      "2025-04": -0.02792980604378756,
+      "2025-05": -0.03297290905376549,
+      "2025-06": -0.016053423513086473,
+      "2025-07": 0.007763688004877423,
+      "2025-08": 0.000394546532539064
+    },
+    "D3_minus_D2": {
+      "2025-01": -0.006703222396973907,
+      "2025-02": -0.015253526201144063,
+      "2025-03": -0.0012535848044146758,
+      "2025-04": -0.008586130890126664,
+      "2025-05": -0.013255140377155528,
+      "2025-06": -0.005984405536990145,
+      "2025-07": -0.005644434715887825,
+      "2025-08": -0.025732035415919452
+    }
+  },
+  "observable_only": true,
+  "occurrence_gates": {
+    "bootstrap_90_lower_brier_non_negative": false,
+    "bootstrap_90_lower_log_loss_non_negative": false,
+    "brier_improvement_positive": true,
+    "concentration_gates_pass": true,
+    "log_loss_improvement_positive": true,
+    "neither_checkpoint_materially_adverse": true,
+    "positive_brier_months_at_least_five": true,
+    "real_brier_increment_exceeds_null_q90": true
+  },
+  "opened_support_counts_only": true,
+  "order_placement": "disabled",
+  "predictive_decision_before_concentration": "no_pressure_onset_increment",
+  "production_runtime_modified": false,
+  "research_only": true,
+  "scientific_status": "opened_support_contract_repair_retrospective_feasibility_evidence",
+  "strategy_promotion": false,
+  "support": {
+    "admitted_candidate_minimum_does_not_apply": true,
+    "aggregate_support_gates": {
+      "admitted_rows_at_least_1200": true,
+      "directional_onset_rows_at_least_250": true,
+      "down_onsets_at_least_100": true,
+      "months_at_least_6": true,
+      "sessions_at_least_100": true,
+      "stocks_at_least_15": true,
+      "up_onsets_at_least_100": true,
+      "valid_parent_stocks_at_least_15": true
+    },
+    "aggregate_support_passes": true,
+    "concentration_does_not_block_fitting": true,
+    "conditional_direction_support_passes": true,
+    "directional_onset_rows": 681,
+    "down_onsets": 336,
+    "maximum_stock_row_share": 0.10961538461538461,
+    "minimum_admitted_stocks": 1,
+    "minimum_valid_parent_stocks": 15,
+    "months": 8,
+    "no_onsets": 879,
+    "rows": 1560,
+    "sessions": 153,
+    "slates": 299,
+    "stocks": 20,
+    "up_onsets": 345
+  },
+  "support_contract_repair": true,
+  "support_contract_repair_details": {
+    "concentration_did_not_prevent_fitting": true,
+    "minimum_admitted_candidate_gate_removed": true,
+    "parent_gate_applied_before_admission": true
+  }
+}

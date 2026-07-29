@@ -1,0 +1,145 @@
+{
+  "experiment_id": "20260721-registered-loop-precursor-hidden-veto-v0",
+  "experiment_name": "Registered-Loop Precursors and Hidden-Diversion Veto Quick Screen V0",
+  "research_only": true,
+  "quick_feasibility_screen": true,
+  "registered_loop_precursor_census": true,
+  "hidden_route_diversion_veto_test": true,
+  "economic_outcomes_opened": false,
+  "directional_outcomes_opened": false,
+  "execution_enabled": false,
+  "order_placement": "disabled",
+  "broker_integration_required": false,
+  "strategy_promotion": false,
+  "production_runtime_modified": false,
+  "retrospective_only": true,
+  "prospective_validation": false,
+  "predecessors": [
+    {
+      "experiment_id": "20260721-opening-trajectory-unregistered-families-v0",
+      "commit": "52469a8b14f08d098fffe670625a4c55c9aaa4dd",
+      "decision": "opening_trajectories_predict_unregistered_events_only"
+    },
+    {
+      "experiment_id": "20260721-hidden-loop-economics-registered-bridge-v0",
+      "commit": "d7cc126f8a711c3aaef5b3eb5b40e3d360546111",
+      "decision": "blocked_support_failure"
+    }
+  ],
+  "population": {
+    "development_start": "2024-01-01",
+    "development_end_inclusive": "2024-12-31",
+    "assessment_start": "2025-01-01",
+    "assessment_end_inclusive": "2025-08-22",
+    "protected_start": "2025-08-23",
+    "decision_ordinals": [6, 12],
+    "registered_horizon_completed_bars": 12,
+    "hidden_horizon_completed_bars": 6,
+    "precursor_lookbacks_completed_bars": [3, 6, 12],
+    "cohort": "exact_frozen_audited_20_stock_opening_cohort"
+  },
+  "precursor": {
+    "registered_broad_family": "motif_type_primitive_repeat_composite",
+    "prefix_candidate_count": "distinct_bar_semantic_orientation_depth_snapshots",
+    "posterior_transition_probability": "last_completed_bar_before_completion",
+    "posterior_changes": "last_minus_first_available_bar_in_window",
+    "full_history": "all_prior_bar_ordinals_present_within_session",
+    "nearest_priority": [
+      "nearest_completed_loop_event",
+      "active_prefix_associated_with_eventual_registered_loop",
+      "other_active_prefix",
+      "regime_transition",
+      "no_identified_structural_precursor"
+    ],
+    "matched_null_draws": 25,
+    "matched_null_seed": 20260721,
+    "clock_bin_minutes": 30,
+    "exact_support": {
+      "minimum_development_occurrences": 30,
+      "minimum_assessment_occurrences": 20,
+      "minimum_assessment_sessions": 10,
+      "minimum_stocks": 8,
+      "maximum_stock_share": 0.3,
+      "maximum_month_share": 0.3,
+      "bh_q_maximum": 0.1
+    }
+  },
+  "candidate_veto": {
+    "candidate_threshold": "development_valid_oof_B0_probability_80th_percentile",
+    "b0_development_folds": 4,
+    "b0_warmup_fraction": 0.2,
+    "hidden_risk_quartiles": [0.25, 0.75],
+    "hidden_risk_quintiles": [0.2, 0.4, 0.6, 0.8],
+    "probability_clip": [0.000001, 0.999999],
+    "model": {
+      "penalty": "l2",
+      "C": 0.25,
+      "solver": "liblinear",
+      "max_iter": 300,
+      "class_weight": null,
+      "n_jobs": 1,
+      "random_state": 20260721
+    },
+    "V0_features": ["logit(B0 registered-loop probability)", "checkpoint_12"],
+    "V1_increment": "logit(U1 hidden-event probability)",
+    "row_weight": "exact_predecessor_slate_weight",
+    "materially_opposite_checkpoint_rate_difference": 0.02,
+    "bootstrap_draws": 25,
+    "bootstrap_seed": 20260722,
+    "hidden_probability_null_refits": 5,
+    "hidden_probability_null_seed": 20260723
+  },
+  "support": {
+    "precursor": {
+      "minimum_unique_assessment_completions": 500,
+      "minimum_sessions": 120,
+      "minimum_stocks": 15,
+      "minimum_months": 6,
+      "minimum_complete_12_bar_history_rate": 0.9
+    },
+    "candidate": {
+      "minimum_assessment_rows": 1000,
+      "minimum_sessions": 120,
+      "minimum_stocks": 15,
+      "minimum_registered_completions": 150,
+      "minimum_actual_hidden_events": 150,
+      "minimum_high_hidden_risk_rows": 200,
+      "minimum_low_hidden_risk_rows": 200,
+      "maximum_stock_share": 0.1,
+      "maximum_target_class_share": 0.85
+    }
+  },
+  "hard_limits": {
+    "one_process": true,
+    "n_jobs": 1,
+    "gpu": false,
+    "maximum_new_assessment_models": 2,
+    "maximum_expanding_development_folds": 4,
+    "session_bootstrap_draws": 25,
+    "precursor_null_draws": 25,
+    "hidden_probability_null_refits": 5,
+    "maximum_plots": 2,
+    "new_loop_discovery": false,
+    "new_emotion_discovery": false,
+    "model_search": false,
+    "feature_search": false,
+    "threshold_search": false,
+    "one_minute_data": false,
+    "repository_wide_test_suite": false
+  },
+  "decision_categories": [
+    "hidden_diversion_veto_and_registered_precursor_supported",
+    "hidden_diversion_veto_supported_only",
+    "registered_precursor_structure_supported_only",
+    "descriptive_precursor_or_veto_structure_only",
+    "no_hidden_veto_or_precursor_enrichment",
+    "blocked_predecessor_panel_not_reconstructable",
+    "blocked_precursor_support_failure",
+    "blocked_candidate_veto_support_failure",
+    "blocked_protected_boundary_failure",
+    "blocked_chronology_or_leakage_failure",
+    "blocked_quick_precursor_veto_resource_limit",
+    "blocked_model_convergence_failure",
+    "blocked_reproducibility_or_audit_failure"
+  ]
+}

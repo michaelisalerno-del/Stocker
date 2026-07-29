@@ -1,0 +1,218 @@
+{
+  "contract_id": "20260715-dynamic-loop-edge-state-lead-lag-v1",
+  "experiment_version": "dynamic_loop_edge_state_lead_lag_v1.0.0",
+  "scientific_status": "opened_2023_and_2025_development_data_post_v2_attribution_not_validation",
+  "registered_before_new_scoring": true,
+  "safety": {
+    "research_only": true,
+    "live_ordering_enabled": false,
+    "order_placement": "disabled",
+    "broker_connection_enabled": false,
+    "paper_or_demo_execution_enabled": false,
+    "deployment_enabled": false,
+    "application_runtime_changed": false,
+    "position_or_frozen_exit_logic_changed": false,
+    "strategy_promotion_allowed": false
+  },
+  "frozen_lineage": {
+    "branch": "agent/slrno-research-handoff",
+    "pre_v2_baseline_commit": "8baf974f2d13751064dbc4d2c7cf65d02e3a8912",
+    "final_scored_v2_implementation_commit": "ca3537a0f337097a9a75abf87ae4bf419fae6a5d",
+    "v2_contract_sha256": "8c68a7c10a23ba39f6d067147601d574f12753ea15ae1a91920b29bf604c5373",
+    "v2_run_id": "20260714-dynamic-loop-edge-state-v2-8c68a7c1-66be016d",
+    "v2_data_snapshot_sha256": "66be016db2be4b55e0309dfe7a1ec4ee6b99a0b490af8d9abfa11b5832dc1a6a",
+    "v2_model_version": "dynamic_loop_edge_state_v2.1.0",
+    "v2_feature_schema_version": "dynamic_loop_edge_state_features_v2.1.0",
+    "v2_cost_model_version": "frozen_regime_loop_pnl_sanity_v1_fixed_5bps_per_side",
+    "fixed_horizon_bars": 24,
+    "primary_hazard_probability": 0.05,
+    "hazard_sensitivities": [
+      0.03333333333333333,
+      0.07142857142857142
+    ],
+    "v2_runner_sha256": "d498275dc306ed347372e94a1b6ea9394e3ed4be7f9236566439ec9879cf7570",
+    "v2_module_sha256": {
+      "session_payoff.py": "1e789166445e01aa93406753135c2d601dca496f42b103dbc5c3a732c1c4f127",
+      "online_state.py": "e85992bba7d4f563727c4d697637890aa8f347b055387b0f6fb0c7861027c0a3",
+      "decision.py": "505962b706a0237d2e4f1d97e0487142acfba2bf3aeee493478517d4db28c048",
+      "walkforward.py": "4a5660320c31a30af5d86cd5789a82c608d05aa52a6d7a1a087114f195de1533"
+    }
+  },
+  "inputs": {
+    "v2_primary_root": "../artifacts/20260714-dynamic-loop-edge-state-v2/primary",
+    "v2_exact_rerun_root": "../artifacts/20260714-dynamic-loop-edge-state-v2/exact_rerun",
+    "required_primary_artifacts": {
+      "causal_edge_state_forecasts.parquet": "352c670fac8c8eae79ae9e79edc0b805ae12d62d7018865c4fe31c8cdf66f797",
+      "causal_feature_panel.parquet": "6873455f8ecdf57b04a3c6ffb253931de97d7d05f945253e8b89a2f4e1b271f2",
+      "session_payoff_panel.parquet": "8bbc9c8eb5b08cc6cca834ae5387c2f29beeeb4bee6adc46a4f1a5cea15b73b7",
+      "trade_decisions.parquet": "041010da4faaa9c67380073b4a9b80aa03cb6329462aacb58af4e9bf2a54025f",
+      "hindsight_episode_diagnostics.parquet": "60f5870f787b7f79068e50bf2619d3c48671184816bb0eee27f69253a93612be",
+      "hindsight_episode_states.parquet": "eefe7a92b0818a29996f55a56db0d05d910119082686e288ed6d2af3307201e3",
+      "stress_test_results.csv": "dd58a3247b798d30162f647ab8ede38146eca98241839c7e261029469244df8b",
+      "run_metadata.json": "cefcb01d87cb8c1ef47c04ead8f54d7b7f272fe188d736ff02798357d3014a24"
+    },
+    "periods": [2023, 2025],
+    "opened_data_only": true,
+    "external_data_dependencies_added": false
+  },
+  "primary_question": "Does the frozen feature overlay at session t improve prediction of the same loop/orientation robust payoff observation at the next explicit trading session versus the identical frozen hierarchy without leading features?",
+  "models": [
+    "v1_60_session_selector",
+    "payoff_only_change_point",
+    "hierarchical_payoff_history_change_point",
+    "hierarchical_change_point"
+  ],
+  "paired_primary_models": {
+    "control": "hierarchical_payoff_history_change_point",
+    "treatment": "hierarchical_change_point",
+    "required_identical_training_fields": [
+      "posterior_mean_net_bps",
+      "posterior_std_net_bps",
+      "posterior_predictive_std_net_bps",
+      "p_edge_positive",
+      "p_change_now",
+      "posterior_run_length_mean",
+      "posterior_run_length_mode",
+      "effective_sessions",
+      "independent_stocks",
+      "raw_fills",
+      "effective_sample_size",
+      "settled_observation_count",
+      "training_latest_source_session",
+      "training_latest_availability_timestamp",
+      "hierarchical_cell_weight"
+    ]
+  },
+  "lead_family": {
+    "registered_leads_sessions": [0, 1, 2, 3, 5],
+    "primary_lead_sessions": 1,
+    "selection_rule": "lead_1_is_primary_because_v2_exposed_it; no best-lead selection after scoring",
+    "calendar": "explicit ordered sessions from the frozen V2 causal feature panel, reset by period",
+    "target_cell": ["period", "loop_id", "orientation", "horizon"],
+    "missing_target_payoff": "missing_not_zero",
+    "target_statuses": [
+      "payoff_settled",
+      "no_opportunity",
+      "opportunity_unfilled_no_payoff",
+      "unresolved_at_snapshot",
+      "cell_unavailable",
+      "period_boundary",
+      "missing_source_data"
+    ]
+  },
+  "state_lead_evaluation": {
+    "positive_target": "target_robust_net_bps_strictly_greater_than_zero",
+    "calibration_probability": "p_next_payoff_positive",
+    "latent_probability_kept_separate": "p_edge_positive",
+    "active_rule": "frozen edge_state equals active",
+    "onset_prediction_rule": "frozen operational transition from non-active to active",
+    "onset_target_rule": "hindsight episode onset lies after forecast session and no later than target session; lead_0 uses onset equal to forecast session",
+    "survival_target_rule": "forecast and target sessions remain inside the same hindsight-positive-or-decaying episode",
+    "calibration_bins": 10,
+    "auc_is_secondary": true
+  },
+  "paired_endpoint": {
+    "primary_metric": "paired_brier_improvement_control_minus_full_at_lead_1",
+    "economic_metric": "sum_target_robust_net_bps_times_full_active_minus_control_active_on_paired_observable_cells",
+    "absolute_error_metric": "control_absolute_expected_bps_error_minus_full_absolute_expected_bps_error",
+    "session_block_bootstrap_resamples": 2000,
+    "bootstrap_confidence": 0.95,
+    "bootstrap_seed": 20260715,
+    "holm_adjustment_family": "paired_brier_improvement_across_leads_0_1_2_3_5",
+    "period_specific": true
+  },
+  "feature_attribution": {
+    "feature_contribution": "full_p_next_payoff_positive_minus_no_feature_p_next_payoff_positive",
+    "bins": 5,
+    "binning": "equal_frequency_from_feature_contribution_only_without_target_values",
+    "continuous_diagnostics": ["spearman_future_payoff", "spearman_positive_event"],
+    "profitable_cutoff_search_allowed": false
+  },
+  "trade_delay": {
+    "original_v2_stress_reconstruction": {
+      "semantics": "shift prior opportunity-session accepted flag within period-loop-orientation-horizon and apply it to current opportunities and their unchanged outcomes",
+      "expected_immediate_net_bps": -9416.383037515745,
+      "expected_delayed_net_bps": 9014.535299458603,
+      "expected_immediate_filled": 275,
+      "expected_delayed_filled": 259,
+      "expected_population_delta_bps": 18430.918336974348
+    },
+    "exact_same_setup_identity": "persistent opportunity_id or persistent anchor/event-lineage identifier must identify the same physical setup at the next calendar session; absence fails closed",
+    "structural_lineage_diagnostic_fields": [
+      "symbol_norm",
+      "loop_id",
+      "orientation",
+      "history_token",
+      "top_loop_cycle",
+      "strategy",
+      "family",
+      "representation",
+      "direction"
+    ],
+    "structural_lineage_is_not_exact_setup": true,
+    "replacement_opportunities_allowed_in_exact_match": false,
+    "capacity_backfill_allowed": false,
+    "restarted_horizon": "only a separately labelled structural-lineage diagnostic may use the later opportunity's own frozen 24-bar outcome",
+    "constant_terminal_time": "report impossible when original terminal timestamp precedes next-session entry; never mix with restarted horizon",
+    "costs_bps_per_side": 5.0,
+    "existing_position_exit_action": "unchanged_existing_exit_rule"
+  },
+  "episode_attribution": {
+    "evaluation_only": true,
+    "lookback_sessions": 5,
+    "positive_forecast_rule": "p_next_payoff_positive greater than 0.5",
+    "classification": {
+      "structurally_led": "full first positive forecast precedes onset and is earlier than control or control is absent",
+      "payoff_history_led": "control first positive forecast precedes onset and is earlier than full or full is absent",
+      "simultaneous": "both first positive forecasts occur on the same session no later than onset",
+      "unpredicted": "neither model is positive in the registered pre-onset window",
+      "ambiguous": "required forecast or calendar identity is missing"
+    },
+    "classification_may_be_used_for_trading": false
+  },
+  "stress_tests": {
+    "twice_costs": true,
+    "fully_retrained_leave_one_stock_out": true,
+    "remove_best_stock": true,
+    "remove_top_five_stocks": true,
+    "remove_best_episode": true,
+    "remove_top_five_episodes": true,
+    "periods_separately": true,
+    "loop_orientation": true,
+    "month_or_quarter": true,
+    "median_session_aggregation": true,
+    "frozen_hazard_sensitivities_only": true,
+    "one_bar_delay_within_session": "unavailable_without_frozen_causal_bar_path_and_not_inferred"
+  },
+  "prospective_logging": {
+    "forecast_rows_immutable": true,
+    "outcomes_append_separately": true,
+    "duplicate_ids_fail_closed": true,
+    "execution_enabled": false
+  },
+  "decision_rule": {
+    "requirements": [
+      "paired_lead_1_calibration_improves",
+      "paired_lead_1_economic_increment_positive",
+      "coherent_lead_shape",
+      "useful_pre_onset_forecasts",
+      "positive_both_periods_or_defensible_heterogeneity",
+      "not_concentrated",
+      "twice_cost_executable_translation_survives",
+      "leave_one_stock_out_directionally_stable",
+      "not_population_or_capacity_confounded",
+      "independent_audit_and_exact_rerun_pass"
+    ],
+    "allowed_conclusions": [
+      "supported_prospectively_only_required",
+      "lead_1_state_prediction_supported_tradeability_unknown",
+      "delayed_trade_effect_supported",
+      "original_delay_result_population_confounded",
+      "leading_features_no_incremental_value",
+      "concentrated_descriptive_lead_only",
+      "hypothesis_rejected",
+      "experiment_blocked_by_missing_data"
+    ]
+  },
+  "random_seed": 20260715
+}

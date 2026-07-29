@@ -1,0 +1,506 @@
+{
+  "broker_integration_required": false,
+  "cohort": [
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF"
+  ],
+  "date_predicate_applied_before_materialisation": true,
+  "execution_enabled": false,
+  "feasibility_screen": true,
+  "loops_regimes_states_and_structural_paths_forbidden": true,
+  "maximum_timestamp_read": "2025-08-22 20:00:00+00:00",
+  "minimum_timestamp_read": "2024-01-02 14:30:00+00:00",
+  "observable_only": true,
+  "order_placement": "disabled",
+  "production_runtime_modified": false,
+  "provider": "EODHD",
+  "research_only": true,
+  "source_gap_ledger_rejected_session_records": 267,
+  "source_paths_are_logical_not_local_absolute": true,
+  "source_rows_by_year_month": [
+    {
+      "row_count": 33180,
+      "year_month": "2024-01"
+    },
+    {
+      "row_count": 31600,
+      "year_month": "2024-02"
+    },
+    {
+      "row_count": 31600,
+      "year_month": "2024-03"
+    },
+    {
+      "row_count": 34760,
+      "year_month": "2024-04"
+    },
+    {
+      "row_count": 34758,
+      "year_month": "2024-05"
+    },
+    {
+      "row_count": 30019,
+      "year_month": "2024-06"
+    },
+    {
+      "row_count": 34047,
+      "year_month": "2024-07"
+    },
+    {
+      "row_count": 34751,
+      "year_month": "2024-08"
+    },
+    {
+      "row_count": 31600,
+      "year_month": "2024-09"
+    },
+    {
+      "row_count": 36333,
+      "year_month": "2024-10"
+    },
+    {
+      "row_count": 30874,
+      "year_month": "2024-11"
+    },
+    {
+      "row_count": 32465,
+      "year_month": "2024-12"
+    },
+    {
+      "row_count": 31584,
+      "year_month": "2025-01"
+    },
+    {
+      "row_count": 30020,
+      "year_month": "2025-02"
+    },
+    {
+      "row_count": 33180,
+      "year_month": "2025-03"
+    },
+    {
+      "row_count": 33177,
+      "year_month": "2025-04"
+    },
+    {
+      "row_count": 33159,
+      "year_month": "2025-05"
+    },
+    {
+      "row_count": 31600,
+      "year_month": "2025-06"
+    },
+    {
+      "row_count": 34040,
+      "year_month": "2025-07"
+    },
+    {
+      "row_count": 25266,
+      "year_month": "2025-08"
+    }
+  ],
+  "sources": [
+    {
+      "bounded_safe_hash": "2ac4ebceb5664606b872a628d5a74136c8cf74492b8df29c6cd5f73f4249cf01",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAL/timeframe=5m/data.parquet",
+      "symbol": "AAL",
+      "vendor_qa_sha256": "9726400fab8ae7389fa16dc3c69e82f962d1608cbd6912a9eb13b5da2c7e7df8",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "b6c167d0613e739c19bef5b890d4d7de66e5adfa0413154e19fa234629f10dfd",
+      "bounded_safe_rows": 32403,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=AAOI/timeframe=5m/data.parquet",
+      "symbol": "AAOI",
+      "vendor_qa_sha256": "6fcfb9e7eb8ba4c8660119ffa89af9f249da157ecfd7e6b3537238a7177d5c6b",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "ad2171c9959edb2274bfaf10be08dd5154a2003e018640fcb74c4345a2bbff81",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=APLD/timeframe=5m/data.parquet",
+      "symbol": "APLD",
+      "vendor_qa_sha256": "26dd3035545c48de9fd0dd872494eb023de63b3c4457add5991d5d7923a98c8d",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "1900c2baaaed80a3fbf86f271f4fbfe41dc2d19c2617b568851d596d9feaa747",
+      "bounded_safe_rows": 32400,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=ASTS/timeframe=5m/data.parquet",
+      "symbol": "ASTS",
+      "vendor_qa_sha256": "e30dd92b518e433737e07a53b16063805aadb4b9c3ce00d7b6d72982c6cd8089",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "055f9bced79ca9c3fb6e65254fc2229e95a9f1a07c147c1b60bcc2cdd75d693b",
+      "bounded_safe_rows": 32400,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=CIFR/timeframe=5m/data.parquet",
+      "symbol": "CIFR",
+      "vendor_qa_sha256": "2f5d4befe2d27fdce5f8a6589ae6ba2e144028433ce29e548d8999b78e651567",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "92fc9fb34c5c525f85c40147e37600ef0cf1670f1427797f741454eb73eddea7",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=HIMS/timeframe=5m/data.parquet",
+      "symbol": "HIMS",
+      "vendor_qa_sha256": "6fc865319846f3b3ea9c1b936a33f249dba7d556afa435051aa05f92b20ca4b0",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "4d9d6f75da9a9f2daadb9d81244343f94647dcbd90a426c03ad2b550e9a23b29",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IONQ/timeframe=5m/data.parquet",
+      "symbol": "IONQ",
+      "vendor_qa_sha256": "1958c644db60c196d6ad49fa2aee4df0820f142e2a495641a720a54db5fc0abb",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "a32fe0464ac2fff115db5db6cc744db591b304c0cbb08f330ed7c37dcebac50b",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=IREN/timeframe=5m/data.parquet",
+      "symbol": "IREN",
+      "vendor_qa_sha256": "9aeaae8de6c1fa74e6394da2c5ac399c6de2a7e21edadd73877a8e11c0d744c8",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "34d6a2385300e8d0c1eb3b890273943d50a8655b00293d028a19fd9b220ae013",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MARA/timeframe=5m/data.parquet",
+      "symbol": "MARA",
+      "vendor_qa_sha256": "24787d4ccc2480f415d8c8bf6c5c8f40de82b56648ffff06914ef271128e48a9",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "62df3853fd345c658a8301add74fe802622cd9c70c24a94ecd486aee9359d1e7",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MP/timeframe=5m/data.parquet",
+      "symbol": "MP",
+      "vendor_qa_sha256": "4a4d94e2ec08619e48b954a19978e1587575a597e15264e2c0b3610aa66ab839",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "60487e33398b4ac48f69e0da402e5103f6f2798d8a1abc7c5d813c9cffafb400",
+      "bounded_safe_rows": 32405,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MRNA/timeframe=5m/data.parquet",
+      "symbol": "MRNA",
+      "vendor_qa_sha256": "010d4980595ec8249a2ead44e7ea010b1e97ef94287bd022b2f474eb2ae2ecb3",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "c8a13768c3b96156051426c79775103c8eb157f6da1b20a692934ad3b3bf4276",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=MSTR/timeframe=5m/data.parquet",
+      "symbol": "MSTR",
+      "vendor_qa_sha256": "dab185e58680bd6089e9b540c250052969e749f6e2d5b4763c658c68edb46ad5",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "03715f3f026a1c2e029c83a07625edd11b785bec63e4285b0b04c08db340222c",
+      "bounded_safe_rows": 32403,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=NVTS/timeframe=5m/data.parquet",
+      "symbol": "NVTS",
+      "vendor_qa_sha256": "3bdaada1623479080a7490d44ebd19567e481dde6c00d46ad327a1dfd7e85c62",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "403a474b3a3b39365e74470852f48056bd0161d60caa26e883a7ab4e45022f81",
+      "bounded_safe_rows": 32402,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=QBTS/timeframe=5m/data.parquet",
+      "symbol": "QBTS",
+      "vendor_qa_sha256": "749987027a5c27092cbbd1a6f694b473c5c15a3039a1f078a407d2edb534ec9f",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "233088673f12790eadba650647c3d10f74f011e7baae69b10d52c02d8fbab042",
+      "bounded_safe_rows": 32400,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RGTI/timeframe=5m/data.parquet",
+      "symbol": "RGTI",
+      "vendor_qa_sha256": "d451680d7a6244da1a089269e7a5699db5112010ced271087618d7a828006bda",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "f217b7abb3404783e87320296d57b3148f26d0bb065d9640db0f4d346e6677d9",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIOT/timeframe=5m/data.parquet",
+      "symbol": "RIOT",
+      "vendor_qa_sha256": "8a4900d54c9cad60a0c998e34df13f6221c8a7199dc5fb221dee087cbd90f8b2",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "c7ab04d8a205be771320a8eccaaa88c1dfa4ff919fd469fe35e99c5cf03e15e6",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=RIVN/timeframe=5m/data.parquet",
+      "symbol": "RIVN",
+      "vendor_qa_sha256": "2b76b675e9deed5b27fa4a689c64d66c49a8c8561cdf04fa8929ce33a6cc8c69",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "141b6f08c5d2b1840024493aef6b7059f3d41deb28cc2d6dcf609aa589818066",
+      "bounded_safe_rows": 32385,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SMCI/timeframe=5m/data.parquet",
+      "symbol": "SMCI",
+      "vendor_qa_sha256": "7fc214ee0b1291cda0afd915f1e98a6e71119f12e25477c3ab6ee637ce703d78",
+      "vendor_qa_status": "warning"
+    },
+    {
+      "bounded_safe_hash": "e3f6d0e05f3bf29a18b0cdb30ce3fe03312628705fa23e46bcb51ef135242353",
+      "bounded_safe_rows": 32399,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=SOFI/timeframe=5m/data.parquet",
+      "symbol": "SOFI",
+      "vendor_qa_sha256": "ba5ae8e8f699d35680eb276d1d242563168ba55fa83a2512f06f08fe5d14d8fd",
+      "vendor_qa_status": "pass"
+    },
+    {
+      "bounded_safe_hash": "cc5c3ad83d8af2d639a59986e65eea5513b658966be513e51628ab23970d54c2",
+      "bounded_safe_rows": 32401,
+      "corporate_action_check_passed": true,
+      "logical_path": "source=eodhd/instrument_type=stock/symbol=WULF/timeframe=5m/data.parquet",
+      "symbol": "WULF",
+      "vendor_qa_sha256": "eab29301a684fb535011428ffe31fefe561b26ac9097307a589592ab18d80811",
+      "vendor_qa_status": "warning"
+    }
+  ],
+  "strategy_promotion": false,
+  "symbol_predicate_applied_before_materialisation": true,
+  "vendor_qa": [
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/AAL_5m_eodhd_qa.json",
+      "sha256": "9726400fab8ae7389fa16dc3c69e82f962d1608cbd6912a9eb13b5da2c7e7df8",
+      "status": "pass",
+      "symbol": "AAL",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/AAOI_5m_eodhd_qa.json",
+      "sha256": "6fcfb9e7eb8ba4c8660119ffa89af9f249da157ecfd7e6b3537238a7177d5c6b",
+      "status": "warning",
+      "symbol": "AAOI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/APLD_5m_eodhd_qa.json",
+      "sha256": "26dd3035545c48de9fd0dd872494eb023de63b3c4457add5991d5d7923a98c8d",
+      "status": "warning",
+      "symbol": "APLD",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/ASTS_5m_eodhd_qa.json",
+      "sha256": "e30dd92b518e433737e07a53b16063805aadb4b9c3ce00d7b6d72982c6cd8089",
+      "status": "warning",
+      "symbol": "ASTS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/CIFR_5m_eodhd_qa.json",
+      "sha256": "2f5d4befe2d27fdce5f8a6589ae6ba2e144028433ce29e548d8999b78e651567",
+      "status": "warning",
+      "symbol": "CIFR",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/HIMS_5m_eodhd_qa.json",
+      "sha256": "6fc865319846f3b3ea9c1b936a33f249dba7d556afa435051aa05f92b20ca4b0",
+      "status": "warning",
+      "symbol": "HIMS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/IONQ_5m_eodhd_qa.json",
+      "sha256": "1958c644db60c196d6ad49fa2aee4df0820f142e2a495641a720a54db5fc0abb",
+      "status": "warning",
+      "symbol": "IONQ",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/IREN_5m_eodhd_qa.json",
+      "sha256": "9aeaae8de6c1fa74e6394da2c5ac399c6de2a7e21edadd73877a8e11c0d744c8",
+      "status": "warning",
+      "symbol": "IREN",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MARA_5m_eodhd_qa.json",
+      "sha256": "24787d4ccc2480f415d8c8bf6c5c8f40de82b56648ffff06914ef271128e48a9",
+      "status": "pass",
+      "symbol": "MARA",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MP_5m_eodhd_qa.json",
+      "sha256": "4a4d94e2ec08619e48b954a19978e1587575a597e15264e2c0b3610aa66ab839",
+      "status": "warning",
+      "symbol": "MP",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MRNA_5m_eodhd_qa.json",
+      "sha256": "010d4980595ec8249a2ead44e7ea010b1e97ef94287bd022b2f474eb2ae2ecb3",
+      "status": "warning",
+      "symbol": "MRNA",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/MSTR_5m_eodhd_qa.json",
+      "sha256": "dab185e58680bd6089e9b540c250052969e749f6e2d5b4763c658c68edb46ad5",
+      "status": "warning",
+      "symbol": "MSTR",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/NVTS_5m_eodhd_qa.json",
+      "sha256": "3bdaada1623479080a7490d44ebd19567e481dde6c00d46ad327a1dfd7e85c62",
+      "status": "warning",
+      "symbol": "NVTS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/QBTS_5m_eodhd_qa.json",
+      "sha256": "749987027a5c27092cbbd1a6f694b473c5c15a3039a1f078a407d2edb534ec9f",
+      "status": "warning",
+      "symbol": "QBTS",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/RGTI_5m_eodhd_qa.json",
+      "sha256": "d451680d7a6244da1a089269e7a5699db5112010ced271087618d7a828006bda",
+      "status": "warning",
+      "symbol": "RGTI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/RIOT_5m_eodhd_qa.json",
+      "sha256": "8a4900d54c9cad60a0c998e34df13f6221c8a7199dc5fb221dee087cbd90f8b2",
+      "status": "pass",
+      "symbol": "RIOT",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/RIVN_5m_eodhd_qa.json",
+      "sha256": "2b76b675e9deed5b27fa4a689c64d66c49a8c8561cdf04fa8929ce33a6cc8c69",
+      "status": "warning",
+      "symbol": "RIVN",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/SMCI_5m_eodhd_qa.json",
+      "sha256": "7fc214ee0b1291cda0afd915f1e98a6e71119f12e25477c3ab6ee637ce703d78",
+      "status": "warning",
+      "symbol": "SMCI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/SOFI_5m_eodhd_qa.json",
+      "sha256": "ba5ae8e8f699d35680eb276d1d242563168ba55fa83a2512f06f08fe5d14d8fd",
+      "status": "pass",
+      "symbol": "SOFI",
+      "validation_error_count": 0
+    },
+    {
+      "adjusted_close_differences": 0,
+      "adjusted_close_present": false,
+      "corporate_action_check_passed": true,
+      "logical_path": "external_vendor_qa/WULF_5m_eodhd_qa.json",
+      "sha256": "eab29301a684fb535011428ffe31fefe561b26ac9097307a589592ab18d80811",
+      "status": "warning",
+      "symbol": "WULF",
+      "validation_error_count": 0
+    }
+  ]
+}

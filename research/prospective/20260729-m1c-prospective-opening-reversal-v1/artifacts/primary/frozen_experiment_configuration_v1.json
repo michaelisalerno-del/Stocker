@@ -1,0 +1,88 @@
+{
+  "baselines": [
+    "follow_vti_severe_opening_sign",
+    "oppose_vti_severe_opening_sign",
+    "always_call",
+    "always_put",
+    "most_recent_completed_five_minute_stock_momentum",
+    "complete_stock_opening_window_momentum",
+    "existing_clean_market_direction_baseline",
+    "frozen_a1",
+    "frozen_historical_asymmetric_downside_score",
+    "independently_frozen_microstructure_rule"
+  ],
+  "bootstrap_confidence_level": 0.95,
+  "cluster_bootstrap_replications": 2000,
+  "configuration_hash": "7d95baa2f7d56c8b82b639f7ee2bae459a879aa0b61200bc2786f0e3bf695c8e",
+  "confirmation_support": {
+    "complete_eligible_stock_episodes": 150,
+    "maximum_event_episode_fraction": 0.15,
+    "maximum_stock_episode_fraction": 0.2,
+    "negative_transition_events": 15,
+    "positive_transition_events": 15,
+    "represented_stocks": 12,
+    "sessions": 40,
+    "unique_severe_opening_events": 40
+  },
+  "development_support": {
+    "complete_eligible_stock_episodes": 150,
+    "maximum_event_episode_fraction": 0.15,
+    "maximum_stock_episode_fraction": 0.2,
+    "negative_transition_events": 15,
+    "positive_transition_events": 15,
+    "represented_stocks": 12,
+    "sessions": 40,
+    "unique_severe_opening_events": 40
+  },
+  "engineering_transfer_valid_sessions": 20,
+  "event_cluster_seed": 2026072903,
+  "forbidden_action_inputs": [
+    "A1",
+    "RSI",
+    "stock_amplification",
+    "stock_resistance",
+    "recent_momentum",
+    "market_sector_features",
+    "microstructure",
+    "option_prices",
+    "option_spreads",
+    "apparent_chart_quality",
+    "tail_phase_beyond_first_entry",
+    "later_outcomes"
+  ],
+  "optional_expiry_comparisons": [
+    "0DTE",
+    "3_TO_5_DTE"
+  ],
+  "primary_null_replications": 1000,
+  "primary_null_seed": 2026072901,
+  "rule": {
+    "checkpoint": 6,
+    "direction_formula": "prediction_sign_v1=-opening_transition_sign_v1",
+    "experiment_id": "m1c-prospective-opening-reversal-v1",
+    "experiment_version": "1",
+    "m1c_probability_threshold": 0.488333710794033,
+    "market_proxy": "VTI",
+    "maximum_promoted_underlyings": 1,
+    "opening_range_q75": 0.00384818171835,
+    "opening_return_q10": -0.00288963733897,
+    "opening_return_q90": 0.00225522676046,
+    "optional_feed_degradation_order": [
+      "neutral_control",
+      "additional_strike",
+      "3_to_5_dte_comparison",
+      "0dte_comparison",
+      "tick_by_tick",
+      "additional_underlying_diagnostic"
+    ],
+    "order_methods_available": false,
+    "order_routing_enabled": false,
+    "primary_expiry": "1DTE",
+    "primary_horizon_minutes": 15,
+    "reserved_market_data_lines": 12,
+    "tail_phase_required": "FIRST_ENTRY"
+  },
+  "schema_version": "m1c-prospective-opening-reversal-config-v1",
+  "session_cluster_seed": 2026072902,
+  "winsor_fraction": 0.01
+}

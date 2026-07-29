@@ -217,6 +217,41 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
     assert adapter.active_subscriptions == {}
 
 
+def test_clock_probe_is_retried_after_the_operational_interval(
+    tmp_path: Path,
+) -> None:
+    application, config, adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+    )
+    adapter.drain_stream_events()
+    application._last_clock_probe_monotonic = 100.0
+
+    assert (
+        application._request_clock_probe_if_due(
+            monotonic_now=100.0 + config.ibkr.subscription_reconciliation_interval_seconds - 0.001,
+        )
+        is False
+    )
+    assert adapter.drain_stream_events() == ()
+
+    assert (
+        application._request_clock_probe_if_due(
+            monotonic_now=(100.0 + config.ibkr.subscription_reconciliation_interval_seconds),
+        )
+        is True
+    )
+    assert tuple(item["kind"] for item in adapter.drain_stream_events()) == ("current_time",)
+    assert (
+        application._request_clock_probe_if_due(
+            monotonic_now=(100.0 + config.ibkr.subscription_reconciliation_interval_seconds),
+        )
+        is False
+    )
+
+    application.shutdown(now=datetime.now(UTC))
+
+
 def test_release_upgrade_preserves_first_activation_and_run_identity(
     tmp_path: Path,
 ) -> None:

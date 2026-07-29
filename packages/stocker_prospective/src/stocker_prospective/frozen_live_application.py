@@ -455,6 +455,7 @@ class FrozenProspectiveApplication:
         self._reconnect_attempts = 0
         self._next_reconnect_at: datetime | None = None
         self._last_reconciliation_monotonic = 0.0
+        self._last_clock_probe_monotonic = time.monotonic()
         self.opening_reversal_capacity = opening_reversal_capacity
         self._opening_reversal_results: dict[
             tuple[date, int],
@@ -518,6 +519,7 @@ class FrozenProspectiveApplication:
     def _poll_once(self, *, now: datetime) -> LivePollResult:
         observed = now.astimezone(UTC)
         self._persist_connection_events(observed)
+        self._request_clock_probe_if_due(monotonic_now=time.monotonic())
         observed_session = observed.astimezone(NEW_YORK).date()
         try:
             xnys_session_bounds(observed_session)
@@ -802,6 +804,20 @@ class FrozenProspectiveApplication:
             acknowledged_at=observed,
         )
         return result
+
+    def _request_clock_probe_if_due(self, *, monotonic_now: float) -> bool:
+        interval = self.config.ibkr.subscription_reconciliation_interval_seconds
+        if monotonic_now - self._last_clock_probe_monotonic < interval:
+            return False
+        if self.adapter.connection.health().state is not ConnectionState.CONNECTED:
+            return False
+        # A startup probe can wait behind recovery CPU pressure before EWrapper
+        # receives it. Refreshing this low-rate control sample lets a later
+        # timely callback supersede stale latency evidence without relaxing the
+        # frozen clock-drift tolerance.
+        self.adapter.request_current_time()
+        self._last_clock_probe_monotonic = monotonic_now
+        return True
 
     def _reconcile_subscriptions(self, observed: datetime) -> None:
         monotonic_now = time.monotonic()

@@ -519,7 +519,6 @@ class FrozenProspectiveApplication:
     def _poll_once(self, *, now: datetime) -> LivePollResult:
         observed = now.astimezone(UTC)
         self._persist_connection_events(observed)
-        self._request_clock_probe_if_due(monotonic_now=time.monotonic())
         observed_session = observed.astimezone(NEW_YORK).date()
         try:
             xnys_session_bounds(observed_session)
@@ -803,6 +802,7 @@ class FrozenProspectiveApplication:
             result,
             acknowledged_at=observed,
         )
+        self._request_clock_probe_if_due(monotonic_now=time.monotonic())
         return result
 
     def _request_clock_probe_if_due(self, *, monotonic_now: float) -> bool:

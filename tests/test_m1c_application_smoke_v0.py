@@ -249,6 +249,10 @@ def test_clock_probe_is_retried_after_the_operational_interval(
         is False
     )
 
+    application._last_clock_probe_monotonic = float("-inf")
+    application.poll(now=datetime.now(UTC))
+    assert tuple(item["kind"] for item in adapter.drain_stream_events()) == ("current_time",)
+
     application.shutdown(now=datetime.now(UTC))
 
 

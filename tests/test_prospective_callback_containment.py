@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import stocker_prospective.ibkr as ibkr_module
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
@@ -99,6 +100,64 @@ def scientific_callback_count(inbox: DurableCallbackInbox) -> int:
                 """
             ).fetchone()[0]
         )
+
+
+def test_canonical_event_preserves_external_callback_boundary_timestamps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value, inbox = adapter(tmp_path)
+    boundary_received_at = NOW
+    delayed_materialisation_at = NOW + timedelta(seconds=200)
+    wall_clock_values = iter(
+        (
+            boundary_received_at,
+            delayed_materialisation_at,
+            delayed_materialisation_at + timedelta(seconds=1),
+        )
+    )
+    monotonic_values = iter((1_000_000_000, 201_000_000_000))
+
+    class SequencedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            value = next(wall_clock_values)
+            return value if tz is not None else value.replace(tzinfo=None)
+
+    class SequencedTime:
+        @staticmethod
+        def monotonic_ns() -> int:
+            return next(monotonic_values)
+
+    monkeypatch.setattr(ibkr_module, "datetime", SequencedDateTime)
+    monkeypatch.setattr(ibkr_module, "time", SequencedTime)
+
+    value.contain_official_callback(
+        "current_time",
+        -1,
+        lambda: value.on_current_time(boundary_received_at),
+        provider_arguments=(int(boundary_received_at.timestamp()),),
+    )
+
+    with inbox._connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT callback_kind, received_utc, received_monotonic_ns
+            FROM callback_inbox_v1
+            WHERE callback_kind IN ('official_provider_current_time', 'current_time')
+            ORDER BY source_sequence
+            """
+        ).fetchall()
+
+    assert len(rows) == 2
+    assert tuple(str(row["received_utc"]) for row in rows) == (
+        boundary_received_at.isoformat(),
+        boundary_received_at.isoformat(),
+    )
+    assert tuple(int(row["received_monotonic_ns"]) for row in rows) == (
+        1_000_000_000,
+        1_000_000_000,
+    )
 
 
 def test_unknown_request_is_quarantined_and_never_escapes_boundary(

@@ -1015,7 +1015,12 @@ class IBKRMarketDataAdapter:
                     source_sequence=self._latest_durably_admitted_sequence,
                 )
                 return
+            # The provider envelope and its canonical scientific event describe
+            # one delivery. Preserve the true EWrapper boundary timestamps so
+            # scheduler delay cannot masquerade as provider clock drift.
             self._official_callback_context.provider_event_id = provider_event_id
+            self._official_callback_context.received_at_utc = received_at
+            self._official_callback_context.received_monotonic_ns = received_monotonic_ns
             callback()
             if self._durable_inbox is not None:
                 self._durable_inbox.complete_provider_envelope(
@@ -1051,6 +1056,8 @@ class IBKRMarketDataAdapter:
                         self._fatal_callback_sequence = admitted_sequence
         finally:
             self._official_callback_context.provider_event_id = None
+            self._official_callback_context.received_at_utc = None
+            self._official_callback_context.received_monotonic_ns = None
 
     @staticmethod
     def _stable_callback_error_code(error: Exception) -> str:
@@ -1457,8 +1464,22 @@ class IBKRMarketDataAdapter:
         request_id: int,
         payload: dict[str, Any],
     ) -> bool:
-        received_at = datetime.now(UTC)
-        received_monotonic_ns = time.monotonic_ns()
+        boundary_received_at = getattr(
+            self._official_callback_context,
+            "received_at_utc",
+            None,
+        )
+        boundary_received_monotonic_ns = getattr(
+            self._official_callback_context,
+            "received_monotonic_ns",
+            None,
+        )
+        received_at = datetime.now(UTC) if boundary_received_at is None else boundary_received_at
+        received_monotonic_ns = (
+            time.monotonic_ns()
+            if boundary_received_monotonic_ns is None
+            else boundary_received_monotonic_ns
+        )
         if self._durable_inbox is not None:
             classification = self._classify_callback(request_id, now=received_at)
             identity_payload = {

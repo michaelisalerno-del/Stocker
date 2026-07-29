@@ -39,7 +39,7 @@ def create_pre_hardening_database(path: Path) -> None:
             """
         )
         for migration in sorted(MIGRATION_ROOT.glob("*.sql")):
-            if migration.name.startswith("0016_"):
+            if migration.name.startswith(("0016_", "0017_")):
                 continue
             connection.executescript(migration.read_text(encoding="utf-8"))
             connection.execute(
@@ -124,6 +124,12 @@ def test_pre_hardening_database_migrates_forward_without_deleting_legacy_data(
             WHERE version = '0016_prospective_recorder_hardening_v1.sql'
             """
         ).fetchone() == (1,)
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM schema_migrations
+            WHERE version = '0017_callback_raw_only_recovery_v1.sql'
+            """
+        ).fetchone() == (1,)
         for table in (
             "callback_inbox_v1",
             "callback_raw_materialization_v1",
@@ -142,6 +148,148 @@ def test_pre_hardening_database_migrates_forward_without_deleting_legacy_data(
                 """,
                 (table,),
             ).fetchone() == (1,)
+        inbox_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(callback_inbox_v1)")
+        }
+        processing_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(callback_processing_commit_v1)")
+        }
+        assert "stream_owner_json" in inbox_columns
+        assert {
+            "processing_disposition",
+            "scientific_projection_complete",
+        }.issubset(processing_columns)
+
+
+def test_database_with_0016_already_applied_receives_0017_columns(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "already-on-0016.sqlite3"
+    create_pre_hardening_database(path)
+    migration_0016 = MIGRATION_ROOT / "0016_prospective_recorder_hardening_v1.sql"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(migration_0016.read_text(encoding="utf-8"))
+        connection.execute(
+            """
+            INSERT INTO schema_migrations(version, applied_at_utc)
+            VALUES (?, ?)
+            """,
+            (migration_0016.name, NOW.isoformat()),
+        )
+
+    ProspectiveRepository(path).migrate()
+
+    with sqlite3.connect(path) as connection:
+        versions = {
+            str(row[0])
+            for row in connection.execute(
+                """
+                SELECT version FROM schema_migrations
+                WHERE version LIKE '0016_%' OR version LIKE '0017_%'
+                """
+            )
+        }
+        inbox_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(callback_inbox_v1)")
+        }
+        processing_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(callback_processing_commit_v1)")
+        }
+        trigger_names = {
+            str(row[0])
+            for row in connection.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'trigger' AND name LIKE 'trg_opening_reversal%'
+                """
+            )
+        }
+        legacy_gap_count = connection.execute(
+            "SELECT gap_count FROM raw_partition_manifest_v0"
+        ).fetchone()
+    assert versions == {
+        "0016_prospective_recorder_hardening_v1.sql",
+        "0017_callback_raw_only_recovery_v1.sql",
+    }
+    assert "stream_owner_json" in inbox_columns
+    assert {
+        "processing_disposition",
+        "scientific_projection_complete",
+    }.issubset(processing_columns)
+    assert {
+        "trg_opening_reversal_discovery_immutable",
+        "trg_opening_reversal_option_outcome_immutable",
+    }.issubset(trigger_names)
+    assert {
+        "trg_opening_reversal_v1_1_discovery_immutable",
+        "trg_opening_reversal_v1_1_outcome_immutable",
+    }.isdisjoint(trigger_names)
+    assert legacy_gap_count == (17,)
+
+
+def test_migration_makes_legacy_discovery_identity_immutable(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-discovery.sqlite3"
+    create_pre_hardening_database(path)
+    with sqlite3.connect(path) as connection:
+        envelope = connection.execute(
+            """
+            INSERT INTO evidence_envelope(
+                run_id, prospective_start_utc, app_version, git_commit,
+                model_artifact_id, universe_id, cohort,
+                source_timestamps_json, recorded_at_utc
+            ) VALUES ('legacy-run', ?, 'legacy', ?, 'legacy-model',
+                      'anchor-frozen-20-v1', 'anchor_frozen_20', '[]', ?)
+            """,
+            (
+                (NOW - timedelta(days=1)).isoformat(),
+                "a" * 40,
+                NOW.isoformat(),
+            ),
+        ).lastrowid
+        connection.execute(
+            """
+            INSERT INTO opening_reversal_contract_discovery_v1(
+                envelope_id, run_id, episode_id, discovery_timestamp_utc,
+                contract_source, cache_hit, candidates_inspected,
+                call_con_id, put_con_id, expiry, strike, tie_break_rule,
+                live_market_data_lines_consumed,
+                planned_live_market_data_lines, metadata_request_ended,
+                full_chain_live_subscription_created, status,
+                missing_reason, audit_hash_v1, audit_json
+            ) VALUES (?, 'legacy-run', 'legacy-generic-episode', ?,
+                      'legacy', 0, 0, NULL, NULL, NULL, NULL, 'legacy',
+                      0, 0, 1, 0, 'failed', 'legacy_unavailable', ?, '{}')
+            """,
+            (envelope, NOW.isoformat(), "9" * 64),
+        )
+
+    repository = ProspectiveRepository(path)
+    repository.migrate()
+
+    with repository._connect() as connection:
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="blocked_opening_reversal_contract_discovery_is_immutable",
+        ):
+            connection.execute(
+                """
+                UPDATE opening_reversal_contract_discovery_v1
+                SET episode_id = 'fresh-aal'
+                WHERE run_id = 'legacy-run'
+                """
+            )
+        stored = connection.execute(
+            """
+            SELECT episode_id
+            FROM opening_reversal_contract_discovery_v1
+            WHERE run_id = 'legacy-run'
+            """
+        ).fetchone()
+        assert tuple(stored) == ("legacy-generic-episode",)
 
 
 def test_schema_newer_than_application_fails_closed(tmp_path: Path) -> None:

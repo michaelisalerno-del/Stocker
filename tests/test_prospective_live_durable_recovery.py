@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -96,6 +97,7 @@ def build_recorder(
     failure_phase: str | None = None,
     raw_failure_phase: str | None = None,
     raw_crash_phase: str | None = None,
+    register_default_stream: bool = True,
 ) -> tuple[FrozenM1CLiveRecorder, IBKRMarketDataAdapter]:
     operational = RecorderOperationalRepository(database.database_path)
     operational.start_generation(
@@ -185,15 +187,16 @@ def build_recorder(
         operational_repository=operational,
         failure_injector=recorder_failure if failure_phase is not None else None,
     )
-    recorder.register_stream(
-        StreamOwner(
-            request_id=7,
-            kind=StreamKind.UNDERLYING_LEVEL1,
-            symbol="AAL",
-            con_id=123,
-            exchange="SMART",
+    if register_default_stream:
+        recorder.register_stream(
+            StreamOwner(
+                request_id=7,
+                kind=StreamKind.UNDERLYING_LEVEL1,
+                symbol="AAL",
+                con_id=123,
+                exchange="SMART",
+            )
         )
-    )
     return recorder, adapter
 
 
@@ -282,6 +285,221 @@ def test_crash_after_lease_is_reclaimed_without_loss(tmp_path: Path) -> None:
     assert result.raw_event_count == 1
     assert inbox.accounting().acknowledged == 1
     assert manifest_count(database) == 1
+
+
+def test_replacement_generation_recovers_raw_but_cannot_reenable_scoring(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    first, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="crashed-owner",
+        inbox=inbox,
+        register_default_stream=False,
+    )
+    emit(adapter)
+    with database._connect() as connection:
+        assert (
+            connection.execute(
+                """
+                SELECT stream_owner_json
+                FROM callback_inbox_v1
+                WHERE status = 'pending'
+                """
+            ).fetchone()[0]
+            is None
+        )
+    first.register_stream(
+        StreamOwner(
+            request_id=7,
+            kind=StreamKind.UNDERLYING_LEVEL1,
+            symbol="AAL",
+            con_id=123,
+            exchange="SMART",
+        )
+    )
+    assert inbox.accounting().pending == 1
+    inbox.latch_fatal(
+        latch_kind="ingestion",
+        stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
+        occurred_at=NOW,
+        error_class="UncleanRecorderRestart",
+        evidence_loss_possible=True,
+    )
+
+    restarted, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=2,
+        owner="replacement",
+        inbox=inbox,
+        adapter=adapter,
+    )
+    restarted.set_session_context_ready(passed=True)
+    restarted.set_capability_preflight(passed=True)
+    assert restarted.scientific_block_latched
+    assert not restarted.scientific_scoring_enabled
+
+    result = restarted.poll(now=NOW + timedelta(seconds=1))
+    restarted.finalize_durable_poll(
+        result,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    assert result.raw_event_count == 1
+    assert result.checkpoint_count == 0
+    assert inbox.accounting().acknowledged == 1
+    assert manifest_count(database) == 1
+
+
+def test_blocked_recovery_persists_original_callback_without_current_owner(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    _, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="crashed-owner",
+        inbox=inbox,
+    )
+    emit(adapter)
+    inbox.latch_fatal(
+        latch_kind="ingestion",
+        stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
+        occurred_at=NOW,
+        error_class="UncleanRecorderRestart",
+        evidence_loss_possible=True,
+    )
+
+    replacement, _ = build_recorder(
+        tmp_path,
+        database,
+        generation=2,
+        owner="replacement",
+        inbox=inbox,
+        adapter=adapter,
+    )
+    replacement.normalizer.unregister(7)
+
+    result = replacement.poll(now=NOW + timedelta(seconds=1))
+    replacement.finalize_durable_poll(
+        result,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    assert result.processing_disposition == "scientifically_blocked_raw_only"
+    assert not result.scientific_projection_complete
+    assert result.raw_event_count == 1
+    assert inbox.accounting().acknowledged == 1
+    with database._connect() as connection:
+        manifest = connection.execute(
+            """
+            SELECT event_type, file_path
+            FROM raw_partition_manifest_v0
+            WHERE run_id = ?
+            """,
+            (RUN_ID,),
+        ).fetchone()
+        processing = connection.execute(
+            """
+            SELECT processing_disposition, scientific_projection_complete
+            FROM callback_processing_commit_v1
+            WHERE inbox_event_id = ?
+            """,
+            (result.durable_inbox_event_ids[0],),
+        ).fetchone()
+        owner_json = connection.execute(
+            """
+            SELECT stream_owner_json
+            FROM callback_inbox_v1
+            WHERE inbox_event_id = ?
+            """,
+            (result.durable_inbox_event_ids[0],),
+        ).fetchone()[0]
+    assert tuple(processing) == ("scientifically_blocked_raw_only", 0)
+    assert str(manifest["event_type"]) == "raw_callback_envelope_event"
+    assert json.loads(str(owner_json)) == {
+        "con_id": 123,
+        "episode_id": None,
+        "exchange": "SMART",
+        "kind": "underlying_level1",
+        "option_contract": None,
+        "request_id": 7,
+        "symbol": "AAL",
+    }
+    import pyarrow.parquet as pq
+
+    row = pq.ParquetFile(str(manifest["file_path"])).read().to_pylist()[0]
+    assert row["callback_kind"] == "level1_quote_update"
+    assert json.loads(str(row["original_payload"]))["value"] == 10.0
+    assert row["recovery_disposition"] == "scientifically_blocked_raw_only"
+
+
+def test_blocked_recovery_reuses_pre_materialized_identity_without_normalizer(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    first, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="crashed-owner",
+        inbox=inbox,
+    )
+    emit(adapter, field="bid")
+    initial = first.poll(now=NOW)
+    first.finalize_durable_poll(initial, acknowledged_at=NOW)
+    emit(adapter, field="ask")
+    interrupted = first.poll(now=NOW + timedelta(seconds=1))
+    manifest_total = manifest_count(database)
+    assert interrupted.raw_materialization_reused is False
+    assert inbox.accounting().leased == 1
+    inbox.latch_fatal(
+        latch_kind="ingestion",
+        stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
+        occurred_at=NOW + timedelta(seconds=1),
+        error_class="UncleanRecorderRestart",
+        evidence_loss_possible=True,
+    )
+
+    replacement, _ = build_recorder(
+        tmp_path,
+        database,
+        generation=2,
+        owner="replacement",
+        inbox=inbox,
+        adapter=adapter,
+    )
+    replacement.normalizer.unregister(7)
+    recovered = replacement.poll(now=NOW + timedelta(seconds=7))
+    replacement.finalize_durable_poll(
+        recovered,
+        acknowledged_at=NOW + timedelta(seconds=7),
+    )
+
+    assert recovered.raw_materialization_reused
+    assert recovered.partition_hashes == interrupted.partition_hashes
+    assert recovered.raw_event_ids == interrupted.raw_event_ids
+    assert recovered.processing_disposition == "scientifically_blocked_raw_only"
+    assert not recovered.scientific_projection_complete
+    assert manifest_count(database) == manifest_total
+    assert inbox.accounting().acknowledged == 2
+    with database._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT processing_disposition, scientific_projection_complete
+            FROM callback_processing_commit_v1
+            WHERE inbox_event_id = ?
+            """,
+            (recovered.durable_inbox_event_ids[0],),
+        ).fetchone()
+    assert tuple(row) == ("scientifically_blocked_raw_only", 0)
 
 
 @pytest.mark.parametrize(

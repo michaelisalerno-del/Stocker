@@ -66,13 +66,18 @@ from stocker_prospective.ibkr_api import (
     write_official_ibkr_api_update_status,
 )
 from stocker_prospective.market_data import MarketDataBudget, MarketDataType
-from stocker_prospective.operational_state import RecorderOperationalRepository
+from stocker_prospective.operational_state import (
+    GapIncident,
+    RecorderOperationalRepository,
+    stable_gap_id,
+)
 from stocker_prospective.parallel import (
     ParallelSourceCaptureService,
     build_parallel_eodhd_service,
 )
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.recorder import RecorderDeploymentIdentity
+from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.scientific_inputs import (
     EODHDGroupOPreparationService,
@@ -602,19 +607,98 @@ def replay_run(config_path: Path = typer.Option(..., "--config", exists=True)) -
             )
 
 
+def _record_interrupted_streaming_episode_gaps(
+    *,
+    repository: ProspectiveRepository,
+    operational_repository: RecorderOperationalRepository,
+    run_id: str,
+    recorder_generation: int,
+    detected_at: datetime,
+) -> tuple[str, ...]:
+    """Persist each process-discontinuous option episode exactly once."""
+
+    restorable_schedules = FrozenRecorderRepository(repository).restorable_option_episode_schedules(
+        run_id=run_id
+    )
+    interrupted_streams = tuple(
+        row for row in restorable_schedules if str(row["status"]) == "streaming"
+    )
+    existing_gap_episodes = {
+        episode_id
+        for gap in operational_repository.active_gaps(run_id=run_id)
+        if gap.cause_code == "PROCESS_RESTART_OPTION_CONTINUITY_LOST"
+        for episode_id in gap.affected_episode_ids
+    }
+    for row in interrupted_streams:
+        episode_id = str(row["episode_id"])
+        if episode_id in existing_gap_episodes:
+            continue
+        gap_start = datetime.fromisoformat(str(row["updated_at_utc"]))
+        if gap_start.tzinfo is None or gap_start.utcoffset() is None:
+            raise RuntimeSafetyError(
+                "blocked_option_episode_continuity_timestamp_not_timezone_aware"
+            )
+        gap_start = gap_start.astimezone(UTC)
+        operational_repository.record_gap(
+            GapIncident(
+                gap_id=stable_gap_id(
+                    run_id=run_id,
+                    recorder_generation=recorder_generation,
+                    symbol=str(row["symbol"]),
+                    stream_kind="option_episode",
+                    request_id=None,
+                    connection_generation=0,
+                    start_timestamp_utc=gap_start,
+                    cause_code="PROCESS_RESTART_OPTION_CONTINUITY_LOST",
+                    incident_identity=episode_id,
+                ),
+                run_id=run_id,
+                recorder_generation=recorder_generation,
+                symbol=str(row["symbol"]),
+                stream_kind="option_episode",
+                request_id=None,
+                connection_generation=0,
+                start_timestamp_utc=gap_start,
+                detection_timestamp_utc=detected_at,
+                cause_code="PROCESS_RESTART_OPTION_CONTINUITY_LOST",
+                severity="scientific",
+                recoverability="unrecoverable",
+                affected_episode_ids=(episode_id,),
+            )
+        )
+    return tuple(str(row["episode_id"]) for row in interrupted_streams)
+
+
 def _fail_closed_on_unclean_recorder_takeover(
     *,
     lease: LeaseRecord,
     config: ProspectiveConfig,
     owner_id: str,
+    repository: ProspectiveRepository,
     durable_inbox: DurableCallbackInbox,
     operational_repository: RecorderOperationalRepository,
-) -> None:
-    """Latch uncertain process-local continuity before opening an IBKR socket."""
+) -> bool:
+    """Latch uncertain continuity while allowing raw-only inbox recovery."""
 
-    if not lease.recovered_stale_owner:
-        return
     assert config.runtime.run_id is not None
+    with repository._connect() as connection:
+        prior_same_run_generation = (
+            connection.execute(
+                """
+                SELECT 1
+                FROM recorder_generation_v1
+                WHERE run_id = ? AND recorder_generation < ?
+                LIMIT 1
+                """,
+                (config.runtime.run_id, lease.generation),
+            ).fetchone()
+            is not None
+        )
+    same_run_stale_takeover = (
+        lease.recovered_stale_owner and lease.previous_run_id == config.runtime.run_id
+    )
+    if not (same_run_stale_takeover or prior_same_run_generation):
+        return False
     observed = datetime.now(UTC)
     operational_repository.start_generation(
         run_id=config.runtime.run_id,
@@ -626,10 +710,16 @@ def _fail_closed_on_unclean_recorder_takeover(
             if len(config.ibkr.allowed_market_data_types) == 1
             else None
         ),
-        # Artifact loading never begins on this failed-closed generation; a
-        # positive placeholder satisfies the state schema without claiming
-        # runtime verification.
+        # The application replaces this placeholder with the exact expected
+        # artifact count before it records any verification result.
         expected_artifact_count=1,
+    )
+    interrupted_episode_ids = _record_interrupted_streaming_episode_gaps(
+        repository=repository,
+        operational_repository=operational_repository,
+        run_id=config.runtime.run_id,
+        recorder_generation=lease.generation,
+        detected_at=observed,
     )
     durable_inbox.record_incident(
         stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
@@ -639,10 +729,22 @@ def _fail_closed_on_unclean_recorder_takeover(
         error_class="UncleanRecorderRestart",
         evidence_loss_possible=True,
         details={
-            "recovered_stale_owner": True,
-            "previous_heartbeat_at_utc": lease.heartbeat_at_utc.isoformat(),
-            "socket_opened": False,
-            "operator_action": "retain_invalid_run_and_start_new_run",
+            "recovered_stale_owner": lease.recovered_stale_owner,
+            "previous_run_id": lease.previous_run_id,
+            "previous_owner_id": lease.previous_owner_id,
+            "previous_heartbeat_at_utc": (
+                None
+                if lease.previous_heartbeat_at_utc is None
+                else lease.previous_heartbeat_at_utc.isoformat()
+            ),
+            "socket_opened_at_detection": False,
+            "raw_inbox_recovery_continues": True,
+            "scientific_scoring_blocked": True,
+            "interrupted_streaming_episode_ids": interrupted_episode_ids,
+            "operator_action": (
+                "preserve raw recovery and explicitly resolve the fatal audit "
+                "before any scientific use"
+            ),
         },
     )
     durable_inbox.latch_fatal(
@@ -653,10 +755,7 @@ def _fail_closed_on_unclean_recorder_takeover(
         evidence_loss_possible=True,
         first_possibly_lost_source_sequence=(durable_inbox.latest_source_sequence()),
     )
-    raise RuntimeSafetyError(
-        "blocked_unclean_recorder_restart_state_uncertain: "
-        "the stale run is retained as invalid; start a new run ID"
-    )
+    return True
 
 
 @recorder_app.command("run")
@@ -742,6 +841,7 @@ def recorder_run(
                 lease=lease,
                 config=config,
                 owner_id=owner_id,
+                repository=repository,
                 durable_inbox=durable_inbox,
                 operational_repository=operational_repository,
             )
@@ -933,6 +1033,55 @@ def recorder_run(
             except Exception as exc:
                 clean_shutdown = False
                 typer.echo(f"Group O preparation cleanup failed: {exc}", err=True)
+        if (
+            frozen_application is not None
+            and repository is not None
+            and operational_repository is not None
+            and durable_inbox is not None
+            and recorder_generation is not None
+            and config is not None
+            and config.runtime.run_id is not None
+        ):
+            observed_shutdown = datetime.now(UTC)
+            try:
+                interrupted_episode_ids = _record_interrupted_streaming_episode_gaps(
+                    repository=repository,
+                    operational_repository=operational_repository,
+                    run_id=config.runtime.run_id,
+                    recorder_generation=recorder_generation,
+                    detected_at=observed_shutdown,
+                )
+                if interrupted_episode_ids:
+                    durable_inbox.record_incident(
+                        stable_error_code=("RECORDER_SHUTDOWN_EPISODE_CONTINUITY_LOST"),
+                        component="recorder_shutdown",
+                        severity="fatal",
+                        occurred_at=observed_shutdown,
+                        error_class="InterruptedStreamingEpisode",
+                        evidence_loss_possible=True,
+                        source_sequence=durable_inbox.latest_source_sequence(),
+                        details={
+                            "interrupted_streaming_episode_ids": (interrupted_episode_ids),
+                            "scientific_scoring_blocked": True,
+                        },
+                    )
+                    durable_inbox.latch_fatal(
+                        latch_kind="ingestion",
+                        stable_error_code=("RECORDER_SHUTDOWN_EPISODE_CONTINUITY_LOST"),
+                        occurred_at=observed_shutdown,
+                        error_class="InterruptedStreamingEpisode",
+                        evidence_loss_possible=True,
+                        first_possibly_lost_source_sequence=(
+                            durable_inbox.latest_source_sequence()
+                        ),
+                    )
+                    fatal_latched = True
+            except Exception as exc:
+                # A failed continuity audit must never fall through to
+                # STOPPED_CLEANLY, even if the remaining cleanup succeeds.
+                fatal_latched = True
+                clean_shutdown = False
+                typer.echo(f"episode continuity audit failed: {exc}", err=True)
         if frozen_application is not None:
             try:
                 frozen_application.shutdown(now=datetime.now(UTC))

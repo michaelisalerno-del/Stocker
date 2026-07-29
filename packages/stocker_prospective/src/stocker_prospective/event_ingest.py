@@ -58,6 +58,36 @@ class StreamOwner:
             raise ValueError("underlying stream cannot carry option ownership")
 
 
+def stream_owner_payload(owner: StreamOwner) -> dict[str, Any]:
+    """Return a JSON-safe, version-stable stream ownership receipt."""
+
+    option = owner.option_contract
+    return {
+        "request_id": owner.request_id,
+        "kind": owner.kind.value,
+        "symbol": owner.symbol,
+        "con_id": owner.con_id,
+        "exchange": owner.exchange,
+        "episode_id": owner.episode_id,
+        "option_contract": (
+            None
+            if option is None
+            else {
+                "underlying_con_id": option.underlying_con_id,
+                "con_id": option.con_id,
+                "expiry": option.expiry.isoformat(),
+                "dte": option.dte,
+                "dte_bucket": option.dte_bucket.value,
+                "strike": option.strike,
+                "right": option.right,
+                "multiplier": option.multiplier,
+                "exchange": option.exchange,
+                "trading_class": option.trading_class,
+            }
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class NormalizedCallback:
     raw_event: RawEvent | None = None
@@ -442,4 +472,5 @@ __all__ = [
     "NormalizedCallback",
     "StreamKind",
     "StreamOwner",
+    "stream_owner_payload",
 ]

@@ -391,7 +391,9 @@ latches, first-class gap and operational incidents, runtime artifact
 verification, and the strict V1.1 eligible-episode projection and guards. The
 migration is forward-only. An application that encounters a migration version
 newer than it supports fails closed without deleting or rewriting persistent
-data.
+data. Migration `0017` preserves the already-published `0016` boundary while
+adding typed callback-owner receipts and the explicit normal-versus-raw-only
+processing disposition for crash recovery.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have
@@ -405,7 +407,8 @@ following original envelope to `callback_inbox_v1` under SQLite WAL with full
 synchronous durability:
 
 1. stable inbox event identity and source sequence;
-2. callback kind, request ID, connection generation, owner, and symbol;
+2. callback kind, request ID, connection generation, textual owner, symbol,
+   and the full typed stream-owner receipt when registration is available;
 3. UTC and monotonic receipt times plus the original provider time when one
    exists;
 4. the original JSON-safe payload, preserving null values and explicitly
@@ -426,15 +429,33 @@ durable original evidence. The next generation quarantines that envelope as
 never silently resumes. Retry idempotency begins with the already admitted
 event identity; it is not inferred from callback content.
 
+IBKR may invoke a callback synchronously before its request method returns.
+The original callback is admitted first; stream registration then backfills
+the typed owner on every row for that unique request/generation without
+rewriting an existing receipt. A crash before that backfill still retains the
+complete provider callback and is recovered only as scientifically blocked
+raw-envelope evidence.
+
 The poller leases a source-ordered batch without deleting it. Its stable batch
 identity and membership survive lease expiry, so a callback arriving during
 recovery cannot change the immutable retry batch. Owner and recorder
 generation fence every transition. After normalisation, the recorder writes
 immutable raw Parquet, atomically installs data and metadata, registers the
 manifest and hashes, and records `callback_raw_materialization_v1`, including
-the exact sorted raw event-ID set. A retry may reuse that materialization only
-when it derives the same raw identities; a difference is fatal instead of
-projecting unpersisted derived events. Only after the outer application has durably completed
+the exact sorted raw event-ID set.
+
+Once ingestion or storage uncertainty is latched, a replacement generation
+never re-runs the stateful quote/bar normalizer or scientific projection for
+pending callbacks. If a prior raw materialization exists, every referenced
+SQLite manifest, metadata sidecar, file, and SHA-256 is verified and its stored
+event identity is reused exactly. Otherwise the recorder persists one
+`raw_callback_envelope_event` per inbox row with the original nullable payload,
+ordering identity, classification, and ownership receipt. The processing
+commit is explicitly marked `scientifically_blocked_raw_only` with
+`scientific_projection_complete = 0`; it cannot be mistaken for a completed
+scientific projection.
+
+Only after the outer application has durably completed
 promotion, option scheduling, episode work, reports, capability evidence and
 checkpoint markers does it record `callback_processing_commit_v1` and
 acknowledge the batch. A crash after the final commit but before acknowledgement
@@ -458,11 +479,15 @@ reconciliation:
 Derived scoring and episode logic run only after raw evidence is recoverable.
 A normalisation poison event remains quarantined with its reason and latches
 the affected run invalid. Neither reconnect nor restart clears an ingestion or
-storage latch. The original run remains blocked until an operator completes an
-evidence audit; when loss cannot be disproved, the operator starts a new run ID
-and retains the old run as invalid evidence. Inbox capacity, backlog, leasing,
-and health are scoped to run ID, so retained poison evidence from the invalid
-run cannot contaminate the new run.
+storage latch. A replacement generation may reclaim expired callback leases
+and continue raw-only materialisation and acknowledgement, but a fatal latch
+survives readiness refreshes and suppresses every score, promotion, episode,
+and outcome projection. Interrupted streaming option episodes create
+first-class unresolved scientific gaps. The original run remains blocked until
+an operator completes an evidence audit; when loss cannot be disproved, the
+operator starts a new run ID and retains the old run as invalid evidence.
+Inbox capacity, backlog, leasing, and health are scoped to run ID, so retained
+poison evidence from the invalid run cannot contaminate the new run.
 
 ## Callback containment and request generations
 

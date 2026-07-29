@@ -293,6 +293,9 @@ def test_recorder_lease_is_single_owner_with_heartbeat_and_stale_recovery(
     assert heartbeat.heartbeat_at_utc == now + timedelta(seconds=10)
     assert recovered.owner_id == "owner-b"
     assert recovered.recovered_stale_owner is True
+    assert recovered.previous_run_id == "prospective-test"
+    assert recovered.previous_owner_id == "owner-a"
+    assert recovered.previous_heartbeat_at_utc == now + timedelta(seconds=10)
 
 
 def test_recorder_anchor_keeps_wal_coordination_files_available(tmp_path: Path) -> None:

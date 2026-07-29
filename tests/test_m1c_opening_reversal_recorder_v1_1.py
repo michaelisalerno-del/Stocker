@@ -720,6 +720,58 @@ def test_database_guard_rejects_two_calls_even_with_distinct_roles(
             )
 
 
+def test_database_guards_reject_identity_changing_evidence_updates(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "identity-update.sqlite3")
+    database.migrate()
+    metadata = _metadata("identity-update", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    receipt = _seed_eligible_v1_1_episode(database, repository, metadata)
+    selection = _primary_selection()
+    repository.record_opening_reversal_contract_discovery_v1(
+        metadata,
+        episode_id="fresh-aal",
+        selection=selection,
+    )
+    predicted = selection.call if receipt.prediction_v1 == "CALL" else selection.put
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=predicted,
+            role="predicted_leg",
+        ),
+    )
+
+    with database._connect() as connection:
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="blocked_opening_reversal_contract_discovery_is_immutable",
+        ):
+            connection.execute(
+                """
+                UPDATE opening_reversal_contract_discovery_v1
+                SET episode_id = 'quiet-state-episode'
+                WHERE run_id = ?
+                """,
+                (metadata.run_id,),
+            )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="blocked_opening_reversal_option_outcome_is_immutable",
+        ):
+            connection.execute(
+                """
+                UPDATE opening_reversal_primary_option_outcome_v1
+                SET prediction_receipt_hash_v1 = ?
+                WHERE run_id = ?
+                """,
+                ("f" * 64, metadata.run_id),
+            )
+
+
 def test_v1_1_repository_rejects_quiet_state_episode_identity(
     tmp_path: Path,
 ) -> None:

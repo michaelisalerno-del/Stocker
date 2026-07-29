@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -45,6 +45,57 @@ class RawMarketEvent(BaseModel):
             return None
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("event timestamps must be timezone-aware")
+        return value.astimezone(UTC)
+
+    @property
+    def ordering_timestamp(self) -> datetime:
+        return self.provider_timestamp_utc or self.received_timestamp_utc
+
+
+class RawCallbackEnvelopeEvent(BaseModel):
+    """Original callback evidence retained when scientific projection is blocked.
+
+    This deliberately does not inherit ``RawMarketEvent``: official control
+    callbacks may use a negative request ID and an interrupted callback may
+    lack a provider monotonic timestamp.  ``received_monotonic_ns`` is a
+    deterministic ordering surrogate in that case; the original nullable
+    value remains explicit in ``original_received_monotonic_ns``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event_id: str = Field(min_length=1)
+    inbox_event_id: str = Field(min_length=1)
+    received_timestamp_utc: datetime
+    received_monotonic_ns: int = Field(ge=0)
+    original_received_monotonic_ns: int | None = Field(default=None, ge=0)
+    provider_timestamp_utc: datetime | None
+    source_sequence: int = Field(gt=0)
+    session: date
+    symbol: str = Field(min_length=1)
+    subscription_symbol: str | None
+    con_id: int
+    request_id: int
+    callback_kind: str = Field(min_length=1)
+    connection_generation: int = Field(ge=0)
+    callback_classification: str = Field(min_length=1)
+    subscription_owner: str | None
+    stream_owner: dict[str, Any] | None
+    original_payload: dict[str, Any]
+    admission_run_id: str | None
+    admission_recorder_generation: int | None
+    recovery_disposition: Literal["scientifically_blocked_raw_only"]
+
+    @field_validator("received_timestamp_utc", "provider_timestamp_utc")
+    @classmethod
+    def _callback_timestamps_are_aware_utc(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("callback evidence timestamps must be timezone-aware")
         return value.astimezone(UTC)
 
     @property
@@ -216,7 +267,8 @@ class FiveMinuteBarEvent(RawMarketEvent):
 
 
 RawEvent = (
-    UnderlyingLevel1QuoteEvent
+    RawCallbackEnvelopeEvent
+    | UnderlyingLevel1QuoteEvent
     | UnderlyingTickBidAskEvent
     | UnderlyingTickTradeEvent
     | UnderlyingDepthEvent

@@ -13,7 +13,7 @@ import stocker_prospective.cli as cli_module
 import stocker_prospective.ibkr_official as ibkr_official_module
 from stocker_prospective.bundle import BundleError
 from stocker_prospective.cli import app
-from stocker_prospective.config import RuntimeSafetyError, load_prospective_config
+from stocker_prospective.config import load_prospective_config
 from stocker_prospective.database import (
     EvidenceMetadata,
     LeaseRecord,
@@ -90,8 +90,9 @@ def test_cli_exposes_operational_commands_and_no_order_command() -> None:
     assert "\n│ orders " not in lowered
 
 
-def test_unclean_recorder_takeover_latches_before_socket_open(
+def test_unclean_recorder_takeover_latches_and_continues_raw_recovery(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = load_prospective_config(write_replay_config(tmp_path))
     assert cfg.runtime.run_id is not None
@@ -125,20 +126,34 @@ def test_unclean_recorder_takeover_latches_before_socket_open(
         heartbeat_at_utc=observed - timedelta(minutes=5),
         generation=2,
         recovered_stale_owner=True,
+        previous_run_id=cfg.runtime.run_id,
+        previous_owner_id="crashed-owner",
+        previous_heartbeat_at_utc=observed - timedelta(minutes=5),
+    )
+    monkeypatch.setattr(
+        cli_module.FrozenRecorderRepository,
+        "restorable_option_episode_schedules",
+        lambda _self, *, run_id: [
+            {
+                "run_id": run_id,
+                "episode_id": "opening-reversal:AAL",
+                "symbol": "AAL",
+                "status": "streaming",
+                "updated_at_utc": (observed - timedelta(minutes=1)).isoformat(),
+            }
+        ],
     )
 
-    with pytest.raises(
-        RuntimeSafetyError,
-        match="blocked_unclean_recorder_restart_state_uncertain",
-    ):
-        cli_module._fail_closed_on_unclean_recorder_takeover(
-            lease=lease,
-            config=cfg,
-            owner_id="replacement",
-            durable_inbox=inbox,
-            operational_repository=operational,
-        )
+    recovery_continues = cli_module._fail_closed_on_unclean_recorder_takeover(
+        lease=lease,
+        config=cfg,
+        owner_id="replacement",
+        repository=repository,
+        durable_inbox=inbox,
+        operational_repository=operational,
+    )
 
+    assert recovery_continues is True
     assert inbox.has_active_fatal("ingestion")
     with repository._connect() as connection:
         row = connection.execute(
@@ -157,8 +172,25 @@ def test_unclean_recorder_takeover_latches_before_socket_open(
                   'RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN'
             """
         ).fetchone()
+        gap = connection.execute(
+            """
+            SELECT cause_code, severity, recoverability,
+                   affected_episode_ids_json, resolution_timestamp_utc
+            FROM gap_incident_v1
+            WHERE run_id = ?
+            """,
+            (cfg.runtime.run_id,),
+        ).fetchone()
     assert tuple(row) == ("INGESTION_FATAL", 0)
-    assert '"socket_opened":false' in str(incident["details_json"])
+    assert '"raw_inbox_recovery_continues":true' in str(incident["details_json"])
+    assert '"scientific_scoring_blocked":true' in str(incident["details_json"])
+    assert tuple(gap) == (
+        "PROCESS_RESTART_OPTION_CONTINUITY_LOST",
+        "scientific",
+        "unrecoverable",
+        '["opening-reversal:AAL"]',
+        None,
+    )
 
 
 def test_ibkr_api_register_writes_verified_immutable_provenance(

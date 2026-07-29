@@ -1291,19 +1291,21 @@ def stable_gap_id(
     connection_generation: int,
     start_timestamp_utc: datetime,
     cause_code: str,
+    incident_identity: str | None = None,
 ) -> str:
-    identity = "|".join(
-        (
-            run_id,
-            str(recorder_generation),
-            symbol,
-            stream_kind,
-            str(request_id),
-            str(connection_generation),
-            _utc(start_timestamp_utc, label="gap start").isoformat(),
-            cause_code,
-        )
+    identity_parts: tuple[str, ...] = (
+        run_id,
+        str(recorder_generation),
+        symbol,
+        stream_kind,
+        str(request_id),
+        str(connection_generation),
+        _utc(start_timestamp_utc, label="gap start").isoformat(),
+        cause_code,
     )
+    if incident_identity is not None:
+        identity_parts = (*identity_parts, incident_identity)
+    identity = "|".join(identity_parts)
     return hashlib.sha256(identity.encode()).hexdigest()
 
 

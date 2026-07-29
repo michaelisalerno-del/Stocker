@@ -994,6 +994,11 @@ method.
 
 ### Durable admission and restart rule
 
+Migration `0017_callback_raw_only_recovery_v1.sql` is intentionally separate
+from `0016`; databases that already applied the hardening schema receive the
+new ownership and raw-only disposition columns without replaying or editing a
+tracked migration.
+
 For each official callback, expect a short-lived `provider_pending` row,
 followed atomically by a canonical `pending` scientific row and a diagnostic
 provider row. The recorder then leases a stable ordered batch, writes and
@@ -1006,11 +1011,27 @@ without canonical materialisation is not safe and becomes ingestion-fatal.
 An expired callback batch lease can be reclaimed by a newer generation. A
 stale recorder-process owner is different: the executable cannot prove that
 its in-memory active episodes and option subscriptions were continuous.
-Startup therefore records `RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN`, opens no
-IBKR socket, and exits with the run latched invalid. Preserve that run and
-start a new preregistered run ID after the incident audit. Old pending or
-quarantined rows remain queryable but are excluded from the new run's leasing,
-capacity, backlog, and health.
+Startup therefore records `RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN` and keeps
+the run ingestion-fatal. The replacement generation is allowed to reclaim
+expired callback leases and persist/acknowledge raw evidence, but it does not
+reconstruct or run the old generation's stateful normalizer. Existing
+materialization is reused only after the manifest, sidecar, file, and content
+hash verify. A not-yet-materialized callback becomes immutable
+`raw_callback_envelope_event` evidence. Confirm its processing row says
+`scientifically_blocked_raw_only` and
+`scientific_projection_complete = 0`; this is recovery evidence, not a score.
+The fatal latch cannot be cleared by artifact, context, capability, or
+connection readiness. Every score, checkpoint, promotion, episode, and outcome
+projection remains disabled. An interrupted streaming option episode also creates one
+unresolved `PROCESS_RESTART_OPTION_CONTINUITY_LOST` scientific gap. Preserve
+the raw recovery set; start a new preregistered run ID for scientifically valid
+recording unless an explicit evidence audit resolves the latch and gaps. Old
+pending or quarantined rows remain queryable but are excluded from a different
+run's leasing, capacity, backlog, and health.
+
+A graceful process stop is not allowed to hide an incomplete streaming option
+episode behind `STOPPED_CLEANLY`: shutdown records the same scientific gap and
+an ingestion-fatal continuity incident before releasing the recorder lease.
 
 ## 11. Interpret recorder health
 
@@ -1210,7 +1231,7 @@ evidence without its own audit.
 
 | Symptom | Meaning and operator action |
 | --- | --- |
-| Stale lease/heartbeat | Confirm the configured owner and process are alive. Stop duplicate processes and preserve the DB/WAL. An expired callback-batch lease is generation-fenced and reclaimable; a stale recorder-process owner latches `RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN` before socket open and requires a new run ID. Historical rows are not proof of life. |
+| Stale lease/heartbeat | Confirm the configured owner and process are alive. Stop duplicate processes and preserve the DB/WAL. A replacement generation latches `RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN`, reclaims expired callback batches for raw-only persistence/acknowledgement, and keeps all scientific projection blocked. Interrupted option streams create unresolved scientific gaps. Use a new run ID for valid recording unless an explicit audit resolves every latch/gap. Historical rows are not proof of life. |
 | `CALLBACK_OVERFLOW` | The bounded durable inbox could not admit another callback. Stop recording, preserve inbox/raw state, identify the first possibly lost sequence, and treat the run as ingestion-fatal. Do not raise the bound as a substitute for the audit. |
 | Growing unacknowledged backlog | Compare callback, raw-commit, and ack heartbeats. Inspect leased attempts and storage incidents. A processing-committed batch may be acknowledged after lease recovery; a poison or interrupted `provider_pending` row is quarantined and fatal. |
 | Valid Parquet but missing manifest | Preserve the sidecar and restart under controlled conditions. Reconciliation verifies the hash and registers the manifest idempotently before inbox acknowledgement. |

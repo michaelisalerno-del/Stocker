@@ -79,6 +79,9 @@ class LeaseRecord(BaseModel):
     heartbeat_at_utc: datetime
     generation: int
     recovered_stale_owner: bool
+    previous_run_id: str | None = None
+    previous_owner_id: str | None = None
+    previous_heartbeat_at_utc: datetime | None = None
 
 
 class UnderlyingContractInput(BaseModel):
@@ -816,6 +819,9 @@ class ProspectiveRepository:
                 "SELECT * FROM recorder_lease WHERE lease_key = 'prospective_recorder'"
             ).fetchone()
             recovered = False
+            previous_run_id: str | None = None
+            previous_owner_id: str | None = None
+            previous_heartbeat_at_utc: datetime | None = None
             if row is not None:
                 heartbeat = datetime.fromisoformat(str(row["heartbeat_at_utc"]))
                 same_owner = row["owner_id"] == owner_id and row["run_id"] == run_id
@@ -827,6 +833,9 @@ class ProspectiveRepository:
                 recovered = not same_owner and stale
                 acquired = now.isoformat() if recovered else str(row["acquired_at_utc"])
                 if recovered:
+                    previous_run_id = str(row["run_id"])
+                    previous_owner_id = str(row["owner_id"])
+                    previous_heartbeat_at_utc = heartbeat
                     historical_generation = connection.execute(
                         """
                         SELECT COALESCE(MAX(recorder_generation), 0)
@@ -888,6 +897,9 @@ class ProspectiveRepository:
                 heartbeat_at_utc=now,
                 generation=generation,
                 recovered_stale_owner=recovered,
+                previous_run_id=previous_run_id,
+                previous_owner_id=previous_owner_id,
+                previous_heartbeat_at_utc=previous_heartbeat_at_utc,
             )
         except Exception:
             connection.rollback()

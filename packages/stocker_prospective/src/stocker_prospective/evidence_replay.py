@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from stocker_prospective.events import (
     FiveMinuteBarEvent,
     OptionQuoteEvent,
+    RawCallbackEnvelopeEvent,
     RawEvent,
     UnderlyingDepthEvent,
     UnderlyingDepthSnapshotEvent,
@@ -50,6 +51,7 @@ class EvidenceReplayResult(BaseModel):
 
 
 _EVENT_MODELS: dict[str, type[RawEvent]] = {
+    "raw_callback_envelope_event": RawCallbackEnvelopeEvent,
     "underlying_level1_quote_event": UnderlyingLevel1QuoteEvent,
     "underlying_tick_bidask_event": UnderlyingTickBidAskEvent,
     "underlying_tick_trade_event": UnderlyingTickTradeEvent,
@@ -76,8 +78,10 @@ def _decode_json_columns(row: dict[str, Any]) -> dict[str, Any]:
             or name
             in {
                 "conditions",
+                "original_payload",
                 "quote_attributes",
                 "snapshot",
+                "stream_owner",
             }
         ):
             try:
@@ -350,7 +354,9 @@ def replay_persisted_evidence(
     raw_records = [
         {
             "stage": (
-                "five_minute_bar"
+                "raw_callback_envelope"
+                if isinstance(event, RawCallbackEnvelopeEvent)
+                else "five_minute_bar"
                 if isinstance(event, FiveMinuteBarEvent)
                 else "option_quote"
                 if isinstance(event, OptionQuoteEvent)
@@ -395,7 +401,13 @@ def replay_persisted_evidence(
         raw_events_replayed=sum(
             1
             for item in records
-            if item["stage"] in {"raw_market_event", "five_minute_bar", "option_quote"}
+            if item["stage"]
+            in {
+                "raw_callback_envelope",
+                "raw_market_event",
+                "five_minute_bar",
+                "option_quote",
+            }
         ),
         stage_counts=dict(sorted(counts.items())),
         digest=hashlib.sha256(canonical.encode()).hexdigest(),

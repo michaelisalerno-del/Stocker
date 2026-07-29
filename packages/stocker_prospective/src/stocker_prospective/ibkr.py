@@ -387,6 +387,7 @@ class IBKRMarketDataAdapter:
         self._connection_generation = 0
         self._request_generations: dict[int, int] = {}
         self._request_owners: dict[int, str] = {}
+        self._request_stream_owners: dict[int, dict[str, object]] = {}
         self._fatal_callback_code: str | None = None
         self._fatal_callback_sequence: int | None = None
         self._latest_durably_admitted_sequence: int | None = None
@@ -843,9 +844,44 @@ class IBKRMarketDataAdapter:
         self._request_generations[request_id] = self._connection_generation
         self._request_owners[request_id] = subscription_owner
 
+    def register_stream_owner(
+        self,
+        request_id: int,
+        stream_owner: Mapping[str, object],
+    ) -> None:
+        """Attach typed ownership after a request ID is allocated.
+
+        The durable inbox backfill closes the small official-client race where
+        a synchronous callback arrives before the request method returns.
+        """
+
+        if self._request_generations.get(request_id) != self._connection_generation:
+            raise ValueError("stream owner request generation differs")
+        encoded = json.dumps(
+            dict(stream_owner),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        payload = json.loads(encoded)
+        if not isinstance(payload, dict) or int(payload.get("request_id", -1)) != request_id:
+            raise ValueError("stream owner request identity differs")
+        existing = self._request_stream_owners.get(request_id)
+        if existing is not None and existing != payload:
+            raise ValueError("stream owner identity differs")
+        self._request_stream_owners[request_id] = payload
+        if self._durable_inbox is not None:
+            self._durable_inbox.attach_stream_owner(
+                request_id=request_id,
+                connection_generation=self._connection_generation,
+                stream_owner=payload,
+                attached_at=datetime.now(UTC),
+            )
+
     def _forget_request(self, request_id: int) -> None:
         self._request_generations.pop(request_id, None)
         self._request_owners.pop(request_id, None)
+        self._request_stream_owners.pop(request_id, None)
 
     @staticmethod
     def _symbol_from_owner(owner: str | None) -> str | None:
@@ -953,6 +989,7 @@ class IBKRMarketDataAdapter:
                     inbox_event_id=provider_event_id,
                     subscription_owner=owner,
                     symbol=self._symbol_from_owner(owner),
+                    stream_owner=self._request_stream_owners.get(request_id),
                     provider_envelope=True,
                 )
                 self._latest_durably_admitted_sequence = admission.event.source_sequence
@@ -1229,6 +1266,7 @@ class IBKRMarketDataAdapter:
     def cancel_orphaned_market_data_request(self, request_id: int) -> None:
         """Repair a request that has no higher-level internal owner."""
 
+        self._tombstone_request(request_id, "orphaned_market_data_request")
         self._cancel_upstream(request_id)
         self.budget.request_cancellation(str(request_id))
         self.budget.confirm_cancellation(str(request_id))
@@ -1471,6 +1509,7 @@ class IBKRMarketDataAdapter:
                 inbox_event_id=event_id,
                 subscription_owner=owner,
                 symbol=self._symbol_from_owner(owner),
+                stream_owner=self._request_stream_owners.get(request_id),
                 provider_envelope_event_id=(
                     None if provider_event_id is None else str(provider_event_id)
                 ),

@@ -109,6 +109,7 @@ def _safe(value: str) -> str:
 
 def _event_type(event: RawEvent) -> str:
     names = {
+        "RawCallbackEnvelopeEvent": "raw_callback_envelope_event",
         "UnderlyingLevel1QuoteEvent": "underlying_level1_quote_event",
         "UnderlyingTickBidAskEvent": "underlying_tick_bidask_event",
         "UnderlyingTickTradeEvent": "underlying_tick_trade_event",

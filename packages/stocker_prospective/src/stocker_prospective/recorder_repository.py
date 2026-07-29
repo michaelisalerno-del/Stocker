@@ -8,6 +8,7 @@ import sqlite3
 from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Final, Literal, cast
 
 from pydantic import BaseModel
@@ -57,7 +58,7 @@ from stocker_prospective.option_ledger import (
     OptionContractPlan,
     ShadowOptionOutcome,
 )
-from stocker_prospective.partition_store import PartitionWriteResult
+from stocker_prospective.partition_store import PartitionWriteResult, sha256_path
 from stocker_prospective.quality_report import SessionQualityReport
 from stocker_prospective.quiet_state import (
     NeutralControlDecision,
@@ -2403,6 +2404,51 @@ class FrozenRecorderRepository:
             )
             assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
+
+    def verify_partition_hashes(
+        self,
+        *,
+        run_id: str,
+        content_hashes: tuple[str, ...],
+    ) -> bool:
+        """Verify exact SQLite manifests and immutable files before batch reuse."""
+
+        expected = tuple(sorted(set(content_hashes)))
+        if not expected:
+            return True
+        with self.repository._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT content_hash, file_path
+                FROM raw_partition_manifest_v0
+                WHERE run_id = ?
+                  AND content_hash IN ({",".join("?" for _ in expected)})
+                """,
+                (run_id, *expected),
+            ).fetchall()
+        if tuple(sorted(str(row["content_hash"]) for row in rows)) != expected:
+            return False
+        for row in rows:
+            content_hash = str(row["content_hash"])
+            data_path = Path(str(row["file_path"]))
+            metadata_path = data_path.with_name(f"part-{content_hash}.metadata.json")
+            if (
+                not data_path.is_file()
+                or not metadata_path.is_file()
+                or sha256_path(data_path) != content_hash
+            ):
+                return False
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return False
+            if (
+                metadata.get("content_hash") != content_hash
+                or Path(str(metadata.get("data_path"))) != data_path
+                or metadata.get("run_id") != run_id
+            ):
+                return False
+        return True
 
     def record_shadow_outcome(
         self,

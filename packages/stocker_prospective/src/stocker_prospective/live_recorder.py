@@ -21,16 +21,19 @@ from stocker_prospective.durable_inbox import (
     CallbackInboxError,
     CallbackInboxEvent,
     DurableCallbackInbox,
+    RawMaterialization,
 )
 from stocker_prospective.event_ingest import (
     IBKRCallbackNormalizer,
     NormalizedCallback,
     StreamKind,
     StreamOwner,
+    stream_owner_payload,
 )
 from stocker_prospective.events import (
     FiveMinuteBarEvent,
     OptionQuoteEvent,
+    RawCallbackEnvelopeEvent,
     RawEvent,
     UnderlyingDepthEvent,
     UnderlyingDepthSnapshot,
@@ -136,6 +139,11 @@ class LivePollResult(BaseModel):
     durable_inbox_event_ids: tuple[str, ...] = ()
     durable_lease_batch_id: str | None = None
     raw_materialization_reused: bool = False
+    processing_disposition: Literal[
+        "normal_scientific_projection",
+        "scientifically_blocked_raw_only",
+    ] = "normal_scientific_projection"
+    scientific_projection_complete: bool = True
 
 
 @dataclass(frozen=True)
@@ -191,6 +199,7 @@ def _bar_event(
 
 def _event_type_name(event: RawEvent) -> str:
     return {
+        "RawCallbackEnvelopeEvent": "raw_callback_envelope_event",
         "UnderlyingLevel1QuoteEvent": "underlying_level1_quote_event",
         "UnderlyingTickBidAskEvent": "underlying_tick_bidask_event",
         "UnderlyingTickTradeEvent": "underlying_tick_trade_event",
@@ -350,10 +359,14 @@ class FrozenM1CLiveRecorder:
             and readiness.historical_activity_baseline_available
             and readiness.clock_drift_within_tolerance
         )
+        self._scientific_block_latched = (
+            durable_inbox is not None and durable_inbox.has_active_fatal()
+        )
         self._scientific_scoring_enabled = (
             readiness.capability_preflight_passed
             and self._scientific_prerequisites_passed
             and self._session_context_ready
+            and not self._scientific_block_latched
         )
         self._clock_drift_seconds: float | None = None
         self._depth_exchanges: tuple[str, ...] = ()
@@ -381,6 +394,11 @@ class FrozenM1CLiveRecorder:
         self._opening_reversal_gate_sessions_restored_v1_1: set[date] = set()
 
     def register_stream(self, owner: StreamOwner) -> None:
+        if self.durable_inbox is not None:
+            self.adapter.register_stream_owner(
+                owner.request_id,
+                stream_owner_payload(owner),
+            )
         self.normalizer.register(owner)
         if owner.kind is StreamKind.UNDERLYING_BAR:
             self._finalizer.register(
@@ -529,7 +547,10 @@ class FrozenM1CLiveRecorder:
 
         self._capability_preflight_passed = passed
         self._scientific_scoring_enabled = (
-            passed and self._scientific_prerequisites_passed and self._session_context_ready
+            passed
+            and self._scientific_prerequisites_passed
+            and self._session_context_ready
+            and not self._scientific_block_latched
         )
 
     def set_session_context_ready(self, *, passed: bool) -> None:
@@ -540,7 +561,14 @@ class FrozenM1CLiveRecorder:
             self._capability_preflight_passed
             and self._scientific_prerequisites_passed
             and self._session_context_ready
+            and not self._scientific_block_latched
         )
+
+    def _latch_scientific_block(self) -> None:
+        """Prevent readiness refreshes from clearing a persisted fatal latch."""
+
+        self._scientific_block_latched = True
+        self._scientific_scoring_enabled = False
 
     def acknowledge_checkpoint(self, result: RecorderCheckpointResult) -> None:
         """Suppress replay only after the application commits all side effects."""
@@ -665,6 +693,10 @@ class FrozenM1CLiveRecorder:
         return self._scientific_scoring_enabled
 
     @property
+    def scientific_block_latched(self) -> bool:
+        return self._scientific_block_latched
+
+    @property
     def clock_drift_seconds(self) -> float | None:
         return self._clock_drift_seconds
 
@@ -717,6 +749,106 @@ class FrozenM1CLiveRecorder:
                 latest_raw_partition_committed_at_utc=committed_at,
             )
         return tuple(item.content_hash for item in partitions)
+
+    @staticmethod
+    def _blocked_callback_envelope(event: CallbackInboxEvent) -> RawCallbackEnvelopeEvent:
+        """Create deterministic raw-only evidence without stateful normalisation."""
+
+        stream_owner = event.stream_owner
+        raw_con_id = None if stream_owner is None else stream_owner.get("con_id")
+        con_id = raw_con_id if isinstance(raw_con_id, int) else -1
+        routing_symbol = event.symbol or (
+            "__CONTROL__" if event.request_id < 0 else "__UNRESOLVED__"
+        )
+        ordering_monotonic = (
+            event.source_sequence
+            if event.received_monotonic_ns is None
+            else event.received_monotonic_ns
+        )
+        ordering_timestamp = event.provider_timestamp_utc or event.received_utc
+        return RawCallbackEnvelopeEvent(
+            event_id=hashlib.sha256(
+                f"scientifically_blocked_raw_callback|{event.inbox_event_id}".encode()
+            ).hexdigest(),
+            inbox_event_id=event.inbox_event_id,
+            received_timestamp_utc=event.received_utc,
+            received_monotonic_ns=ordering_monotonic,
+            original_received_monotonic_ns=event.received_monotonic_ns,
+            provider_timestamp_utc=event.provider_timestamp_utc,
+            source_sequence=event.source_sequence,
+            session=ordering_timestamp.astimezone(NEW_YORK).date(),
+            symbol=routing_symbol,
+            subscription_symbol=event.symbol,
+            con_id=con_id,
+            request_id=event.request_id,
+            callback_kind=event.callback_kind,
+            connection_generation=event.connection_generation,
+            callback_classification=event.callback_classification.value,
+            subscription_owner=event.subscription_owner,
+            stream_owner=stream_owner,
+            original_payload=event.original_payload,
+            admission_run_id=event.admission_run_id,
+            admission_recorder_generation=event.admission_recorder_generation,
+            recovery_disposition="scientifically_blocked_raw_only",
+        )
+
+    def _poll_scientifically_blocked_batch(
+        self,
+        *,
+        now: datetime,
+        events: tuple[CallbackInboxEvent, ...],
+        materialization: RawMaterialization | None,
+    ) -> LivePollResult:
+        """Recover a durable lease without re-running scientific projection.
+
+        A prior generation may have advanced stateful quote/bar caches before
+        crashing.  Reconstructing those caches from only this lease would be
+        scientifically ambiguous.  Existing immutable materialization is
+        therefore hash-verified and reused exactly; otherwise one raw callback
+        envelope per inbox row is persisted before acknowledgement.
+        """
+
+        if materialization is not None:
+            if not self.repository.verify_partition_hashes(
+                run_id=self.run_id,
+                content_hashes=materialization.partition_hashes,
+            ):
+                raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_INVALID")
+            partition_hashes = materialization.partition_hashes
+            raw_event_ids = materialization.raw_event_ids
+            raw_event_count = len(raw_event_ids)
+        else:
+            raw_events = tuple(self._blocked_callback_envelope(event) for event in events)
+            metadata = self.metadata_factory(
+                max(
+                    (event.received_timestamp_utc for event in raw_events),
+                    default=now,
+                ),
+                tuple(event.ordering_timestamp for event in raw_events) or (now,),
+            )
+            partition_hashes = self._persist_raw(
+                metadata,
+                raw_events,
+                committed_at=now,
+            )
+            raw_event_ids = tuple(sorted(event.event_id for event in raw_events))
+            raw_event_count = len(raw_events)
+        return LivePollResult(
+            callback_count=len(events),
+            raw_event_count=raw_event_count,
+            finalised_bar_count=0,
+            checkpoint_count=0,
+            fresh_episode_count=0,
+            partition_hashes=partition_hashes,
+            raw_event_ids=raw_event_ids,
+            blocked_checkpoints={
+                f"{symbol}:{session.isoformat()}:{checkpoint}": reason
+                for (symbol, session, checkpoint), reason in sorted(self._blocked.items())
+            },
+            checkpoint_results=(),
+            processing_disposition="scientifically_blocked_raw_only",
+            scientific_projection_complete=False,
+        )
 
     @staticmethod
     def _nominal_opening_reversal_entry_v1_1(session: date) -> datetime:
@@ -1261,7 +1393,7 @@ class FrozenM1CLiveRecorder:
                 connection_generation=first.connection_generation,
             )
         if self.adapter.fatal_callback_code is not None or inbox.has_active_fatal():
-            self._scientific_scoring_enabled = False
+            self._latch_scientific_block()
         leased = inbox.lease(
             lease_owner=self.lease_owner,
             lease_generation=self.recorder_generation,
@@ -1284,19 +1416,25 @@ class FrozenM1CLiveRecorder:
                 acknowledged_at=observed_now,
             )
         pending_events = tuple(pending)
-        callbacks = tuple(event.normalizer_payload() for event in pending_events)
         try:
             materialization = inbox.raw_materialization(pending_events)
-            result = self._poll_callbacks(
-                now=observed_now,
-                callbacks=callbacks,
-                precommitted_partition_hashes=(
-                    None if materialization is None else materialization.partition_hashes
-                ),
-                expected_raw_event_ids=(
-                    None if materialization is None else materialization.raw_event_ids
-                ),
-            )
+            if self._scientific_block_latched:
+                result = self._poll_scientifically_blocked_batch(
+                    now=observed_now,
+                    events=pending_events,
+                    materialization=materialization,
+                )
+            else:
+                result = self._poll_callbacks(
+                    now=observed_now,
+                    callbacks=tuple(event.normalizer_payload() for event in pending_events),
+                    precommitted_partition_hashes=(
+                        None if materialization is None else materialization.partition_hashes
+                    ),
+                    expected_raw_event_ids=(
+                        None if materialization is None else materialization.raw_event_ids
+                    ),
+                )
             self._failure_checkpoint("before_callback_raw_materialization")
             inbox.commit_raw_materialization(
                 pending_events,
@@ -1363,7 +1501,7 @@ class FrozenM1CLiveRecorder:
                 request_id=failed.request_id,
                 connection_generation=failed.connection_generation,
             )
-            self._scientific_scoring_enabled = False
+            self._latch_scientific_block()
             raise
         except Exception as exc:
             inbox.release(
@@ -1411,7 +1549,7 @@ class FrozenM1CLiveRecorder:
                 first_possibly_lost_source_sequence=first_sequence,
                 connection_generation=self.adapter.connection_generation,
             )
-            self._scientific_scoring_enabled = False
+            self._latch_scientific_block()
             raise
 
     def finalize_durable_poll(
@@ -1437,6 +1575,8 @@ class FrozenM1CLiveRecorder:
             run_id=self.run_id,
             recorder_generation=self.recorder_generation,
             raw_partition_hashes=result.partition_hashes,
+            processing_disposition=result.processing_disposition,
+            scientific_projection_complete=result.scientific_projection_complete,
             committed_at=observed,
         )
         self._failure_checkpoint("after_callback_processing_commit")
@@ -1496,7 +1636,7 @@ class FrozenM1CLiveRecorder:
             except Exception:
                 return
             return
-        self._scientific_scoring_enabled = False
+        self._latch_scientific_block()
         storage_failure = isinstance(error, (OSError, sqlite3.Error)) or any(
             token in str(error).lower()
             for token in ("database", "partition", "parquet", "storage", "disk")
@@ -1694,29 +1834,41 @@ class FrozenM1CLiveRecorder:
                 committed_at=observed_now,
             )
         )
-        results = self._score_ready(observed_now=observed_now)
-        complete_opening_receipts = tuple(
-            receipt
-            for result in results
-            if (receipt := result.opening_reversal_prediction_v1) is not None
-        )
-        deadline_opening_receipts = self._emit_opening_reversal_deadline_receipts_v1(
-            observed_now,
-        )
-        opening_receipts_by_hash = {
-            receipt.receipt_hash_v1: receipt
-            for receipt in (
-                *complete_opening_receipts,
-                *deadline_opening_receipts,
+        results: tuple[RecorderCheckpointResult, ...]
+        opening_receipts_by_hash: dict[str, OpeningReversalPredictionReceiptV1]
+        barrier_audits_v1_1: tuple[OpeningReversalCausalBarrierAuditV1_1, ...]
+        released_decision_events: tuple[RawEvent, ...]
+        newly_derived_raw_events: tuple[RawEvent, ...]
+        if self._scientific_block_latched:
+            results = ()
+            opening_receipts_by_hash = {}
+            barrier_audits_v1_1 = ()
+            released_decision_events = ()
+            newly_derived_raw_events = ()
+        else:
+            results = self._score_ready(observed_now=observed_now)
+            complete_opening_receipts = tuple(
+                receipt
+                for result in results
+                if (receipt := result.opening_reversal_prediction_v1) is not None
             )
-        }
-        (
-            barrier_audits_v1_1,
-            released_decision_events,
-            newly_derived_raw_events,
-        ) = self._close_opening_reversal_barrier_v1_1(
-            observed_now=observed_now,
-        )
+            deadline_opening_receipts = self._emit_opening_reversal_deadline_receipts_v1(
+                observed_now,
+            )
+            opening_receipts_by_hash = {
+                receipt.receipt_hash_v1: receipt
+                for receipt in (
+                    *complete_opening_receipts,
+                    *deadline_opening_receipts,
+                )
+            }
+            (
+                barrier_audits_v1_1,
+                released_decision_events,
+                newly_derived_raw_events,
+            ) = self._close_opening_reversal_barrier_v1_1(
+                observed_now=observed_now,
+            )
         if newly_derived_raw_events and precommitted_partition_hashes is None:
             raw_events.extend(newly_derived_raw_events)
             partition_hashes = (
@@ -1757,11 +1909,12 @@ class FrozenM1CLiveRecorder:
             )
             if persisted is not None and persisted.barrier_status == "passed":
                 barrier_passed_sessions.add(session)
-        self._activate_v1_1_checkpoint_results_after_barrier(
-            results,
-            barrier_passed_sessions=frozenset(barrier_passed_sessions),
-        )
-        self._record_due_episode_windows(observed_now)
+        if not self._scientific_block_latched:
+            self._activate_v1_1_checkpoint_results_after_barrier(
+                results,
+                barrier_passed_sessions=frozenset(barrier_passed_sessions),
+            )
+            self._record_due_episode_windows(observed_now)
         self._trim_history(observed_now)
         if (
             self.operational_repository is not None

@@ -68,6 +68,7 @@ class CallbackInboxEvent(BaseModel):
     connection_generation: int = Field(ge=0)
     subscription_owner: str | None
     symbol: str | None
+    stream_owner: dict[str, Any] | None
     callback_classification: CallbackClassification
     provider_envelope_event_id: str | None
     lease_owner: str | None
@@ -104,6 +105,7 @@ class CallbackInboxEvent(BaseModel):
             "received_timestamp_utc": self.received_utc.isoformat(),
             "received_monotonic_ns": self.received_monotonic_ns,
             "source_sequence": self.source_sequence,
+            "persisted_stream_owner": self.stream_owner,
         }
 
 
@@ -313,6 +315,11 @@ class DurableCallbackInbox:
                 None if row["subscription_owner"] is None else str(row["subscription_owner"])
             ),
             symbol=None if row["symbol"] is None else str(row["symbol"]),
+            stream_owner=(
+                None
+                if row["stream_owner_json"] is None
+                else json.loads(str(row["stream_owner_json"]))
+            ),
             callback_classification=CallbackClassification(str(row["callback_classification"])),
             provider_envelope_event_id=(
                 None
@@ -357,6 +364,7 @@ class DurableCallbackInbox:
         inbox_event_id: str | None = None,
         subscription_owner: str | None = None,
         symbol: str | None = None,
+        stream_owner: Mapping[str, object] | None = None,
         diagnostic: bool = False,
         provider_envelope: bool = False,
         provider_envelope_event_id: str | None = None,
@@ -373,6 +381,7 @@ class DurableCallbackInbox:
             raise ValueError("callback monotonic timestamp must be nonnegative")
         original_payload = dict(payload)
         payload_json = _encoded(original_payload)
+        stream_owner_json = None if stream_owner is None else _encoded(dict(stream_owner))
         event_id = inbox_event_id or _event_id(
             callback_kind=kind,
             request_id=request_id,
@@ -445,6 +454,7 @@ class DurableCallbackInbox:
                     or int(existing["request_id"]) != request_id
                     or existing["admission_run_id"] != self.run_id
                     or int(existing["connection_generation"]) != connection_generation
+                    or existing["stream_owner_json"] != stream_owner_json
                     or not stored_payload_matches
                 ):
                     connection.rollback()
@@ -488,10 +498,11 @@ class DurableCallbackInbox:
                     received_monotonic_ns, provider_timestamp_utc,
                     original_payload_json, admission_run_id,
                     admission_recorder_generation, connection_generation,
-                    subscription_owner, symbol, callback_classification,
+                    subscription_owner, symbol, stream_owner_json,
+                    callback_classification,
                     provider_envelope_event_id, status, acknowledgement_timestamp_utc,
                     failure_classification, admitted_at_utc, updated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
@@ -506,6 +517,7 @@ class DurableCallbackInbox:
                     connection_generation,
                     subscription_owner,
                     symbol,
+                    stream_owner_json,
                     classification.value,
                     provider_envelope_event_id,
                     initial_status.value,
@@ -536,6 +548,67 @@ class DurableCallbackInbox:
             ).fetchone()
         assert row is not None
         return InboxAdmissionResult(event=self._event(row), duplicate=False)
+
+    def attach_stream_owner(
+        self,
+        *,
+        request_id: int,
+        connection_generation: int,
+        stream_owner: Mapping[str, object],
+        attached_at: datetime,
+    ) -> int:
+        """Backfill ownership for callbacks delivered during request startup.
+
+        IBKR may invoke a callback before the request method returns.  The
+        callback is already durable at that point; registration then fills the
+        typed owner only on still-unprocessed rows and never rewrites an
+        existing ownership receipt.
+        """
+
+        observed = _utc(attached_at, label="stream owner attachment timestamp")
+        encoded_owner = _encoded(dict(stream_owner))
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            conflicting = connection.execute(
+                """
+                SELECT inbox_event_id
+                FROM callback_inbox_v1
+                WHERE admission_run_id IS ?
+                  AND request_id = ?
+                  AND connection_generation = ?
+                  AND stream_owner_json IS NOT NULL
+                  AND stream_owner_json <> ?
+                LIMIT 1
+                """,
+                (
+                    self.run_id,
+                    request_id,
+                    connection_generation,
+                    encoded_owner,
+                ),
+            ).fetchone()
+            if conflicting is not None:
+                connection.rollback()
+                raise CallbackIdentityCollision("CALLBACK_STREAM_OWNER_COLLISION")
+            cursor = connection.execute(
+                """
+                UPDATE callback_inbox_v1
+                SET stream_owner_json = ?, updated_at_utc = ?
+                WHERE admission_run_id IS ?
+                  AND request_id = ?
+                  AND connection_generation = ?
+                  AND stream_owner_json IS NULL
+                """,
+                (
+                    encoded_owner,
+                    observed.isoformat(),
+                    self.run_id,
+                    request_id,
+                    connection_generation,
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount
 
     def _complete_provider_envelope_in_transaction(
         self,
@@ -1145,8 +1218,23 @@ class DurableCallbackInbox:
         run_id: str,
         recorder_generation: int,
         raw_partition_hashes: tuple[str, ...],
+        processing_disposition: Literal[
+            "normal_scientific_projection",
+            "scientifically_blocked_raw_only",
+        ] = "normal_scientific_projection",
+        scientific_projection_complete: bool = True,
         committed_at: datetime,
     ) -> None:
+        if (
+            processing_disposition == "normal_scientific_projection"
+            and not scientific_projection_complete
+        ):
+            raise ValueError("normal callback processing must complete scientific projection")
+        if (
+            processing_disposition == "scientifically_blocked_raw_only"
+            and scientific_projection_complete
+        ):
+            raise ValueError("blocked raw-only processing cannot claim scientific projection")
         observed = _utc(committed_at, label="callback processing commit timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
         with self._connect() as connection:
@@ -1157,7 +1245,8 @@ class DurableCallbackInbox:
                     raise CallbackInboxError("CALLBACK_PROCESSING_RUN_DIFFERS")
                 existing = connection.execute(
                     """
-                    SELECT run_id, recorder_generation, raw_partition_hashes_json
+                    SELECT run_id, recorder_generation, raw_partition_hashes_json,
+                           processing_disposition, scientific_projection_complete
                     FROM callback_processing_commit_v1
                     WHERE inbox_event_id = ?
                     """,
@@ -1168,6 +1257,9 @@ class DurableCallbackInbox:
                         str(existing["run_id"]) != run_id
                         or int(existing["recorder_generation"]) != recorder_generation
                         or str(existing["raw_partition_hashes_json"]) != encoded_hashes
+                        or str(existing["processing_disposition"]) != processing_disposition
+                        or bool(existing["scientific_projection_complete"])
+                        is not scientific_projection_complete
                     ):
                         connection.rollback()
                         raise CallbackInboxError("CALLBACK_PROCESSING_COMMIT_DIFFERS")
@@ -1177,8 +1269,9 @@ class DurableCallbackInbox:
                     INSERT INTO callback_processing_commit_v1(
                         inbox_event_id, source_sequence, run_id,
                         recorder_generation, raw_partition_hashes_json,
+                        processing_disposition, scientific_projection_complete,
                         committed_at_utc
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event.inbox_event_id,
@@ -1186,6 +1279,8 @@ class DurableCallbackInbox:
                         run_id,
                         recorder_generation,
                         encoded_hashes,
+                        processing_disposition,
+                        int(scientific_projection_complete),
                         observed.isoformat(),
                     ),
                 )

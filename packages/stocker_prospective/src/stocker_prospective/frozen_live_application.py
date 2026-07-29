@@ -484,8 +484,12 @@ class FrozenProspectiveApplication:
                             message="previous_session_options_context_ready",
                             details={
                                 "signal_session": observed_session.isoformat(),
-                                "m1c_scoring_allowed": True,
-                                "option_episode_capture_allowed": True,
+                                "m1c_scoring_allowed": (
+                                    not self.live_recorder.scientific_block_latched
+                                ),
+                                "option_episode_capture_allowed": (
+                                    not self.live_recorder.scientific_block_latched
+                                ),
                                 "resolved_blocker": (
                                     "blocked_missing_previous_session_options_context"
                                 ),
@@ -509,6 +513,15 @@ class FrozenProspectiveApplication:
                 callback_metadata,
                 symbol=symbol,
             )
+        if self.live_recorder.scientific_block_latched:
+            # A replacement process may continue lossless raw admission and
+            # generation-fenced acknowledgement, but no episode, promotion,
+            # outcome, or checkpoint state can be reconstructed implicitly.
+            self.live_recorder.finalize_durable_poll(
+                result,
+                acknowledged_at=observed,
+            )
+            return result
         checkpoints_to_complete: list[RecorderCheckpointResult] = []
         for checkpoint in result.checkpoint_results:
             symbol = checkpoint.episode_decision.symbol

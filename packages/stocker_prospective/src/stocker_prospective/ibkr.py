@@ -7,20 +7,29 @@ CI and replay independent from the optional dependency.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import ipaddress
+import json
 import os
+import sqlite3
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal
 
 from stocker_prospective.config import RuntimeSafetyError
+from stocker_prospective.durable_inbox import (
+    CallbackClassification,
+    CallbackIdentityCollision,
+    CallbackInboxOverflow,
+    DurableCallbackInbox,
+)
 from stocker_prospective.ibkr_api import (
     OfficialIBKRApiProvenanceError,
     load_official_ibkr_api_provenance,
@@ -45,6 +54,90 @@ IBKR_DEPENDENCY_BLOCKER = "blocked_official_ibkr_api_not_installed"
 IBKR_PROVENANCE_BLOCKER = "blocked_unverified_official_ibkr_api"
 IBKR_API_UPDATE_MAX_AGE = timedelta(days=14)
 IBKR_INFORMATIONAL_NOTIFICATION_CODES = frozenset({2104, 2106, 2107, 2108, 2119, 2158})
+FORBIDDEN_BROKER_SURFACE = frozenset(
+    {
+        "placeOrder",
+        "cancelOrder",
+        "exerciseOptions",
+        "reqGlobalCancel",
+        "reqOpenOrders",
+        "reqAllOpenOrders",
+        "reqAutoOpenOrders",
+        "reqAccountSummary",
+        "reqAccountUpdates",
+        "reqAccountUpdatesMulti",
+        "reqPositions",
+        "reqPositionsMulti",
+        "reqExecutions",
+        "reqCompletedOrders",
+        "reqPnL",
+        "reqPnLSingle",
+        "place_order",
+        "cancel_order",
+        "exercise_options",
+        "request_global_cancel",
+        "request_account",
+        "request_positions",
+        "request_executions",
+    }
+)
+
+
+def _serialisable_provider_value(
+    value: object,
+    *,
+    _seen: set[int] | None = None,
+) -> object:
+    """Losslessly traverse one finite official callback envelope.
+
+    A cycle or unsupported provider object is a callback-boundary failure. It
+    is never replaced with a truncation marker that could pretend the original
+    provider delivery was durably replayable.
+    """
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return {"__provider_bytes_hex__": value.hex()}
+    seen = set() if _seen is None else _seen
+    identity = id(value)
+    if identity in seen:
+        raise TypeError("provider callback payload contains a cycle")
+    seen.add(identity)
+    try:
+        if isinstance(value, Mapping):
+            return {
+                str(key): _serialisable_provider_value(item, _seen=seen)
+                for key, item in value.items()
+            }
+        if isinstance(value, (tuple, list, set, frozenset)):
+            items = (
+                sorted(value, key=lambda item: repr(item))
+                if isinstance(value, (set, frozenset))
+                else value
+            )
+            return [_serialisable_provider_value(item, _seen=seen) for item in items]
+        attributes = getattr(value, "__dict__", None)
+        if isinstance(attributes, dict):
+            return {
+                "__provider_type__": type(value).__name__,
+                "attributes": {
+                    str(key): _serialisable_provider_value(item, _seen=seen)
+                    for key, item in sorted(
+                        attributes.items(),
+                        key=lambda pair: str(pair[0]),
+                    )
+                    if not str(key).startswith("_") and not callable(item)
+                },
+            }
+        return {
+            "__provider_type__": type(value).__name__,
+            "value": str(value),
+        }
+    finally:
+        seen.remove(identity)
 
 
 class OfficialIBKRDependencyError(RuntimeError):
@@ -264,6 +357,8 @@ class IBKRMarketDataAdapter:
             require_ibkr_socket_loopback_only
         ),
         max_stream_events: int = 65_536,
+        durable_inbox: DurableCallbackInbox | None = None,
+        require_durable_inbox_on_start: bool = False,
     ) -> None:
         if max_stream_events <= 0:
             raise ValueError("max_stream_events must be positive")
@@ -287,11 +382,51 @@ class IBKRMarketDataAdapter:
         self._stream_event_limit = max_stream_events
         self._stream_event_sequence = 0
         self._stream_event_lock = threading.RLock()
+        self._durable_inbox = durable_inbox
+        self._require_durable_inbox_on_start = require_durable_inbox_on_start
+        self._connection_generation = 0
+        self._request_generations: dict[int, int] = {}
+        self._request_owners: dict[int, str] = {}
+        self._fatal_callback_code: str | None = None
+        self._fatal_callback_sequence: int | None = None
+        self._latest_durably_admitted_sequence: int | None = None
+        self._pending_callback_failure: dict[str, Any] | None = None
+        self._callback_failure_lock = threading.RLock()
+        self._official_callback_context = threading.local()
         self._loop_thread: threading.Thread | None = None
         self._client: Any | None = None
         self._stopping = threading.Event()
         self._connected = threading.Event()
         self._socket_preflight = socket_preflight
+        if self._durable_inbox is not None:
+            self._restore_persisted_ingestion_latch()
+
+    @property
+    def connection_generation(self) -> int:
+        return self._connection_generation
+
+    @property
+    def fatal_callback_code(self) -> str | None:
+        return self._fatal_callback_code
+
+    @property
+    def scientific_recording_valid(self) -> bool:
+        return self._fatal_callback_code is None
+
+    def attach_durable_inbox(self, inbox: DurableCallbackInbox) -> None:
+        """Attach the WAL-backed callback spool before the socket starts."""
+
+        if self._loop_thread is not None and self._loop_thread.is_alive():
+            raise RuntimeError("cannot replace durable inbox while callback loop is active")
+        self._durable_inbox = inbox
+        self._restore_persisted_ingestion_latch()
+
+    def _restore_persisted_ingestion_latch(self) -> None:
+        assert self._durable_inbox is not None
+        active = self._durable_inbox.active_fatal("ingestion")
+        if active is None:
+            return
+        self._fatal_callback_code, self._fatal_callback_sequence = active
 
     @property
     def dependency_blocker(self) -> str | None:
@@ -309,17 +444,25 @@ class IBKRMarketDataAdapter:
         missing = [name for name in required if not callable(getattr(client, name, None))]
         if missing:
             raise TypeError(f"official client missing market-data methods: {missing}")
-        forbidden = ("placeOrder", "cancelOrder", "reqOpenOrders", "reqGlobalCancel")
-        if any(callable(getattr(client, name, None)) for name in forbidden):
-            raise TypeError("order-capable wrapper cannot be attached to the recorder")
+        forbidden = sorted(
+            name for name in FORBIDDEN_BROKER_SURFACE if callable(getattr(client, name, None))
+        )
+        if forbidden:
+            raise TypeError(
+                "order-capable or account/position/execution wrapper cannot be "
+                "attached to the recorder: " + ", ".join(forbidden)
+            )
         self._client = client
 
     def start(self) -> None:
         require_official_ibkr_api()
         if self._client is None:
             raise RuntimeError("official IBKR callback client has not been attached")
+        if self._require_durable_inbox_on_start and self._durable_inbox is None:
+            raise RuntimeError("blocked_ibkr_connection: durable_callback_inbox_required")
         if self._loop_thread is not None and self._loop_thread.is_alive():
             return
+        self._connection_generation += 1
         self._socket_preflight(self.config.host, self.config.port)
         self.connection.connecting()
         self._connected.clear()
@@ -356,6 +499,7 @@ class IBKRMarketDataAdapter:
         self.stream_quotes.clear()
         for key in self.budget.shutdown():
             if key.isdigit():
+                self._tombstone_request(int(key), "adapter_shutdown")
                 self._cancel_upstream(int(key))
         self._subscription_kinds.clear()
         if self._client is not None:
@@ -371,6 +515,7 @@ class IBKRMarketDataAdapter:
         if self._client is None:
             raise RuntimeError("blocked_ibkr_connection")
         self._socket_preflight(self.config.host, self.config.port)
+        self._connection_generation += 1
         self._connected.clear()
         try:
             self._client.disconnect()
@@ -410,6 +555,7 @@ class IBKRMarketDataAdapter:
         if self._client is None:
             raise RuntimeError("blocked_ibkr_connection")
         request_id = self.request_ids.next()
+        self._track_request(request_id, subscription_key)
         key = str(request_id)
         self.budget.reserve(key)
         self.stream_quotes.register(request_id)
@@ -419,6 +565,7 @@ class IBKRMarketDataAdapter:
             existing = self.subscriptions.remove(subscription_key)
             if existing is not None:
                 self.subscriptions.register(subscription_key, existing)
+                self._forget_request(request_id)
                 return existing
         try:
             self._subscription_kinds[request_id] = "market_data"
@@ -436,6 +583,7 @@ class IBKRMarketDataAdapter:
             self.stream_quotes.remove(request_id)
             self.subscriptions.remove(subscription_key)
             self._subscription_kinds.pop(request_id, None)
+            self._tombstone_request(request_id, "market_data_request_failed")
             raise
         return request_id
 
@@ -448,6 +596,7 @@ class IBKRMarketDataAdapter:
         key = str(request_id)
         if not self.budget.request_cancellation(key):
             return
+        self._tombstone_request(request_id, "market_data_cancelled")
         self._cancel_upstream(request_id)
         self.budget.confirm_cancellation(key)
         self.stream_quotes.remove(request_id)
@@ -469,6 +618,7 @@ class IBKRMarketDataAdapter:
         if not callable(method):
             raise RuntimeError("blocked_ibkr_market_data_subscription")
         request_id = self.request_ids.next()
+        self._track_request(request_id, subscription_key)
         key = str(request_id)
         self.budget.reserve(key)
         if not self.subscriptions.register(subscription_key, request_id):
@@ -476,6 +626,7 @@ class IBKRMarketDataAdapter:
             existing = self.subscriptions.remove(subscription_key)
             if existing is not None:
                 self.subscriptions.register(subscription_key, existing)
+                self._forget_request(request_id)
                 return existing
         try:
             self._subscription_kinds[request_id] = "realtime_bars"
@@ -492,6 +643,7 @@ class IBKRMarketDataAdapter:
             self.budget.confirm_cancellation(key)
             self.subscriptions.remove(subscription_key)
             self._subscription_kinds.pop(request_id, None)
+            self._tombstone_request(request_id, "realtime_bar_request_failed")
             raise
         return request_id
 
@@ -504,6 +656,7 @@ class IBKRMarketDataAdapter:
         key = str(request_id)
         if not self.budget.request_cancellation(key):
             return
+        self._tombstone_request(request_id, "realtime_bar_cancelled")
         self._cancel_upstream(request_id)
         self.budget.confirm_cancellation(key)
         self._subscription_kinds.pop(request_id, None)
@@ -672,6 +825,7 @@ class IBKRMarketDataAdapter:
         kind: str,
     ) -> tuple[int, int | None]:
         request_id = self.request_ids.next()
+        self._track_request(request_id, subscription_key)
         key = str(request_id)
         self.budget.reserve(key)
         if not self.subscriptions.register(subscription_key, request_id):
@@ -680,11 +834,291 @@ class IBKRMarketDataAdapter:
             if existing is None:
                 raise RuntimeError("subscription registry changed during allocation")
             self.subscriptions.register(subscription_key, existing)
+            self._forget_request(request_id)
             return request_id, existing
         self._subscription_kinds[request_id] = kind
         return request_id, None
 
+    def _track_request(self, request_id: int, subscription_owner: str) -> None:
+        self._request_generations[request_id] = self._connection_generation
+        self._request_owners[request_id] = subscription_owner
+
+    def _forget_request(self, request_id: int) -> None:
+        self._request_generations.pop(request_id, None)
+        self._request_owners.pop(request_id, None)
+
+    @staticmethod
+    def _symbol_from_owner(owner: str | None) -> str | None:
+        if owner is None:
+            return None
+        candidate = owner.split(":", 1)[0].strip().upper()
+        return candidate if candidate.isalpha() and 1 <= len(candidate) <= 8 else None
+
+    def _tombstone_request(self, request_id: int, reason: str) -> None:
+        generation = self._request_generations.get(
+            request_id,
+            self._connection_generation,
+        )
+        owner = self._request_owners.get(request_id)
+        if self._durable_inbox is not None:
+            self._durable_inbox.record_tombstone(
+                request_id=request_id,
+                connection_generation=generation,
+                subscription_owner=owner,
+                symbol=self._symbol_from_owner(owner),
+                cancellation_reason=reason,
+                cancelled_at=datetime.now(UTC),
+                ttl=timedelta(minutes=15),
+            )
+        self._forget_request(request_id)
+
+    def _classify_callback(
+        self,
+        request_id: int,
+        *,
+        now: datetime,
+    ) -> CallbackClassification:
+        if self._fatal_callback_code is not None:
+            return CallbackClassification.AFTER_DATA_LOSS_LATCH
+        if request_id < 0:
+            return CallbackClassification.CONTROL
+        request_generation = self._request_generations.get(request_id)
+        if request_generation is not None and request_generation < self._connection_generation:
+            return CallbackClassification.PREVIOUS_CONNECTION
+        if request_id in self._subscription_kinds or self.callbacks.is_pending(request_id):
+            return CallbackClassification.ACCEPTED_ACTIVE
+        if self._durable_inbox is not None:
+            tombstone = self._durable_inbox.tombstone(request_id=request_id, now=now)
+            if tombstone is not None:
+                if tombstone.connection_generation < self._connection_generation:
+                    return CallbackClassification.PREVIOUS_CONNECTION
+                return CallbackClassification.EXPECTED_LATE
+        return CallbackClassification.UNKNOWN
+
+    def contain_official_callback(
+        self,
+        callback_kind: str,
+        request_id: int,
+        callback: Callable[[], None],
+        *,
+        provider_arguments: tuple[object, ...] = (),
+        provider_keywords: Mapping[str, object] | None = None,
+    ) -> None:
+        """True external boundary: classify every failure and never re-raise."""
+
+        sequence_before = self._latest_durably_admitted_sequence
+        provider_event_id: str | None = None
+        try:
+            self.flush_pending_callback_failure()
+            received_at = datetime.now(UTC)
+            received_monotonic_ns = time.monotonic_ns()
+            classification = (
+                CallbackClassification.CONTROL
+                if callback_kind
+                in {
+                    "error",
+                    "connection_closed",
+                    "current_time",
+                    "market_depth_exchanges",
+                }
+                else self._classify_callback(request_id, now=received_at)
+            )
+            provider_payload = {
+                "provider_arguments": _serialisable_provider_value(provider_arguments),
+                "provider_keywords": _serialisable_provider_value(dict(provider_keywords or {})),
+            }
+            provider_event_id = hashlib.sha256(
+                "|".join(
+                    (
+                        "official_provider_callback",
+                        callback_kind,
+                        str(request_id),
+                        str(self._durable_inbox.run_id if self._durable_inbox else None),
+                        str(self._connection_generation),
+                        received_at.isoformat(),
+                        str(received_monotonic_ns),
+                    )
+                ).encode()
+            ).hexdigest()
+            if self._durable_inbox is not None:
+                owner = self._request_owners.get(request_id)
+                admission = self._durable_inbox.admit(
+                    callback_kind=f"official_provider_{callback_kind}",
+                    request_id=request_id,
+                    payload=provider_payload,
+                    connection_generation=self._connection_generation,
+                    classification=classification,
+                    received_utc=received_at,
+                    received_monotonic_ns=received_monotonic_ns,
+                    inbox_event_id=provider_event_id,
+                    subscription_owner=owner,
+                    symbol=self._symbol_from_owner(owner),
+                    provider_envelope=True,
+                )
+                self._latest_durably_admitted_sequence = admission.event.source_sequence
+                if admission.duplicate:
+                    raise CallbackIdentityCollision("CALLBACK_PROVIDER_DELIVERY_ID_COLLISION")
+            if classification in {
+                CallbackClassification.EXPECTED_LATE,
+                CallbackClassification.PREVIOUS_CONNECTION,
+            }:
+                return
+            if classification in {
+                CallbackClassification.UNKNOWN,
+                CallbackClassification.AFTER_DATA_LOSS_LATCH,
+            }:
+                self._latch_callback_failure(
+                    callback_kind=callback_kind,
+                    request_id=request_id,
+                    error=RuntimeError(
+                        "unknown_callback_request_id"
+                        if classification is CallbackClassification.UNKNOWN
+                        else "callback_after_data_loss_latch"
+                    ),
+                    source_sequence=self._latest_durably_admitted_sequence,
+                )
+                return
+            self._official_callback_context.provider_event_id = provider_event_id
+            callback()
+            if self._durable_inbox is not None:
+                self._durable_inbox.complete_provider_envelope(
+                    provider_envelope_event_id=provider_event_id,
+                    completed_at=datetime.now(UTC),
+                )
+        except Exception as exc:
+            admitted_sequence = (
+                self._latest_durably_admitted_sequence
+                if self._latest_durably_admitted_sequence != sequence_before
+                else None
+            )
+            try:
+                if self._durable_inbox is not None and provider_event_id is not None:
+                    self._durable_inbox.quarantine_provider_envelope(
+                        provider_envelope_event_id=provider_event_id,
+                        failure_classification=self._stable_callback_error_code(exc),
+                        quarantined_at=datetime.now(UTC),
+                    )
+                self._latch_callback_failure(
+                    callback_kind=callback_kind,
+                    request_id=request_id,
+                    error=exc,
+                    source_sequence=admitted_sequence,
+                )
+            except Exception:
+                # This is the last-resort in-process latch. Durable recording
+                # is already best-effort inside _latch_callback_failure, but
+                # even an unexpected classifier bug must not escape EWrapper.
+                with self._callback_failure_lock:
+                    if self._fatal_callback_code is None:
+                        self._fatal_callback_code = "CALLBACK_BOUNDARY_FAILURE"
+                        self._fatal_callback_sequence = admitted_sequence
+        finally:
+            self._official_callback_context.provider_event_id = None
+
+    @staticmethod
+    def _stable_callback_error_code(error: Exception) -> str:
+        if isinstance(error, CallbackInboxOverflow) or "queue_exhausted" in str(error):
+            return "CALLBACK_OVERFLOW"
+        if isinstance(error, CallbackIdentityCollision):
+            return "CALLBACK_IDENTITY_COLLISION"
+        if isinstance(error, sqlite3.Error):
+            return "CALLBACK_DURABLE_ADMISSION_FAILED"
+        if "unknown_callback_request_id" in str(error):
+            return "CALLBACK_UNKNOWN_REQUEST_ID"
+        if "cache_failed" in str(error):
+            return "CALLBACK_CACHE_FAILURE"
+        if isinstance(error, (TypeError, ValueError, OverflowError)):
+            return "CALLBACK_MALFORMED_VALUE"
+        return "CALLBACK_BOUNDARY_FAILURE"
+
+    def _latch_callback_failure(
+        self,
+        *,
+        callback_kind: str,
+        request_id: int,
+        error: Exception,
+        source_sequence: int | None,
+    ) -> None:
+        occurred_at = datetime.now(UTC)
+        code = self._stable_callback_error_code(error)
+        with self._callback_failure_lock:
+            if self._fatal_callback_code is None:
+                self._fatal_callback_code = code
+                self._fatal_callback_sequence = source_sequence
+            payload: dict[str, Any] = {
+                "stable_error_code": code,
+                "callback_kind": callback_kind,
+                "request_id": request_id,
+                "error_class": type(error).__name__,
+                "occurred_at": occurred_at,
+                "source_sequence": source_sequence,
+                "connection_generation": self._connection_generation,
+                "subscription_owner": self._request_owners.get(request_id),
+                "symbol": self._symbol_from_owner(self._request_owners.get(request_id)),
+                "failure_count": 1,
+            }
+            if not self._persist_callback_failure(payload):
+                if self._pending_callback_failure is None:
+                    self._pending_callback_failure = payload
+                else:
+                    self._pending_callback_failure["failure_count"] = (
+                        int(self._pending_callback_failure.get("failure_count", 1)) + 1
+                    )
+
+    def _persist_callback_failure(self, payload: dict[str, Any]) -> bool:
+        if self._durable_inbox is None:
+            return False
+        occurred_at = payload["occurred_at"]
+        assert isinstance(occurred_at, datetime)
+        try:
+            self._durable_inbox.record_incident(
+                stable_error_code=str(payload["stable_error_code"]),
+                component="official_ibkr_callback",
+                severity="fatal",
+                occurred_at=occurred_at,
+                error_class=str(payload["error_class"]),
+                evidence_loss_possible=True,
+                callback_kind=str(payload["callback_kind"]),
+                request_id=int(payload["request_id"]),
+                source_sequence=(
+                    None if payload["source_sequence"] is None else int(payload["source_sequence"])
+                ),
+                connection_generation=int(payload["connection_generation"]),
+                subscription_owner=(
+                    None
+                    if payload["subscription_owner"] is None
+                    else str(payload["subscription_owner"])
+                ),
+                symbol=None if payload["symbol"] is None else str(payload["symbol"]),
+                details={"failure_count": int(payload.get("failure_count", 1))},
+            )
+            self._durable_inbox.latch_fatal(
+                latch_kind="ingestion",
+                stable_error_code=str(payload["stable_error_code"]),
+                occurred_at=occurred_at,
+                error_class=str(payload["error_class"]),
+                evidence_loss_possible=True,
+                first_possibly_lost_source_sequence=(
+                    None if payload["source_sequence"] is None else int(payload["source_sequence"])
+                ),
+                callback_kind=str(payload["callback_kind"]),
+                request_id=int(payload["request_id"]),
+                connection_generation=int(payload["connection_generation"]),
+            )
+        except Exception:
+            return False
+        return True
+
+    def flush_pending_callback_failure(self) -> None:
+        """Retry the single bounded aggregate when SQLite becomes writable."""
+
+        with self._callback_failure_lock:
+            pending = self._pending_callback_failure
+            if pending is not None and self._persist_callback_failure(pending):
+                self._pending_callback_failure = None
+
     def _abort_stream_subscription(self, request_id: int, subscription_key: str) -> None:
+        self._tombstone_request(request_id, "stream_subscription_failed")
         self.budget.confirm_cancellation(str(request_id))
         self.subscriptions.remove(subscription_key)
         self._subscription_kinds.pop(request_id, None)
@@ -698,6 +1132,7 @@ class IBKRMarketDataAdapter:
         key = str(request_id)
         if not self.budget.request_cancellation(key):
             return
+        self._tombstone_request(request_id, "stream_subscription_cancelled")
         self._cancel_upstream(request_id)
         self.budget.confirm_cancellation(key)
         self._subscription_kinds.pop(request_id, None)
@@ -750,6 +1185,7 @@ class IBKRMarketDataAdapter:
         if generic_ticks:
             raise ValueError("generic ticks are unavailable for bounded snapshot captures")
         request_id = self.request_ids.next()
+        self._track_request(request_id, f"temporary_quote:{request_id}")
         key = str(request_id)
         self.budget.reserve(key)
         self.callbacks.begin(request_id, kind="temporary_quote")
@@ -779,6 +1215,7 @@ class IBKRMarketDataAdapter:
             broker_snapshot_complete = result.complete
             return result
         finally:
+            self._tombstone_request(request_id, "temporary_quote_complete")
             self.budget.request_cancellation(key)
             if not broker_snapshot_complete:
                 self._client.cancelMktData(request_id)
@@ -817,6 +1254,7 @@ class IBKRMarketDataAdapter:
         if not callable(method):
             raise RuntimeError("blocked_ibkr_market_data_subscription")
         request_id = self.request_ids.next()
+        self._track_request(request_id, f"option_chain_metadata:{underlying_symbol}")
         budget_key = f"metadata:{request_id}"
         self.budget.reserve(budget_key, lines=0)
         try:
@@ -837,6 +1275,7 @@ class IBKRMarketDataAdapter:
                 timeout_seconds=self.config.request_timeout_seconds,
             )
         finally:
+            self._tombstone_request(request_id, "option_chain_metadata_complete")
             self.budget.confirm_cancellation(budget_key)
 
     def qualify_exact_contract(self, contract: Any) -> CallbackResult:
@@ -848,6 +1287,7 @@ class IBKRMarketDataAdapter:
         if not callable(method):
             raise RuntimeError("blocked_ibkr_market_data_subscription")
         request_id = self.request_ids.next()
+        self._track_request(request_id, f"exact_contract_qualification:{request_id}")
         budget_key = f"qualification:{request_id}"
         self.budget.reserve(budget_key, lines=0)
         try:
@@ -862,6 +1302,7 @@ class IBKRMarketDataAdapter:
                 timeout_seconds=self.config.request_timeout_seconds,
             )
         finally:
+            self._tombstone_request(request_id, "contract_qualification_complete")
             self.budget.confirm_cancellation(budget_key)
 
     def on_option_parameter(self, request_id: int, payload: Any) -> None:
@@ -882,16 +1323,18 @@ class IBKRMarketDataAdapter:
         payload: dict[str, Any],
         *,
         complete: bool = False,
-    ) -> None:
+    ) -> bool:
         """Receive a quote update without converting missing fields to zero."""
 
         if self.callbacks.is_pending(request_id):
             self.callbacks.add(request_id, payload)
             if complete:
                 self.callbacks.complete(request_id)
-            return
-        self.stream_quotes.add(request_id, payload)
-        self._append_stream_event("level1_quote_update", request_id, payload)
+            return True
+        admitted = self._append_stream_event("level1_quote_update", request_id, payload)
+        if admitted:
+            self.stream_quotes.add(request_id, payload)
+        return admitted
 
     def on_connected(self, market_data_type: MarketDataType | None) -> None:
         self.connection.connected(market_data_type)
@@ -902,8 +1345,7 @@ class IBKRMarketDataAdapter:
         request_id: int,
         market_data_type: MarketDataType,
     ) -> None:
-        self.connection.market_data_type_observed(market_data_type)
-        self.on_quote_update(
+        admitted = self.on_quote_update(
             request_id,
             {
                 "field": "market_data_type",
@@ -911,9 +1353,13 @@ class IBKRMarketDataAdapter:
                 "market_data_type": market_data_type.value,
             },
         )
+        if admitted:
+            self.connection.market_data_type_observed(market_data_type)
 
     def on_realtime_bar(self, update: RealtimeBarUpdate) -> None:
-        self.realtime_bars.add(update)
+        payload = asdict(update)
+        if self._append_stream_event("realtime_bar", update.request_id, payload):
+            self.realtime_bars.add(update)
 
     def on_tick_by_tick_bidask(self, request_id: int, payload: dict[str, Any]) -> None:
         self._append_stream_event("tick_by_tick_bidask", request_id, payload)
@@ -972,12 +1418,96 @@ class IBKRMarketDataAdapter:
         kind: str,
         request_id: int,
         payload: dict[str, Any],
-    ) -> None:
+    ) -> bool:
+        received_at = datetime.now(UTC)
+        received_monotonic_ns = time.monotonic_ns()
+        if self._durable_inbox is not None:
+            classification = self._classify_callback(request_id, now=received_at)
+            identity_payload = {
+                key: value
+                for key, value in payload.items()
+                if key not in {"receive_timestamp_utc", "received_timestamp_utc"}
+            }
+            identity_json = json.dumps(
+                identity_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+                allow_nan=True,
+            )
+            provider_event_id = getattr(
+                self._official_callback_context,
+                "provider_event_id",
+                None,
+            )
+            if provider_event_id is None:
+                provider_event_id = identity_payload.get("provider_event_id")
+            delivery_identity = (
+                f"provider:{provider_event_id}:{kind}"
+                if provider_event_id is not None
+                else f"callback:{received_at.isoformat()}:{received_monotonic_ns}"
+            )
+            event_id = hashlib.sha256(
+                "|".join(
+                    (
+                        kind,
+                        str(request_id),
+                        str(self._durable_inbox.run_id),
+                        str(self._connection_generation),
+                        delivery_identity,
+                        "" if provider_event_id is not None else identity_json,
+                    )
+                ).encode()
+            ).hexdigest()
+            owner = self._request_owners.get(request_id)
+            result = self._durable_inbox.admit(
+                callback_kind=kind,
+                request_id=request_id,
+                payload=payload,
+                connection_generation=self._connection_generation,
+                classification=classification,
+                received_utc=received_at,
+                received_monotonic_ns=received_monotonic_ns,
+                inbox_event_id=event_id,
+                subscription_owner=owner,
+                symbol=self._symbol_from_owner(owner),
+                provider_envelope_event_id=(
+                    None if provider_event_id is None else str(provider_event_id)
+                ),
+            )
+            self._latest_durably_admitted_sequence = result.event.source_sequence
+            if result.duplicate:
+                self._durable_inbox.record_incident(
+                    stable_error_code="DUPLICATE_CALLBACK",
+                    component="official_ibkr_callback",
+                    severity="diagnostic",
+                    occurred_at=received_at,
+                    error_class="DuplicateCallback",
+                    evidence_loss_possible=False,
+                    callback_kind=kind,
+                    request_id=request_id,
+                    source_sequence=result.event.source_sequence,
+                    connection_generation=self._connection_generation,
+                    subscription_owner=owner,
+                    symbol=self._symbol_from_owner(owner),
+                )
+                return False
+            if classification is CallbackClassification.UNKNOWN:
+                self._latch_callback_failure(
+                    callback_kind=kind,
+                    request_id=request_id,
+                    error=RuntimeError("unknown_callback_request_id"),
+                    source_sequence=result.event.source_sequence,
+                )
+                return False
+            return classification in {
+                CallbackClassification.ACCEPTED_ACTIVE,
+                CallbackClassification.CONTROL,
+            }
         with self._stream_event_lock:
             if len(self._stream_events) >= self._stream_event_limit:
                 raise RuntimeError("bounded_ibkr_stream_event_queue_exhausted")
             self._stream_event_sequence += 1
-            received_at = datetime.now(UTC)
             event = {
                 **payload,
                 "kind": kind,
@@ -986,11 +1516,12 @@ class IBKRMarketDataAdapter:
                     "receive_timestamp_utc",
                     received_at.isoformat(),
                 ),
-                "received_monotonic_ns": time.monotonic_ns(),
+                "received_monotonic_ns": received_monotonic_ns,
                 "source_sequence": self._stream_event_sequence,
             }
             event.pop("receive_timestamp_utc", None)
             self._stream_events.append(event)
+        return True
 
     def drain_stream_events(
         self,
@@ -1008,6 +1539,7 @@ class IBKRMarketDataAdapter:
     def _clear_lost_subscriptions(self) -> None:
         self.callbacks.shutdown()
         for _, request_id in self.subscriptions.active_items():
+            self._tombstone_request(request_id, "connection_generation_replaced")
             self.budget.confirm_cancellation(str(request_id))
             self.stream_quotes.remove(request_id)
             self._subscription_kinds.pop(request_id, None)

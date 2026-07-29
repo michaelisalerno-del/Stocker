@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -83,12 +84,17 @@ def _timestamp(value: object) -> datetime | None:
 
 
 def _number(value: object) -> float | None:
-    if value is None or isinstance(value, bool):
+    if value is None:
         return None
+    if isinstance(value, bool):
+        raise ValueError("IBKR market field is boolean, not numeric")
     try:
-        return float(cast(Any, value))
-    except (TypeError, ValueError):
-        return None
+        number = float(cast(Any, value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("IBKR market field is not numeric") from exc
+    if not math.isfinite(number):
+        raise ValueError("IBKR market field is non-finite")
+    return number
 
 
 def _integer(value: object) -> int | None:
@@ -191,7 +197,9 @@ class IBKRCallbackNormalizer:
             )
         if kind in {"historical_bar", "historical_bar_update"}:
             return NormalizedCallback(historical_bar=self._historical_bar(owner, payload, received))
-        return NormalizedCallback(control_kind=kind, control_payload=dict(payload))
+        if kind in {"historical_backfill_end", "ibkr_error"}:
+            return NormalizedCallback(control_kind=kind, control_payload=dict(payload))
+        raise ValueError(f"unsupported IBKR stream callback kind: {kind}")
 
     def _common(
         self,

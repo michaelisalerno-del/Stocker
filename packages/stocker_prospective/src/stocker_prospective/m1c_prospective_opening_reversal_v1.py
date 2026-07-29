@@ -764,10 +764,7 @@ def build_prediction_receipt_v1(
         buffered_at = timing.first_entry_or_post_entry_event_buffered_at_utc
         if buffered_at is not None and buffered_at < source.entry_timestamp_utc:
             reasons.append("entry_buffer_timestamp_before_nominal_entry")
-        if (
-            buffered_at is not None
-            and buffered_at > source.receipt_created_at_utc
-        ):
+        if buffered_at is not None and buffered_at > source.receipt_created_at_utc:
             reasons.append("entry_buffer_timestamp_after_receipt")
         if expected_latency < 0.0 or not math.isclose(
             timing.receipt_latency_after_nominal_entry_seconds,
@@ -2172,6 +2169,29 @@ class PrimaryOptionPairSelectionV1(BaseModel):
         return self
 
 
+def validate_primary_option_protocol_v1_1(
+    *,
+    session: date,
+    contracts: Iterable[OptionContractCandidateV1],
+) -> tuple[OptionContractCandidateV1, OptionContractCandidateV1]:
+    """Fail closed unless the frozen V1.1 two-line primary protocol is exact."""
+
+    rows = tuple(contracts)
+    if len(rows) != 2:
+        raise ValueError("blocked_v1_1_option_protocol_requires_exactly_two_legs")
+    by_right = {row.right: row for row in rows}
+    if set(by_right) != {"C", "P"}:
+        raise ValueError("blocked_v1_1_option_protocol_rejects_condor_or_duplicate_roles")
+    call = by_right["C"]
+    put = by_right["P"]
+    primary_expiry = session + timedelta(days=1)
+    if call.expiry != primary_expiry or put.expiry != primary_expiry:
+        raise ValueError("blocked_v1_1_option_protocol_primary_expiry_must_be_1dte")
+    if call.underlying != put.underlying or call.strike != put.strike or call.con_id == put.con_id:
+        raise ValueError("blocked_v1_1_option_protocol_requires_common_strike_pair")
+    return call, put
+
+
 def select_primary_option_pair_v1(
     *,
     session: date,
@@ -2592,6 +2612,7 @@ __all__ = [
     "PostEntryBarV1",
     "PrimaryOptionBidAskOutcomeV1",
     "PrimaryOptionPairSelectionV1",
+    "validate_primary_option_protocol_v1_1",
     "PromotionSelectionV1",
     "RESERVED_MARKET_DATA_LINES_V1",
     "build_opening_reversal_outcome_v1",

@@ -6,10 +6,20 @@ import hashlib
 import json
 import math
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from stocker_prospective.database import SchemaVersionTooNew
+from stocker_prospective.operational_state import (
+    OperationalStateProjection,
+    OperationalThresholds,
+    inactive_operational_projection,
+    project_operational_state_from_database,
+)
 from stocker_prospective.quiet_state import (
     BOTTOM_5_THRESHOLD,
     BOTTOM_10_THRESHOLD,
@@ -27,6 +37,10 @@ class ProspectiveReadStore:
         self.database_path = Path(database_path)
         self.run_id = run_id
         self._anchor: sqlite3.Connection | None = None
+        self._snapshot_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
+            f"prospective_read_snapshot_{id(self)}",
+            default=None,
+        )
 
     def _connect(self) -> sqlite3.Connection:
         uri = f"file:{self.database_path.resolve()}?mode=ro"
@@ -36,6 +50,34 @@ class ProspectiveReadStore:
         connection.execute("PRAGMA busy_timeout = 2000")
         return connection
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        snapshot = self._snapshot_connection.get()
+        if snapshot is not None:
+            yield snapshot
+            return
+        with self._connect() as connection:
+            yield connection
+
+    @contextmanager
+    def snapshot_transaction(self) -> Iterator[None]:
+        """Give all nested projections one consistent read-only WAL snapshot."""
+
+        if self._snapshot_connection.get() is not None:
+            yield
+            return
+        connection = self._connect()
+        token = self._snapshot_connection.set(connection)
+        try:
+            connection.execute("BEGIN")
+            # Establish the SQLite snapshot immediately, before section reads.
+            connection.execute("SELECT COUNT(*) FROM sqlite_schema").fetchone()
+            yield
+            connection.rollback()
+        finally:
+            self._snapshot_connection.reset(token)
+            connection.close()
+
     def open_anchor(self) -> None:
         """Keep WAL coordination files live for the read-only web process."""
 
@@ -43,6 +85,16 @@ class ProspectiveReadStore:
             return
         connection = self._connect()
         try:
+            supported = {path.name for path in Path(__file__).with_name("migrations").glob("*.sql")}
+            applied = {
+                str(row["version"])
+                for row in connection.execute("SELECT version FROM schema_migrations")
+            }
+            unsupported = tuple(sorted(applied - supported))
+            if unsupported:
+                raise SchemaVersionTooNew(
+                    "blocked_schema_newer_than_supported: " + ",".join(unsupported)
+                )
             connection.execute("SELECT count(*) FROM sqlite_schema").fetchone()
         except Exception:
             connection.close()
@@ -75,7 +127,7 @@ class ProspectiveReadStore:
 
     def database_health(self) -> dict[str, Any]:
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 result = connection.execute("PRAGMA quick_check").fetchone()
                 migration = connection.execute(
                     "SELECT version, applied_at_utc FROM schema_migrations "
@@ -97,8 +149,27 @@ class ProspectiveReadStore:
                 "mode": "read_only_wal",
             }
 
+    def read_only_verification(self) -> dict[str, Any]:
+        try:
+            with self._connection() as connection:
+                query_only = int(connection.execute("PRAGMA query_only").fetchone()[0])
+                mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0])
+            return {
+                "verified": query_only == 1,
+                "query_only": query_only == 1,
+                "opened_with_mode_ro": True,
+                "journal_mode": mode,
+            }
+        except sqlite3.Error:
+            return {
+                "verified": False,
+                "query_only": False,
+                "opened_with_mode_ro": True,
+                "journal_mode": None,
+            }
+
     def latest_run(self) -> dict[str, Any] | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = self._run_row(connection)
         return self._dict(row)
 
@@ -115,12 +186,12 @@ class ProspectiveReadStore:
         return latest
 
     def _selected_run_id(self) -> str | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = self._run_row(connection)
         return None if row is None else str(row["run_id"])
 
     def runtime_projection(self) -> dict[str, Any]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             run = self._run_row(connection)
             lease_run_id = (
                 self.run_id
@@ -237,7 +308,7 @@ class ProspectiveReadStore:
                 "anchor_frozen_20": [],
                 "prospective_external_universe_exploratory": [],
             }
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM universe_membership WHERE run_id = ? ORDER BY cohort, symbol",
                 (run_id,),
@@ -257,7 +328,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT e.*, s.m1_probability, s.frozen_threshold, s.score_label,
@@ -282,7 +353,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return None
-        with self._connect() as connection:
+        with self._connection() as connection:
             episode = connection.execute(
                 """
                 SELECT e.*, v.prospective_start_utc, v.app_version, v.git_commit,
@@ -383,7 +454,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT s.*, e.crossing_timestamp_utc,
@@ -405,7 +476,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return None
-        with self._connect() as connection:
+        with self._connection() as connection:
             structure = connection.execute(
                 """
                 SELECT s.*, e.crossing_timestamp_utc
@@ -445,7 +516,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT a.*, e.recorded_at_utc, e.app_version, e.git_commit,
@@ -459,12 +530,127 @@ class ProspectiveReadStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def recorder_status_v0(self) -> dict[str, Any]:
-        run_id = self._selected_run_id()
+    def recorder_operational_state(
+        self,
+        *,
+        now: datetime,
+        prospective_start_utc: datetime | None = None,
+        thresholds: OperationalThresholds | None = None,
+    ) -> OperationalStateProjection:
+        with self._connection() as connection:
+            run = self._run_row(connection)
+            run_id = (
+                self.run_id
+                if self.run_id is not None
+                else (None if run is None else str(run["run_id"]))
+            )
+            if run_id is None:
+                return inactive_operational_projection(now=now)
+            if prospective_start_utc is not None:
+                start = prospective_start_utc
+            elif run is not None:
+                start = datetime.fromisoformat(str(run["prospective_start_utc"]))
+            else:
+                return inactive_operational_projection(now=now)
+            return project_operational_state_from_database(
+                connection,
+                run_id=run_id,
+                now=now,
+                prospective_start_utc=start,
+                thresholds=thresholds or OperationalThresholds(),
+            )
+
+    def runtime_artifact_verification(self) -> dict[str, Any]:
+        run_id = self.run_id or self._selected_run_id()
+        if run_id is None:
+            return {
+                "verified": False,
+                "generation": None,
+                "expected_artifact_count": 0,
+                "items": [],
+                "blockers": [],
+            }
+        with self._connection() as connection:
+            state = connection.execute(
+                """
+                SELECT recorder_generation, expected_artifact_count
+                FROM recorder_operational_state_v1
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            if state is None:
+                return {
+                    "verified": False,
+                    "generation": None,
+                    "expected_artifact_count": 0,
+                    "items": [],
+                    "blockers": ["RUNTIME_ARTIFACT_EVIDENCE_ABSENT"],
+                }
+            generation = int(state["recorder_generation"])
+            expected_count = int(state["expected_artifact_count"])
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM runtime_artifact_verification_v1
+                WHERE run_id = ? AND recorder_generation = ?
+                ORDER BY artifact_name
+                """,
+                (run_id, generation),
+            ).fetchall()
+        items = [self._decoded(row) for row in rows]
+        verified = (
+            expected_count > 0
+            and len(items) == expected_count
+            and all(
+                item["verification_result"] == "verified"
+                and bool(item["found"])
+                and bool(item["loaded"])
+                and bool(item["schema_validated"])
+                and bool(item["hash_verified"])
+                and bool(item["contract_compatible"])
+                and bool(item["used_by_active_generation"])
+                for item in items
+            )
+        )
+        blockers = sorted(
+            {
+                str(item["blocker"] or "RUNTIME_ARTIFACT_NOT_VERIFIED")
+                for item in items
+                if item["verification_result"] != "verified"
+            }
+        )
+        if not items:
+            blockers.append("RUNTIME_ARTIFACT_EVIDENCE_ABSENT")
+        elif len(items) != expected_count:
+            blockers.append("RUNTIME_ARTIFACT_EVIDENCE_INCOMPLETE")
+        return {
+            "verified": verified,
+            "generation": generation,
+            "expected_artifact_count": expected_count,
+            "items": items,
+            "blockers": blockers,
+        }
+
+    def recorder_status_v0(
+        self,
+        *,
+        now: datetime | None = None,
+        prospective_start_utc: datetime | None = None,
+        thresholds: OperationalThresholds | None = None,
+    ) -> dict[str, Any]:
+        observed = datetime.now(UTC) if now is None else now.astimezone(UTC)
+        operational = self.recorder_operational_state(
+            now=observed,
+            prospective_start_utc=prospective_start_utc,
+            thresholds=thresholds,
+        )
+        run_id = self.run_id or self._selected_run_id()
         if run_id is None:
             return {
                 "run_id": None,
-                "state": "inactive",
+                "state": operational.state.value,
+                "operational": operational.model_dump(mode="json"),
                 "latest_checkpoint": None,
                 "latest_completed_bar": None,
                 "latest_episode": None,
@@ -474,7 +660,7 @@ class ProspectiveReadStore:
                 "record_only": True,
                 "execution_enabled": False,
             }
-        with self._connect() as connection:
+        with self._connection() as connection:
             checkpoint = connection.execute(
                 """
                 SELECT * FROM m1c_checkpoint_v0
@@ -498,9 +684,30 @@ class ProspectiveReadStore:
             ).fetchone()
             partition = connection.execute(
                 """
-                SELECT MAX(maximum_timestamp_utc) AS last_event_timestamp,
-                       COALESCE(SUM(gap_count), 0) AS data_gaps
+                SELECT MAX(maximum_timestamp_utc) AS last_event_timestamp
                 FROM raw_partition_manifest_v0 WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            gaps = connection.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN resolution_timestamp_utc IS NULL THEN 1 ELSE 0 END)
+                        AS active_gaps,
+                    SUM(CASE WHEN resolution_timestamp_utc IS NOT NULL
+                                  AND recoverability = 'recoverable'
+                             THEN 1 ELSE 0 END) AS resolved_recoverable_gaps,
+                    SUM(CASE WHEN resolution_timestamp_utc IS NULL
+                                  AND severity = 'scientific'
+                             THEN 1 ELSE 0 END) AS unresolved_scientific_gaps,
+                    SUM(CASE WHEN cause_code LIKE 'CONNECTION_%'
+                                  OR stream_kind = 'connection'
+                             THEN 1 ELSE 0 END) AS connection_interruptions,
+                    SUM(CASE WHEN resolution_timestamp_utc IS NULL
+                                  AND severity = 'optional'
+                             THEN 1 ELSE 0 END) AS optional_feed_degradations
+                FROM gap_incident_v1
+                WHERE run_id = ?
                 """,
                 (run_id,),
             ).fetchone()
@@ -522,7 +729,8 @@ class ProspectiveReadStore:
             ).fetchone()
         return {
             "run_id": run_id,
-            "state": "recording",
+            "state": operational.state.value,
+            "operational": operational.model_dump(mode="json"),
             "latest_checkpoint": (None if checkpoint is None else self._decoded(checkpoint)),
             "latest_completed_bar": (
                 None if completed_bar is None else self._decoded(completed_bar)
@@ -531,7 +739,21 @@ class ProspectiveReadStore:
             "last_event_timestamp": (
                 None if partition is None else partition["last_event_timestamp"]
             ),
-            "data_gaps": 0 if partition is None else int(partition["data_gaps"]),
+            "data_gaps": (
+                0
+                if gaps is None or gaps["unresolved_scientific_gaps"] is None
+                else int(gaps["unresolved_scientific_gaps"])
+            ),
+            "gaps": {
+                name: (0 if gaps is None or gaps[name] is None else int(gaps[name]))
+                for name in (
+                    "active_gaps",
+                    "resolved_recoverable_gaps",
+                    "unresolved_scientific_gaps",
+                    "connection_interruptions",
+                    "optional_feed_degradations",
+                )
+            },
             "subscriptions": {
                 str(row["subscription_kind"]): int(row["used"]) for row in subscriptions
             },
@@ -545,7 +767,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 WITH latest_checkpoint AS (
@@ -650,7 +872,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT e.*,
@@ -671,7 +893,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return None
-        with self._connect() as connection:
+        with self._connection() as connection:
             episode = connection.execute(
                 """
                 SELECT e.*, c.feature_values_json, c.model_hash,
@@ -703,7 +925,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM microstructure_summary_v0
@@ -727,7 +949,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             episode = connection.execute(
                 """
                 SELECT symbol, trigger_bar_end_utc, prospective_entry_timestamp_utc
@@ -822,7 +1044,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return None
-        with self._connect() as connection:
+        with self._connection() as connection:
             episode = connection.execute(
                 """
                 SELECT symbol, trigger_bar_end_utc, prospective_entry_timestamp_utc
@@ -888,7 +1110,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT c.*, q.provider_timestamp_utc, q.received_timestamp_utc,
@@ -910,7 +1132,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT s.*, e.symbol, e.trigger_bar_end_utc
@@ -971,7 +1193,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             partitions = connection.execute(
                 """
                 SELECT file_path, event_type
@@ -1044,7 +1266,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             partitions = connection.execute(
                 """
                 SELECT 'raw_partition' AS audit_type, content_hash AS identity,
@@ -1151,7 +1373,7 @@ class ProspectiveReadStore:
         if run_id is None:
             projection = empty
         else:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 latest = connection.execute(
                     """
                     SELECT q.*, m.bar_end_utc
@@ -1232,7 +1454,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 WITH latest_quiet AS (
@@ -1300,7 +1522,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT o.*,
@@ -1328,7 +1550,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return None
-        with self._connect() as connection:
+        with self._connection() as connection:
             observation = connection.execute(
                 """
                 SELECT o.*, q.model_hash, q.feature_hash,
@@ -1387,7 +1609,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT c.*, q.provider_timestamp_utc, q.received_timestamp_utc,
@@ -1416,7 +1638,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT s.*, o.phase, o.observation_kind, o.symbol,
@@ -1442,7 +1664,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 WITH observation_counts AS (
@@ -1489,7 +1711,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM recorder_session_report_v0
@@ -1514,7 +1736,7 @@ class ProspectiveReadStore:
                 "degraded_episodes": 0,
                 "reconciliation_warnings": [],
             }
-        with self._connect() as connection:
+        with self._connection() as connection:
             capacity = connection.execute(
                 """
                 SELECT * FROM ibkr_runtime_capacity_v0
@@ -1608,7 +1830,7 @@ class ProspectiveReadStore:
         run_id = self._selected_run_id()
         if run_id is None:
             return {"sessions": [], "valid_session_count": 0, "decision": None}
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM source_transfer_session_v0

@@ -20,6 +20,9 @@ class SessionQualityReport(BaseModel):
 
     session_date: date
     generated_at_utc: datetime
+    recorder_operational_state: str = "INACTIVE"
+    recorder_state_reason_code: str = "STATE_NOT_CAPTURED_LEGACY"
+    scientific_recording_valid: bool = False
     expected_universe_minutes: int = Field(ge=0)
     level1_coverage: float = Field(ge=0.0, le=1.0)
     tick_by_tick_coverage: float = Field(ge=0.0, le=1.0)
@@ -209,9 +212,28 @@ def build_session_quality_report(
         "SELECT COUNT(*) FROM m1c_checkpoint_v0 WHERE run_id = ? AND session_date = ?",
         (run_id, session),
     )
+    operational = connection.execute(
+        """
+        SELECT state, state_reason_code, scientific_recording_valid
+        FROM recorder_operational_state_v1
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
     report = SessionQualityReport.create(
         session_date=session_date,
         generated_at_utc=generated_at,
+        recorder_operational_state=(
+            "INACTIVE" if operational is None else str(operational["state"])
+        ),
+        recorder_state_reason_code=(
+            "NO_ACTIVE_RECORDER_GENERATION"
+            if operational is None
+            else str(operational["state_reason_code"] or "RECORDER_STATE_REASON_UNAVAILABLE")
+        ),
+        scientific_recording_valid=(
+            False if operational is None else bool(operational["scientific_recording_valid"])
+        ),
         expected_universe_minutes=20 * 390,
         level1_coverage=event_coverage(("underlying_level1_quote_event",)),
         tick_by_tick_coverage=event_coverage(
@@ -251,10 +273,31 @@ def build_session_quality_report(
             0.0 if resolved_options == 0 else min(1.0, quoted_options / resolved_options)
         ),
         median_quote_staleness_seconds=(None if not staleness else statistics.median(staleness)),
-        data_gaps=sum(int(row["gap_count"]) for row in partitions),
-        reconnects=sum(
-            str(row["cancellation_reason"] or "") == "data_lost_reconnect"
-            for row in subscription_rows
+        data_gaps=scalar(
+            """
+            SELECT COUNT(*)
+            FROM gap_incident_v1
+            WHERE run_id = ? AND severity = 'scientific'
+              AND date(start_timestamp_utc) <= ?
+              AND (
+                    end_timestamp_utc IS NULL
+                    OR date(end_timestamp_utc) >= ?
+                  )
+            """,
+            (run_id, session, session),
+        ),
+        reconnects=scalar(
+            """
+            SELECT COUNT(*)
+            FROM gap_incident_v1
+            WHERE run_id = ?
+              AND date(start_timestamp_utc) = ?
+              AND (
+                    cause_code LIKE 'CONNECTION_%'
+                    OR stream_kind = 'connection'
+                  )
+            """,
+            (run_id, session),
         ),
         pacing_errors=sum(code in {100, 420} for code in error_codes),
         capacity_denials=sum(int(row["capacity_denied"]) for row in subscription_rows),

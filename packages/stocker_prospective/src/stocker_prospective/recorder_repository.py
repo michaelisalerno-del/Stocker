@@ -24,6 +24,7 @@ from stocker_prospective.events import (
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import FrozenGroupOContext
 from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
+    M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID,
     RESERVED_MARKET_DATA_LINES_V1,
     CapacityDegradationEventV1,
     MarketDataCapacitySnapshotV1,
@@ -37,6 +38,7 @@ from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
     PrimaryOptionPairSelectionV1,
     PromotionSelectionV1,
     build_opening_transfer_decision_receipt_v1,
+    validate_primary_option_protocol_v1_1,
 )
 from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
     OpeningReversalActivationReceiptV1_1,
@@ -4139,14 +4141,26 @@ class FrozenRecorderRepository:
                      prediction.receipt_hash_v1
                 WHERE option_outcome.run_id = ?
                   AND option_outcome.complete = 1
+                  AND prediction.experiment_id = ?
                   AND prediction.experiment_version = ?
                   AND prediction.scientific_outcome_eligible_v1 = 1
+                  AND (
+                      prediction.experiment_version != '1.1'
+                      OR EXISTS(
+                          SELECT 1
+                          FROM opening_reversal_v1_1_eligible_episode eligible
+                          WHERE eligible.run_id = prediction.run_id
+                            AND eligible.prediction_receipt_hash_v1 =
+                                prediction.receipt_hash_v1
+                      )
+                  )
                   AND option_outcome.subscription_end_utc <= ?
                 ORDER BY option_outcome.prediction_receipt_hash_v1,
                          option_outcome.role
                 """,
                 (
                     run_id,
+                    M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID,
                     receipt.experiment_version,
                     receipt.boundary_timestamp_utc.isoformat(),
                 ),
@@ -4346,6 +4360,7 @@ class FrozenRecorderRepository:
               ON prediction.receipt_hash_v1 =
                  outcome.prediction_receipt_hash_v1
             WHERE outcome.run_id = ?
+              AND prediction.experiment_id = ?
               AND prediction.experiment_version = ?
               AND prediction.cohort_phase = ?
               AND prediction.scientific_outcome_eligible_v1 = 1
@@ -4353,10 +4368,10 @@ class FrozenRecorderRepository:
                   prediction.experiment_version != '1.1'
                   OR EXISTS(
                       SELECT 1
-                      FROM opening_reversal_causal_barrier_audit_v1_1 barrier
-                      WHERE barrier.run_id = prediction.run_id
-                        AND barrier.session_date = prediction.session_date
-                        AND barrier.barrier_status = 'passed'
+                      FROM opening_reversal_v1_1_eligible_episode eligible
+                      WHERE eligible.run_id = prediction.run_id
+                        AND eligible.prediction_receipt_hash_v1 =
+                            prediction.receipt_hash_v1
                   )
               )
               AND outcome.outcome_completeness_v1 = 'complete'
@@ -4365,6 +4380,7 @@ class FrozenRecorderRepository:
             """,
             (
                 run_id,
+                M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID,
                 receipt.experiment_version,
                 phase,
                 receipt.boundary_timestamp_utc.isoformat(),
@@ -5105,6 +5121,36 @@ class FrozenRecorderRepository:
         self._validate(metadata)
         encoded = _json(selection)
         with self.repository._connect() as connection:
+            prediction = connection.execute(
+                """
+                SELECT experiment_id, experiment_version, session_date
+                FROM opening_reversal_prediction_v1
+                WHERE run_id = ? AND fresh_episode_id = ?
+                """,
+                (metadata.run_id, episode_id),
+            ).fetchone()
+            if (
+                prediction is None
+                or str(prediction["experiment_id"]) != M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID
+            ):
+                raise ValueError("blocked_opening_reversal_episode_identity_missing")
+            if str(prediction["experiment_version"]) == "1.1":
+                if (
+                    connection.execute(
+                        """
+                        SELECT 1
+                        FROM opening_reversal_v1_1_eligible_episode
+                        WHERE run_id = ? AND episode_id = ?
+                        """,
+                        (metadata.run_id, episode_id),
+                    ).fetchone()
+                    is None
+                ):
+                    raise ValueError("blocked_v1_1_episode_not_eligible")
+                validate_primary_option_protocol_v1_1(
+                    session=date.fromisoformat(str(prediction["session_date"])),
+                    contracts=(selection.call, selection.put),
+                )
             existing = connection.execute(
                 """
                 SELECT id, audit_hash_v1, audit_json
@@ -5189,6 +5235,32 @@ class FrozenRecorderRepository:
         audit_hash = _content_hash(payload)
         encoded = _json(payload)
         with self.repository._connect() as connection:
+            prediction = connection.execute(
+                """
+                SELECT experiment_id, experiment_version
+                FROM opening_reversal_prediction_v1
+                WHERE run_id = ? AND fresh_episode_id = ?
+                """,
+                (metadata.run_id, episode_id),
+            ).fetchone()
+            if (
+                prediction is None
+                or str(prediction["experiment_id"]) != M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID
+            ):
+                raise ValueError("blocked_opening_reversal_episode_identity_missing")
+            if (
+                str(prediction["experiment_version"]) == "1.1"
+                and connection.execute(
+                    """
+                    SELECT 1
+                    FROM opening_reversal_v1_1_eligible_episode
+                    WHERE run_id = ? AND episode_id = ?
+                    """,
+                    (metadata.run_id, episode_id),
+                ).fetchone()
+                is None
+            ):
+                raise ValueError("blocked_v1_1_episode_not_eligible")
             existing = connection.execute(
                 """
                 SELECT id, audit_hash_v1, audit_json
@@ -5753,6 +5825,10 @@ class FrozenRecorderRepository:
             parent = connection.execute(
                 """
                 SELECT prediction.prediction_v1, prediction.stock,
+                       prediction.experiment_id,
+                       prediction.experiment_version,
+                       prediction.session_date,
+                       prediction.fresh_episode_id,
                        prediction.scientific_outcome_eligible_v1,
                        promotion.promoted_receipt_hash_v1
                 FROM opening_reversal_prediction_v1 prediction
@@ -5765,6 +5841,42 @@ class FrozenRecorderRepository:
                 """,
                 (metadata.run_id, outcome.prediction_receipt_hash_v1),
             ).fetchone()
+            if parent is not None and str(parent["experiment_version"]) == "1.1":
+                eligible = connection.execute(
+                    """
+                    SELECT episode_id, session_date
+                    FROM opening_reversal_v1_1_eligible_episode
+                    WHERE run_id = ? AND prediction_receipt_hash_v1 = ?
+                    """,
+                    (metadata.run_id, outcome.prediction_receipt_hash_v1),
+                ).fetchone()
+                discovery = connection.execute(
+                    """
+                    SELECT call_con_id, put_con_id, expiry, strike,
+                           planned_live_market_data_lines, status
+                    FROM opening_reversal_contract_discovery_v1
+                    WHERE run_id = ? AND episode_id = ?
+                    """,
+                    (metadata.run_id, parent["fresh_episode_id"]),
+                ).fetchone()
+                selected_con_id = (
+                    None
+                    if discovery is None
+                    else discovery["call_con_id" if outcome.contract.right == "C" else "put_con_id"]
+                )
+                if (
+                    str(parent["experiment_id"]) != M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID
+                    or eligible is None
+                    or discovery is None
+                    or str(discovery["status"]) != "selected"
+                    or int(discovery["planned_live_market_data_lines"]) != 2
+                    or selected_con_id != outcome.contract.con_id
+                    or str(discovery["expiry"]) != outcome.contract.expiry.isoformat()
+                    or float(discovery["strike"]) != outcome.contract.strike
+                    or outcome.contract.expiry
+                    != date.fromisoformat(str(parent["session_date"])) + timedelta(days=1)
+                ):
+                    raise ValueError("blocked_v1_1_outcome_not_from_eligible_primary_pair")
             expected_right = (
                 "C" if parent is not None and str(parent["prediction_v1"]) == "CALL" else "P"
             )

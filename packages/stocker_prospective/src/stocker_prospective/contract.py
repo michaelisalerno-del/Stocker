@@ -102,6 +102,10 @@ FORBIDDEN_BROKER_METHODS: Final[frozenset[str]] = frozenset(
         "reqPositions",
         "reqAccountUpdates",
         "reqAccountSummary",
+        "reqAccountUpdatesMulti",
+        "reqPositionsMulti",
+        "reqExecutions",
+        "reqCompletedOrders",
         "reqGlobalCancel",
         "exerciseOptions",
     }

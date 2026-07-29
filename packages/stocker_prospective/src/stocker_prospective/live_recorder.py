@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import math
+import sqlite3
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
@@ -16,8 +17,14 @@ from pydantic import BaseModel, ConfigDict
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.database import EvidenceMetadata
 from stocker_prospective.direction_features import DirectionFeatureBar
+from stocker_prospective.durable_inbox import (
+    CallbackInboxError,
+    CallbackInboxEvent,
+    DurableCallbackInbox,
+)
 from stocker_prospective.event_ingest import (
     IBKRCallbackNormalizer,
+    NormalizedCallback,
     StreamKind,
     StreamOwner,
 )
@@ -70,6 +77,12 @@ from stocker_prospective.opening_market_transition_v1 import (
     calculate_opening_preentry_window_v1,
     classify_opening_market_transition_v1,
 )
+from stocker_prospective.operational_state import (
+    GapIncident,
+    OperationalThresholds,
+    RecorderOperationalRepository,
+    stable_gap_id,
+)
 from stocker_prospective.order_book import DepthBook
 from stocker_prospective.partition_store import PartitionedEventStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
@@ -106,6 +119,7 @@ class LivePollResult(BaseModel):
     checkpoint_count: int
     fresh_episode_count: int
     partition_hashes: tuple[str, ...]
+    raw_event_ids: tuple[str, ...] = ()
     blocked_checkpoints: dict[str, str]
     checkpoint_results: tuple[RecorderCheckpointResult, ...]
     opening_reversal_prediction_receipts: tuple[
@@ -119,12 +133,23 @@ class LivePollResult(BaseModel):
     depth_reset_symbols: tuple[str, ...] = ()
     ibkr_errors: tuple[tuple[int, int], ...] = ()
     broker_mutations: int = 0
+    durable_inbox_event_ids: tuple[str, ...] = ()
+    durable_lease_batch_id: str | None = None
+    raw_materialization_reused: bool = False
 
 
 @dataclass(frozen=True)
 class _DeferredDecisionEventV1_1:
     event: RawEvent
     completed_bar: AuditedLiveBar | None = None
+
+
+class CallbackNormalizationFatal(RuntimeError):
+    """A leased callback could not be deterministically normalised."""
+
+    def __init__(self, callback_index: int) -> None:
+        super().__init__("CALLBACK_NORMALIZATION_FAILED")
+        self.callback_index = callback_index
 
 
 def _bar_event(
@@ -202,6 +227,14 @@ class FrozenM1CLiveRecorder:
         depth_snapshot_interval: timedelta = timedelta(seconds=1),
         option_quote_sink: OptionQuoteSink | None = None,
         episode_callback: EpisodeCallback | None = None,
+        durable_inbox: DurableCallbackInbox | None = None,
+        recorder_generation: int | None = None,
+        lease_owner: str | None = None,
+        inbox_lease_timeout: timedelta = timedelta(seconds=30),
+        inbox_batch_limit: int = 2_048,
+        failure_injector: Callable[[str], None] | None = None,
+        operational_repository: RecorderOperationalRepository | None = None,
+        operational_thresholds: OperationalThresholds | None = None,
     ) -> None:
         if len(universe_symbols) != 20 or len(set(universe_symbols)) != 20:
             raise ValueError("frozen M1C live recorder requires the exact 20-stock cohort")
@@ -222,6 +255,12 @@ class FrozenM1CLiveRecorder:
             raise ValueError("depth rows must be positive")
         if depth_snapshot_interval <= timedelta(0):
             raise ValueError("depth snapshot interval must be positive")
+        if durable_inbox is not None and (
+            recorder_generation is None or recorder_generation <= 0 or not lease_owner
+        ):
+            raise ValueError("durable callback lease identity is required")
+        if inbox_lease_timeout <= timedelta(0) or inbox_batch_limit <= 0:
+            raise ValueError("durable callback lease bounds must be positive")
         self.adapter = adapter
         self.normalizer = normalizer
         self.raw_store = raw_store
@@ -245,6 +284,15 @@ class FrozenM1CLiveRecorder:
         self.depth_snapshot_interval = depth_snapshot_interval
         self.option_quote_sink = option_quote_sink
         self.episode_callback = episode_callback
+        self.durable_inbox = durable_inbox
+        self.recorder_generation = recorder_generation
+        self.lease_owner = lease_owner
+        self.inbox_lease_timeout = inbox_lease_timeout
+        self.inbox_batch_limit = inbox_batch_limit
+        self.failure_injector = failure_injector
+        self.operational_repository = operational_repository
+        self.operational_thresholds = operational_thresholds or OperationalThresholds()
+        self._inflight_durable_events: tuple[CallbackInboxEvent, ...] = ()
         self._finalizer = KeepUpToDateBarFinalizer(
             prospective_collection_start=normalizer.prospective_collection_start
         )
@@ -272,6 +320,27 @@ class FrozenM1CLiveRecorder:
             str,
             list[tuple[datetime, datetime | None]],
         ] = {}
+        self._active_gap_ids: dict[
+            tuple[str, str, int | None, Literal["optional", "degraded", "scientific"]],
+            list[tuple[str, int]],
+        ] = {}
+        if self.operational_repository is not None and self.recorder_generation is not None:
+            restored_scientific_starts: dict[str, datetime] = {}
+            for gap in self.operational_repository.active_gaps(run_id=self.run_id):
+                key = (gap.symbol, gap.stream_kind, gap.request_id, gap.severity)
+                self._active_gap_ids.setdefault(key, []).append(
+                    (gap.gap_id, gap.recorder_generation)
+                )
+                if gap.severity == "scientific":
+                    self._gap_symbols.add(gap.symbol)
+                    prior = restored_scientific_starts.get(gap.symbol)
+                    restored_scientific_starts[gap.symbol] = (
+                        gap.start_timestamp_utc
+                        if prior is None
+                        else min(prior, gap.start_timestamp_utc)
+                    )
+            for symbol, started_at in restored_scientific_starts.items():
+                self._gap_intervals[symbol] = [(started_at, None)]
         self._capability_preflight_passed = readiness.capability_preflight_passed
         self._session_context_ready = True
         self._scientific_prerequisites_passed = (
@@ -328,20 +397,107 @@ class FrozenM1CLiveRecorder:
             self._last_depth_snapshot_at.pop(owner.symbol, None)
             self._last_depth_validity.pop(owner.symbol, None)
 
-    def mark_gap(self, symbol: str, *, started_at: datetime) -> None:
+    def mark_gap(
+        self,
+        symbol: str,
+        *,
+        started_at: datetime,
+        cause_code: str = "REQUIRED_STREAM_INTERRUPTION",
+        request_id: int | None = None,
+        stream_kind: str = "required_market_stream",
+        recoverability: Literal["recoverable", "unrecoverable", "unknown"] = "unknown",
+        severity: Literal["optional", "degraded", "scientific"] = "scientific",
+    ) -> None:
         if symbol in self.universe_symbols or symbol in self.context_proxy_symbols:
             observed = started_at.astimezone(UTC)
-            self._gap_symbols.add(symbol)
-            intervals = self._gap_intervals.setdefault(symbol, [])
-            if not intervals or intervals[-1][1] is not None:
-                intervals.append((observed, None))
+            gap_key = (symbol, stream_kind, request_id, severity)
+            if gap_key in self._active_gap_ids:
+                return
+            if severity == "scientific":
+                self._gap_symbols.add(symbol)
+                intervals = self._gap_intervals.setdefault(symbol, [])
+                if not intervals or intervals[-1][1] is not None:
+                    intervals.append((observed, None))
+            if self.operational_repository is not None and self.recorder_generation is not None:
+                gap_id = stable_gap_id(
+                    run_id=self.run_id,
+                    recorder_generation=self.recorder_generation,
+                    symbol=symbol,
+                    stream_kind=stream_kind,
+                    request_id=request_id,
+                    connection_generation=self.adapter.connection_generation,
+                    start_timestamp_utc=observed,
+                    cause_code=cause_code,
+                )
+                self.operational_repository.record_gap(
+                    GapIncident(
+                        gap_id=gap_id,
+                        run_id=self.run_id,
+                        recorder_generation=self.recorder_generation,
+                        symbol=symbol,
+                        stream_kind=stream_kind,
+                        request_id=request_id,
+                        connection_generation=self.adapter.connection_generation,
+                        start_timestamp_utc=observed,
+                        detection_timestamp_utc=observed,
+                        cause_code=cause_code,
+                        severity=severity,
+                        recoverability=recoverability,
+                    )
+                )
+                self._active_gap_ids[gap_key] = [(gap_id, self.recorder_generation)]
+
+    def _resolve_active_gaps(
+        self,
+        *,
+        symbol: str,
+        completed_at: datetime,
+        resolution_evidence: str,
+        stream_kind: str | None = None,
+        request_id: int | None = None,
+        scientific_only: bool = False,
+    ) -> None:
+        completed = completed_at.astimezone(UTC)
+        for gap_key, active_incidents in tuple(self._active_gap_ids.items()):
+            gap_symbol, gap_stream_kind, gap_request_id, severity = gap_key
+            if (
+                gap_symbol != symbol
+                or (stream_kind is not None and gap_stream_kind != stream_kind)
+                or (request_id is not None and gap_request_id != request_id)
+                or (scientific_only and severity != "scientific")
+            ):
+                continue
+            if self.operational_repository is not None and self.recorder_generation is not None:
+                for gap_id, owning_generation in active_incidents:
+                    self.operational_repository.resolve_gap(
+                        gap_id=gap_id,
+                        run_id=self.run_id,
+                        recorder_generation=owning_generation,
+                        resolved_at=completed,
+                        resolution_evidence=resolution_evidence,
+                        end_timestamp_utc=completed,
+                    )
+            del self._active_gap_ids[gap_key]
 
     def clear_gap_after_complete_bar(self, symbol: str, *, completed_at: datetime) -> None:
-        intervals = self._gap_intervals.get(symbol)
-        if intervals and intervals[-1][1] is None:
-            started, _ = intervals[-1]
-            intervals[-1] = (started, max(started, completed_at.astimezone(UTC)))
-        self._gap_symbols.discard(symbol)
+        completed = completed_at.astimezone(UTC)
+        self._resolve_active_gaps(
+            symbol=symbol,
+            completed_at=completed,
+            resolution_evidence="complete_required_bar_observed_after_gap",
+            stream_kind=StreamKind.UNDERLYING_BAR.value,
+            scientific_only=True,
+        )
+        scientific_gap_remains = any(
+            gap_symbol == symbol and severity == "scientific"
+            for gap_symbol, _, _, severity in self._active_gap_ids
+        )
+        if not scientific_gap_remains:
+            intervals = self._gap_intervals.get(symbol)
+            if intervals and intervals[-1][1] is None:
+                started, _ = intervals[-1]
+                intervals[-1] = (started, max(started, completed))
+            self._gap_symbols.discard(symbol)
 
     def gap_overlaps(
         self,
@@ -505,6 +661,10 @@ class FrozenM1CLiveRecorder:
         return dict(self._latest_quotes)
 
     @property
+    def scientific_scoring_enabled(self) -> bool:
+        return self._scientific_scoring_enabled
+
+    @property
     def clock_drift_seconds(self) -> float | None:
         return self._clock_drift_seconds
 
@@ -516,6 +676,8 @@ class FrozenM1CLiveRecorder:
         self,
         metadata: EvidenceMetadata,
         events: tuple[RawEvent, ...],
+        *,
+        committed_at: datetime,
     ) -> tuple[str, ...]:
         if not events:
             return ()
@@ -523,7 +685,9 @@ class FrozenM1CLiveRecorder:
             data_source="ibkr",
             events=events,
             complete=True,
-            gap_count=len({event.symbol for event in events if event.symbol in self._gap_symbols}),
+            # Retain the legacy manifest column without copying a batch-wide
+            # count into every partition. GapIncident is the canonical tally.
+            gap_count=0,
         )
         for partition in partitions:
             path_parts = {
@@ -539,6 +703,18 @@ class FrozenM1CLiveRecorder:
                 symbol=path_parts["symbol"],
                 event_type=path_parts["event_type"],
                 partition=partition,
+            )
+        if (
+            self.operational_repository is not None
+            and self.recorder_generation is not None
+            and self.lease_owner is not None
+        ):
+            self.operational_repository.touch(
+                run_id=self.run_id,
+                recorder_generation=self.recorder_generation,
+                owner_id=self.lease_owner,
+                now=committed_at,
+                latest_raw_partition_committed_at_utc=committed_at,
             )
         return tuple(item.content_hash for item in partitions)
 
@@ -639,10 +815,7 @@ class FrozenM1CLiveRecorder:
                 event.session,
                 [],
             )
-            if not any(
-                item.event.event_id == event.event_id
-                for item in deferred
-            ):
+            if not any(item.event.event_id == event.event_id for item in deferred):
                 deferred.append(
                     _DeferredDecisionEventV1_1(
                         event=event,
@@ -675,6 +848,11 @@ class FrozenM1CLiveRecorder:
                 self.mark_gap(
                     event.symbol,
                     started_at=event.received_timestamp_utc,
+                    cause_code="OPTIONAL_DEPTH_RESET",
+                    request_id=event.request_id,
+                    stream_kind="underlying_depth",
+                    recoverability="recoverable",
+                    severity="optional",
                 )
         return tuple(admitted)
 
@@ -791,6 +969,11 @@ class FrozenM1CLiveRecorder:
                     self.mark_gap(
                         event.symbol,
                         started_at=event.received_timestamp_utc,
+                        cause_code="OPTIONAL_DEPTH_SEQUENCE_GAP",
+                        request_id=event.request_id,
+                        stream_kind="underlying_depth",
+                        recoverability="recoverable",
+                        severity="optional",
                     )
                     snapshot = book.snapshot(event.received_timestamp_utc)
                     self._last_depth_validity[event.symbol] = False
@@ -804,6 +987,13 @@ class FrozenM1CLiveRecorder:
                 ):
                     book.mark_complete()
                     snapshot = book.snapshot(event.received_timestamp_utc)
+                    self._resolve_active_gaps(
+                        symbol=event.symbol,
+                        completed_at=event.received_timestamp_utc,
+                        resolution_evidence="complete_depth_book_observed_after_gap",
+                        stream_kind="underlying_depth",
+                        request_id=event.request_id,
+                    )
                 previous_validity = self._last_depth_validity.get(event.symbol)
                 previous_timestamp = self._last_depth_snapshot_at.get(event.symbol)
                 due = (
@@ -1015,7 +1205,353 @@ class FrozenM1CLiveRecorder:
             if self.episode_callback is not None:
                 self.episode_callback(result)
 
+    def _failure_checkpoint(self, phase: str) -> None:
+        if self.failure_injector is not None:
+            self.failure_injector(phase)
+
     def poll(self, *, now: datetime) -> LivePollResult:
+        """Lease callbacks and durably materialise raw evidence.
+
+        The owning application must call :meth:`finalize_durable_poll` only
+        after every application-side effect and checkpoint marker is durable.
+        """
+
+        observed_now = now.astimezone(UTC)
+        inbox = self.durable_inbox
+        if inbox is None:
+            return self._poll_callbacks(
+                now=observed_now,
+                callbacks=self.adapter.drain_stream_events(),
+            )
+        assert self.recorder_generation is not None
+        assert self.lease_owner is not None
+        if self._inflight_durable_events:
+            raise RuntimeError("CALLBACK_DURABLE_POLL_NOT_FINALIZED")
+        self.adapter.flush_pending_callback_failure()
+        interrupted = inbox.quarantine_interrupted_provider_envelopes(
+            current_recorder_generation=self.recorder_generation,
+            observed_at=observed_now,
+        )
+        if interrupted:
+            first = interrupted[0]
+            for event in interrupted:
+                inbox.record_incident(
+                    stable_error_code="CALLBACK_PROVIDER_MATERIALIZATION_INTERRUPTED",
+                    component="official_ibkr_callback",
+                    severity="fatal",
+                    occurred_at=observed_now,
+                    error_class="InterruptedProviderCallback",
+                    evidence_loss_possible=True,
+                    callback_kind=event.callback_kind,
+                    request_id=event.request_id,
+                    source_sequence=event.source_sequence,
+                    connection_generation=event.connection_generation,
+                    subscription_owner=event.subscription_owner,
+                    symbol=event.symbol,
+                )
+            inbox.latch_fatal(
+                latch_kind="ingestion",
+                stable_error_code="CALLBACK_PROVIDER_MATERIALIZATION_INTERRUPTED",
+                occurred_at=observed_now,
+                error_class="InterruptedProviderCallback",
+                evidence_loss_possible=True,
+                first_possibly_lost_source_sequence=first.source_sequence,
+                callback_kind=first.callback_kind,
+                request_id=first.request_id,
+                connection_generation=first.connection_generation,
+            )
+        if self.adapter.fatal_callback_code is not None or inbox.has_active_fatal():
+            self._scientific_scoring_enabled = False
+        leased = inbox.lease(
+            lease_owner=self.lease_owner,
+            lease_generation=self.recorder_generation,
+            now=observed_now,
+            lease_timeout=self.inbox_lease_timeout,
+            limit=self.inbox_batch_limit,
+        )
+        self._failure_checkpoint("after_callback_lease")
+        pending: list[CallbackInboxEvent] = []
+        for event in leased:
+            committed_hashes = inbox.processing_commit(event.inbox_event_id)
+            if committed_hashes is None:
+                pending.append(event)
+                continue
+            inbox.acknowledge(
+                (event,),
+                lease_owner=self.lease_owner,
+                lease_generation=self.recorder_generation,
+                raw_partition_hashes=committed_hashes,
+                acknowledged_at=observed_now,
+            )
+        pending_events = tuple(pending)
+        callbacks = tuple(event.normalizer_payload() for event in pending_events)
+        try:
+            materialization = inbox.raw_materialization(pending_events)
+            result = self._poll_callbacks(
+                now=observed_now,
+                callbacks=callbacks,
+                precommitted_partition_hashes=(
+                    None if materialization is None else materialization.partition_hashes
+                ),
+                expected_raw_event_ids=(
+                    None if materialization is None else materialization.raw_event_ids
+                ),
+            )
+            self._failure_checkpoint("before_callback_raw_materialization")
+            inbox.commit_raw_materialization(
+                pending_events,
+                run_id=self.run_id,
+                recorder_generation=self.recorder_generation,
+                raw_partition_hashes=result.partition_hashes,
+                raw_event_ids=result.raw_event_ids,
+                materialized_at=observed_now,
+            )
+            self._failure_checkpoint("after_callback_raw_materialization")
+            batch_ids = {event.lease_batch_id for event in pending_events}
+            batch_id = None if not batch_ids else next(iter(batch_ids))
+            self._inflight_durable_events = pending_events
+            return result.model_copy(
+                update={
+                    "durable_inbox_event_ids": tuple(
+                        event.inbox_event_id for event in pending_events
+                    ),
+                    "durable_lease_batch_id": batch_id,
+                    "raw_materialization_reused": materialization is not None,
+                }
+            )
+        except CallbackNormalizationFatal as exc:
+            failed = pending_events[exc.callback_index]
+            inbox.quarantine(
+                failed,
+                failure_classification="CALLBACK_NORMALIZATION_FAILED",
+                lease_owner=self.lease_owner,
+                lease_generation=self.recorder_generation,
+                now=observed_now,
+            )
+            inbox.release(
+                (
+                    event
+                    for index, event in enumerate(pending_events)
+                    if index != exc.callback_index
+                ),
+                lease_owner=self.lease_owner,
+                lease_generation=self.recorder_generation,
+                now=observed_now,
+            )
+            inbox.record_incident(
+                stable_error_code="CALLBACK_NORMALIZATION_FAILED",
+                component="prospective_live_recorder",
+                severity="fatal",
+                occurred_at=observed_now,
+                error_class=type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__,
+                evidence_loss_possible=True,
+                callback_kind=failed.callback_kind,
+                request_id=failed.request_id,
+                source_sequence=failed.source_sequence,
+                connection_generation=failed.connection_generation,
+                subscription_owner=failed.subscription_owner,
+                symbol=failed.symbol,
+            )
+            inbox.latch_fatal(
+                latch_kind="ingestion",
+                stable_error_code="CALLBACK_NORMALIZATION_FAILED",
+                occurred_at=observed_now,
+                error_class=type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__,
+                evidence_loss_possible=True,
+                first_possibly_lost_source_sequence=failed.source_sequence,
+                callback_kind=failed.callback_kind,
+                request_id=failed.request_id,
+                connection_generation=failed.connection_generation,
+            )
+            self._scientific_scoring_enabled = False
+            raise
+        except Exception as exc:
+            inbox.release(
+                pending_events,
+                lease_owner=self.lease_owner,
+                lease_generation=self.recorder_generation,
+                now=observed_now,
+            )
+            storage_failure = isinstance(exc, (OSError, sqlite3.Error)) or any(
+                token in str(exc).lower()
+                for token in (
+                    "partition",
+                    "parquet",
+                    "pyarrow",
+                    "disk",
+                    "storage",
+                    "materialization",
+                )
+            )
+            stable_code = (
+                "RAW_STORAGE_COMMIT_FAILED" if storage_failure else "RECORDER_PROCESSING_FAILED"
+            )
+            latch_kind = "storage" if storage_failure else "ingestion"
+            first_sequence = (
+                None
+                if not pending_events
+                else min(event.source_sequence for event in pending_events)
+            )
+            inbox.record_incident(
+                stable_error_code=stable_code,
+                component="prospective_live_recorder",
+                severity="fatal",
+                occurred_at=observed_now,
+                error_class=type(exc).__name__,
+                evidence_loss_possible=True,
+                source_sequence=first_sequence,
+                connection_generation=self.adapter.connection_generation,
+            )
+            inbox.latch_fatal(
+                latch_kind=latch_kind,
+                stable_error_code=stable_code,
+                occurred_at=observed_now,
+                error_class=type(exc).__name__,
+                evidence_loss_possible=True,
+                first_possibly_lost_source_sequence=first_sequence,
+                connection_generation=self.adapter.connection_generation,
+            )
+            self._scientific_scoring_enabled = False
+            raise
+
+    def finalize_durable_poll(
+        self,
+        result: LivePollResult,
+        *,
+        acknowledged_at: datetime,
+    ) -> None:
+        """Commit outer application completion, then generation-fenced ack."""
+
+        inbox = self.durable_inbox
+        if inbox is None:
+            return
+        assert self.recorder_generation is not None
+        assert self.lease_owner is not None
+        events = self._inflight_durable_events
+        if tuple(event.inbox_event_id for event in events) != result.durable_inbox_event_ids:
+            raise CallbackInboxError("CALLBACK_DURABLE_POLL_IDENTITY_CHANGED")
+        observed = acknowledged_at.astimezone(UTC)
+        self._failure_checkpoint("before_callback_processing_commit")
+        inbox.commit_processing(
+            events,
+            run_id=self.run_id,
+            recorder_generation=self.recorder_generation,
+            raw_partition_hashes=result.partition_hashes,
+            committed_at=observed,
+        )
+        self._failure_checkpoint("after_callback_processing_commit")
+        inbox.acknowledge(
+            events,
+            lease_owner=self.lease_owner,
+            lease_generation=self.recorder_generation,
+            raw_partition_hashes=result.partition_hashes,
+            acknowledged_at=observed,
+        )
+        self._failure_checkpoint("after_callback_acknowledgement")
+        self._inflight_durable_events = ()
+
+    def fail_inflight_durable_poll(
+        self,
+        error: Exception,
+        *,
+        occurred_at: datetime,
+    ) -> None:
+        """Persist a fatal outer-application failure before process exit."""
+
+        inbox = self.durable_inbox
+        events = self._inflight_durable_events
+        if inbox is None:
+            return
+        assert self.recorder_generation is not None
+        assert self.lease_owner is not None
+        observed = occurred_at.astimezone(UTC)
+        first_sequence = (
+            min(event.source_sequence for event in events)
+            if events
+            else inbox.latest_source_sequence()
+        )
+        processing_committed = bool(events) and all(
+            inbox.processing_commit(event.inbox_event_id) is not None for event in events
+        )
+        if processing_committed:
+            # SQLite already proves every recorder/application side effect in
+            # this lease is complete. A failed ack is a recoverable cursor
+            # transition; the expired generation-fenced lease will be
+            # reclaimed and acknowledged without re-projecting evidence.
+            try:
+                inbox.record_incident(
+                    stable_error_code="CALLBACK_ACK_DEFERRED",
+                    component="frozen_prospective_application",
+                    severity="degraded",
+                    occurred_at=observed,
+                    error_class=type(error).__name__,
+                    evidence_loss_possible=False,
+                    source_sequence=first_sequence,
+                    connection_generation=self.adapter.connection_generation,
+                    details={
+                        "processing_commit_present": True,
+                        "callbacks_remain_unacknowledged": True,
+                    },
+                )
+            except Exception:
+                return
+            return
+        self._scientific_scoring_enabled = False
+        storage_failure = isinstance(error, (OSError, sqlite3.Error)) or any(
+            token in str(error).lower()
+            for token in ("database", "partition", "parquet", "storage", "disk")
+        )
+        stable_code = (
+            "RECORDER_APPLICATION_STORAGE_COMMIT_FAILED"
+            if storage_failure
+            else "RECORDER_APPLICATION_COMMIT_FAILED"
+        )
+        try:
+            inbox.record_incident(
+                stable_error_code=stable_code,
+                component="frozen_prospective_application",
+                severity="fatal",
+                occurred_at=observed,
+                error_class=type(error).__name__,
+                evidence_loss_possible=True,
+                source_sequence=first_sequence,
+                connection_generation=self.adapter.connection_generation,
+                details={
+                    "callbacks_remain_unacknowledged": bool(events),
+                    "failure_before_callback_lease": not events,
+                },
+            )
+            inbox.latch_fatal(
+                latch_kind="storage" if storage_failure else "ingestion",
+                stable_error_code=stable_code,
+                occurred_at=observed,
+                error_class=type(error).__name__,
+                evidence_loss_possible=True,
+                first_possibly_lost_source_sequence=first_sequence,
+                connection_generation=self.adapter.connection_generation,
+            )
+            if events:
+                inbox.release(
+                    events,
+                    lease_owner=self.lease_owner,
+                    lease_generation=self.recorder_generation,
+                    now=observed,
+                )
+        except Exception:
+            # This is the process-level failure boundary. Leaving the durable
+            # lease untouched is safer than obscuring the original application
+            # error or pretending the batch was released.
+            return
+        self._inflight_durable_events = ()
+
+    def _poll_callbacks(
+        self,
+        *,
+        now: datetime,
+        callbacks: tuple[dict[str, Any], ...],
+        precommitted_partition_hashes: tuple[str, ...] | None = None,
+        expected_raw_event_ids: tuple[str, ...] | None = None,
+    ) -> LivePollResult:
         observed_now = now.astimezone(UTC)
         raw_events: list[RawEvent] = []
         admitted_decision_events: list[RawEvent] = []
@@ -1023,9 +1559,17 @@ class FrozenM1CLiveRecorder:
         depth_reset_symbols: set[str] = set()
         ibkr_errors: list[tuple[int, int]] = []
         deferred_control_gaps: list[tuple[str, datetime]] = []
-        callbacks = self.adapter.drain_stream_events()
-        for payload in callbacks:
-            normalized = self.normalizer.normalize(payload)
+        normalized_callbacks: list[tuple[dict[str, Any], NormalizedCallback | None]] = []
+        for callback_index, payload in enumerate(callbacks):
+            try:
+                normalized = self.normalizer.normalize(payload)
+            except Exception as exc:
+                raise CallbackNormalizationFatal(callback_index) from exc
+            normalized_callbacks.append((payload, normalized))
+        # No raw/derived side effect begins until the entire lease is known to
+        # be normalisable. A poison callback therefore cannot partially apply
+        # an earlier callback from the same batch.
+        for payload, normalized in normalized_callbacks:
             if normalized is None:
                 continue
             raw_disposition: Literal["admit", "buffer"] = "admit"
@@ -1115,9 +1659,23 @@ class FrozenM1CLiveRecorder:
                     ):
                         deferred_control_gaps.append((owner.symbol, observed_now))
                     else:
+                        optional_stream = owner.kind in {
+                            StreamKind.UNDERLYING_DEPTH,
+                            StreamKind.UNDERLYING_TICK_BIDASK,
+                            StreamKind.UNDERLYING_TICK_LAST,
+                        }
                         self.mark_gap(
                             owner.symbol,
                             started_at=observed_now,
+                            cause_code=(
+                                "OPTIONAL_STREAM_IBKR_ERROR"
+                                if optional_stream
+                                else "REQUIRED_STREAM_IBKR_ERROR"
+                            ),
+                            request_id=request_id,
+                            stream_kind=owner.kind.value,
+                            recoverability="unknown",
+                            severity="optional" if optional_stream else "scientific",
                         )
         source_times = tuple(event.ordering_timestamp for event in raw_events)
         metadata = self.metadata_factory(
@@ -1127,7 +1685,15 @@ class FrozenM1CLiveRecorder:
             ),
             source_times or (observed_now,),
         )
-        partition_hashes = self._persist_raw(metadata, tuple(raw_events))
+        partition_hashes = (
+            precommitted_partition_hashes
+            if precommitted_partition_hashes is not None
+            else self._persist_raw(
+                metadata,
+                tuple(raw_events),
+                committed_at=observed_now,
+            )
+        )
         results = self._score_ready(observed_now=observed_now)
         complete_opening_receipts = tuple(
             receipt
@@ -1151,15 +1717,23 @@ class FrozenM1CLiveRecorder:
         ) = self._close_opening_reversal_barrier_v1_1(
             observed_now=observed_now,
         )
-        if newly_derived_raw_events:
+        if newly_derived_raw_events and precommitted_partition_hashes is None:
             raw_events.extend(newly_derived_raw_events)
             partition_hashes = (
                 *partition_hashes,
                 *self._persist_raw(
                     metadata,
                     newly_derived_raw_events,
+                    committed_at=observed_now,
                 ),
             )
+        elif newly_derived_raw_events:
+            raw_events.extend(newly_derived_raw_events)
+        raw_event_ids = tuple(sorted(event.event_id for event in raw_events))
+        if expected_raw_event_ids is not None and raw_event_ids != tuple(
+            sorted(expected_raw_event_ids)
+        ):
+            raise CallbackInboxError("CALLBACK_RAW_EVENT_IDENTITY_DIFFERS")
         for event in (
             *admitted_decision_events,
             *released_decision_events,
@@ -1168,38 +1742,76 @@ class FrozenM1CLiveRecorder:
         for symbol, started_at in deferred_control_gaps:
             self.mark_gap(symbol, started_at=started_at)
         barrier_passed_sessions = {
-            audit.session
-            for audit in barrier_audits_v1_1
-            if audit.barrier_status == "passed"
+            audit.session for audit in barrier_audits_v1_1 if audit.barrier_status == "passed"
         }
         v1_1_result_sessions = {
             receipt.session
             for result in results
-            if (receipt := result.opening_reversal_prediction_v1)
-            is not None
+            if (receipt := result.opening_reversal_prediction_v1) is not None
             and receipt.experiment_version == "1.1"
         }
         for session in v1_1_result_sessions - barrier_passed_sessions:
-            persisted = (
-                self.repository
-                .load_opening_reversal_causal_barrier_audit_v1_1(
-                    run_id=metadata.run_id,
-                    session=session,
-                )
+            persisted = self.repository.load_opening_reversal_causal_barrier_audit_v1_1(
+                run_id=metadata.run_id,
+                session=session,
             )
-            if (
-                persisted is not None
-                and persisted.barrier_status == "passed"
-            ):
+            if persisted is not None and persisted.barrier_status == "passed":
                 barrier_passed_sessions.add(session)
         self._activate_v1_1_checkpoint_results_after_barrier(
             results,
-            barrier_passed_sessions=frozenset(
-                barrier_passed_sessions
-            ),
+            barrier_passed_sessions=frozenset(barrier_passed_sessions),
         )
         self._record_due_episode_windows(observed_now)
         self._trim_history(observed_now)
+        if (
+            self.operational_repository is not None
+            and self.recorder_generation is not None
+            and self.lease_owner is not None
+        ):
+            try:
+                session_open, session_close = xnys_session_bounds(
+                    observed_now.astimezone(NEW_YORK).date()
+                )
+                market_session_open = session_open <= observed_now <= session_close
+            except ValueError:
+                market_session_open = False
+            health = self.adapter.connection.health()
+            completed_bar_times = tuple(
+                event.bar_end_utc
+                for event in raw_events
+                if isinstance(event, FiveMinuteBarEvent) and event.finalised
+            )
+            self.operational_repository.touch(
+                run_id=self.run_id,
+                recorder_generation=self.recorder_generation,
+                owner_id=self.lease_owner,
+                now=observed_now,
+                market_session_open=market_session_open,
+                callbacks_expected=market_session_open and bool(self.normalizer.owners),
+                ibkr_connection_state=health.state.value,
+                observed_market_data_mode=(
+                    None if health.market_data_type is None else health.market_data_type.value
+                ),
+                scientific_prerequisites_valid=(
+                    self._scientific_prerequisites_passed
+                    and self._capability_preflight_passed
+                    and self._session_context_ready
+                    and self.adapter.scientific_recording_valid
+                ),
+                latest_completed_five_minute_bar_at_utc=(
+                    None if not completed_bar_times else max(completed_bar_times)
+                ),
+                latest_successful_checkpoint_at_utc=(None if not results else observed_now),
+                broker_state_mutation_count=0,
+            )
+            self.operational_repository.refresh_projection(
+                run_id=self.run_id,
+                recorder_generation=self.recorder_generation,
+                owner_id=self.lease_owner,
+                now=observed_now,
+                prospective_start_utc=self.raw_store.prospective_collection_start,
+                thresholds=self.operational_thresholds,
+            )
         return LivePollResult(
             callback_count=len(callbacks),
             raw_event_count=len(raw_events),
@@ -1207,6 +1819,7 @@ class FrozenM1CLiveRecorder:
             checkpoint_count=len(results),
             fresh_episode_count=sum(result.episode_decision.fresh_episode for result in results),
             partition_hashes=partition_hashes,
+            raw_event_ids=raw_event_ids,
             blocked_checkpoints={
                 f"{symbol}:{session.isoformat()}:{checkpoint}": reason
                 for (symbol, session, checkpoint), reason in sorted(self._blocked.items())
@@ -1573,8 +2186,9 @@ class FrozenM1CLiveRecorder:
                                         or self._opening_reversal_decision_gate_v1_1 is None
                                     )
                                     else (
-                                        self._opening_reversal_decision_gate_v1_1
-                                        .first_deferred_event_received_at(session)
+                                        self._opening_reversal_decision_gate_v1_1.first_deferred_event_received_at(
+                                            session
+                                        )
                                     )
                                 ),
                                 opening_reversal_entry_data_admitted_before_receipt_v1_1=(
@@ -1582,8 +2196,9 @@ class FrozenM1CLiveRecorder:
                                         v1_1_checkpoint
                                         and self._opening_reversal_decision_gate_v1_1 is not None
                                         and (
-                                            self._opening_reversal_decision_gate_v1_1
-                                            .scientific_barrier_compromised(session)
+                                            self._opening_reversal_decision_gate_v1_1.scientific_barrier_compromised(
+                                                session
+                                            )
                                         )
                                     )
                                 ),

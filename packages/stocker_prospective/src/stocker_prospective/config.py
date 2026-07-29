@@ -5,12 +5,14 @@ from __future__ import annotations
 import ipaddress
 import os
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from stocker_prospective.operational_state import OperationalThresholds
 
 
 class RuntimeSafetyError(RuntimeError):
@@ -61,6 +63,14 @@ class RuntimeConfig(BaseModel):
     run_id: str | None = None
     recorder_lease_stale_seconds: int = Field(default=60, ge=15)
     heartbeat_seconds: int = Field(default=10, ge=1)
+    callback_inbox_max_unacknowledged: int = Field(default=65_536, ge=1)
+    callback_inbox_batch_limit: int = Field(default=2_048, ge=1, le=65_536)
+    callback_inbox_lease_seconds: int = Field(default=30, ge=5)
+    callback_heartbeat_stale_seconds: int = Field(default=30, ge=5)
+    raw_storage_heartbeat_stale_seconds: int = Field(default=60, ge=5)
+    callback_acknowledgement_stale_seconds: int = Field(default=30, ge=5)
+    callback_inbox_healthy_backlog: int = Field(default=5_000, ge=0)
+    callback_inbox_oldest_healthy_seconds: int = Field(default=60, ge=1)
 
     @field_validator("prospective_start_utc")
     @classmethod
@@ -273,6 +283,13 @@ ORDER_METHOD_NAMES = frozenset(
         "cancelOrder",
         "reqGlobalCancel",
         "exerciseOptions",
+        "reqAccountSummary",
+        "reqAccountUpdates",
+        "reqAccountUpdatesMulti",
+        "reqPositions",
+        "reqPositionsMulti",
+        "reqExecutions",
+        "reqCompletedOrders",
     }
 )
 
@@ -454,3 +471,32 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "capture_delay_seconds": config.parallel_validation.capture_delay_seconds,
         },
     }
+
+
+def operational_thresholds(
+    config: ProspectiveConfig,
+) -> OperationalThresholds:
+    """Build the shared recorder/web thresholds for the authoritative state."""
+
+    return OperationalThresholds(
+        lease_stale_after=timedelta(seconds=config.runtime.recorder_lease_stale_seconds),
+        process_heartbeat_stale_after=timedelta(
+            seconds=max(
+                config.runtime.heartbeat_seconds * 3,
+                config.runtime.recorder_lease_stale_seconds,
+            )
+        ),
+        callback_heartbeat_stale_after=timedelta(
+            seconds=config.runtime.callback_heartbeat_stale_seconds
+        ),
+        raw_storage_heartbeat_stale_after=timedelta(
+            seconds=config.runtime.raw_storage_heartbeat_stale_seconds
+        ),
+        acknowledgement_stale_after=timedelta(
+            seconds=config.runtime.callback_acknowledgement_stale_seconds
+        ),
+        maximum_inbox_backlog=config.runtime.callback_inbox_healthy_backlog,
+        maximum_oldest_unacknowledged_age=timedelta(
+            seconds=config.runtime.callback_inbox_oldest_healthy_seconds
+        ),
+    )

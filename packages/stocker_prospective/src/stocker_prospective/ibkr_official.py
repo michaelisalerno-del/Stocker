@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from datetime import UTC, date, datetime
+from functools import wraps
 from typing import Any
 
 from stocker_prospective.ibkr import IBKRMarketDataAdapter, require_official_ibkr_api
@@ -132,20 +134,72 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
     from ibapi.client import EClient
     from ibapi.wrapper import EWrapper
 
+    def callback_boundary(
+        callback_kind: str,
+        request_position: int | None = 0,
+    ) -> Callable[[Callable[..., None]], Callable[..., None]]:
+        def decorate(method: Callable[..., None]) -> Callable[..., None]:
+            @wraps(method)
+            def guarded(self: Any, *arguments: Any, **keywords: Any) -> None:
+                request_id = -1
+                extraction_error: Exception | None = None
+                try:
+                    if request_position is not None:
+                        if len(arguments) > request_position:
+                            request_id = int(arguments[request_position])
+                        else:
+                            request_id = int(
+                                keywords.get(
+                                    "reqId",
+                                    keywords.get("request_id", -1),
+                                )
+                            )
+                except Exception as exc:
+                    # Request-ID conversion is itself part of the external
+                    # callback boundary. Feed it through the same fatal
+                    # classifier instead of allowing it to escape EWrapper.
+                    extraction_error = exc
+
+                def callback() -> None:
+                    if extraction_error is not None:
+                        raise extraction_error
+                    method(self, *arguments, **keywords)
+
+                boundary = getattr(adapter, "contain_official_callback", None)
+                if callable(boundary):
+                    boundary(
+                        callback_kind,
+                        request_id,
+                        callback,
+                        provider_arguments=arguments,
+                        provider_keywords=keywords,
+                    )
+                else:
+                    callback()
+
+            guarded.__dict__["__stocker_callback_boundary__"] = True
+            return guarded
+
+        return decorate
+
     class _StockerOfficialMarketDataClient(EWrapper, EClient):  # type: ignore[misc]
         def __init__(self) -> None:
             EWrapper.__init__(self)
             EClient.__init__(self, self)
             self._market_data_types: dict[int, str] = {}
+            self._maximum_market_data_type_entries = 1_024
 
-        def nextValidId(self, orderId: int) -> None:  # noqa: N802
-            # The official callback name contains "order", but the value also
-            # seeds market-data request IDs. It never creates an order surface.
-            adapter.request_ids.synchronise(orderId)
-            # nextValidId completes the socket handshake; it does not confirm
-            # the market-data type for any request.
-            adapter.on_connected(None)
+        def connect(self, host: str, port: int, client_id: int) -> Any:
+            self._market_data_types.clear()
+            result = EClient.connect(self, host, port, client_id)
+            if result is not False:
+                # Market-data request identifiers are process-local. The
+                # recorder deliberately does not consume any order callback
+                # merely to establish socket readiness.
+                adapter.on_connected(None)
+            return result
 
+        @callback_boundary("error")
         def error(
             self,
             reqId: int,
@@ -158,9 +212,11 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
             # between the request ID and error code.
             adapter.on_error(reqId, errorCode, errorString)
 
+        @callback_boundary("connection_closed", None)
         def connectionClosed(self) -> None:  # noqa: N802
             adapter.on_connection_closed()
 
+        @callback_boundary("market_data_type")
         def marketDataType(self, reqId: int, marketDataType: int) -> None:  # noqa: N802
             mapped = {
                 1: MarketDataType.LIVE,
@@ -175,12 +231,19 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                     "unknown_market_data_type",
                 )
                 return
+            if (
+                reqId not in self._market_data_types
+                and len(self._market_data_types) >= self._maximum_market_data_type_entries
+            ):
+                raise RuntimeError("market_data_type_cache_failed")
             self._market_data_types[reqId] = mapped.value
             adapter.on_market_data_type(reqId, mapped)
 
+        @callback_boundary("current_time", None)
         def currentTime(self, time: int) -> None:  # noqa: N802
             adapter.on_current_time(datetime.fromtimestamp(time, tz=UTC))
 
+        @callback_boundary("tick_by_tick_bidask")
         def tickByTickBidAsk(  # noqa: N802
             self,
             reqId: int,
@@ -205,6 +268,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 },
             )
 
+        @callback_boundary("tick_by_tick_trade")
         def tickByTickAllLast(  # noqa: N802
             self,
             reqId: int,
@@ -231,6 +295,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 },
             )
 
+        @callback_boundary("market_depth")
         def updateMktDepth(  # noqa: N802
             self,
             reqId: int,
@@ -253,6 +318,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 ),
             )
 
+        @callback_boundary("market_depth_l2")
         def updateMktDepthL2(  # noqa: N802
             self,
             reqId: int,
@@ -302,6 +368,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 "smart_depth": smart_depth,
             }
 
+        @callback_boundary("market_depth_exchanges", None)
         def mktDepthExchanges(self, descriptions: list[Any]) -> None:  # noqa: N802
             adapter.on_depth_exchanges(
                 tuple(
@@ -316,6 +383,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 )
             )
 
+        @callback_boundary("security_definition_option_parameter")
         def securityDefinitionOptionParameter(  # noqa: N802
             self,
             reqId: int,
@@ -338,15 +406,19 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 },
             )
 
+        @callback_boundary("security_definition_option_parameter_end")
         def securityDefinitionOptionParameterEnd(self, reqId: int) -> None:  # noqa: N802
             adapter.on_option_parameter_end(reqId)
 
+        @callback_boundary("contract_details")
         def contractDetails(self, reqId: int, contractDetails: Any) -> None:  # noqa: N802
             adapter.on_contract_details(reqId, contractDetails)
 
+        @callback_boundary("contract_details_end")
         def contractDetailsEnd(self, reqId: int) -> None:  # noqa: N802
             adapter.on_contract_details_end(reqId)
 
+        @callback_boundary("tick_price")
         def tickPrice(  # noqa: N802
             self,
             reqId: int,
@@ -365,7 +437,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                     }.get(tickType, f"price_tick_{tickType}"),
                     "value": (
                         None
-                        if not math.isfinite(price) or price < 0 or abs(price) >= 1e307
+                        if math.isfinite(price) and (price < 0 or abs(price) >= 1e307)
                         else price
                     ),
                     "market_data_type": self._market_data_types.get(reqId),
@@ -378,10 +450,13 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 },
             )
 
+        @callback_boundary("tick_size")
         def tickSize(self, reqId: int, tickType: int, size: Any) -> None:  # noqa: N802
             numeric = float(size) if size is not None else None
-            if numeric is not None and (
-                not math.isfinite(numeric) or numeric < 0 or abs(numeric) >= 1e307
+            if (
+                numeric is not None
+                and math.isfinite(numeric)
+                and (numeric < 0 or abs(numeric) >= 1e307)
             ):
                 numeric = None
             adapter.on_quote_update(
@@ -401,6 +476,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 },
             )
 
+        @callback_boundary("tick_option_computation")
         def tickOptionComputation(  # noqa: N802
             self,
             reqId: int,
@@ -429,7 +505,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
             def present(value: float) -> float | None:
                 return (
                     None
-                    if value is None or not math.isfinite(value) or abs(value) >= 1e307
+                    if value is None or (math.isfinite(value) and abs(value) >= 1e307)
                     else value
                 )
 
@@ -451,9 +527,11 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 },
             )
 
+        @callback_boundary("tick_snapshot_end")
         def tickSnapshotEnd(self, reqId: int) -> None:  # noqa: N802
             adapter.callbacks.complete(reqId)
 
+        @callback_boundary("realtime_bar")
         def realtimeBar(  # noqa: N802
             self,
             reqId: int,
@@ -470,9 +548,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 if value is None:
                     return None
                 converted = float(value)
-                return (
-                    None if not math.isfinite(converted) or abs(converted) >= 1e307 else converted
-                )
+                return None if math.isfinite(converted) and abs(converted) >= 1e307 else converted
 
             adapter.on_realtime_bar(
                 RealtimeBarUpdate(
@@ -489,6 +565,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 )
             )
 
+        @callback_boundary("historical_data")
         def historicalData(self, reqId: int, bar: Any) -> None:  # noqa: N802
             adapter.on_historical_bar(
                 reqId,
@@ -496,6 +573,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 update=False,
             )
 
+        @callback_boundary("historical_data_update")
         def historicalDataUpdate(self, reqId: int, bar: Any) -> None:  # noqa: N802
             adapter.on_historical_bar(
                 reqId,
@@ -503,6 +581,7 @@ def create_official_callback_client(adapter: IBKRMarketDataAdapter) -> Any:
                 update=True,
             )
 
+        @callback_boundary("historical_data_end")
         def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:  # noqa: N802
             adapter.on_historical_bar_end(reqId, start=start, end=end)
 

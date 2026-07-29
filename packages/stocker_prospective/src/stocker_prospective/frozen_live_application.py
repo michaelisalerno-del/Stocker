@@ -25,7 +25,7 @@ from stocker_prospective.capacity import (
     WindowedRequestPacer,
     resolve_runtime_capacity,
 )
-from stocker_prospective.config import ProspectiveConfig
+from stocker_prospective.config import ProspectiveConfig, operational_thresholds
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.contract import (
     BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
@@ -41,6 +41,7 @@ from stocker_prospective.database import (
 )
 from stocker_prospective.direction import FrozenDirectionRuntime
 from stocker_prospective.direction_features import FrozenDirectionFeatureBuilder
+from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.event_ingest import IBKRCallbackNormalizer
 from stocker_prospective.frozen_m1c import FrozenM1CRuntime
 from stocker_prospective.group_o import (
@@ -78,6 +79,11 @@ from stocker_prospective.market_data import ConnectionState, MarketDataType
 from stocker_prospective.opening_market_transition_v1 import (
     load_opening_transition_threshold_manifest_v1,
 )
+from stocker_prospective.operational_state import (
+    RecorderOperationalRepository,
+    RuntimeArtifactVerification,
+    stable_artifact_verification_id,
+)
 from stocker_prospective.option_budget import (
     BudgetAwareEpisodeStateMachine,
     EpisodeAllocationRecord,
@@ -112,6 +118,7 @@ from stocker_prospective.signed_market_shock_v1 import (
     load_signed_market_shock_threshold_manifest_v1,
 )
 from stocker_prospective.source_transfer import SourceTransferCoordinator
+from stocker_prospective.storage_recovery import CrossStoreReconciler
 from stocker_prospective.subscriptions import (
     PromotionScheduler,
     SubscriptionBudgetManager,
@@ -210,6 +217,97 @@ def _assert_frozen_m1c_artifact_hashes(artifact_files: Mapping[str, Path]) -> No
     )
     if mismatches:
         raise ValueError("blocked_frozen_artifact_hash_mismatch: " + ",".join(mismatches))
+
+
+def _activation_receipt_identity(record: object | None) -> str:
+    if record is None or not hasattr(record, "model_dump"):
+        return "activation_receipt_unavailable"
+    payload = record.model_dump(mode="json")
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _record_blocked_runtime_artifacts(
+    *,
+    repository: RecorderOperationalRepository | None,
+    activation_ledger: ProspectiveActivationLedger,
+    run_id: str,
+    recorder_generation: int | None,
+    artifact_files: Mapping[str, Path],
+    blocker: str,
+) -> None:
+    """Best-effort startup evidence for a generation that cannot load artifacts."""
+
+    if repository is None or recorder_generation is None:
+        return
+    try:
+        activation = activation_ledger.load()
+    except (OSError, ValueError):
+        activation = None
+    immutable_hashes = {} if activation is None else activation.model_artifact_hashes
+    built_in_hashes = {
+        "m1c_feature_manifest": M1C_FEATURE_MANIFEST_SHA256,
+        "m1c_threshold": M1C_THRESHOLD_ARTIFACT_SHA256,
+        "m1c_scaling": M1C_SCALING_ARTIFACT_SHA256,
+    }
+    receipt_identity = _activation_receipt_identity(activation)
+    observed_at = datetime.now(UTC)
+    for artifact_name, artifact_path in sorted(artifact_files.items()):
+        found = artifact_path.is_file()
+        observed_hash: str | None = None
+        if found:
+            try:
+                observed_hash = _sha256(artifact_path)
+            except OSError:
+                found = False
+        expected_hash = immutable_hashes.get(
+            artifact_name,
+            built_in_hashes.get(artifact_name, "expected_hash_unavailable"),
+        )
+        hash_verified = observed_hash is not None and observed_hash == expected_hash
+        verification = RuntimeArtifactVerification(
+            verification_id=stable_artifact_verification_id(
+                run_id=run_id,
+                recorder_generation=recorder_generation,
+                artifact_name=artifact_name,
+                expected_hash=expected_hash,
+            ),
+            run_id=run_id,
+            recorder_generation=recorder_generation,
+            artifact_bundle_id="artifact_bundle_unavailable",
+            artifact_name=artifact_name,
+            expected_hash=expected_hash,
+            observed_hash=observed_hash,
+            feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
+            activation_receipt_identity=receipt_identity,
+            found=found,
+            loaded=False,
+            schema_validated=False,
+            hash_verified=hash_verified,
+            contract_compatible=False,
+            used_by_active_generation=False,
+            load_timestamp_utc=observed_at,
+            verification_result="blocked",
+            blocker=blocker,
+            details={
+                "startup_failed_closed": True,
+                "expected_hash_source": (
+                    "immutable_activation_receipt"
+                    if artifact_name in immutable_hashes
+                    else "built_in_frozen_contract"
+                    if artifact_name in built_in_hashes
+                    else "unavailable_before_first_activation"
+                ),
+            },
+        )
+        try:
+            repository.record_artifact_verification(verification)
+        except Exception:
+            # The original artifact failure remains authoritative. Persistence
+            # is best effort here because a storage failure has its own fatal
+            # path and must not be disguised as an artifact parsing error.
+            return
 
 
 class FrozenProspectiveApplication:
@@ -324,6 +422,19 @@ class FrozenProspectiveApplication:
             )
 
     def poll(self, *, now: datetime) -> LivePollResult:
+        """Run one callback batch and fail closed across the full application."""
+
+        observed = now.astimezone(UTC)
+        try:
+            return self._poll_once(now=observed)
+        except Exception as exc:
+            self.live_recorder.fail_inflight_durable_poll(
+                exc,
+                occurred_at=observed,
+            )
+            raise
+
+    def _poll_once(self, *, now: datetime) -> LivePollResult:
         observed = now.astimezone(UTC)
         self._persist_connection_events(observed)
         observed_session = observed.astimezone(NEW_YORK).date()
@@ -592,6 +703,10 @@ class FrozenProspectiveApplication:
                 self._active_episode_end.pop(episode_id)
         capability = self._write_capability_manifest(observed)
         self.live_recorder.set_capability_preflight(passed=capability.scientific_recording_valid)
+        self.live_recorder.finalize_durable_poll(
+            result,
+            acknowledged_at=observed,
+        )
         return result
 
     def _reconcile_subscriptions(self, observed: datetime) -> None:
@@ -766,7 +881,13 @@ class FrozenProspectiveApplication:
         if health.subscriptions_require_rebuild:
             metadata = self.metadata_factory(now, (now,))
             for item in self.resolved_contracts:
-                self.live_recorder.mark_gap(item.symbol, started_at=now)
+                self.live_recorder.mark_gap(
+                    item.symbol,
+                    started_at=now,
+                    cause_code="CONNECTION_DATA_LOSS_REBUILD",
+                    stream_kind="connection",
+                    recoverability="recoverable",
+                )
             self.subscriptions.rebuild_after_data_loss(metadata)
             self.option_discovery.rebuild_after_data_loss(metadata)
             self.adapter.connection.subscriptions_rebuilt()
@@ -879,6 +1000,9 @@ def build_frozen_prospective_application(
     ],
     ibkr_api_version: str,
     heartbeat: Callable[[], object] | None = None,
+    durable_inbox: DurableCallbackInbox | None = None,
+    recorder_generation: int | None = None,
+    recorder_owner_id: str | None = None,
 ) -> FrozenProspectiveApplication:
     """Build the live service only after all frozen artifact identities verify."""
 
@@ -908,6 +1032,12 @@ def build_frozen_prospective_application(
     for name, value in required_paths.items():
         assert value is not None
         resolved_paths[name] = Path(value)
+    operational_repository = (
+        None
+        if recorder_generation is None or recorder_owner_id is None
+        else RecorderOperationalRepository(repository.database_path)
+    )
+    activation_ledger = ProspectiveActivationLedger(resolved_paths["recorder_activation"])
     artifact_root = resolved_paths["frozen_m1c_artifact_root"]
     if set(SECTOR_PROXY_BY_SYMBOL) != set(identity.symbols):
         raise ValueError("frozen sector-proxy map differs from the exact 20-stock cohort")
@@ -972,15 +1102,6 @@ def build_frozen_prospective_application(
         raise ValueError("opening reversal config and activation must be configured together")
     if reversal_config_path is not None:
         assert reversal_activation_path is not None
-        if config.ibkr.reserved_future_trading_lines != 12:
-            raise ValueError("opening reversal V1 requires exactly 12 reserved market-data lines")
-        frozen_reversal_config = load_frozen_experiment_config_v1(str(reversal_config_path))
-        opening_reversal_activation_v1 = load_activation_receipt_v1(str(reversal_activation_path))
-        if (
-            opening_reversal_activation_v1.configuration_hash
-            != frozen_reversal_config.configuration_hash
-        ):
-            raise ValueError("opening reversal activation/configuration hash mismatch")
         artifact_files["m1c_prospective_opening_reversal_v1_config"] = Path(reversal_config_path)
         artifact_files["m1c_prospective_opening_reversal_v1_activation"] = Path(
             reversal_activation_path
@@ -992,18 +1113,75 @@ def build_frozen_prospective_application(
         raise ValueError("opening reversal V1.1 config and activation must be configured together")
     if reversal_v1_1_config_path is not None:
         assert reversal_v1_1_activation_path is not None
+        artifact_files["m1c_prospective_opening_reversal_v1_1_config"] = Path(
+            reversal_v1_1_config_path
+        )
+        artifact_files["m1c_prospective_opening_reversal_v1_1_activation"] = Path(
+            reversal_v1_1_activation_path
+        )
+    if operational_repository is not None:
+        assert recorder_generation is not None
+        assert recorder_owner_id is not None
+        operational_repository.start_generation(
+            run_id=config.runtime.run_id,
+            recorder_generation=recorder_generation,
+            owner_id=recorder_owner_id,
+            started_at=datetime.now(UTC),
+            required_market_data_mode=(
+                config.ibkr.allowed_market_data_types[0]
+                if len(config.ibkr.allowed_market_data_types) == 1
+                else None
+            ),
+            expected_artifact_count=len(artifact_files),
+        )
+
+    def block_runtime_artifacts(blocker: str) -> None:
+        _record_blocked_runtime_artifacts(
+            repository=operational_repository,
+            activation_ledger=activation_ledger,
+            run_id=config.runtime.run_id or "",
+            recorder_generation=recorder_generation,
+            artifact_files=artifact_files,
+            blocker=blocker,
+        )
+
+    if reversal_config_path is not None:
+        assert reversal_activation_path is not None
+        if config.ibkr.reserved_future_trading_lines != 12:
+            raise ValueError("opening reversal V1 requires exactly 12 reserved market-data lines")
+        try:
+            frozen_reversal_config = load_frozen_experiment_config_v1(str(reversal_config_path))
+            opening_reversal_activation_v1 = load_activation_receipt_v1(
+                str(reversal_activation_path)
+            )
+        except (OSError, ValueError):
+            block_runtime_artifacts("RUNTIME_ARTIFACT_SCHEMA_INVALID")
+            raise
+        if (
+            opening_reversal_activation_v1.configuration_hash
+            != frozen_reversal_config.configuration_hash
+        ):
+            block_runtime_artifacts("RUNTIME_ARTIFACT_CONTRACT_INCOMPATIBLE")
+            raise ValueError("opening reversal activation/configuration hash mismatch")
+    if reversal_v1_1_config_path is not None:
+        assert reversal_v1_1_activation_path is not None
         if opening_reversal_activation_v1 is None:
+            block_runtime_artifacts("RUNTIME_ARTIFACT_CONTRACT_INCOMPATIBLE")
             raise ValueError("opening reversal V1.1 requires the exact V1 activation")
         if config.ibkr.reserved_future_trading_lines != 12:
             raise ValueError(
                 "opening reversal V1.1 preserves exactly 12 reserved market-data lines"
             )
-        timing_addendum_config = load_frozen_timing_addendum_config_v1_1(
-            str(reversal_v1_1_config_path)
-        )
-        opening_reversal_activation_v1_1 = load_activation_receipt_v1_1(
-            str(reversal_v1_1_activation_path)
-        )
+        try:
+            timing_addendum_config = load_frozen_timing_addendum_config_v1_1(
+                str(reversal_v1_1_config_path)
+            )
+            opening_reversal_activation_v1_1 = load_activation_receipt_v1_1(
+                str(reversal_v1_1_activation_path)
+            )
+        except (OSError, ValueError):
+            block_runtime_artifacts("RUNTIME_ARTIFACT_SCHEMA_INVALID")
+            raise
         if (
             opening_reversal_activation_v1_1.timing_addendum_configuration_hash_v1_1
             != timing_addendum_config.configuration_hash_v1_1
@@ -1018,30 +1196,34 @@ def build_frozen_prospective_application(
                 != opening_reversal_activation_v1.configuration_hash
             )
         ):
+            block_runtime_artifacts("RUNTIME_ARTIFACT_CONTRACT_INCOMPATIBLE")
             raise ValueError("opening reversal V1.1 activation/addendum/V1 binding mismatch")
-        artifact_files["m1c_prospective_opening_reversal_v1_1_config"] = Path(
-            reversal_v1_1_config_path
-        )
-        artifact_files["m1c_prospective_opening_reversal_v1_1_activation"] = Path(
-            reversal_v1_1_activation_path
-        )
     if any(not path.is_file() for path in artifact_files.values()):
         absent = sorted(name for name, path in artifact_files.items() if not path.is_file())
+        block_runtime_artifacts("RUNTIME_ARTIFACT_NOT_FOUND")
         raise ValueError("frozen recorder artifact absent: " + ",".join(absent))
-    _assert_frozen_m1c_artifact_hashes(artifact_files)
-    m1c_runtime = FrozenM1CRuntime.from_artifacts(
-        feature_manifest_path=artifact_files["m1c_feature_manifest"],
-        threshold_path=artifact_files["m1c_threshold"],
-    )
-    direction_runtime = FrozenDirectionRuntime.from_artifacts(
-        model_configurations_path=artifact_files["direction_models"],
-        normalisation_path=artifact_files["direction_normalisation"],
-        thresholds_path=artifact_files["direction_thresholds"],
-    )
-    m1c_features = M1CCausalFeatureBuilder.from_scaling_artifact(artifact_files["m1c_scaling"])
-    direction_features = FrozenDirectionFeatureBuilder.from_beta_artifact(
-        artifact_files["direction_beta"]
-    )
+    try:
+        _assert_frozen_m1c_artifact_hashes(artifact_files)
+    except ValueError:
+        block_runtime_artifacts("RUNTIME_ARTIFACT_HASH_MISMATCH")
+        raise
+    try:
+        m1c_runtime = FrozenM1CRuntime.from_artifacts(
+            feature_manifest_path=artifact_files["m1c_feature_manifest"],
+            threshold_path=artifact_files["m1c_threshold"],
+        )
+        direction_runtime = FrozenDirectionRuntime.from_artifacts(
+            model_configurations_path=artifact_files["direction_models"],
+            normalisation_path=artifact_files["direction_normalisation"],
+            thresholds_path=artifact_files["direction_thresholds"],
+        )
+        m1c_features = M1CCausalFeatureBuilder.from_scaling_artifact(artifact_files["m1c_scaling"])
+        direction_features = FrozenDirectionFeatureBuilder.from_beta_artifact(
+            artifact_files["direction_beta"]
+        )
+    except (OSError, ValueError):
+        block_runtime_artifacts("RUNTIME_ARTIFACT_SCHEMA_INVALID")
+        raise
     m1c_parity = _passed(
         resolved_paths["m1c_live_parity_report"],
         label="M1C live parity",
@@ -1183,7 +1365,6 @@ def build_frozen_prospective_application(
         heartbeat=heartbeat,
     )
 
-    activation_ledger = ProspectiveActivationLedger(resolved_paths["recorder_activation"])
     existing_activation = activation_ledger.load()
     activation = activation_ledger.activate(
         activation_timestamp_utc=(
@@ -1307,7 +1488,23 @@ def build_frozen_prospective_application(
         prospective_collection_start=prospective_start,
         recorder_version=config.runtime.app_version,
         contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
+        run_id=config.runtime.run_id,
     )
+    if (
+        durable_inbox is not None
+        and recorder_generation is not None
+        and operational_repository is not None
+    ):
+        recovery = CrossStoreReconciler(
+            repository=repository,
+            recorder_repository=frozen_repository,
+            raw_store=raw_store,
+            inbox=durable_inbox,
+            run_id=config.runtime.run_id,
+            recorder_generation=recorder_generation,
+        ).reconcile(initial_metadata, observed_at=datetime.now(UTC))
+        if not recovery.safe_to_score:
+            raise RuntimeError("blocked_storage_integrity_reconciliation_failed")
     group_packages: dict[date, FrozenGroupOSessionPackage] = {}
 
     def group_o_provider(symbol: str, signal_session: date) -> Any:
@@ -1451,6 +1648,13 @@ def build_frozen_prospective_application(
         maximum_quote_age=timedelta(seconds=config.ibkr.maximum_quote_age_seconds),
         maximum_clock_drift_seconds=config.ibkr.maximum_clock_drift_seconds,
         depth_rows=config.ibkr.level2_rows,
+        durable_inbox=durable_inbox,
+        recorder_generation=recorder_generation,
+        lease_owner=recorder_owner_id,
+        inbox_lease_timeout=timedelta(seconds=config.runtime.callback_inbox_lease_seconds),
+        inbox_batch_limit=config.runtime.callback_inbox_batch_limit,
+        operational_repository=operational_repository,
+        operational_thresholds=operational_thresholds(config),
     )
 
     controller = LiveSubscriptionController(
@@ -1665,7 +1869,7 @@ def build_frozen_prospective_application(
         run_id=config.runtime.run_id or "",
         report_root=resolved_paths["prospective_report_root"],
     )
-    return FrozenProspectiveApplication(
+    application = FrozenProspectiveApplication(
         config=config,
         adapter=adapter,
         repository=repository,
@@ -1692,6 +1896,46 @@ def build_frozen_prospective_application(
         tws_or_gateway_version=gateway_version,
         session_context_preflight=session_context_preflight,
     )
+    if operational_repository is not None:
+        assert recorder_generation is not None
+        activation_receipt_identity = _activation_receipt_identity(activation)
+        loaded_at = datetime.now(UTC)
+        for artifact_name, artifact_path in sorted(artifact_files.items()):
+            expected_hash = activation.model_artifact_hashes[artifact_name]
+            observed_hash = _sha256(artifact_path)
+            verified = observed_hash == expected_hash
+            operational_repository.record_artifact_verification(
+                RuntimeArtifactVerification(
+                    verification_id=stable_artifact_verification_id(
+                        run_id=config.runtime.run_id,
+                        recorder_generation=recorder_generation,
+                        artifact_name=artifact_name,
+                        expected_hash=expected_hash,
+                    ),
+                    run_id=config.runtime.run_id,
+                    recorder_generation=recorder_generation,
+                    artifact_bundle_id=m1c_runtime.model_hash,
+                    artifact_name=artifact_name,
+                    expected_hash=expected_hash,
+                    observed_hash=observed_hash,
+                    feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
+                    activation_receipt_identity=activation_receipt_identity,
+                    found=True,
+                    loaded=True,
+                    schema_validated=True,
+                    hash_verified=verified,
+                    contract_compatible=True,
+                    used_by_active_generation=True,
+                    load_timestamp_utc=loaded_at,
+                    verification_result="verified" if verified else "blocked",
+                    blocker=(None if verified else "blocked_frozen_artifact_hash_mismatch"),
+                    details={
+                        "expected_hash_source": "immutable_activation_receipt",
+                        "application_wiring_completed": True,
+                    },
+                )
+            )
+    return application
 
 
 __all__ = [

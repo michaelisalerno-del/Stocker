@@ -43,7 +43,8 @@ from stocker_prospective.context import (
     import_signed_context,
     load_imported_context,
 )
-from stocker_prospective.database import ProspectiveRepository
+from stocker_prospective.database import LeaseRecord, ProspectiveRepository
+from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.frozen_artifacts import (
     FrozenArtifactReconstructionError,
     reconstruct_frozen_artifacts,
@@ -65,15 +66,13 @@ from stocker_prospective.ibkr_api import (
     write_official_ibkr_api_update_status,
 )
 from stocker_prospective.market_data import MarketDataBudget, MarketDataType
+from stocker_prospective.operational_state import RecorderOperationalRepository
 from stocker_prospective.parallel import (
     ParallelSourceCaptureService,
     build_parallel_eodhd_service,
 )
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
-from stocker_prospective.recorder import (
-    IBKRDiagnosticRecorder,
-    RecorderDeploymentIdentity,
-)
+from stocker_prospective.recorder import RecorderDeploymentIdentity
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.scientific_inputs import (
     EODHDGroupOPreparationService,
@@ -499,6 +498,7 @@ def _ibkr_adapter(config: ProspectiveConfig) -> IBKRMarketDataAdapter:
             request_rate_limit=config.ibkr.request_rate_per_second,
         ),
         socket_preflight=require_ibkr_socket_loopback_only,
+        require_durable_inbox_on_start=True,
     )
 
 
@@ -602,6 +602,63 @@ def replay_run(config_path: Path = typer.Option(..., "--config", exists=True)) -
             )
 
 
+def _fail_closed_on_unclean_recorder_takeover(
+    *,
+    lease: LeaseRecord,
+    config: ProspectiveConfig,
+    owner_id: str,
+    durable_inbox: DurableCallbackInbox,
+    operational_repository: RecorderOperationalRepository,
+) -> None:
+    """Latch uncertain process-local continuity before opening an IBKR socket."""
+
+    if not lease.recovered_stale_owner:
+        return
+    assert config.runtime.run_id is not None
+    observed = datetime.now(UTC)
+    operational_repository.start_generation(
+        run_id=config.runtime.run_id,
+        recorder_generation=lease.generation,
+        owner_id=owner_id,
+        started_at=observed,
+        required_market_data_mode=(
+            config.ibkr.allowed_market_data_types[0]
+            if len(config.ibkr.allowed_market_data_types) == 1
+            else None
+        ),
+        # Artifact loading never begins on this failed-closed generation; a
+        # positive placeholder satisfies the state schema without claiming
+        # runtime verification.
+        expected_artifact_count=1,
+    )
+    durable_inbox.record_incident(
+        stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
+        component="recorder_startup",
+        severity="fatal",
+        occurred_at=observed,
+        error_class="UncleanRecorderRestart",
+        evidence_loss_possible=True,
+        details={
+            "recovered_stale_owner": True,
+            "previous_heartbeat_at_utc": lease.heartbeat_at_utc.isoformat(),
+            "socket_opened": False,
+            "operator_action": "retain_invalid_run_and_start_new_run",
+        },
+    )
+    durable_inbox.latch_fatal(
+        latch_kind="ingestion",
+        stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
+        occurred_at=observed,
+        error_class="UncleanRecorderRestart",
+        evidence_loss_possible=True,
+        first_possibly_lost_source_sequence=(durable_inbox.latest_source_sequence()),
+    )
+    raise RuntimeSafetyError(
+        "blocked_unclean_recorder_restart_state_uncertain: "
+        "the stale run is retained as invalid; start a new run ID"
+    )
+
+
 @recorder_app.command("run")
 def recorder_run(
     config_path: Path = typer.Option(..., "--config", exists=True),
@@ -611,7 +668,6 @@ def recorder_run(
     """Own the single recorder lease and market-data loop."""
 
     adapter: IBKRMarketDataAdapter | None = None
-    diagnostic_recorder: Any | None = None
     frozen_application: Any | None = None
     parallel_capture: ParallelSourceCaptureService | None = None
     group_o_preparer: EODHDGroupOPreparationService | None = None
@@ -620,6 +676,10 @@ def recorder_run(
     lease_owned = False
     config: ProspectiveConfig | None = None
     owner_id: str | None = None
+    durable_inbox: DurableCallbackInbox | None = None
+    operational_repository: RecorderOperationalRepository | None = None
+    recorder_generation: int | None = None
+    fatal_exit = False
     try:
         config = load_prospective_config(config_path)
         validate_persistent_paths(config, release_directory)
@@ -648,6 +708,12 @@ def recorder_run(
                 lease_owned = False
                 return
         else:
+            if config.paths.frozen_m1c_artifact_root is None:
+                raise RuntimeSafetyError(
+                    "blocked_unsafe_runtime_configuration: IBKR callback recording "
+                    "requires the durable raw recorder; legacy memory-drain "
+                    "diagnostic mode cannot open a socket"
+                )
             adapter = _ibkr_adapter(config)
             validate_runtime_safety(config, adapter)
             ibkr_api_module = require_official_ibkr_api()
@@ -655,13 +721,30 @@ def recorder_run(
             repository = ProspectiveRepository(config.paths.database)
             repository.migrate()
             repository.open_anchor()
-            repository.acquire_recorder_lease(
+            lease = repository.acquire_recorder_lease(
                 run_id=config.runtime.run_id,
                 owner_id=owner_id,
                 now=datetime.now(UTC),
                 stale_after=timedelta(seconds=config.runtime.recorder_lease_stale_seconds),
             )
+            recorder_generation = lease.generation
             lease_owned = True
+            durable_inbox = DurableCallbackInbox(
+                config.paths.database,
+                max_unacknowledged=(config.runtime.callback_inbox_max_unacknowledged),
+                run_id=config.runtime.run_id,
+                recorder_generation=recorder_generation,
+                owner_id=owner_id,
+            )
+            adapter.attach_durable_inbox(durable_inbox)
+            operational_repository = RecorderOperationalRepository(config.paths.database)
+            _fail_closed_on_unclean_recorder_takeover(
+                lease=lease,
+                config=config,
+                owner_id=owner_id,
+                durable_inbox=durable_inbox,
+                operational_repository=operational_repository,
+            )
             from stocker_prospective.ibkr_official import (
                 create_official_callback_client,
                 create_official_option_contract,
@@ -671,49 +754,62 @@ def recorder_run(
             adapter.attach_official_client(create_official_callback_client(adapter))
 
             def heartbeat() -> object:
-                return repository.heartbeat_recorder_lease(
+                lease_record = repository.heartbeat_recorder_lease(
                     run_id=config.runtime.run_id or "",
                     owner_id=owner_id or "",
                     now=datetime.now(UTC),
                 )
+                if (
+                    operational_repository is not None
+                    and recorder_generation is not None
+                    and frozen_application is not None
+                ):
+                    health = adapter.connection.health()
+                    operational_repository.touch(
+                        run_id=config.runtime.run_id or "",
+                        recorder_generation=recorder_generation,
+                        owner_id=owner_id or "",
+                        now=datetime.now(UTC),
+                        ibkr_connection_state=health.state.value,
+                        observed_market_data_mode=(
+                            None
+                            if health.market_data_type is None
+                            else health.market_data_type.value
+                        ),
+                        broker_state_mutation_count=0,
+                    )
+                return lease_record
 
             adapter.start()
-            if config.paths.frozen_m1c_artifact_root is not None:
-                from stocker_prospective.frozen_live_application import (
-                    build_frozen_prospective_application,
-                )
+            from stocker_prospective.frozen_live_application import (
+                build_frozen_prospective_application,
+            )
 
-                frozen_application = build_frozen_prospective_application(
-                    config=config,
-                    adapter=adapter,
-                    repository=repository,
-                    identity=deployment_identity,
-                    stock_contract_factory=create_official_stock_contract,
-                    option_contract_factory=(
-                        lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
-                            create_official_option_contract(
-                                symbol=symbol,
-                                expiry=expiry,
-                                strike=strike,
-                                right=right,
-                                multiplier=multiplier,
-                                exchange=exchange,
-                                trading_class=trading,
-                            )
+            frozen_application = build_frozen_prospective_application(
+                config=config,
+                adapter=adapter,
+                repository=repository,
+                identity=deployment_identity,
+                stock_contract_factory=create_official_stock_contract,
+                option_contract_factory=(
+                    lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
+                        create_official_option_contract(
+                            symbol=symbol,
+                            expiry=expiry,
+                            strike=strike,
+                            right=right,
+                            multiplier=multiplier,
+                            exchange=exchange,
+                            trading_class=trading,
                         )
-                    ),
-                    ibkr_api_version=str(getattr(ibkr_api_module, "__version__", "unknown")),
-                    heartbeat=heartbeat,
-                )
-            else:
-                diagnostic_recorder = IBKRDiagnosticRecorder(
-                    config=config,
-                    repository=repository,
-                    adapter=adapter,
-                    identity=deployment_identity,
-                    contract_factory=create_official_stock_contract,
-                    heartbeat=heartbeat,
-                )
+                    )
+                ),
+                ibkr_api_version=str(getattr(ibkr_api_module, "__version__", "unknown")),
+                heartbeat=heartbeat,
+                durable_inbox=durable_inbox,
+                recorder_generation=recorder_generation,
+                recorder_owner_id=owner_id,
+            )
             if config.parallel_validation.enabled:
                 parallel_capture = build_parallel_eodhd_service(
                     config=config,
@@ -763,8 +859,6 @@ def recorder_run(
         signal.signal(signal.SIGINT, request_stop)
         next_lease_heartbeat = time.monotonic()
         while not stopping:
-            if diagnostic_recorder is not None:
-                diagnostic_recorder.poll(now=datetime.now(UTC))
             if frozen_application is not None:
                 frozen_application.poll(now=datetime.now(UTC))
                 if group_o_preparer is not None:
@@ -800,30 +894,76 @@ def recorder_run(
         UniverseError,
         ValueError,
     ) as exc:
+        fatal_exit = True
         _fatal(str(exc), exit_code=78)
     except Exception as exc:
+        fatal_exit = True
         _fatal(str(exc), exit_code=75)
     finally:
+        clean_shutdown = not fatal_exit
+        fatal_latched = False
+        if durable_inbox is not None:
+            try:
+                fatal_latched = durable_inbox.has_active_fatal()
+            except Exception as exc:
+                fatal_latched = True
+                clean_shutdown = False
+                typer.echo(f"fatal latch read failed: {exc}", err=True)
+        if (
+            operational_repository is not None
+            and recorder_generation is not None
+            and config is not None
+            and config.runtime.run_id is not None
+            and owner_id is not None
+            and not fatal_latched
+        ):
+            try:
+                operational_repository.set_stopping(
+                    run_id=config.runtime.run_id,
+                    recorder_generation=recorder_generation,
+                    owner_id=owner_id,
+                    now=datetime.now(UTC),
+                )
+            except Exception as exc:
+                clean_shutdown = False
+                typer.echo(f"recorder stopping state failed: {exc}", err=True)
         if group_o_preparer is not None:
             try:
                 group_o_preparer.shutdown()
             except Exception as exc:
+                clean_shutdown = False
                 typer.echo(f"Group O preparation cleanup failed: {exc}", err=True)
-        if diagnostic_recorder is not None:
-            try:
-                diagnostic_recorder.shutdown(now=datetime.now(UTC))
-            except Exception as exc:
-                typer.echo(f"recorder shutdown cleanup failed: {exc}", err=True)
         if frozen_application is not None:
             try:
                 frozen_application.shutdown(now=datetime.now(UTC))
             except Exception as exc:
+                clean_shutdown = False
                 typer.echo(f"frozen recorder shutdown cleanup failed: {exc}", err=True)
         if adapter is not None:
             try:
                 adapter.stop()
             except Exception as exc:
+                clean_shutdown = False
                 typer.echo(f"IBKR adapter cleanup failed: {exc}", err=True)
+        if (
+            clean_shutdown
+            and not fatal_latched
+            and operational_repository is not None
+            and recorder_generation is not None
+            and config is not None
+            and config.runtime.run_id is not None
+            and owner_id is not None
+        ):
+            try:
+                operational_repository.set_stopped_cleanly(
+                    run_id=config.runtime.run_id,
+                    recorder_generation=recorder_generation,
+                    owner_id=owner_id,
+                    now=datetime.now(UTC),
+                    termination_reason="operator_stop",
+                )
+            except Exception as exc:
+                typer.echo(f"recorder stopped state failed: {exc}", err=True)
         if (
             lease_owned
             and repository is not None

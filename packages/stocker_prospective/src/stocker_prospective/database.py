@@ -21,6 +21,10 @@ class RecorderLeaseHeld(RuntimeError):
     """Another recorder currently owns the database lease."""
 
 
+class SchemaVersionTooNew(RuntimeError):
+    """The database contains a migration this application does not understand."""
+
+
 class EvidenceMetadata(BaseModel):
     """Metadata flattened into every exported runtime evidence record."""
 
@@ -155,6 +159,7 @@ class ProspectiveRepository:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
         connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = FULL")
         return connection
 
     def open_anchor(self) -> None:
@@ -182,6 +187,8 @@ class ProspectiveRepository:
         """Apply package migrations exactly once."""
 
         migration_root = Path(__file__).with_name("migrations")
+        migration_paths = tuple(sorted(migration_root.glob("*.sql")))
+        supported = {path.name for path in migration_paths}
         with self._connect() as connection:
             connection.execute(
                 """
@@ -195,7 +202,12 @@ class ProspectiveRepository:
                 str(row["version"])
                 for row in connection.execute("SELECT version FROM schema_migrations")
             }
-            for path in sorted(migration_root.glob("*.sql")):
+            unsupported = tuple(sorted(applied - supported))
+            if unsupported:
+                raise SchemaVersionTooNew(
+                    "blocked_schema_newer_than_supported: " + ",".join(unsupported)
+                )
+            for path in migration_paths:
                 if path.name in applied:
                     continue
                 version = path.name.replace("'", "''")
@@ -814,7 +826,24 @@ class ProspectiveRepository:
                     )
                 recovered = not same_owner and stale
                 acquired = now.isoformat() if recovered else str(row["acquired_at_utc"])
-                generation = int(row["generation"]) + (1 if recovered else 0)
+                if recovered:
+                    historical_generation = connection.execute(
+                        """
+                        SELECT COALESCE(MAX(recorder_generation), 0)
+                        FROM recorder_generation_v1
+                        WHERE run_id = ?
+                        """,
+                        (run_id,),
+                    ).fetchone()[0]
+                    generation = (
+                        max(
+                            int(row["generation"]),
+                            int(historical_generation),
+                        )
+                        + 1
+                    )
+                else:
+                    generation = int(row["generation"])
                 connection.execute(
                     """
                     UPDATE recorder_lease
@@ -833,7 +862,15 @@ class ProspectiveRepository:
                 )
             else:
                 acquired = now.isoformat()
-                generation = 1
+                historical_generation = connection.execute(
+                    """
+                    SELECT COALESCE(MAX(recorder_generation), 0)
+                    FROM recorder_generation_v1
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                ).fetchone()[0]
+                generation = int(historical_generation) + 1
                 connection.execute(
                     """
                     INSERT INTO recorder_lease(

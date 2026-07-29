@@ -1,0 +1,16 @@
+{
+  "base_manifest": "research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary/api_market_data_capacity_manifest_v1.json",
+  "base_manifest_sha256": "6c3ef8dbf67109f3bded04f7ebe817ee1ae43af0690c45364ecf0f56c1b7e539",
+  "capacity_policy_changed": false,
+  "full_chain_live_subscription_created": false,
+  "level_ii_required": false,
+  "mandatory_option_streams": [
+    "one_primary_1dte_call",
+    "one_primary_1dte_put"
+  ],
+  "maximum_promoted_underlyings": 1,
+  "primary_pair_capacity_failure": "option_economics_blocked_capacity",
+  "reserve_may_fund_optional_research": false,
+  "reserved_position_monitoring_and_safety_lines": 12,
+  "schema_version": "api-market-data-capacity-manifest-v1.1"
+}

@@ -1,0 +1,3 @@
+period,eligible_shock_onset_episode_count,material_mover_count,unique_shock_event_count,session_count,roc_auc_followed_shock_among_material_movers,spearman_response_vs_continuation_aligned_return,spearman_two_sided_p_value,session_cluster_auc_lower_95,session_cluster_auc_upper_95,shock_event_cluster_auc_lower_95,shock_event_cluster_auc_upper_95
+assessment,9,4,9,9,0.0,-0.39999999999999997,0.286105101908313,0.0,0.0,0.0,0.0
+stress,29,12,21,16,0.3142857142857143,-0.196551724137931,0.30682037104028814,0.0,1.0,0.013733766233766242,0.9468055555555567

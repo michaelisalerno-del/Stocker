@@ -1,0 +1,17 @@
+{
+  "barrier_failure": "fail_scientific_session_closed_and_continue_core_recorder",
+  "decision_surface_release_sequence": [
+    "complete_sixth_predictor_bar",
+    "score_frozen_20_stock_cohort",
+    "persist_all_20_prediction_receipts",
+    "persist_causal_barrier_audit",
+    "release_buffered_entry_or_post_entry_data"
+  ],
+  "engineering_transfer_sessions_restart": 20,
+  "fresh_run_required": true,
+  "nominal_entry_actionable": false,
+  "raw_append_only_archival_before_receipt_allowed": true,
+  "receipt_contract": "durable_before_entry_or_post_entry_data_admitted_to_decision_surface",
+  "schema_version": "m1c-opening-reversal-causal-timing-manifest-v1.1",
+  "sixth_bar_may_complete_at_nominal_entry": true
+}

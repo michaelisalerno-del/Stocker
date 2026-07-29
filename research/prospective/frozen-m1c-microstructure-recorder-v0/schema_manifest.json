@@ -103,6 +103,62 @@
       "trade receive ordering identity"
     ]
   },
+  "m1c_tail_phase_v1_logging": {
+    "migration": "0011_m1c_tail_phase_v1.sql",
+    "group_o_session_context_v0": [
+      "previous_close_implied_movement_15m"
+    ],
+    "previous_close_implied_movement_15m_contract": {
+      "source": "exact previous-session ATM IV from the external Group-O package producer",
+      "formula": "atm_iv * sqrt(15 / (252 * 390)) * sqrt(2 / pi)",
+      "canonical_reference": "stocker_research.m1c_low_movement_v0.iv_expected_absolute",
+      "missing_or_invalid_effect": "UNKNOWN_INCOMPLETE logging only; M1C eligibility unchanged"
+    },
+    "m1c_checkpoint_v0": [
+      "m1c_high_tail_v1",
+      "m1c_tail_phase_v1",
+      "tail_entry_number_v1",
+      "tail_run_length_checkpoints_v1",
+      "tail_run_age_minutes_v1",
+      "prior_tail_entries_v1",
+      "previous_checkpoint_above_tail_v1",
+      "minutes_since_previous_tail_exit_v1",
+      "phase_history_complete_v1",
+      "phase_missing_reason_v1",
+      "movement_consumed_v1",
+      "movement_consumed_numerator_v1",
+      "movement_consumed_denominator_v1",
+      "movement_consumed_complete_v1",
+      "movement_consumed_missing_reason_v1",
+      "movement_consumed_bucket_v1",
+      "tail_phase_source_v1_json"
+    ],
+    "m1c_episode_v0": [
+      "phase_at_trigger_v1",
+      "tail_run_age_at_trigger_v1",
+      "movement_consumed_at_trigger_v1",
+      "movement_consumed_bucket_v1",
+      "m1c_high_tail_threshold_v1",
+      "m1c_model_version_v1",
+      "tail_entry_number_v1",
+      "tail_run_length_checkpoints_v1",
+      "prior_tail_entries_v1",
+      "previous_checkpoint_above_tail_v1",
+      "minutes_since_previous_tail_exit_v1",
+      "phase_history_complete_v1",
+      "phase_missing_reason_v1",
+      "movement_consumed_numerator_v1",
+      "movement_consumed_denominator_v1",
+      "movement_consumed_complete_v1",
+      "movement_consumed_missing_reason_v1",
+      "tail_phase_source_v1_json"
+    ],
+    "logging_only": true,
+    "changes_episode_inclusion": false,
+    "changes_subscription_priority": false,
+    "changes_direction_or_contract_selection": false,
+    "changes_order_routing": false
+  },
   "metadata_tables": [
     "m1c_checkpoint_v0",
     "m1c_episode_v0",
@@ -134,6 +190,7 @@
     "m1c_threshold": 0.488333710794033,
     "microstructure_direction_model_fitted": false,
     "microstructure_features_descriptive_only": true,
+    "m1c_tail_phase_v1_logging_only": true,
     "option_pnl_is_shadow_quote_pnl": true,
     "option_quotes_recorded": true,
     "paper_orders_allowed": false,

@@ -1,0 +1,104 @@
+{
+  "archived_signed_pressure_values_read": false,
+  "broker_access": false,
+  "causal_historical_surface": {
+    "causal_checkpoint_rows_after_previous_close_options": 32510,
+    "causal_checkpoint_rows_before_options": 119395,
+    "causal_stock_sessions_after_previous_close_options": 2179,
+    "movement_target_available_rows": 32510,
+    "movement_target_unavailable_rows": 0,
+    "row_membership_uses_future_target_validity": false,
+    "weight_definition": "1 / causal checkpoints in the same stock-session",
+    "weights_use_future_target_validity": false,
+    "weights_use_peer_stock_counts": false
+  },
+  "causal_opened_stress_surface": {
+    "causal_checkpoint_rows_after_previous_close_options": 18136,
+    "causal_checkpoint_rows_before_options": 18136,
+    "causal_stock_sessions_after_previous_close_options": 1214,
+    "movement_target_available_rows": 18136,
+    "movement_target_unavailable_rows": 0,
+    "row_membership_uses_future_target_validity": false,
+    "weight_definition": "1 / causal checkpoints in the same stock-session",
+    "weights_use_future_target_validity": false,
+    "weights_use_peer_stock_counts": false
+  },
+  "cross_stock_count_used_for_weights": false,
+  "future_bar_target_validity_used_for_row_membership": false,
+  "future_filtered_advance_eligibility_read": false,
+  "options_downloaded": false,
+  "protected_rows_read": 0,
+  "research_only": true,
+  "sources": [
+    {
+      "columns_read_exclude_archived_signed_pressure": true,
+      "columns_read_exclude_future_labels_and_eligibility": true,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/dense_advance_panel.parquet",
+      "role": "unfiltered_dense_causal_checkpoint_surface",
+      "rows_read": 119395,
+      "sha256": "a916b792e15e8630dadc09bed64d71be5533ce9f3b2bd93af06605d0faaa0cc3"
+    },
+    {
+      "maximum_reconstruction_difference": 0.0,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json",
+      "role": "frozen_causal_group_i_scaling_definitions",
+      "sha256": "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2"
+    },
+    {
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_dimensions.parquet",
+      "role": "exact_previous_close_historical_options_context",
+      "sha256": "4bc6fd0ce6972210949a5447fd06ca0ffaa258cb953d5e3447c1c07afab85b40",
+      "stock_sessions": 2179
+    },
+    {
+      "maximum_session_read": "2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+      "role": "completed_five_minute_stock_and_market_bars",
+      "rows_read": 401232,
+      "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+    },
+    {
+      "maximum_session": "2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-local/StockerM1CV1/research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/holdout_selected_option_pairs.parquet",
+      "role": "exact_previous_close_opened_stress_options_context",
+      "sha256": "0b3f16cb06ae00df06dc34041a87d78b17478f1245810f54b5cc2d0f38d27e97",
+      "stock_sessions": 1214
+    },
+    {
+      "archived_pressure_values_read": false,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-local/StockerM1CV1/research/directional-readiness/20260726-movement-qualified-direction-screen-v0/artifacts/primary/movement_signal_episodes.parquet",
+      "role": "archived_episode_identities_for_impact_comparison_only",
+      "sha256": "8db3debfbbd360f94f8b171d0bac02d673bfc31b951c15a6713ba5ccaf939aba"
+    },
+    {
+      "maximum_session": "2025-08-22",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-local/StockerM1CV1/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/assessment_predictions.parquet",
+      "role": "frozen_m1c_probability_regression_fixture",
+      "rows_read": 417,
+      "sha256": "08340ee9c2b4ad887319cb655fd5aa556f53c40a62b69743fcebd5366cf6e027"
+    }
+  ],
+  "tail_phase_v1_source_coverage": {
+    "assessment": {
+      "canonical_causal_checkpoint_rows": 47847,
+      "context_coverage_rate": 0.29080193115555836,
+      "missing_row_state": "M1C_probability_undefined_not_scored",
+      "rows_with_previous_close_option_context": 13914,
+      "rows_without_previous_close_option_context": 33933
+    },
+    "development": {
+      "canonical_causal_checkpoint_rows": 71548,
+      "context_coverage_rate": 0.25990943143064793,
+      "missing_row_state": "M1C_probability_undefined_not_scored",
+      "rows_with_previous_close_option_context": 18596,
+      "rows_without_previous_close_option_context": 52952
+    },
+    "stress": {
+      "canonical_causal_checkpoint_rows": 18136,
+      "context_coverage_rate": 1.0,
+      "missing_row_state": "source_membership_conditioned_on_available_previous_close_options",
+      "rows_with_previous_close_option_context": 18136,
+      "rows_without_previous_close_option_context": 0
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "a1_version": "A1/frozen-m1c-microstructure-recorder-v0",
+  "activation_timestamp_utc": "2026-07-29T07:53:23.253773+00:00",
+  "base_v1_activation_receipt_hash": "9b0df39b477e49e3af3e464346b01f0dd121541614b12968ea7333695f31e6ba",
+  "branch": "codex/m1c-prospective-opening-reversal-v1",
+  "broker_order_placed": false,
+  "broker_order_routing_enabled": false,
+  "capacity_denials": 0,
+  "capacity_manager_version": "market_data_capacity_snapshot_v1",
+  "commands": [
+    "rtk uv run python research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/build_activation_artifacts.py --activate",
+    "rtk uv run python research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/build_activation_artifacts.py --verify"
+  ],
+  "commit": "c7e409076bfb4a91a1a56b63971dc29b986e7904",
+  "configuration_hash": "959720fa98f79744b616e33611cb823c536f4e2989c7f72f2d707c83da3c2233",
+  "configured_line_budget": null,
+  "contract_discovery_failures": 0,
+  "contract_selection_version": "opening-reversal-primary-1dte-atm-v1",
+  "data_sources": [
+    "IBKR_live",
+    "EODHD_transfer_comparison"
+  ],
+  "dirty_working_tree_status": "M configs/prospective/server.example.yaml\n M packages/stocker_prospective/src/stocker_prospective/config.py\n M packages/stocker_prospective/src/stocker_prospective/frozen_live_application.py\n M packages/stocker_prospective/src/stocker_prospective/live_recorder.py\n M packages/stocker_prospective/src/stocker_prospective/m1c_opening_reversal_analysis_v1.py\n M packages/stocker_prospective/src/stocker_prospective/m1c_prospective_opening_reversal_v1.py\n M packages/stocker_prospective/src/stocker_prospective/option_discovery.py\n M packages/stocker_prospective/src/stocker_prospective/recorder_repository.py\n M packages/stocker_prospective/src/stocker_prospective/recorder_v0.py\n M tests/test_m1c_opening_reversal_analysis_v1.py\n?? packages/stocker_prospective/src/stocker_prospective/m1c_prospective_opening_reversal_v1_1.py\n?? packages/stocker_prospective/src/stocker_prospective/migrations/0015_m1c_prospective_opening_reversal_v1_1.sql\n?? research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/\n?? tests/test_m1c_opening_reversal_activation_artifacts_v1_1.py\n?? tests/test_m1c_opening_reversal_live_barrier_v1_1.py\n?? tests/test_m1c_opening_reversal_recorder_v1_1.py\n?? tests/test_m1c_prospective_opening_reversal_v1_1.py",
+  "episode_count": 0,
+  "event_count": 0,
+  "m1c_version": "frozen-m1c-v0",
+  "protected_pre_activation_outcome_opened": false,
+  "recorder_schema_version": "0015_m1c_prospective_opening_reversal_v1_1",
+  "reserved_line_count": 12,
+  "schema_version": "m1c-opening-reversal-provenance-v1.1",
+  "scientific_rule_hash": "7a2a40170fa1dffb148cb51144c1c9bfcb029c5d797ea9680164cfd9fbce1ea7",
+  "seeds": {
+    "event_cluster": 2026072903,
+    "primary_null": 2026072901,
+    "session_cluster": 2026072902
+  },
+  "source_file_sha256": {
+    "configs/prospective/server.example.yaml": "b5230be6c654b960bfe7444494e4df53b5c8b57b7fa897fda2ad6d53df1b0af2",
+    "packages/stocker_prospective/src/stocker_prospective/config.py": "44321f80cbc3a36b8d842594f74c0fe104fb4c426137822e6216af7f093e9b81",
+    "packages/stocker_prospective/src/stocker_prospective/frozen_live_application.py": "e2069cd8ca40af0908156ae25d0dfca34b4cb963c3ebb92b16bdbd30eb63373c",
+    "packages/stocker_prospective/src/stocker_prospective/live_recorder.py": "aa5b2eda9411c33c791c8a58a1d48d6334de83b05a2d5ad4e534d787d92ba30a",
+    "packages/stocker_prospective/src/stocker_prospective/m1c_opening_reversal_analysis_v1.py": "051dbe78b998ccf3dee13e793d32d1190f359c520d793a15221012f362ffe8bc",
+    "packages/stocker_prospective/src/stocker_prospective/m1c_prospective_opening_reversal_v1.py": "68baea96c323e93108336b5d12284afa967436ec5561d158e54389478961fcdf",
+    "packages/stocker_prospective/src/stocker_prospective/m1c_prospective_opening_reversal_v1_1.py": "65299b5a5e79fa35a8b05c2fde786f1cd9336a31297f8a8a2010967a72b94959",
+    "packages/stocker_prospective/src/stocker_prospective/migrations/0015_m1c_prospective_opening_reversal_v1_1.sql": "584ae4ed122262694e8bbead0875b3620a492f80379263859bf3d906a52346dc",
+    "packages/stocker_prospective/src/stocker_prospective/option_discovery.py": "1184f46528817e2e105a46ea34a80e11a9d6d2f77a0387d79aa27540a4ae9ca0",
+    "packages/stocker_prospective/src/stocker_prospective/recorder_repository.py": "a053c1b538e18c43a116de6eef17ddbc5d976259813d717b70c61a83c91c809f",
+    "packages/stocker_prospective/src/stocker_prospective/recorder_v0.py": "fee03931d09145e22f7baaad3b0bdd1f3bf7dd07ece3b089b71237644ed376ef",
+    "research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/README.md": "e9de6628a49c12704ce9d3e02c0d0b18809878fb6b72ae86b0fc22b39dbb0ce6",
+    "research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/build_activation_artifacts.py": "fcbbc3a792f406a5aecb7d7170924b4f67dbe5e1c129a3295e9b119b3f807d24"
+  },
+  "tail_phase_version": "m1c-tail-phase-v1",
+  "transfer_status": "engineering_transfer_pending",
+  "vti_thresholds": {
+    "opening_range_q75": 0.00384818171835,
+    "opening_return_q10": -0.00288963733897,
+    "opening_return_q90": 0.00225522676046
+  }
+}

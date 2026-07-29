@@ -1,0 +1,7 @@
+{
+  "directional_union_equals_frozen_strict_event": true,
+  "negative_threshold_equality_state": "NO_MATERIAL_MOVE",
+  "positive_threshold_equality_state": "NO_MATERIAL_MOVE",
+  "stored_m1c_target_changed": false,
+  "valid_finite_row_count": 1416
+}

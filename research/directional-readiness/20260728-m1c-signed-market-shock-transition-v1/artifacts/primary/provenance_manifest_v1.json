@@ -1,0 +1,669 @@
+{
+  "calibration_row_counts_by_checkpoint": [
+    {
+      "calibration_complete_v1": false,
+      "calibration_missing_reason_v1": "insufficient_predictor_support:market_return_w0_v1=0,market_range_w0_v1=0,market_return_w1_v1=0,market_range_w1_v1=0",
+      "checkpoint": 6,
+      "market_range_w0_support_v1": 0,
+      "market_range_w1_support_v1": 0,
+      "market_return_w0_support_v1": 0,
+      "market_return_w1_support_v1": 0
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 8,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 10,
+      "market_range_w0_support_v1": 250,
+      "market_range_w1_support_v1": 250,
+      "market_return_w0_support_v1": 250,
+      "market_return_w1_support_v1": 250
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 12,
+      "market_range_w0_support_v1": 250,
+      "market_range_w1_support_v1": 250,
+      "market_return_w0_support_v1": 250,
+      "market_return_w1_support_v1": 250
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 14,
+      "market_range_w0_support_v1": 250,
+      "market_range_w1_support_v1": 250,
+      "market_return_w0_support_v1": 250,
+      "market_return_w1_support_v1": 250
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 16,
+      "market_range_w0_support_v1": 250,
+      "market_range_w1_support_v1": 250,
+      "market_return_w0_support_v1": 250,
+      "market_return_w1_support_v1": 250
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 18,
+      "market_range_w0_support_v1": 252,
+      "market_range_w1_support_v1": 252,
+      "market_return_w0_support_v1": 252,
+      "market_return_w1_support_v1": 252
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 20,
+      "market_range_w0_support_v1": 252,
+      "market_range_w1_support_v1": 252,
+      "market_return_w0_support_v1": 252,
+      "market_return_w1_support_v1": 252
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 22,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 24,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 26,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 28,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 30,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 32,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    },
+    {
+      "calibration_complete_v1": true,
+      "calibration_missing_reason_v1": null,
+      "checkpoint": 34,
+      "market_range_w0_support_v1": 251,
+      "market_range_w1_support_v1": 251,
+      "market_return_w0_support_v1": 251,
+      "market_return_w1_support_v1": 251
+    }
+  ],
+  "causality_confirmations": {
+    "checkpoint_pooling_used": false,
+    "cross_sectional_normalisation_used": false,
+    "entry_bar_excluded": true,
+    "future_market_bars_used": false,
+    "future_option_observations_used": false,
+    "future_stock_bars_used_for_response": false,
+    "market_windows_end_no_later_than_signal": true,
+    "outcome_driven_thresholds_used": false,
+    "stock_or_month_predictive_inputs_used": false
+  },
+  "configuration_sha256": "e69291d2d683d5e229bdb3f64ce1b85dd37c0332685e40d61642e2ba43c0d61e",
+  "confirmations": {
+    "a1_unchanged": true,
+    "broker_accessed": false,
+    "contaminated_fields_used": false,
+    "m1c_unchanged": true,
+    "option_profitability_tested": false,
+    "order_placed": false,
+    "order_routing_enabled": false,
+    "protected_2026_outcomes_accessed": false,
+    "tail_phase_v1_unchanged": true
+  },
+  "data_date_boundaries": {
+    "assessment": {
+      "end": "2025-08-22",
+      "start": "2025-01-01"
+    },
+    "development": {
+      "end": "2024-12-31",
+      "start": "2024-01-01"
+    },
+    "protected": {
+      "read_allowed": false,
+      "start": "2026-01-01"
+    },
+    "stress": {
+      "end": "2025-12-31",
+      "start": "2025-09-01"
+    }
+  },
+  "episode_counts": {
+    "assessment": 417,
+    "development": 474,
+    "stress": 525
+  },
+  "exact_commands": [
+    "rtk uv run python research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/run_experiment.py",
+    "rtk uv run pytest tests/test_m1c_signed_market_shock_transition_v1.py tests/test_m1c_signed_market_shock_transition_v1_artifacts.py tests/test_m1c_signed_market_shock_transition_v1_recorder.py -q",
+    "rtk uv run ruff check packages/stocker_prospective/src/stocker_prospective/config.py packages/stocker_prospective/src/stocker_prospective/frozen_live_application.py packages/stocker_prospective/src/stocker_prospective/live_recorder.py packages/stocker_prospective/src/stocker_prospective/recorder_repository.py packages/stocker_prospective/src/stocker_prospective/recorder_v0.py packages/stocker_prospective/src/stocker_prospective/signed_market_shock_v1.py packages/stocker_research/src/stocker_research/m1c_signed_market_shock_transition_v1.py research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/run_experiment.py tests/test_m1c_signed_market_shock_transition_v1.py tests/test_m1c_signed_market_shock_transition_v1_artifacts.py tests/test_m1c_signed_market_shock_transition_v1_recorder.py",
+    "rtk uv run mypy packages/stocker_prospective/src/stocker_prospective/config.py packages/stocker_prospective/src/stocker_prospective/frozen_live_application.py packages/stocker_prospective/src/stocker_prospective/live_recorder.py packages/stocker_prospective/src/stocker_prospective/recorder_repository.py packages/stocker_prospective/src/stocker_prospective/recorder_v0.py packages/stocker_prospective/src/stocker_prospective/signed_market_shock_v1.py packages/stocker_research/src/stocker_research/m1c_signed_market_shock_transition_v1.py",
+    "rtk uv run pytest -q",
+    "rtk uv run ruff check ."
+  ],
+  "execution_confirmations": {
+    "broker_access": false,
+    "order_routing_enabled": false,
+    "orders_submitted": false
+  },
+  "frozen_regression": {
+    "fields": [
+      "M1C_probability",
+      "m1c_high_tail_v1",
+      "m1c_tail_phase_v1",
+      "A1_probability_up_v1",
+      "A1_action_v1",
+      "episode_id",
+      "existing_fresh_episode_identifier"
+    ],
+    "passed": true,
+    "rows_compared": 1416,
+    "tolerance": 0.0
+  },
+  "generated_at_utc": "2026-07-28T11:26:01.702401+00:00",
+  "input_artifacts": [
+    {
+      "bytes": 670138,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/fresh_episode_results_v1.parquet",
+      "sha256": "a843fedf4c5df712237fd374c5efb3ff8925b575c875395ea648d786b589d9a3"
+    },
+    {
+      "bytes": 6506235,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/checkpoint_results_v1.parquet",
+      "sha256": "8dd0ef53d9c5493b70f600a28d6f77e8ffabd5e7b48a5378cf0bb4411382cb8f"
+    },
+    {
+      "bytes": 180549179,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+      "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+    },
+    {
+      "bytes": 666679,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_dimensions.parquet",
+      "sha256": "4bc6fd0ce6972210949a5447fd06ca0ffaa258cb953d5e3447c1c07afab85b40"
+    },
+    {
+      "bytes": 268969,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/holdout_selected_option_pairs.parquet",
+      "sha256": "0b3f16cb06ae00df06dc34041a87d78b17478f1245810f54b5cc2d0f38d27e97"
+    },
+    {
+      "bytes": 10716,
+      "hash_scope": "whole_file_known_to_end_by_2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/provenance_manifest_v1.json",
+      "sha256": "b6e54f9b2d7de085ccd7132c4dbdb26231f901d57b3536a68abf26228fec6421"
+    },
+    {
+      "hash_scope": "Arrow hash of predicate-materialised rows from 2024-01-01 through 2025-12-31 only; protected rows were not materialised",
+      "path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=VTI.US/timeframe=5m/data.parquet",
+      "row_count": 39429,
+      "sha256": "92e5be6975ab50c2a6ba792f235a281aae99f9a3ab1aaee72b31a4cc05c08b4f"
+    }
+  ],
+  "market_proxy": {
+    "adjustment_convention": "raw/unadjusted OHLC; source has no adjusted-close field",
+    "alternative_proxies_tested": false,
+    "bars_at_frozen_checkpoints": [
+      {
+        "checkpoint": 6,
+        "complete_rows": 0,
+        "incomplete_rows": 497,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 8,
+        "complete_rows": 496,
+        "incomplete_rows": 1,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 10,
+        "complete_rows": 495,
+        "incomplete_rows": 2,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 12,
+        "complete_rows": 495,
+        "incomplete_rows": 2,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 14,
+        "complete_rows": 495,
+        "incomplete_rows": 2,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 16,
+        "complete_rows": 495,
+        "incomplete_rows": 2,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 18,
+        "complete_rows": 497,
+        "incomplete_rows": 0,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 20,
+        "complete_rows": 497,
+        "incomplete_rows": 0,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 22,
+        "complete_rows": 496,
+        "incomplete_rows": 1,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 24,
+        "complete_rows": 496,
+        "incomplete_rows": 1,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 26,
+        "complete_rows": 496,
+        "incomplete_rows": 1,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 28,
+        "complete_rows": 496,
+        "incomplete_rows": 1,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 30,
+        "complete_rows": 496,
+        "incomplete_rows": 1,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 32,
+        "complete_rows": 496,
+        "incomplete_rows": 1,
+        "scheduled_rows": 497
+      },
+      {
+        "checkpoint": 34,
+        "complete_rows": 495,
+        "incomplete_rows": 2,
+        "scheduled_rows": 497
+      }
+    ],
+    "bounded_arrow_sha256": "92e5be6975ab50c2a6ba792f235a281aae99f9a3ab1aaee72b31a4cc05c08b4f",
+    "bounded_max_timestamp": "2025-12-31T21:00:00+00:00",
+    "bounded_min_timestamp": "2024-01-02T14:30:00+00:00",
+    "bounded_opened_row_count": 39429,
+    "bounded_rows_with_missing_ohlc_count": 28,
+    "canonical_proxy_available": true,
+    "checkpoint_6_note": "VTI bars are present, but W1 is deterministically incomplete because its reference would cross the session boundary",
+    "existing_causal_alignment": {
+      "benchmark_available_after_stock_bar_count": 0,
+      "maximum_absolute_bar_range_difference": 0.0,
+      "maximum_absolute_bar_return_difference": 0.0,
+      "passed": true,
+      "rows_compared": 19860
+    },
+    "frequency": "five_minutes",
+    "imputation": false,
+    "new_external_dataset_acquired": false,
+    "partial_bars_allowed": false,
+    "protected_filter": "timestamp >= 2024-01-01T00:00:00Z and < 2026-01-01T00:00:00Z",
+    "proxy_identifier": "VTI",
+    "session_crossing_allowed": false,
+    "source": "EODHD canonical processed stock bars",
+    "source_path": "/Users/michaelsalerno/StockerLocal/data/processed/source=eodhd/instrument_type=stock/symbol=VTI.US/timeframe=5m/data.parquet",
+    "timestamp_semantics": "UTC bar-start timestamp; a bar is causal only at bar_start_plus_5_minutes",
+    "trading_calendar": "NYSE regular session 09:30-16:00 America/New_York"
+  },
+  "missingness_counts_and_reasons": [
+    {
+      "category": "market_window",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "invalid_market_bar:1"
+    },
+    {
+      "category": "market_window",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "non_contiguous_market_timestamps:0-2"
+    },
+    {
+      "category": "market_window",
+      "episode_count": 413,
+      "period": "development",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 413,
+      "period": "development",
+      "reason": "insufficient_predictor_support:market_return_w0_v1=0,market_range_w0_v1=0,market_return_w1_v1=0,market_range_w1_v1=0"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "invalid_market_bar:1"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 413,
+      "period": "development",
+      "reason": "market_window_measurement_incomplete"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "non_contiguous_market_timestamps:0-2"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 413,
+      "period": "development",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 413,
+      "period": "development",
+      "reason": "insufficient_predictor_support:market_return_w0_v1=0,market_range_w0_v1=0,market_return_w1_v1=0,market_range_w1_v1=0"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "invalid_market_bar:1"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 413,
+      "period": "development",
+      "reason": "market_window_measurement_incomplete"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 1,
+      "period": "development",
+      "reason": "non_contiguous_market_timestamps:0-2"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 413,
+      "period": "development",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "market_window",
+      "episode_count": 360,
+      "period": "assessment",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 360,
+      "period": "assessment",
+      "reason": "insufficient_predictor_support:market_return_w0_v1=0,market_range_w0_v1=0,market_return_w1_v1=0,market_range_w1_v1=0"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 360,
+      "period": "assessment",
+      "reason": "market_window_measurement_incomplete"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 360,
+      "period": "assessment",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 360,
+      "period": "assessment",
+      "reason": "insufficient_predictor_support:market_return_w0_v1=0,market_range_w0_v1=0,market_return_w1_v1=0,market_range_w1_v1=0"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 360,
+      "period": "assessment",
+      "reason": "market_window_measurement_incomplete"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 360,
+      "period": "assessment",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "market_window",
+      "episode_count": 442,
+      "period": "stress",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 442,
+      "period": "stress",
+      "reason": "insufficient_predictor_support:market_return_w0_v1=0,market_range_w0_v1=0,market_return_w1_v1=0,market_range_w1_v1=0"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 442,
+      "period": "stress",
+      "reason": "market_window_measurement_incomplete"
+    },
+    {
+      "category": "market_shock",
+      "episode_count": 442,
+      "period": "stress",
+      "reason": "w1_reference_would_cross_session"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 442,
+      "period": "stress",
+      "reason": "insufficient_predictor_support:market_return_w0_v1=0,market_range_w0_v1=0,market_return_w1_v1=0,market_range_w1_v1=0"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 442,
+      "period": "stress",
+      "reason": "market_window_measurement_incomplete"
+    },
+    {
+      "category": "stock_response",
+      "episode_count": 442,
+      "period": "stress",
+      "reason": "w1_reference_would_cross_session"
+    }
+  ],
+  "output_sha256": {
+    "assessment_outcomes_v1.csv": "0b30535886914d08d1c237ef7f45faa26657dfae6cdc836e7ecab828f3d81fac",
+    "baseline_comparisons_v1.csv": "1863efa5e694e7e618098b28078253339b2d09a6d17aee5506da2047a9dbf2c4",
+    "canonical_market_proxy_audit_v1.json": "3bb52e3b8245468f08becc386af35d815db834c72ec2139ee7d9a8344dae8e89",
+    "checkpoint_shock_threshold_manifest_v1.json": "3c9291fca2adc41357929ba8edff6b187688e627b27ca19ed35330de02d58b8e",
+    "checkpoint_stratified_mechanism_results_v1.csv": "065f2e8b7fbdc0d833ca30f81f977e1865542d18bbbe863bface08831bf8fe28",
+    "cluster_bootstrap_summary_v1.csv": "0c29cabd22bc71f5203d209023c1fe83b343d960d3188e0aa0593d9c574e39b4",
+    "concentration_report_v1.csv": "dd0da58bda0cd65be16c47484df61b3fd70d43850969b4b43fe04e2291778bbf",
+    "continuation_arm_results_v1.csv": "7fa26cc30b22682e3a35907bd46956579dc2e7e1479619241a6d6f3f8830914e",
+    "continuous_ranking_results_v1.csv": "1a61a53691b353b3f13fae830fba53d5bf46716e3181fbc1d1f7e026ae470e50",
+    "episode_market_state_response_v1.parquet": "5abcff67f6c17ec6ab99c8bbc9d37e769594eb9cc90513882d3dd1e0f7ecf9a7",
+    "event_accounting_v1.csv": "742e815923998b03ec344fed4af39fa156933b0068348ffbd24bf9b20c7e73ad",
+    "frozen_configuration_v1.json": "3cc63f62d183933f60af8f3f6a40cbc0c6965da4ec187c96a087d9ff4c2211f7",
+    "leave_one_checkpoint_out_v1.csv": "3828651a8aabcbc5abadb7f839455b38dfb463ef1bed528e7efa6437e7036465",
+    "leave_one_month_out_v1.csv": "5aa7d3428d6646c41d10212364881eb08ac045aa63af8699f5a49cf896f03959",
+    "leave_one_session_out_v1.csv": "93d33c608f74ca4f2d99c80c747dff17c4e0a752eb0ac924929691286c353f61",
+    "leave_one_shock_event_out_v1.csv": "4881a1af88dbc8c6d204bc7a1bb95edbe7e565c953c5bcc5311c345268ac1aad",
+    "leave_one_stock_out_v1.csv": "a6b93344708f2550ceb442e989279c77940436c6f6ab8e0942ffbf2c94d8e2c6",
+    "market_state_surface_v1.parquet": "d9cdb0bb99886968d72d464b24d53a4b330470156a9a918cf01b2ed0722966ed",
+    "missingness_reasons_v1.csv": "aab07f061890177350be5fe9384aa8bf9d4d239bac6514e493bec8cab6ae215e",
+    "normal_regime_comparison_v1.csv": "c14aa19fa5bd1a5c24423960690edd330a0d41eb281564652c61a5a94a9c98cd",
+    "null_and_placebo_results_v1.json": "5ddf48fed9d4407ae38db95965dd5eccb4b4c96002005b20935a8d378ea6ba8c",
+    "predictor_calibration_table_v1.csv": "0874006b4ac7f66e8675090f448e94993d0739917b14929de1221c8e45118f51",
+    "primary_null_draws_v1.parquet": "de3a5e26379900df87750976264944a1b57ef4eea972141d4cf992d2378cd6e9",
+    "reports/m1c_signed_market_shock_transition_v1.md": "a9c8648ce147f1ccbcbc71f91a1e2c242f4f0e488fa6cdb7c9eff8619ea06256",
+    "resistance_arm_results_v1.csv": "0f837bcf9a18bfba88ee2fc4a1456f6b369ac6541d73f02ee33f99cd324dd0de",
+    "response_quintile_manifest_v1.json": "7fe30746f73a80060151c8de61650dfc73df19c9fec9ba10f60e11aaf6d5da2e",
+    "response_quintile_outcomes_v1.csv": "5fa5d242aa7179de98edcc9e8d60d47e275738c758e3060c54ee1741413a9eb0",
+    "session_cluster_bootstrap_v1.parquet": "8c4c26c2b68090c89ce37a16804549854c53cc6e012b0d11c9858b41f2ebffe7",
+    "shock_event_cluster_bootstrap_v1.parquet": "237bf8f6202806690b1db3b4333c9321fe6608b537dbfb66a2d6b54bcd7b640f",
+    "shock_sign_stratification_v1.csv": "e222cb1f8d523a8315a81cfa6b50439a40e9cccbf4e709b26d594b571679aa86",
+    "stress_outcomes_v1.csv": "c8cbb259be753d1cc07d58302ff37478b172024f59254ffce50de02223183706",
+    "summary_v1.json": "200892049e6bbd67c8cee0310b75fbfd920746282f6e128784907516bec415e2",
+    "tail_phase_diagnostics_v1.csv": "ca811abf83d81fa74abfd52875d411623dbc9a681af8a343525e2db911bfae6b",
+    "target_partition_audit_v1.json": "bc801cddbe741dc3aaafa4e5dc803fe2bc0e71643cddf4f9e3b833915080d0ac",
+    "unique_shock_events_v1.csv": "caf691567f0d654a5f7d4c01b8990a573feafbafdee6adf80c6d4d57ca403b62"
+  },
+  "protected_data_confirmation": {
+    "bounded_reader_upper_limit_exclusive": "2026-01-01",
+    "protected_data_opened": false,
+    "protected_outcomes_calculated": false,
+    "protected_outcomes_displayed": false,
+    "protected_outcomes_inspected": false
+  },
+  "random_seeds": {
+    "primary_null": 2026072805,
+    "session_cluster_bootstrap": 2026072803,
+    "shock_event_cluster_bootstrap": 2026072804
+  },
+  "replications": {
+    "primary_null": 1000,
+    "session_cluster_bootstrap": 5000,
+    "shock_event_cluster_bootstrap": 5000
+  },
+  "repository": {
+    "branch": "codex/m1c-signed-market-shock-transition-v1",
+    "commit": "95decdbfb457a9b30f91b217d9b2cca9667b9d6a",
+    "dirty_status": [
+      "M  configs/prospective/server.example.yaml",
+      "M  packages/stocker_prospective/src/stocker_prospective/config.py",
+      "M  packages/stocker_prospective/src/stocker_prospective/frozen_live_application.py",
+      "M  packages/stocker_prospective/src/stocker_prospective/live_recorder.py",
+      "A  packages/stocker_prospective/src/stocker_prospective/migrations/0012_m1c_signed_market_shock_v1.sql",
+      "MM packages/stocker_prospective/src/stocker_prospective/recorder_repository.py",
+      "MM packages/stocker_prospective/src/stocker_prospective/recorder_v0.py",
+      "AM packages/stocker_prospective/src/stocker_prospective/signed_market_shock_v1.py",
+      "AM packages/stocker_research/src/stocker_research/m1c_signed_market_shock_transition_v1.py",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/README.md",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/assessment_outcomes_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/baseline_comparisons_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/canonical_market_proxy_audit_v1.json",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/checkpoint_shock_threshold_manifest_v1.json",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/cluster_bootstrap_summary_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/concentration_report_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/continuation_arm_results_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/continuous_ranking_results_v1.csv",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/episode_market_state_response_v1.parquet",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/event_accounting_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/frozen_configuration_v1.json",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/leave_one_checkpoint_out_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/leave_one_month_out_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/leave_one_session_out_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/leave_one_shock_event_out_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/leave_one_stock_out_v1.csv",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/market_state_surface_v1.parquet",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/missingness_reasons_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/normal_regime_comparison_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/null_and_placebo_results_v1.json",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/predictor_calibration_table_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/primary_null_draws_v1.parquet",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/provenance_manifest_v1.json",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/resistance_arm_results_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/response_quintile_manifest_v1.json",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/response_quintile_outcomes_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/session_cluster_bootstrap_v1.parquet",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/shock_event_cluster_bootstrap_v1.parquet",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/shock_sign_stratification_v1.csv",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/stress_outcomes_v1.csv",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/summary_v1.json",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/tail_phase_diagnostics_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/target_partition_audit_v1.json",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/unique_shock_events_v1.csv",
+      "A  research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/contract.json",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/reports/m1c_signed_market_shock_transition_v1.md",
+      "AM research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/run_experiment.py",
+      "AM tests/test_m1c_signed_market_shock_transition_v1.py",
+      "AM tests/test_m1c_signed_market_shock_transition_v1_artifacts.py",
+      "AM tests/test_m1c_signed_market_shock_transition_v1_recorder.py",
+      "?? research/directional-readiness/20260728-m1c-signed-market-shock-transition-v1/artifacts/primary/checkpoint_stratified_mechanism_results_v1.csv"
+    ],
+    "dirty_working_tree": true,
+    "local_repository_authoritative": true,
+    "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual-2/Stocker"
+  },
+  "schema_version": "m1c-signed-market-shock-transition-provenance-v1",
+  "target_partition_audit": {
+    "directional_union_equals_frozen_strict_event": true,
+    "negative_threshold_equality_state": "NO_MATERIAL_MOVE",
+    "positive_threshold_equality_state": "NO_MATERIAL_MOVE",
+    "stored_m1c_target_changed": false,
+    "valid_finite_row_count": 1416
+  },
+  "unique_shock_event_counts": {
+    "assessment": 476,
+    "development": 470,
+    "stress": 187
+  }
+}

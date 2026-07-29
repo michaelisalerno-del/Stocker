@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
@@ -14,6 +14,14 @@ from stocker_prospective.database import EvidenceMetadata
 from stocker_prospective.events import UnderlyingLevel1QuoteEvent
 from stocker_prospective.ibkr import IBKRMarketDataAdapter
 from stocker_prospective.live_subscriptions import QualifiedUnderlying
+from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
+    OpeningReversalPredictionReceiptV1,
+    OptionContractCandidateV1,
+    OptionTopOfBookV1,
+    PrimaryOptionPairSelectionV1,
+    build_primary_option_bid_ask_outcome_v1,
+    select_primary_option_pair_v1,
+)
 from stocker_prospective.option_budget import (
     BudgetAwareEpisodeStateMachine,
     DteAllocator,
@@ -188,6 +196,26 @@ class BoundedOptionDiscoveryService:
         self._finalizations: dict[str, OptionEpisodeFinalization] = {}
         self._rejections: dict[str, str] = {}
         self._resolved_contracts: dict[str, ResolvedOptionContract] = {}
+        self._chain_metadata_cache: dict[
+            tuple[str, date],
+            object,
+        ] = {}
+        self._opening_reversal_audits: dict[
+            str,
+            PrimaryOptionPairSelectionV1,
+        ] = {}
+        self._opening_reversal_receipts: dict[
+            str,
+            OpeningReversalPredictionReceiptV1,
+        ] = {}
+        self._opening_reversal_subscription_started_at: dict[
+            str,
+            datetime,
+        ] = {}
+        self._opening_reversal_discovery_context: dict[
+            str,
+            tuple[str, bool, int],
+        ] = {}
         if run_id is not None:
             self._restore_schedules()
 
@@ -256,19 +284,28 @@ class BoundedOptionDiscoveryService:
                 maximum_contracts=int(row["maximum_contracts"]),
             )
 
-    def persist_checkpoint_schedules(self, result: RecorderCheckpointResult) -> None:
-        """Durably admit every in-memory task before checkpoint completion."""
+    def persist_checkpoint_schedules(
+        self,
+        result: RecorderCheckpointResult,
+        *,
+        episode_ids: Iterable[str] | None = None,
+    ) -> None:
+        """Durably admit selected in-memory tasks before checkpoint completion."""
 
-        identities = {
-            value
-            for value in (
-                result.episode_decision.episode_id,
-                result.quiet_observation_id,
-                result.neutral_control_id,
-                result.high_tail_control_id,
-            )
-            if value is not None
-        }
+        identities = (
+            {
+                value
+                for value in (
+                    result.episode_decision.episode_id,
+                    result.quiet_observation_id,
+                    result.neutral_control_id,
+                    result.high_tail_control_id,
+                )
+                if value is not None
+            }
+            if episode_ids is None
+            else set(episode_ids)
+        )
         metadata = self.metadata_factory(
             result.episode_decision.trigger_bar_end,
             (result.episode_decision.trigger_bar_end,),
@@ -331,6 +368,62 @@ class BoundedOptionDiscoveryService:
                 probability=result.score.probability,
                 quiet_state=False,
                 recording_duration=timedelta(minutes=60),
+                strike_steps=self.strike_steps,
+                maximum_contracts=self.maximum_contracts_per_episode,
+            ),
+        )
+
+    def schedule_opening_reversal(
+        self,
+        result: RecorderCheckpointResult,
+        receipt: OpeningReversalPredictionReceiptV1,
+    ) -> None:
+        """Schedule only the promoted V1 stock and its primary 1DTE pair."""
+
+        decision = result.episode_decision
+        if (
+            not receipt.eligibility_v1
+            or receipt.prediction_v1 == "ABSTAIN"
+            or not decision.fresh_episode
+            or decision.episode_id is None
+            or decision.episode_id != receipt.fresh_episode_id
+        ):
+            return
+        self._opening_reversal_receipts[decision.episode_id] = receipt
+        underlying = self.underlying_contracts.get(decision.symbol)
+        if underlying is None:
+            self._rejections[decision.episode_id] = "underlying_contract_not_resolved"
+            self._record_unscheduled_rejection(
+                result,
+                episode_id=decision.episode_id,
+                episode_kind=EpisodeKind.OPENING_REVERSAL,
+                quiet_state=False,
+                recording_duration=timedelta(minutes=30),
+                strike_steps=self.strike_steps,
+                maximum_contracts=self.maximum_contracts_per_episode,
+                reason="underlying_contract_not_resolved",
+            )
+            return
+        self._pending.setdefault(
+            decision.episode_id,
+            _PendingEpisode(
+                episode_id=decision.episode_id,
+                checkpoint_id=result.checkpoint_id,
+                symbol=decision.symbol,
+                session=decision.session,
+                entry_timestamp=decision.prospective_entry_timestamp,
+                underlying=underlying,
+                directional_actions={
+                    (
+                        "OPENING_REVERSAL_V1"
+                        if receipt.experiment_version == "1"
+                        else "OPENING_REVERSAL_V1_1"
+                    ): receipt.prediction_v1
+                },
+                episode_kind=EpisodeKind.OPENING_REVERSAL,
+                probability=result.score.probability,
+                quiet_state=False,
+                recording_duration=timedelta(minutes=30),
                 strike_steps=self.strike_steps,
                 maximum_contracts=self.maximum_contracts_per_episode,
             ),
@@ -417,7 +510,11 @@ class BoundedOptionDiscoveryService:
                     if reference is None or reference <= 0.0:
                         continue
                     try:
-                        episode.plan = self._discover_plan(episode, reference)
+                        episode.plan = self._discover_plan(
+                            episode,
+                            reference,
+                            discovered_at=now,
+                        )
                     except (RuntimeError, ValueError) as exc:
                         self._reject(episode, now=now, reason=str(exc))
                         continue
@@ -470,16 +567,26 @@ class BoundedOptionDiscoveryService:
                     episode_id=episode.episode_id,
                     status="streaming",
                 )
+                if episode.episode_kind is EpisodeKind.OPENING_REVERSAL:
+                    self._opening_reversal_subscription_started_at[episode.episode_id] = now
             finish_at = episode.entry_timestamp + episode.recording_duration + self.sensitivity_wait
             if episode.started and now >= finish_at:
                 metadata = self.metadata_factory(now, (finish_at,))
-                self._finalizations[episode.episode_id] = self.option_recorder.finalise_episode(
+                finalization = self.option_recorder.finalise_episode(
                     metadata,
                     episode_id=episode.episode_id,
                     symbol=episode.symbol,
                     entry_timestamp=episode.entry_timestamp,
                     directional_actions=episode.directional_actions,
                 )
+                self._finalizations[episode.episode_id] = finalization
+                if episode.episode_kind is EpisodeKind.OPENING_REVERSAL:
+                    self._record_opening_reversal_option_outcomes(
+                        episode=episode,
+                        finalization=finalization,
+                        metadata=metadata,
+                        finalised_at=now,
+                    )
                 if self.episode_state_machine is not None:
                     self.episode_state_machine.complete(
                         episode.episode_id,
@@ -494,6 +601,107 @@ class BoundedOptionDiscoveryService:
         if self.episode_state_machine is not None:
             self.episode_state_machine.poll(now=now)
         self.option_recorder.flush_pending(self.metadata_factory(now, (now,)))
+
+    def _record_opening_reversal_option_outcomes(
+        self,
+        *,
+        episode: _PendingEpisode,
+        finalization: OptionEpisodeFinalization,
+        metadata: EvidenceMetadata,
+        finalised_at: datetime,
+    ) -> None:
+        receipt = self._opening_reversal_receipts.get(episode.episode_id)
+        audit = self._opening_reversal_audits.get(episode.episode_id)
+        if receipt is None or audit is None or not receipt.scientific_outcome_eligible_v1:
+            return
+        by_con_id = {
+            int(outcome.con_id): outcome
+            for outcome in finalization.raw_contract_outcomes
+            if outcome.horizon_minutes == 15 and outcome.con_id is not None
+        }
+        predicted_right = "C" if receipt.prediction_v1 == "CALL" else "P"
+        started_at = self._opening_reversal_subscription_started_at.get(
+            episode.episode_id,
+            episode.entry_timestamp,
+        )
+        for contract in (audit.call, audit.put):
+            raw = by_con_id.get(contract.con_id)
+            entry_age = None if raw is None else raw.entry_quote_age_seconds
+            entry_timestamp = (
+                episode.entry_timestamp
+                if entry_age is None
+                else episode.entry_timestamp + timedelta(seconds=entry_age)
+            )
+            entry_missing = (
+                "entry_ask_invalid"
+                if raw is None or raw.entry_ask is None
+                else (
+                    "entry_quote_quality_incomplete"
+                    if raw.entry_bid is None or raw.entry_quality is None
+                    else None
+                )
+            )
+            entry_quality = None if raw is None else raw.entry_quality
+            entry_quote = OptionTopOfBookV1(
+                timestamp_utc=entry_timestamp,
+                bid=None if raw is None else raw.entry_bid,
+                ask=None if raw is None else raw.entry_ask,
+                quote_age_seconds=entry_age,
+                locked_or_crossed=(
+                    False
+                    if entry_quality is None
+                    else entry_quality.locked_quote or entry_quality.crossed_quote
+                ),
+                stale=False if entry_quality is None else entry_quality.stale_quote,
+                missing_reason=entry_missing,
+            )
+            horizon = episode.entry_timestamp + timedelta(minutes=15)
+            exit_timestamp = (
+                horizon
+                if raw is None or raw.first_bid_after_horizon_timestamp is None
+                else raw.first_bid_after_horizon_timestamp
+            )
+            exit_bid = None if raw is None else raw.first_bid_after_horizon
+            exit_ask = None if raw is None else raw.first_ask_after_horizon
+            exit_age = (
+                None
+                if raw is None or raw.first_bid_after_horizon_timestamp is None
+                else (raw.first_bid_after_horizon_timestamp - horizon).total_seconds()
+            )
+            exit_quality_missing = exit_bid is None or exit_ask is None or exit_age is None
+            exit_quote = OptionTopOfBookV1(
+                timestamp_utc=exit_timestamp,
+                bid=exit_bid,
+                ask=exit_ask,
+                quote_age_seconds=exit_age,
+                locked_or_crossed=(
+                    exit_bid is not None and exit_ask is not None and exit_bid >= exit_ask
+                ),
+                stale=(
+                    exit_age is None
+                    or exit_age > self.option_recorder.maximum_quote_age.total_seconds()
+                ),
+                missing_reason=(
+                    "exit_bid_invalid"
+                    if exit_bid is None
+                    else ("exit_quote_quality_incomplete" if exit_quality_missing else None)
+                ),
+            )
+            result = build_primary_option_bid_ask_outcome_v1(
+                prediction_receipt_hash_v1=receipt.receipt_hash_v1,
+                contract=contract,
+                role=("predicted_leg" if contract.right == predicted_right else "opposite_leg"),
+                entry_timestamp_utc=episode.entry_timestamp,
+                subscription_start_utc=started_at,
+                subscription_end_utc=finalised_at,
+                capacity_line_owner=(f"opening_reversal_primary_pair:{episode.episode_id}"),
+                entry_quote=entry_quote,
+                exit_quote=exit_quote,
+            )
+            self.option_recorder.repository.record_opening_reversal_primary_option_outcome_v1(
+                metadata,
+                result,
+            )
 
     def _reject(
         self,
@@ -525,6 +733,22 @@ class BoundedOptionDiscoveryService:
                 ),
             },
         )
+        discovery_context = self._opening_reversal_discovery_context.get(episode.episode_id)
+        if (
+            episode.episode_kind is EpisodeKind.OPENING_REVERSAL
+            and episode.episode_id not in self._opening_reversal_audits
+            and discovery_context is not None
+        ):
+            source, cache_hit, candidates_inspected = discovery_context
+            self.option_recorder.repository.record_opening_reversal_contract_discovery_failure_v1(
+                metadata,
+                episode_id=episode.episode_id,
+                discovery_timestamp_utc=now,
+                contract_source=source,
+                cache_hit=cache_hit,
+                candidates_inspected=candidates_inspected,
+                missing_reason=reason,
+            )
         episode.finalised = True
 
     def _record_unscheduled_rejection(
@@ -586,9 +810,10 @@ class BoundedOptionDiscoveryService:
                 continue
             con_id = resolved.contract.con_id
             roles = plan.selection_roles.get(contract.con_id_key, ("comparison",))
-            required = episode.episode_kind is EpisodeKind.HIGH_TAIL or any(
-                role.startswith("primary_") for role in roles
-            )
+            required = episode.episode_kind in {
+                EpisodeKind.HIGH_TAIL,
+                EpisodeKind.OPENING_REVERSAL,
+            } or any(role.startswith("primary_") for role in roles)
             if episode.episode_kind is EpisodeKind.NEUTRAL_CONTROL:
                 subscription_class = SubscriptionClass.OPTIONAL_RESEARCH
                 required = False
@@ -607,6 +832,17 @@ class BoundedOptionDiscoveryService:
                     subscription_class=subscription_class,
                     required=required,
                     dte_bucket=contract.dte_bucket,
+                    drop_order=(
+                        None
+                        if required
+                        else 1
+                        if episode.episode_kind is EpisodeKind.NEUTRAL_CONTROL
+                        else 3
+                        if contract.dte_bucket is DteBucket.THREE_TO_FIVE_DTE
+                        else 4
+                        if contract.dte_bucket is DteBucket.ZERO_DTE
+                        else 2
+                    ),
                 )
             )
         if (
@@ -616,6 +852,8 @@ class BoundedOptionDiscoveryService:
             raise ValueError("primary_1dte_iron_condor_not_resolved")
         if episode.episode_kind is EpisodeKind.HIGH_TAIL and len(intents) < 2:
             raise ValueError("high_tail_atm_call_put_not_resolved")
+        if episode.episode_kind is EpisodeKind.OPENING_REVERSAL and len(intents) != 2:
+            raise ValueError("opening_reversal_primary_1dte_pair_not_resolved")
         return OptionEpisodeTask(
             episode_id=episode.episode_id,
             symbol=episode.symbol,
@@ -704,31 +942,56 @@ class BoundedOptionDiscoveryService:
         self,
         episode: _PendingEpisode,
         underlying_reference: float,
+        *,
+        discovered_at: datetime,
     ) -> OptionContractPlan:
-        result = self.adapter.request_option_chain_metadata(
-            underlying_symbol=episode.symbol,
-            exchange="",
-            underlying_security_type="STK",
-            underlying_contract_id=episode.underlying.con_id,
-        )
-        if self.heartbeat is not None:
-            self.heartbeat()
-        candidates = [
-            item
-            for item in result.items
-            if int(_attribute(item, "underlying_contract_id", "underlyingConId") or 0)
-            == episode.underlying.con_id
-        ]
-        if not candidates:
-            raise ValueError("option_chain_metadata_unavailable")
-        selected = min(
-            candidates,
-            key=lambda item: (
-                0 if str(_attribute(item, "exchange") or "") == "SMART" else 1,
-                str(_attribute(item, "exchange") or ""),
-                str(_attribute(item, "trading_class", "tradingClass") or ""),
-            ),
-        )
+        cache_key = (episode.symbol, episode.session)
+        if episode.episode_kind is EpisodeKind.OPENING_REVERSAL:
+            self._opening_reversal_discovery_context.setdefault(
+                episode.episode_id,
+                ("ibkr_secdef_metadata", False, 0),
+            )
+        selected = self._chain_metadata_cache.get(cache_key)
+        cache_hit = selected is not None
+        if selected is None:
+            result = self.adapter.request_option_chain_metadata(
+                underlying_symbol=episode.symbol,
+                exchange="",
+                underlying_security_type="STK",
+                underlying_contract_id=episode.underlying.con_id,
+            )
+            if self.heartbeat is not None:
+                self.heartbeat()
+            candidates = [
+                item
+                for item in result.items
+                if int(
+                    _attribute(
+                        item,
+                        "underlying_contract_id",
+                        "underlyingConId",
+                    )
+                    or 0
+                )
+                == episode.underlying.con_id
+            ]
+            if not candidates:
+                raise ValueError("option_chain_metadata_unavailable")
+            selected = min(
+                candidates,
+                key=lambda item: (
+                    0 if str(_attribute(item, "exchange") or "") == "SMART" else 1,
+                    str(_attribute(item, "exchange") or ""),
+                    str(_attribute(item, "trading_class", "tradingClass") or ""),
+                ),
+            )
+            self._chain_metadata_cache[cache_key] = selected
+        if episode.episode_kind is EpisodeKind.OPENING_REVERSAL:
+            self._opening_reversal_discovery_context[episode.episode_id] = (
+                ("cached_ibkr_secdef_metadata" if cache_hit else "ibkr_secdef_metadata"),
+                cache_hit,
+                0,
+            )
         expiries = tuple(
             parsed
             for value in cast(list[object], _attribute(selected, "expirations") or [])
@@ -755,7 +1018,11 @@ class BoundedOptionDiscoveryService:
         if allocation.primary is None:
             reason = (
                 "no_1dte_expiry"
-                if episode.episode_kind is EpisodeKind.QUIET
+                if episode.episode_kind
+                in {
+                    EpisodeKind.QUIET,
+                    EpisodeKind.OPENING_REVERSAL,
+                }
                 else "scheduled_dte_expiry_unavailable"
             )
             raise ValueError(reason)
@@ -771,6 +1038,25 @@ class BoundedOptionDiscoveryService:
         )
         exchange = str(_attribute(selected, "exchange") or "SMART")
         trading_class = str(_attribute(selected, "trading_class", "tradingClass") or episode.symbol)
+        if episode.episode_kind is EpisodeKind.OPENING_REVERSAL:
+            primary_expiry = selections[DteBucket.ONE_DTE].expiry
+            if (
+                allocation.primary is not DteBucket.ONE_DTE
+                or primary_expiry is None
+                or allocation.secondary
+            ):
+                raise ValueError("opening_reversal_requires_only_primary_1dte")
+            return self._discover_opening_reversal_plan(
+                episode=episode,
+                underlying_reference=underlying_reference,
+                expiry=primary_expiry,
+                metadata_strikes=strikes,
+                exchange=exchange,
+                trading_class=trading_class,
+                discovered_at=discovered_at,
+                cache_hit=cache_hit,
+                skipped=allocation.skipped,
+            )
         strikes_by_expiry_right: dict[tuple[date, str], tuple[float, ...]] = {}
         if self.maximum_discovery_snapshots > 0:
             for expiry in dict.fromkeys(chosen_expiries.values()):
@@ -797,7 +1083,7 @@ class BoundedOptionDiscoveryService:
             exchange=exchange,
             trading_class=trading_class,
         )
-        return self._select_snapshot_plan(
+        plan = self._select_snapshot_plan(
             episode=episode,
             candidates=candidate_plan,
             underlying_reference=underlying_reference,
@@ -805,6 +1091,123 @@ class BoundedOptionDiscoveryService:
             secondary_buckets=allocation.secondary,
             skipped=allocation.skipped,
         )
+        return plan
+
+    def _discover_opening_reversal_plan(
+        self,
+        *,
+        episode: _PendingEpisode,
+        underlying_reference: float,
+        expiry: date,
+        metadata_strikes: tuple[float, ...],
+        exchange: str,
+        trading_class: str,
+        discovered_at: datetime,
+        cache_hit: bool,
+        skipped: Mapping[str, str],
+    ) -> OptionContractPlan:
+        """Select from metadata first; qualify and later stream only one pair."""
+
+        ordered_strikes = sorted(
+            {strike for strike in metadata_strikes if math.isfinite(strike) and strike > 0.0},
+            key=lambda strike: (
+                abs(strike - underlying_reference),
+                strike,
+            ),
+        )
+        attempt_limit = min(
+            len(ordered_strikes),
+            1 + self.common_strike_fallback_attempts,
+        )
+        candidates_inspected = 0
+        for strike in ordered_strikes[:attempt_limit]:
+            rights: tuple[Literal["C", "P"], ...] = ("C", "P")
+            unresolved_pair = tuple(
+                OptionContract(
+                    underlying_con_id=episode.underlying.con_id,
+                    con_id=None,
+                    expiry=expiry,
+                    dte=(expiry - episode.session).days,
+                    dte_bucket=DteBucket.ONE_DTE,
+                    strike=strike,
+                    right=right,
+                    multiplier=100,
+                    exchange=exchange,
+                    trading_class=trading_class,
+                )
+                for right in rights
+            )
+            resolved_pair: list[ResolvedOptionContract] = []
+            for contract in unresolved_pair:
+                candidates_inspected += 1
+                source, context_cache_hit, _ = self._opening_reversal_discovery_context[
+                    episode.episode_id
+                ]
+                self._opening_reversal_discovery_context[episode.episode_id] = (
+                    source,
+                    context_cache_hit,
+                    candidates_inspected,
+                )
+                resolved = self._resolve_uncached(
+                    episode.symbol,
+                    contract,
+                )
+                if resolved is not None:
+                    resolved_pair.append(resolved)
+            if len(resolved_pair) != 2:
+                continue
+            for unresolved, resolved in zip(
+                unresolved_pair,
+                resolved_pair,
+                strict=True,
+            ):
+                self._resolved_contracts[unresolved.con_id_key] = resolved
+                self._resolved_contracts[resolved.contract.con_id_key] = resolved
+            resolved_candidates = tuple(
+                OptionContractCandidateV1(
+                    con_id=cast(int, resolved.contract.con_id),
+                    underlying=episode.symbol,
+                    expiry=resolved.contract.expiry,
+                    strike=resolved.contract.strike,
+                    right=resolved.contract.right,
+                    multiplier=resolved.contract.multiplier,
+                    exchange=resolved.contract.exchange,
+                    trading_class=resolved.contract.trading_class,
+                )
+                for resolved in resolved_pair
+            )
+            audit = select_primary_option_pair_v1(
+                session=episode.session,
+                underlying_reference=underlying_reference,
+                candidates=resolved_candidates,
+                discovery_timestamp_utc=discovered_at,
+                contract_source=(
+                    "cached_ibkr_secdef_metadata" if cache_hit else "ibkr_secdef_metadata"
+                ),
+                cache_hit=cache_hit,
+                candidates_inspected=candidates_inspected,
+            )
+            self._opening_reversal_audits[episode.episode_id] = audit
+            self.option_recorder.repository.record_opening_reversal_contract_discovery_v1(
+                self.metadata_factory(discovered_at, (discovered_at,)),
+                episode_id=episode.episode_id,
+                selection=audit,
+            )
+            return OptionContractPlan(
+                contracts=unresolved_pair,
+                requested_contract_count=2,
+                maximum_contracts=2,
+                capacity_reduced=False,
+                missing_buckets=tuple(
+                    f"{bucket}:{reason}" for bucket, reason in sorted(skipped.items())
+                ),
+                selection_rule=("opening_reversal_metadata_only_primary_1dte_atm_pair_v1"),
+                selection_roles={
+                    unresolved_pair[0].con_id_key: ("primary_atm_call",),
+                    unresolved_pair[1].con_id_key: ("primary_atm_put",),
+                },
+            )
+        raise ValueError("primary_1dte_option_pair_unavailable")
 
     def _select_snapshot_plan(
         self,
@@ -852,7 +1255,10 @@ class BoundedOptionDiscoveryService:
         )
         selected: list[OptionContract] = []
         roles: dict[str, tuple[str, ...]] = {}
-        if episode.episode_kind is EpisodeKind.HIGH_TAIL:
+        if episode.episode_kind in {
+            EpisodeKind.HIGH_TAIL,
+            EpisodeKind.OPENING_REVERSAL,
+        }:
             atm_pair = self._atm_pair(
                 primary_contracts,
                 snapshots=snapshots,
@@ -936,8 +1342,16 @@ class BoundedOptionDiscoveryService:
             missing_buckets=missing,
             selection_rule=(
                 "bounded_live_snapshot_delta_condor_and_atm_comparisons_v0"
-                if episode.episode_kind is not EpisodeKind.HIGH_TAIL
-                else "bounded_live_snapshot_atm_call_put_v0"
+                if episode.episode_kind
+                not in {
+                    EpisodeKind.HIGH_TAIL,
+                    EpisodeKind.OPENING_REVERSAL,
+                }
+                else (
+                    "opening_reversal_primary_1dte_atm_call_put_v1"
+                    if episode.episode_kind is EpisodeKind.OPENING_REVERSAL
+                    else "bounded_live_snapshot_atm_call_put_v0"
+                )
             ),
             selection_roles={
                 contract.con_id_key: roles[contract.con_id_key] for contract in selected
@@ -998,7 +1412,7 @@ class BoundedOptionDiscoveryService:
                 (
                     contract
                     for contract in contracts
-                    if contract.right == right and contract.con_id_key in snapshots
+                    if (contract.right == right and contract.con_id_key in snapshots)
                 ),
                 key=lambda contract: (
                     abs(contract.strike - underlying_reference),

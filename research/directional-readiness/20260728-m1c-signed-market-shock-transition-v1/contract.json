@@ -1,0 +1,186 @@
+{
+  "research_id": "M1C Signed Market Shock Transition V1",
+  "schema_version": "m1c-signed-market-shock-transition-v1",
+  "research_only": true,
+  "retrospective_opened_periods": true,
+  "untouched_confirmation": false,
+  "market_proxy": {
+    "symbol": "VTI",
+    "source": "EODHD canonical processed five-minute OHLC",
+    "frequency_minutes": 5,
+    "timestamp_semantics": "bar_start_utc_available_at_bar_completion",
+    "calendar": "NYSE regular session",
+    "adjustment_policy": "raw_unadjusted_OHLC",
+    "alternatives_tested": false
+  },
+  "chronology": {
+    "development": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "assessment": {
+      "start": "2025-01-01",
+      "end": "2025-08-22"
+    },
+    "stress": {
+      "start": "2025-09-01",
+      "end": "2025-12-31"
+    },
+    "protected": {
+      "start": "2026-01-01",
+      "read_allowed": false
+    }
+  },
+  "frozen_m1c": {
+    "threshold": 0.488333710794033,
+    "entry": "next_five_minute_bar_open",
+    "horizon_minutes": 15,
+    "terminal": "close_of_third_post_entry_bar",
+    "material_move_operator": "strict_greater_than",
+    "movement_scale": "prior_close_atm_iv_sqrt_15_over_252x390_sqrt_2_over_pi",
+    "retraining_allowed": false,
+    "recalibration_allowed": false
+  },
+  "frozen_checkpoints": [
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34
+  ],
+  "market_windows": {
+    "w0": {
+      "bars": 3,
+      "ordinals": "checkpoint-3_through_checkpoint-1",
+      "return": "log(last_close_w0 / close_immediately_before_w0)",
+      "range": "log(max_high_w0 / min_low_w0)"
+    },
+    "w1": {
+      "bars": 3,
+      "ordinals": "checkpoint-6_through_checkpoint-4",
+      "return": "log(last_close_w1 / close_immediately_before_w1)",
+      "range": "log(max_high_w1 / min_low_w1)"
+    },
+    "overlap": false,
+    "entry_bar_included": false,
+    "future_bars_included": false,
+    "cross_session_allowed": false,
+    "imputation_allowed": false
+  },
+  "shock_calibration": {
+    "period": "2024_predictors_only",
+    "by_checkpoint": true,
+    "minimum_predictor_support": 20,
+    "pooling_fallback_allowed": false,
+    "signed_return_percentiles": [
+      0.1,
+      0.9
+    ],
+    "range_percentile": 0.75
+  },
+  "market_states": [
+    "NEGATIVE_SHOCK_ONSET",
+    "POSITIVE_SHOCK_ONSET",
+    "ONGOING_NEGATIVE_SHOCK",
+    "ONGOING_POSITIVE_SHOCK",
+    "ELEVATED_RANGE_NONDIRECTIONAL",
+    "NORMAL_OTHER",
+    "UNKNOWN_INCOMPLETE"
+  ],
+  "primary_market_states": [
+    "NEGATIVE_SHOCK_ONSET",
+    "POSITIVE_SHOCK_ONSET"
+  ],
+  "stock_response": {
+    "return_window": "same_exact_w0",
+    "relative_response": "shock_sign * (stock_return_w0 - market_return_w0) / threshold_15m",
+    "absolute_alignment": "shock_sign * stock_return_w0 / threshold_15m",
+    "classes": [
+      "AMPLIFYING",
+      "RESISTING",
+      "NEUTRAL_EXACT",
+      "NOT_SHOCK_ONSET",
+      "UNKNOWN_INCOMPLETE"
+    ],
+    "fitted_cut": false,
+    "cross_sectional_normalisation": false
+  },
+  "mechanisms": {
+    "continuation": {
+      "population": "fresh_high_m1c_signed_shock_onset_amplifying",
+      "prediction": "shock_direction",
+      "aligned_return": "shock_sign * future_signed_return_15m"
+    },
+    "resistance": {
+      "population": "fresh_high_m1c_signed_shock_onset_resisting",
+      "prediction": "opposite_shock_direction",
+      "aligned_return": "-shock_sign * future_signed_return_15m"
+    },
+    "combined_policy_allowed": false
+  },
+  "continuous_diagnostic": {
+    "score": "shock_relative_response_v1",
+    "target": "material_endpoint_followed_shock_v1",
+    "model_fit": false,
+    "quintiles": "2024_valid_fresh_high_m1c_shock_onset_predictors_only",
+    "quintile_minimum_support": "none_invented"
+  },
+  "bootstrap": {
+    "draws": 5000,
+    "confidence_level": 0.95,
+    "session_seed": 2026072803,
+    "shock_event_seed": 2026072804
+  },
+  "null": {
+    "draws": 1000,
+    "seed": 2026072805,
+    "grouping": [
+      "stock",
+      "checkpoint",
+      "period"
+    ],
+    "same_session_allowed": false
+  },
+  "temporal_placebo": {
+    "construction": "next_eligible_episode_outcome_same_stock_checkpoint_period",
+    "cross_chronology_allowed": false
+  },
+  "support_requirements": {
+    "minimum_stock_episodes": 30,
+    "minimum_sessions": 10,
+    "minimum_market_shock_events": 10,
+    "minimum_negative_actions": 8,
+    "minimum_positive_actions": 8,
+    "minimum_stocks": 8,
+    "maximum_single_stock_share": 0.25,
+    "maximum_single_session_share": 0.2,
+    "maximum_single_shock_event_share": 0.2,
+    "maximum_single_checkpoint_share": 0.4
+  },
+  "forbidden_inputs": [
+    "archived_signed_pressure",
+    "archived_tension",
+    "future_filtered_peer_slate",
+    "future_dependent_stock_membership",
+    "cross_sectional_peer_normalisation",
+    "future_market_bars",
+    "future_option_observations",
+    "option_pnl",
+    "stock_identity_as_predictive_input",
+    "month_identity_as_predictive_input"
+  ],
+  "option_pnl_calculated": false,
+  "broker_access": false,
+  "order_routing_enabled": false,
+  "orders_allowed": false
+}

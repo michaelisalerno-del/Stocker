@@ -1,0 +1,10 @@
+{
+  "activation_timestamp_utc": "2026-07-29T06:39:44.466604+00:00",
+  "experiment_id": "m1c-prospective-opening-reversal-v1",
+  "experiment_version": "1",
+  "reason": "direction is not prospectively supported and no option cohort exists",
+  "receipt_hash": "0752b9516681b9b17584d8db4bacf9fbc92f63bb6b5c7e55403f206aea11e8be",
+  "receipt_type": "option_economics_decision",
+  "scientific_result_issued": false,
+  "status": "not_issued"
+}

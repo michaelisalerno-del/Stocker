@@ -1,0 +1,13 @@
+period,response_quintile_v1,episode_count,material_mover_count,unique_shock_event_count,session_count,followed_shock_rate_among_material_movers,mean_continuation_aligned_return,no_material_move_rate
+assessment,Q1,3,0,3,3,,0.003585743837310891,1.0
+assessment,Q2,0,0,0,0,,,
+assessment,Q3,2,1,2,2,1.0,0.01716878606054084,0.5
+assessment,Q4,1,1,1,1,1.0,0.009011507572991117,0.0
+assessment,Q5,3,2,3,3,0.0,-0.017442243897365855,0.3333333333333333
+assessment,UNKNOWN_INCOMPLETE,0,0,0,0,,,
+stress,Q1,15,6,12,11,0.5,-0.0003114188187056217,0.6
+stress,Q2,0,0,0,0,,,
+stress,Q3,0,0,0,0,,,
+stress,Q4,8,2,6,6,0.5,0.0002911018060669664,0.75
+stress,Q5,6,4,4,4,0.25,-0.0072966557781794965,0.3333333333333333
+stress,UNKNOWN_INCOMPLETE,0,0,0,0,,,

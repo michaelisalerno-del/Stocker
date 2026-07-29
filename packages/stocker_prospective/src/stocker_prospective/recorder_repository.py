@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Final, Literal, cast
 
 from pydantic import BaseModel
 
-from stocker_prospective.contract import claims_boundary
+from stocker_prospective.contract import M1C_FROZEN_THRESHOLD, claims_boundary
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.direction import DirectionClassification
 from stocker_prospective.direction_features import DirectionFeatureResult
@@ -21,7 +23,32 @@ from stocker_prospective.events import (
 )
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import FrozenGroupOContext
+from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
+    RESERVED_MARKET_DATA_LINES_V1,
+    CapacityDegradationEventV1,
+    MarketDataCapacitySnapshotV1,
+    OpeningReversalActivationReceiptV1,
+    OpeningReversalDecisionReceiptV1,
+    OpeningReversalPredictionReceiptV1,
+    OpeningReversalUnderlyingOutcomeV1,
+    OpeningTransferOperationalEvidenceV1,
+    OpeningTransferSessionResultV1,
+    PrimaryOptionBidAskOutcomeV1,
+    PrimaryOptionPairSelectionV1,
+    PromotionSelectionV1,
+    build_opening_transfer_decision_receipt_v1,
+)
+from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
+    OpeningReversalActivationReceiptV1_1,
+    OpeningReversalCausalBarrierAuditV1_1,
+)
 from stocker_prospective.microstructure import MicrostructureWindowSummary
+from stocker_prospective.opening_market_transition_v1 import (
+    OpeningMarketTransitionStateResultV1,
+    OpeningPreEntryWindowV1,
+    OpeningTransitionThresholdsV1,
+    StockOpeningResponseResultV1,
+)
 from stocker_prospective.option_budget import EpisodeAllocationRecord
 from stocker_prospective.option_ledger import (
     OptionContract,
@@ -36,13 +63,74 @@ from stocker_prospective.quiet_state import (
     QuietStateSnapshot,
 )
 from stocker_prospective.safety import EpisodeSafetyDecision
+from stocker_prospective.signed_market_shock_v1 import (
+    CheckpointShockThresholdsV1,
+    MarketShockStateResultV1,
+    PreentryMarketWindowsV1,
+    StockShockResponseResultV1,
+)
 from stocker_prospective.subscriptions import PromotionDecision, SubscriptionRecord
+from stocker_prospective.tail_phase_v1 import (
+    M1C_TAIL_PHASE_V1_VERSION,
+    MOVEMENT_CONSUMED_LOOKBACK_MINUTES_V1,
+    MOVEMENT_CONSUMED_MEDIAN_2024_V1,
+    MovementConsumedBucketV1,
+    MovementConsumedStateV1,
+    TailPhaseStateV1,
+    assign_movement_consumed_bucket_v1,
+)
 
 TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT = frozenset(
     {
         "ibkr_transfer_supported_without_recalibration",
         "ibkr_ranking_supported_probability_scale_shifted",
     }
+)
+SIGNED_MARKET_SHOCK_COLUMNS_V1: Final[tuple[str, ...]] = (
+    "canonical_market_proxy_v1",
+    "market_return_w0_v1",
+    "market_range_w0_v1",
+    "market_return_w1_v1",
+    "market_range_w1_v1",
+    "market_shock_thresholds_v1_json",
+    "market_shock_state_v1",
+    "market_shock_event_id_v1",
+    "shock_sign_v1",
+    "stock_return_w0_v1",
+    "stock_absolute_alignment_v1",
+    "shock_relative_response_v1",
+    "shock_response_class_v1",
+    "shock_resisting_subtype_v1",
+    "market_shock_complete_v1",
+    "shock_response_complete_v1",
+    "market_shock_missing_reasons_v1_json",
+    "shock_response_missing_reasons_v1_json",
+)
+OPENING_MARKET_TRANSITION_COLUMNS_V1: Final[tuple[str, ...]] = (
+    "opening_market_proxy_v1",
+    "vti_session_open_v1",
+    "vti_prior_regular_session_close_v1",
+    "opening_expected_bar_count_v1",
+    "opening_observed_bar_count_v1",
+    "market_opening_return_v1",
+    "market_opening_range_v1",
+    "market_overnight_gap_v1",
+    "market_total_transition_v1",
+    "market_gap_open_alignment_v1",
+    "opening_thresholds_v1_json",
+    "opening_market_transition_state_v1",
+    "opening_transition_sign_v1",
+    "opening_transition_event_id_v1",
+    "stock_opening_return_v1",
+    "stock_opening_range_v1",
+    "stock_opening_alignment_v1",
+    "stock_relative_opening_response_v1",
+    "stock_opening_response_class_v1",
+    "stock_opening_resisting_subtype_v1",
+    "opening_market_complete_v1",
+    "stock_opening_response_complete_v1",
+    "opening_market_missing_reasons_v1_json",
+    "stock_opening_response_missing_reasons_v1_json",
 )
 
 
@@ -58,6 +146,10 @@ def _json(value: object) -> str:
     )
 
 
+def _content_hash(value: object) -> str:
+    return hashlib.sha256(_json(value).encode("utf-8")).hexdigest()
+
+
 def _assert_immutable_observation(
     existing: sqlite3.Row,
     *,
@@ -67,6 +159,98 @@ def _assert_immutable_observation(
     mismatches = tuple(key for key, value in expected.items() if existing[key] != value)
     if mismatches:
         raise ValueError(f"immutable {label} differs: {','.join(sorted(mismatches))}")
+
+
+def _signed_market_shock_values_v1(
+    *,
+    market_windows_v1: PreentryMarketWindowsV1,
+    market_shock_state_v1: MarketShockStateResultV1,
+    stock_shock_response_v1: StockShockResponseResultV1,
+    market_shock_thresholds_v1: CheckpointShockThresholdsV1 | None,
+) -> dict[str, object]:
+    """Serialise the logging-only fields once for insert and retry validation."""
+
+    values: dict[str, object] = {
+        "canonical_market_proxy_v1": market_windows_v1.market_proxy_v1,
+        "market_return_w0_v1": market_windows_v1.market_return_w0_v1,
+        "market_range_w0_v1": market_windows_v1.market_range_w0_v1,
+        "market_return_w1_v1": market_windows_v1.market_return_w1_v1,
+        "market_range_w1_v1": market_windows_v1.market_range_w1_v1,
+        "market_shock_thresholds_v1_json": (
+            None if market_shock_thresholds_v1 is None else _json(market_shock_thresholds_v1)
+        ),
+        "market_shock_state_v1": market_shock_state_v1.market_shock_state_v1,
+        "market_shock_event_id_v1": (market_shock_state_v1.market_shock_event_id_v1),
+        "shock_sign_v1": market_shock_state_v1.shock_sign_v1,
+        "stock_return_w0_v1": stock_shock_response_v1.stock_return_w0_v1,
+        "stock_absolute_alignment_v1": (stock_shock_response_v1.stock_absolute_alignment_v1),
+        "shock_relative_response_v1": (stock_shock_response_v1.shock_relative_response_v1),
+        "shock_response_class_v1": (stock_shock_response_v1.shock_response_class_v1),
+        "shock_resisting_subtype_v1": stock_shock_response_v1.resisting_subtype_v1,
+        "market_shock_complete_v1": int(market_shock_state_v1.complete_v1),
+        "shock_response_complete_v1": int(stock_shock_response_v1.complete_v1),
+        "market_shock_missing_reasons_v1_json": _json(market_shock_state_v1.missing_reasons_v1),
+        "shock_response_missing_reasons_v1_json": _json(stock_shock_response_v1.missing_reasons_v1),
+    }
+    if tuple(values) != SIGNED_MARKET_SHOCK_COLUMNS_V1:
+        raise AssertionError("signed market-shock persistence column order drifted")
+    return values
+
+
+def _opening_market_transition_values_v1(
+    *,
+    opening_window_v1: OpeningPreEntryWindowV1,
+    opening_transition_state_v1: OpeningMarketTransitionStateResultV1,
+    stock_opening_response_v1: StockOpeningResponseResultV1,
+    opening_thresholds_v1: OpeningTransitionThresholdsV1 | None,
+) -> dict[str, object]:
+    """Serialise opening-transition logging once for insert and retry checks."""
+
+    values: dict[str, object] = {
+        "opening_market_proxy_v1": opening_window_v1.market_proxy_v1,
+        "vti_session_open_v1": opening_window_v1.market_session_open_v1,
+        "vti_prior_regular_session_close_v1": (
+            opening_window_v1.market_prior_regular_session_close_v1
+        ),
+        "opening_expected_bar_count_v1": (opening_window_v1.expected_opening_bar_count_v1),
+        "opening_observed_bar_count_v1": (opening_window_v1.observed_opening_bar_count_v1),
+        "market_opening_return_v1": opening_window_v1.market_opening_return_v1,
+        "market_opening_range_v1": opening_window_v1.market_opening_range_v1,
+        "market_overnight_gap_v1": opening_window_v1.market_overnight_gap_v1,
+        "market_total_transition_v1": (opening_window_v1.market_total_transition_v1),
+        "market_gap_open_alignment_v1": (opening_window_v1.market_gap_open_alignment_v1),
+        "opening_thresholds_v1_json": (
+            None if opening_thresholds_v1 is None else _json(opening_thresholds_v1)
+        ),
+        "opening_market_transition_state_v1": (
+            opening_transition_state_v1.opening_market_transition_state_v1
+        ),
+        "opening_transition_sign_v1": (opening_transition_state_v1.opening_transition_sign_v1),
+        "opening_transition_event_id_v1": (
+            opening_transition_state_v1.opening_transition_event_id_v1
+        ),
+        "stock_opening_return_v1": (stock_opening_response_v1.stock_opening_return_v1),
+        "stock_opening_range_v1": (stock_opening_response_v1.stock_opening_range_v1),
+        "stock_opening_alignment_v1": (stock_opening_response_v1.stock_opening_alignment_v1),
+        "stock_relative_opening_response_v1": (
+            stock_opening_response_v1.stock_relative_opening_response_v1
+        ),
+        "stock_opening_response_class_v1": (
+            stock_opening_response_v1.stock_opening_response_class_v1
+        ),
+        "stock_opening_resisting_subtype_v1": (stock_opening_response_v1.resisting_subtype_v1),
+        "opening_market_complete_v1": int(opening_transition_state_v1.complete_v1),
+        "stock_opening_response_complete_v1": int(stock_opening_response_v1.complete_v1),
+        "opening_market_missing_reasons_v1_json": _json(
+            opening_transition_state_v1.missing_reasons_v1
+        ),
+        "stock_opening_response_missing_reasons_v1_json": _json(
+            stock_opening_response_v1.missing_reasons_v1
+        ),
+    }
+    if tuple(values) != OPENING_MARKET_TRANSITION_COLUMNS_V1:
+        raise AssertionError("opening-transition persistence column order drifted")
+    return values
 
 
 class FrozenRecorderRepository:
@@ -437,10 +621,11 @@ class FrozenRecorderRepository:
                     envelope_id, run_id, symbol, signal_session,
                     required_option_observation_session,
                     actual_option_observation_session, front_expiry, dte,
-                    atm_strike, features_json, missing_indicators_json,
+                    atm_strike, previous_close_implied_movement_15m,
+                    features_json, missing_indicators_json,
                     quality_status, source_receipt_hashes_json, context_hash,
                     claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     envelope_id,
@@ -456,6 +641,7 @@ class FrozenRecorderRepository:
                     None if context.front_expiry is None else context.front_expiry.isoformat(),
                     context.dte,
                     context.atm_strike,
+                    context.previous_close_implied_movement_15m,
                     _json(context.features),
                     _json(context.missing_indicators),
                     context.quality_status,
@@ -612,6 +798,40 @@ class FrozenRecorderRepository:
             ),
             0 if episode is None else int(episode["episode_number"]),
         )
+
+    def session_tail_phase_history(
+        self,
+        *,
+        run_id: str,
+        symbol: str,
+        session: date,
+    ) -> tuple[tuple[int, datetime, float, bool, str | None], ...]:
+        """Return chronological checkpoint inputs needed to restore Tail Phase V1."""
+
+        with self.repository._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT checkpoint, bar_end_utc, probability, eligible,
+                       rejection_reasons_json
+                FROM m1c_checkpoint_v0
+                WHERE run_id = ? AND symbol = ? AND session_date = ?
+                ORDER BY checkpoint
+                """,
+                (run_id, symbol, session.isoformat()),
+            ).fetchall()
+        output: list[tuple[int, datetime, float, bool, str | None]] = []
+        for row in rows:
+            reasons = cast(list[object], json.loads(str(row["rejection_reasons_json"])))
+            output.append(
+                (
+                    int(row["checkpoint"]),
+                    datetime.fromisoformat(str(row["bar_end_utc"])),
+                    float(row["probability"]),
+                    bool(row["eligible"]),
+                    None if not reasons else ";".join(str(value) for value in reasons),
+                )
+            )
+        return tuple(output)
 
     def quiet_session_state(
         self,
@@ -1173,14 +1393,53 @@ class FrozenRecorderRepository:
         feature_freshness: str,
         rejection_reasons: tuple[str, ...],
         model_version: str = "frozen-m1c-v0",
+        tail_phase_v1: TailPhaseStateV1 | None = None,
+        movement_consumed_v1: MovementConsumedStateV1 | None = None,
+        movement_consumed_bucket_v1: MovementConsumedBucketV1 | None = None,
+        movement_consumed_frozen_median_v1: float | None = None,
+        tail_phase_activation_status_v1: str = "not_configured",
     ) -> int:
         self._validate(metadata)
         if score.threshold_passed != (score.probability >= score.threshold):
             raise ValueError("M1C threshold membership differs")
+        if score.threshold != M1C_FROZEN_THRESHOLD:
+            raise ValueError("M1C threshold differs from the frozen contract")
+        if tail_phase_v1 is not None:
+            if tail_phase_v1.m1c_high_tail_v1 is not score.threshold_passed:
+                raise ValueError("Tail Phase membership differs from frozen M1C")
+            if (score.threshold_passed and tail_phase_v1.m1c_tail_phase_v1 == "OUTSIDE_TAIL") or (
+                not score.threshold_passed
+                and tail_phase_v1.m1c_tail_phase_v1 in {"FIRST_ENTRY", "PERSISTENT", "RE_ENTRY"}
+            ):
+                raise ValueError("Tail Phase state differs from frozen M1C")
+        if (
+            movement_consumed_frozen_median_v1 is not None
+            and movement_consumed_frozen_median_v1 != MOVEMENT_CONSUMED_MEDIAN_2024_V1
+        ):
+            raise ValueError("movement-consumed frozen median differs")
+        if movement_consumed_v1 is not None and movement_consumed_bucket_v1 is not None:
+            expected_bucket = assign_movement_consumed_bucket_v1(
+                movement_consumed_v1.movement_consumed_v1,
+                frozen_median=movement_consumed_frozen_median_v1,
+            )
+            if movement_consumed_bucket_v1 != expected_bucket:
+                raise ValueError("movement-consumed bucket differs from frozen median")
         with self.repository._connect() as connection:
             existing = connection.execute(
                 """
-                SELECT id, feature_hash, probability FROM m1c_checkpoint_v0
+                SELECT id, feature_hash, probability, threshold,
+                       m1c_high_tail_v1, m1c_tail_phase_v1,
+                       tail_entry_number_v1, tail_run_length_checkpoints_v1,
+                       tail_run_age_minutes_v1, prior_tail_entries_v1,
+                       previous_checkpoint_above_tail_v1,
+                       minutes_since_previous_tail_exit_v1,
+                       phase_history_complete_v1, phase_missing_reason_v1,
+                       movement_consumed_v1, movement_consumed_numerator_v1,
+                       movement_consumed_denominator_v1,
+                       movement_consumed_complete_v1,
+                       movement_consumed_missing_reason_v1,
+                       movement_consumed_bucket_v1, tail_phase_source_v1_json
+                FROM m1c_checkpoint_v0
                 WHERE run_id = ? AND symbol = ? AND session_date = ? AND checkpoint = ?
                 """,
                 (metadata.run_id, symbol, session.isoformat(), checkpoint),
@@ -1189,8 +1448,72 @@ class FrozenRecorderRepository:
                 if (
                     str(existing["feature_hash"]) != score.feature_hash
                     or float(existing["probability"]) != score.probability
+                    or float(existing["threshold"]) != score.threshold
                 ):
                     raise ValueError("immutable M1C checkpoint differs")
+                if tail_phase_v1 is not None:
+                    persisted_phase = {
+                        "m1c_high_tail_v1": (
+                            None
+                            if existing["m1c_high_tail_v1"] is None
+                            else bool(existing["m1c_high_tail_v1"])
+                        ),
+                        "m1c_tail_phase_v1": existing["m1c_tail_phase_v1"],
+                        "tail_entry_number_v1": existing["tail_entry_number_v1"],
+                        "tail_run_length_checkpoints_v1": existing[
+                            "tail_run_length_checkpoints_v1"
+                        ],
+                        "tail_run_age_minutes_v1": existing["tail_run_age_minutes_v1"],
+                        "prior_tail_entries_v1": existing["prior_tail_entries_v1"],
+                        "previous_checkpoint_above_tail_v1": (
+                            None
+                            if existing["previous_checkpoint_above_tail_v1"] is None
+                            else bool(existing["previous_checkpoint_above_tail_v1"])
+                        ),
+                        "minutes_since_previous_tail_exit_v1": existing[
+                            "minutes_since_previous_tail_exit_v1"
+                        ],
+                        "phase_history_complete_v1": bool(existing["phase_history_complete_v1"]),
+                        "phase_missing_reason_v1": existing["phase_missing_reason_v1"],
+                    }
+                    if persisted_phase != tail_phase_v1.model_dump(mode="python"):
+                        raise ValueError("immutable Tail Phase checkpoint differs")
+                    source = json.loads(str(existing["tail_phase_source_v1_json"]))
+                    if (
+                        source.get("tail_phase_activation_status_v1")
+                        != tail_phase_activation_status_v1
+                    ):
+                        raise ValueError("immutable Tail Phase activation differs")
+                if movement_consumed_v1 is not None:
+                    persisted_consumed = {
+                        "movement_consumed_v1": existing["movement_consumed_v1"],
+                        "movement_consumed_numerator_v1": existing[
+                            "movement_consumed_numerator_v1"
+                        ],
+                        "movement_consumed_denominator_v1": existing[
+                            "movement_consumed_denominator_v1"
+                        ],
+                        "movement_consumed_complete_v1": bool(
+                            existing["movement_consumed_complete_v1"]
+                        ),
+                        "movement_consumed_missing_reason_v1": existing[
+                            "movement_consumed_missing_reason_v1"
+                        ],
+                    }
+                    if persisted_consumed != movement_consumed_v1.model_dump(mode="python"):
+                        raise ValueError("immutable movement-consumed checkpoint differs")
+                if (
+                    movement_consumed_bucket_v1 is not None
+                    and existing["movement_consumed_bucket_v1"] != movement_consumed_bucket_v1
+                ):
+                    raise ValueError("immutable movement-consumed bucket differs")
+                if movement_consumed_frozen_median_v1 is not None:
+                    source = json.loads(str(existing["tail_phase_source_v1_json"]))
+                    if (
+                        source.get("movement_consumed_frozen_median_v1")
+                        != movement_consumed_frozen_median_v1
+                    ):
+                        raise ValueError("immutable Tail Phase source differs")
                 return int(existing["id"])
             envelope_id = self.repository._insert_envelope(connection, metadata)
             cursor = connection.execute(
@@ -1237,7 +1560,387 @@ class FrozenRecorderRepository:
                 ),
             )
             assert cursor.lastrowid is not None
-            return int(cursor.lastrowid)
+            checkpoint_id = int(cursor.lastrowid)
+            if (
+                tail_phase_v1 is not None
+                or movement_consumed_v1 is not None
+                or movement_consumed_bucket_v1 is not None
+            ):
+                phase = (
+                    TailPhaseStateV1(
+                        m1c_high_tail_v1=None,
+                        m1c_tail_phase_v1="UNKNOWN_INCOMPLETE",
+                        tail_entry_number_v1=None,
+                        tail_run_length_checkpoints_v1=None,
+                        tail_run_age_minutes_v1=None,
+                        prior_tail_entries_v1=None,
+                        previous_checkpoint_above_tail_v1=None,
+                        minutes_since_previous_tail_exit_v1=None,
+                        phase_history_complete_v1=False,
+                        phase_missing_reason_v1="tail_phase_not_supplied",
+                    )
+                    if tail_phase_v1 is None
+                    else tail_phase_v1
+                )
+                consumed = (
+                    MovementConsumedStateV1(
+                        movement_consumed_v1=None,
+                        movement_consumed_numerator_v1=None,
+                        movement_consumed_denominator_v1=None,
+                        movement_consumed_complete_v1=False,
+                        movement_consumed_missing_reason_v1=("movement_consumed_not_supplied"),
+                    )
+                    if movement_consumed_v1 is None
+                    else movement_consumed_v1
+                )
+                bucket: MovementConsumedBucketV1 = (
+                    "UNKNOWN_INCOMPLETE"
+                    if movement_consumed_bucket_v1 is None
+                    else movement_consumed_bucket_v1
+                )
+                source = {
+                    "schema_version": M1C_TAIL_PHASE_V1_VERSION,
+                    "m1c_threshold": score.threshold,
+                    "movement_consumed_lookback_minutes": (MOVEMENT_CONSUMED_LOOKBACK_MINUTES_V1),
+                    "movement_consumed_frozen_median_v1": (movement_consumed_frozen_median_v1),
+                    "tail_phase_activation_status_v1": (tail_phase_activation_status_v1),
+                    "previous_close_implied_movement_15m_status": (
+                        "available"
+                        if consumed.movement_consumed_denominator_v1 is not None
+                        else consumed.movement_consumed_missing_reason_v1
+                    ),
+                    "movement_consumed_median_provenance": {
+                        "start": "2024-01-01",
+                        "end": "2024-12-31",
+                        "predictor_values_only": True,
+                    },
+                    "stock_local": True,
+                    "peer_normalisation_used": False,
+                    "causal_timestamp": bar_end_utc.astimezone(UTC).isoformat(),
+                    "recorder_configuration_hash": self.configuration_hash,
+                }
+                connection.execute(
+                    """
+                    UPDATE m1c_checkpoint_v0
+                    SET m1c_high_tail_v1 = ?,
+                        m1c_tail_phase_v1 = ?,
+                        tail_entry_number_v1 = ?,
+                        tail_run_length_checkpoints_v1 = ?,
+                        tail_run_age_minutes_v1 = ?,
+                        prior_tail_entries_v1 = ?,
+                        previous_checkpoint_above_tail_v1 = ?,
+                        minutes_since_previous_tail_exit_v1 = ?,
+                        phase_history_complete_v1 = ?,
+                        phase_missing_reason_v1 = ?,
+                        movement_consumed_v1 = ?,
+                        movement_consumed_numerator_v1 = ?,
+                        movement_consumed_denominator_v1 = ?,
+                        movement_consumed_complete_v1 = ?,
+                        movement_consumed_missing_reason_v1 = ?,
+                        movement_consumed_bucket_v1 = ?,
+                        tail_phase_source_v1_json = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        (None if phase.m1c_high_tail_v1 is None else int(phase.m1c_high_tail_v1)),
+                        phase.m1c_tail_phase_v1,
+                        phase.tail_entry_number_v1,
+                        phase.tail_run_length_checkpoints_v1,
+                        phase.tail_run_age_minutes_v1,
+                        phase.prior_tail_entries_v1,
+                        (
+                            None
+                            if phase.previous_checkpoint_above_tail_v1 is None
+                            else int(phase.previous_checkpoint_above_tail_v1)
+                        ),
+                        phase.minutes_since_previous_tail_exit_v1,
+                        int(phase.phase_history_complete_v1),
+                        phase.phase_missing_reason_v1,
+                        consumed.movement_consumed_v1,
+                        consumed.movement_consumed_numerator_v1,
+                        consumed.movement_consumed_denominator_v1,
+                        int(consumed.movement_consumed_complete_v1),
+                        consumed.movement_consumed_missing_reason_v1,
+                        bucket,
+                        _json(source),
+                        checkpoint_id,
+                    ),
+                )
+            return checkpoint_id
+
+    def record_signed_market_shock_checkpoint_v1(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        checkpoint_id: int,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        market_windows_v1: PreentryMarketWindowsV1,
+        market_shock_state_v1: MarketShockStateResultV1,
+        stock_shock_response_v1: StockShockResponseResultV1,
+        market_shock_thresholds_v1: CheckpointShockThresholdsV1 | None,
+        activation_status_v1: str,
+    ) -> None:
+        """Attach optional signed-shock evidence after core episode promotion."""
+
+        self._validate(metadata)
+        expected = _signed_market_shock_values_v1(
+            market_windows_v1=market_windows_v1,
+            market_shock_state_v1=market_shock_state_v1,
+            stock_shock_response_v1=stock_shock_response_v1,
+            market_shock_thresholds_v1=market_shock_thresholds_v1,
+        )
+        shock_source = {
+            "schema_version": "m1c-signed-market-shock-transition-v1",
+            "activation_status_v1": activation_status_v1,
+            "threshold_configuration": (
+                None
+                if market_shock_thresholds_v1 is None
+                else market_shock_thresholds_v1.model_dump(mode="json")
+            ),
+            "w0_bar_ordinals_v1": market_windows_v1.w0_bar_ordinals_v1,
+            "w1_bar_ordinals_v1": market_windows_v1.w1_bar_ordinals_v1,
+            "signal_timestamp": market_windows_v1.signal_timestamp,
+            "maximum_market_timestamp_v1": (market_windows_v1.maximum_market_timestamp_v1),
+            "maximum_stock_timestamp_v1": (stock_shock_response_v1.maximum_stock_timestamp_v1),
+            "recorder_configuration_hash": self.configuration_hash,
+            "logging_only": True,
+            "m1c_scoring_changed": False,
+            "episode_promotion_changed": False,
+            "recorder_priority_changed": False,
+            "subscription_allocation_changed": False,
+            "option_contract_selection_changed": False,
+            "direction_decision_changed": False,
+            "episode_inclusion_changed": False,
+            "order_routing_changed": False,
+        }
+        source_json = _json(shock_source)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT run_id, symbol, session_date, checkpoint,
+                       canonical_market_proxy_v1,
+                       market_return_w0_v1, market_range_w0_v1,
+                       market_return_w1_v1, market_range_w1_v1,
+                       market_shock_thresholds_v1_json,
+                       market_shock_state_v1, market_shock_event_id_v1,
+                       shock_sign_v1, stock_return_w0_v1,
+                       stock_absolute_alignment_v1,
+                       shock_relative_response_v1,
+                       shock_response_class_v1,
+                       shock_resisting_subtype_v1,
+                       market_shock_complete_v1,
+                       shock_response_complete_v1,
+                       market_shock_missing_reasons_v1_json,
+                       shock_response_missing_reasons_v1_json,
+                       signed_market_shock_source_v1_json
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if existing is None:
+                raise ValueError("signed-shock checkpoint does not exist")
+            if (
+                str(existing["run_id"]) != metadata.run_id
+                or str(existing["symbol"]) != symbol
+                or str(existing["session_date"]) != session.isoformat()
+                or int(existing["checkpoint"]) != checkpoint
+                or market_windows_v1.session != session
+                or market_windows_v1.checkpoint != checkpoint
+            ):
+                raise ValueError("signed-shock checkpoint identity differs")
+            if existing["signed_market_shock_source_v1_json"] is not None:
+                _assert_immutable_observation(
+                    existing,
+                    expected={
+                        **expected,
+                        "signed_market_shock_source_v1_json": source_json,
+                    },
+                    label="signed market-shock checkpoint",
+                )
+                return
+            if any(existing[column] is not None for column in SIGNED_MARKET_SHOCK_COLUMNS_V1):
+                raise ValueError("signed market-shock checkpoint is partially populated")
+            connection.execute(
+                """
+                UPDATE m1c_checkpoint_v0
+                SET canonical_market_proxy_v1 = ?,
+                    market_return_w0_v1 = ?,
+                    market_range_w0_v1 = ?,
+                    market_return_w1_v1 = ?,
+                    market_range_w1_v1 = ?,
+                    market_shock_thresholds_v1_json = ?,
+                    market_shock_state_v1 = ?,
+                    market_shock_event_id_v1 = ?,
+                    shock_sign_v1 = ?,
+                    stock_return_w0_v1 = ?,
+                    stock_absolute_alignment_v1 = ?,
+                    shock_relative_response_v1 = ?,
+                    shock_response_class_v1 = ?,
+                    shock_resisting_subtype_v1 = ?,
+                    market_shock_complete_v1 = ?,
+                    shock_response_complete_v1 = ?,
+                    market_shock_missing_reasons_v1_json = ?,
+                    shock_response_missing_reasons_v1_json = ?,
+                    signed_market_shock_source_v1_json = ?
+                WHERE id = ?
+                """,
+                (
+                    *(expected[column] for column in SIGNED_MARKET_SHOCK_COLUMNS_V1),
+                    source_json,
+                    checkpoint_id,
+                ),
+            )
+
+    def record_opening_market_transition_checkpoint_v1(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        checkpoint_id: int,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        opening_window_v1: OpeningPreEntryWindowV1,
+        opening_transition_state_v1: OpeningMarketTransitionStateResultV1,
+        stock_opening_response_v1: StockOpeningResponseResultV1,
+        opening_thresholds_v1: OpeningTransitionThresholdsV1 | None,
+        activation_status_v1: str,
+    ) -> None:
+        """Attach optional opening evidence after core episode promotion."""
+
+        self._validate(metadata)
+        expected = _opening_market_transition_values_v1(
+            opening_window_v1=opening_window_v1,
+            opening_transition_state_v1=opening_transition_state_v1,
+            stock_opening_response_v1=stock_opening_response_v1,
+            opening_thresholds_v1=opening_thresholds_v1,
+        )
+        source = {
+            "schema_version": "m1c-opening-market-transition-v1",
+            "activation_status_v1": activation_status_v1,
+            "threshold_configuration": (
+                None
+                if opening_thresholds_v1 is None
+                else opening_thresholds_v1.model_dump(mode="json")
+            ),
+            "previous_session_v1": opening_window_v1.previous_session_v1,
+            "session_open_timestamp_v1": (opening_window_v1.session_open_timestamp_v1),
+            "signal_timestamp_v1": opening_window_v1.signal_timestamp_v1,
+            "entry_timestamp_v1": opening_window_v1.entry_timestamp_v1,
+            "opening_bar_ordinals_v1": (opening_window_v1.opening_bar_ordinals_v1),
+            "expected_opening_bar_count_v1": (opening_window_v1.expected_opening_bar_count_v1),
+            "observed_opening_bar_count_v1": (opening_window_v1.observed_opening_bar_count_v1),
+            "entry_bar_included_v1": (opening_window_v1.entry_bar_included_v1),
+            "maximum_market_timestamp_v1": (opening_window_v1.maximum_market_timestamp_v1),
+            "maximum_stock_timestamp_v1": (stock_opening_response_v1.maximum_stock_timestamp_v1),
+            "recorder_configuration_hash": self.configuration_hash,
+            "logging_only": True,
+            "m1c_scoring_changed": False,
+            "episode_promotion_changed": False,
+            "recorder_priority_changed": False,
+            "subscription_allocation_changed": False,
+            "option_contract_selection_changed": False,
+            "direction_decision_changed": False,
+            "episode_inclusion_changed": False,
+            "recorder_capacity_changed": False,
+            "order_routing_changed": False,
+        }
+        source_json = _json(source)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT run_id, symbol, session_date, checkpoint,
+                       opening_market_proxy_v1,
+                       vti_session_open_v1,
+                       vti_prior_regular_session_close_v1,
+                       opening_expected_bar_count_v1,
+                       opening_observed_bar_count_v1,
+                       market_opening_return_v1,
+                       market_opening_range_v1,
+                       market_overnight_gap_v1,
+                       market_total_transition_v1,
+                       market_gap_open_alignment_v1,
+                       opening_thresholds_v1_json,
+                       opening_market_transition_state_v1,
+                       opening_transition_sign_v1,
+                       opening_transition_event_id_v1,
+                       stock_opening_return_v1,
+                       stock_opening_range_v1,
+                       stock_opening_alignment_v1,
+                       stock_relative_opening_response_v1,
+                       stock_opening_response_class_v1,
+                       stock_opening_resisting_subtype_v1,
+                       opening_market_complete_v1,
+                       stock_opening_response_complete_v1,
+                       opening_market_missing_reasons_v1_json,
+                       stock_opening_response_missing_reasons_v1_json,
+                       opening_market_transition_source_v1_json
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if existing is None:
+                raise ValueError("opening-transition checkpoint does not exist")
+            if (
+                str(existing["run_id"]) != metadata.run_id
+                or str(existing["symbol"]) != symbol
+                or str(existing["session_date"]) != session.isoformat()
+                or int(existing["checkpoint"]) != checkpoint
+                or opening_window_v1.session != session
+                or opening_window_v1.checkpoint_v1 != checkpoint
+            ):
+                raise ValueError("opening-transition checkpoint identity differs")
+            if existing["opening_market_transition_source_v1_json"] is not None:
+                _assert_immutable_observation(
+                    existing,
+                    expected={
+                        **expected,
+                        "opening_market_transition_source_v1_json": source_json,
+                    },
+                    label="opening market-transition checkpoint",
+                )
+                return
+            if any(existing[column] is not None for column in OPENING_MARKET_TRANSITION_COLUMNS_V1):
+                raise ValueError("opening market-transition checkpoint is partially populated")
+            connection.execute(
+                """
+                UPDATE m1c_checkpoint_v0
+                SET opening_market_proxy_v1 = ?,
+                    vti_session_open_v1 = ?,
+                    vti_prior_regular_session_close_v1 = ?,
+                    opening_expected_bar_count_v1 = ?,
+                    opening_observed_bar_count_v1 = ?,
+                    market_opening_return_v1 = ?,
+                    market_opening_range_v1 = ?,
+                    market_overnight_gap_v1 = ?,
+                    market_total_transition_v1 = ?,
+                    market_gap_open_alignment_v1 = ?,
+                    opening_thresholds_v1_json = ?,
+                    opening_market_transition_state_v1 = ?,
+                    opening_transition_sign_v1 = ?,
+                    opening_transition_event_id_v1 = ?,
+                    stock_opening_return_v1 = ?,
+                    stock_opening_range_v1 = ?,
+                    stock_opening_alignment_v1 = ?,
+                    stock_relative_opening_response_v1 = ?,
+                    stock_opening_response_class_v1 = ?,
+                    stock_opening_resisting_subtype_v1 = ?,
+                    opening_market_complete_v1 = ?,
+                    stock_opening_response_complete_v1 = ?,
+                    opening_market_missing_reasons_v1_json = ?,
+                    stock_opening_response_missing_reasons_v1_json = ?,
+                    opening_market_transition_source_v1_json = ?
+                WHERE id = ?
+                """,
+                (
+                    *(expected[column] for column in OPENING_MARKET_TRANSITION_COLUMNS_V1),
+                    source_json,
+                    checkpoint_id,
+                ),
+            )
 
     def record_episode(
         self,
@@ -1258,6 +1961,28 @@ class FrozenRecorderRepository:
             ).fetchone()
             if existing is not None:
                 return str(existing["episode_id"])
+            checkpoint = connection.execute(
+                """
+                SELECT model_version, threshold, probability,
+                       m1c_tail_phase_v1, tail_entry_number_v1,
+                       tail_run_length_checkpoints_v1, tail_run_age_minutes_v1,
+                       prior_tail_entries_v1, previous_checkpoint_above_tail_v1,
+                       minutes_since_previous_tail_exit_v1,
+                       phase_history_complete_v1, phase_missing_reason_v1,
+                       movement_consumed_v1, movement_consumed_numerator_v1,
+                       movement_consumed_denominator_v1,
+                       movement_consumed_complete_v1,
+                       movement_consumed_missing_reason_v1,
+                       movement_consumed_bucket_v1, tail_phase_source_v1_json
+                FROM m1c_checkpoint_v0
+                WHERE id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if checkpoint is None:
+                raise KeyError(checkpoint_id)
+            if float(checkpoint["probability"]) != decision.probability:
+                raise ValueError("episode M1C probability differs from checkpoint")
             envelope_id = self.repository._insert_envelope(connection, metadata)
             connection.execute(
                 """
@@ -1289,6 +2014,51 @@ class FrozenRecorderRepository:
                     int(safety.scientific_recording_valid),
                     _json(safety.rejection_reasons),
                     self.claims_json,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE m1c_episode_v0
+                SET m1c_model_version_v1 = ?,
+                    m1c_high_tail_threshold_v1 = ?,
+                    phase_at_trigger_v1 = ?,
+                    tail_entry_number_v1 = ?,
+                    tail_run_length_checkpoints_v1 = ?,
+                    tail_run_age_at_trigger_v1 = ?,
+                    prior_tail_entries_v1 = ?,
+                    previous_checkpoint_above_tail_v1 = ?,
+                    minutes_since_previous_tail_exit_v1 = ?,
+                    phase_history_complete_v1 = ?,
+                    phase_missing_reason_v1 = ?,
+                    movement_consumed_at_trigger_v1 = ?,
+                    movement_consumed_numerator_v1 = ?,
+                    movement_consumed_denominator_v1 = ?,
+                    movement_consumed_complete_v1 = ?,
+                    movement_consumed_missing_reason_v1 = ?,
+                    movement_consumed_bucket_v1 = ?,
+                    tail_phase_source_v1_json = ?
+                WHERE episode_id = ?
+                """,
+                (
+                    str(checkpoint["model_version"]),
+                    float(checkpoint["threshold"]),
+                    checkpoint["m1c_tail_phase_v1"],
+                    checkpoint["tail_entry_number_v1"],
+                    checkpoint["tail_run_length_checkpoints_v1"],
+                    checkpoint["tail_run_age_minutes_v1"],
+                    checkpoint["prior_tail_entries_v1"],
+                    checkpoint["previous_checkpoint_above_tail_v1"],
+                    checkpoint["minutes_since_previous_tail_exit_v1"],
+                    checkpoint["phase_history_complete_v1"],
+                    checkpoint["phase_missing_reason_v1"],
+                    checkpoint["movement_consumed_v1"],
+                    checkpoint["movement_consumed_numerator_v1"],
+                    checkpoint["movement_consumed_denominator_v1"],
+                    checkpoint["movement_consumed_complete_v1"],
+                    checkpoint["movement_consumed_missing_reason_v1"],
+                    checkpoint["movement_consumed_bucket_v1"],
+                    checkpoint["tail_phase_source_v1_json"],
+                    decision.episode_id,
                 ),
             )
         return decision.episode_id
@@ -3135,6 +3905,1972 @@ class FrozenRecorderRepository:
                     source_transfer_decision,
                     metadata.recorded_at_utc.isoformat(),
                     self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def opening_reversal_phase_for_session(
+        self,
+        *,
+        run_id: str,
+        session: date,
+    ) -> tuple[
+        Literal[
+            "engineering_transfer",
+            "prospective_development",
+            "untouched_confirmation",
+        ],
+        str,
+    ]:
+        """Resolve V1 phase only from immutable aggregate boundary receipts."""
+
+        with self.repository._connect() as connection:
+            decisions = connection.execute(
+                """
+                SELECT receipt_kind, cohort_last_session, decision
+                FROM opening_reversal_decision_receipt_v1
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchall()
+        by_kind = {str(row["receipt_kind"]): row for row in decisions}
+        transfer = by_kind.get("transfer")
+        if transfer is None:
+            return "engineering_transfer", "engineering_transfer_pending"
+        transfer_decision = str(transfer["decision"])
+        transfer_last = transfer["cohort_last_session"]
+        if transfer_last is None or str(transfer_last) >= session.isoformat():
+            return "engineering_transfer", "engineering_transfer_pending"
+        if transfer_decision not in {
+            "opening_transfer_supported_without_recalibration",
+            "opening_transfer_supported_with_predictor_only_mapping",
+        }:
+            return "engineering_transfer", transfer_decision
+        development = by_kind.get("development")
+        confirmation = by_kind.get("confirmation_start")
+        if (
+            development is not None
+            and str(development["decision"]) == "prospective_opening_reversal_development_supported"
+            and confirmation is not None
+            and confirmation["cohort_last_session"] is not None
+            and str(confirmation["cohort_last_session"]) < session.isoformat()
+        ):
+            return "untouched_confirmation", transfer_decision
+        return "prospective_development", transfer_decision
+
+    def record_opening_reversal_decision_receipt_v1(
+        self,
+        metadata: EvidenceMetadata,
+        receipt: OpeningReversalDecisionReceiptV1,
+    ) -> int:
+        """Persist one immutable aggregate phase/decision receipt."""
+
+        self._validate(metadata)
+        encoded = _json(receipt)
+        with self.repository._connect() as connection:
+            self._validate_opening_reversal_decision_sources_v1(
+                connection,
+                run_id=metadata.run_id,
+                receipt=receipt,
+            )
+            existing = connection.execute(
+                """
+                SELECT id, receipt_hash_v1, receipt_json
+                FROM opening_reversal_decision_receipt_v1
+                WHERE run_id = ? AND receipt_kind = ?
+                """,
+                (metadata.run_id, receipt.receipt_kind),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["receipt_hash_v1"]) != receipt.receipt_hash_v1
+                    or str(existing["receipt_json"]) != encoded
+                ):
+                    raise ValueError(f"{receipt.receipt_kind} decision receipt is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_decision_receipt_v1(
+                    envelope_id, run_id, receipt_kind, boundary_timestamp_utc,
+                    decision, cohort_first_session, cohort_last_session,
+                    receipt_hash_v1, receipt_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    receipt.receipt_kind,
+                    receipt.boundary_timestamp_utc.isoformat(),
+                    receipt.decision,
+                    (
+                        None
+                        if receipt.cohort_first_session is None
+                        else receipt.cohort_first_session.isoformat()
+                    ),
+                    (
+                        None
+                        if receipt.cohort_last_session is None
+                        else receipt.cohort_last_session.isoformat()
+                    ),
+                    receipt.receipt_hash_v1,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    @staticmethod
+    def _validate_opening_reversal_decision_sources_v1(
+        connection: sqlite3.Connection,
+        *,
+        run_id: str,
+        receipt: OpeningReversalDecisionReceiptV1,
+    ) -> None:
+        """Bind phase receipts to the exact immutable recorder rows."""
+
+        if receipt.receipt_kind == "transfer":
+            rows = connection.execute(
+                """
+                SELECT transfer.session_date, transfer.report_hash_v1,
+                       envelope.recorded_at_utc
+                FROM opening_reversal_transfer_session_v1 transfer
+                JOIN evidence_envelope envelope
+                  ON envelope.id = transfer.envelope_id
+                WHERE transfer.run_id = ? AND transfer.valid = 1
+                  AND transfer.operational_checks_pass = 1
+                ORDER BY session_date
+                LIMIT 20
+                """,
+                (run_id,),
+            ).fetchall()
+            hashes = tuple(str(row["report_hash_v1"]) for row in rows)
+            activation = connection.execute(
+                """
+                SELECT activation_timestamp_utc, new_york_trading_date
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_version = ?
+                """,
+                (run_id, receipt.experiment_version),
+            ).fetchone()
+            if (
+                len(rows) != 20
+                or activation is None
+                or hashes != receipt.source_receipt_hashes
+                or any(
+                    date.fromisoformat(str(row["session_date"]))
+                    < date.fromisoformat(str(activation["new_york_trading_date"]))
+                    or datetime.fromisoformat(str(row["recorded_at_utc"]))
+                    <= datetime.fromisoformat(str(activation["activation_timestamp_utc"]))
+                    for row in rows
+                )
+                or receipt.cohort_first_session != date.fromisoformat(str(rows[0]["session_date"]))
+                or receipt.cohort_last_session != date.fromisoformat(str(rows[-1]["session_date"]))
+            ):
+                raise ValueError("transfer receipt sources do not match first 20 valid sessions")
+            return
+
+        if receipt.receipt_kind == "confirmation_start":
+            development = connection.execute(
+                """
+                SELECT decision, boundary_timestamp_utc, cohort_last_session,
+                       receipt_hash_v1, receipt_json
+                FROM opening_reversal_decision_receipt_v1
+                WHERE run_id = ? AND receipt_kind = 'development'
+                """,
+                (run_id,),
+            ).fetchone()
+            development_receipt = (
+                None
+                if development is None
+                else OpeningReversalDecisionReceiptV1.model_validate_json(
+                    str(development["receipt_json"])
+                )
+            )
+            if (
+                development is None
+                or development_receipt is None
+                or development_receipt.experiment_version != receipt.experiment_version
+                or str(development["decision"])
+                != "prospective_opening_reversal_development_supported"
+                or receipt.source_receipt_hashes != (str(development["receipt_hash_v1"]),)
+                or receipt.cohort_last_session is None
+                or receipt.cohort_last_session.isoformat()
+                != str(development["cohort_last_session"])
+                or receipt.boundary_timestamp_utc
+                <= datetime.fromisoformat(str(development["boundary_timestamp_utc"]))
+            ):
+                raise ValueError(
+                    "confirmation-start source is not the stored supported development"
+                )
+            return
+
+        if receipt.receipt_kind == "option_economics":
+            direction = connection.execute(
+                """
+                SELECT receipt_hash_v1, cohort_first_session,
+                       cohort_last_session, receipt_json
+                FROM opening_reversal_decision_receipt_v1
+                WHERE run_id = ? AND receipt_kind = 'confirmation'
+                  AND decision =
+                      'prospective_opening_reversal_direction_supported'
+                """,
+                (run_id,),
+            ).fetchone()
+            option_rows = connection.execute(
+                """
+                SELECT option_outcome.outcome_hash_v1,
+                       option_outcome.outcome_json,
+                       option_outcome.prediction_receipt_hash_v1,
+                       option_outcome.role,
+                       option_outcome.expiry,
+                       prediction.session_date,
+                       prediction.stock,
+                       prediction.opening_transition_event_id_v1,
+                       prediction.prediction_v1,
+                       prediction.receipt_json
+                FROM opening_reversal_primary_option_outcome_v1 option_outcome
+                JOIN opening_reversal_prediction_v1 prediction
+                  ON prediction.receipt_hash_v1 =
+                     option_outcome.prediction_receipt_hash_v1
+                JOIN opening_reversal_promotion_v1 promotion
+                  ON promotion.promoted_receipt_hash_v1 =
+                     prediction.receipt_hash_v1
+                WHERE option_outcome.run_id = ?
+                  AND option_outcome.complete = 1
+                  AND prediction.experiment_version = ?
+                  AND prediction.scientific_outcome_eligible_v1 = 1
+                  AND option_outcome.subscription_end_utc <= ?
+                ORDER BY option_outcome.prediction_receipt_hash_v1,
+                         option_outcome.role
+                """,
+                (
+                    run_id,
+                    receipt.experiment_version,
+                    receipt.boundary_timestamp_utc.isoformat(),
+                ),
+            ).fetchall()
+            direction_receipt = (
+                None
+                if direction is None
+                else OpeningReversalDecisionReceiptV1.model_validate_json(
+                    str(direction["receipt_json"])
+                )
+            )
+            if (
+                direction is None
+                or direction_receipt is None
+                or direction_receipt.experiment_version != receipt.experiment_version
+            ):
+                raise ValueError("option decision requires stored supported confirmation direction")
+            by_prediction: dict[str, list[sqlite3.Row]] = {}
+            for row in option_rows:
+                by_prediction.setdefault(
+                    str(row["prediction_receipt_hash_v1"]),
+                    [],
+                ).append(row)
+            complete_pairs = {
+                prediction_hash: rows
+                for prediction_hash, rows in by_prediction.items()
+                if len(rows) == 2
+                and {str(row["role"]) for row in rows} == {"predicted_leg", "opposite_leg"}
+            }
+            option_hashes = tuple(
+                sorted(
+                    str(row["outcome_hash_v1"]) for rows in complete_pairs.values() for row in rows
+                )
+            )
+            expected_sources = {
+                str(direction["receipt_hash_v1"]),
+                *option_hashes,
+            }
+            if set(receipt.source_receipt_hashes) != expected_sources:
+                raise ValueError("option decision sources differ from persisted primary pairs")
+            representative_rows = tuple(rows[0] for rows in complete_pairs.values())
+            if not representative_rows:
+                capacity_blocks = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM opening_reversal_degradation_event_v1
+                        WHERE run_id = ?
+                          AND reason = 'option_economics_blocked_capacity'
+                        """,
+                        (run_id,),
+                    ).fetchone()[0]
+                )
+                zero_counts = {
+                    "complete_promoted_option_episodes": 0,
+                    "call_option_episodes": 0,
+                    "put_option_episodes": 0,
+                    "unique_severe_opening_events": 0,
+                    "represented_stocks": 0,
+                    "represented_expiries": 0,
+                    "maximum_stock_episode_count": 0,
+                    "maximum_expiry_episode_count": 0,
+                    "maximum_event_episode_count": 0,
+                }
+                if (
+                    receipt.decision != "option_economics_blocked_capacity"
+                    or capacity_blocks == 0
+                    or dict(receipt.support_counts) != zero_counts
+                    or receipt.cohort_first_session is None
+                    or receipt.cohort_last_session is None
+                    or receipt.cohort_first_session.isoformat()
+                    != str(direction["cohort_first_session"])
+                    or receipt.cohort_last_session.isoformat()
+                    != str(direction["cohort_last_session"])
+                ):
+                    raise ValueError("empty option decision lacks persisted capacity block")
+                return
+            sessions = tuple(
+                date.fromisoformat(str(row["session_date"])) for row in representative_rows
+            )
+            if (
+                min(sessions) != receipt.cohort_first_session
+                or max(sessions) != receipt.cohort_last_session
+            ):
+                raise ValueError("option decision cohort boundary differs")
+            stock_counts = Counter(str(row["stock"]) for row in representative_rows)
+            expiry_counts = Counter(str(rows[0]["expiry"]) for rows in complete_pairs.values())
+            event_counts = Counter(
+                str(row["opening_transition_event_id_v1"]) for row in representative_rows
+            )
+            expected_counts = {
+                "complete_promoted_option_episodes": len(representative_rows),
+                "call_option_episodes": sum(
+                    str(row["prediction_v1"]) == "CALL" for row in representative_rows
+                ),
+                "put_option_episodes": sum(
+                    str(row["prediction_v1"]) == "PUT" for row in representative_rows
+                ),
+                "unique_severe_opening_events": len(event_counts),
+                "represented_stocks": len(stock_counts),
+                "represented_expiries": len(expiry_counts),
+                "maximum_stock_episode_count": max(stock_counts.values()),
+                "maximum_expiry_episode_count": max(expiry_counts.values()),
+                "maximum_event_episode_count": max(event_counts.values()),
+            }
+            if dict(receipt.support_counts) != expected_counts:
+                raise ValueError("option decision support differs from persisted primary pairs")
+            from stocker_prospective.m1c_opening_reversal_analysis_v1 import (
+                OpeningReversalOptionEpisodeV1,
+                analyze_option_economics_v1,
+            )
+
+            option_episodes = []
+            for prediction_hash, rows in complete_pairs.items():
+                by_role = {str(row["role"]): row for row in rows}
+                predicted = PrimaryOptionBidAskOutcomeV1.model_validate_json(
+                    str(by_role["predicted_leg"]["outcome_json"])
+                )
+                opposite = PrimaryOptionBidAskOutcomeV1.model_validate_json(
+                    str(by_role["opposite_leg"]["outcome_json"])
+                )
+                prediction = OpeningReversalPredictionReceiptV1.model_validate_json(
+                    str(rows[0]["receipt_json"])
+                )
+                assert predicted.conservative_return_v1 is not None
+                assert opposite.conservative_return_v1 is not None
+                option_episodes.append(
+                    OpeningReversalOptionEpisodeV1(
+                        experiment_version=prediction.experiment_version,
+                        prediction_receipt_hash_v1=prediction_hash,
+                        predicted_leg_outcome_hash_v1=predicted.outcome_hash_v1,
+                        opposite_leg_outcome_hash_v1=opposite.outcome_hash_v1,
+                        session=prediction.session,
+                        stock=prediction.stock,
+                        opening_transition_event_id_v1=cast(
+                            str,
+                            prediction.opening_transition_event_id_v1,
+                        ),
+                        prediction_v1=cast(
+                            Literal["CALL", "PUT"],
+                            prediction.prediction_v1,
+                        ),
+                        expiry=predicted.contract.expiry,
+                        predicted_leg_conservative_return_v1=(predicted.conservative_return_v1),
+                        opposite_leg_conservative_return_v1=(opposite.conservative_return_v1),
+                        actual_bid_ask_evidence=True,
+                        quote_quality_passed=True,
+                        staleness_passed=True,
+                        continuously_or_adequately_quoted=True,
+                    )
+                )
+            option_analysis = analyze_option_economics_v1(
+                option_episodes,
+                underlying_direction_supported=True,
+                capacity_blocked=(receipt.decision == "option_economics_blocked_capacity"),
+            )
+            if option_analysis.decision != receipt.decision:
+                raise ValueError("option decision differs from frozen bid/ask analysis")
+            return
+
+        if receipt.receipt_kind not in {"development", "confirmation"}:
+            return
+        if receipt.cohort_first_session is None or receipt.cohort_last_session is None:
+            raise ValueError("direction decision cohort boundary is missing")
+        phase = (
+            "prospective_development"
+            if receipt.receipt_kind == "development"
+            else "untouched_confirmation"
+        )
+        rows = connection.execute(
+            """
+            SELECT outcome.outcome_receipt_hash_v1,
+                   outcome.outcome_created_at_utc,
+                   outcome.outcome_json,
+                   outcome.session_date,
+                   outcome.stock,
+                   outcome.opening_transition_event_id_v1,
+                   prediction.opening_transition_sign_v1,
+                   prediction.receipt_json,
+                   EXISTS(
+                       SELECT 1
+                       FROM opening_reversal_promotion_v1 promotion
+                       WHERE promotion.run_id = prediction.run_id
+                         AND promotion.promoted_receipt_hash_v1 =
+                             prediction.receipt_hash_v1
+                   ) AS promoted,
+                   (
+                       SELECT COUNT(*)
+                       FROM opening_reversal_primary_option_outcome_v1 option_outcome
+                       WHERE option_outcome.run_id = prediction.run_id
+                         AND option_outcome.prediction_receipt_hash_v1 =
+                             prediction.receipt_hash_v1
+                         AND option_outcome.complete = 1
+                   ) AS complete_option_leg_count
+            FROM opening_reversal_underlying_outcome_v1 outcome
+            JOIN opening_reversal_prediction_v1 prediction
+              ON prediction.receipt_hash_v1 =
+                 outcome.prediction_receipt_hash_v1
+            WHERE outcome.run_id = ?
+              AND prediction.experiment_version = ?
+              AND prediction.cohort_phase = ?
+              AND prediction.scientific_outcome_eligible_v1 = 1
+              AND (
+                  prediction.experiment_version != '1.1'
+                  OR EXISTS(
+                      SELECT 1
+                      FROM opening_reversal_causal_barrier_audit_v1_1 barrier
+                      WHERE barrier.run_id = prediction.run_id
+                        AND barrier.session_date = prediction.session_date
+                        AND barrier.barrier_status = 'passed'
+                  )
+              )
+              AND outcome.outcome_completeness_v1 = 'complete'
+              AND outcome.outcome_created_at_utc <= ?
+            ORDER BY outcome.outcome_receipt_hash_v1
+            """,
+            (
+                run_id,
+                receipt.experiment_version,
+                phase,
+                receipt.boundary_timestamp_utc.isoformat(),
+            ),
+        ).fetchall()
+        hashes = tuple(str(row["outcome_receipt_hash_v1"]) for row in rows)
+        if hashes != tuple(sorted(receipt.source_receipt_hashes)) or not rows:
+            raise ValueError(f"{receipt.receipt_kind} sources do not match persisted outcomes")
+        sessions = tuple(date.fromisoformat(str(row["session_date"])) for row in rows)
+        if (
+            min(sessions) != receipt.cohort_first_session
+            or max(sessions) != receipt.cohort_last_session
+        ):
+            raise ValueError(f"{receipt.receipt_kind} cohort boundary differs from outcomes")
+        event_identity: dict[str, tuple[date, int]] = {}
+        for row, session in zip(rows, sessions, strict=True):
+            event_id = str(row["opening_transition_event_id_v1"])
+            sign = int(row["opening_transition_sign_v1"])
+            identity = (session, sign)
+            if event_identity.setdefault(event_id, identity) != identity:
+                raise ValueError("one persisted opening event has multiple identities")
+        stock_counts = Counter(str(row["stock"]) for row in rows)
+        event_counts = Counter(str(row["opening_transition_event_id_v1"]) for row in rows)
+        expected_counts = {
+            "complete_eligible_stock_episodes": len(rows),
+            "unique_severe_opening_events": len(event_identity),
+            "positive_transition_events": sum(
+                sign == 1 for _session, sign in event_identity.values()
+            ),
+            "negative_transition_events": sum(
+                sign == -1 for _session, sign in event_identity.values()
+            ),
+            "represented_stocks": len(stock_counts),
+            "sessions": len(set(sessions)),
+            "maximum_stock_episode_count": max(stock_counts.values()),
+            "maximum_event_episode_count": max(event_counts.values()),
+        }
+        if dict(receipt.support_counts) != expected_counts:
+            raise ValueError(
+                f"{receipt.receipt_kind} support counts differ from persisted outcomes"
+            )
+        from stocker_prospective.m1c_opening_reversal_analysis_v1 import (
+            analyze_direction_cohort_v1,
+            build_opening_reversal_analysis_episode_v1,
+        )
+
+        episodes = tuple(
+            build_opening_reversal_analysis_episode_v1(
+                prediction=OpeningReversalPredictionReceiptV1.model_validate_json(
+                    str(row["receipt_json"])
+                ),
+                outcome=OpeningReversalUnderlyingOutcomeV1.model_validate_json(
+                    str(row["outcome_json"])
+                ),
+                promoted=bool(row["promoted"]),
+                primary_option_evidence_complete=(int(row["complete_option_leg_count"]) == 2),
+            )
+            for row in rows
+        )
+        direction_analysis = analyze_direction_cohort_v1(
+            episodes,
+            phase=cast(
+                Literal[
+                    "prospective_development",
+                    "untouched_confirmation",
+                ],
+                phase,
+            ),
+        )
+        if direction_analysis.decision != receipt.decision:
+            raise ValueError(f"{receipt.receipt_kind} decision differs from frozen analysis")
+
+    def maybe_record_opening_transfer_decision_v1(
+        self,
+        metadata: EvidenceMetadata,
+    ) -> OpeningReversalDecisionReceiptV1 | None:
+        """Sign the first 20 valid predictor-only sessions exactly once."""
+
+        self._validate(metadata)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT receipt_json
+                FROM opening_reversal_decision_receipt_v1
+                WHERE run_id = ? AND receipt_kind = 'transfer'
+                """,
+                (metadata.run_id,),
+            ).fetchone()
+            if existing is not None:
+                return OpeningReversalDecisionReceiptV1.model_validate_json(
+                    str(existing["receipt_json"])
+                )
+            rows = connection.execute(
+                """
+                SELECT report_json
+                FROM opening_reversal_transfer_session_v1
+                WHERE run_id = ? AND valid = 1
+                ORDER BY session_date
+                LIMIT 20
+                """,
+                (metadata.run_id,),
+            ).fetchall()
+            activation = connection.execute(
+                """
+                SELECT experiment_version
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (metadata.run_id,),
+            ).fetchone()
+        if len(rows) < 20:
+            return None
+        if activation is None or str(activation["experiment_version"]) not in {
+            "1",
+            "1.1",
+        }:
+            raise ValueError("opening reversal activation is unavailable")
+        receipt = build_opening_transfer_decision_receipt_v1(
+            sessions=tuple(
+                OpeningTransferSessionResultV1.model_validate_json(str(row["report_json"]))
+                for row in rows
+            ),
+            boundary_timestamp_utc=metadata.recorded_at_utc,
+            experiment_version=cast(
+                Literal["1", "1.1"],
+                str(activation["experiment_version"]),
+            ),
+        )
+        self.record_opening_reversal_decision_receipt_v1(metadata, receipt)
+        return receipt
+
+    def record_opening_reversal_activation_v1(
+        self,
+        metadata: EvidenceMetadata,
+        receipt: OpeningReversalActivationReceiptV1,
+    ) -> int:
+        """Persist the activation boundary once; a retry must be byte-identical."""
+
+        self._validate(metadata)
+        encoded = _json(receipt)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, activation_receipt_hash, receipt_json
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ? AND experiment_version = ?
+                """,
+                (
+                    metadata.run_id,
+                    receipt.experiment_id,
+                    receipt.experiment_version,
+                ),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["activation_receipt_hash"]) != receipt.activation_receipt_hash
+                    or str(existing["receipt_json"]) != encoded
+                ):
+                    raise ValueError("opening reversal activation is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_activation_v1(
+                    envelope_id, run_id, experiment_id, experiment_version,
+                    activation_timestamp_utc, new_york_trading_date,
+                    configuration_hash, frozen_rule_hash,
+                    configured_reserved_line_count, order_routing_disabled,
+                    activation_receipt_hash, receipt_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 12, 1, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    receipt.experiment_id,
+                    receipt.experiment_version,
+                    receipt.activation_timestamp_utc.isoformat(),
+                    receipt.new_york_trading_date_at_activation.isoformat(),
+                    receipt.configuration_hash,
+                    receipt.frozen_rule_hash,
+                    receipt.activation_receipt_hash,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_activation_v1_1(
+        self,
+        metadata: EvidenceMetadata,
+        receipt: OpeningReversalActivationReceiptV1_1,
+    ) -> int:
+        """Persist the immutable timing addendum without replacing V1."""
+
+        self._validate(metadata)
+        encoded = _json(receipt)
+        with self.repository._connect() as connection:
+            base = connection.execute(
+                """
+                SELECT activation_receipt_hash, configuration_hash,
+                       frozen_rule_hash
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ?
+                  AND experiment_version = '1'
+                """,
+                (metadata.run_id, receipt.experiment_id),
+            ).fetchone()
+            if (
+                base is None
+                or str(base["activation_receipt_hash"])
+                != receipt.superseded_activation_receipt_hash_v1
+                or str(base["configuration_hash"]) != receipt.frozen_configuration_hash_v1
+                or str(base["frozen_rule_hash"]) != receipt.frozen_rule_hash
+            ):
+                raise ValueError("opening reversal V1.1 lacks the exact V1 activation")
+            existing = connection.execute(
+                """
+                SELECT id, activation_receipt_hash, receipt_json
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ?
+                  AND experiment_version = '1.1'
+                """,
+                (metadata.run_id, receipt.experiment_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["activation_receipt_hash"]) != receipt.activation_receipt_hash_v1_1
+                    or str(existing["receipt_json"]) != encoded
+                ):
+                    raise ValueError("opening reversal V1.1 activation is immutable")
+                return int(existing["id"])
+            prior_experiment_rows = sum(
+                int(
+                    connection.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE run_id = ?",
+                        (metadata.run_id,),
+                    ).fetchone()[0]
+                )
+                for table in (
+                    "opening_reversal_prediction_v1",
+                    "opening_reversal_transfer_session_v1",
+                    "opening_reversal_underlying_outcome_v1",
+                    "opening_reversal_decision_receipt_v1",
+                )
+            )
+            if prior_experiment_rows:
+                raise ValueError(
+                    "opening reversal V1.1 requires a fresh run so the "
+                    "20-session engineering transfer restarts"
+                )
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_activation_v1(
+                    envelope_id, run_id, experiment_id, experiment_version,
+                    activation_timestamp_utc, new_york_trading_date,
+                    configuration_hash, frozen_rule_hash,
+                    configured_reserved_line_count, order_routing_disabled,
+                    activation_receipt_hash, receipt_json
+                ) VALUES (?, ?, ?, '1.1', ?, ?, ?, ?, 12, 1, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    receipt.experiment_id,
+                    receipt.activation_timestamp_utc.isoformat(),
+                    receipt.new_york_trading_date_at_activation.isoformat(),
+                    receipt.timing_addendum_configuration_hash_v1_1,
+                    receipt.frozen_rule_hash,
+                    receipt.activation_receipt_hash_v1_1,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_prediction_v1(
+        self,
+        metadata: EvidenceMetadata,
+        receipt: OpeningReversalPredictionReceiptV1,
+    ) -> int:
+        """Append one immutable receipt; corrections use their own table."""
+
+        self._validate(metadata)
+        expected_phase, expected_transfer_status = self.opening_reversal_phase_for_session(
+            run_id=metadata.run_id,
+            session=receipt.session,
+        )
+        if (
+            receipt.cohort_phase != expected_phase
+            or receipt.transfer_status != expected_transfer_status
+        ):
+            raise ValueError("opening reversal prediction phase differs from immutable boundaries")
+        encoded = _json(receipt)
+        with self.repository._connect() as connection:
+            activation = connection.execute(
+                """
+                SELECT activation_timestamp_utc
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ?
+                  AND experiment_version = ?
+                """,
+                (
+                    metadata.run_id,
+                    receipt.experiment_id,
+                    receipt.experiment_version,
+                ),
+            ).fetchone()
+            if activation is None or receipt.receipt_created_at_utc <= datetime.fromisoformat(
+                str(activation["activation_timestamp_utc"])
+            ):
+                raise ValueError("opening reversal prediction lacks prior activation boundary")
+            existing = connection.execute(
+                """
+                SELECT id, receipt_hash_v1, receipt_json
+                FROM opening_reversal_prediction_v1
+                WHERE run_id = ? AND session_date = ? AND stock = ?
+                  AND checkpoint = 6 AND experiment_id = ?
+                  AND experiment_version = ?
+                """,
+                (
+                    metadata.run_id,
+                    receipt.session.isoformat(),
+                    receipt.stock,
+                    receipt.experiment_id,
+                    receipt.experiment_version,
+                ),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["receipt_hash_v1"]) != receipt.receipt_hash_v1
+                    or str(existing["receipt_json"]) != encoded
+                ):
+                    raise ValueError("opening reversal prediction receipt is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_prediction_v1(
+                    envelope_id, run_id, experiment_id, experiment_version,
+                    session_date, stock, checkpoint, signal_timestamp_utc,
+                    entry_timestamp_utc, receipt_created_at_utc,
+                    m1c_probability, m1c_threshold, high_tail_membership,
+                    fresh_episode_id, tail_phase_v1,
+                    market_opening_return_v1, market_opening_range_v1,
+                    opening_market_transition_state_v1,
+                    opening_transition_sign_v1, opening_transition_event_id_v1,
+                    data_source, transfer_status, cohort_phase, prediction_v1,
+                    prediction_sign_v1, eligibility_v1,
+                    ineligibility_reasons_v1_json, completeness_status_v1,
+                    scientific_outcome_eligible_v1,
+                    scientific_exclusion_reason_v1, capacity_snapshot_id,
+                    previous_close_atm_iv_scale_15m, frozen_comparisons_json,
+                    rule_hash_v1, receipt_hash_v1, receipt_json
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, 6, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    receipt.experiment_id,
+                    receipt.experiment_version,
+                    receipt.session.isoformat(),
+                    receipt.stock,
+                    receipt.signal_timestamp_utc.isoformat(),
+                    receipt.entry_timestamp_utc.isoformat(),
+                    receipt.receipt_created_at_utc.isoformat(),
+                    receipt.m1c_probability,
+                    receipt.m1c_threshold,
+                    int(receipt.high_tail_membership),
+                    receipt.fresh_episode_id,
+                    receipt.tail_phase_v1,
+                    receipt.market_opening_return_v1,
+                    receipt.market_opening_range_v1,
+                    receipt.opening_market_transition_state_v1,
+                    receipt.opening_transition_sign_v1,
+                    receipt.opening_transition_event_id_v1,
+                    receipt.data_source,
+                    receipt.transfer_status,
+                    receipt.cohort_phase,
+                    receipt.prediction_v1,
+                    receipt.prediction_sign_v1,
+                    int(receipt.eligibility_v1),
+                    _json(receipt.ineligibility_reasons_v1),
+                    receipt.completeness_status_v1,
+                    int(receipt.scientific_outcome_eligible_v1),
+                    receipt.scientific_exclusion_reason_v1,
+                    receipt.capacity_snapshot_id,
+                    receipt.previous_close_atm_iv_scale_15m,
+                    _json(receipt.frozen_comparisons),
+                    receipt.rule_hash_v1,
+                    receipt.receipt_hash_v1,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def load_opening_reversal_prediction_v1(
+        self,
+        *,
+        run_id: str,
+        session: date,
+        stock: str,
+        experiment_version: Literal["1", "1.1"] = "1",
+    ) -> OpeningReversalPredictionReceiptV1 | None:
+        """Read an already-frozen receipt so late bars cannot replace it."""
+
+        with self.repository._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT receipt_json
+                FROM opening_reversal_prediction_v1
+                WHERE run_id = ? AND session_date = ? AND stock = ?
+                      AND checkpoint = 6 AND experiment_version = ?
+                """,
+                (run_id, session.isoformat(), stock, experiment_version),
+            ).fetchone()
+        if row is None:
+            return None
+        return OpeningReversalPredictionReceiptV1.model_validate_json(str(row["receipt_json"]))
+
+    def record_opening_reversal_promotion_v1(
+        self,
+        metadata: EvidenceMetadata,
+        selection: PromotionSelectionV1,
+    ) -> int:
+        """Persist the one-stock promotion ranking and every losing candidate."""
+
+        self._validate(metadata)
+        promoted = selection.promoted
+        if promoted is None:
+            raise ValueError("promotion receipt requires an eligible winner")
+        payload = {
+            "session": promoted.session,
+            "opening_transition_event_id_v1": (promoted.opening_transition_event_id_v1),
+            "promoted_receipt_hash_v1": promoted.receipt_hash_v1,
+            "promoted_stock": promoted.stock,
+            "eligible_count": selection.eligible_count,
+            "maximum_promoted_count": selection.maximum_promoted_count,
+            "selection_rule": selection.selection_rule,
+            "non_promoted": selection.non_promoted,
+        }
+        promotion_hash = _content_hash(payload)
+        encoded_losers = _json(selection.non_promoted)
+        with self.repository._connect() as connection:
+            if promoted.experiment_version == "1.1":
+                barrier = connection.execute(
+                    """
+                    SELECT audit_json
+                    FROM opening_reversal_causal_barrier_audit_v1_1
+                    WHERE run_id = ? AND session_date = ?
+                      AND barrier_status = 'passed'
+                    """,
+                    (metadata.run_id, promoted.session.isoformat()),
+                ).fetchone()
+                if barrier is None:
+                    raise ValueError("opening reversal V1.1 causal barrier has not passed")
+                audit = OpeningReversalCausalBarrierAuditV1_1.model_validate_json(
+                    str(barrier["audit_json"])
+                )
+                if promoted.receipt_hash_v1 not in audit.prediction_receipt_hashes:
+                    raise ValueError("opening reversal V1.1 promotion is outside causal barrier")
+            existing = connection.execute(
+                """
+                SELECT id, promotion_hash_v1
+                FROM opening_reversal_promotion_v1
+                WHERE run_id = ? AND opening_transition_event_id_v1 = ?
+                """,
+                (
+                    metadata.run_id,
+                    promoted.opening_transition_event_id_v1,
+                ),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["promotion_hash_v1"]) != promotion_hash:
+                    raise ValueError("opening reversal promotion is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_promotion_v1(
+                    envelope_id, run_id, session_date,
+                    opening_transition_event_id_v1, promoted_receipt_hash_v1,
+                    promoted_stock, eligible_count, maximum_promoted_count,
+                    selection_rule, non_promoted_json, promotion_hash_v1
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    promoted.session.isoformat(),
+                    promoted.opening_transition_event_id_v1,
+                    promoted.receipt_hash_v1,
+                    promoted.stock,
+                    selection.eligible_count,
+                    selection.selection_rule,
+                    encoded_losers,
+                    promotion_hash,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_causal_barrier_audit_v1_1(
+        self,
+        metadata: EvidenceMetadata,
+        audit: OpeningReversalCausalBarrierAuditV1_1,
+    ) -> int:
+        """Persist barrier proof before any buffered decision data is released."""
+
+        self._validate(metadata)
+        encoded = _json(audit)
+        with self.repository._connect() as connection:
+            activation = connection.execute(
+                """
+                SELECT activation_receipt_hash
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ? AND experiment_id = ?
+                  AND experiment_version = '1.1'
+                """,
+                (metadata.run_id, audit.experiment_id),
+            ).fetchone()
+            persisted_hashes = tuple(
+                sorted(
+                    str(row["receipt_hash_v1"])
+                    for row in connection.execute(
+                        """
+                        SELECT receipt_hash_v1
+                        FROM opening_reversal_prediction_v1
+                        WHERE run_id = ? AND experiment_version = '1.1'
+                          AND session_date = ?
+                        """,
+                        (metadata.run_id, audit.session.isoformat()),
+                    ).fetchall()
+                )
+            )
+            if (
+                activation is None
+                or str(activation["activation_receipt_hash"]) != audit.activation_receipt_hash_v1_1
+                or persisted_hashes != audit.prediction_receipt_hashes
+            ):
+                raise ValueError("opening reversal V1.1 barrier sources are not durable")
+            existing = connection.execute(
+                """
+                SELECT id, audit_hash_v1_1, audit_json
+                FROM opening_reversal_causal_barrier_audit_v1_1
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (metadata.run_id, audit.session.isoformat()),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["audit_hash_v1_1"]) != audit.audit_hash_v1_1
+                    or str(existing["audit_json"]) != encoded
+                ):
+                    raise ValueError("opening reversal V1.1 barrier audit is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_causal_barrier_audit_v1_1(
+                    envelope_id, run_id, experiment_id, experiment_version,
+                    activation_receipt_hash_v1_1, session_date,
+                    nominal_entry_timestamp_utc, prediction_receipt_count,
+                    prediction_receipt_hashes_json, deferred_event_count,
+                    first_deferred_event_received_at_utc,
+                    entry_or_post_entry_data_admitted_before_receipts,
+                    raw_event_archive_write_allowed, core_recorder_continued,
+                    barrier_status, failure_reason, release_authorized_at_utc,
+                    audit_hash_v1_1, audit_json
+                ) VALUES (
+                    ?, ?, ?, '1.1', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?,
+                    ?, ?
+                )
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    audit.experiment_id,
+                    audit.activation_receipt_hash_v1_1,
+                    audit.session.isoformat(),
+                    audit.nominal_entry_timestamp_utc.isoformat(),
+                    audit.prediction_receipt_count,
+                    _json(audit.prediction_receipt_hashes),
+                    audit.deferred_event_count,
+                    (
+                        None
+                        if audit.first_deferred_event_received_at_utc is None
+                        else audit.first_deferred_event_received_at_utc.isoformat()
+                    ),
+                    int(audit.entry_or_post_entry_data_admitted_before_receipts),
+                    audit.barrier_status,
+                    audit.failure_reason,
+                    audit.release_authorized_at_utc.isoformat(),
+                    audit.audit_hash_v1_1,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def load_opening_reversal_causal_barrier_audit_v1_1(
+        self,
+        *,
+        run_id: str,
+        session: date,
+    ) -> OpeningReversalCausalBarrierAuditV1_1 | None:
+        """Restore the immutable gate disposition after a recorder restart."""
+
+        with self.repository._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT audit_json
+                FROM opening_reversal_causal_barrier_audit_v1_1
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (run_id, session.isoformat()),
+            ).fetchone()
+        if row is None:
+            return None
+        return OpeningReversalCausalBarrierAuditV1_1.model_validate_json(str(row["audit_json"]))
+
+    def record_opening_reversal_capacity_snapshot_v1(
+        self,
+        metadata: EvidenceMetadata,
+        snapshot: MarketDataCapacitySnapshotV1,
+    ) -> int:
+        self._validate(metadata)
+        encoded = _json(snapshot)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, snapshot_json
+                FROM opening_reversal_capacity_snapshot_v1
+                WHERE snapshot_hash_v1 = ?
+                """,
+                (snapshot.snapshot_hash,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["snapshot_json"]) != encoded:
+                    raise ValueError("capacity snapshot hash collision")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_capacity_snapshot_v1(
+                    envelope_id, run_id, timestamp_utc, configured_budget,
+                    reserved_lines, mandatory_lines, optional_lines,
+                    pending_lines, cancelled_lines,
+                    lines_awaiting_acknowledgement_or_cleanup,
+                    estimated_free_lines, current_promoted_episode_id,
+                    snapshot_hash_v1, snapshot_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    snapshot.timestamp_utc.isoformat(),
+                    snapshot.configured_budget,
+                    snapshot.reserved_lines,
+                    snapshot.mandatory_lines,
+                    snapshot.optional_lines,
+                    snapshot.pending_lines,
+                    snapshot.cancelled_lines,
+                    snapshot.lines_awaiting_acknowledgement_or_cleanup,
+                    snapshot.estimated_free_lines,
+                    snapshot.current_promoted_episode_id,
+                    snapshot.snapshot_hash,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_degradation_v1(
+        self,
+        metadata: EvidenceMetadata,
+        event: CapacityDegradationEventV1,
+        *,
+        capacity_snapshot_hash_v1: str | None,
+    ) -> int:
+        self._validate(metadata)
+        payload = {
+            **event.model_dump(mode="json"),
+            "capacity_snapshot_hash_v1": capacity_snapshot_hash_v1,
+        }
+        event_hash = _content_hash(payload)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id FROM opening_reversal_degradation_event_v1
+                WHERE event_hash_v1 = ?
+                """,
+                (event_hash,),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_degradation_event_v1(
+                    envelope_id, run_id, timestamp_utc, episode_id, feed,
+                    subscription_ids_json, reason, raw_capacity_reason,
+                    capacity_snapshot_hash_v1,
+                    primary_direction_evidence_remains_complete,
+                    primary_option_evidence_remains_complete, event_hash_v1
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    event.timestamp_utc.isoformat(),
+                    event.episode_id,
+                    None if event.feed is None else event.feed.value,
+                    _json(event.subscription_ids),
+                    event.reason,
+                    event.raw_capacity_reason,
+                    capacity_snapshot_hash_v1,
+                    int(event.primary_option_evidence_remains_complete),
+                    event_hash,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_contract_discovery_v1(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        episode_id: str,
+        selection: PrimaryOptionPairSelectionV1,
+    ) -> int:
+        self._validate(metadata)
+        encoded = _json(selection)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, audit_hash_v1, audit_json
+                FROM opening_reversal_contract_discovery_v1
+                WHERE run_id = ? AND episode_id = ?
+                """,
+                (metadata.run_id, episode_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["audit_hash_v1"]) != selection.selection_hash
+                    or str(existing["audit_json"]) != encoded
+                ):
+                    raise ValueError("contract discovery audit is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_contract_discovery_v1(
+                    envelope_id, run_id, episode_id, discovery_timestamp_utc,
+                    contract_source, cache_hit, candidates_inspected,
+                    call_con_id, put_con_id, expiry, strike, tie_break_rule,
+                    live_market_data_lines_consumed, planned_live_market_data_lines,
+                    metadata_request_ended,
+                    full_chain_live_subscription_created, status, missing_reason,
+                    audit_hash_v1, audit_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0,
+                          'selected', NULL, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    episode_id,
+                    selection.discovery_timestamp_utc.isoformat(),
+                    selection.contract_source,
+                    int(selection.cache_hit),
+                    selection.candidates_inspected,
+                    selection.call.con_id,
+                    selection.put.con_id,
+                    selection.call.expiry.isoformat(),
+                    selection.call.strike,
+                    selection.frozen_tie_break_rule,
+                    selection.live_market_data_lines_consumed,
+                    selection.planned_live_market_data_lines,
+                    selection.selection_hash,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_contract_discovery_failure_v1(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        episode_id: str,
+        discovery_timestamp_utc: datetime,
+        contract_source: str,
+        cache_hit: bool,
+        candidates_inspected: int,
+        missing_reason: str,
+    ) -> int:
+        """Persist a terminal metadata/qualification failure without streaming."""
+
+        self._validate(metadata)
+        payload = {
+            "episode_id": episode_id,
+            "discovery_timestamp_utc": discovery_timestamp_utc,
+            "contract_source": contract_source,
+            "cache_hit": cache_hit,
+            "candidates_inspected": candidates_inspected,
+            "tie_break_rule": (
+                "1dte_common_nearest_atm_absolute_distance_then_lower_strike_then_con_id"
+            ),
+            "metadata_request_ended": True,
+            "full_chain_live_subscription_created": False,
+            "live_market_data_lines_consumed": 0,
+            "planned_live_market_data_lines": 0,
+            "status": "failed",
+            "missing_reason": missing_reason,
+        }
+        audit_hash = _content_hash(payload)
+        encoded = _json(payload)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, audit_hash_v1, audit_json
+                FROM opening_reversal_contract_discovery_v1
+                WHERE run_id = ? AND episode_id = ?
+                """,
+                (metadata.run_id, episode_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["audit_hash_v1"]) != audit_hash
+                    or str(existing["audit_json"]) != encoded
+                ):
+                    raise ValueError("contract discovery audit is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_contract_discovery_v1(
+                    envelope_id, run_id, episode_id, discovery_timestamp_utc,
+                    contract_source, cache_hit, candidates_inspected,
+                    call_con_id, put_con_id, expiry, strike, tie_break_rule,
+                    live_market_data_lines_consumed, planned_live_market_data_lines,
+                    metadata_request_ended,
+                    full_chain_live_subscription_created, status, missing_reason,
+                    audit_hash_v1, audit_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?,
+                          0, 0, 1, 0, 'failed', ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    episode_id,
+                    discovery_timestamp_utc.isoformat(),
+                    contract_source,
+                    int(cache_hit),
+                    candidates_inspected,
+                    payload["tie_break_rule"],
+                    missing_reason,
+                    audit_hash,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_transfer_session_v1(
+        self,
+        metadata: EvidenceMetadata,
+        result: OpeningTransferSessionResultV1,
+    ) -> int:
+        """Persist one engineering-only predictor transfer report."""
+
+        self._validate(metadata)
+        encoded = _json(result)
+        with self.repository._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, report_hash_v1, report_json
+                FROM opening_reversal_transfer_session_v1
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (metadata.run_id, result.session.isoformat()),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["report_hash_v1"]) != result.report_hash_v1
+                    or str(existing["report_json"]) != encoded
+                ):
+                    raise ValueError("opening transfer session is immutable")
+                return int(existing["id"])
+            prior_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM opening_reversal_transfer_session_v1
+                    WHERE run_id = ? AND valid = 1 AND session_date < ?
+                    """,
+                    (metadata.run_id, result.session.isoformat()),
+                ).fetchone()[0]
+            )
+            valid_ordinal = prior_count + 1 if result.valid else None
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_transfer_session_v1(
+                    envelope_id, run_id, session_date, valid,
+                    valid_session_ordinal, decision, ibkr_opening_return,
+                    eodhd_opening_return, ibkr_opening_range,
+                    eodhd_opening_range, severe_state_agreement,
+                    sign_agreement, timestamp_alignment,
+                    checkpoint_6_episode_identity_agreement,
+                    operational_checks_pass, operational_evidence_json,
+                    outcome_fields_accessed, report_json, report_hash_v1
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0,
+                          ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    result.session.isoformat(),
+                    int(result.valid),
+                    valid_ordinal,
+                    result.decision,
+                    result.ibkr_opening_return,
+                    result.eodhd_opening_return,
+                    result.ibkr_opening_range,
+                    result.eodhd_opening_range,
+                    int(result.severe_state_agreement),
+                    int(result.sign_agreement),
+                    int(result.bar_timestamp_alignment),
+                    int(result.checkpoint_6_episode_identity_agreement),
+                    int(result.operational_evidence.critical_checks_pass),
+                    _json(result.operational_evidence),
+                    encoded,
+                    result.report_hash_v1,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def opening_reversal_engineering_operational_evidence_v1(
+        self,
+        *,
+        run_id: str,
+        session: date,
+    ) -> OpeningTransferOperationalEvidenceV1:
+        """Derive one outcome-free engineering guard audit from recorder rows."""
+
+        session_text = session.isoformat()
+        with self.repository._connect() as connection:
+            activation_row = connection.execute(
+                """
+                SELECT experiment_version, receipt_json
+                FROM opening_reversal_activation_v1
+                WHERE run_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            active_version = (
+                None if activation_row is None else str(activation_row["experiment_version"])
+            )
+            predictions = connection.execute(
+                """
+                SELECT experiment_version, receipt_hash_v1,
+                       receipt_created_at_utc,
+                       entry_timestamp_utc, capacity_snapshot_id,
+                       fresh_episode_id, receipt_json
+                FROM opening_reversal_prediction_v1
+                WHERE run_id = ? AND session_date = ? AND checkpoint = 6
+                  AND experiment_version = ?
+                ORDER BY stock
+                """,
+                (run_id, session_text, active_version),
+            ).fetchall()
+            barrier_row = connection.execute(
+                """
+                SELECT barrier_status, prediction_receipt_hashes_json,
+                       audit_json
+                FROM opening_reversal_causal_barrier_audit_v1_1
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (run_id, session_text),
+            ).fetchone()
+            correction_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM opening_reversal_prediction_correction_v1 c
+                    JOIN opening_reversal_prediction_v1 p
+                      ON p.receipt_hash_v1 = c.original_receipt_hash_v1
+                    WHERE c.run_id = ? AND p.session_date = ?
+                    """,
+                    (run_id, session_text),
+                ).fetchone()[0]
+            )
+            capacity_rows = connection.execute(
+                """
+                SELECT snapshot_hash_v1, reserved_lines
+                FROM opening_reversal_capacity_snapshot_v1
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchall()
+            promoted = connection.execute(
+                """
+                SELECT prediction.fresh_episode_id
+                FROM opening_reversal_promotion_v1 promotion
+                JOIN opening_reversal_prediction_v1 prediction
+                  ON prediction.receipt_hash_v1 =
+                     promotion.promoted_receipt_hash_v1
+                WHERE promotion.run_id = ?
+                  AND promotion.session_date = ?
+                  AND promotion.promoted_receipt_hash_v1 IS NOT NULL
+                """,
+                (run_id, session_text),
+            ).fetchall()
+            quality_row = connection.execute(
+                """
+                SELECT report_json
+                FROM recorder_session_report_v0
+                WHERE run_id = ? AND session_date = ?
+                """,
+                (run_id, session_text),
+            ).fetchone()
+            promoted_ids = tuple(
+                str(row["fresh_episode_id"])
+                for row in promoted
+                if row["fresh_episode_id"] is not None
+            )
+            discovery_rows = []
+            latest_allocations: dict[str, str | None] = {}
+            promoted_level1_started: dict[str, bool] = {}
+            degradation_rows = []
+            for episode_id in promoted_ids:
+                promoted_level1_started[episode_id] = (
+                    connection.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM subscription_lifecycle_v0
+                        WHERE run_id = ? AND owner_episode = ?
+                          AND subscription_kind = 'level1'
+                          AND capacity_denied = 0
+                        """,
+                        (run_id, episode_id),
+                    ).fetchone()[0]
+                    > 0
+                )
+                discovery = connection.execute(
+                    """
+                    SELECT status
+                    FROM opening_reversal_contract_discovery_v1
+                    WHERE run_id = ? AND episode_id = ?
+                    """,
+                    (run_id, episode_id),
+                ).fetchone()
+                if discovery is not None:
+                    discovery_rows.append(discovery)
+                allocation = connection.execute(
+                    """
+                    SELECT state
+                    FROM option_episode_allocation_v0
+                    WHERE run_id = ? AND episode_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (run_id, episode_id),
+                ).fetchone()
+                latest_allocations[episode_id] = (
+                    None if allocation is None else str(allocation["state"])
+                )
+                degradation_rows.extend(
+                    connection.execute(
+                        """
+                        SELECT reason,
+                               primary_direction_evidence_remains_complete
+                        FROM opening_reversal_degradation_event_v1
+                        WHERE run_id = ? AND episode_id = ?
+                        """,
+                        (run_id, episode_id),
+                    ).fetchall()
+                )
+
+        prediction_count = len(predictions)
+        prediction_hashes = tuple(sorted(str(row["receipt_hash_v1"]) for row in predictions))
+        if active_version == "1.1":
+            barrier_hashes = (
+                ()
+                if barrier_row is None
+                else tuple(
+                    sorted(
+                        cast(
+                            list[str],
+                            json.loads(str(barrier_row["prediction_receipt_hashes_json"])),
+                        )
+                    )
+                )
+            )
+            timing_pass = (
+                prediction_count == 20
+                and barrier_row is not None
+                and str(barrier_row["barrier_status"]) == "passed"
+                and barrier_hashes == prediction_hashes
+                and all(
+                    (
+                        receipt := (
+                            OpeningReversalPredictionReceiptV1.model_validate_json(
+                                str(row["receipt_json"])
+                            )
+                        )
+                    ).experiment_version
+                    == "1.1"
+                    and receipt.timing_evidence_v1_1 is not None
+                    and not (
+                        receipt.timing_evidence_v1_1.entry_or_post_entry_data_admitted_before_receipt
+                    )
+                    for row in predictions
+                )
+            )
+        else:
+            timing_pass = prediction_count == 20 and all(
+                datetime.fromisoformat(str(row["receipt_created_at_utc"]))
+                < datetime.fromisoformat(str(row["entry_timestamp_utc"]))
+                for row in predictions
+            )
+        immutability_pass = prediction_count == 20 and correction_count == 0
+        capacity_by_hash = {
+            str(row["snapshot_hash_v1"]): int(row["reserved_lines"]) for row in capacity_rows
+        }
+        required_snapshot_ids = tuple(
+            str(row["capacity_snapshot_id"])
+            for row in predictions
+            if row["capacity_snapshot_id"] is not None
+        )
+        capacity_complete = (
+            prediction_count == 20
+            and len(required_snapshot_ids) == prediction_count
+            and all(snapshot_id in capacity_by_hash for snapshot_id in required_snapshot_ids)
+        )
+        reserve_pass = capacity_complete and all(
+            capacity_by_hash[snapshot_id] >= RESERVED_MARKET_DATA_LINES_V1
+            for snapshot_id in required_snapshot_ids
+        )
+        discovery_complete = len(discovery_rows) == len(promoted_ids)
+        selected_count = sum(str(row["status"]) == "selected" for row in discovery_rows)
+        promoted_underlying_level1_pass = not promoted_ids or all(promoted_level1_started.values())
+        pair_recording_pass = not promoted_ids or (
+            discovery_complete
+            and selected_count == len(promoted_ids)
+            and all(latest_allocations[episode_id] == "COMPLETE" for episode_id in promoted_ids)
+        )
+        graceful_degradation_pass = all(
+            bool(row["primary_direction_evidence_remains_complete"])
+            and str(row["reason"])
+            in {
+                "optional_feed_not_started_capacity_reserved",
+                "option_economics_blocked_capacity",
+            }
+            for row in degradation_rows
+        )
+        cancellation_recovery_pass = not promoted_ids or all(
+            latest_allocations[episode_id] == "COMPLETE" for episode_id in promoted_ids
+        )
+        quality = (
+            {}
+            if quality_row is None
+            else cast(
+                dict[str, object],
+                json.loads(str(quality_row["report_json"])),
+            )
+        )
+        universe_uninterrupted = (
+            bool(quality.get("complete"))
+            and float(cast(float | int, quality.get("m1c_checkpoint_coverage", 0.0))) == 1.0
+            and int(cast(float | int, quality.get("m1c_predictions", 0))) >= 20 * 15
+        )
+        recorder_reliability_pass = (
+            bool(quality.get("complete"))
+            and int(cast(float | int, quality.get("data_gaps", 1))) == 0
+            and int(cast(float | int, quality.get("pacing_errors", 1))) == 0
+        )
+        activation = (
+            {}
+            if activation_row is None
+            else cast(
+                dict[str, object],
+                json.loads(str(activation_row["receipt_json"])),
+            )
+        )
+        claims = claims_boundary()
+        no_order_guard_pass = (
+            activation.get("order_routing_disabled") is True
+            and activation.get("order_methods_available") is False
+            and claims["paper_orders_allowed"] is False
+            and claims["live_orders_allowed"] is False
+            and claims["order_methods_available"] is False
+        )
+        checks = (
+            (
+                prediction_count == 20,
+                "engineering_prediction_receipt_count_not_20",
+            ),
+            (timing_pass, "engineering_prediction_receipt_timing_failed"),
+            (
+                immutability_pass,
+                "engineering_prediction_receipt_immutability_failed",
+            ),
+            (capacity_complete, "engineering_capacity_snapshots_incomplete"),
+            (reserve_pass, "engineering_reserved_twelve_lines_failed"),
+            (
+                promoted_underlying_level1_pass,
+                "engineering_promoted_underlying_level1_failed",
+            ),
+            (discovery_complete, "engineering_contract_discovery_incomplete"),
+            (
+                pair_recording_pass,
+                "engineering_primary_option_pair_recording_failed",
+            ),
+            (
+                graceful_degradation_pass,
+                "engineering_graceful_degradation_failed",
+            ),
+            (
+                cancellation_recovery_pass,
+                "engineering_cancellation_recovery_failed",
+            ),
+            (
+                universe_uninterrupted,
+                "engineering_m1c_universe_interrupted",
+            ),
+            (
+                recorder_reliability_pass,
+                "engineering_recorder_reliability_failed",
+            ),
+            (no_order_guard_pass, "engineering_no_order_guard_failed"),
+        )
+        missing_reasons = tuple(reason for passed, reason in checks if not passed)
+        return OpeningTransferOperationalEvidenceV1(
+            prediction_receipt_count=prediction_count,
+            prediction_receipt_timing_pass=timing_pass,
+            prediction_receipt_immutability_pass=immutability_pass,
+            capacity_snapshot_count=len(capacity_by_hash),
+            capacity_snapshots_complete=capacity_complete,
+            reserved_twelve_lines_pass=reserve_pass,
+            promoted_episode_count=len(promoted_ids),
+            promoted_underlying_level1_pass=(promoted_underlying_level1_pass),
+            contract_discovery_audit_count=len(discovery_rows),
+            contract_discovery_complete=discovery_complete,
+            primary_option_pair_available_count=selected_count,
+            primary_option_pair_recording_pass=pair_recording_pass,
+            graceful_degradation_pass=graceful_degradation_pass,
+            cancellation_recovery_pass=cancellation_recovery_pass,
+            m1c_universe_uninterrupted=universe_uninterrupted,
+            recorder_reliability_pass=recorder_reliability_pass,
+            no_order_guard_pass=no_order_guard_pass,
+            orders_placed=0,
+            critical_checks_pass=not missing_reasons,
+            missing_reasons=missing_reasons,
+        )
+
+    def record_opening_reversal_underlying_outcome_v1(
+        self,
+        metadata: EvidenceMetadata,
+        outcome: OpeningReversalUnderlyingOutcomeV1,
+    ) -> int:
+        self._validate(metadata)
+        encoded = _json(outcome)
+        with self.repository._connect() as connection:
+            parent = connection.execute(
+                """
+                SELECT scientific_outcome_eligible_v1,
+                       experiment_version, session_date
+                FROM opening_reversal_prediction_v1
+                WHERE receipt_hash_v1 = ?
+                """,
+                (outcome.prediction_receipt_hash_v1,),
+            ).fetchone()
+            if parent is None or not bool(parent["scientific_outcome_eligible_v1"]):
+                raise ValueError("protected or engineering outcome rejected")
+            if str(parent["experiment_version"]) == "1.1":
+                barrier = connection.execute(
+                    """
+                    SELECT audit_json
+                    FROM opening_reversal_causal_barrier_audit_v1_1
+                    WHERE run_id = ? AND session_date = ?
+                      AND barrier_status = 'passed'
+                    """,
+                    (
+                        metadata.run_id,
+                        str(parent["session_date"]),
+                    ),
+                ).fetchone()
+                if barrier is None:
+                    raise ValueError("V1.1 outcome lacks a passing causal barrier")
+                audit = OpeningReversalCausalBarrierAuditV1_1.model_validate_json(
+                    str(barrier["audit_json"])
+                )
+                if outcome.prediction_receipt_hash_v1 not in audit.prediction_receipt_hashes:
+                    raise ValueError("V1.1 outcome prediction is outside causal barrier")
+            existing = connection.execute(
+                """
+                SELECT id, outcome_receipt_hash_v1, outcome_json
+                FROM opening_reversal_underlying_outcome_v1
+                WHERE prediction_receipt_hash_v1 = ?
+                """,
+                (outcome.prediction_receipt_hash_v1,),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["outcome_receipt_hash_v1"]) != outcome.outcome_receipt_hash_v1
+                    or str(existing["outcome_json"]) != encoded
+                ):
+                    raise ValueError("opening reversal outcome is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_underlying_outcome_v1(
+                    envelope_id, run_id, prediction_receipt_hash_v1,
+                    opening_transition_event_id_v1, session_date, stock,
+                    prediction_v1, r_15m, absolute_return_15m, threshold_15m,
+                    outcome_state_v1, opening_reversal_aligned_return_v1,
+                    correct_predicted_material_direction_v1,
+                    accuracy_counting_no_move_as_failure_v1,
+                    maximum_favourable_excursion_v1,
+                    maximum_adverse_excursion_v1,
+                    canonical_post_entry_local_range_share_v1,
+                    iv_residual_v1, exceed_iv_v1, outcome_completeness_v1,
+                    missing_reason_v1, outcome_created_at_utc,
+                    outcome_receipt_hash_v1, outcome_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    outcome.prediction_receipt_hash_v1,
+                    outcome.opening_transition_event_id_v1,
+                    outcome.session.isoformat(),
+                    outcome.stock,
+                    outcome.prediction_v1,
+                    outcome.r_15m,
+                    outcome.absolute_return_15m,
+                    outcome.threshold_15m,
+                    outcome.outcome_state_v1,
+                    outcome.opening_reversal_aligned_return_v1,
+                    (
+                        None
+                        if outcome.correct_predicted_material_direction_v1 is None
+                        else int(outcome.correct_predicted_material_direction_v1)
+                    ),
+                    (
+                        None
+                        if outcome.accuracy_counting_no_move_as_failure_v1 is None
+                        else int(outcome.accuracy_counting_no_move_as_failure_v1)
+                    ),
+                    outcome.maximum_favourable_excursion_v1,
+                    outcome.maximum_adverse_excursion_v1,
+                    outcome.canonical_post_entry_local_range_share_v1,
+                    outcome.iv_residual_v1,
+                    (None if outcome.exceed_iv_v1 is None else int(outcome.exceed_iv_v1)),
+                    outcome.outcome_completeness_v1,
+                    outcome.missing_reason_v1,
+                    outcome.outcome_created_at_utc.isoformat(),
+                    outcome.outcome_receipt_hash_v1,
+                    encoded,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_opening_reversal_primary_option_outcome_v1(
+        self,
+        metadata: EvidenceMetadata,
+        outcome: PrimaryOptionBidAskOutcomeV1,
+    ) -> int:
+        self._validate(metadata)
+        encoded = _json(outcome)
+        with self.repository._connect() as connection:
+            parent = connection.execute(
+                """
+                SELECT prediction.prediction_v1, prediction.stock,
+                       prediction.scientific_outcome_eligible_v1,
+                       promotion.promoted_receipt_hash_v1
+                FROM opening_reversal_prediction_v1 prediction
+                LEFT JOIN opening_reversal_promotion_v1 promotion
+                  ON promotion.promoted_receipt_hash_v1 =
+                     prediction.receipt_hash_v1
+                 AND promotion.run_id = prediction.run_id
+                WHERE prediction.run_id = ?
+                  AND prediction.receipt_hash_v1 = ?
+                """,
+                (metadata.run_id, outcome.prediction_receipt_hash_v1),
+            ).fetchone()
+            expected_right = (
+                "C" if parent is not None and str(parent["prediction_v1"]) == "CALL" else "P"
+            )
+            if outcome.role == "opposite_leg":
+                expected_right = "P" if expected_right == "C" else "C"
+            if (
+                parent is None
+                or not bool(parent["scientific_outcome_eligible_v1"])
+                or parent["promoted_receipt_hash_v1"] is None
+                or outcome.contract.underlying != str(parent["stock"])
+                or outcome.contract.right != expected_right
+            ):
+                raise ValueError("primary option outcome is not linked to promoted prediction")
+            other_leg = connection.execute(
+                """
+                SELECT expiry, strike, right
+                FROM opening_reversal_primary_option_outcome_v1
+                WHERE run_id = ? AND prediction_receipt_hash_v1 = ?
+                  AND role <> ?
+                """,
+                (
+                    metadata.run_id,
+                    outcome.prediction_receipt_hash_v1,
+                    outcome.role,
+                ),
+            ).fetchone()
+            if other_leg is not None and (
+                str(other_leg["expiry"]) != outcome.contract.expiry.isoformat()
+                or float(other_leg["strike"]) != outcome.contract.strike
+                or str(other_leg["right"]) == outcome.contract.right
+            ):
+                raise ValueError("primary option outcome pair is inconsistent")
+            existing = connection.execute(
+                """
+                SELECT id, outcome_hash_v1, outcome_json
+                FROM opening_reversal_primary_option_outcome_v1
+                WHERE run_id = ? AND prediction_receipt_hash_v1 = ? AND role = ?
+                """,
+                (
+                    metadata.run_id,
+                    outcome.prediction_receipt_hash_v1,
+                    outcome.role,
+                ),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["outcome_hash_v1"]) != outcome.outcome_hash_v1
+                    or str(existing["outcome_json"]) != encoded
+                ):
+                    raise ValueError("primary option outcome is immutable")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            entry = outcome.entry_quote
+            exit_quote = outcome.exit_quote
+            cursor = connection.execute(
+                """
+                INSERT INTO opening_reversal_primary_option_outcome_v1(
+                    envelope_id, run_id, prediction_receipt_hash_v1, con_id,
+                    right, role, expiry, strike, entry_bid, entry_ask,
+                    entry_midpoint_diagnostic, entry_quote_timestamp_utc,
+                    exit_bid, exit_ask, exit_midpoint_diagnostic,
+                    exit_quote_timestamp_utc, entry_spread, exit_spread,
+                    entry_quote_age_seconds, exit_quote_age_seconds,
+                    entry_locked_or_crossed, exit_locked_or_crossed,
+                    entry_stale, exit_stale, subscription_start_utc,
+                    subscription_end_utc, capacity_line_owner,
+                    conservative_return_v1, complete, missing_reason,
+                    outcome_hash_v1, outcome_json
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    outcome.prediction_receipt_hash_v1,
+                    outcome.contract.con_id,
+                    outcome.contract.right,
+                    outcome.role,
+                    outcome.contract.expiry.isoformat(),
+                    outcome.contract.strike,
+                    entry.bid,
+                    entry.ask,
+                    outcome.entry_midpoint_diagnostic,
+                    entry.timestamp_utc.isoformat(),
+                    exit_quote.bid,
+                    exit_quote.ask,
+                    outcome.exit_midpoint_diagnostic,
+                    exit_quote.timestamp_utc.isoformat(),
+                    outcome.entry_spread,
+                    outcome.exit_spread,
+                    entry.quote_age_seconds,
+                    exit_quote.quote_age_seconds,
+                    int(entry.locked_or_crossed),
+                    int(exit_quote.locked_or_crossed),
+                    int(entry.stale),
+                    int(exit_quote.stale),
+                    outcome.subscription_start_utc.isoformat(),
+                    outcome.subscription_end_utc.isoformat(),
+                    outcome.capacity_line_owner,
+                    outcome.conservative_return_v1,
+                    int(outcome.complete),
+                    outcome.missing_reason,
+                    outcome.outcome_hash_v1,
+                    encoded,
                 ),
             )
             assert cursor.lastrowid is not None

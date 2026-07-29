@@ -29,6 +29,7 @@ class FrozenGroupOContext(BaseModel):
     front_expiry: date | None
     dte: int | None
     atm_strike: float | None
+    previous_close_implied_movement_15m: float | None = None
     features: dict[str, float | int | bool | None]
     missing_indicators: dict[str, bool]
     quality_status: str
@@ -56,6 +57,7 @@ def build_group_o_context(
     front_expiry: date | None,
     dte: int | None,
     atm_strike: float | None,
+    previous_close_implied_movement_15m: float | None = None,
     features: dict[str, float | int | bool | None],
     missing_indicators: dict[str, bool],
     quality_status: str,
@@ -93,6 +95,7 @@ def build_group_o_context(
         "front_expiry": None if front_expiry is None else front_expiry.isoformat(),
         "dte": dte,
         "atm_strike": atm_strike,
+        "previous_close_implied_movement_15m": previous_close_implied_movement_15m,
         "features": features,
         "missing_indicators": missing_indicators,
         "quality_status": quality_status,

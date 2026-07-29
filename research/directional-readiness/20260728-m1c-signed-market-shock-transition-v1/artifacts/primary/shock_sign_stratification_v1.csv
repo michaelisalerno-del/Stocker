@@ -1,0 +1,9 @@
+period,shock_state,arm,episode_count,session_count,unique_shock_event_count,stock_count,mean_aligned_return,material_direction_accuracy
+assessment,NEGATIVE_SHOCK_ONSET,continuation,1,1,1,1,0.006841466881649569,
+assessment,NEGATIVE_SHOCK_ONSET,resistance,2,2,2,2,-0.001957882315141551,
+assessment,POSITIVE_SHOCK_ONSET,continuation,6,6,6,4,-0.0014962753330041267,0.5
+assessment,POSITIVE_SHOCK_ONSET,resistance,0,0,0,0,,
+stress,NEGATIVE_SHOCK_ONSET,continuation,17,11,13,7,-0.003324150940958563,0.4444444444444444
+stress,NEGATIVE_SHOCK_ONSET,resistance,4,3,3,3,-0.0029262909939572015,0.5
+stress,POSITIVE_SHOCK_ONSET,continuation,8,6,6,6,-0.0001646250600823517,0.0
+stress,POSITIVE_SHOCK_ONSET,resistance,0,0,0,0,,

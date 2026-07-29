@@ -1,0 +1,283 @@
+{
+  "ambiguous_path_counts": {
+    "endpoint_primary": 0,
+    "first_breach_not_primary": 0
+  },
+  "branch": "* \n  codex/m1c-asymmetric-downside-residual-v1",
+  "causality_confirmation": {
+    "A1_modified": false,
+    "A1_refit": false,
+    "M1C_modified": false,
+    "M1C_probability_used_in_model": false,
+    "M1C_recalibrated": false,
+    "M1C_refit": false,
+    "M1C_threshold_changed": false,
+    "Tail_Phase_V1_modified": false,
+    "archived_signed_pressure_used": false,
+    "archived_tension_used": false,
+    "fresh_episode_definition_changed": false,
+    "future_filtered_peer_slate_used": false,
+    "option_outcomes_used": false,
+    "peer_normalisation_used": false,
+    "stock_identity_used_in_model": false
+  },
+  "commit": "1d32190883533a7c0a3d089185335482c4696e19",
+  "configuration_hashes": {
+    "contract": "04accd9a0f19b7b3d8a31534d14af02c8b8d3f72759930979fcb1f8306017845",
+    "implementation": "82919b3bbf9be5f45ef96e91bc6c9eae1952a5546eaf0fee4ea5733f4c47d31d",
+    "runner": "6d468be7c511545fd0f2223cf24c939b47cdd010cea006b737ff53a25732c1b1"
+  },
+  "data_date_boundaries": {
+    "assessment": {
+      "end": "2025-08-22",
+      "start": "2025-01-01"
+    },
+    "development": {
+      "end": "2024-12-31",
+      "start": "2024-01-01"
+    },
+    "protected": {
+      "end": null,
+      "start": "2026-01-01"
+    },
+    "stress": {
+      "end": "2025-12-31",
+      "start": "2025-09-01"
+    }
+  },
+  "dirty_status": [
+    " A packages/stocker_research/src/stocker_research/m1c_asymmetric_downside_residual_v1.py",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/README.md",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/baseline_comparisons_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/combined_policy_metrics_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/concentration_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/conditional_direction_metrics_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/development_fold_audit_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/feature_manifest_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/final_model_parameters_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/frozen_action_thresholds_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/frozen_experiment_configuration_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/frozen_system_regression_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/full_three_state_outcomes_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/independent_audit_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/independent_audit_v1.md",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/label_permutation_summary_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/leave_one_month_stock_checkpoint_out_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/provenance_manifest_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/reliability_bins_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/report.md",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/secondary_10m_directional_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/session_cluster_bootstrap_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/standardisation_parameters_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/summary_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/tail_phase_diagnostics_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/target_definition_audit_v1.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/temporal_placebo_v1.csv",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/audit_experiment.py",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/contract.json",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/reports/report.md",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/run_experiment.py",
+    " A research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/source_audit.md",
+    " A tests/test_m1c_asymmetric_downside_residual_v1.py",
+    " A tests/test_m1c_asymmetric_downside_residual_v1_artifacts.py"
+  ],
+  "dirty_working_tree": true,
+  "episode_counts": {
+    "assessment": {
+      "ambiguous_path": 0,
+      "eligible_fresh_episodes": 417,
+      "material_down": 86,
+      "material_movers": 205,
+      "material_up": 119,
+      "no_move": 212,
+      "sessions": 126,
+      "stocks": 20
+    },
+    "development": {
+      "ambiguous_path": 0,
+      "eligible_fresh_episodes": 474,
+      "material_down": 137,
+      "material_movers": 253,
+      "material_up": 116,
+      "no_move": 221,
+      "sessions": 189,
+      "stocks": 19
+    },
+    "stress": {
+      "ambiguous_path": 0,
+      "eligible_fresh_episodes": 525,
+      "material_down": 172,
+      "material_movers": 270,
+      "material_up": 98,
+      "no_move": 255,
+      "sessions": 67,
+      "stocks": 20
+    }
+  },
+  "exact_commands": [
+    "rtk uv run python research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/run_experiment.py",
+    "rtk uv run python research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/audit_experiment.py",
+    "rtk uv run pytest tests/test_m1c_asymmetric_downside_residual_v1.py tests/test_m1c_asymmetric_downside_residual_v1_artifacts.py -q",
+    "rtk uv run ruff check packages/stocker_research/src/stocker_research/m1c_asymmetric_downside_residual_v1.py tests/test_m1c_asymmetric_downside_residual_v1.py tests/test_m1c_asymmetric_downside_residual_v1_artifacts.py research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/run_experiment.py research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/audit_experiment.py",
+    "rtk uv run mypy packages/stocker_research/src/stocker_research/m1c_asymmetric_downside_residual_v1.py",
+    "rtk uv run pytest"
+  ],
+  "exclusions_and_reasons": {
+    "checkpoint_secondary": {
+      "eligible_rows": 2970,
+      "eligible_rows_missing_market_baseline": 0,
+      "incomplete_fixed_predictors": 0,
+      "incomplete_primary_outcome": 0,
+      "non_primary_phase": 0,
+      "not_high_m1c": 0,
+      "source_rows": 2970
+    },
+    "fresh_episodes": {
+      "eligible_rows": 1416,
+      "eligible_rows_missing_market_baseline": 0,
+      "incomplete_fixed_predictors": 0,
+      "incomplete_primary_outcome": 0,
+      "non_primary_phase": 0,
+      "not_high_m1c": 0,
+      "source_rows": 1416
+    }
+  },
+  "execution_confirmation": {
+    "broker_accessed": false,
+    "order_routing_enabled": false,
+    "order_routing_path_imported": false,
+    "orders_placed": false
+  },
+  "frozen_system_regression": {
+    "fresh_episodes": {
+      "fields": [
+        "M1C_probability",
+        "m1c_high_tail_v1",
+        "m1c_tail_phase_v1",
+        "movement_consumed_v1",
+        "A1_probability_up_v1",
+        "A1_action_v1",
+        "episode_id",
+        "existing_fresh_episode_identifier"
+      ],
+      "passed": true,
+      "rows_compared": 1416,
+      "tolerance": 0.0
+    },
+    "high_tail_checkpoints": {
+      "fields": [
+        "M1C_probability",
+        "m1c_high_tail_v1",
+        "m1c_tail_phase_v1",
+        "movement_consumed_v1",
+        "A1_probability_up_v1",
+        "A1_action_v1"
+      ],
+      "passed": true,
+      "rows_compared": 2970,
+      "tolerance": 0.0
+    }
+  },
+  "input_artifact_identities": [
+    {
+      "bytes": 8201,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual/StockerFresh/research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/contract.json",
+      "sha256": "04accd9a0f19b7b3d8a31534d14af02c8b8d3f72759930979fcb1f8306017845"
+    },
+    {
+      "bytes": 670138,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual/StockerFresh/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/fresh_episode_results_v1.parquet",
+      "sha256": "a843fedf4c5df712237fd374c5efb3ff8925b575c875395ea648d786b589d9a3"
+    },
+    {
+      "bytes": 6506235,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual/StockerFresh/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/checkpoint_results_v1.parquet",
+      "sha256": "8dd0ef53d9c5493b70f600a28d6f77e8ffabd5e7b48a5378cf0bb4411382cb8f"
+    },
+    {
+      "bytes": 10716,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual/StockerFresh/research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/provenance_manifest_v1.json",
+      "sha256": "b6e54f9b2d7de085ccd7132c4dbdb26231f901d57b3536a68abf26228fec6421"
+    },
+    {
+      "bytes": 180549179,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+      "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+    },
+    {
+      "bytes": 666679,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_dimensions.parquet",
+      "sha256": "4bc6fd0ce6972210949a5447fd06ca0ffaa258cb953d5e3447c1c07afab85b40"
+    },
+    {
+      "bytes": 268969,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-actual/StockerFresh/research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/holdout_selected_option_pairs.parquet",
+      "sha256": "0b3f16cb06ae00df06dc34041a87d78b17478f1245810f54b5cc2d0f38d27e97"
+    }
+  ],
+  "missingness_counts": {
+    "D1": 0,
+    "D2": 0,
+    "D3": 0,
+    "D4": 0,
+    "primary_outcome": 0
+  },
+  "output_hashes": {
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/assessment_episode_predictions_v1.parquet": "18219c4b7b492b6fdfd0258aff3d8957957c8d34975f8eece3b8b260dfd4dcd4",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/baseline_comparisons_v1.csv": "75d8de984bb3cb655a0729d282da44fb79fda28b6c8223e57dd20a9d28d4eb52",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/checkpoint_secondary_predictions_v1.parquet": "3b057c982ed74d5c2ceaa18f8aa3fd3112e3d6d2d5fbdd7d0c57bc3cd9a09b1e",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/combined_policy_metrics_v1.csv": "51e8ba489c02b7a816a8beca0b9c0254b36b83fbe510709ed2c6f6ac3aa4b609",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/concentration_v1.csv": "cc562007725318e1e10c9a688c15716f0f580258433756dfb0b7633edb827919",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/conditional_direction_metrics_v1.csv": "1ec842c31473f37159d311c3cdc6ed7f5ae83afe29a34197057a6add07bc9044",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/development_fold_audit_v1.json": "704be5d984e33a8d7de101f550ef3bc8042b633e33619fa52ebc1a65d543e2c4",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/development_oof_predictions_v1.parquet": "5637fbc4c4487483c79fcbee8ea3d67a73992c8b9039305b1c053c26f2f9691b",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/feature_manifest_v1.json": "ad43c02ed3cfaa4df81606ab3eb8fb318594c67718d1be70c611ef1aa40bddd4",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/final_model_parameters_v1.json": "03e9e14e485132afaa4aeae3ed81ae571549471ccd43330bd3b454bceb419770",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/frozen_action_thresholds_v1.json": "759885e4347761c6ddc98b5cb9a014d0d3dda27643a77da92184b0614ff1242c",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/frozen_experiment_configuration_v1.json": "108e8260da8d368e367f50a1eec4b5bb9418c300c1e30f13cdbc5e2c7b8ae78e",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/frozen_system_regression_v1.json": "ac268c1d0f756c32bba56271cb65e26a0a96df933f15b120f593d65b1670fd69",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/full_three_state_outcomes_v1.csv": "181231348dab33909e019940488f892034620916da215fdf17e7a3701472956b",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/label_permutation_draws_v1.parquet": "34bf181a9b96ce2c9c6c8ecd8f3ee5afbd493ffd998602b4aa774ecad35651be",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/label_permutation_summary_v1.csv": "0d14f55895f5163ae2c98f04d8f138f00750b35434c79b89e4275ea60ac0aa16",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/leave_one_month_stock_checkpoint_out_v1.csv": "0631a58e7b0064d797ac27d6102942ccaefa88d5213f0f7ff0e57dbee13352d1",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/reliability_bins_v1.csv": "ef36506eeea11735be269591ca73d09c5d0bb6d64cfddf8b4f3d0e3d60e9933f",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/report.md": "24ddad1bbdb000b88593f344e6ec5ef2865d7cebe51b513c4a202ac2d4b43ae4",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/secondary_10m_directional_v1.csv": "46761fbe3dd878d05b54161ab701866e449d60e58b7b898bc5bcd73a3659bf3f",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/session_cluster_bootstrap_v1.csv": "471f8baa9e2a8d9b9c09777491274db003d15e01708b3bde69b9a3eec77d8926",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/standardisation_parameters_v1.json": "66953054e09d40146116485ad960accd3f64900b83521ca46b4a26cc6c91adc0",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/stress_episode_predictions_v1.parquet": "ffd326ae7ab752fe7918d11fb3c11c0fb1a2a0788a707c3cf1e8baf554e3f392",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/summary_v1.json": "801083eb6193db6d59cb5823ad8ee93e479e0e4a82fcc0ce8dce0837ee4bd275",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/tail_phase_diagnostics_v1.csv": "4ff563a49929e13f7b9ea92ede0d58fd31c343301ec0fd27d214228f7f23c8b7",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/target_definition_audit_v1.json": "c36fb80e26c28928d25f8242dec3b60bdb9491ad388d9b5ebdc05c5e65e50fd9",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/temporal_placebo_predictions_v1.parquet": "5ec599eddaa4f9e084e139f9bf6fe9699a10b6f2c9efdc8ae1b73e9fc496a19c",
+    "research/directional-readiness/20260728-m1c-asymmetric-downside-residual-v1/artifacts/primary/temporal_placebo_v1.csv": "251ed75972f0cae6b4740ad2d6c70345c902934a97558070728d6596410e278b"
+  },
+  "protected_data_confirmation": {
+    "filter_pushdown_used_for_external_row_sources": true,
+    "maximum_opened_session": "2025-12-31",
+    "protected_2026_outcome_calculated": false,
+    "protected_2026_outcome_displayed": false,
+    "protected_2026_outcome_inspected": false,
+    "protected_2026_outcome_read": false
+  },
+  "random_seeds": {
+    "bootstrap_assessment": 2026072801,
+    "bootstrap_stress": 2026072801,
+    "model": 2026072801,
+    "permutation_assessment": 2026072802,
+    "permutation_stress": 2026072802
+  },
+  "research_id": "M1C Asymmetric Downside Residual V1",
+  "source_row_counts": {
+    "checkpoint_rows": 50646,
+    "completed_bar_rows_opened": 401232,
+    "fresh_episode_rows": 1416,
+    "previous_close_option_context_rows_opened": 3393
+  },
+  "verification_status_at_provenance_generation": {
+    "focused_tests": "21_passed",
+    "full_suite": "1351_passed_1_skipped_13_failed_19_errors_due_to_missing_unrelated_frozen_slrno_artifacts",
+    "lint": "passed",
+    "type_check": "passed"
+  }
+}

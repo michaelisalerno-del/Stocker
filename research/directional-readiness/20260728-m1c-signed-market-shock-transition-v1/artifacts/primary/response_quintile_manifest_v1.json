@@ -1,0 +1,17 @@
+{
+  "calibration": {
+    "calibration_complete_v1": true,
+    "calibration_missing_reason_v1": null,
+    "q20_v1": 1.246772545923766,
+    "q40_v1": 1.3386638918457059,
+    "q60_v1": 1.8486929869665076,
+    "q80_v1": 2.4946067533072087,
+    "support_v1": 8
+  },
+  "calibration_population": "2024 valid fresh high-M1C signed-shock-onset predictor rows only",
+  "configuration_hash": "e69291d2d683d5e229bdb3f64ce1b85dd37c0332685e40d61642e2ba43c0d61e",
+  "freshness_required_for_quintile_calibration": true,
+  "minimum_support_not_invented": true,
+  "outcomes_used": false,
+  "schema_version": "m1c-signed-market-shock-response-quintiles-v1"
+}

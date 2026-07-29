@@ -95,6 +95,34 @@ queues, reduces, or records a skip and does not stop Class 0–1 M1C streams.
 Only `critical_budget_unavailable` blocks signal capture. The historical
 decision remains `blocked_insufficient_low_tail_support`.
 
+M1C Tail Phase V1 is an additional logging-only projection at each frozen
+checkpoint. It records strict stock-session `FIRST_ENTRY`, `PERSISTENT`,
+`RE_ENTRY`, `OUTSIDE_TAIL`, or `UNKNOWN_INCOMPLETE` state and a stock-local
+pre-trigger 15-minute range divided by the explicit previous-close
+option-implied 15-minute movement. Missing checkpoints are never bridged and
+incomplete denominators remain visible. The frozen 2024 consumed median is
+loaded from the versioned V1 artifact. These fields do not alter M1C scoring,
+fresh-episode identity, promotion, subscription priority, A1/C1/R1 actions,
+option selection, capacity allocation, or order safety.
+
+The external Group-O session-package producer must populate
+`previous_close_implied_movement_15m` from the exact prior-session ATM IV using
+`atm_iv * sqrt(15 / (252 * 390)) * sqrt(2 / pi)`, the same convention as
+`m1c_low_movement_v0.iv_expected_absolute`. The package must retain the option
+observation session and receipt hashes already carried by Group O. This field
+is optional for recorder continuity: absent or invalid values produce an
+auditable `UNKNOWN_INCOMPLETE` consumed bucket and never make Group O or the
+M1C universe ineligible. The first transfer sessions must verify this external
+producer handoff before treating prospective consumed buckets as complete.
+
+During the first 20 `engineering_transfer` sessions, Tail Phase logging may
+verify session reset, checkpoint chronology, missing-checkpoint handling,
+threshold equality, prior-close denominator identity, timestamps, episode
+linkage, and feed gaps. Those sessions may not optimise phase, consumption,
+direction, microstructure, or option-selection rules. Optional Tail Phase
+input exhaustion records `UNKNOWN_INCOMPLETE` and never stops the universe
+recorder.
+
 The official `ibapi` dependency remains absent from the repository and
 immutable model bundle. A server release may install it only from an
 operator-accepted official IBKR archive; startup hashes the installed Python
@@ -346,6 +374,10 @@ quotes. Migration application and its registry insert are one SQLite
 transaction.
 Migration `0005` records current active/pending/cancelling lines, request rate,
 waiting/rejected signals, and reserved capacity for the separate web process.
+Migration `0011` adds nullable M1C Tail Phase V1 checkpoint and episode fields
+plus the explicit previous-close implied 15-minute movement on Group O
+context. Existing rows remain readable; new recorder rows preserve the exact
+phase-at-trigger values without changing the episode definition.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

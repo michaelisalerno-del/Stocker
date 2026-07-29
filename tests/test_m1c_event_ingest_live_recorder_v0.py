@@ -447,4 +447,6 @@ def test_live_recorder_hydrates_processed_checkpoints_before_restart_replay(
             for checkpoint in range(1, 7)
         }
 
-    assert recorder._score_ready() == ()
+    assert recorder._score_ready(
+        observed_now=START + timedelta(minutes=30),
+    ) == ()

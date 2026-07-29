@@ -1,0 +1,23 @@
+{
+  "allowed_evaluations": [
+    "bar_timing",
+    "bar_semantics",
+    "vti_opening_return",
+    "vti_opening_range",
+    "severe_state_agreement",
+    "threshold_boundary_disagreement",
+    "source_completeness",
+    "prediction_receipt_timing",
+    "subscription_capacity",
+    "contract_discovery",
+    "graceful_degradation",
+    "recorder_reliability",
+    "no_order_safeguards"
+  ],
+  "cohort_phase": "engineering_transfer",
+  "outcomes_opened": false,
+  "reason": "awaiting_post_activation_engineering_transfer_sessions",
+  "status": "pending",
+  "valid_sessions_observed": 0,
+  "valid_sessions_required": 20
+}

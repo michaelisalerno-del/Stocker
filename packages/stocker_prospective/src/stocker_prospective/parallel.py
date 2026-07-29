@@ -212,6 +212,12 @@ class ParallelSourceCaptureService:
         self.config = config
         self.repository = repository
         self.identity = identity
+        self.capture_symbols = (
+            (*identity.symbols, "VTI")
+            if config.paths.m1c_prospective_opening_reversal_v1_activation
+            is not None
+            else identity.symbols
+        )
         self.provider = provider
         self._sleep = sleep
         self._heartbeat = heartbeat
@@ -340,7 +346,7 @@ class ParallelSourceCaptureService:
             session_open + timedelta(minutes=5 * offset)
             for offset in range(EXPECTED_REGULAR_SESSION_BAR_COUNT)
         }
-        for index, symbol in enumerate(self.identity.symbols):
+        for index, symbol in enumerate(self.capture_symbols):
             if self._heartbeat is not None:
                 self._heartbeat()
             try:
@@ -426,14 +432,14 @@ class ParallelSourceCaptureService:
                     )
                 )
                 bar_count += 1
-            if index + 1 < len(self.identity.symbols):
+            if index + 1 < len(self.capture_symbols):
                 self._sleep(60.0 / self.config.parallel_validation.requests_per_minute)
         self.repository.record_source_capture_completion(
             metadata,
             provider="eodhd",
             session_date=session_date,
             status="complete" if not missing else "partial",
-            requested_symbol_count=len(self.identity.symbols),
+            requested_symbol_count=len(self.capture_symbols),
             captured_symbol_count=captured_symbols,
             bar_count=bar_count,
             missing_symbols=tuple(missing),

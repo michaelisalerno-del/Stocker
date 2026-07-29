@@ -1,0 +1,27 @@
+{
+  "counts": {
+    "assessment": {
+      "excluded_by_population_definition": 6,
+      "primary_signed_shock_count": 9,
+      "tail_phase_candidate_count": 15
+    },
+    "stress": {
+      "excluded_by_population_definition": 5,
+      "primary_signed_shock_count": 29,
+      "tail_phase_candidate_count": 34
+    }
+  },
+  "duplicate_or_dependent_episode_exclusions": 0,
+  "excluded_reason": "Each excluded RE_ENTRY occurred 20 minutes after a canonical fresh episode and therefore failed the frozen 30-minute spacing.",
+  "excluded_row_count": 11,
+  "explanation": "The Tail Phase diagnostic used every high-M1C FIRST_ENTRY or RE_ENTRY checkpoint row, while the primary study used canonical fresh episodes with the frozen 30-minute spacing rule.",
+  "incomplete_outcome_exclusions": 0,
+  "incomplete_stock_response_exclusions": 0,
+  "invalid_iv_scale_exclusions": 0,
+  "invalid_response_class_exclusions": 0,
+  "population_construction_bug": false,
+  "prior_scientific_conclusion_changed": false,
+  "reporting_bug": false,
+  "status": "fully_reconciled",
+  "terminology_ambiguity": true
+}

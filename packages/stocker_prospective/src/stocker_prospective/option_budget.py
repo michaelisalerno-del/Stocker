@@ -33,6 +33,7 @@ class EpisodeState(StrEnum):
 
 
 class EpisodeKind(StrEnum):
+    OPENING_REVERSAL = "opening_reversal"
     QUIET = "quiet"
     HIGH_TAIL = "high_tail"
     NEUTRAL_CONTROL = "neutral_control"
@@ -65,14 +66,14 @@ class DteAllocator:
     ) -> DteAllocation:
         available_set = set(available)
         skipped: dict[str, str] = {}
-        if kind is EpisodeKind.QUIET:
+        if kind in {EpisodeKind.QUIET, EpisodeKind.OPENING_REVERSAL}:
             if DteBucket.ONE_DTE not in available_set:
                 skipped[DteBucket.ONE_DTE.value] = "no_1dte_expiry"
                 for bucket in available_set:
                     skipped[bucket.value] = "not_substituted_for_missing_primary_1dte"
                 return DteAllocation(None, (), skipped)
             secondary: tuple[DteBucket, ...] = ()
-            if allow_secondary:
+            if allow_secondary and kind is EpisodeKind.QUIET:
                 secondary = next(
                     (
                         (bucket,)
@@ -152,6 +153,7 @@ class OptionSubscriptionIntent:
     subscription_class: SubscriptionClass
     required: bool
     dte_bucket: DteBucket
+    drop_order: int | None = None
 
     def __post_init__(self) -> None:
         if self.con_id <= 0 or self.key != f"OPTION_LEVEL1|{self.con_id}":
@@ -160,6 +162,10 @@ class OptionSubscriptionIntent:
             raise ValueError("option intent role is required")
         if "naked" in self.role.lower():
             raise ValueError("naked option structures are forbidden")
+        if self.required and self.drop_order is not None:
+            raise ValueError("required option streams cannot have a drop order")
+        if self.drop_order is not None and self.drop_order <= 0:
+            raise ValueError("optional option drop order must be positive")
 
 
 @dataclass(frozen=True)
@@ -207,6 +213,10 @@ class EpisodeAllocationRecord:
     updated_at_utc: datetime
     cohort_phase: str = "engineering_transfer"
     scientific_option_evidence: bool = False
+    required_subscriptions: tuple[str, ...] = ()
+    subscription_roles: tuple[tuple[str, str], ...] = ()
+    optional_drop_orders: tuple[tuple[str, int], ...] = ()
+    transition_subscriptions: tuple[str, ...] = ()
 
 
 PersistenceSink = Callable[[EpisodeAllocationRecord], object]
@@ -263,9 +273,10 @@ class BudgetAwareEpisodeStateMachine:
     @staticmethod
     def _priority(task: OptionEpisodeTask) -> tuple[int, float, datetime, str, str]:
         kind_rank = {
-            EpisodeKind.QUIET: 0,
-            EpisodeKind.HIGH_TAIL: 1,
-            EpisodeKind.NEUTRAL_CONTROL: 2,
+            EpisodeKind.OPENING_REVERSAL: 0,
+            EpisodeKind.QUIET: 1,
+            EpisodeKind.HIGH_TAIL: 2,
+            EpisodeKind.NEUTRAL_CONTROL: 3,
         }[task.kind]
         probability_rank = task.probability if task.kind is EpisodeKind.QUIET else -task.probability
         return (
@@ -293,6 +304,7 @@ class BudgetAwareEpisodeStateMachine:
         queued: tuple[str, ...] = (),
         denied: tuple[str, ...] = (),
         reason: str | None = None,
+        transition: tuple[str, ...] = (),
     ) -> EpisodeAllocationRecord:
         cohort_phase, scientific_option_evidence = (
             ("engineering_transfer", False)
@@ -316,6 +328,21 @@ class BudgetAwareEpisodeStateMachine:
             updated_at_utc=now.astimezone(UTC),
             cohort_phase=cohort_phase,
             scientific_option_evidence=scientific_option_evidence,
+            required_subscriptions=tuple(
+                intent.key
+                for intent in task.requested_subscriptions
+                if intent.required
+            ),
+            subscription_roles=tuple(
+                (intent.key, intent.role)
+                for intent in task.requested_subscriptions
+            ),
+            optional_drop_orders=tuple(
+                (intent.key, intent.drop_order)
+                for intent in task.requested_subscriptions
+                if not intent.required and intent.drop_order is not None
+            ),
+            transition_subscriptions=transition,
         )
 
     @property
@@ -348,6 +375,7 @@ class BudgetAwareEpisodeStateMachine:
                 before=before,
                 queued=keys,
                 reason=reason,
+                transition=keys,
             )
         )
 
@@ -405,6 +433,11 @@ class BudgetAwareEpisodeStateMachine:
             key=lambda item: (
                 int(item[1].subscription_class),
                 0 if item[1].required else 1,
+                (
+                    0
+                    if item[1].required
+                    else -(item[1].drop_order or 0)
+                ),
                 item[0],
             ),
         )
@@ -429,6 +462,8 @@ class BudgetAwareEpisodeStateMachine:
                 owner_episode=task.episode_id,
                 owner_id=owner_id,
                 protected=intent.required,
+                research_feed=intent.role,
+                drop_order=intent.drop_order,
                 now_monotonic=now.timestamp() + allocation_rank / 1_000_000.0,
                 now_utc=now,
             )
@@ -500,6 +535,7 @@ class BudgetAwareEpisodeStateMachine:
                 approved=approved,
                 denied=denied,
                 reason=reasons,
+                transition=denied,
             )
         )
 
@@ -543,6 +579,7 @@ class BudgetAwareEpisodeStateMachine:
                 before=before,
                 denied=previous.approved_subscriptions,
                 reason=f"displaced_by_higher_priority_episode:{replacement_episode_id}",
+                transition=previous.approved_subscriptions,
             )
         )
         if now < task.useful_until_utc:
@@ -554,6 +591,7 @@ class BudgetAwareEpisodeStateMachine:
                         intent.key for intent in task.requested_subscriptions
                     ),
                     denied_subscriptions=(),
+                    transition_subscriptions=(),
                     capacity_before=self.budget.snapshot(),
                     capacity_after=self.budget.snapshot(),
                 )
@@ -625,6 +663,63 @@ class BudgetAwareEpisodeStateMachine:
                 approved_subscriptions=approved,
                 denied_subscriptions=denied,
                 degradation_reason=reason,
+                transition_subscriptions=(key,),
+                capacity_before=before,
+                capacity_after=self.budget.snapshot(),
+                updated_at_utc=now.astimezone(UTC),
+            )
+        )
+
+    def degrade_optional(
+        self,
+        episode_id: str,
+        *,
+        now: datetime,
+        reason: str,
+    ) -> EpisodeAllocationRecord:
+        """Drop the lowest-priority active optional feed group, never primary."""
+
+        task = self._tasks[episode_id]
+        current = self._records[episode_id]
+        active = set(current.approved_subscriptions)
+        candidates = tuple(
+            intent
+            for intent in task.requested_subscriptions
+            if not intent.required and intent.key in active
+        )
+        if not candidates:
+            return current
+        drop_order = min(intent.drop_order or 0 for intent in candidates)
+        dropped = tuple(
+            intent.key
+            for intent in candidates
+            if intent.drop_order == drop_order
+        )
+        owner_id = f"episode:{episode_id}"
+        before = self.budget.snapshot()
+        for key in dropped:
+            self.budget.release(
+                key,
+                owner_id=owner_id,
+                reason=reason,
+                now_utc=now,
+            )
+        approved = tuple(
+            key
+            for key in current.approved_subscriptions
+            if key not in set(dropped)
+        )
+        return self._persist(
+            replace(
+                current,
+                state=EpisodeState.DEGRADED,
+                approved_subscriptions=approved,
+                denied_subscriptions=(
+                    *current.denied_subscriptions,
+                    *dropped,
+                ),
+                degradation_reason=reason,
+                transition_subscriptions=dropped,
                 capacity_before=before,
                 capacity_after=self.budget.snapshot(),
                 updated_at_utc=now.astimezone(UTC),
@@ -661,6 +756,7 @@ class BudgetAwareEpisodeStateMachine:
                     queued_subscriptions=(),
                     denied_subscriptions=previous.queued_subscriptions,
                     degradation_reason="queued_episode_expired",
+                    transition_subscriptions=previous.queued_subscriptions,
                     capacity_before=self.budget.snapshot(),
                     capacity_after=self.budget.snapshot(),
                     updated_at_utc=observed,

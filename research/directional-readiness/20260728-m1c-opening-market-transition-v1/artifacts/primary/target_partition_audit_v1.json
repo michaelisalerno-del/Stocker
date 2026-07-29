@@ -1,0 +1,7 @@
+{
+  "negative_threshold_equality_partition": "NO_MATERIAL_MOVE",
+  "positive_threshold_equality_partition": "NO_MATERIAL_MOVE",
+  "stored_m1c_target_changed": false,
+  "strict_material_move_equivalence": true,
+  "valid_row_count": 1215
+}

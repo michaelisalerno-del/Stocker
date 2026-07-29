@@ -1,0 +1,186 @@
+{
+  "causality_confirmation": {
+    "a1_refit": false,
+    "archived_signed_pressure_used": false,
+    "archived_tension_used": false,
+    "fresh_episode_definition_changed": false,
+    "future_filtered_peer_slate_used": false,
+    "m1c_refit": false,
+    "peer_normalisation_used_for_v1_features": false
+  },
+  "current_branch": "codex/m1c-tail-phase-v1",
+  "date_boundaries": {
+    "assessment": [
+      "2025-01-01",
+      "2025-08-22"
+    ],
+    "development": [
+      "2024-01-01",
+      "2024-12-31"
+    ],
+    "protected_start": "2026-01-01",
+    "stress": [
+      "2025-09-01",
+      "2025-12-31"
+    ]
+  },
+  "dirty_status": [
+    " M configs/prospective/server.example.yaml",
+    " M docs/architecture/prospective-evidence-recorder.md",
+    " M packages/stocker_prospective/src/stocker_prospective/config.py",
+    " M packages/stocker_prospective/src/stocker_prospective/frozen_live_application.py",
+    " M packages/stocker_prospective/src/stocker_prospective/group_o.py",
+    " M packages/stocker_prospective/src/stocker_prospective/recorder_repository.py",
+    " M packages/stocker_prospective/src/stocker_prospective/recorder_v0.py",
+    " M research/prospective/frozen-m1c-microstructure-recorder-v0/schema_manifest.json",
+    "?? packages/stocker_prospective/src/stocker_prospective/migrations/0011_m1c_tail_phase_v1.sql",
+    "?? packages/stocker_prospective/src/stocker_prospective/tail_phase_v1.py",
+    "?? packages/stocker_research/src/stocker_research/m1c_tail_phase_v1.py",
+    "?? research/directional-readiness/20260728-m1c-tail-phase-v1/",
+    "?? tests/test_m1c_tail_phase_v1.py"
+  ],
+  "dirty_working_tree": true,
+  "exact_commands_used": [
+    "rtk uv run python research/directional-readiness/20260728-m1c-tail-phase-v1/run_tail_phase_v1.py"
+  ],
+  "exclusion_counts_and_reasons": {
+    "assessment_missing_previous_close_option_context": 33933,
+    "development_missing_previous_close_option_context": 52952,
+    "high_tail_incomplete_frozen_a1": 1,
+    "high_tail_incomplete_movement_consumed": 0,
+    "high_tail_unavailable_future_10m": 0,
+    "high_tail_unavailable_future_15m": 0,
+    "high_tail_unknown_incomplete_phase": 0,
+    "months_removed_after_outcome_review": 0,
+    "outliers_removed": 0,
+    "outside_tail_not_in_structural_outcome_analysis": 47676,
+    "stocks_removed_after_outcome_review": 0
+  },
+  "execution_confirmation": {
+    "broker_access": false,
+    "order_routing_enabled": false,
+    "orders_submitted": false
+  },
+  "git_commit": "bf98a6b299d8f5efc8c46108e2f2802bfc297544",
+  "input_artifact_identities": [
+    {
+      "columns_read_exclude_archived_signed_pressure": true,
+      "columns_read_exclude_future_labels_and_eligibility": true,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/dense_advance_panel.parquet",
+      "role": "unfiltered_dense_causal_checkpoint_surface",
+      "rows_read": 119395,
+      "sha256": "a916b792e15e8630dadc09bed64d71be5533ce9f3b2bd93af06605d0faaa0cc3"
+    },
+    {
+      "maximum_reconstruction_difference": 0.0,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/route-competition/20260722-broad-conflict-advance-hazard-v02/artifacts/primary/model_configurations.json",
+      "role": "frozen_causal_group_i_scaling_definitions",
+      "sha256": "9521b093f01313a4993a9e101ef0e214ab32933809585ef267551747762b49c2"
+    },
+    {
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-3/research/cross-market-context/20260723-daily-stock-front-options-context-v01/artifacts/primary/front_options_dimensions.parquet",
+      "role": "exact_previous_close_historical_options_context",
+      "sha256": "4bc6fd0ce6972210949a5447fd06ca0ffaa258cb953d5e3447c1c07afab85b40",
+      "stock_sessions": 2179
+    },
+    {
+      "maximum_session_read": "2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-23-you-are-working-in-the-github-5/data/cache/minimal-intraday-iv-excess-holdout-v0/frozen_state_surface.parquet",
+      "role": "completed_five_minute_stock_and_market_bars",
+      "rows_read": 401232,
+      "sha256": "68b1cc53c1570d53054d685966eef96f533d8760368ebfc148766bb8f3a6bcc0"
+    },
+    {
+      "maximum_session": "2025-12-31",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-local/StockerM1CV1/research/options-feasibility/20260724-minimal-intraday-iv-excess-holdout-v01/artifacts/primary/holdout_selected_option_pairs.parquet",
+      "role": "exact_previous_close_opened_stress_options_context",
+      "sha256": "0b3f16cb06ae00df06dc34041a87d78b17478f1245810f54b5cc2d0f38d27e97",
+      "stock_sessions": 1214
+    },
+    {
+      "archived_pressure_values_read": false,
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-local/StockerM1CV1/research/directional-readiness/20260726-movement-qualified-direction-screen-v0/artifacts/primary/movement_signal_episodes.parquet",
+      "role": "archived_episode_identities_for_impact_comparison_only",
+      "sha256": "8db3debfbbd360f94f8b171d0bac02d673bfc31b951c15a6713ba5ccaf939aba"
+    },
+    {
+      "maximum_session": "2025-08-22",
+      "path": "/Users/michaelsalerno/Documents/Codex/2026-07-28-you-are-working-on-the-local/StockerM1CV1/research/directional-readiness/20260726-stock-local-directional-archetypes-v0/artifacts/primary/assessment_predictions.parquet",
+      "role": "frozen_m1c_probability_regression_fixture",
+      "rows_read": 417,
+      "sha256": "08340ee9c2b4ad887319cb655fd5aa556f53c40a62b69743fcebd5366cf6e027"
+    }
+  ],
+  "maximum_session_opened": "2025-12-31",
+  "missingness_counts": {
+    "movement_consumed_missing_reasons": {
+      "complete": 2970
+    },
+    "phase_missing_reasons": {
+      "complete": 2970
+    },
+    "post_share_missing_reasons": {
+      "complete": 2970
+    }
+  },
+  "output_hashes": {
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/canonical_implementation_v1.json": "4b12f4d4b261c6f24f82c2e2e142c2dd0ab758d31ade21246d3b1204edc0ad24",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/checkpoint_results_v1.parquet": "8dd0ef53d9c5493b70f600a28d6f77e8ffabd5e7b48a5378cf0bb4411382cb8f",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/cluster_bootstrap_v1.csv": "a570eae5d97e4876e8e6b192f9a1261881eca58ec818a3596b0d42668c5b4749",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/concentration_v1.csv": "a67bccd593712599cb7fcc58601503f9c86a6a66ba677f4be1077bcfb2a22763",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/directional_diagnostics_v1.csv": "beb1a4b410f5c077569e4f4b7de8c6c8560ef5dde63211797dc00d3499cbce4c",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/fresh_episode_results_v1.parquet": "a843fedf4c5df712237fd374c5efb3ff8925b575c875395ea648d786b589d9a3",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/frozen_config_v1.json": "9c944a2a88a7d4bf7530a6762f1435abb2800fe4a620d7db49eba8160ed26678",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/key_comparisons_v1.csv": "304434c22e1d884d04beaf564aaccd2735541d5e29337847a294b397c56bd9ae",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/leave_one_out_v1.csv": "6729e627802707061d80a5457a80de1f3eb90486643958fb327ddb0858a290c7",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/missingness_v1.csv": "72da21f323ea228a13ebe61eef79ad487bbe215ca23ba2f7ba797eced19855a4",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/movement_summaries_v1.csv": "4d52773ecebed178bcd6f232bc4ae569673510fdc830d71ea6c1eeea92011906",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/regime_diagnostics_v1.csv": "c419d46e13dcc160297a79b0cbbcb6f85616d92909baf9ee5a219c66ef8c930a",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/report.md": "21ae2243e47075f9458cd74bff4c0a9beab9d4d65aca3d775428863b9a137df8",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/source_manifest_v1.json": "842718d3a4f59bcda2a70b1b3ba9bb865edbbe1fbd73e8868020d69a4d14922d",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/structural_counts_v1.csv": "6980e6ad0ebfd10a14a87a4cdd2dd897f1291f874523b4fe7ee4a11abf490322",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/artifacts/primary/summary_v1.json": "ca872c816f9ec24fe7529def6a727f2839e3e6f3f44c4d0e88e039f977d18475",
+    "research/directional-readiness/20260728-m1c-tail-phase-v1/reports/report.md": "21ae2243e47075f9458cd74bff4c0a9beab9d4d65aca3d775428863b9a137df8"
+  },
+  "protected_data_confirmation": {
+    "protected_data_opened": false,
+    "protected_outcomes_calculated": false,
+    "protected_outcomes_displayed": false,
+    "protected_outcomes_inspected": false,
+    "source_manifest_protected_rows_read": 0
+  },
+  "relevant_configuration_hashes": {
+    "frozen_a1_models": "857a8907159a4e8025f8417f829597c9b6338ad1eeabea646bc08307543bfdf8",
+    "frozen_a1_normalisation": "6b8e4f058e4e89a405c9ec33ddba1c6dd84ceaa5f19a4504f93bc937fa5a317d",
+    "frozen_a1_thresholds": "54651f1fc4c74de8fecc49cfd88e317a41211201a2966128f4f0f0e23f293a3b",
+    "frozen_m1c_feature_manifest": "6f59177a58973d33a24741e3c265e1831bfb6dc07afac17ae371501019bdc5cc",
+    "frozen_m1c_threshold": "1aae6b7b28bf0f51b914d069bb31ac2e209b43ddaaa938fd373c55a2e65cbabe",
+    "frozen_stock_market_betas": "86c2c63def43262b758f5f4df59113d2f8038ad151fcfd0c173f7a4d043cc7be",
+    "prospective_tail_phase_schema_manifest": "277cdb1c45535c6fef651791334f9c8aba3ca3280028137b72bd0d443974f258",
+    "v1_contract": "5b7fe3ced63286b9ea4599bb402ca16d14b229321fe7d3d5c3ba6b8196e14c87",
+    "v1_frozen_config": "9c944a2a88a7d4bf7530a6762f1435abb2800fe4a620d7db49eba8160ed26678"
+  },
+  "research_id": "M1C Tail Phase V1",
+  "row_counts": {
+    "by_partition": {
+      "assessment": 13914,
+      "development": 18596,
+      "stress": 18136
+    },
+    "checkpoint_rows": 50646,
+    "episodes_by_partition": {
+      "assessment": 417,
+      "development": 474,
+      "stress": 525
+    },
+    "fresh_episode_rows": 1416,
+    "high_tail_by_partition": {
+      "assessment": 898,
+      "development": 926,
+      "stress": 1146
+    },
+    "raw_high_tail_checkpoint_rows": 2970,
+    "valid_phase_high_tail_checkpoint_rows": 2970
+  },
+  "schema_version": "m1c-tail-phase-v1"
+}

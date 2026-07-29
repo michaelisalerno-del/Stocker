@@ -1,0 +1,34 @@
+{
+  "bar_local_intervals": [
+    "09:30-09:35",
+    "09:35-09:40",
+    "09:40-09:45",
+    "09:45-09:50",
+    "09:50-09:55",
+    "09:55-10:00"
+  ],
+  "bar_ordinals": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "checkpoint": 6,
+  "checkpoint_6_signal_timestamp_example_utc": "2025-01-02T15:00:00+00:00",
+  "checkpoint_6_signal_timestamp_local": "2025-01-02T10:00:00-05:00",
+  "checkpoint_meaning": "six complete five-minute regular-session bars are available",
+  "complete_regular_session_bars_before_entry": 6,
+  "entry_bar_excluded": true,
+  "entry_bar_local_interval": "10:00-10:05",
+  "entry_bar_ordinal": 6,
+  "expected_opening_bar_count": 6,
+  "final_complete_bar_start_example_utc": "2025-01-02T14:55:00+00:00",
+  "final_complete_bar_start_local": "2025-01-02T09:55:00-05:00",
+  "next_bar_open_entry_timestamp_example_utc": "2025-01-02T15:00:00+00:00",
+  "next_bar_open_entry_timestamp_local": "2025-01-02T10:00:00-05:00",
+  "partial_bars_included": false,
+  "session_open_timestamp_example_utc": "2025-01-02T14:30:00+00:00",
+  "session_open_timestamp_local": "2025-01-02T09:30:00-05:00"
+}

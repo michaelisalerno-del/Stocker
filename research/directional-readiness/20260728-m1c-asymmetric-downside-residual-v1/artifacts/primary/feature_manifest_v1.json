@@ -1,0 +1,58 @@
+{
+  "D4_volume_status": "available_historical_causal_stock_volume",
+  "causal_at_entry": true,
+  "excluded_fields": [
+    "signed_pressure",
+    "tension",
+    "future_filtered_peer_slate",
+    "peer_normalisation",
+    "numerical descendants of contaminated fields",
+    "M1C_probability",
+    "Tail Phase as a fitted feature",
+    "stock identity",
+    "stock intercepts",
+    "month identity",
+    "checkpoint identity",
+    "option outcomes",
+    "future movement",
+    "A1 score",
+    "market direction in the primary model",
+    "sector direction in the primary model",
+    "feature interactions",
+    "polynomial expansion"
+  ],
+  "features": [
+    {
+      "formula": "log(current_complete_bar_close / preceding_same_session_bar_close)",
+      "id": "D1",
+      "name": "signed_return_5m"
+    },
+    {
+      "formula": "log(current_complete_bar_close / same_session_close_three_bars_earlier)",
+      "id": "D2",
+      "name": "signed_return_15m"
+    },
+    {
+      "formula": "2 * ((current close - trailing three-bar low) / (trailing three-bar high - trailing three-bar low)) - 1",
+      "id": "D3",
+      "name": "close_location_15m",
+      "zero_range": "missing_no_imputation"
+    },
+    {
+      "fallback": "If reliable stock volume is unavailable, use only D1-D3; no substitute feature.",
+      "formula": "(current close - causal session typical-price VWAP) / (previous-close underlying price * previous-close implied 15-minute absolute log movement)",
+      "id": "D4",
+      "name": "distance_from_session_vwap_iv",
+      "vwap": "cumulative volume-weighted typical price using only same-stock same-session completed bars through the checkpoint"
+    }
+  ],
+  "no_imputation": true,
+  "ordered_model_columns": [
+    "D1_signed_return_5m",
+    "D2_signed_return_15m",
+    "D3_close_location_15m",
+    "D4_distance_from_session_vwap_iv"
+  ],
+  "standardisation_fit_scope": "2024 development training rows only",
+  "stock_local": true
+}

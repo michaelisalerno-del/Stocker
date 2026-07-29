@@ -1,0 +1,195 @@
+{
+  "amplification_continuation_decision": "blocked_insufficient_support",
+  "assessment_null_p_values": {
+    "amplification_continuation": 0.8031968031968032,
+    "market_following": 0.8411588411588412,
+    "resistance_reversal": 0.3156843156843157
+  },
+  "broad_market_following_decision": "blocked_insufficient_support",
+  "continuous_ranking_reproducible": false,
+  "contract_checks": {
+    "amplification_continuation": {
+      "assessment_event_cluster_lower_above_zero": false,
+      "assessment_session_cluster_lower_above_zero": false,
+      "assessment_support_pass": true,
+      "holm_adjusted_assessment_null_p_below_0_05": false,
+      "leave_one_dependency_robust": false,
+      "material_direction_accuracy_above_half_both_periods": false,
+      "mean_aligned_return_positive_both_periods": false,
+      "positive_and_negative_transitions_same_mechanism": false,
+      "selection_beats_following_all_severe_both_periods": false,
+      "stress_support_pass": false
+    },
+    "market_following": {
+      "accuracy_including_no_move_beats_normal_both_periods": false,
+      "assessment_event_cluster_lower_above_zero": false,
+      "assessment_null_p_below_0_05": false,
+      "assessment_session_cluster_lower_above_zero": false,
+      "assessment_support_pass": true,
+      "leave_one_dependency_robust": false,
+      "material_direction_accuracy_above_half_both_periods": false,
+      "mean_aligned_return_positive_both_periods": false,
+      "positive_and_negative_transitions_same_mechanism": false,
+      "stress_support_pass": false
+    },
+    "resistance_reversal": {
+      "assessment_event_cluster_lower_above_zero": false,
+      "assessment_session_cluster_lower_above_zero": false,
+      "assessment_support_pass": true,
+      "holm_adjusted_assessment_null_p_below_0_05": false,
+      "leave_one_dependency_robust": false,
+      "material_direction_accuracy_above_half_both_periods": true,
+      "mean_aligned_return_positive_both_periods": true,
+      "opposing_beats_following_same_resisting_both_periods": true,
+      "positive_and_negative_transitions_same_mechanism": false,
+      "stress_support_pass": false
+    }
+  },
+  "holm_adjusted_response_mechanism_p_values": {
+    "amplification_continuation": 0.8031968031968032,
+    "resistance_reversal": 0.6313686313686314
+  },
+  "more_conservative_cluster_conclusion_governs": true,
+  "overall_decision": "blocked_insufficient_support",
+  "resistance_reversal_decision": "blocked_insufficient_support",
+  "support": {
+    "assessment:amplification_continuation": {
+      "call_count": 41,
+      "checks": {
+        "maximum_event_share_20pct": true,
+        "maximum_session_share_20pct": true,
+        "maximum_stock_share_25pct": true,
+        "minimum_15_sessions": true,
+        "minimum_15_transition_events": true,
+        "minimum_30_episodes": true,
+        "minimum_8_call_predictions": true,
+        "minimum_8_put_predictions": true,
+        "minimum_8_stocks": true
+      },
+      "episode_count": 83,
+      "maximum_event_share": 0.07228915662650602,
+      "maximum_session_share": 0.07228915662650602,
+      "maximum_stock_share": 0.13253012048192772,
+      "put_count": 42,
+      "session_count": 35,
+      "stock_count": 20,
+      "support_pass": true,
+      "transition_event_count": 35
+    },
+    "assessment:market_following": {
+      "call_count": 68,
+      "checks": {
+        "maximum_event_share_20pct": true,
+        "maximum_session_share_20pct": true,
+        "maximum_stock_share_25pct": true,
+        "minimum_15_sessions": true,
+        "minimum_15_transition_events": true,
+        "minimum_30_episodes": true,
+        "minimum_8_call_predictions": true,
+        "minimum_8_put_predictions": true,
+        "minimum_8_stocks": true
+      },
+      "episode_count": 130,
+      "maximum_event_share": 0.06153846153846154,
+      "maximum_session_share": 0.06153846153846154,
+      "maximum_stock_share": 0.11538461538461539,
+      "put_count": 62,
+      "session_count": 43,
+      "stock_count": 20,
+      "support_pass": true,
+      "transition_event_count": 43
+    },
+    "assessment:resistance_reversal": {
+      "call_count": 20,
+      "checks": {
+        "maximum_event_share_20pct": true,
+        "maximum_session_share_20pct": true,
+        "maximum_stock_share_25pct": true,
+        "minimum_15_sessions": true,
+        "minimum_15_transition_events": true,
+        "minimum_30_episodes": true,
+        "minimum_8_call_predictions": true,
+        "minimum_8_put_predictions": true,
+        "minimum_8_stocks": true
+      },
+      "episode_count": 47,
+      "maximum_event_share": 0.10638297872340426,
+      "maximum_session_share": 0.10638297872340426,
+      "maximum_stock_share": 0.1276595744680851,
+      "put_count": 27,
+      "session_count": 28,
+      "stock_count": 17,
+      "support_pass": true,
+      "transition_event_count": 28
+    },
+    "stress:amplification_continuation": {
+      "call_count": 45,
+      "checks": {
+        "maximum_event_share_20pct": true,
+        "maximum_session_share_20pct": true,
+        "maximum_stock_share_25pct": true,
+        "minimum_15_sessions": false,
+        "minimum_15_transition_events": false,
+        "minimum_30_episodes": true,
+        "minimum_8_call_predictions": true,
+        "minimum_8_put_predictions": true,
+        "minimum_8_stocks": true
+      },
+      "episode_count": 69,
+      "maximum_event_share": 0.17391304347826086,
+      "maximum_session_share": 0.17391304347826086,
+      "maximum_stock_share": 0.11594202898550725,
+      "put_count": 24,
+      "session_count": 13,
+      "stock_count": 19,
+      "support_pass": false,
+      "transition_event_count": 13
+    },
+    "stress:market_following": {
+      "call_count": 63,
+      "checks": {
+        "maximum_event_share_20pct": true,
+        "maximum_session_share_20pct": true,
+        "maximum_stock_share_25pct": true,
+        "minimum_15_sessions": false,
+        "minimum_15_transition_events": false,
+        "minimum_30_episodes": true,
+        "minimum_8_call_predictions": true,
+        "minimum_8_put_predictions": true,
+        "minimum_8_stocks": true
+      },
+      "episode_count": 101,
+      "maximum_event_share": 0.13861386138613863,
+      "maximum_session_share": 0.13861386138613863,
+      "maximum_stock_share": 0.0891089108910891,
+      "put_count": 38,
+      "session_count": 13,
+      "stock_count": 20,
+      "support_pass": false,
+      "transition_event_count": 13
+    },
+    "stress:resistance_reversal": {
+      "call_count": 14,
+      "checks": {
+        "maximum_event_share_20pct": true,
+        "maximum_session_share_20pct": true,
+        "maximum_stock_share_25pct": true,
+        "minimum_15_sessions": false,
+        "minimum_15_transition_events": false,
+        "minimum_30_episodes": true,
+        "minimum_8_call_predictions": true,
+        "minimum_8_put_predictions": true,
+        "minimum_8_stocks": true
+      },
+      "episode_count": 32,
+      "maximum_event_share": 0.1875,
+      "maximum_session_share": 0.1875,
+      "maximum_stock_share": 0.125,
+      "put_count": 18,
+      "session_count": 11,
+      "stock_count": 16,
+      "support_pass": false,
+      "transition_event_count": 11
+    }
+  }
+}

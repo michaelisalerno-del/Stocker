@@ -818,6 +818,13 @@ sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
 
 Expected results include `wal` and `ok`.
 
+Migration `0016_prospective_recorder_hardening_v1` is forward-only and retains
+all pre-hardening rows. It places the callback inbox, leases,
+acknowledgements, fatal latches, gap incidents, runtime artifact receipts,
+recorder generations, and operational incidents in the same checked SQLite
+backup boundary. Startup fails closed if the database contains a migration
+newer than the installed application supports.
+
 ## 8. Start deterministic replay mode
 
 Replay needs no bundle, EODHD credential, or IBKR client:
@@ -860,17 +867,25 @@ From the server:
 
 ```bash
 curl --fail --silent http://127.0.0.1:8765/api/health | jq .
+curl --fail --silent http://127.0.0.1:8765/api/dashboard-snapshot | jq .
 curl --fail --silent http://127.0.0.1:8765/api/config/public | jq .
 curl --fail --silent http://127.0.0.1:8765/openapi.json | jq '.paths | keys'
 ```
 
 The replay health response should be correctly `blocked`, with synthetic data
-visible and real-scoring/IBKR blockers present. It should state
-`LIVE TRADING DISABLED`, `no_order_path_verified: true`, and expose no secret or
-database path. The `ibkr_api` section independently reports whether the
-first-party package is installed, source-tree verified, and current. That does
-not imply that IB Gateway is installed, authenticated, connected, or permitted
-for live market data.
+visible and real-scoring/IBKR blockers present. It should state `LIVE TRADING
+DISABLED`, expose the named no-order checks and their aggregate verdict, and
+expose no secret or database path. The `ibkr_api` section independently reports
+whether the first-party package is installed, source-tree verified, and
+current. A YAML `read_only` value is only configured evidence: local adapter
+surface enforcement is a separate check, and the Gateway/TWS environment is
+reported as not externally verifiable.
+
+The dashboard snapshot includes the authoritative recorder state, each
+heartbeat, gap counts, persisted artifact receipts, operational alerts, and
+the last database observation time in one read transaction. An old historical
+run without a current fresh lease must show `INACTIVE`, `STOPPED_CLEANLY`, or
+`STALE_HEARTBEAT`; it must never show recording merely because rows exist.
 
 ## 10. Start record-only IBKR mode
 
@@ -899,15 +914,15 @@ sudo grep -A3 '^ibkr:' /etc/stocker/prospective.yaml
 The runtime configuration must contain `host: 127.0.0.1` and `port: 4003`,
 never the Gateway upstream port.
 
-Record-only IBKR diagnostics require the hash-verified registered universe and
-the official dependency. A missing active frozen bundle remains an explicit
-health blocker but does not prevent underlying evidence recording; a bundle
-hash mismatch still fails closed. Installing the reconstructed bundle removes
-only the missing-artifact blocker. Record-only deliberately persists
-source-semantic blockers instead of scoring. Shadow scoring still requires
-passing feature parity and exact signed previous-session context. Do not lower
-either gate after observing outcomes. Install the units only after the gates
-for the selected mode are satisfied:
+Record-only IBKR mode requires the durable raw recorder, hash-verified
+registered universe, exact frozen artifact root, and official dependency.
+Legacy memory-drain diagnostic mode is not allowed to open an IBKR socket.
+Missing, partial, schema-invalid, contract-incompatible, or hash-mismatched
+artifacts fail closed. A configured path does not remove the blocker: only
+persisted receipts from the active recorder generation can do so. Shadow
+scoring still requires passing feature parity and exact signed
+previous-session context. Do not lower either gate after observing outcomes.
+Install the units only after the gates for the selected mode are satisfied:
 
 When `parallel_validation.enabled` is true, the recorder also makes one bounded
 five-minute-history request per anchor symbol after the configured
@@ -953,7 +968,8 @@ process's read-only anchor.
 The web repository independently opens SQLite with `mode=ro` and
 `PRAGMA query_only=ON`, and a process-lifetime read-only anchor keeps WAL/SHM
 coordination files present while the recorder opens and closes writer
-connections. Tests require destructive SQL to fail. On the deployed host,
+connections. It also refuses any migration version newer than the installed
+application understands. Tests require destructive SQL to fail. On the deployed host,
 verify the independent filesystem boundary too:
 
 ```bash
@@ -976,7 +992,85 @@ only `critical_budget_unavailable` may block M1C signal recording. The service
 remains record-only and exposes no order, account, position, or portfolio
 method.
 
-## 11. View logs and health
+### Durable admission and restart rule
+
+For each official callback, expect a short-lived `provider_pending` row,
+followed atomically by a canonical `pending` scientific row and a diagnostic
+provider row. The recorder then leases a stable ordered batch, writes and
+registers immutable raw partitions, records the exact partition hashes and raw
+event IDs, commits application processing, and finally acknowledges. Never
+manually mark a row acknowledged. A processing commit without an
+acknowledgement is safe for acknowledgement-only recovery; a provider envelope
+without canonical materialisation is not safe and becomes ingestion-fatal.
+
+An expired callback batch lease can be reclaimed by a newer generation. A
+stale recorder-process owner is different: the executable cannot prove that
+its in-memory active episodes and option subscriptions were continuous.
+Startup therefore records `RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN`, opens no
+IBKR socket, and exits with the run latched invalid. Preserve that run and
+start a new preregistered run ID after the incident audit. Old pending or
+quarantined rows remain queryable but are excluded from the new run's leasing,
+capacity, backlog, and health.
+
+## 11. Interpret recorder health
+
+The web process reads `recorder_operational_state_v1`; it does not infer
+activity from configured paths or historical data. Treat only
+`RECORDING_HEALTHY` as green. That state requires all of the following:
+
+- the current generation owns a fresh recorder lease;
+- process, callback-received, durable-admission, raw-storage, and inbox-ack
+  heartbeats are fresh when the market calendar expects callbacks;
+- inbox count and oldest-unacknowledged age remain within configured bounds;
+- the expected IBKR connection and market-data mode are observed;
+- every expected frozen artifact has a verified active-generation receipt;
+- scientific prerequisites pass, the broker mutation count is zero, and no
+  required stream gap or fatal latch is active.
+
+`MARKET_CLOSED` is expected outside the configured session and does not demand
+a callback heartbeat. `RECORDING_DEGRADED` means evidence is still being
+recorded but a nonfatal live condition is unhealthy. `SCIENTIFICALLY_BLOCKED`,
+`INGESTION_FATAL`, and `STORAGE_FATAL` prohibit scoring. `STALE_HEARTBEAT`
+means the process or ownership evidence is stale even if historical rows are
+present. `RECONNECTING`, `STARTING`, `STOPPING`, `STOPPED_CLEANLY`,
+`WAITING_FOR_PROSPECTIVE_START`, and `INACTIVE` are literal lifecycle states.
+
+Inspect the independent times rather than one combined heartbeat:
+
+```bash
+curl --fail --silent http://127.0.0.1:8765/api/recorder/status \
+  | jq '.operational | {state, reason_code, timestamps, inbox, conditions}'
+```
+
+## 12. Respond to ingestion or storage fatal state
+
+Do not restart repeatedly, clear a row, or assume a socket reconnect repaired
+the evidence boundary.
+
+1. Stop the recorder while leaving the read-only web service available.
+2. Take a checked SQLite backup and preserve the immutable raw directory,
+   staged directory, and quarantine directory together.
+3. Inspect the active `recorder_fatal_latch_v1`,
+   `operational_incident_v1`, `callback_inbox_v1`,
+   `callback_raw_materialization_v1`, `callback_processing_commit_v1`,
+   `raw_partition_manifest_v0`, and
+   `gap_incident_v1` rows. Do not include secrets in the incident record.
+4. For storage failures, independently hash every named partition and sidecar.
+   A controlled recorder startup runs deterministic staged-file and manifest
+   reconciliation, but the persisted fatal latch still blocks scoring.
+5. For poison or callback-loss failures, identify the first possibly lost
+   source sequence. Never fabricate a callback or coerce a missing value to
+   zero.
+6. Record the audit and recovery evidence in the operator incident system. If
+   loss cannot be disproved, keep the original run invalid and start a new
+   preregistered run ID. No reconnect or process restart automatically clears
+   the old latch.
+
+Optional-feed gaps may resolve when a complete valid book/capture returns and
+are counted separately. Required-stream gaps and any possibly lost callback
+invalidate scientific scoring until the evidence audit is complete.
+
+## 13. View logs and health
 
 ```bash
 sudo systemctl status stocker-recorder.service stocker-web.service
@@ -987,7 +1081,13 @@ sudo journalctl -u stocker-recorder.service -f
 
 Do not paste the environment file into logs or support tickets.
 
-## 12. Graceful shutdown
+Every HTTP response includes a correlation ID. Production bodies remain
+generic; server logs contain the path, method, correlation ID, stable internal
+code, exception class, version, safe run ID, and stack trace. An
+evidence-validity error must also appear as a persisted operational incident,
+not only a log line.
+
+## 14. Graceful shutdown
 
 ```bash
 sudo systemctl stop stocker-recorder.service
@@ -995,10 +1095,14 @@ sudo systemctl stop stocker-web.service
 sudo systemctl status stocker-recorder.service stocker-web.service
 ```
 
-The recorder handles `SIGTERM`, stops admissions, cancels pending temporary
-subscriptions, disconnects, and leaves missed captures missed.
+The recorder handles `SIGTERM`, moves its generation to `STOPPING`, cancels
+temporary subscriptions, disconnects the callback source, and records
+`STOPPED_CLEANLY` only after successful cleanup. An already leased or pending
+callback is not declared processed during shutdown: it remains in the durable
+inbox for generation-fenced restart recovery. A fatal latch remains fatal
+across shutdown and restart.
 
-## 13. Roll back the application release
+## 15. Roll back the application release
 
 The database and bundle store remain untouched:
 
@@ -1016,7 +1120,7 @@ rollback. Confirm it also contains the exact `ibapi` tree named by the active
 provenance record. Never restore an older database as part of application
 rollback.
 
-## 14. Roll back the active bundle
+## 16. Roll back the active bundle
 
 Bundle rollback changes only the atomic active pointer:
 
@@ -1031,7 +1135,7 @@ sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective bundle activa
 Use a new prospective run for a changed active bundle. Do not rewrite scores
 already recorded under the prior bundle.
 
-## 15. Back up and restore the database
+## 17. Back up and restore the database
 
 Install and enable the daily checked backup timer:
 
@@ -1047,9 +1151,13 @@ sudo systemctl status stocker-backup.service stocker-backup.timer
 sudo ls -l /var/lib/stocker/backups
 ```
 
-The application never automatically deletes evidence or backups. Configure
-encrypted off-host replication and retention in the server's approved backup
-system; deletion remains an explicit operator action.
+The SQLite backup includes the durable callback inbox and every hardening
+state table. It does not copy immutable Parquet files; replicate the entire raw
+partition tree, metadata sidecars, staged/quarantine tree, SQLite backup, and
+its hash manifest as one recovery set. The application never automatically
+deletes evidence or backups. Configure encrypted off-host replication and
+retention in the server's approved backup system; deletion remains an explicit
+operator action.
 
 Restore is deliberately manual and requires both services stopped:
 
@@ -1069,6 +1177,48 @@ sudo systemctl start stocker-web.service stocker-recorder.service
 ```
 
 Retain `pre-restore.sqlite3` until the restored run is independently audited.
+
+## Replay ownership and dashboard polling
+
+Each replay start has a generation. `stop` changes only that generation to
+`STOPPING`, signals its private event, and joins for a configured bound. Do not
+start another replay while an earlier worker can still mutate state. If a
+worker ignores stop, the API exposes an explicit failed-stop state and clean
+stop is false; investigate the fixture/worker before retrying. A stale worker
+cannot publish completion, digest, counters, or errors into a newer
+generation. Replay has no broker object and broker mutation count remains
+zero.
+
+The browser issues one `/api/dashboard-snapshot` request per interval, never
+overlaps requests, aborts an obsolete request, and pauses while hidden. Episode
+details load only when selection changes or an operator explicitly refreshes
+them. A section-level error leaves other snapshot sections visible. The UI
+shows the last successful snapshot and distinguishes stale from unavailable
+data.
+
+## Gap incident lifecycle
+
+One real discontinuity creates one stable `gap_incident_v1` row even when it
+affects several Parquet partitions. The operational projection separately
+counts active gaps, resolved recoverable gaps, unresolved scientific gaps,
+connection interruptions, and optional-feed degradation. Do not sum legacy
+partition `gap_count` values. Resolution requires a timestamp and evidence;
+optional recovery cannot convert a required scientific gap into valid
+evidence without its own audit.
+
+## Troubleshooting
+
+| Symptom | Meaning and operator action |
+| --- | --- |
+| Stale lease/heartbeat | Confirm the configured owner and process are alive. Stop duplicate processes and preserve the DB/WAL. An expired callback-batch lease is generation-fenced and reclaimable; a stale recorder-process owner latches `RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN` before socket open and requires a new run ID. Historical rows are not proof of life. |
+| `CALLBACK_OVERFLOW` | The bounded durable inbox could not admit another callback. Stop recording, preserve inbox/raw state, identify the first possibly lost sequence, and treat the run as ingestion-fatal. Do not raise the bound as a substitute for the audit. |
+| Growing unacknowledged backlog | Compare callback, raw-commit, and ack heartbeats. Inspect leased attempts and storage incidents. A processing-committed batch may be acknowledged after lease recovery; a poison or interrupted `provider_pending` row is quarantined and fatal. |
+| Valid Parquet but missing manifest | Preserve the sidecar and restart under controlled conditions. Reconciliation verifies the hash and registers the manifest idempotently before inbox acknowledgement. |
+| Manifest points to missing file | Treat as `STORAGE_FATAL`; restore the exact hash-matching immutable file from the paired recovery set or retain the run as invalid. |
+| IBKR reconnect | `RECONNECTING` is expected while ownership is rebuilt. Lost-data reconnect creates one connection gap and rebuilt request generation. The socket reconnect never clears a prior fatal latch. |
+| Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
+| Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
+| Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
 
 ## Secure browser access
 

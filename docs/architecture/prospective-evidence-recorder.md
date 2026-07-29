@@ -57,12 +57,17 @@ GET routes only.
 
 - owns the only prospective database writer and singleton recorder lease;
 - owns the optional official IBKR callback loop;
+- durably admits every scientific stream callback to the WAL-backed callback
+  inbox before updating a bounded in-memory cache or making the callback
+  available to the poller;
 - creates completed-bar, underlying-quote, connection, budget, rejection, and
   health evidence in the admitted live record-only path;
-- maintains a heartbeat and recovers a stale owner only after the configured
-  lease interval;
-- uses monotonic request IDs, bounded callback queues, market-data line
-  headroom, and a local request-rate limit;
+- maintains a heartbeat and can reclaim expired callback leases after the
+  configured interval; a stale process-owner takeover is latched before a
+  socket opens because process-local episode and subscription continuity
+  cannot be proved;
+- uses monotonic request IDs, a bounded durable inbox, bounded state caches,
+  market-data line headroom, and a local request-rate limit;
 - qualifies the exact `STK` contract for every registered anchor symbol; the
   frozen M1C mode then maintains one audited completed-five-minute update
   stream per stock plus only its required market proxies, without duplicate
@@ -150,6 +155,7 @@ it never downloads or installs broker code.
   - `GET /api/config/public`
   - `GET /api/recorder/status`
   - `GET /api/recorder/capabilities`
+  - `GET /api/dashboard-snapshot`
   - `GET /api/recorder/session-reports`
   - `GET /api/market-data-budget`
   - `GET /api/source-transfer`
@@ -378,10 +384,181 @@ Migration `0011` adds nullable M1C Tail Phase V1 checkpoint and episode fields
 plus the explicit previous-close implied 15-minute movement on Group O
 context. Existing rows remain readable; new recorder rows preserve the exact
 phase-at-trigger values without changing the episode definition.
+Migration `0016` adds the durable callback inbox, retry-stable lease batches,
+raw-materialization and generation-fenced processing commits, request
+tombstones, recorder generations and heartbeats, fatal
+latches, first-class gap and operational incidents, runtime artifact
+verification, and the strict V1.1 eligible-episode projection and guards. The
+migration is forward-only. An application that encounters a migration version
+newer than it supports fails closed without deleting or rewriting persistent
+data.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have
 no automatic deletion policy.
+
+## Crash-consistent callback and raw-evidence protocol
+
+Scientific stream callbacks do not use a destructive in-memory drain. The
+official callback boundary allocates a source sequence and commits the
+following original envelope to `callback_inbox_v1` under SQLite WAL with full
+synchronous durability:
+
+1. stable inbox event identity and source sequence;
+2. callback kind, request ID, connection generation, owner, and symbol;
+3. UTC and monotonic receipt times plus the original provider time when one
+   exists;
+4. the original JSON-safe payload, preserving null values and explicitly
+   tagging non-finite malformed provider values;
+5. callback classification, lease owner/generation/time, attempts, status,
+   acknowledgement, failure class, and associated raw partition hashes.
+
+The official boundary first stores a lossless provider envelope in
+`provider_pending`. Every official invocation gets a new delivery identity and
+source sequence; equal market values are not assumed to be duplicate
+deliveries. A scientific stream row is inserted and the provider envelope is
+made diagnostic in the same SQLite transaction. Control, bounded
+option-parameter, contract-detail, and snapshot callbacks explicitly complete
+their provider envelope after the bounded registry update. A process death
+between provider admission and canonical materialisation therefore leaves
+durable original evidence. The next generation quarantines that envelope as
+`CALLBACK_PROVIDER_MATERIALIZATION_INTERRUPTED`, latches ingestion fatal, and
+never silently resumes. Retry idempotency begins with the already admitted
+event identity; it is not inferred from callback content.
+
+The poller leases a source-ordered batch without deleting it. Its stable batch
+identity and membership survive lease expiry, so a callback arriving during
+recovery cannot change the immutable retry batch. Owner and recorder
+generation fence every transition. After normalisation, the recorder writes
+immutable raw Parquet, atomically installs data and metadata, registers the
+manifest and hashes, and records `callback_raw_materialization_v1`, including
+the exact sorted raw event-ID set. A retry may reuse that materialization only
+when it derives the same raw identities; a difference is fatal instead of
+projecting unpersisted derived events. Only after the outer application has durably completed
+promotion, option scheduling, episode work, reports, capability evidence and
+checkpoint markers does it record `callback_processing_commit_v1` and
+acknowledge the batch. A crash after the final commit but before acknowledgement
+is recovered by acknowledgement alone and is reported as degraded, not
+evidence loss. Retention compaction is a separate explicit operation and
+affects acknowledged and completed-diagnostic rows only.
+
+Raw Parquet and SQLite cannot share one transaction. The partition store
+therefore writes a staged file and metadata sidecar, fsyncs data, performs
+atomic renames, and fsyncs parent directories where supported. Startup
+reconciliation:
+
+- completes or deterministically quarantines staged files;
+- registers a valid immutable partition whose manifest transaction was
+  interrupted;
+- verifies every registered path and SHA-256 hash;
+- treats a missing or corrupt registered partition as `STORAGE_FATAL`; and
+- recovers manifest-before-materialization and processing-commit-before-ack
+  crashes without emitting a duplicate scientific row.
+
+Derived scoring and episode logic run only after raw evidence is recoverable.
+A normalisation poison event remains quarantined with its reason and latches
+the affected run invalid. Neither reconnect nor restart clears an ingestion or
+storage latch. The original run remains blocked until an operator completes an
+evidence audit; when loss cannot be disproved, the operator starts a new run ID
+and retains the old run as invalid evidence. Inbox capacity, backlog, leasing,
+and health are scoped to run ID, so retained poison evidence from the invalid
+run cannot contaminate the new run.
+
+## Callback containment and request generations
+
+Every official IBKR callback entry point is a true exception boundary. Queue
+pressure, malformed values, unknown IDs, late callbacks, cache failures, and
+durable-store failures are converted to stable operational incidents; none is
+re-raised into IBKR's callback loop. Best-effort incident evidence includes
+the callback/request identity, source sequence when allocated, connection
+generation, owner/symbol when known, exception class, stable code, and whether
+loss is possible.
+
+Recently cancelled or replaced request IDs remain in a bounded, expiring
+tombstone table. A callback is classified as active, expected-late,
+previous-generation, duplicate, unknown, or after a data-loss latch. Expected
+late and previous-generation callbacks are diagnostic and cannot mutate the
+active subscription cache. Unknown callbacks, durable inbox overflow, and any
+possibly lost callback immediately latch ingestion fatal and disable scoring.
+
+## One authoritative operational projection
+
+`recorder_operational_state_v1` plus its generation, lease, incidents, gaps,
+and artifact evidence is the only source for `/api/health`,
+`/api/recorder/status`, the dashboard, session reports, and operational
+alerts. The explicit states are:
+
+| State | Meaning |
+| --- | --- |
+| `INACTIVE` | No current recorder generation exists. |
+| `STARTING` | A generation owns startup but has not satisfied health gates. |
+| `WAITING_FOR_PROSPECTIVE_START` | The lease is fresh but the preregistered start has not arrived. |
+| `MARKET_CLOSED` | The calendar says callbacks are not expected; quiet is not a failure. |
+| `RECORDING_HEALTHY` | Every lease, heartbeat, storage, inbox, broker-mode, artifact, prerequisite, and required-gap condition passes. |
+| `RECORDING_DEGRADED` | Recording continues but a nonfatal live condition is stale or unexpected. |
+| `RECONNECTING` | The expected IBKR connection is being rebuilt. |
+| `STALE_HEARTBEAT` | The current lease or process heartbeat is stale. |
+| `INGESTION_FATAL` | Callback evidence may have been lost or poisoned. |
+| `STORAGE_FATAL` | Immutable raw evidence or its manifest is inconsistent. |
+| `SCIENTIFICALLY_BLOCKED` | Prerequisites, artifacts, market-data mode, broker mutation, or a required gap forbids scoring. |
+| `STOPPING` | The owning generation is shutting down. |
+| `STOPPED_CLEANLY` | That generation completed a clean bounded shutdown. |
+
+The projection stores process, callback-received, durable-admission,
+raw-partition, inbox-acknowledgement, completed-five-minute-bar, and checkpoint
+timestamps separately. `RECORDING_HEALTHY` requires a fresh current-generation
+lease, fresh expected heartbeats, a bounded/young inbox backlog, the expected
+connection and observed market-data mode, exact runtime artifact verification,
+valid scientific prerequisites, no fatal latch, no broker-state mutation, and
+no unresolved required-stream gap. A historical run row without a live lease
+can never produce a recording label.
+
+## Gap, replay, dashboard, and verification projections
+
+A discontinuity is one `gap_incident_v1` row with a stable identity, affected
+stream/sequence range, cause, severity, recoverability, optional backfill
+result, affected episodes, and resolution evidence. Dashboard counts come
+from those incident identities: active gaps, resolved recoverable gaps,
+unresolved scientific gaps, connection interruptions, and optional-feed
+degradations. Legacy per-partition `gap_count` remains readable but is never
+summed into the new operational total.
+
+Every replay start owns a new operation generation and its own stop event.
+Only the active generation may publish counters, digest, completion, or error.
+Stop moves to `STOPPING`, signals that generation, and joins for a bound. A
+worker that ignores the bound produces an explicit failed-stop result and
+blocks a new start while it can still mutate state. Replays remain
+broker-isolated.
+
+The main browser poll is one read-only `GET /api/dashboard-snapshot` request
+inside one SQLite read transaction. Optional section failures carry stable
+section error codes while successful sections remain visible. The browser
+prevents overlap, aborts obsolete requests, pauses while hidden, and fetches
+episode detail only on selection or explicit refresh. It renders values with
+text nodes, preserves CSP/authentication/no-store controls, and distinguishes
+unavailable data from a stale last-successful snapshot.
+
+Artifact verification is persisted by the recorder generation that actually
+found, loaded, schema-validated, hash-verified, contract-checked, and used each
+artifact. A configured path is not evidence. The web process displays the
+persisted bundle/artifact IDs, expected and observed hashes, feature-contract
+version, activation receipt, load time, generation, result, and blocker.
+No-order reporting is likewise derived from named checks for risk disablement,
+web isolation/read-only access, absent HTTP/adapter/runtime order surfaces,
+loopback/read-only configuration, and a zero broker mutation count. It clearly
+separates local enforcement from what cannot be externally verified about the
+IBKR environment.
+
+## M1C V1.1 experiment segregation
+
+The V1.1 eligible view and insert/update guards bind the opening-reversal
+experiment ID, activation receipt, causal-barrier audit, eligible episode,
+primary 1DTE expiry, one call and one put, the same nearest valid common
+strike, exactly two subscription lines, and their bid/ask outcomes. Quiet-state
+short-premium, condor roles, secondary expiries, generic/high-tail option
+episodes, and mismatched experiment identities cannot enter that projection.
+These guards add no new rule and change no frozen coefficient, threshold,
+checkpoint, cohort member, timestamp, or causal barrier.
 
 ## Explicitly absent
 

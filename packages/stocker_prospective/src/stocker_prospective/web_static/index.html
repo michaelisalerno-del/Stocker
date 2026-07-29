@@ -45,7 +45,7 @@
           <span>04</span> Options
         </button>
         <button class="nav-item" type="button" data-screen="shadow-blotter">
-          <span>05</span> Shadow
+          <span>05</span> Ledgers
         </button>
         <button class="nav-item" type="button" data-screen="safety-audit">
           <span>06</span> Audit
@@ -185,21 +185,32 @@
       <section id="shadow-blotter" class="screen" aria-labelledby="shadow-title" tabindex="-1">
         <div class="section-heading">
           <div>
-            <span class="eyebrow">05 / Frozen quote outcome ledger</span>
-            <h2 id="shadow-title">Shadow Ledger</h2>
+            <span class="eyebrow">05 / Segregated virtual evidence</span>
+            <h2 id="shadow-title">Virtual Ledgers</h2>
           </div>
           <p>
-            First valid ask after prospective entry to the last valid bid at or
-            before each horizon. Midpoint and last returns are diagnostic only.
+            Frozen opening-reversal and quiet-state option evidence shown as
+            separate research-only ledgers. No row represents a broker fill,
+            account position, or executable recommendation.
           </p>
         </div>
         <div class="ledger-banner">
-          <span>PRIMARY RETURN</span>
-          <strong>ASK ENTRY → BID EXIT</strong>
-          <span>NO PAPER LEDGER / NO ORDERS</span>
+          <span>RESEARCH-ONLY PROJECTION</span>
+          <strong>VIRTUAL EVIDENCE — NOT BROKER POSITIONS</strong>
+          <span>NO COMBINED TOTAL / NO ORDERS</span>
+        </div>
+        <div id="virtual-ledgers" class="virtual-ledger-stack">
+          <article class="panel blotter-panel">
+            <header><span>V</span><h3>M1C V1.1 predicted 1DTE leg</h3></header>
+            <div id="opening-reversal-virtual-ledger" class="data-region"></div>
+          </article>
+          <article class="panel blotter-panel">
+            <header><span>Q</span><h3>Quiet-state frozen short-premium structures</h3></header>
+            <div id="quiet-state-virtual-ledger" class="data-region"></div>
+          </article>
         </div>
         <article class="panel blotter-panel">
-          <header><span>Q</span><h3>15 / 30 / 60 minute and supported session-end outcomes</h3></header>
+          <header><span>E</span><h3>Generic quote-outcome evidence</h3></header>
           <div id="shadow-list" class="data-region"></div>
         </article>
         <div id="shadow-evidence" class="visually-hidden" aria-hidden="true"></div>

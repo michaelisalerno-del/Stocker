@@ -78,6 +78,26 @@ def test_durable_inbox_has_no_execution_order_or_broker_imports() -> None:
     }
 
 
+def test_virtual_ledger_models_have_no_execution_order_or_broker_imports() -> None:
+    source = (PACKAGE / "virtual_positions.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported_modules = {
+        node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+
+    assert not {
+        module
+        for module in imported_modules
+        if {"execution", "order", "broker", "ibkr"}.intersection(module.lower().split("."))
+    }
+
+
 def test_official_callback_bridge_has_only_contained_market_data_callbacks() -> None:
     source = (PACKAGE / "ibkr_official.py").read_text(encoding="utf-8")
     tree = ast.parse(source)

@@ -346,8 +346,35 @@ remain separate. Missing legs, stale or non-live quotes, crossed markets,
 nonpositive debits, and excessive capture lag reject the valuation.
 
 There are no midpoint fills, last-price fills, model-price fills, paper fills,
-or best-later-interval fills. The future paper ledger is an intentionally empty
-read-only schema view and has no submission interface.
+or best-later-interval fills.
+
+## Virtual position evidence ledgers
+
+The read-only dashboard projects two deliberately separate virtual ledgers
+from immutable recorder evidence. Neither projection creates a fill, order,
+account balance, buying power, margin, assignment, or broker position.
+
+The opening-reversal ledger admits only the exact eligible M1C V1.1
+prediction receipt and its causal-barrier, activation, promotion, and strict
+primary-pair evidence. It projects quantity one of the predicted 1DTE leg.
+The opposite leg remains control evidence. A row stays `SCHEDULED` before
+contract discovery and `CAPTURING` while the exact two-line call/put evidence
+is incomplete. It becomes `CLOSED` only when both same-strike primary outcomes
+are complete; its virtual entry is the first valid live ask and its frozen
+15-minute exit is the last valid live bid at or before the horizon. Missing
+or invalid evidence produces `INVALID`, never a synthetic zero or fill.
+
+The quiet-state ledger is a different projection with a different identity.
+It contains only `quiet_bottom_10` observations and the frozen short-premium
+structures: ATM iron butterfly, delta iron condor, call credit spread, and put
+credit spread. Long-option candidates, straddles, neutral controls, and
+high-tail controls do not enter it. Opening short bids/long asks and closing
+short asks/long bids remain the conservative convention. Each structure and
+horizon remains a separate research outcome.
+
+The API returns these as separate collections and publishes no combined total.
+The web process obtains both with its query-only SQLite connection and cannot
+receive the recorder, adapter, or any mutable database object.
 
 ## Persistence
 
@@ -394,6 +421,9 @@ newer than it supports fails closed without deleting or rewriting persistent
 data. Migration `0017` preserves the already-published `0016` boundary while
 adding typed callback-owner receipts and the explicit normal-versus-raw-only
 processing disposition for crash recovery.
+Migration `0018` adds the two read-only virtual-ledger views over existing
+immutable V1.1 and quiet-state evidence. It adds no mutable trading or account
+state and preserves the experiment boundary in the SQL predicates.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

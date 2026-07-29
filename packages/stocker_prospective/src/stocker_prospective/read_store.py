@@ -28,6 +28,10 @@ from stocker_prospective.quiet_state import (
     NEUTRAL_CONTROL_SALT,
     NEUTRAL_CONTROL_SAMPLING_FRACTION,
 )
+from stocker_prospective.virtual_positions import (
+    OpeningReversalVirtualPositionV1,
+    QuietStateVirtualPositionV1,
+)
 
 
 class ProspectiveReadStore:
@@ -1184,6 +1188,70 @@ class ProspectiveReadStore:
             ),
             reverse=True,
         )[:limit]
+
+    def opening_reversal_virtual_positions_v1(
+        self,
+        *,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Return only strict V1.1 predicted-leg virtual position evidence."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM opening_reversal_virtual_position_v1
+                WHERE run_id = ?
+                ORDER BY session_date DESC, entry_timestamp_utc DESC,
+                         virtual_position_id DESC
+                LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            raw = dict(row)
+            encoded_flags = raw.pop("latest_quote_quality_flags_json", None)
+            raw["latest_quote_quality_flags"] = (
+                () if encoded_flags is None else tuple(json.loads(str(encoded_flags)))
+            )
+            item = OpeningReversalVirtualPositionV1.model_validate(raw)
+            items.append(item.model_dump(mode="json"))
+        return items
+
+    def quiet_state_virtual_positions_v1(
+        self,
+        *,
+        limit: int = 2000,
+    ) -> list[dict[str, Any]]:
+        """Return quiet-bottom-10 short-premium evidence in its own projection."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM quiet_state_virtual_position_v1
+                WHERE run_id = ?
+                ORDER BY session_date DESC, trigger_timestamp_utc DESC,
+                         horizon_minutes, virtual_position_id DESC
+                LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            raw = dict(row)
+            raw["quality_flags"] = tuple(json.loads(str(raw.pop("quality_flags_json"))))
+            raw["legs"] = tuple(json.loads(str(raw.pop("legs_json"))))
+            item = QuietStateVirtualPositionV1.model_validate(raw)
+            items.append(item.model_dump(mode="json"))
+        return items
 
     def raw_event_sample_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
         """Return a bounded recent sample for audit inspection, never broker state."""

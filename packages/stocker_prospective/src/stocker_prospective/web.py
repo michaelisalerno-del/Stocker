@@ -936,6 +936,32 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "claims_boundary": claims_boundary(),
         }
 
+    @app.get("/api/virtual-ledgers")
+    def virtual_ledgers() -> dict[str, Any]:
+        """Expose two segregated evidence ledgers without broker semantics."""
+
+        return {
+            "opening_reversal": {
+                "ledger_scope": "opening_reversal_v1_1",
+                "items": store.opening_reversal_virtual_positions_v1(),
+                "entry_convention": "first_valid_live_ask_at_or_after_entry",
+                "exit_convention": ("last_valid_live_bid_at_or_before_frozen_15m_horizon"),
+                "quantity": 1,
+                "opposite_leg_is_control_only": True,
+            },
+            "quiet_state": {
+                "ledger_scope": "quiet_state_short_premium",
+                "items": store.quiet_state_virtual_positions_v1(),
+                "fill_convention": ("open_short_bid_long_ask_close_short_ask_long_bid"),
+                "controls_included": False,
+                "long_option_candidates_included": False,
+            },
+            "ledgers_combined_for_analysis": False,
+            "execution_claimed": False,
+            "broker_positions_claimed": False,
+            "claims_boundary": claims_boundary(),
+        }
+
     @app.get("/api/audit/events")
     def audit_events() -> dict[str, Any]:
         return {
@@ -1025,6 +1051,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "universe": universe_live,
             "episodes": episodes,
             "shadow": shadow_outcomes,
+            "virtual_ledgers": virtual_ledgers,
             "audit": audit_events,
             "session_reports": recorder_session_reports,
             "quiet_status": quiet_state_status,

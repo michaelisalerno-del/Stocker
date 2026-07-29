@@ -713,6 +713,14 @@ tbody tr:hover td {
   margin-top: 18px;
 }
 
+.blotter-panel + .blotter-panel {
+  margin-top: 18px;
+}
+
+.virtual-ledger-stack + .blotter-panel {
+  margin-top: 18px;
+}
+
 .safety-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

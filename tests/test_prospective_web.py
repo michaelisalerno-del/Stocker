@@ -458,6 +458,10 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     assert 'id="quiet-episode"' in page.text
     assert 'id="quiet-shadow"' in page.text
     assert 'id="concentration-audit"' in page.text
+    assert 'id="virtual-ledgers"' in page.text
+    assert 'id="opening-reversal-virtual-ledger"' in page.text
+    assert 'id="quiet-state-virtual-ledger"' in page.text
+    assert "VIRTUAL EVIDENCE — NOT BROKER POSITIONS" in page.text
     assert "BLOCKED_INSUFFICIENT_LOW_TAIL_SUPPORT" in page.text
     assert "SHORT BID / LONG ASK OPEN" in page.text
     assert "retrospective oracle" not in page.text.lower()
@@ -476,6 +480,7 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     assert 'document.visibilityState === "visible"' in script
     assert "innerHTML" not in script
     assert "renderConcentrationAudit" in script
+    assert "renderVirtualLedgers" in script
 
     for path in (
         "/api/recorder/status",
@@ -484,6 +489,7 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
         "/api/universe/live",
         "/api/episodes",
         "/api/shadow-outcomes",
+        "/api/virtual-ledgers",
         "/api/audit/events",
     ):
         response = client.get(path)
@@ -515,6 +521,7 @@ def test_dashboard_snapshot_is_one_consistent_projection(tmp_path: Path) -> None
         "universe",
         "episodes",
         "shadow",
+        "virtual_ledgers",
         "audit",
         "session_reports",
         "quiet_status",
@@ -531,6 +538,30 @@ def test_dashboard_snapshot_is_one_consistent_projection(tmp_path: Path) -> None
     assert payload["sections"]["status"]["run_id"] == "replay-run-001"
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-correlation-id"]
+
+
+def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> None:
+    client = seeded_app(tmp_path)
+
+    response = client.get("/api/virtual-ledgers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["opening_reversal"]["ledger_scope"] == "opening_reversal_v1_1"
+    assert payload["opening_reversal"]["items"] == []
+    assert (
+        payload["opening_reversal"]["entry_convention"] == "first_valid_live_ask_at_or_after_entry"
+    )
+    assert payload["quiet_state"]["ledger_scope"] == "quiet_state_short_premium"
+    assert payload["quiet_state"]["items"] == []
+    assert (
+        payload["quiet_state"]["fill_convention"]
+        == "open_short_bid_long_ask_close_short_ask_long_bid"
+    )
+    assert payload["ledgers_combined_for_analysis"] is False
+    assert payload["execution_claimed"] is False
+    assert payload["broker_positions_claimed"] is False
+    assert payload["claims_boundary"] == claims_boundary()
 
 
 def test_optional_snapshot_section_failure_preserves_other_sections(

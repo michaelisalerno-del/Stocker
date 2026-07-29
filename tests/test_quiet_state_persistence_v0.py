@@ -16,6 +16,7 @@ from stocker_prospective.quiet_state import (
     QuietEpisodeTracker,
     classify_quiet_state,
 )
+from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 
 START = datetime(2026, 7, 27, 14, 0, tzinfo=UTC)
@@ -399,3 +400,112 @@ def test_quiet_session_state_restores_last_eligible_and_episode(tmp_path: Path) 
     assert probability == 0.13
     assert timestamp == START
     assert count == 1
+
+
+def test_quiet_virtual_ledger_contains_only_quiet_short_premium_structures(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "quiet-virtual-ledger.sqlite3")
+    database.migrate()
+    metadata = _metadata("quiet-virtual-ledger")
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    score = _score(0.13)
+    checkpoint_id = repository.record_checkpoint(
+        metadata,
+        symbol="AAL",
+        session=SESSION,
+        checkpoint=6,
+        bar_start_utc=START - timedelta(minutes=5),
+        bar_end_utc=START,
+        score=score,
+        session_context_hash="d" * 64,
+        feature_values={"x": 1.0},
+        eligible=True,
+        feature_freshness="fresh",
+        rejection_reasons=(),
+    )
+    quiet_checkpoint_id = repository.record_quiet_checkpoint(
+        metadata,
+        checkpoint_id=checkpoint_id,
+        symbol="AAL",
+        session=SESSION,
+        checkpoint=6,
+        snapshot=classify_quiet_state(
+            probability=score.probability,
+            previous_probability=None,
+            model_hash=score.model_hash,
+            feature_hash=score.feature_hash,
+            data_quality_status="valid",
+        ),
+        eligible=True,
+    )
+    observation_id = repository.record_quiet_episode(
+        metadata,
+        quiet_checkpoint_id=quiet_checkpoint_id,
+        decision=QuietEpisodeTracker().evaluate(
+            symbol="AAL",
+            session=SESSION,
+            checkpoint=6,
+            trigger_bar_end=START,
+            probability=score.probability,
+        ),
+        scientific_recording_valid=True,
+    )
+    payload = {
+        "closing_debit": 40.0,
+        "configured_commission_pnl": 7.4,
+        "legs": [
+            {"side": "short", "con_id": 101, "strike": 100.0, "right": "C"},
+            {"side": "short", "con_id": 102, "strike": 100.0, "right": "P"},
+            {"side": "long", "con_id": 103, "strike": 105.0, "right": "C"},
+            {"side": "long", "con_id": 104, "strike": 95.0, "right": "P"},
+        ],
+    }
+    for structure_type in ("DELTA_IRON_CONDOR", "LONG_CALL"):
+        repository.record_quiet_shadow_structure(
+            metadata,
+            observation_id=observation_id,
+            structure_type=structure_type,
+            dte_bucket="1DTE",
+            horizon_label="15m",
+            horizon_minutes=15,
+            payload=payload,
+            opening_credit_or_debit=50.0,
+            maximum_defined_risk=450.0,
+            conservative_pnl=10.0,
+            return_on_maximum_risk=10.0 / 450.0,
+            short_strike_touched=False,
+            protective_wing_touched=False,
+            attempted=True,
+            complete_quote_quality=True,
+            strict_quote_quality=True,
+            quality_status="strict_quality",
+            quality_flags=(),
+        )
+
+    with database._connect() as connection:
+        rows = connection.execute("SELECT * FROM quiet_state_virtual_position_v1").fetchall()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ledger_scope"] == "quiet_state_short_premium"
+    assert row["observation_id"] == observation_id
+    assert row["observation_kind"] == "quiet_bottom_10"
+    assert row["structure_type"] == "DELTA_IRON_CONDOR"
+    assert row["lifecycle_state"] == "CLOSED"
+    assert row["opening_net_credit"] == pytest.approx(50.0)
+    assert row["closing_net_debit"] == pytest.approx(40.0)
+    assert row["conservative_pnl"] == pytest.approx(10.0)
+    assert row["leg_count"] == 4
+    assert row["execution_claimed"] == 0
+    assert row["paper_fill_claimed"] == 0
+
+    projected = ProspectiveReadStore(
+        database.database_path,
+        run_id=metadata.run_id,
+    ).quiet_state_virtual_positions_v1()
+    assert len(projected) == 1
+    assert projected[0]["structure_type"] == "DELTA_IRON_CONDOR"
+    assert projected[0]["legs"][0]["side"] == "short"
+    assert projected[0]["conservative_pnl"] == pytest.approx(10.0)

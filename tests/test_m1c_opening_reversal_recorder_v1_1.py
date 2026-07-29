@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 import pytest
 
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
+from stocker_prospective.events import OptionQuoteEvent
 from stocker_prospective.frozen_m1c import FrozenM1CScore
 from stocker_prospective.group_o import build_group_o_context
 from stocker_prospective.m1c_features import LiveFeatureBar
@@ -33,6 +34,9 @@ from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.opening_market_transition_v1 import (
     OpeningTransitionThresholdsV1,
 )
+from stocker_prospective.option_ledger import OptionContract
+from stocker_prospective.options import DteBucket
+from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.recorder_v0 import (
     FrozenM1CRecorderEngine,
@@ -1007,3 +1011,139 @@ def test_checkpoint_engine_emits_v1_1_receipt_behind_causal_barrier(
     assert receipt.receipt_created_at_utc == RECEIPT_CREATED
     assert receipt.timing_evidence_v1_1 is not None
     assert receipt.timing_evidence_v1_1.entry_or_post_entry_data_admitted_before_receipt is False
+
+
+def test_v1_1_virtual_position_closes_only_after_both_primary_pair_outcomes(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "virtual-position-v1-1.sqlite3")
+    database.migrate()
+    metadata = _metadata("virtual-position-v1-1", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    receipt = _seed_eligible_v1_1_episode(database, repository, metadata)
+    selection = _primary_selection()
+    repository.record_opening_reversal_contract_discovery_v1(
+        metadata,
+        episode_id="fresh-aal",
+        selection=selection,
+    )
+    predicted = selection.call if receipt.prediction_v1 == "CALL" else selection.put
+    opposite = selection.put if receipt.prediction_v1 == "CALL" else selection.call
+    predicted_contract = OptionContract(
+        underlying_con_id=1,
+        con_id=predicted.con_id,
+        expiry=predicted.expiry,
+        dte=1,
+        dte_bucket=DteBucket.ONE_DTE,
+        strike=predicted.strike,
+        right=predicted.right,
+        multiplier=predicted.multiplier,
+        exchange=predicted.exchange,
+        trading_class=predicted.trading_class,
+    )
+    option_contract_id = repository.record_option_contract(
+        metadata,
+        episode_id="fresh-aal",
+        contract=predicted_contract,
+        selection_rank=1,
+        resolution_status="recording",
+        rejection_reason=None,
+        recording_started_at_utc=ENTRY,
+        recording_ends_at_utc=ENTRY + timedelta(minutes=30),
+    )
+    repository.update_option_quote_projection(
+        option_contract_id=option_contract_id,
+        event=OptionQuoteEvent(
+            event_id="virtual-position-latest-quote",
+            received_timestamp_utc=ENTRY + timedelta(seconds=2),
+            received_monotonic_ns=1,
+            provider_timestamp_utc=ENTRY + timedelta(seconds=2),
+            source_sequence=1,
+            session=SESSION,
+            symbol="AAL",
+            con_id=predicted.con_id,
+            request_id=101,
+            episode_id="fresh-aal",
+            expiry=predicted.expiry,
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=predicted.strike,
+            right=predicted.right,
+            multiplier=predicted.multiplier,
+            exchange=predicted.exchange,
+            trading_class=predicted.trading_class,
+            bid=1.05,
+            bid_size=10.0,
+            ask=1.15,
+            ask_size=12.0,
+            last=1.10,
+            last_size=1.0,
+            market_data_type=MarketDataType.LIVE,
+        ),
+        recording_status="recording",
+        quote_quality_flags=(),
+    )
+
+    with database._connect() as connection:
+        capturing = connection.execute(
+            "SELECT * FROM opening_reversal_virtual_position_v1"
+        ).fetchone()
+    assert capturing is not None
+    assert capturing["lifecycle_state"] == "CAPTURING"
+    assert capturing["con_id"] == predicted.con_id
+    assert capturing["role"] == "predicted_leg"
+    assert capturing["planned_live_market_data_lines"] == 2
+    assert capturing["pair_outcome_count"] == 0
+    assert capturing["latest_observed_bid"] == pytest.approx(1.05)
+    assert capturing["latest_observed_ask"] == pytest.approx(1.15)
+
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=predicted,
+            role="predicted_leg",
+        ),
+    )
+    with database._connect() as connection:
+        still_capturing = connection.execute(
+            "SELECT * FROM opening_reversal_virtual_position_v1"
+        ).fetchone()
+    assert still_capturing["lifecycle_state"] == "CAPTURING"
+    assert still_capturing["pair_outcome_count"] == 1
+
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=opposite,
+            role="opposite_leg",
+        ),
+    )
+    with database._connect() as connection:
+        rows = connection.execute("SELECT * FROM opening_reversal_virtual_position_v1").fetchall()
+
+    assert len(rows) == 1
+    closed = rows[0]
+    assert closed["lifecycle_state"] == "CLOSED"
+    assert closed["prediction_receipt_hash_v1"] == receipt.receipt_hash_v1
+    assert closed["experiment_id"] == "m1c-prospective-opening-reversal-v1"
+    assert closed["experiment_version"] == "1.1"
+    assert closed["right"] == predicted.right
+    assert closed["dte"] == 1
+    assert closed["quantity"] == 1
+    assert closed["entry_ask"] == pytest.approx(1.1)
+    assert closed["exit_bid"] == pytest.approx(1.2)
+    assert closed["gross_quote_pnl"] == pytest.approx(10.0)
+    assert closed["execution_claimed"] == 0
+    assert closed["paper_fill_claimed"] == 0
+
+    projected = ProspectiveReadStore(
+        database.database_path,
+        run_id=metadata.run_id,
+    ).opening_reversal_virtual_positions_v1()
+    assert len(projected) == 1
+    assert projected[0]["lifecycle_state"] == "CLOSED"
+    assert projected[0]["right"] == predicted.right
+    assert projected[0]["gross_quote_pnl"] == pytest.approx(10.0)

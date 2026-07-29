@@ -12,6 +12,10 @@ const state = {
   universe: [],
   episodes: [],
   shadow: [],
+  virtualLedgers: {
+    opening_reversal: { items: [] },
+    quiet_state: { items: [] },
+  },
   audit: [],
   sessionReports: [],
   selectedEpisode: null,
@@ -658,6 +662,51 @@ function renderShadow() {
   ));
 }
 
+function renderVirtualLedgers() {
+  const opening = state.virtualLedgers.opening_reversal?.items || [];
+  const quiet = state.virtualLedgers.quiet_state?.items || [];
+  replace("opening-reversal-virtual-ledger", table(
+    [
+      { label: "State", value: "lifecycle_state" },
+      { label: "Session", value: "session_date" },
+      { label: "Symbol", value: "symbol" },
+      { label: "Direction", value: "predicted_direction" },
+      { label: "Right", value: "right" },
+      { label: "1DTE contract", value: "con_id" },
+      { label: "Strike", value: "strike" },
+      { label: "Latest bid", value: "latest_observed_bid" },
+      { label: "Latest ask", value: "latest_observed_ask" },
+      { label: "Latest quote", value: "latest_quote_received_at_utc", format: clock },
+      { label: "Entry ask", value: "entry_ask" },
+      { label: "Exit bid", value: "exit_bid" },
+      { label: "Gross quote P&L", value: "gross_quote_pnl" },
+      { label: "Pair outcomes", value: (row) => `${row.pair_complete_count} / 2` },
+      { label: "Blocker / wait", value: "status_reason" },
+    ],
+    opening,
+  ));
+  replace("quiet-state-virtual-ledger", table(
+    [
+      { label: "State", value: "lifecycle_state" },
+      { label: "Session", value: "session_date" },
+      { label: "Symbol", value: "symbol" },
+      { label: "Structure", value: "structure_type" },
+      { label: "DTE", value: "dte_bucket" },
+      { label: "Horizon", value: "horizon_label" },
+      { label: "Legs", value: "leg_count" },
+      { label: "Opening credit", value: "opening_net_credit" },
+      { label: "Closing debit", value: "closing_net_debit" },
+      { label: "Conservative P&L", value: "conservative_pnl" },
+      { label: "Commission P&L", value: "configured_commission_pnl" },
+      { label: "Max risk", value: "maximum_defined_risk" },
+      { label: "Quality", value: "quality_status" },
+      { label: "Scientific", value: "scientific_option_evidence" },
+      { label: "Blocker", value: "status_reason" },
+    ],
+    quiet,
+  ));
+}
+
 function renderQuietUniverse() {
   const status = state.quietStatus;
   const thresholds = status.thresholds || {};
@@ -1047,6 +1096,7 @@ async function performRefresh({ refreshDetails = false, signal } = {}) {
     if (sections.universe) state.universe = sections.universe.items || [];
     if (sections.episodes) state.episodes = sections.episodes.items || [];
     if (sections.shadow) state.shadow = sections.shadow.items || [];
+    if (sections.virtual_ledgers) state.virtualLedgers = sections.virtual_ledgers;
     if (sections.audit) state.audit = sections.audit.items || [];
     if (sections.session_reports) {
       state.sessionReports = sections.session_reports.items || [];
@@ -1079,6 +1129,7 @@ async function performRefresh({ refreshDetails = false, signal } = {}) {
     renderUniverse();
     renderEpisodeIndex();
     renderShadow();
+    renderVirtualLedgers();
     renderAudit();
     renderQuietUniverse();
     renderQuietEpisodeIndex();

@@ -8,7 +8,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROSPECTIVE_PACKAGE = "packages/stocker_prospective/"
-PROSPECTIVE_TEST_PREFIXES = ("tests/test_prospective_", "tests/test_m1c_")
+PROSPECTIVE_TEST_PREFIXES = (
+    "tests/test_prospective_",
+    "tests/test_m1c_",
+    "tests/test_quiet_state_",
+)
 
 
 def _git(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:

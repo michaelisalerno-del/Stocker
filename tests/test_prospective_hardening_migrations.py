@@ -39,7 +39,7 @@ def create_pre_hardening_database(path: Path) -> None:
             """
         )
         for migration in sorted(MIGRATION_ROOT.glob("*.sql")):
-            if migration.name.startswith(("0016_", "0017_")):
+            if migration.name.startswith(("0016_", "0017_", "0018_")):
                 continue
             connection.executescript(migration.read_text(encoding="utf-8"))
             connection.execute(
@@ -130,6 +130,12 @@ def test_pre_hardening_database_migrates_forward_without_deleting_legacy_data(
             WHERE version = '0017_callback_raw_only_recovery_v1.sql'
             """
         ).fetchone() == (1,)
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM schema_migrations
+            WHERE version = '0018_virtual_position_ledgers_v1.sql'
+            """
+        ).fetchone() == (1,)
         for table in (
             "callback_inbox_v1",
             "callback_raw_materialization_v1",
@@ -147,6 +153,17 @@ def test_pre_hardening_database_migrates_forward_without_deleting_legacy_data(
                 WHERE type = 'table' AND name = ?
                 """,
                 (table,),
+            ).fetchone() == (1,)
+        for view in (
+            "opening_reversal_virtual_position_v1",
+            "quiet_state_virtual_position_v1",
+        ):
+            assert connection.execute(
+                """
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type = 'view' AND name = ?
+                """,
+                (view,),
             ).fetchone() == (1,)
         inbox_columns = {
             str(row[1]) for row in connection.execute("PRAGMA table_info(callback_inbox_v1)")
@@ -186,7 +203,9 @@ def test_database_with_0016_already_applied_receives_0017_columns(
             for row in connection.execute(
                 """
                 SELECT version FROM schema_migrations
-                WHERE version LIKE '0016_%' OR version LIKE '0017_%'
+                WHERE version LIKE '0016_%'
+                   OR version LIKE '0017_%'
+                   OR version LIKE '0018_%'
                 """
             )
         }
@@ -212,6 +231,7 @@ def test_database_with_0016_already_applied_receives_0017_columns(
     assert versions == {
         "0016_prospective_recorder_hardening_v1.sql",
         "0017_callback_raw_only_recovery_v1.sql",
+        "0018_virtual_position_ledgers_v1.sql",
     }
     assert "stream_owner_json" in inbox_columns
     assert {

@@ -868,6 +868,7 @@ From the server:
 ```bash
 curl --fail --silent http://127.0.0.1:8765/api/health | jq .
 curl --fail --silent http://127.0.0.1:8765/api/dashboard-snapshot | jq .
+curl --fail --silent http://127.0.0.1:8765/api/virtual-ledgers | jq .
 curl --fail --silent http://127.0.0.1:8765/api/config/public | jq .
 curl --fail --silent http://127.0.0.1:8765/openapi.json | jq '.paths | keys'
 ```
@@ -886,6 +887,14 @@ heartbeat, gap counts, persisted artifact receipts, operational alerts, and
 the last database observation time in one read transaction. An old historical
 run without a current fresh lease must show `INACTIVE`, `STOPPED_CLEANLY`, or
 `STALE_HEARTBEAT`; it must never show recording merely because rows exist.
+
+The virtual-ledger response contains separate `opening_reversal` and
+`quiet_state` collections. It must state that the ledgers are not combined and
+that no execution or broker positions are claimed. An opening-reversal row is
+`CLOSED` only after both strict primary-pair outcomes are complete. Quiet-state
+rows include only bottom-10 short-premium structures; controls and long-option
+candidates remain outside that ledger. An empty collection means no qualifying
+immutable outcome exists for the selected run, not that a hidden fill occurred.
 
 ## 10. Start record-only IBKR mode
 
@@ -1240,6 +1249,7 @@ evidence without its own audit.
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
+| Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation, strict contract evidence, and completed bid/ask outcomes. Inspect the corresponding capture or invalid reason; do not manufacture a position from configuration, a latest quote, or a partial leg. |
 
 ## Secure browser access
 

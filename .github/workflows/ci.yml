@@ -32,13 +32,13 @@ jobs:
         run: uv run python scripts/check_prospective_changed_format.py --base "$CI_BASE_SHA"
 
       - name: Lint prospective recorder
-        run: uv run ruff check packages/stocker_prospective/src tests/test_prospective_*.py tests/test_m1c_*.py
+        run: uv run ruff check packages/stocker_prospective/src tests/test_prospective_*.py tests/test_m1c_*.py tests/test_quiet_state_*.py
 
       - name: Type check prospective recorder
         run: uv run mypy --no-incremental packages/stocker_prospective/src/stocker_prospective
 
       - name: Test prospective recorder and M1C segregation
-        run: uv run pytest tests/test_prospective_*.py tests/test_m1c_*.py
+        run: uv run pytest tests/test_prospective_*.py tests/test_m1c_*.py tests/test_quiet_state_*.py
 
       - name: Import and CLI smoke test
         run: |

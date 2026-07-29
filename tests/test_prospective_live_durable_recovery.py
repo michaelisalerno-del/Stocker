@@ -212,6 +212,44 @@ def emit(adapter: IBKRMarketDataAdapter, *, field: str = "bid") -> None:
     )
 
 
+def admit_bar(
+    inbox: DurableCallbackInbox,
+    *,
+    bar_start: datetime,
+    received_at: datetime,
+    monotonic_ns: int,
+) -> None:
+    inbox.admit(
+        callback_kind="historical_bar_update",
+        request_id=7,
+        payload={
+            "bar_start_utc": bar_start.isoformat(),
+            "open": 10.0,
+            "high": 10.1,
+            "low": 9.9,
+            "close": 10.05,
+            "volume": None,
+            "wap": None,
+            "trade_count": None,
+        },
+        connection_generation=1,
+        classification=CallbackClassification.ACCEPTED_ACTIVE,
+        received_utc=received_at,
+        received_monotonic_ns=monotonic_ns,
+        subscription_owner="AAL:historical_keep_up_to_date",
+        symbol="AAL",
+        stream_owner={
+            "request_id": 7,
+            "kind": "underlying_bar",
+            "symbol": "AAL",
+            "con_id": 123,
+            "exchange": "SMART",
+            "option_contract": None,
+            "episode_id": None,
+        },
+    )
+
+
 def manifest_count(database: ProspectiveRepository) -> int:
     with database._connect() as connection:
         return int(
@@ -285,6 +323,71 @@ def test_crash_after_lease_is_reclaimed_without_loss(tmp_path: Path) -> None:
     assert result.raw_event_count == 1
     assert inbox.accounting().acknowledged == 1
     assert manifest_count(database) == 1
+
+
+def test_replacement_generation_projects_only_its_own_callbacks(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="first",
+        inbox=inbox,
+        register_default_stream=False,
+    )
+    admit_bar(
+        inbox,
+        bar_start=NOW,
+        received_at=NOW,
+        monotonic_ns=1,
+    )
+
+    replacement, _ = build_recorder(
+        tmp_path,
+        database,
+        generation=2,
+        owner="replacement",
+        inbox=inbox,
+        register_default_stream=False,
+    )
+    replacement.register_stream(
+        StreamOwner(
+            request_id=7,
+            kind=StreamKind.UNDERLYING_BAR,
+            symbol="AAL",
+            con_id=123,
+            exchange="SMART",
+        )
+    )
+    admit_bar(
+        inbox,
+        bar_start=NOW - timedelta(hours=1),
+        received_at=NOW + timedelta(seconds=1),
+        monotonic_ns=2,
+    )
+
+    recovered = replacement.poll(now=NOW + timedelta(seconds=2))
+    replacement.finalize_durable_poll(
+        recovered,
+        acknowledged_at=NOW + timedelta(seconds=2),
+    )
+    projected = replacement.poll(now=NOW + timedelta(seconds=3))
+    replacement.finalize_durable_poll(
+        projected,
+        acknowledged_at=NOW + timedelta(seconds=3),
+    )
+
+    assert recovered.callback_count == 1
+    assert recovered.processing_disposition == "scientifically_blocked_raw_only"
+    assert not recovered.scientific_projection_complete
+    assert projected.callback_count == 1
+    assert projected.processing_disposition == "normal_scientific_projection"
+    assert projected.scientific_projection_complete
+    assert inbox.accounting().acknowledged == 2
+    assert not inbox.has_active_fatal()
 
 
 def test_replacement_generation_recovers_raw_but_cannot_reenable_scoring(
@@ -601,7 +704,27 @@ def test_crash_after_parquet_completion_before_manifest_reconciles_on_restart(
     accounting = inbox.accounting()
     assert accounting.acknowledged == 1
     assert accounting.highest_source_sequence == (accounting.highest_acknowledged_sequence)
-    assert manifest_count(database) == 1
+    with database._connect() as connection:
+        event_type_counts = {
+            str(row["event_type"]): int(row["event_count"])
+            for row in connection.execute(
+                """
+                SELECT event_type, COUNT(*) AS event_count
+                FROM raw_partition_manifest_v0
+                WHERE run_id = ?
+                GROUP BY event_type
+                """,
+                (RUN_ID,),
+            )
+        }
+    # The reconciled scientific event remains unique. Because the crash
+    # preceded its inbox-materialization receipt, the replacement generation
+    # also preserves the original callback as a non-scientific raw envelope
+    # rather than risking a second stateful projection.
+    assert event_type_counts == {
+        "raw_callback_envelope_event": 1,
+        "underlying_level1_quote_event": 1,
+    }
 
 
 def test_outer_application_failure_keeps_raw_evidence_and_blocks_validity(

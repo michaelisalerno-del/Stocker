@@ -1418,7 +1418,77 @@ class FrozenM1CLiveRecorder:
         pending_events = tuple(pending)
         try:
             materialization = inbox.raw_materialization(pending_events)
-            if self._scientific_block_latched:
+            project_current_generation = all(
+                event.admission_recorder_generation == self.recorder_generation
+                for event in pending_events
+            )
+            if not self._scientific_block_latched and materialization is None and pending_events:
+                future_event = next(
+                    (
+                        event
+                        for event in pending_events
+                        if event.admission_recorder_generation is not None
+                        and event.admission_recorder_generation > self.recorder_generation
+                    ),
+                    None,
+                )
+                if future_event is not None:
+                    raise CallbackInboxError("CALLBACK_ADMISSION_FROM_NEWER_RECORDER_GENERATION")
+                project_current_generation = (
+                    pending_events[0].admission_recorder_generation == self.recorder_generation
+                )
+                split_at = next(
+                    (
+                        index
+                        for index, event in enumerate(pending_events[1:], start=1)
+                        if (event.admission_recorder_generation == self.recorder_generation)
+                        is not project_current_generation
+                    ),
+                    len(pending_events),
+                )
+                deferred_events = pending_events[split_at:]
+                if deferred_events:
+                    released = inbox.release(
+                        deferred_events,
+                        lease_owner=self.lease_owner,
+                        lease_generation=self.recorder_generation,
+                        now=observed_now,
+                    )
+                    if released != len(deferred_events):
+                        raise CallbackInboxError("CALLBACK_GENERATION_SPLIT_LEASE_CHANGED")
+                    pending_events = pending_events[:split_at]
+            if pending_events and not project_current_generation:
+                first = pending_events[0]
+                last = pending_events[-1]
+                inbox.record_incident(
+                    stable_error_code="CALLBACK_PREVIOUS_RECORDER_GENERATION_RAW_ONLY",
+                    component="prospective_live_recorder",
+                    severity="diagnostic",
+                    occurred_at=observed_now,
+                    error_class="PreviousRecorderGenerationCallback",
+                    evidence_loss_possible=False,
+                    callback_kind=first.callback_kind,
+                    request_id=first.request_id,
+                    source_sequence=first.source_sequence,
+                    connection_generation=first.connection_generation,
+                    subscription_owner=first.subscription_owner,
+                    symbol=first.symbol,
+                    details={
+                        "callback_count": len(pending_events),
+                        "current_recorder_generation": self.recorder_generation,
+                        "admission_recorder_generation": (first.admission_recorder_generation),
+                        "first_source_sequence": first.source_sequence,
+                        "last_source_sequence": last.source_sequence,
+                    },
+                    incident_id=hashlib.sha256(
+                        (
+                            "previous_recorder_generation_raw_only|"
+                            f"{self.run_id}|{self.recorder_generation}|"
+                            f"{first.inbox_event_id}|{last.inbox_event_id}"
+                        ).encode()
+                    ).hexdigest(),
+                )
+            if self._scientific_block_latched or not project_current_generation:
                 result = self._poll_scientifically_blocked_batch(
                     now=observed_now,
                     events=pending_events,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -94,3 +95,24 @@ def test_v1_1_rejects_secondary_dte_wrong_leg_count_condor_and_strike_mismatch(
             session=SESSION,
             contracts=contracts,
         )
+
+
+def test_dashboard_copy_keeps_v1_1_separate_from_quiet_option_structures() -> None:
+    dashboard = (
+        Path(__file__).parents[1]
+        / "packages"
+        / "stocker_prospective"
+        / "src"
+        / "stocker_prospective"
+        / "web_static"
+        / "index.html"
+    ).read_text(encoding="utf-8")
+    dashboard_copy = " ".join(dashboard.split())
+
+    assert "M1C V1.1 records exactly two primary 1DTE lines" in dashboard_copy
+    assert "same nearest valid common strike" in dashboard_copy
+    assert "no secondary DTE or condor" in dashboard_copy
+    assert "Quiet-state structures remain separate" in dashboard_copy
+    assert "primary 1DTE condor is secured first" not in dashboard_copy
+    option_header = "<header><span>O</span><h3>Recorded bounded contracts</h3></header>"
+    assert dashboard.count(option_header) == 1

@@ -101,6 +101,7 @@ GroupOProvider = Callable[[str, date], FrozenGroupOContext]
 OptionQuoteSink = Callable[[EvidenceMetadata, OptionQuoteEvent], None]
 EpisodeCallback = Callable[[RecorderCheckpointResult], None]
 NEW_YORK = ZoneInfo("America/New_York")
+PROCESSING_HEARTBEAT_CALLBACK_INTERVAL = 8
 
 
 @dataclass(frozen=True)
@@ -240,10 +241,11 @@ class FrozenM1CLiveRecorder:
         recorder_generation: int | None = None,
         lease_owner: str | None = None,
         inbox_lease_timeout: timedelta = timedelta(seconds=30),
-        inbox_batch_limit: int = 2_048,
+        inbox_batch_limit: int = 32,
         failure_injector: Callable[[str], None] | None = None,
         operational_repository: RecorderOperationalRepository | None = None,
         operational_thresholds: OperationalThresholds | None = None,
+        processing_heartbeat: Callable[[], object] | None = None,
     ) -> None:
         if len(universe_symbols) != 20 or len(set(universe_symbols)) != 20:
             raise ValueError("frozen M1C live recorder requires the exact 20-stock cohort")
@@ -301,6 +303,7 @@ class FrozenM1CLiveRecorder:
         self.failure_injector = failure_injector
         self.operational_repository = operational_repository
         self.operational_thresholds = operational_thresholds or OperationalThresholds()
+        self.processing_heartbeat = processing_heartbeat
         self._inflight_durable_events: tuple[CallbackInboxEvent, ...] = ()
         self._finalizer = KeepUpToDateBarFinalizer(
             prospective_collection_start=normalizer.prospective_collection_start
@@ -1779,7 +1782,15 @@ class FrozenM1CLiveRecorder:
         # No raw/derived side effect begins until the entire lease is known to
         # be normalisable. A poison callback therefore cannot partially apply
         # an earlier callback from the same batch.
-        for payload, normalized in normalized_callbacks:
+        for callback_index, (payload, normalized) in enumerate(normalized_callbacks):
+            # Initial historical backfills can make one bounded batch costly.
+            # Refresh ownership before stateful projection so the generation's
+            # lease cannot appear abandoned while its inbox lease is active.
+            if (
+                self.processing_heartbeat is not None
+                and callback_index % PROCESSING_HEARTBEAT_CALLBACK_INTERVAL == 0
+            ):
+                self.processing_heartbeat()
             if normalized is None:
                 continue
             raw_disposition: Literal["admit", "buffer"] = "admit"

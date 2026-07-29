@@ -1751,6 +1751,7 @@ def build_frozen_prospective_application(
         inbox_batch_limit=config.runtime.callback_inbox_batch_limit,
         operational_repository=operational_repository,
         operational_thresholds=operational_thresholds(config),
+        processing_heartbeat=heartbeat,
     )
 
     controller = LiveSubscriptionController(

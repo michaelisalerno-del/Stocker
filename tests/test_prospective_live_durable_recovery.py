@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -98,6 +99,7 @@ def build_recorder(
     raw_failure_phase: str | None = None,
     raw_crash_phase: str | None = None,
     register_default_stream: bool = True,
+    processing_heartbeat: Callable[[], object] | None = None,
 ) -> tuple[FrozenM1CLiveRecorder, IBKRMarketDataAdapter]:
     operational = RecorderOperationalRepository(database.database_path)
     operational.start_generation(
@@ -186,6 +188,7 @@ def build_recorder(
         inbox_lease_timeout=timedelta(seconds=5),
         operational_repository=operational,
         failure_injector=recorder_failure if failure_phase is not None else None,
+        processing_heartbeat=processing_heartbeat,
     )
     if register_default_stream:
         recorder.register_stream(
@@ -287,6 +290,34 @@ def test_durable_poll_acknowledges_only_after_raw_manifest_commit(
     assert accounting.acknowledged == 1
     assert accounting.pending == 0
     assert accounting.highest_source_sequence == accounting.highest_acknowledged_sequence
+
+
+def test_large_durable_batch_refreshes_processing_heartbeat(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    pulses: list[int] = []
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+        processing_heartbeat=lambda: pulses.append(len(pulses)),
+    )
+    for index in range(17):
+        emit(adapter, field="bid" if index % 2 else "ask")
+
+    result = recorder.poll(now=NOW + timedelta(seconds=1))
+    recorder.finalize_durable_poll(
+        result,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    assert recorder.inbox_batch_limit == 32
+    assert len(result.durable_inbox_event_ids) == 17
+    assert pulses == [0, 1, 2]
 
 
 def test_crash_after_lease_is_reclaimed_without_loss(tmp_path: Path) -> None:

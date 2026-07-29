@@ -64,7 +64,7 @@ class RuntimeConfig(BaseModel):
     recorder_lease_stale_seconds: int = Field(default=60, ge=15)
     heartbeat_seconds: int = Field(default=10, ge=1)
     callback_inbox_max_unacknowledged: int = Field(default=65_536, ge=1)
-    callback_inbox_batch_limit: int = Field(default=2_048, ge=1, le=65_536)
+    callback_inbox_batch_limit: int = Field(default=32, ge=1, le=65_536)
     callback_inbox_lease_seconds: int = Field(default=30, ge=5)
     callback_heartbeat_stale_seconds: int = Field(default=30, ge=5)
     raw_storage_heartbeat_stale_seconds: int = Field(default=60, ge=5)

@@ -465,6 +465,7 @@ def test_episode_scientific_gate_fails_closed_with_stored_reasons() -> None:
             unresolved_bar_gap=False,
             deterministic_episode_identity=True,
             raw_event_storage_writable=True,
+            scientific_recording_authorized=True,
         )
     )
 

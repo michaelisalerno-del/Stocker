@@ -14,7 +14,7 @@ from stocker_prospective.config import ProspectiveConfig, operational_thresholds
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.contract import SECTOR_PROXY_BY_SYMBOL
 from stocker_prospective.database import ProspectiveRepository
-from stocker_prospective.fake_ibkr import FakeIBKRAdapter
+from stocker_prospective.fake_ibkr import FakeIBKRAdapter, FakeIBKREvent
 from stocker_prospective.frozen_live_application import (
     _require_compatible_existing_activation,
     build_frozen_prospective_application,
@@ -26,6 +26,7 @@ from stocker_prospective.group_o import (
     FrozenGroupOSessionPackage,
     build_group_o_context,
 )
+from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder import RecorderDeploymentIdentity
 
@@ -59,6 +60,10 @@ def _build_fake_application(
     tmp_path: Path,
     *,
     include_scientific_prerequisites: bool,
+    complete_activity_baseline: bool = False,
+    bar_compatibility_passed: bool | None = None,
+    write_bar_compatibility_report: bool = True,
+    events: tuple[FakeIBKREvent, ...] | None = None,
     git_commit: str = "a" * 40,
 ) -> tuple[object, ProspectiveConfig, FakeIBKRAdapter, tuple[str, ...]]:
     universe = json.loads(
@@ -67,20 +72,37 @@ def _build_fake_application(
     symbols = tuple(str(value) for value in universe["symbols"])
     activity_path = tmp_path / "historical-activity.parquet"
     if include_scientific_prerequisites:
+        activity_sessions = ["2026-07-23"]
+        activity_ordinals = range(1)
+        if complete_activity_baseline:
+            latest = previous_xnys_session(datetime.now(UTC).date() + timedelta(days=1))
+            reversed_sessions = [latest]
+            for _ in range(19):
+                reversed_sessions.append(previous_xnys_session(reversed_sessions[-1]))
+            activity_sessions = [session.isoformat() for session in reversed(reversed_sessions)]
+            activity_ordinals = range(6)
         pd.DataFrame(
             [
                 {
                     "symbol": symbol,
-                    "session": "2026-07-23",
-                    "bar_ordinal": 0,
+                    "session": session,
+                    "bar_ordinal": ordinal,
                     "volume": 1_000.0,
                 }
                 for symbol in symbols
+                for session in activity_sessions
+                for ordinal in activity_ordinals
             ]
         ).to_parquet(activity_path, index=False)
     bar_report = tmp_path / "bar-compatibility.json"
-    if include_scientific_prerequisites:
-        bar_report.write_text('{"passed":true}\n', encoding="utf-8")
+    if include_scientific_prerequisites and write_bar_compatibility_report:
+        bar_report.write_text(
+            json.dumps(
+                {"passed": (True if bar_compatibility_passed is None else bar_compatibility_passed)}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     context_root = tmp_path / "context"
     context_root.mkdir(exist_ok=True)
 
@@ -142,7 +164,14 @@ def _build_fake_application(
         symbols=symbols,
         bundle_verified=True,
     )
-    adapter = FakeIBKRAdapter.from_fixture(FAKE_FIXTURE)
+    adapter = (
+        FakeIBKRAdapter.from_fixture(FAKE_FIXTURE)
+        if events is None
+        else FakeIBKRAdapter(
+            fixture_id="engineering-shadow-checkpoint-v0",
+            events=events,
+        )
+    )
     adapter.connect()
     repository = ProspectiveRepository(config.paths.database)
     repository.migrate()
@@ -180,6 +209,169 @@ def _build_fake_application(
         adapter,
         symbols,
     )
+
+
+def _completed_bar_events() -> tuple[tuple[FakeIBKREvent, ...], datetime]:
+    events: list[FakeIBKREvent] = []
+    sequence = 0
+    candidate_session = datetime.now(UTC).date() + timedelta(days=1)
+    while True:
+        try:
+            session_open, _session_close = xnys_session_bounds(candidate_session)
+            break
+        except ValueError:
+            candidate_session += timedelta(days=1)
+    for checkpoint in range(1, 8):
+        bar_end = session_open + timedelta(minutes=5 * checkpoint)
+        for symbol in ("AAL", "VTI"):
+            events.append(
+                FakeIBKREvent(
+                    sequence=sequence,
+                    scenario="engineering_shadow_checkpoint",
+                    kind="five_minute_bar",
+                    timestamp_utc=bar_end.isoformat(),
+                    payload={"symbol": symbol, "checkpoint": checkpoint},
+                )
+            )
+            sequence += 1
+    observed = session_open + timedelta(minutes=35, seconds=1)
+    return tuple(events), observed
+
+
+def _write_valid_group_o_package(
+    *,
+    config: ProspectiveConfig,
+    symbols: tuple[str, ...],
+    signal_session: datetime,
+) -> None:
+    runtime = FrozenM1CRuntime.from_artifacts(
+        feature_manifest_path=ARCHETYPE_ROOT / "causal_movement_feature_manifest.json",
+        threshold_path=ARCHETYPE_ROOT / "causal_movement_threshold.json",
+    )
+    session = signal_session.date()
+    observation_session = previous_xnys_session(session)
+    package = FrozenGroupOSessionPackage(
+        contract_version="frozen-m1c-microstructure-recorder-v0/group-o-session-v0",
+        signal_session=session,
+        generated_from_authorised_cache=True,
+        feature_manifest_hash=GROUP_O_FEATURE_MANIFEST_SHA256,
+        regime_mapping_hash=GROUP_O_REGIME_MAPPING_SHA256,
+        contexts=tuple(
+            build_group_o_context(
+                symbol=symbol,
+                signal_session=session,
+                actual_option_observation_session=observation_session,
+                front_expiry=session + timedelta(days=3),
+                dte=3,
+                atm_strike=10.0,
+                features={name: 0.0 for name in runtime.required_group_o_features},
+                missing_indicators={},
+                quality_status="valid",
+                source_receipt_hashes=("a" * 64,),
+            )
+            for symbol in symbols
+        ),
+    )
+    output = config.paths.context_root / "group-o" / f"{session.isoformat()}.json"
+    output.parent.mkdir(parents=True)
+    output.write_text(package.model_dump_json(indent=2), encoding="utf-8")
+
+
+def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_claim(
+    tmp_path: Path,
+) -> None:
+    events, observed = _completed_bar_events()
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        bar_compatibility_passed=True,
+        events=events,
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+
+    results = tuple(
+        application.poll(now=observed + timedelta(seconds=offset)) for offset in range(3)
+    )
+    checkpoint_results = tuple(
+        checkpoint for result in results for checkpoint in result.checkpoint_results
+    )
+
+    assert application.live_recorder.shadow_evaluation_enabled is True
+    # Runtime artifacts are verified, but the immutable 20-session transfer
+    # cohort still keeps this checkpoint out of scientific evidence.
+    assert application.live_recorder.scientific_scoring_enabled is True
+    assert len(checkpoint_results) == 1, [
+        (
+            result.callback_count,
+            result.raw_event_count,
+            result.finalised_bar_count,
+            result.checkpoint_count,
+            result.blocked_checkpoints,
+        )
+        for result in results
+    ]
+    assert "scientific_recording_not_authorized" in (checkpoint_results[0].rejection_reasons)
+    universe = ProspectiveReadStore(
+        config.paths.database,
+        run_id=config.runtime.run_id,
+    ).universe_live_v0()
+    aal = next(item for item in universe if item["symbol"] == "AAL")
+    assert aal["m1c_probability"] is not None
+    assert aal["m1c_threshold"] == 0.488333710794033
+    assert aal["m1c_scientific_eligible"] is False
+    assert "scientific_recording_not_authorized" in aal["m1c_rejection_reasons"]
+    assert ("level1", "AAL") in adapter.active_subscriptions.values()
+    with sqlite3.connect(config.paths.database) as connection:
+        checkpoint_eligibility = connection.execute(
+            """
+            SELECT eligible
+            FROM m1c_checkpoint_v0
+            WHERE run_id = ? AND symbol = 'AAL'
+            """,
+            (config.runtime.run_id,),
+        ).fetchone()
+        scientific_option_rows = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM option_episode_allocation_v0
+            WHERE run_id = ? AND scientific_option_evidence = 1
+            """,
+            (config.runtime.run_id,),
+        ).fetchone()
+    assert checkpoint_eligibility == (0,)
+    assert scientific_option_rows == (0,)
+
+    application.shutdown(now=observed + timedelta(seconds=1))
+
+
+def test_missing_bar_compatibility_report_keeps_science_blocked_but_not_shadow(
+    tmp_path: Path,
+) -> None:
+    events, observed = _completed_bar_events()
+    application, config, _adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        write_bar_compatibility_report=False,
+        events=events,
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+    for offset in range(3):
+        application.poll(now=observed + timedelta(seconds=offset))
+
+    assert application.live_recorder.shadow_evaluation_enabled is True
+    assert application.live_recorder.scientific_scoring_enabled is False
+
+    application.shutdown(now=observed + timedelta(seconds=3))
 
 
 def test_full_recorder_application_starts_and_polls_with_fake_ibkr(

@@ -288,9 +288,23 @@ def test_quiet_checkpoint_episode_and_control_are_immutable_and_claim_bounded(
         quiet_checkpoint_id=neutral_quiet_checkpoint_id,
         decision=neutral,
         trigger_timestamp=START + timedelta(minutes=10),
-        data_quality_flags=(),
+        scientific_recording_valid=False,
+        data_quality_flags=("scientific_recording_not_authorized",),
     )
     assert control_id.startswith("m1c-neutral-")
+    with database._connect() as connection:
+        neutral_row = connection.execute(
+            """
+            SELECT scientific_recording_valid, data_quality_flags_json
+            FROM quiet_state_observation_v0
+            WHERE observation_id = ?
+            """,
+            (control_id,),
+        ).fetchone()
+    assert neutral_row["scientific_recording_valid"] == 0
+    assert json.loads(neutral_row["data_quality_flags_json"]) == [
+        "scientific_recording_not_authorized"
+    ]
     capacity_contract = OptionContract(
         underlying_con_id=1,
         con_id=201,
@@ -404,6 +418,102 @@ def test_quiet_session_state_restores_last_eligible_and_episode(tmp_path: Path) 
     assert probability == 0.13
     assert timestamp == START
     assert count == 1
+
+
+def test_shadow_only_parent_keeps_option_descendants_non_scientific(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "quiet-parent-safety.sqlite3")
+    database.migrate()
+    metadata = _metadata("quiet-parent-safety")
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    for ordinal in range(20):
+        repository.record_source_transfer_session(
+            metadata,
+            session=date(2026, 6, 1) + timedelta(days=ordinal),
+            valid=True,
+            decision="ibkr_transfer_supported_without_recalibration",
+            report={"ordinal": ordinal + 1},
+        )
+    assert repository.prospective_phase_for_session(
+        run_id=metadata.run_id,
+        session=SESSION,
+    ) == ("option_development", True)
+
+    score = _score(0.13)
+    checkpoint_id = repository.record_checkpoint(
+        metadata,
+        symbol="AAL",
+        session=SESSION,
+        checkpoint=6,
+        bar_start_utc=START - timedelta(minutes=5),
+        bar_end_utc=START,
+        score=score,
+        session_context_hash="d" * 64,
+        feature_values={"x": 1.0},
+        eligible=False,
+        feature_freshness="fresh",
+        rejection_reasons=("scientific_recording_not_authorized",),
+    )
+    quiet_checkpoint_id = repository.record_quiet_checkpoint(
+        metadata,
+        checkpoint_id=checkpoint_id,
+        symbol="AAL",
+        session=SESSION,
+        checkpoint=6,
+        snapshot=classify_quiet_state(
+            probability=score.probability,
+            previous_probability=None,
+            model_hash=score.model_hash,
+            feature_hash=score.feature_hash,
+            data_quality_status="valid",
+        ),
+        eligible=False,
+    )
+    observation_id = repository.record_quiet_episode(
+        metadata,
+        quiet_checkpoint_id=quiet_checkpoint_id,
+        decision=QuietEpisodeTracker().evaluate(
+            symbol="AAL",
+            session=SESSION,
+            checkpoint=6,
+            trigger_bar_end=START,
+            probability=score.probability,
+        ),
+        scientific_recording_valid=False,
+    )
+    repository.record_quiet_shadow_structure(
+        metadata,
+        observation_id=observation_id,
+        structure_type="CALL_CREDIT_SPREAD",
+        dte_bucket="1DTE",
+        horizon_label="15m",
+        horizon_minutes=15,
+        payload={"fixture": "shadow-only-parent"},
+        opening_credit_or_debit=None,
+        maximum_defined_risk=None,
+        conservative_pnl=None,
+        return_on_maximum_risk=None,
+        short_strike_touched=None,
+        protective_wing_touched=None,
+        attempted=False,
+        complete_quote_quality=False,
+        strict_quote_quality=False,
+        quality_status="invalid",
+        quality_flags=("scientific_recording_not_authorized",),
+    )
+
+    with database._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT cohort_phase, scientific_option_evidence
+            FROM quiet_state_shadow_outcome_v0
+            WHERE observation_id = ?
+            """,
+            (observation_id,),
+        ).fetchone()
+    assert tuple(row) == ("option_development", 0)
 
 
 def test_quiet_virtual_ledger_contains_only_quiet_short_premium_structures(

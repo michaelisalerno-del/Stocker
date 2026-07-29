@@ -302,12 +302,11 @@ def test_signed_shock_logging_failure_cannot_suppress_fresh_episode(
             underlying_quote_fresh=True,
             unresolved_bar_gap=False,
             raw_event_storage_writable=True,
+            scientific_recording_authorized=True,
         )
     )
 
     assert result.episode_decision.fresh_episode
     assert result.market_shock_state_v1.market_shock_state_v1 == "UNKNOWN_INCOMPLETE"
     with database._connect() as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM m1c_episode_v0"
-        ).fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM m1c_episode_v0").fetchone()[0] == 1

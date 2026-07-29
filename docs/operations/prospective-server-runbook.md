@@ -760,6 +760,15 @@ the 20-session engineering-transfer phase and remains optional afterward. The
 recorder enforces the resolved historical-bar request allowance as a rolling
 window during startup and reconnect restoration.
 
+The 20-session gate controls whether an observation may be scientific
+evidence; it does not disable engineering shadow capture. During
+`engineering_transfer`, completed frozen checkpoints may populate Universe
+Tape and arm bounded Level I for low/high arming candidates. The checkpoint,
+quiet observation, option allocation, outcome, and virtual-ledger descendants
+must remain explicitly non-scientific until both the source-transfer phase and
+all runtime scientific prerequisites pass. Never clear
+`scientific_recording_not_authorized` by editing the database or a receipt.
+
 Put the token only in `/etc/stocker/stocker.env`:
 
 ```dotenv
@@ -824,6 +833,11 @@ acknowledgements, fatal latches, gap incidents, runtime artifact receipts,
 recorder generations, and operational incidents in the same checked SQLite
 backup boundary. Startup fails closed if the database contains a migration
 newer than the installed application supports.
+
+Migration `0020_opening_reversal_shadow_capture_v1` keeps the 20-session and
+runtime-verification gates scientific: engineering-shadow V1.1 episodes may
+capture the frozen primary 1DTE call/put pair, but their ledger rows remain
+`scientific_eligible=false` and cannot enter the strict scientific view.
 
 ## 8. Start deterministic replay mode
 
@@ -1267,6 +1281,7 @@ evidence without its own audit.
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
+| Universe Tape has symbols and bars but no probabilities | Confirm a frozen checkpoint (6, 8, …, 34) completed with the prior-session activity baseline and Group-O package available. A pending bar-compatibility receipt should show an engineering score marked `scientific_recording_not_authorized`; it must not suppress that score. Bid/ask remains intentionally blank until the bounded promotion scheduler arms Level I for a low/high candidate. |
 | Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation and bounded contract plan. The quiet capture table may show current persisted bid/ask before a structure closes; a finalized row additionally requires complete immutable per-leg entry/exit quotes. Inspect the wait/invalid reason and never manufacture a position from configuration, a latest quote, or a partial leg. |
 
 ## Secure browser access

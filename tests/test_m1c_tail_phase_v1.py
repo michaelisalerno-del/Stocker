@@ -609,6 +609,7 @@ def test_checkpoint_repository_persists_flat_tail_phase_fields(tmp_path: Path) -
             unresolved_bar_gap=False,
             deterministic_episode_identity=True,
             raw_event_storage_writable=True,
+            scientific_recording_authorized=True,
         )
     )
     episode_id = repository.record_episode(
@@ -741,6 +742,7 @@ def test_live_engine_logs_tail_phase_without_changing_episode_eligibility(
             underlying_quote_fresh=True,
             unresolved_bar_gap=False,
             raw_event_storage_writable=True,
+            scientific_recording_authorized=True,
         )
     )
 
@@ -806,6 +808,7 @@ def test_live_engine_logs_tail_phase_without_changing_episode_eligibility(
             underlying_quote_fresh=True,
             unresolved_bar_gap=False,
             raw_event_storage_writable=True,
+            scientific_recording_authorized=True,
         )
     )
 

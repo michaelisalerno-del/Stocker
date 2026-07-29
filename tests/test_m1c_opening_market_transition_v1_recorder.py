@@ -193,16 +193,11 @@ def test_recorder_persists_opening_transition_fields_as_logging_only(
     assert bool(row["eligible"]) is True
     assert row["opening_market_proxy_v1"] == "VTI"
     assert row["vti_session_open_v1"] == window.market_session_open_v1
-    assert (
-        row["vti_prior_regular_session_close_v1"]
-        == window.market_prior_regular_session_close_v1
-    )
+    assert row["vti_prior_regular_session_close_v1"] == window.market_prior_regular_session_close_v1
     assert row["opening_expected_bar_count_v1"] == 6
     assert row["opening_observed_bar_count_v1"] == 6
     assert row["market_opening_return_v1"] == window.market_opening_return_v1
-    assert row["opening_market_transition_state_v1"] == (
-        "POSITIVE_SEVERE_OPENING_TRANSITION"
-    )
+    assert row["opening_market_transition_state_v1"] == ("POSITIVE_SEVERE_OPENING_TRANSITION")
     assert row["opening_transition_sign_v1"] == 1
     assert row["stock_opening_return_v1"] == response.stock_opening_return_v1
     assert row["stock_relative_opening_response_v1"] == (
@@ -292,8 +287,7 @@ def test_opening_logging_failure_cannot_suppress_fresh_episode(
 
     if failure_stage == "calculation":
         monkeypatch.setattr(
-            "stocker_prospective.recorder_v0."
-            "calculate_opening_preentry_window_v1",
+            "stocker_prospective.recorder_v0.calculate_opening_preentry_window_v1",
             fail,
         )
     else:
@@ -319,6 +313,7 @@ def test_opening_logging_failure_cannot_suppress_fresh_episode(
             underlying_quote_fresh=True,
             unresolved_bar_gap=False,
             raw_event_storage_writable=True,
+            scientific_recording_authorized=True,
             completed_market_shock_bars_v1=_bars("VTI"),
             market_previous_session_v1=PREVIOUS_SESSION,
             market_prior_regular_session_close_v1=99.0,
@@ -330,6 +325,4 @@ def test_opening_logging_failure_cannot_suppress_fresh_episode(
         "UNKNOWN_INCOMPLETE"
     )
     with database._connect() as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM m1c_episode_v0"
-        ).fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM m1c_episode_v0").fetchone()[0] == 1

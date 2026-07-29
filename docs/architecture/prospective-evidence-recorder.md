@@ -90,15 +90,20 @@ GET routes only.
 
 The frozen M1C mode loads and hash-verifies the causal feature manifest,
 preprocessing, coefficients, intercept, stock/checkpoint levels, and frozen
-thresholds. Runtime parity and completed-bar compatibility still fail closed,
-but a passing installation may score live IBKR bars and begin bounded option
-shadow recording immediately. The first 20 valid sessions remain
-`engineering_transfer` evidence only; the later EODHD reconstruction monitors
-ranking, threshold meaning, signal frequency, and episode identity without
-requiring exact vendor OHLC equality. Optional capacity exhaustion degrades,
-queues, reduces, or records a skip and does not stop Class 0–1 M1C streams.
-Only `critical_budget_unavailable` blocks signal capture. The historical
-decision remains `blocked_insufficient_low_tail_support`.
+thresholds. Runtime parity, causal inputs, and completed-bar compatibility
+fail closed for scientific evidence. A pending completed-bar compatibility
+receipt does not suppress the engineering shadow projection: when the other
+causal inputs are present, the recorder may persist the frozen score, arm
+bounded Level I acquisition, and mimic option observations, while recording
+`scientific_recording_not_authorized` and forcing all descendant option
+evidence to non-scientific. The first 20 valid sessions remain
+`engineering_transfer` evidence only; they are a source-transfer gate, not a
+ban on shadow capture. The later EODHD reconstruction monitors ranking,
+threshold meaning, signal frequency, and episode identity without requiring
+exact vendor OHLC equality. Optional capacity exhaustion degrades, queues,
+reduces, or records a skip and does not stop Class 0–1 M1C streams. Only
+`critical_budget_unavailable` blocks signal capture. The historical decision
+remains `blocked_insufficient_low_tail_support`.
 
 M1C Tail Phase V1 is an additional logging-only projection at each frozen
 checkpoint. It records strict stock-session `FIRST_ENTRY`, `PERSISTENT`,
@@ -354,9 +359,13 @@ The read-only dashboard projects two deliberately separate virtual ledgers
 from immutable recorder evidence. Neither projection creates a fill, order,
 account balance, buying power, margin, assignment, or broker position.
 
-The opening-reversal ledger admits only the exact eligible M1C V1.1
+The opening-reversal ledger admits only an exact capture-eligible M1C V1.1
 prediction receipt and its causal-barrier, activation, promotion, and strict
 primary-pair evidence. It projects quantity one of the predicted 1DTE leg.
+Engineering-shadow rows are labelled `scientific_eligible=false`; the
+separate scientific-eligible view additionally requires a scientifically
+valid parent episode. Thus the recorder can mimic the frozen protocol during
+the transfer gate without admitting those outcomes to scientific analysis.
 The opposite leg remains control evidence. A row stays `SCHEDULED` before
 contract discovery and `CAPTURING` while the exact two-line call/put evidence
 is incomplete. It becomes `CLOSED` only when both same-strike primary outcomes
@@ -434,7 +443,10 @@ state and preserves the experiment boundary in the SQL predicates. Migration
 `0019` forward-replaces those views for databases already on `0018`, adding
 role-aware partial-pair status, exact frozen quote-timing labels, terminal
 schedule handling, and fail-closed immutable quiet-leg evidence checks without
-changing any source evidence row.
+changing any source evidence row. Migration `0020` separates V1.1 capture
+eligibility from scientific eligibility. It permits an engineering-shadow
+episode to record only the same primary 1DTE call/put pair while the strict
+scientific projection additionally requires a scientifically valid parent.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

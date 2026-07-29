@@ -160,6 +160,7 @@ def _record_fresh_episode(
     metadata: EvidenceMetadata,
     *,
     quiet_state_alias: bool = False,
+    scientific_recording_valid: bool = True,
 ) -> None:
     with database._connect() as connection:
         checkpoint_envelope = database._insert_envelope(connection, metadata)
@@ -173,7 +174,7 @@ def _record_fresh_episode(
                 threshold, threshold_passed, eligible, feature_freshness,
                 missing_feature_count, rejection_reasons_json, claims_json
             ) VALUES (?, ?, 'AAL', ?, 6, ?, ?, ?, 'M1C', 'frozen-m1c-v0',
-                      ?, ?, ?, '{}', 0.70, 0.488333710794033, 1, 1,
+                      ?, ?, ?, '{}', 0.70, 0.488333710794033, 1, ?,
                       'complete', 0, '[]', '{}')
             """,
             (
@@ -186,6 +187,7 @@ def _record_fresh_episode(
                 "a" * 64,
                 "b" * 64,
                 "c" * 64,
+                int(scientific_recording_valid),
             ),
         )
         assert checkpoint.lastrowid is not None
@@ -201,7 +203,7 @@ def _record_fresh_episode(
                 rejection_reasons_json, phase, completion_status,
                 completed_at_utc, claims_json
             ) VALUES ('fresh-aal', ?, ?, ?, 'AAL', ?, 6, ?, ?, 0.70,
-                      0.40, 1, NULL, 1, '[]', 'pending_completion',
+                      0.40, 1, NULL, ?, '[]', 'pending_completion',
                       'active', NULL, '{}')
             """,
             (
@@ -211,6 +213,7 @@ def _record_fresh_episode(
                 SESSION.isoformat(),
                 ENTRY.isoformat(),
                 ENTRY.isoformat(),
+                int(scientific_recording_valid),
             ),
         )
         if not quiet_state_alias:
@@ -272,6 +275,7 @@ def _seed_eligible_v1_1_episode(
     metadata: EvidenceMetadata,
     *,
     quiet_state_alias: bool = False,
+    scientific_recording_valid: bool = True,
 ):
     base, activation = _activation_pair()
     repository.record_opening_reversal_activation_v1(metadata, base)
@@ -299,6 +303,7 @@ def _seed_eligible_v1_1_episode(
         database,
         metadata,
         quiet_state_alias=quiet_state_alias,
+        scientific_recording_valid=scientific_recording_valid,
     )
     stocks = ("AAL", *(f"S{index:02d}" for index in range(1, 20)))
     receipts = tuple(
@@ -573,6 +578,88 @@ def test_v1_1_eligible_episode_accepts_only_its_selected_two_line_outcomes(
     }
     assert {str(row["expiry"]) for row in legs} == {(SESSION + timedelta(days=1)).isoformat()}
     assert {float(row["strike"]) for row in legs} == {100.0}
+
+
+def test_v1_1_shadow_episode_captures_pair_without_becoming_scientific(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "shadow-v1-1.sqlite3")
+    database.migrate()
+    metadata = _metadata("shadow-v1-1", RECEIPT_CREATED)
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    receipt = _seed_eligible_v1_1_episode(
+        database,
+        repository,
+        metadata,
+        scientific_recording_valid=False,
+    )
+    selection = _primary_selection()
+
+    repository.record_opening_reversal_contract_discovery_v1(
+        metadata,
+        episode_id="fresh-aal",
+        selection=selection,
+    )
+    predicted = selection.call if receipt.prediction_v1 == "CALL" else selection.put
+    opposite = selection.put if receipt.prediction_v1 == "CALL" else selection.call
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=predicted,
+            role="predicted_leg",
+        ),
+    )
+    repository.record_opening_reversal_primary_option_outcome_v1(
+        metadata,
+        _primary_outcome(
+            receipt_hash=receipt.receipt_hash_v1,
+            contract=opposite,
+            role="opposite_leg",
+        ),
+    )
+
+    with database._connect() as connection:
+        capture_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM opening_reversal_v1_1_capture_eligible_episode
+            WHERE run_id = ?
+            """,
+            (metadata.run_id,),
+        ).fetchone()
+        scientific_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM opening_reversal_v1_1_eligible_episode
+            WHERE run_id = ?
+            """,
+            (metadata.run_id,),
+        ).fetchone()
+        ledger = connection.execute(
+            """
+            SELECT lifecycle_state, pair_outcome_count, scientific_eligible
+            FROM opening_reversal_virtual_position_v1
+            WHERE run_id = ?
+            """,
+            (metadata.run_id,),
+        ).fetchone()
+
+    assert capture_count[0] == 1
+    assert scientific_count[0] == 0
+    assert ledger is not None
+    assert ledger["lifecycle_state"] == "CLOSED"
+    assert ledger["pair_outcome_count"] == 2
+    assert ledger["scientific_eligible"] == 0
+    projected = ProspectiveReadStore(
+        database.database_path,
+        run_id=metadata.run_id,
+    ).opening_reversal_virtual_positions_v1()
+    assert len(projected) == 1
+    assert projected[0]["scientific_eligible"] is False
+    assert projected[0]["execution_claimed"] is False
+    assert projected[0]["paper_fill_claimed"] is False
 
 
 def test_v1_1_repository_rejects_secondary_dte_selection(
@@ -865,7 +952,7 @@ def test_v1_1_activation_requires_a_fresh_engineering_run(
         )
 
 
-def test_checkpoint_engine_emits_v1_1_receipt_behind_causal_barrier(
+def test_checkpoint_engine_emits_non_scientific_v1_1_shadow_receipt_behind_causal_barrier(
     tmp_path: Path,
 ) -> None:
     class FakeFeatureBuilder:
@@ -1001,6 +1088,7 @@ def test_checkpoint_engine_emits_v1_1_receipt_behind_causal_barrier(
                 ENTRY + timedelta(milliseconds=1)
             ),
             opening_reversal_entry_data_admitted_before_receipt_v1_1=False,
+            scientific_recording_authorized=False,
         )
     )
 
@@ -1008,6 +1096,8 @@ def test_checkpoint_engine_emits_v1_1_receipt_behind_causal_barrier(
     assert receipt is not None
     assert receipt.experiment_version == "1.1"
     assert receipt.eligibility_v1
+    assert receipt.scientific_outcome_eligible_v1 is False
+    assert receipt.scientific_exclusion_reason_v1 == "engineering_transfer"
     assert receipt.receipt_created_at_utc == RECEIPT_CREATED
     assert receipt.timing_evidence_v1_1 is not None
     assert receipt.timing_evidence_v1_1.entry_or_post_entry_data_admitted_before_receipt is False

@@ -61,6 +61,8 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
     assert "SuccessExitStatus=143" in unit
+    assert "Restart=always" in unit
+    assert "Restart=on-failure" not in unit
     assert "username" not in lowered
     assert "password" not in lowered
     assert "2fa" not in lowered

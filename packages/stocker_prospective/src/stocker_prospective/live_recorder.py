@@ -708,7 +708,11 @@ class FrozenM1CLiveRecorder:
                 )
             elif normalized.control_kind == "ibkr_error":
                 request_id = int(payload["request_id"])
-                code = int(payload.get("error_code", -1))
+                raw_code = payload.get("error_code")
+                try:
+                    code = -1 if raw_code is None else int(raw_code)
+                except (TypeError, ValueError):
+                    code = -1
                 ibkr_errors.append((request_id, code))
                 owner = self.normalizer.owner(request_id)
                 if owner is not None:

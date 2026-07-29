@@ -23,7 +23,10 @@ ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway
 ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 ExecStart=/opt/ibgateway/current/ibgateway
-Restart=on-failure
+# IB Gateway exits successfully during its configured daily auto-restart.
+# Relaunch it so the broker-managed restart session can resume before expiry.
+# An explicit `systemctl stop` still suppresses service restarts.
+Restart=always
 RestartSec=20
 KillSignal=SIGTERM
 SuccessExitStatus=143

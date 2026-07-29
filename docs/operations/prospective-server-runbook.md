@@ -547,6 +547,12 @@ database, commands, or logs. Choose the paper session. In Gateway API settings:
 5. Configure the supported daily auto-restart window if desired. Plan for
    manual authentication again after the weekly reset.
 
+The systemd unit uses `Restart=always` because Gateway reports its scheduled
+daily auto-restart as a successful process exit. This lets systemd relaunch the
+official application immediately while its broker-managed restart session is
+still resumable. An operator-issued `systemctl stop` does not trigger a
+restart. A weekly broker reset may still require manual authentication.
+
 Verify that the upstream port is firewall-restricted, the Stocker endpoint is
 loopback-only, and VNC remains private:
 

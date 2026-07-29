@@ -340,6 +340,18 @@ def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
         window_end=gap_start + timedelta(minutes=7),
     )
 
+    market_adapter._append_stream_event(
+        "ibkr_error",
+        -1,
+        {
+            "error_code": None,
+            "reason": "connection_closed",
+            "message": "official_socket_connection_closed",
+        },
+    )
+    control_result = recorder.poll(now=START + timedelta(seconds=11))
+    assert control_result.raw_event_count == 0
+
 
 def test_live_recorder_hydrates_processed_checkpoints_before_restart_replay(
     tmp_path: Path,

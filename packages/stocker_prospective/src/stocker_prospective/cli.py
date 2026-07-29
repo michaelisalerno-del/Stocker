@@ -684,16 +684,44 @@ def _fail_closed_on_unclean_recorder_takeover(
     with repository._connect() as connection:
         previous_generation = connection.execute(
             """
-            SELECT recorder_generation, stopped_cleanly
-            FROM recorder_generation_v1
-            WHERE run_id = ? AND recorder_generation < ?
-            ORDER BY recorder_generation DESC
+            SELECT generation.recorder_generation,
+                   generation.stopped_cleanly,
+                   CASE
+                       WHEN state.state = 'SCIENTIFICALLY_BLOCKED'
+                        AND state.state_reason_code =
+                            'FATAL_LATCH_RESOLVED_RESTART_REQUIRED'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM recorder_fatal_latch_v1 AS resolved
+                            WHERE resolved.run_id = generation.run_id
+                              AND resolved.recorder_generation =
+                                  generation.recorder_generation
+                              AND resolved.resolved_at_utc IS NOT NULL
+                              AND LENGTH(TRIM(resolved.resolution_evidence)) > 0
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM recorder_fatal_latch_v1 AS active
+                            WHERE active.run_id = generation.run_id
+                              AND active.resolved_at_utc IS NULL
+                        )
+                       THEN 1
+                       ELSE 0
+                   END AS explicitly_resolved_for_restart
+            FROM recorder_generation_v1 AS generation
+            LEFT JOIN recorder_operational_state_v1 AS state
+              ON state.run_id = generation.run_id
+             AND state.recorder_generation = generation.recorder_generation
+            WHERE generation.run_id = ?
+              AND generation.recorder_generation < ?
+            ORDER BY generation.recorder_generation DESC
             LIMIT 1
             """,
             (config.runtime.run_id, lease.generation),
         ).fetchone()
-    previous_generation_unclean = previous_generation is not None and (
-        previous_generation["stopped_cleanly"] != 1
+    previous_generation_unclean = previous_generation is not None and not (
+        previous_generation["stopped_cleanly"] == 1
+        or previous_generation["explicitly_resolved_for_restart"] == 1
     )
     same_run_stale_takeover = (
         lease.recovered_stale_owner and lease.previous_run_id == config.runtime.run_id
@@ -745,6 +773,11 @@ def _fail_closed_on_unclean_recorder_takeover(
             ),
             "previous_generation_stopped_cleanly": (
                 None if previous_generation is None else previous_generation["stopped_cleanly"] == 1
+            ),
+            "previous_generation_explicitly_resolved_for_restart": (
+                None
+                if previous_generation is None
+                else previous_generation["explicitly_resolved_for_restart"] == 1
             ),
             "socket_opened_at_detection": False,
             "raw_inbox_recovery_continues": True,

@@ -193,8 +193,10 @@ def test_unclean_recorder_takeover_latches_and_continues_raw_recovery(
     )
 
 
-def test_clean_previous_generation_does_not_relatch_unclean_restart(
+@pytest.mark.parametrize("resolved_fatal", [False, True])
+def test_clean_or_resolved_previous_generation_does_not_relatch_unclean_restart(
     tmp_path: Path,
+    resolved_fatal: bool,
 ) -> None:
     cfg = load_prospective_config(write_replay_config(tmp_path))
     assert cfg.runtime.run_id is not None
@@ -223,19 +225,40 @@ def test_clean_previous_generation_does_not_relatch_unclean_restart(
         required_market_data_mode="live",
         expected_artifact_count=1,
     )
-    operational.set_stopping(
-        run_id=cfg.runtime.run_id,
-        recorder_generation=1,
-        owner_id="clean-owner",
-        now=observed - timedelta(minutes=1),
-    )
-    operational.set_stopped_cleanly(
-        run_id=cfg.runtime.run_id,
-        recorder_generation=1,
-        owner_id="clean-owner",
-        now=observed,
-        termination_reason="operator_shutdown",
-    )
+    if resolved_fatal:
+        prior_inbox = DurableCallbackInbox(
+            cfg.paths.database,
+            run_id=cfg.runtime.run_id,
+            recorder_generation=1,
+            owner_id="clean-owner",
+        )
+        prior_inbox.latch_fatal(
+            latch_kind="ingestion",
+            stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
+            occurred_at=observed - timedelta(minutes=1),
+            error_class="UncleanRecorderRestart",
+            evidence_loss_possible=True,
+        )
+        prior_inbox.resolve_fatal_latch(
+            latch_kind="ingestion",
+            expected_stable_error_code="RECORDER_UNCLEAN_RESTART_STATE_UNCERTAIN",
+            resolution_evidence="all inbox sequences reconciled; no quarantined events",
+            resolved_at=observed,
+        )
+    else:
+        operational.set_stopping(
+            run_id=cfg.runtime.run_id,
+            recorder_generation=1,
+            owner_id="clean-owner",
+            now=observed - timedelta(minutes=1),
+        )
+        operational.set_stopped_cleanly(
+            run_id=cfg.runtime.run_id,
+            recorder_generation=1,
+            owner_id="clean-owner",
+            now=observed,
+            termination_reason="operator_shutdown",
+        )
     inbox = DurableCallbackInbox(
         cfg.paths.database,
         run_id=cfg.runtime.run_id,

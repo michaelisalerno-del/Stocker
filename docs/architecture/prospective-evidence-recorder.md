@@ -562,6 +562,10 @@ replacement ID is accepted only when substituting a historical
 all scientific configuration and artifact checks remain unchanged. This
 database-backed proof prevents an arbitrary run-ID change from bypassing the
 activation boundary.
+V1 and V1.1 activation associations preserve the exact receipt hash and JSON.
+A replacement association points to the original activation row, and database
+triggers compare every frozen field before accepting it. Both original and
+replacement associations are append-only and reject updates or deletes.
 
 ## Callback containment and request generations
 

@@ -4580,6 +4580,99 @@ class FrozenRecorderRepository:
         self.record_opening_reversal_decision_receipt_v1(metadata, receipt)
         return receipt
 
+    def _record_opening_reversal_activation_binding_v1(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        metadata: EvidenceMetadata,
+        experiment_id: str,
+        experiment_version: str,
+        activation_timestamp_utc: datetime,
+        new_york_trading_date: date,
+        configuration_hash: str,
+        frozen_rule_hash: str,
+        activation_receipt_hash: str,
+        receipt_json: str,
+    ) -> int:
+        expected = {
+            "experiment_id": experiment_id,
+            "experiment_version": experiment_version,
+            "activation_timestamp_utc": activation_timestamp_utc.isoformat(),
+            "new_york_trading_date": new_york_trading_date.isoformat(),
+            "configuration_hash": configuration_hash,
+            "frozen_rule_hash": frozen_rule_hash,
+            "configured_reserved_line_count": "12",
+            "order_routing_disabled": "1",
+            "activation_receipt_hash": activation_receipt_hash,
+            "receipt_json": receipt_json,
+        }
+
+        def require_byte_identical(row: sqlite3.Row) -> None:
+            if any(str(row[column]) != value for column, value in expected.items()):
+                raise ValueError("opening reversal activation is immutable")
+
+        existing = connection.execute(
+            """
+            SELECT *
+            FROM opening_reversal_activation_v1
+            WHERE run_id = ? AND experiment_id = ? AND experiment_version = ?
+            """,
+            (metadata.run_id, experiment_id, experiment_version),
+        ).fetchone()
+        if existing is not None:
+            require_byte_identical(existing)
+            return int(existing["id"])
+
+        source = connection.execute(
+            """
+            SELECT *
+            FROM opening_reversal_activation_v1
+            WHERE activation_receipt_hash = ?
+              AND binding_kind = 'original_activation'
+            ORDER BY id
+            LIMIT 1
+            """,
+            (activation_receipt_hash,),
+        ).fetchone()
+        source_activation_id: int | None = None
+        binding_kind = "original_activation"
+        if source is not None:
+            require_byte_identical(source)
+            if str(source["run_id"]) == metadata.run_id:
+                raise ValueError("opening reversal activation binding source is not distinct")
+            source_activation_id = int(source["id"])
+            binding_kind = "audited_run_rollover"
+
+        envelope_id = self.repository._insert_envelope(connection, metadata)
+        cursor = connection.execute(
+            """
+            INSERT INTO opening_reversal_activation_v1(
+                envelope_id, run_id, experiment_id, experiment_version,
+                activation_timestamp_utc, new_york_trading_date,
+                configuration_hash, frozen_rule_hash,
+                configured_reserved_line_count, order_routing_disabled,
+                activation_receipt_hash, receipt_json,
+                source_activation_id, binding_kind
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 12, 1, ?, ?, ?, ?)
+            """,
+            (
+                envelope_id,
+                metadata.run_id,
+                experiment_id,
+                experiment_version,
+                activation_timestamp_utc.isoformat(),
+                new_york_trading_date.isoformat(),
+                configuration_hash,
+                frozen_rule_hash,
+                activation_receipt_hash,
+                receipt_json,
+                source_activation_id,
+                binding_kind,
+            ),
+        )
+        assert cursor.lastrowid is not None
+        return int(cursor.lastrowid)
+
     def record_opening_reversal_activation_v1(
         self,
         metadata: EvidenceMetadata,
@@ -4590,51 +4683,18 @@ class FrozenRecorderRepository:
         self._validate(metadata)
         encoded = _json(receipt)
         with self.repository._connect() as connection:
-            existing = connection.execute(
-                """
-                SELECT id, activation_receipt_hash, receipt_json
-                FROM opening_reversal_activation_v1
-                WHERE run_id = ? AND experiment_id = ? AND experiment_version = ?
-                """,
-                (
-                    metadata.run_id,
-                    receipt.experiment_id,
-                    receipt.experiment_version,
-                ),
-            ).fetchone()
-            if existing is not None:
-                if (
-                    str(existing["activation_receipt_hash"]) != receipt.activation_receipt_hash
-                    or str(existing["receipt_json"]) != encoded
-                ):
-                    raise ValueError("opening reversal activation is immutable")
-                return int(existing["id"])
-            envelope_id = self.repository._insert_envelope(connection, metadata)
-            cursor = connection.execute(
-                """
-                INSERT INTO opening_reversal_activation_v1(
-                    envelope_id, run_id, experiment_id, experiment_version,
-                    activation_timestamp_utc, new_york_trading_date,
-                    configuration_hash, frozen_rule_hash,
-                    configured_reserved_line_count, order_routing_disabled,
-                    activation_receipt_hash, receipt_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 12, 1, ?, ?)
-                """,
-                (
-                    envelope_id,
-                    metadata.run_id,
-                    receipt.experiment_id,
-                    receipt.experiment_version,
-                    receipt.activation_timestamp_utc.isoformat(),
-                    receipt.new_york_trading_date_at_activation.isoformat(),
-                    receipt.configuration_hash,
-                    receipt.frozen_rule_hash,
-                    receipt.activation_receipt_hash,
-                    encoded,
-                ),
+            return self._record_opening_reversal_activation_binding_v1(
+                connection,
+                metadata=metadata,
+                experiment_id=receipt.experiment_id,
+                experiment_version=receipt.experiment_version,
+                activation_timestamp_utc=receipt.activation_timestamp_utc,
+                new_york_trading_date=(receipt.new_york_trading_date_at_activation),
+                configuration_hash=receipt.configuration_hash,
+                frozen_rule_hash=receipt.frozen_rule_hash,
+                activation_receipt_hash=receipt.activation_receipt_hash,
+                receipt_json=encoded,
             )
-            assert cursor.lastrowid is not None
-            return int(cursor.lastrowid)
 
     def record_opening_reversal_activation_v1_1(
         self,
@@ -4666,7 +4726,7 @@ class FrozenRecorderRepository:
                 raise ValueError("opening reversal V1.1 lacks the exact V1 activation")
             existing = connection.execute(
                 """
-                SELECT id, activation_receipt_hash, receipt_json
+                SELECT 1
                 FROM opening_reversal_activation_v1
                 WHERE run_id = ? AND experiment_id = ?
                   AND experiment_version = '1.1'
@@ -4674,12 +4734,18 @@ class FrozenRecorderRepository:
                 (metadata.run_id, receipt.experiment_id),
             ).fetchone()
             if existing is not None:
-                if (
-                    str(existing["activation_receipt_hash"]) != receipt.activation_receipt_hash_v1_1
-                    or str(existing["receipt_json"]) != encoded
-                ):
-                    raise ValueError("opening reversal V1.1 activation is immutable")
-                return int(existing["id"])
+                return self._record_opening_reversal_activation_binding_v1(
+                    connection,
+                    metadata=metadata,
+                    experiment_id=receipt.experiment_id,
+                    experiment_version="1.1",
+                    activation_timestamp_utc=receipt.activation_timestamp_utc,
+                    new_york_trading_date=(receipt.new_york_trading_date_at_activation),
+                    configuration_hash=(receipt.timing_addendum_configuration_hash_v1_1),
+                    frozen_rule_hash=receipt.frozen_rule_hash,
+                    activation_receipt_hash=receipt.activation_receipt_hash_v1_1,
+                    receipt_json=encoded,
+                )
             prior_experiment_rows = sum(
                 int(
                     connection.execute(
@@ -4699,31 +4765,18 @@ class FrozenRecorderRepository:
                     "opening reversal V1.1 requires a fresh run so the "
                     "20-session engineering transfer restarts"
                 )
-            envelope_id = self.repository._insert_envelope(connection, metadata)
-            cursor = connection.execute(
-                """
-                INSERT INTO opening_reversal_activation_v1(
-                    envelope_id, run_id, experiment_id, experiment_version,
-                    activation_timestamp_utc, new_york_trading_date,
-                    configuration_hash, frozen_rule_hash,
-                    configured_reserved_line_count, order_routing_disabled,
-                    activation_receipt_hash, receipt_json
-                ) VALUES (?, ?, ?, '1.1', ?, ?, ?, ?, 12, 1, ?, ?)
-                """,
-                (
-                    envelope_id,
-                    metadata.run_id,
-                    receipt.experiment_id,
-                    receipt.activation_timestamp_utc.isoformat(),
-                    receipt.new_york_trading_date_at_activation.isoformat(),
-                    receipt.timing_addendum_configuration_hash_v1_1,
-                    receipt.frozen_rule_hash,
-                    receipt.activation_receipt_hash_v1_1,
-                    encoded,
-                ),
+            return self._record_opening_reversal_activation_binding_v1(
+                connection,
+                metadata=metadata,
+                experiment_id=receipt.experiment_id,
+                experiment_version="1.1",
+                activation_timestamp_utc=receipt.activation_timestamp_utc,
+                new_york_trading_date=(receipt.new_york_trading_date_at_activation),
+                configuration_hash=(receipt.timing_addendum_configuration_hash_v1_1),
+                frozen_rule_hash=receipt.frozen_rule_hash,
+                activation_receipt_hash=receipt.activation_receipt_hash_v1_1,
+                receipt_json=encoded,
             )
-            assert cursor.lastrowid is not None
-            return int(cursor.lastrowid)
 
     def record_opening_reversal_prediction_v1(
         self,

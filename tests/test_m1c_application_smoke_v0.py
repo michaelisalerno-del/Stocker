@@ -50,6 +50,12 @@ SCALING_ARTIFACT = (
     / "model_configurations.json"
 )
 RECORDER_RESEARCH = ROOT / "research/prospective/frozen-m1c-microstructure-recorder-v0"
+OPENING_REVERSAL_V1 = (
+    ROOT / "research/prospective/20260729-m1c-prospective-opening-reversal-v1/artifacts/primary"
+)
+OPENING_REVERSAL_V1_1 = (
+    ROOT / "research/prospective/20260729-m1c-prospective-opening-reversal-v1-1/artifacts/primary"
+)
 FAKE_FIXTURE = (
     ROOT
     / "packages/stocker_prospective/src/stocker_prospective/fixtures"
@@ -69,6 +75,7 @@ def _build_fake_application(
     app_version: str = "0.1.0",
     recorder_generation: int | None = None,
     run_id: str = "fake-recorder-smoke-v0",
+    include_opening_reversal: bool = False,
 ) -> tuple[object, ProspectiveConfig, FakeIBKRAdapter, tuple[str, ...]]:
     universe = json.loads(
         (ROOT / "configs/prospective/anchor-frozen-20.json").read_text(encoding="utf-8")
@@ -110,29 +117,45 @@ def _build_fake_application(
     context_root = tmp_path / "context"
     context_root.mkdir(exist_ok=True)
 
+    configured_paths: dict[str, object] = {
+        "database": tmp_path / "prospective.sqlite3",
+        "bundle_root": tmp_path / "bundles",
+        "feature_parity_report": (ROOT / "configs/prospective/feature-parity-m1.json"),
+        "context_root": context_root,
+        "raw_event_root": tmp_path / "raw-events",
+        "recorder_activation": tmp_path / "activation.json",
+        "m1c_live_parity_report": (RECORDER_RESEARCH / "m1c_live_parity_report.json"),
+        "direction_live_parity_report": (RECORDER_RESEARCH / "direction_live_parity_report.json"),
+        "ibkr_capability_manifest": tmp_path / "capability.json",
+        "prospective_phase_ledger": tmp_path / "phases.jsonl",
+        "prospective_report_root": tmp_path / "reports",
+        "aggregate_transfer_report": tmp_path / "reports" / "aggregate.json",
+        "frozen_m1c_artifact_root": ARCHETYPE_ROOT,
+        "m1c_scaling_artifact": SCALING_ARTIFACT,
+        "direction_beta_artifact": (ARCHETYPE_ROOT / "stock_market_beta_parameters.csv"),
+        "historical_activity_bars": activity_path,
+        "bar_compatibility_report": bar_report,
+    }
+    if include_opening_reversal:
+        configured_paths.update(
+            {
+                "m1c_prospective_opening_reversal_v1_config": (
+                    OPENING_REVERSAL_V1 / "frozen_experiment_configuration_v1.json"
+                ),
+                "m1c_prospective_opening_reversal_v1_activation": (
+                    OPENING_REVERSAL_V1 / "experiment_activation_receipt_v1.json"
+                ),
+                "m1c_prospective_opening_reversal_v1_1_config": (
+                    OPENING_REVERSAL_V1_1 / "frozen_timing_addendum_configuration_v1_1.json"
+                ),
+                "m1c_prospective_opening_reversal_v1_1_activation": (
+                    OPENING_REVERSAL_V1_1 / "experiment_activation_receipt_v1_1.json"
+                ),
+            }
+        )
     config = ProspectiveConfig.model_validate(
         {
-            "paths": {
-                "database": tmp_path / "prospective.sqlite3",
-                "bundle_root": tmp_path / "bundles",
-                "feature_parity_report": (ROOT / "configs/prospective/feature-parity-m1.json"),
-                "context_root": context_root,
-                "raw_event_root": tmp_path / "raw-events",
-                "recorder_activation": tmp_path / "activation.json",
-                "m1c_live_parity_report": (RECORDER_RESEARCH / "m1c_live_parity_report.json"),
-                "direction_live_parity_report": (
-                    RECORDER_RESEARCH / "direction_live_parity_report.json"
-                ),
-                "ibkr_capability_manifest": tmp_path / "capability.json",
-                "prospective_phase_ledger": tmp_path / "phases.jsonl",
-                "prospective_report_root": tmp_path / "reports",
-                "aggregate_transfer_report": tmp_path / "reports" / "aggregate.json",
-                "frozen_m1c_artifact_root": ARCHETYPE_ROOT,
-                "m1c_scaling_artifact": SCALING_ARTIFACT,
-                "direction_beta_artifact": (ARCHETYPE_ROOT / "stock_market_beta_parameters.csv"),
-                "historical_activity_bars": activity_path,
-                "bar_compatibility_report": bar_report,
-            },
+            "paths": configured_paths,
             "runtime": {
                 "mode": "record_only",
                 "source": "ibkr",
@@ -600,6 +623,7 @@ def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(
         include_scientific_prerequisites=True,
         recorder_generation=1,
         run_id="failed-run-v0",
+        include_opening_reversal=True,
     )
     activation_before = (tmp_path / "activation.json").read_bytes()
     activation = ActivationRecord.model_validate_json(activation_before)
@@ -648,6 +672,7 @@ def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(
         app_version="0.2.0",
         recorder_generation=1,
         run_id="isolated-replacement-run-v0",
+        include_opening_reversal=True,
     )
 
     assert replacement_config.runtime.run_id == "isolated-replacement-run-v0"
@@ -668,8 +693,67 @@ def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(
             WHERE run_id = 'isolated-replacement-run-v0'
             """
         ).fetchone()
+        activation_rows = connection.execute(
+            """
+            SELECT id, run_id, experiment_version, activation_receipt_hash,
+                   receipt_json, source_activation_id, binding_kind
+            FROM opening_reversal_activation_v1
+            ORDER BY experiment_version, run_id
+            """
+        ).fetchall()
+        migration_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM schema_migrations
+            WHERE version = '0021_opening_reversal_activation_run_binding_v1.sql'
+            """
+        ).fetchone()
+        capture_view_sql = connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_schema
+            WHERE type = 'view'
+              AND name = 'opening_reversal_v1_1_capture_eligible_episode'
+            """
+        ).fetchone()
     assert run_ids == {"failed-run-v0", "isolated-replacement-run-v0"}
     assert replacement_identity == ("a" * 40, "0.1.0")
+    assert migration_count == (1,)
+    assert capture_view_sql is not None
+    assert "JOIN opening_reversal_activation_v1 AS activation" in str(capture_view_sql[0])
+    assert len(activation_rows) == 4
+    for experiment_version in ("1", "1.1"):
+        version_rows = [row for row in activation_rows if row[2] == experiment_version]
+        assert len(version_rows) == 2
+        original = next(row for row in version_rows if row[1] == "failed-run-v0")
+        replacement = next(row for row in version_rows if row[1] == "isolated-replacement-run-v0")
+        assert original[5:] == (None, "original_activation")
+        assert replacement[5:] == (original[0], "audited_run_rollover")
+        assert replacement[3:5] == original[3:5]
+
+    with sqlite3.connect(first_config.paths.database) as connection:
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="opening reversal activation binding is immutable",
+        ):
+            connection.execute(
+                """
+                UPDATE opening_reversal_activation_v1
+                SET receipt_json = receipt_json
+                WHERE run_id = 'isolated-replacement-run-v0'
+                """
+            )
+        connection.rollback()
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="opening reversal activation binding is append-only",
+        ):
+            connection.execute(
+                """
+                DELETE FROM opening_reversal_activation_v1
+                WHERE run_id = 'isolated-replacement-run-v0'
+                """
+            )
 
     replacement_application.shutdown(now=datetime.now(UTC))
 

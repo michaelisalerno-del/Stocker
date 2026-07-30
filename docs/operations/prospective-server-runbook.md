@@ -839,6 +839,11 @@ runtime-verification gates scientific: engineering-shadow V1.1 episodes may
 capture the frozen primary 1DTE call/put pair, but their ledger rows remain
 `scientific_eligible=false` and cannot enter the strict scientific view.
 
+Migration `0021_opening_reversal_activation_run_binding_v1` separates
+operational run lineage from immutable V1/V1.1 activation identity. It
+preserves existing receipt rows as originals and permits only append-only,
+byte-identical audited bindings in a replacement run.
+
 ## 8. Start deterministic replay mode
 
 Replay needs no bundle, EODHD credential, or IBKR client:
@@ -1088,6 +1093,11 @@ if any non-operational configuration field differs, startup exits with
 `blocked_existing_activation_configuration_mismatch`. The replacement run
 therefore creates a new operational lineage without changing activation time,
 artifacts, experiment receipts, thresholds, cohort, or causal rules.
+Migration `0021_opening_reversal_activation_run_binding_v1` records the V1 and
+V1.1 receipts for the replacement run as byte-identical, hash-identical
+bindings to each original activation row. Database triggers reject a binding
+whose timestamps, hashes, frozen rules, receipt JSON, reserved-line count, or
+no-order flag differs, and reject every later update or delete.
 
 A graceful process stop is not allowed to hide an incomplete streaming option
 episode behind `STOPPED_CLEANLY`: shutdown records the same scientific gap and

@@ -89,6 +89,13 @@ class WebConfig(BaseModel):
     auth_cookie_name: str = "__Host-stocker_session"
     auth_cookie_secure: bool = True
     requests_per_minute: int = Field(default=120, ge=1, le=10_000)
+    quote_series_maximum_points: int = Field(default=600, ge=2, le=5_000)
+    parquet_projection_maximum_input_rows: int = Field(
+        default=50_000,
+        ge=100,
+        le=1_000_000,
+    )
+    audit_page_maximum_items: int = Field(default=200, ge=1, le=1_000)
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
 
     @model_validator(mode="after")

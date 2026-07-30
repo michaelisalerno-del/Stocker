@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
-import math
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from stocker_prospective.parquet_read_projection import (
+    ParquetProjectionLimitExceeded,
+    read_parquet_tail,
+    read_parquet_window,
+)
 from stocker_prospective.quiet_state import (
     BOTTOM_5_THRESHOLD,
     BOTTOM_10_THRESHOLD,
@@ -769,11 +775,14 @@ class ProspectiveReadStore:
         episode_id: str,
         *,
         maximum_points: int = 600,
+        maximum_input_rows: int = 50_000,
     ) -> list[dict[str, Any]]:
         """Read a bounded chart projection from immutable quote partitions."""
 
-        if maximum_points <= 0:
-            raise ValueError("maximum quote-series points must be positive")
+        if maximum_points < 2:
+            raise ValueError("maximum quote-series points must be at least two")
+        if maximum_input_rows <= 0:
+            raise ValueError("maximum quote-series input rows must be positive")
         run_id = self._selected_run_id()
         if run_id is None:
             return []
@@ -809,17 +818,39 @@ class ProspectiveReadStore:
                 """,
                 (run_id, str(episode["symbol"]), start.isoformat(), end.isoformat()),
             ).fetchall()
-        try:
-            import pyarrow.parquet as pq
-        except ImportError:
-            return []
         points: dict[str, dict[str, Any]] = {}
+        input_rows = 0
         for partition in partitions:
             path = Path(str(partition["file_path"]))
             if not path.is_file():
                 continue
-            table = pq.ParquetFile(path).read()  # type: ignore[no-untyped-call]
-            for row in table.to_pylist():
+            remaining_rows = maximum_input_rows - input_rows
+            if remaining_rows <= 0:
+                return []
+            try:
+                projection = read_parquet_window(
+                    path,
+                    columns=(
+                        "event_id",
+                        "provider_timestamp_utc",
+                        "received_timestamp_utc",
+                        "bid",
+                        "ask",
+                        "bid_size",
+                        "ask_size",
+                    ),
+                    timestamp_columns=(
+                        "provider_timestamp_utc",
+                        "received_timestamp_utc",
+                    ),
+                    start=start,
+                    end=end,
+                    maximum_input_rows=remaining_rows,
+                )
+            except (OSError, ParquetProjectionLimitExceeded):
+                return []
+            input_rows += projection.metrics.input_rows
+            for row in projection.rows:
                 raw_timestamp = row.get("provider_timestamp_utc") or row.get(
                     "received_timestamp_utc"
                 )
@@ -849,7 +880,13 @@ class ProspectiveReadStore:
                     if total_size is None or total_size <= 0.0
                     else (ask_value * float(bid_size) + bid_value * float(ask_size)) / total_size
                 )
-                points[str(row.get("event_id"))] = {
+                event_id = row.get("event_id")
+                identity = (
+                    str(event_id)
+                    if event_id is not None
+                    else f"{observed.isoformat()}:{bid_value}:{ask_value}"
+                )
+                points[identity] = {
                     "event_id": row.get("event_id"),
                     "timestamp_utc": observed.isoformat(),
                     "bid": bid_value,
@@ -862,13 +899,22 @@ class ProspectiveReadStore:
             points.values(),
             key=lambda item: (str(item["timestamp_utc"]), str(item["event_id"])),
         )
-        stride = max(1, math.ceil(len(ordered) / maximum_points))
-        sampled = ordered[::stride]
-        if ordered and sampled[-1] != ordered[-1]:
-            sampled.append(ordered[-1])
-        return sampled[:maximum_points]
+        if len(ordered) <= maximum_points:
+            return ordered
+        sample_indexes = tuple(
+            round(index * (len(ordered) - 1) / (maximum_points - 1))
+            for index in range(maximum_points)
+        )
+        return [ordered[index] for index in sample_indexes]
 
-    def episode_depth_snapshot_v0(self, episode_id: str) -> dict[str, Any] | None:
+    def episode_depth_snapshot_v0(
+        self,
+        episode_id: str,
+        *,
+        maximum_input_rows: int = 20_000,
+    ) -> dict[str, Any] | None:
+        if maximum_input_rows <= 0:
+            raise ValueError("maximum depth-snapshot input rows must be positive")
         run_id = self._selected_run_id()
         if run_id is None:
             return None
@@ -900,17 +946,32 @@ class ProspectiveReadStore:
                 """,
                 (run_id, str(episode["symbol"]), start.isoformat(), end.isoformat()),
             ).fetchall()
-        try:
-            import pyarrow.parquet as pq
-        except ImportError:
-            return None
         candidates: list[dict[str, Any]] = []
+        input_rows = 0
         for partition in partitions:
             path = Path(str(partition["file_path"]))
             if not path.is_file():
                 continue
-            table = pq.ParquetFile(path).read()  # type: ignore[no-untyped-call]
-            for row in table.to_pylist():
+            remaining_rows = maximum_input_rows - input_rows
+            if remaining_rows <= 0:
+                return None
+            try:
+                projection = read_parquet_window(
+                    path,
+                    columns=(
+                        "event_id",
+                        "received_timestamp_utc",
+                        "snapshot",
+                    ),
+                    timestamp_columns=("received_timestamp_utc",),
+                    start=start,
+                    end=end,
+                    maximum_input_rows=remaining_rows,
+                )
+            except (OSError, ParquetProjectionLimitExceeded):
+                return None
+            input_rows += projection.metrics.input_rows
+            for row in projection.rows:
                 raw_timestamp = row.get("received_timestamp_utc")
                 snapshot = row.get("snapshot")
                 if raw_timestamp is None or snapshot is None:
@@ -1013,178 +1074,186 @@ class ProspectiveReadStore:
             reverse=True,
         )[:limit]
 
-    def raw_event_sample_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        """Return a bounded recent sample for audit inspection, never broker state."""
+    @staticmethod
+    def _audit_cursor(*, recorded_at_utc: str, audit_id: int) -> str:
+        payload = json.dumps(
+            {"recorded_at_utc": recorded_at_utc, "audit_id": audit_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
-        if limit <= 0:
-            return []
-        run_id = self._selected_run_id()
-        if run_id is None:
-            return []
-        with self._connect() as connection:
-            partitions = connection.execute(
-                """
-                SELECT file_path, event_type
-                FROM raw_partition_manifest_v0
-                WHERE run_id = ?
-                ORDER BY maximum_timestamp_utc DESC, content_hash DESC
-                LIMIT 12
-                """,
-                (run_id,),
-            ).fetchall()
+    @staticmethod
+    def _decode_audit_cursor(cursor: str) -> tuple[str, int]:
         try:
-            import pyarrow.parquet as pq
-        except ImportError:
-            return []
-        sample: list[dict[str, Any]] = []
-        for partition in partitions:
-            path = Path(str(partition["file_path"]))
-            try:
-                is_file = path.is_file()
-            except OSError:
-                is_file = False
-            if not is_file:
-                continue
-            try:
-                rows = pq.ParquetFile(path).read().to_pylist()  # type: ignore[no-untyped-call]
-            except OSError:
-                continue
-            for row in rows[-limit:]:
-                timestamp = row.get("provider_timestamp_utc") or row.get("received_timestamp_utc")
-                detail = {
-                    key: row.get(key)
-                    for key in (
-                        "bid",
-                        "ask",
-                        "last",
-                        "price",
-                        "size",
-                        "operation",
-                        "side",
-                        "position",
-                        "checkpoint",
-                        "market_data_type",
-                    )
-                    if row.get(key) is not None
-                }
-                sample.append(
-                    {
-                        "audit_type": "raw_event",
-                        "identity": row.get("event_id"),
-                        "recorded_at_utc": timestamp,
-                        "details": json.dumps(
-                            {
-                                "event_type": str(partition["event_type"]),
-                                "symbol": row.get("symbol"),
-                                "source_sequence": row.get("source_sequence"),
-                                **detail,
-                            },
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
-                    }
-                )
-        return sorted(
-            sample,
-            key=lambda item: str(item["recorded_at_utc"]),
-            reverse=True,
-        )[:limit]
+            padded = cursor + ("=" * (-len(cursor) % 4))
+            payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+            recorded_at_utc = str(payload["recorded_at_utc"])
+            audit_id = int(payload["audit_id"])
+        except (
+            binascii.Error,
+            KeyError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as exc:
+            raise ValueError("invalid audit cursor") from exc
+        if audit_id <= 0:
+            raise ValueError("invalid audit cursor")
+        return recorded_at_utc, audit_id
 
-    def audit_events_v0(self, *, limit: int = 1000) -> list[dict[str, Any]]:
+    def audit_event_page_v0(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        if limit <= 0:
+            raise ValueError("audit page limit must be positive")
         run_id = self._selected_run_id()
         if run_id is None:
-            return []
+            return {
+                "items": [],
+                "next_cursor": None,
+                "has_more": False,
+                "limit": limit,
+            }
+        cursor_timestamp: str | None = None
+        cursor_id: int | None = None
+        if cursor is not None:
+            cursor_timestamp, cursor_id = self._decode_audit_cursor(cursor)
         with self._connect() as connection:
-            partitions = connection.execute(
+            rows = connection.execute(
                 """
-                SELECT 'raw_partition' AS audit_type, content_hash AS identity,
-                       maximum_timestamp_utc AS recorded_at_utc,
-                       file_path AS details
-                FROM raw_partition_manifest_v0 WHERE run_id = ?
-                ORDER BY maximum_timestamp_utc DESC LIMIT ?
+                SELECT id AS audit_id, audit_type, identity,
+                       recorded_at_utc, details
+                FROM web_audit_projection_v0
+                WHERE run_id = ?
+                  AND (
+                    ? IS NULL
+                    OR recorded_at_utc < ?
+                    OR (recorded_at_utc = ? AND id < ?)
+                  )
+                ORDER BY recorded_at_utc DESC, id DESC
+                LIMIT ?
                 """,
-                (run_id, limit),
+                (
+                    run_id,
+                    cursor_timestamp,
+                    cursor_timestamp,
+                    cursor_timestamp,
+                    cursor_id,
+                    limit + 1,
+                ),
             ).fetchall()
-            lifecycle = connection.execute(
-                """
-                SELECT 'subscription' AS audit_type,
-                       subscription_key AS identity,
-                       started_at_utc AS recorded_at_utc,
-                       cancellation_reason AS details
-                FROM subscription_lifecycle_v0 WHERE run_id = ?
-                ORDER BY started_at_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-            model_events = connection.execute(
-                """
-                SELECT 'm1c_prediction' AS audit_type,
-                       feature_hash AS identity,
-                       bar_end_utc AS recorded_at_utc,
-                       json_object(
-                         'symbol', symbol,
-                         'checkpoint', checkpoint,
-                         'model_hash', model_hash,
-                         'probability', probability,
-                         'threshold', threshold,
-                         'threshold_passed', threshold_passed,
-                         'eligible', eligible,
-                         'rejection_reasons', rejection_reasons_json
-                       ) AS details
-                FROM m1c_checkpoint_v0 WHERE run_id = ?
-                ORDER BY bar_end_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-            episode_events = connection.execute(
-                """
-                SELECT 'episode_decision' AS audit_type,
-                       episode_id AS identity,
-                       trigger_bar_end_utc AS recorded_at_utc,
-                       json_object(
-                         'symbol', symbol,
-                         'checkpoint', trigger_checkpoint,
-                         'entry', prospective_entry_timestamp_utc,
-                         'probability', m1c_probability,
-                         'previous_probability', previous_m1c_probability,
-                         'scientific_recording_valid', scientific_recording_valid,
-                         'rejection_reasons', rejection_reasons_json
-                       ) AS details
-                FROM m1c_episode_v0 WHERE run_id = ?
-                ORDER BY trigger_bar_end_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-            shadow_events = connection.execute(
-                """
-                SELECT 'shadow_quote_selection' AS audit_type,
-                       episode_id || ':' || archetype || ':' ||
-                         contract_identity || ':' || horizon_minutes AS identity,
-                       target_timestamp_utc AS recorded_at_utc,
-                       payload_json AS details
-                FROM shadow_quote_outcome_v0 WHERE run_id = ?
-                ORDER BY target_timestamp_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-        combined = [
-            *self.raw_event_sample_v0(limit=min(limit, 100)),
-            *(
-                dict(row)
-                for row in (
-                    *partitions,
-                    *lifecycle,
-                    *model_events,
-                    *episode_events,
-                    *shadow_events,
-                )
-            ),
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        items = [dict(row) for row in visible]
+        next_cursor = None
+        if has_more and items:
+            next_cursor = self._audit_cursor(
+                recorded_at_utc=str(items[-1]["recorded_at_utc"]),
+                audit_id=int(items[-1]["audit_id"]),
+            )
+        return {
+            "items": items,
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+            "limit": limit,
+        }
+
+    def audit_events_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Compatibility wrapper over the indexed first audit page."""
+
+        return list(self.audit_event_page_v0(limit=limit)["items"])
+
+    def raw_event_sample_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent raw-partition identities without opening Parquet files."""
+
+        return [
+            item
+            for item in self.audit_events_v0(limit=limit)
+            if item["audit_type"] == "raw_partition"
         ]
-        return sorted(
-            combined,
-            key=lambda item: str(item["recorded_at_utc"]),
-            reverse=True,
-        )[:limit]
+
+    def raw_event_detail_v0(
+        self,
+        content_hash: str,
+        *,
+        limit: int = 100,
+        maximum_input_rows: int = 50_000,
+    ) -> dict[str, Any] | None:
+        """Explicitly inspect one immutable partition with bounded columns and rows."""
+
+        if limit <= 0 or maximum_input_rows <= 0:
+            raise ValueError("raw-event detail limits must be positive")
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return None
+        with self._connect() as connection:
+            partition = connection.execute(
+                """
+                SELECT content_hash, event_type, symbol, session_date, file_path,
+                       row_count, minimum_timestamp_utc, maximum_timestamp_utc,
+                       complete, gap_count
+                FROM raw_partition_manifest_v0
+                WHERE run_id = ? AND content_hash = ?
+                """,
+                (run_id, content_hash),
+            ).fetchone()
+        if partition is None:
+            return None
+        path = Path(str(partition["file_path"]))
+        public_partition = dict(partition)
+        public_partition.pop("file_path")
+        if not path.is_file():
+            return {
+                "partition": public_partition,
+                "items": [],
+                "blocked_reason": "partition_unavailable",
+                "read_metrics": None,
+            }
+        try:
+            projection = read_parquet_tail(
+                path,
+                columns=(
+                    "event_id",
+                    "provider_timestamp_utc",
+                    "received_timestamp_utc",
+                    "source_sequence",
+                    "symbol",
+                    "bid",
+                    "ask",
+                    "last",
+                    "price",
+                    "size",
+                    "operation",
+                    "side",
+                    "position",
+                    "checkpoint",
+                    "market_data_type",
+                ),
+                maximum_rows=limit,
+                maximum_input_rows=maximum_input_rows,
+            )
+        except (OSError, ParquetProjectionLimitExceeded) as exc:
+            metrics = (
+                exc.metrics.model_dump()
+                if isinstance(exc, ParquetProjectionLimitExceeded)
+                else None
+            )
+            return {
+                "partition": public_partition,
+                "items": [],
+                "blocked_reason": "projection_limit_exceeded",
+                "read_metrics": metrics,
+            }
+        return {
+            "partition": public_partition,
+            "items": list(projection.rows),
+            "blocked_reason": None,
+            "read_metrics": projection.metrics.model_dump(),
+        }
 
     def quiet_state_status_v0(self) -> dict[str, Any]:
         """Project frozen quiet-state collection status without broker access."""

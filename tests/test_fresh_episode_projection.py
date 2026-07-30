@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
+
+import stocker_prospective.read_store as read_store_module
 from stocker_prospective.database import ProspectiveRepository
 from stocker_prospective.read_store import ProspectiveReadStore
 
@@ -353,3 +359,99 @@ def test_fresh_episode_requires_current_session_latest_completed_checkpoint_and_
     assert items["MULTIPLE"]["latest_episode_id"] == (
         f"MULTIPLE-{CURRENT_SESSION}-2"
     )
+
+
+def test_quote_chart_projection_is_windowed_column_bounded_and_preserves_endpoints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "synthetic.sqlite3"
+    seed_freshness_database(database)
+    partition = tmp_path / "enlarged-quotes.parquet"
+    episode_start = datetime(2026, 7, 30, 14, 5, tzinfo=UTC)
+    rows: list[dict[str, object]] = []
+    for group in range(9):
+        for index in range(100):
+            observed = episode_start - timedelta(days=20 - group, seconds=index)
+            rows.append(
+                {
+                    "event_id": f"old-{group}-{index}",
+                    "provider_timestamp_utc": observed.isoformat(),
+                    "received_timestamp_utc": observed.isoformat(),
+                    "bid": 90.0,
+                    "ask": 90.1,
+                    "bid_size": 10.0,
+                    "ask_size": 10.0,
+                    "ignored_payload": "x" * 2048,
+                }
+            )
+    for index in range(100):
+        observed = episode_start + timedelta(seconds=index)
+        rows.append(
+            {
+                "event_id": f"window-{index:03d}",
+                "provider_timestamp_utc": observed.isoformat(),
+                "received_timestamp_utc": observed.isoformat(),
+                "bid": 100.0 + index / 1000,
+                "ask": 100.1 + index / 1000,
+                "bid_size": 10.0,
+                "ask_size": 12.0,
+                "ignored_payload": "x" * 2048,
+            }
+        )
+    pq.write_table(
+        pa.Table.from_pylist(rows),
+        partition,
+        row_group_size=100,
+        compression=None,
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO raw_partition_manifest_v0(
+                run_id, data_source, session_date, symbol, event_type,
+                file_path, row_count, minimum_timestamp_utc,
+                maximum_timestamp_utc, schema_version, content_hash,
+                complete, gap_count, recorder_version, contract_version,
+                recorded_at_utc, claims_json
+            ) VALUES (?, 'synthetic', ?, 'LATEST',
+                      'underlying_level1_quote_event', ?, ?, ?, ?,
+                      'test', 'quote-window-partition', 1, 0, 'test', 'test',
+                      ?, '{}')
+            """,
+            (
+                RUN_ID,
+                CURRENT_SESSION,
+                str(partition),
+                len(rows),
+                str(rows[0]["received_timestamp_utc"]),
+                str(rows[-1]["received_timestamp_utc"]),
+                str(rows[-1]["received_timestamp_utc"]),
+            ),
+        )
+
+    observed_metrics = []
+    original_read = read_store_module.read_parquet_window
+
+    def tracking_read(*args: object, **kwargs: object) -> object:
+        projection = original_read(*args, **kwargs)
+        observed_metrics.append(projection.metrics)
+        return projection
+
+    monkeypatch.setattr(read_store_module, "read_parquet_window", tracking_read)
+    projected = ProspectiveReadStore(
+        database,
+        run_id=RUN_ID,
+    ).episode_quote_series_v0(
+        f"LATEST-{CURRENT_SESSION}-1",
+        maximum_points=10,
+        maximum_input_rows=500,
+    )
+
+    assert len(projected) == 10
+    assert projected[0]["event_id"] == "window-000"
+    assert projected[-1]["event_id"] == "window-099"
+    assert len(observed_metrics) == 1
+    assert observed_metrics[0].row_groups_examined == 10
+    assert observed_metrics[0].row_groups_read == 1
+    assert "ignored_payload" not in observed_metrics[0].columns_read

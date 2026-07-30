@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -795,8 +795,15 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     def episode_microstructure(episode_id: str) -> dict[str, Any]:
         return {
             "items": store.episode_microstructure_v0(episode_id),
-            "quote_series": store.episode_quote_series_v0(episode_id),
-            "latest_depth_snapshot": store.episode_depth_snapshot_v0(episode_id),
+            "quote_series": store.episode_quote_series_v0(
+                episode_id,
+                maximum_points=config.web.quote_series_maximum_points,
+                maximum_input_rows=config.web.parquet_projection_maximum_input_rows,
+            ),
+            "latest_depth_snapshot": store.episode_depth_snapshot_v0(
+                episode_id,
+                maximum_input_rows=config.web.parquet_projection_maximum_input_rows,
+            ),
             "label": "microstructure descriptive score",
             "direction_model_fitted": False,
             "claims_boundary": claims_boundary(),
@@ -821,10 +828,41 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         }
 
     @app.get("/api/audit/events")
-    def audit_events() -> dict[str, Any]:
+    def audit_events(
+        limit: int = Query(default=100, ge=1, le=1_000),
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        if limit > config.web.audit_page_maximum_items:
+            raise HTTPException(status_code=422, detail="invalid_request")
+        try:
+            page = store.audit_event_page_v0(limit=limit, cursor=cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid_cursor") from exc
         return {
             "ordered": True,
-            "items": store.audit_events_v0(),
+            **page,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/audit/raw-events/{content_hash}")
+    def raw_event_detail(
+        content_hash: str,
+        limit: int = Query(default=100, ge=1, le=100),
+    ) -> dict[str, Any]:
+        if (
+            len(content_hash) != 64
+            or any(character not in "0123456789abcdef" for character in content_hash)
+        ):
+            raise HTTPException(status_code=404, detail="not_found")
+        result = store.raw_event_detail_v0(
+            content_hash,
+            limit=limit,
+            maximum_input_rows=config.web.parquet_projection_maximum_input_rows,
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="not_found")
+        return {
+            **result,
             "claims_boundary": claims_boundary(),
         }
 

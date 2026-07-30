@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
 import sqlite3
@@ -7,9 +8,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from fastapi.testclient import TestClient
 
+import stocker_prospective.read_store as read_store_module
 from stocker_prospective.budget_reports import BudgetAwareDailyReportWriter
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.contract import claims_boundary
@@ -223,6 +227,108 @@ def test_audit_events_skip_raw_partitions_the_web_identity_cannot_read(
         item["audit_type"] == "raw_partition" and item["identity"] == "protected-partition"
         for item in response.json()["items"]
     )
+
+
+def test_audit_events_are_sqlite_only_bounded_and_cursor_paginated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+    with sqlite3.connect(cfg.paths.database) as connection:
+        for index in range(5):
+            connection.execute(
+                """
+                INSERT INTO raw_partition_manifest_v0(
+                    run_id, data_source, session_date, symbol, event_type,
+                    file_path, row_count, minimum_timestamp_utc,
+                    maximum_timestamp_utc, schema_version, content_hash,
+                    complete, gap_count, recorder_version, contract_version,
+                    recorded_at_utc, claims_json
+                ) VALUES (?, 'synthetic', '2026-07-30', 'AAPL', 'synthetic',
+                          ?, 100, ?, ?, 'test', ?, 1, 0, 'test', 'test', ?, '{}')
+                """,
+                (
+                    cfg.runtime.run_id,
+                    str(tmp_path / f"must-not-open-{index}.parquet"),
+                    f"2026-07-30T14:0{index}:00+00:00",
+                    f"2026-07-30T14:0{index}:59+00:00",
+                    f"{index + 1:064x}",
+                    f"2026-07-30T14:0{index}:59+00:00",
+                ),
+            )
+
+    monkeypatch.setattr(
+        read_store_module,
+        "read_parquet_tail",
+        lambda *_args, **_kwargs: pytest.fail("audit listing opened Parquet"),
+    )
+    first = client.get("/api/audit/events?limit=2")
+    second = client.get(
+        "/api/audit/events",
+        params={"limit": 2, "cursor": first.json()["next_cursor"]},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(first.json()["items"]) == 2
+    assert len(second.json()["items"]) == 2
+    assert first.json()["has_more"] is True
+    assert set(item["audit_id"] for item in first.json()["items"]).isdisjoint(
+        item["audit_id"] for item in second.json()["items"]
+    )
+    assert all("must-not-open" not in str(item) for item in first.json()["items"])
+
+
+def test_raw_event_detail_requires_explicit_partition_and_is_bounded(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+    partition = tmp_path / "explicit-raw-detail.parquet"
+    rows = [
+        {
+            "event_id": f"event-{index}",
+            "received_timestamp_utc": f"2026-07-30T14:00:{index:02d}+00:00",
+            "provider_timestamp_utc": f"2026-07-30T14:00:{index:02d}+00:00",
+            "source_sequence": index,
+            "symbol": "AAPL",
+            "bid": 100.0 + index / 100,
+            "ask": 100.1 + index / 100,
+            "secret_vendor_payload": "must-not-be-projected",
+        }
+        for index in range(10)
+    ]
+    pq.write_table(pa.Table.from_pylist(rows), partition, row_group_size=5)
+    content_hash = hashlib.sha256(partition.read_bytes()).hexdigest()
+    with sqlite3.connect(cfg.paths.database) as connection:
+        connection.execute(
+            """
+            INSERT INTO raw_partition_manifest_v0(
+                run_id, data_source, session_date, symbol, event_type,
+                file_path, row_count, minimum_timestamp_utc,
+                maximum_timestamp_utc, schema_version, content_hash,
+                complete, gap_count, recorder_version, contract_version,
+                recorded_at_utc, claims_json
+            ) VALUES (?, 'synthetic', '2026-07-30', 'AAPL',
+                      'underlying_level1_quote_event', ?, 10,
+                      '2026-07-30T14:00:00+00:00',
+                      '2026-07-30T14:00:09+00:00', 'test', ?, 1, 0,
+                      'test', 'test', '2026-07-30T14:00:10+00:00', '{}')
+            """,
+            (cfg.runtime.run_id, str(partition), content_hash),
+        )
+
+    response = client.get(f"/api/audit/raw-events/{content_hash}?limit=3")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["items"]) == 3
+    assert body["items"][0]["event_id"] == "event-7"
+    assert body["items"][-1]["event_id"] == "event-9"
+    assert body["read_metrics"]["row_groups_read"] == 1
+    assert "file_path" not in body["partition"]
+    assert "secret_vendor_payload" not in str(body)
 
 
 def test_health_does_not_apply_legacy_m1_parity_gate_to_frozen_m1c(

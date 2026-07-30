@@ -75,6 +75,18 @@ def activate(value: IBKRMarketDataAdapter, request_id: int = 7) -> None:
     value._track_request(request_id, "AAL:level1")
     value._subscription_kinds[request_id] = "market_data"
     value.stream_quotes.register(request_id)
+    value.register_stream_owner(
+        request_id,
+        {
+            "request_id": request_id,
+            "kind": "underlying_level1",
+            "symbol": "AAL",
+            "con_id": 123,
+            "exchange": "SMART",
+            "episode_id": None,
+            "option_contract": None,
+        },
+    )
 
 
 def classifications(inbox: DurableCallbackInbox) -> tuple[str, ...]:

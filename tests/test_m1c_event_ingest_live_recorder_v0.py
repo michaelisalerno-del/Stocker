@@ -4,11 +4,14 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.event_ingest import (
     IBKRCallbackNormalizer,
     StreamKind,
     StreamOwner,
+    stream_owner_payload,
 )
 from stocker_prospective.events import (
     OptionQuoteEvent,
@@ -117,6 +120,248 @@ def test_callback_normalizer_marks_unconfirmed_market_data_unknown() -> None:
     assert isinstance(result.raw_event, UnderlyingLevel1QuoteEvent)
     assert result.raw_event.market_data_type is MarketDataType.UNKNOWN
     assert result.raw_event.market_data_type.primary_eligible is False
+
+
+def test_persisted_option_owner_survives_mutable_owner_removal() -> None:
+    normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
+    owner = StreamOwner(
+        request_id=9,
+        kind=StreamKind.OPTION_LEVEL1,
+        symbol="AAL",
+        con_id=999,
+        episode_id="episode-admitted-before-cancel",
+        option_contract=OptionContract(
+            underlying_con_id=123,
+            con_id=999,
+            expiry=START.date() + timedelta(days=1),
+            dte=1,
+            dte_bucket=DteBucket.ONE_DTE,
+            strike=100.0,
+            right="P",
+            multiplier=100,
+            exchange="SMART",
+            trading_class="AAL",
+        ),
+    )
+
+    result = normalizer.normalize(
+        {
+            "kind": "level1_quote_update",
+            "request_id": 9,
+            "field": "bid",
+            "value": 1.25,
+            "market_data_type": "live",
+            "received_timestamp_utc": START.isoformat(),
+            "received_monotonic_ns": 1,
+            "source_sequence": 1,
+            "persisted_stream_owner": stream_owner_payload(owner),
+        }
+    )
+
+    assert result is not None
+    assert isinstance(result.raw_event, OptionQuoteEvent)
+    assert result.raw_event.episode_id == "episode-admitted-before-cancel"
+    assert result.raw_event.dte_bucket is DteBucket.ONE_DTE
+    assert result.raw_event.right == "P"
+
+
+def test_persisted_owner_remains_authoritative_after_request_id_reuse() -> None:
+    normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
+    normalizer.register(
+        StreamOwner(
+            request_id=7,
+            kind=StreamKind.UNDERLYING_LEVEL1,
+            symbol="AAL",
+            con_id=123,
+        )
+    )
+    stale_owner = StreamOwner(
+        request_id=7,
+        kind=StreamKind.UNDERLYING_LEVEL1,
+        symbol="MARA",
+        con_id=456,
+    )
+
+    admitted = normalizer.normalize(
+        {
+            **callback(1, field="bid", value=10.0),
+            "persisted_stream_owner": stream_owner_payload(stale_owner),
+        }
+    )
+    active = normalizer.normalize(callback(2, field="ask", value=20.02))
+
+    assert admitted is not None
+    assert isinstance(admitted.raw_event, UnderlyingLevel1QuoteEvent)
+    assert admitted.raw_event.symbol == "MARA"
+    assert admitted.raw_event.bid == 10.0
+    assert active is not None
+    assert isinstance(active.raw_event, UnderlyingLevel1QuoteEvent)
+    assert active.raw_event.symbol == "AAL"
+    assert active.raw_event.bid is None
+    assert active.raw_event.ask == 20.02
+
+
+def test_persisted_owner_request_id_mismatch_fails_closed() -> None:
+    normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
+    mismatched_owner = StreamOwner(
+        request_id=8,
+        kind=StreamKind.UNDERLYING_LEVEL1,
+        symbol="AAL",
+        con_id=123,
+    )
+
+    with pytest.raises(ValueError, match="request ID differs from callback"):
+        normalizer.normalize(
+            {
+                **callback(1, field="bid", value=10.0),
+                "persisted_stream_owner": stream_owner_payload(mismatched_owner),
+            }
+        )
+
+
+def test_malformed_persisted_owner_receipt_fails_closed() -> None:
+    normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
+
+    with pytest.raises(ValueError, match="PERSISTED_STREAM_OWNER_INVALID"):
+        normalizer.normalize(
+            {
+                **callback(1, field="bid", value=10.0),
+                "persisted_stream_owner": {
+                    "request_id": 7,
+                    "kind": "underlying_level1",
+                    "symbol": "AAL",
+                    "con_id": True,
+                    "exchange": None,
+                    "episode_id": None,
+                    "option_contract": None,
+                },
+            }
+        )
+
+
+def test_present_but_unbound_persisted_owner_never_uses_mutable_owner() -> None:
+    normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
+    normalizer.register(
+        StreamOwner(
+            request_id=7,
+            kind=StreamKind.UNDERLYING_LEVEL1,
+            symbol="AAL",
+            con_id=123,
+        )
+    )
+
+    with pytest.raises(ValueError, match="PERSISTED_STREAM_OWNER_MISSING"):
+        normalizer.normalize(
+            {
+                **callback(1, field="bid", value=10.0),
+                "persisted_stream_owner": None,
+            }
+        )
+
+
+def test_detached_owner_receipt_cannot_contaminate_reused_request_state() -> None:
+    normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
+    retired_owner = StreamOwner(
+        request_id=7,
+        kind=StreamKind.UNDERLYING_LEVEL1,
+        symbol="AAL",
+        con_id=123,
+    )
+    retired = normalizer.normalize(
+        {
+            **callback(1, field="bid", value=10.0),
+            "persisted_stream_owner": stream_owner_payload(retired_owner),
+        }
+    )
+    assert retired is not None
+
+    normalizer.register(
+        StreamOwner(
+            request_id=7,
+            kind=StreamKind.UNDERLYING_LEVEL1,
+            symbol="MARA",
+            con_id=456,
+        )
+    )
+    active = normalizer.normalize(callback(2, field="ask", value=20.02))
+
+    assert active is not None
+    assert isinstance(active.raw_event, UnderlyingLevel1QuoteEvent)
+    assert active.raw_event.symbol == "MARA"
+    assert active.raw_event.ask == 20.02
+    assert active.raw_event.bid is None
+    assert not active.raw_event.quote_valid
+
+
+def test_failed_detached_batch_rolls_quote_state_back_for_retry() -> None:
+    normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
+    owner = StreamOwner(
+        request_id=7,
+        kind=StreamKind.UNDERLYING_LEVEL1,
+        symbol="AAL",
+        con_id=123,
+    )
+    normalizer.register(owner)
+    normalizer.normalize(callback(1, field="bid", value=10.0))
+    normalizer.unregister(7)
+    admitted_ask = {
+        **callback(2, field="ask", value=10.02),
+        "persisted_stream_owner": stream_owner_payload(owner),
+    }
+
+    with (
+        pytest.raises(RuntimeError, match="synthetic projection failure"),
+        normalizer.normalization_batch(),
+    ):
+        normalizer.normalize(admitted_ask)
+        raise RuntimeError("synthetic projection failure")
+
+    with normalizer.normalization_batch():
+        retried = normalizer.normalize(admitted_ask)
+
+    assert retried is not None
+    assert isinstance(retried.raw_event, UnderlyingLevel1QuoteEvent)
+    assert retried.raw_event.bid == 10.0
+    assert retried.raw_event.ask == 10.02
+    assert retried.raw_event.quote_valid
+
+
+def test_retired_quote_state_capacity_fails_explicitly_without_eviction() -> None:
+    normalizer = IBKRCallbackNormalizer(
+        prospective_collection_start=START,
+        max_retired_quote_states=1,
+    )
+    first = StreamOwner(
+        request_id=7,
+        kind=StreamKind.UNDERLYING_LEVEL1,
+        symbol="AAL",
+        con_id=123,
+    )
+    second = StreamOwner(
+        request_id=8,
+        kind=StreamKind.UNDERLYING_LEVEL1,
+        symbol="MARA",
+        con_id=456,
+    )
+    normalizer.register(first)
+    normalizer.normalize(callback(1, field="bid", value=10.0))
+    normalizer.unregister(7)
+    normalizer.register(second)
+    normalizer.normalize(
+        {
+            **callback(2, field="bid", value=20.0),
+            "request_id": 8,
+        }
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="CALLBACK_RETIRED_QUOTE_STATE_CAPACITY_EXCEEDED",
+    ):
+        normalizer.unregister(8)
+
+    assert normalizer.owner(8) == second
+    assert normalizer.retired_quote_owners == (first,)
 
 
 def test_option_computations_preserve_source_and_only_model_populates_model_fields() -> None:
@@ -447,6 +692,9 @@ def test_live_recorder_hydrates_processed_checkpoints_before_restart_replay(
             for checkpoint in range(1, 7)
         }
 
-    assert recorder._score_ready(
-        observed_now=START + timedelta(minutes=30),
-    ) == ()
+    assert (
+        recorder._score_ready(
+            observed_now=START + timedelta(minutes=30),
+        )
+        == ()
+    )

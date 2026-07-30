@@ -447,6 +447,15 @@ def test_online_backup_includes_durable_inbox_and_runtime_verification(
         classification=CallbackClassification.ACCEPTED_ACTIVE,
         subscription_owner="core-bars",
         symbol="AAL",
+        stream_owner={
+            "request_id": 101,
+            "kind": "underlying_bar",
+            "symbol": "AAL",
+            "con_id": 123,
+            "exchange": "SMART",
+            "episode_id": None,
+            "option_contract": None,
+        },
     )
     leased = inbox.lease(
         lease_owner=lease.owner_id,

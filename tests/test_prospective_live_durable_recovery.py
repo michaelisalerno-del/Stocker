@@ -17,6 +17,7 @@ from stocker_prospective.event_ingest import (
     IBKRCallbackNormalizer,
     StreamKind,
     StreamOwner,
+    stream_owner_payload,
 )
 from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
 from stocker_prospective.live_recorder import (
@@ -292,6 +293,293 @@ def test_durable_poll_acknowledges_only_after_raw_manifest_commit(
     assert accounting.highest_source_sequence == accounting.highest_acknowledged_sequence
 
 
+def test_callback_admitted_before_cancellation_uses_persisted_owner(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    emit(adapter, field="ask_size")
+
+    # Cancellation removes mutable request ownership, but it must not invalidate
+    # an event whose owner identity was already committed with durable admission.
+    recorder.normalizer.unregister(7)
+
+    result = recorder.poll(now=NOW + timedelta(seconds=1))
+    recorder.finalize_durable_poll(
+        result,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    assert result.processing_disposition == "normal_scientific_projection"
+    assert result.scientific_projection_complete
+    assert result.raw_event_count == 1
+    assert inbox.accounting().acknowledged == 1
+    assert inbox.accounting().quarantined == 0
+    assert not inbox.has_active_fatal()
+    with database._connect() as connection:
+        event = connection.execute(
+            """
+            SELECT event_type
+            FROM raw_partition_manifest_v0
+            WHERE run_id = ?
+            """,
+            (RUN_ID,),
+        ).fetchone()
+    assert str(event["event_type"]) == "underlying_level1_quote_event"
+
+
+def test_request_error_admitted_before_cancellation_uses_persisted_owner(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    adapter.on_error(7, 10197, "simulated request-scoped market-data error")
+    assert inbox.accounting().pending == 1
+    recorder.normalizer.unregister(7)
+
+    result = recorder.poll(now=NOW + timedelta(seconds=1))
+    assert result.callback_count == 1
+    recorder.finalize_durable_poll(
+        result,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    with database._connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT symbol, stream_kind, request_id, cause_code
+            FROM gap_incident_v1
+            WHERE run_id = ?
+            """,
+            (RUN_ID,),
+        ).fetchall()
+    assert tuple(tuple(row) for row in rows) == (
+        (
+            "AAL",
+            StreamKind.UNDERLYING_LEVEL1.value,
+            7,
+            "REQUIRED_STREAM_IBKR_ERROR",
+        ),
+    )
+    assert inbox.accounting().acknowledged == 1
+
+
+def test_request_error_is_not_reattributed_after_request_id_reuse(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    adapter.on_error(7, 10197, "simulated request-scoped market-data error")
+    assert inbox.accounting().pending == 1
+    recorder.normalizer.unregister(7)
+    recorder.normalizer.register(
+        StreamOwner(
+            request_id=7,
+            kind=StreamKind.UNDERLYING_LEVEL1,
+            symbol="AAPL",
+            con_id=456,
+            exchange="SMART",
+        )
+    )
+
+    result = recorder.poll(now=NOW + timedelta(seconds=1))
+    assert result.callback_count == 1
+    recorder.finalize_durable_poll(
+        result,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    with database._connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT symbol, stream_kind, request_id, cause_code
+            FROM gap_incident_v1
+            WHERE run_id = ?
+            """,
+            (RUN_ID,),
+        ).fetchall()
+    assert tuple(tuple(row) for row in rows) == (
+        (
+            "AAL",
+            StreamKind.UNDERLYING_LEVEL1.value,
+            7,
+            "REQUIRED_STREAM_IBKR_ERROR",
+        ),
+    )
+    assert inbox.accounting().acknowledged == 1
+
+
+def test_cancelled_stream_replays_its_admitted_quote_updates_as_one_batch(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    emit(adapter, field="bid")
+    emit(adapter, field="ask")
+    recorder.normalizer.unregister(7)
+
+    result = recorder.poll(now=NOW + timedelta(seconds=1))
+    recorder.finalize_durable_poll(
+        result,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    assert result.raw_event_count == 2
+    with database._connect() as connection:
+        quote = connection.execute(
+            """
+            SELECT bid, ask, quote_valid
+            FROM underlying_live_state_v0
+            WHERE run_id = ? AND symbol = 'AAL'
+            """,
+            (RUN_ID,),
+        ).fetchone()
+    assert tuple(quote) == (10.0, 10.02, 1)
+    assert inbox.accounting().acknowledged == 2
+    assert recorder.normalizer.retired_quote_owners == ()
+    assert not inbox.has_active_fatal()
+
+
+def test_cancelled_stream_quote_state_survives_durable_lease_boundaries(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    recorder.inbox_batch_limit = 1
+    emit(adapter, field="bid")
+    emit(adapter, field="ask")
+    recorder.normalizer.unregister(7)
+
+    first = recorder.poll(now=NOW + timedelta(seconds=1))
+    recorder.finalize_durable_poll(
+        first,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+    assert len(recorder.normalizer.retired_quote_owners) == 1
+    second = recorder.poll(now=NOW + timedelta(seconds=2))
+    recorder.finalize_durable_poll(
+        second,
+        acknowledged_at=NOW + timedelta(seconds=2),
+    )
+
+    assert first.raw_event_count == second.raw_event_count == 1
+    with database._connect() as connection:
+        quote = connection.execute(
+            """
+            SELECT bid, ask, quote_valid
+            FROM underlying_live_state_v0
+            WHERE run_id = ? AND symbol = 'AAL'
+            """,
+            (RUN_ID,),
+        ).fetchone()
+    assert tuple(quote) == (10.0, 10.02, 1)
+    assert inbox.accounting().acknowledged == 2
+    assert recorder.normalizer.retired_quote_owners == ()
+
+
+def test_retired_quote_state_without_pending_evidence_is_pruned_on_poll(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    emit(adapter, field="bid")
+    baseline = recorder.poll(now=NOW + timedelta(seconds=1))
+    recorder.finalize_durable_poll(
+        baseline,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+
+    recorder.normalizer.unregister(7)
+    assert len(recorder.normalizer.retired_quote_owners) == 1
+
+    empty = recorder.poll(now=NOW + timedelta(seconds=2))
+
+    assert empty.callback_count == 0
+    assert recorder.normalizer.retired_quote_owners == ()
+
+
+def test_pending_callback_retains_last_acknowledged_pre_cancellation_quote(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    emit(adapter, field="bid")
+    baseline = recorder.poll(now=NOW + timedelta(seconds=1))
+    recorder.finalize_durable_poll(
+        baseline,
+        acknowledged_at=NOW + timedelta(seconds=1),
+    )
+    emit(adapter, field="ask")
+    recorder.normalizer.unregister(7)
+
+    pending = recorder.poll(now=NOW + timedelta(seconds=2))
+    recorder.finalize_durable_poll(
+        pending,
+        acknowledged_at=NOW + timedelta(seconds=2),
+    )
+
+    with database._connect() as connection:
+        quote = connection.execute(
+            """
+            SELECT bid, ask, quote_valid
+            FROM underlying_live_state_v0
+            WHERE run_id = ? AND symbol = 'AAL'
+            """,
+            (RUN_ID,),
+        ).fetchone()
+    assert tuple(quote) == (10.0, 10.02, 1)
+    assert inbox.accounting().acknowledged == 2
+
+
 def test_large_durable_batch_refreshes_processing_heartbeat(
     tmp_path: Path,
 ) -> None:
@@ -488,6 +776,70 @@ def test_replacement_generation_recovers_raw_but_cannot_reenable_scoring(
     assert result.checkpoint_count == 0
     assert inbox.accounting().acknowledged == 1
     assert manifest_count(database) == 1
+
+
+def test_new_generation_cannot_backfill_owner_on_unbound_old_callback(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    _, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="crashed-before-owner-bind",
+        inbox=inbox,
+        register_default_stream=False,
+    )
+    emit(adapter)
+    with database._connect() as connection:
+        before = connection.execute(
+            """
+            SELECT admission_recorder_generation, stream_owner_json
+            FROM callback_inbox_v1
+            WHERE status = 'pending'
+            """
+        ).fetchone()
+    assert tuple(before) == (1, None)
+
+    replacement, _ = build_recorder(
+        tmp_path,
+        database,
+        generation=2,
+        owner="replacement",
+        inbox=inbox,
+        adapter=adapter,
+        register_default_stream=False,
+    )
+    replacement.register_stream(
+        StreamOwner(
+            request_id=7,
+            kind=StreamKind.UNDERLYING_LEVEL1,
+            symbol="MARA",
+            con_id=456,
+            exchange="SMART",
+        )
+    )
+    with database._connect() as connection:
+        after = connection.execute(
+            """
+            SELECT stream_owner_json
+            FROM callback_inbox_v1
+            WHERE admission_recorder_generation = 1
+            """
+        ).fetchone()
+    assert after[0] is None
+
+    recovered = replacement.poll(now=NOW + timedelta(seconds=6))
+    replacement.finalize_durable_poll(
+        recovered,
+        acknowledged_at=NOW + timedelta(seconds=6),
+    )
+
+    assert recovered.processing_disposition == "scientifically_blocked_raw_only"
+    assert not recovered.scientific_projection_complete
+    assert recovered.raw_event_count == 1
+    assert inbox.accounting().acknowledged == 1
 
 
 def test_blocked_recovery_persists_original_callback_without_current_owner(
@@ -938,6 +1290,14 @@ def test_poison_callback_is_quarantined_and_blocks_scoring(tmp_path: Path) -> No
         inbox_event_id="poison-event",
         subscription_owner="AAL:level1",
         symbol="AAL",
+        stream_owner=stream_owner_payload(
+            StreamOwner(
+                request_id=7,
+                kind=StreamKind.UNDERLYING_LEVEL1,
+                symbol="AAL",
+                con_id=123,
+            )
+        ),
     )
 
     with pytest.raises(
@@ -950,6 +1310,50 @@ def test_poison_callback_is_quarantined_and_blocks_scoring(tmp_path: Path) -> No
     assert inbox.accounting().acknowledged == 0
     assert inbox.has_active_fatal("ingestion")
     assert not recorder._scientific_scoring_enabled
+
+
+def test_invalid_persisted_owner_is_quarantined_and_blocks_scoring(
+    tmp_path: Path,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, _ = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    inbox.admit(
+        callback_kind="level1_quote_update",
+        request_id=7,
+        payload={"field": "bid", "value": 10.0},
+        connection_generation=1,
+        classification=CallbackClassification.ACCEPTED_ACTIVE,
+        received_utc=NOW,
+        received_monotonic_ns=1,
+        inbox_event_id="invalid-owner-event",
+        subscription_owner="AAL:level1",
+        symbol="AAL",
+        stream_owner=stream_owner_payload(
+            StreamOwner(
+                request_id=8,
+                kind=StreamKind.UNDERLYING_LEVEL1,
+                symbol="AAL",
+                con_id=123,
+            )
+        ),
+    )
+
+    with pytest.raises(
+        CallbackNormalizationFatal,
+        match="CALLBACK_NORMALIZATION_FAILED",
+    ):
+        recorder.poll(now=NOW)
+
+    assert inbox.accounting().quarantined == 1
+    assert inbox.has_active_fatal("ingestion")
+    assert not recorder.scientific_scoring_enabled
 
 
 def test_poison_later_in_lease_cannot_partially_persist_earlier_callback(
@@ -979,6 +1383,14 @@ def test_poison_later_in_lease_cannot_partially_persist_earlier_callback(
             inbox_event_id=event_id,
             subscription_owner="AAL:level1",
             symbol="AAL",
+            stream_owner=stream_owner_payload(
+                StreamOwner(
+                    request_id=7,
+                    kind=StreamKind.UNDERLYING_LEVEL1,
+                    symbol="AAL",
+                    con_id=123,
+                )
+            ),
         )
 
     with pytest.raises(CallbackNormalizationFatal):

@@ -484,10 +484,25 @@ event identity; it is not inferred from callback content.
 
 IBKR may invoke a callback synchronously before its request method returns.
 The original callback is admitted first; stream registration then backfills
-the typed owner on every row for that unique request/generation without
-rewriting an existing receipt. A crash before that backfill still retains the
+the typed owner only on unprocessed rows matching the exact run, recorder
+generation, connection generation and request ID, without rewriting an
+existing receipt. A positive-request callback in the current generation is
+not leaseable while that receipt remains null, so mutable ownership can never
+stand in for an unfinished durable bind. A replacement generation cannot
+backfill the old row even if its request and connection counters restart at
+the same values. A crash before the original backfill still retains the
 complete provider callback and is recovered only as scientifically blocked
 raw-envelope evidence.
+
+Cancellation cannot invalidate a callback that was already admitted as
+active. Normalisation treats that callback's typed receipt as authoritative,
+even if the mutable request ID has since been removed or reused. Incremental
+Level I state is keyed by the full receipt rather than request ID and is
+retained across bounded inbox leases only while SQLite still has
+unacknowledged rows for that owner. It is rolled back on a failed processing
+attempt and released after the last acknowledgement. The retired-state cache
+is bounded and fails explicitly on exhaustion. Callbacks classified as
+expected-late at admission remain diagnostic and never enter this path.
 
 The poller leases a source-ordered batch without deleting it. Its stable batch
 identity and membership survive lease expiry, so a callback arriving during

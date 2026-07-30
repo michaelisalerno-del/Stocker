@@ -1348,6 +1348,11 @@ class FrozenM1CLiveRecorder:
         if self.failure_injector is not None:
             self.failure_injector(phase)
 
+    def _reconcile_retired_quote_state(self, inbox: DurableCallbackInbox) -> None:
+        for owner in self.normalizer.retired_quote_owners:
+            if not inbox.has_unacknowledged_stream_owner(stream_owner_payload(owner)):
+                self.normalizer.release_retired_quote_owner(owner)
+
     def poll(self, *, now: datetime) -> LivePollResult:
         """Lease callbacks and durably materialise raw evidence.
 
@@ -1358,14 +1363,16 @@ class FrozenM1CLiveRecorder:
         observed_now = now.astimezone(UTC)
         inbox = self.durable_inbox
         if inbox is None:
-            return self._poll_callbacks(
-                now=observed_now,
-                callbacks=self.adapter.drain_stream_events(),
-            )
+            with self.normalizer.normalization_batch():
+                return self._poll_callbacks(
+                    now=observed_now,
+                    callbacks=self.adapter.drain_stream_events(),
+                )
         assert self.recorder_generation is not None
         assert self.lease_owner is not None
         if self._inflight_durable_events:
             raise RuntimeError("CALLBACK_DURABLE_POLL_NOT_FINALIZED")
+        self._reconcile_retired_quote_state(inbox)
         self.adapter.flush_pending_callback_failure()
         interrupted = inbox.quarantine_interrupted_provider_envelopes(
             current_recorder_generation=self.recorder_generation,
@@ -1422,6 +1429,7 @@ class FrozenM1CLiveRecorder:
                 raw_partition_hashes=committed_hashes,
                 acknowledged_at=observed_now,
             )
+        self._reconcile_retired_quote_state(inbox)
         pending_events = tuple(pending)
         try:
             materialization = inbox.raw_materialization(pending_events)
@@ -1502,16 +1510,17 @@ class FrozenM1CLiveRecorder:
                     materialization=materialization,
                 )
             else:
-                result = self._poll_callbacks(
-                    now=observed_now,
-                    callbacks=tuple(event.normalizer_payload() for event in pending_events),
-                    precommitted_partition_hashes=(
-                        None if materialization is None else materialization.partition_hashes
-                    ),
-                    expected_raw_event_ids=(
-                        None if materialization is None else materialization.raw_event_ids
-                    ),
-                )
+                with self.normalizer.normalization_batch():
+                    result = self._poll_callbacks(
+                        now=observed_now,
+                        callbacks=tuple(event.normalizer_payload() for event in pending_events),
+                        precommitted_partition_hashes=(
+                            None if materialization is None else materialization.partition_hashes
+                        ),
+                        expected_raw_event_ids=(
+                            None if materialization is None else materialization.raw_event_ids
+                        ),
+                    )
             self._failure_checkpoint("before_callback_raw_materialization")
             inbox.commit_raw_materialization(
                 pending_events,
@@ -1664,6 +1673,7 @@ class FrozenM1CLiveRecorder:
             raw_partition_hashes=result.partition_hashes,
             acknowledged_at=observed,
         )
+        self._reconcile_retired_quote_state(inbox)
         self._failure_checkpoint("after_callback_acknowledgement")
         self._inflight_durable_events = ()
 
@@ -1777,6 +1787,9 @@ class FrozenM1CLiveRecorder:
         ibkr_errors: list[tuple[int, int]] = []
         deferred_control_gaps: list[tuple[str, datetime]] = []
         normalized_callbacks: list[tuple[dict[str, Any], NormalizedCallback | None]] = []
+        # The inbox has already made expected-late callbacks diagnostic. These
+        # are accepted-active events whose admission owners can outlive mutable
+        # request registration until the whole ordered lease is normalised.
         for callback_index, payload in enumerate(callbacks):
             try:
                 normalized = self.normalizer.normalize(payload)
@@ -1872,7 +1885,10 @@ class FrozenM1CLiveRecorder:
                 except (TypeError, ValueError):
                     code = -1
                 ibkr_errors.append((request_id, code))
-                owner = self.normalizer.owner(request_id)
+                # Request IDs are mutable and may be cancelled or reused before
+                # a durable lease is polled. Attribute the incident to the
+                # immutable owner selected from its admission receipt.
+                owner = normalized.stream_owner
                 if owner is not None:
                     session = observed_now.astimezone(NEW_YORK).date()
                     gate = self._opening_reversal_decision_gate_v1_1

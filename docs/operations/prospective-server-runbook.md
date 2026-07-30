@@ -1030,6 +1030,17 @@ event IDs, commits application processing, and finally acknowledges. Never
 manually mark a row acknowledged. A processing commit without an
 acknowledgement is safe for acknowledgement-only recovery; a provider envelope
 without canonical materialisation is not safe and becomes ingestion-fatal.
+A current-generation positive request with a null `stream_owner_json` is
+intentionally head-of-line blocked until the same recorder generation binds
+its typed receipt. A later process must not attach a newly reused request ID
+to that row; it recovers the old callback as raw-only evidence instead.
+
+If cancellation occurs after active admission but before polling, the recorder
+uses the immutable owner receipt and retains that owner's incremental quote
+state across lease boundaries until SQLite shows no unacknowledged callbacks
+for it. This is distinct from a callback classified after cancellation:
+`expected_late_callback_after_cancellation` is diagnostic, already
+acknowledged, and cannot update the live quote or option projection.
 
 The default lease batch is bounded at 256 callbacks. This amortizes immutable
 partition and checkpoint overhead across the 28 required bar streams while

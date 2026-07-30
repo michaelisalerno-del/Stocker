@@ -71,6 +71,15 @@ def admit(
         inbox_event_id=event_id,
         subscription_owner="AAL:level1",
         symbol="AAL",
+        stream_owner={
+            "request_id": request_id,
+            "kind": "underlying_level1",
+            "symbol": "AAL",
+            "con_id": 123,
+            "exchange": "SMART",
+            "episode_id": None,
+            "option_contract": None,
+        },
     )
     return result.event.source_sequence
 
@@ -94,6 +103,61 @@ def test_durable_insert_survives_restart_before_first_lease(tmp_path: Path) -> N
     assert leased[0].original_payload["value"] is None
     assert restarted.accounting().pending == 0
     assert restarted.accounting().leased == 1
+
+
+def test_same_generation_can_bind_startup_race_owner_before_lease(
+    tmp_path: Path,
+) -> None:
+    path = migrated_database(tmp_path)
+    inbox = durable_inbox(path)
+    inbox.admit(
+        callback_kind="level1_quote_update",
+        request_id=7,
+        payload={"field": "bid", "value": 10.0},
+        connection_generation=2,
+        classification=CallbackClassification.ACCEPTED_ACTIVE,
+        received_utc=NOW,
+        received_monotonic_ns=123,
+        inbox_event_id="startup-race",
+        subscription_owner="AAL:level1",
+        symbol="AAL",
+    )
+    owner = {
+        "request_id": 7,
+        "kind": "underlying_level1",
+        "symbol": "AAL",
+        "con_id": 123,
+        "exchange": "SMART",
+        "episode_id": None,
+        "option_contract": None,
+    }
+
+    assert (
+        inbox.lease(
+            lease_owner="recorder",
+            lease_generation=1,
+            now=NOW,
+            lease_timeout=timedelta(seconds=30),
+            limit=10,
+        )
+        == ()
+    )
+    attached = inbox.attach_stream_owner(
+        request_id=7,
+        connection_generation=2,
+        stream_owner=owner,
+        attached_at=NOW + timedelta(milliseconds=1),
+    )
+    leased = inbox.lease(
+        lease_owner="recorder",
+        lease_generation=1,
+        now=NOW + timedelta(seconds=1),
+        lease_timeout=timedelta(seconds=30),
+        limit=10,
+    )
+
+    assert attached == 1
+    assert leased[0].stream_owner == owner
 
 
 def test_expired_lease_is_reclaimed_and_old_generation_cannot_ack(tmp_path: Path) -> None:

@@ -584,14 +584,17 @@ class DurableCallbackInbox:
                 SELECT inbox_event_id
                 FROM callback_inbox_v1
                 WHERE admission_run_id IS ?
+                  AND admission_recorder_generation IS ?
                   AND request_id = ?
                   AND connection_generation = ?
+                  AND status IN ('provider_pending', 'pending')
                   AND stream_owner_json IS NOT NULL
                   AND stream_owner_json <> ?
                 LIMIT 1
                 """,
                 (
                     self.run_id,
+                    self.recorder_generation,
                     request_id,
                     connection_generation,
                     encoded_owner,
@@ -605,14 +608,17 @@ class DurableCallbackInbox:
                 UPDATE callback_inbox_v1
                 SET stream_owner_json = ?, updated_at_utc = ?
                 WHERE admission_run_id IS ?
+                  AND admission_recorder_generation IS ?
                   AND request_id = ?
                   AND connection_generation = ?
+                  AND status IN ('provider_pending', 'pending')
                   AND stream_owner_json IS NULL
                 """,
                 (
                     encoded_owner,
                     observed.isoformat(),
                     self.run_id,
+                    self.recorder_generation,
                     request_id,
                     connection_generation,
                 ),
@@ -825,6 +831,14 @@ class DurableCallbackInbox:
         observed = _utc(now, label="callback lease timestamp")
         expired_before = (observed - lease_timeout).isoformat()
         leased: list[sqlite3.Row] = []
+
+        def owner_binding_pending(row: sqlite3.Row) -> bool:
+            return (
+                int(row["request_id"]) >= 0
+                and row["stream_owner_json"] is None
+                and row["admission_recorder_generation"] == self.recorder_generation
+            )
+
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             # An explicitly abandoned run retains its poison/pending evidence
@@ -842,7 +856,8 @@ class DurableCallbackInbox:
             )
             oldest = connection.execute(
                 """
-                SELECT inbox_event_id, status, lease_batch_id
+                SELECT inbox_event_id, status, lease_batch_id, request_id,
+                       stream_owner_json, admission_recorder_generation
                 FROM callback_inbox_v1
                 WHERE status IN ('pending', 'leased')
                   AND admission_run_id IS ?
@@ -851,14 +866,15 @@ class DurableCallbackInbox:
                 """,
                 (self.run_id,),
             ).fetchone()
-            if oldest is None or str(oldest["status"]) == "leased":
+            if oldest is None or str(oldest["status"]) == "leased" or owner_binding_pending(oldest):
                 event_ids: tuple[str, ...] = ()
                 batch_id = None
             elif oldest["lease_batch_id"] is not None:
                 batch_id = str(oldest["lease_batch_id"])
                 rows = connection.execute(
                     """
-                    SELECT inbox_event_id
+                    SELECT inbox_event_id, request_id, stream_owner_json,
+                           admission_recorder_generation
                     FROM callback_inbox_v1
                     WHERE status = 'pending'
                       AND admission_run_id IS ?
@@ -867,11 +883,19 @@ class DurableCallbackInbox:
                     """,
                     (self.run_id, batch_id),
                 ).fetchall()
-                event_ids = tuple(str(row["inbox_event_id"]) for row in rows)
+                ready_rows = []
+                for row in rows:
+                    if owner_binding_pending(row):
+                        break
+                    ready_rows.append(row)
+                event_ids = tuple(str(row["inbox_event_id"]) for row in ready_rows)
+                if not event_ids:
+                    batch_id = None
             else:
                 rows = connection.execute(
                     """
-                    SELECT inbox_event_id
+                    SELECT inbox_event_id, request_id, stream_owner_json,
+                           admission_recorder_generation
                     FROM callback_inbox_v1
                     WHERE status = 'pending'
                       AND admission_run_id IS ?
@@ -881,16 +905,25 @@ class DurableCallbackInbox:
                     """,
                     (self.run_id, limit),
                 ).fetchall()
-                event_ids = tuple(str(row["inbox_event_id"]) for row in rows)
-                batch_id = hashlib.sha256(
-                    "|".join(
-                        (
-                            str(self.run_id),
-                            str(lease_generation),
-                            *event_ids,
-                        )
-                    ).encode()
-                ).hexdigest()
+                ready_rows = []
+                for row in rows:
+                    if owner_binding_pending(row):
+                        break
+                    ready_rows.append(row)
+                event_ids = tuple(str(row["inbox_event_id"]) for row in ready_rows)
+                batch_id = (
+                    None
+                    if not event_ids
+                    else hashlib.sha256(
+                        "|".join(
+                            (
+                                str(self.run_id),
+                                str(lease_generation),
+                                *event_ids,
+                            )
+                        ).encode()
+                    ).hexdigest()
+                )
             for event_id in event_ids:
                 cursor = connection.execute(
                     """
@@ -930,6 +963,27 @@ class DurableCallbackInbox:
             )
             connection.commit()
         return tuple(self._event(row) for row in leased)
+
+    def has_unacknowledged_stream_owner(
+        self,
+        stream_owner: Mapping[str, object],
+    ) -> bool:
+        """Return whether this run can still lease evidence for one owner."""
+
+        encoded_owner = _encoded(dict(stream_owner))
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM callback_inbox_v1
+                WHERE admission_run_id IS ?
+                  AND stream_owner_json = ?
+                  AND status IN ('provider_pending', 'pending', 'leased')
+                LIMIT 1
+                """,
+                (self.run_id, encoded_owner),
+            ).fetchone()
+        return row is not None
 
     def commit_raw_materialization(
         self,

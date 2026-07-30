@@ -1050,7 +1050,10 @@ acknowledged, and cannot update the live quote or option projection.
 The default lease batch is bounded at 256 callbacks. This amortizes immutable
 partition and checkpoint overhead across the 28 required bar streams while
 leaving excess callbacks pending and recoverable. Processing refreshes
-generation ownership every eight projected callbacks. Do not raise the bound
+generation ownership every eight projected callbacks and between each grouped
+immutable partition write, before compression, hashing, fsync, and atomic
+rename work begins. The batch is acknowledged only after all partition
+manifests and recorder-side processing state commit. Do not raise the bound
 merely to hide a growing backlog; compare callback admission and processing
 rates, oldest-unacknowledged age, lease freshness, and host capacity first.
 

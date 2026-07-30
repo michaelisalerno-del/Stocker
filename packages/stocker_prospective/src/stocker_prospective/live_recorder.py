@@ -727,6 +727,7 @@ class FrozenM1CLiveRecorder:
             # Retain the legacy manifest column without copying a batch-wide
             # count into every partition. GapIncident is the canonical tally.
             gap_count=0,
+            progress_heartbeat=self.processing_heartbeat,
         )
         for partition in partitions:
             path_parts = {

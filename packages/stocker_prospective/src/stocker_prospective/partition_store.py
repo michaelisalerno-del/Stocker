@@ -320,20 +320,29 @@ class PartitionedEventStore:
         events: tuple[RawEvent, ...],
         complete: bool,
         gap_count: int = 0,
+        progress_heartbeat: Callable[[], object] | None = None,
     ) -> tuple[PartitionWriteResult, ...]:
         grouped: dict[tuple[str, str, str, str], list[RawEvent]] = {}
         for event in events:
             _, identity = self._partition(data_source=data_source, event=event)
             grouped.setdefault(identity, []).append(event)
-        return tuple(
-            self.write_events(
-                data_source=data_source,
-                events=tuple(grouped[key]),
-                complete=complete,
-                gap_count=gap_count,
+        results: list[PartitionWriteResult] = []
+        for key in sorted(grouped):
+            # Each immutable Parquet write includes compression, multiple
+            # fsyncs, hashing, and atomic renames. Large cross-symbol batches
+            # must refresh process/lease ownership between partitions so a
+            # healthy recorder is not projected as stale mid-commit.
+            if progress_heartbeat is not None:
+                progress_heartbeat()
+            results.append(
+                self.write_events(
+                    data_source=data_source,
+                    events=tuple(grouped[key]),
+                    complete=complete,
+                    gap_count=gap_count,
+                )
             )
-            for key in sorted(grouped)
-        )
+        return tuple(results)
 
     @staticmethod
     def _load_result(path: Path) -> PartitionWriteResult:

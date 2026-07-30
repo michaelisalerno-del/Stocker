@@ -605,7 +605,9 @@ def test_large_durable_batch_refreshes_processing_heartbeat(
 
     assert recorder.inbox_batch_limit == 256
     assert len(result.durable_inbox_event_ids) == 256
-    assert pulses == list(range(32))
+    # 32 normalisation/projection pulses plus one before the immutable
+    # partition compression/fsync/rename sequence.
+    assert pulses == list(range(33))
     assert inbox.accounting().pending == 1
 
 

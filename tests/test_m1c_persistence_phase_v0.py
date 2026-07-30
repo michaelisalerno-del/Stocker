@@ -270,6 +270,29 @@ def test_partition_store_is_append_only_atomic_hashed_and_prospective(tmp_path: 
         )
 
 
+def test_grouped_partition_writes_refresh_heartbeat_between_fsync_boundaries(
+    tmp_path: Path,
+) -> None:
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    heartbeat_calls: list[int] = []
+
+    partitions = store.write_grouped(
+        data_source="fake_ibkr",
+        events=(raw_event(1), completed_bar(1)),
+        complete=True,
+        progress_heartbeat=lambda: heartbeat_calls.append(len(heartbeat_calls) + 1),
+    )
+
+    assert len(partitions) == 2
+    assert heartbeat_calls == [1, 2]
+    assert all(store.verify(partition) for partition in partitions)
+
+
 def test_partition_finalisation_recovers_without_publishing_complete_orphan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

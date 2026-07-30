@@ -544,6 +544,12 @@ reconciliation:
 - recovers manifest-before-materialization and processing-commit-before-ack
   crashes without emitting a duplicate scientific row.
 
+For a grouped cross-symbol batch, the owning recorder refreshes its process
+and lease heartbeat before each immutable partition write. This keeps lengthy
+compression, hashing, fsync, and rename work distinguishable from a dead
+worker without moving acknowledgement ahead of the batch's durable processing
+commit.
+
 Derived scoring and episode logic run only after raw evidence is recoverable.
 A normalisation poison event remains quarantined with its reason and latches
 the affected run invalid. Neither reconnect nor restart clears an ingestion or

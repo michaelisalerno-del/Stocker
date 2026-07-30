@@ -19,6 +19,29 @@ from stocker_prospective.parallel import (
 )
 from stocker_prospective.recorder import RecorderDeploymentIdentity
 
+FROZEN_SYMBOLS = (
+    "AAL",
+    "AAOI",
+    "APLD",
+    "ASTS",
+    "CIFR",
+    "HIMS",
+    "IONQ",
+    "IREN",
+    "MARA",
+    "MP",
+    "MRNA",
+    "MSTR",
+    "NVTS",
+    "QBTS",
+    "RGTI",
+    "RIOT",
+    "RIVN",
+    "SMCI",
+    "SOFI",
+    "WULF",
+)
+
 
 def _metadata(recorded_at: datetime) -> EvidenceMetadata:
     return EvidenceMetadata(
@@ -31,6 +54,29 @@ def _metadata(recorded_at: datetime) -> EvidenceMetadata:
         cohort="anchor_frozen_20",
         source_timestamps=["2026-07-27T13:35:00+00:00"],
         recorded_at_utc=recorded_at,
+    )
+
+
+def _metadata_factory(
+    observed_at: datetime,
+    source_timestamps: tuple[datetime, ...],
+) -> EvidenceMetadata:
+    return _metadata(observed_at).model_copy(
+        update={
+            "source_timestamps": [
+                timestamp.astimezone(UTC).isoformat() for timestamp in source_timestamps
+            ],
+        }
+    )
+
+
+def _identity() -> RecorderDeploymentIdentity:
+    return RecorderDeploymentIdentity(
+        model_artifact_id="m1-feature-runtime-test-v1",
+        universe_id="anchor-frozen-20-v1",
+        universe_hash="b" * 64,
+        symbols=FROZEN_SYMBOLS,
+        bundle_verified=True,
     )
 
 
@@ -75,10 +121,7 @@ def test_parallel_source_bar_is_append_oriented_idempotent_and_never_scores(
     assert row["rejection_reason"] == "parallel_validation_only"
 
     retried = observed.model_copy(
-        update={
-            "receive_timestamp_utc": observed.receive_timestamp_utc
-            + timedelta(minutes=10)
-        }
+        update={"receive_timestamp_utc": observed.receive_timestamp_utc + timedelta(minutes=10)}
     )
     assert repository.record_source_bar_observation(retried) == first
     assert repository.count("source_bar_observation") == 1
@@ -199,40 +242,12 @@ def test_parallel_capture_waits_for_registered_delay_and_never_backfills(
     repository = ProspectiveRepository(config.paths.database)
     repository.migrate()
     provider = _FakeParallelProvider()
-    symbols = (
-        "AAL",
-        "AAOI",
-        "APLD",
-        "ASTS",
-        "CIFR",
-        "HIMS",
-        "IONQ",
-        "IREN",
-        "MARA",
-        "MP",
-        "MRNA",
-        "MSTR",
-        "NVTS",
-        "QBTS",
-        "RGTI",
-        "RIOT",
-        "RIVN",
-        "SMCI",
-        "SOFI",
-        "WULF",
-    )
-    identity = RecorderDeploymentIdentity(
-        model_artifact_id="m1-feature-runtime-test-v1",
-        universe_id="anchor-frozen-20-v1",
-        universe_hash="b" * 64,
-        symbols=symbols,
-        bundle_verified=True,
-    )
     service = ParallelSourceCaptureService(
         config=config,
         repository=repository,
-        identity=identity,
+        identity=_identity(),
         provider=provider,
+        metadata_factory=_metadata_factory,
         sleep=lambda _seconds: None,
     )
 
@@ -258,6 +273,44 @@ def test_parallel_capture_waits_for_registered_delay_and_never_backfills(
     assert completion["captured_symbol_count"] == 0
 
 
+def test_parallel_capture_reuses_immutable_run_identity_after_release_change(
+    tmp_path: Path,
+) -> None:
+    config = _service_config(tmp_path)
+    config.runtime.git_commit = "b" * 40
+    config.runtime.prospective_start_utc = datetime(
+        2026,
+        7,
+        28,
+        13,
+        30,
+        tzinfo=UTC,
+    )
+    repository = ProspectiveRepository(config.paths.database)
+    repository.migrate()
+    activation_metadata = _metadata(datetime(2026, 7, 27, 13, 30, tzinfo=UTC))
+    repository.create_run(activation_metadata)
+    provider = _FakeParallelProvider()
+
+    service = ParallelSourceCaptureService(
+        config=config,
+        repository=repository,
+        identity=_identity(),
+        provider=provider,
+        sleep=lambda _seconds: None,
+        metadata_factory=_metadata_factory,
+    )
+
+    service.poll(now=datetime(2026, 7, 27, 22, tzinfo=UTC))
+
+    assert len(provider.calls) == 20
+    assert repository.source_capture_completed(
+        run_id="prospective-parallel-test",
+        provider="eodhd",
+        session_date=date(2026, 7, 27),
+    )
+
+
 def test_parallel_vendor_endpoint_is_fixed_to_approved_https_host(tmp_path: Path) -> None:
     payload = _service_config(tmp_path).model_dump(mode="python")
     payload["parallel_validation"]["base_url"] = "http://example.invalid/api"
@@ -281,22 +334,13 @@ def test_pending_vendor_request_heartbeats_the_recorder_lease(tmp_path: Path) ->
     config = _service_config(tmp_path)
     config.runtime.heartbeat_seconds = 1
     repository = ProspectiveRepository(config.paths.database)
-    identity = RecorderDeploymentIdentity(
-        model_artifact_id="m1-feature-runtime-test-v1",
-        universe_id="anchor-frozen-20-v1",
-        universe_hash="b" * 64,
-        symbols=(
-            "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
-            "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF",
-        ),
-        bundle_verified=True,
-    )
     heartbeats: list[bool] = []
     service = ParallelSourceCaptureService(
         config=config,
         repository=repository,
-        identity=identity,
+        identity=_identity(),
         provider=SlowProvider(),
+        metadata_factory=_metadata_factory,
         sleep=lambda _seconds: None,
         heartbeat=lambda: heartbeats.append(True),
     )
@@ -327,16 +371,6 @@ def test_lease_loss_aborts_capture_without_later_evidence_writes(tmp_path: Path)
     config.runtime.heartbeat_seconds = 1
     repository = ProspectiveRepository(config.paths.database)
     repository.migrate()
-    identity = RecorderDeploymentIdentity(
-        model_artifact_id="m1-feature-runtime-test-v1",
-        universe_id="anchor-frozen-20-v1",
-        universe_hash="b" * 64,
-        symbols=(
-            "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
-            "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF",
-        ),
-        bundle_verified=True,
-    )
     heartbeat_count = 0
 
     def heartbeat() -> None:
@@ -348,8 +382,9 @@ def test_lease_loss_aborts_capture_without_later_evidence_writes(tmp_path: Path)
     service = ParallelSourceCaptureService(
         config=config,
         repository=repository,
-        identity=identity,
+        identity=_identity(),
         provider=SlowProvider(),
+        metadata_factory=_metadata_factory,
         sleep=lambda _seconds: None,
         heartbeat=heartbeat,
     )

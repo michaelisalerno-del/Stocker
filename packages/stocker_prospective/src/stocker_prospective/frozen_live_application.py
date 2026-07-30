@@ -169,12 +169,15 @@ def _configuration_hash(
     config: ProspectiveConfig,
     *,
     git_commit: str | None = None,
+    app_version: str | None = None,
     omitted_runtime_fields: frozenset[str] = frozenset(),
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
     runtime_payload = cast(dict[str, Any], payload["runtime"])
     if git_commit is not None:
         runtime_payload["git_commit"] = git_commit
+    if app_version is not None:
+        runtime_payload["app_version"] = app_version
     for field_name in omitted_runtime_fields:
         runtime_payload.pop(field_name)
     return hashlib.sha256(
@@ -190,15 +193,21 @@ def _activation_configuration_hash_candidates(
     config: ProspectiveConfig,
     *,
     activation_git_commit: str,
+    activation_app_version: str | None = None,
 ) -> frozenset[str]:
     """Reconstruct only the supported first-activation configuration shapes."""
 
     return frozenset(
         {
-            _configuration_hash(config, git_commit=activation_git_commit),
             _configuration_hash(
                 config,
                 git_commit=activation_git_commit,
+                app_version=activation_app_version,
+            ),
+            _configuration_hash(
+                config,
+                git_commit=activation_git_commit,
+                app_version=activation_app_version,
                 omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
             ),
         }
@@ -212,6 +221,7 @@ def _require_compatible_existing_activation(
     artifact_hashes: Mapping[str, str],
     ibkr_api_version: str,
     tws_or_gateway_version: str,
+    activation_app_version: str | None = None,
 ) -> None:
     """Preserve first activation while failing closed on scientific drift."""
 
@@ -228,6 +238,7 @@ def _require_compatible_existing_activation(
     if activation.configuration_hash not in _activation_configuration_hash_candidates(
         config,
         activation_git_commit=activation.git_sha,
+        activation_app_version=activation_app_version,
     ):
         raise ValueError("blocked_existing_activation_configuration_mismatch")
 
@@ -1167,6 +1178,10 @@ def build_frozen_prospective_application(
         else RecorderOperationalRepository(repository.database_path)
     )
     activation_ledger = ProspectiveActivationLedger(resolved_paths["recorder_activation"])
+    first_activation_app_version = (
+        repository.prospective_run_app_version(run_id=config.runtime.run_id)
+        or config.runtime.app_version
+    )
     artifact_root = resolved_paths["frozen_m1c_artifact_root"]
     if set(SECTOR_PROXY_BY_SYMBOL) != set(identity.symbols):
         raise ValueError("frozen sector-proxy map differs from the exact 20-stock cohort")
@@ -1506,6 +1521,7 @@ def build_frozen_prospective_application(
             artifact_hashes=artifact_hashes,
             ibkr_api_version=ibkr_api_version,
             tws_or_gateway_version=gateway_version,
+            activation_app_version=first_activation_app_version,
         )
         activation = existing_activation
     prospective_start = activation.prospective_collection_start_utc
@@ -1517,7 +1533,7 @@ def build_frozen_prospective_application(
         return EvidenceMetadata(
             run_id=config.runtime.run_id or "",
             prospective_start_utc=prospective_start,
-            app_version=config.runtime.app_version,
+            app_version=first_activation_app_version,
             # prospective_run is the immutable first-activation identity.
             # The current release is persisted with the active generation's
             # runtime-artifact receipts below.
@@ -2074,6 +2090,8 @@ def build_frozen_prospective_application(
                         "application_wiring_completed": True,
                         "activation_git_commit": activation.git_sha,
                         "runtime_git_commit": config.runtime.git_commit,
+                        "activation_app_version": first_activation_app_version,
+                        "runtime_app_version": config.runtime.app_version,
                     },
                 )
             )

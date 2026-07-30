@@ -957,6 +957,7 @@ def recorder_run(
                     config=config,
                     repository=repository,
                     identity=deployment_identity,
+                    metadata_factory=frozen_application.metadata_factory,
                     heartbeat=lambda: repository.heartbeat_recorder_lease(
                         run_id=config.runtime.run_id or "",
                         owner_id=owner_id or "",

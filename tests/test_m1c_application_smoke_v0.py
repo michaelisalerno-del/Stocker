@@ -65,6 +65,8 @@ def _build_fake_application(
     write_bar_compatibility_report: bool = True,
     events: tuple[FakeIBKREvent, ...] | None = None,
     git_commit: str = "a" * 40,
+    app_version: str = "0.1.0",
+    recorder_generation: int | None = None,
 ) -> tuple[object, ProspectiveConfig, FakeIBKRAdapter, tuple[str, ...]]:
     universe = json.loads(
         (ROOT / "configs/prospective/anchor-frozen-20.json").read_text(encoding="utf-8")
@@ -134,7 +136,7 @@ def _build_fake_application(
                 "source": "ibkr",
                 "prospective_start_utc": "2026-07-24T13:00:00Z",
                 "instance_id": "fake-recorder-smoke",
-                "app_version": "0.1.0",
+                "app_version": app_version,
                 "git_commit": git_commit,
                 "run_id": "fake-recorder-smoke-v0",
             },
@@ -204,6 +206,8 @@ def _build_fake_application(
                 )
             ),
             ibkr_api_version="fake-10.37",
+            recorder_generation=recorder_generation,
+            recorder_owner_id=(None if recorder_generation is None else "fake-recorder-owner"),
         ),
         config,
         adapter,
@@ -500,6 +504,7 @@ def test_release_upgrade_preserves_first_activation_and_run_identity(
         tmp_path,
         include_scientific_prerequisites=True,
         git_commit="a" * 40,
+        recorder_generation=1,
     )
     activation_before = (tmp_path / "activation.json").read_bytes()
     first_application.shutdown(now=datetime.now(UTC))
@@ -508,16 +513,33 @@ def test_release_upgrade_preserves_first_activation_and_run_identity(
         tmp_path,
         include_scientific_prerequisites=True,
         git_commit="b" * 40,
+        app_version="0.2.0",
+        recorder_generation=2,
     )
 
     assert second_config.runtime.git_commit == "b" * 40
+    assert second_config.runtime.app_version == "0.2.0"
     assert (tmp_path / "activation.json").read_bytes() == activation_before
     with sqlite3.connect(config.paths.database) as connection:
-        run_git_commit = connection.execute(
-            "SELECT git_commit FROM prospective_run WHERE run_id = ?",
+        run_identity = connection.execute(
+            "SELECT git_commit, app_version FROM prospective_run WHERE run_id = ?",
             (config.runtime.run_id,),
         ).fetchone()
-    assert run_git_commit == ("a" * 40,)
+        generation_receipt = connection.execute(
+            """
+            SELECT details_json
+            FROM runtime_artifact_verification_v1
+            WHERE run_id = ? AND recorder_generation = 2
+            ORDER BY artifact_name
+            LIMIT 1
+            """,
+            (config.runtime.run_id,),
+        ).fetchone()
+    assert run_identity == ("a" * 40, "0.1.0")
+    assert generation_receipt is not None
+    receipt_details = json.loads(generation_receipt[0])
+    assert receipt_details["activation_app_version"] == "0.1.0"
+    assert receipt_details["runtime_app_version"] == "0.2.0"
 
     second_application.shutdown(now=datetime.now(UTC))
 

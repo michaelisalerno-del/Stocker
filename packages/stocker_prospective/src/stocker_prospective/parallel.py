@@ -15,7 +15,6 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
 from stocker_data.vendors.eodhd import EODHDClient, normalize_intraday_response
-from stocker_prospective.bundle import ANCHOR_COHORT
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.database import (
     EvidenceMetadata,
@@ -27,6 +26,10 @@ from stocker_prospective.recorder import RecorderDeploymentIdentity
 
 NEW_YORK = ZoneInfo("America/New_York")
 EXPECTED_REGULAR_SESSION_BAR_COUNT = 78
+EvidenceMetadataFactory = Callable[
+    [datetime, tuple[datetime, ...]],
+    EvidenceMetadata,
+]
 
 
 class ParallelCaptureError(RuntimeError):
@@ -203,6 +206,7 @@ class ParallelSourceCaptureService:
         repository: ProspectiveRepository,
         identity: RecorderDeploymentIdentity,
         provider: ParallelBarProvider,
+        metadata_factory: EvidenceMetadataFactory,
         sleep: Callable[[float], None] = time.sleep,
         heartbeat: Callable[[], object] | None = None,
         completion_sink: Callable[[date, datetime], object] | None = None,
@@ -214,14 +218,19 @@ class ParallelSourceCaptureService:
         self.identity = identity
         self.capture_symbols = (
             (*identity.symbols, "VTI")
-            if config.paths.m1c_prospective_opening_reversal_v1_activation
-            is not None
+            if config.paths.m1c_prospective_opening_reversal_v1_activation is not None
             else identity.symbols
         )
         self.provider = provider
         self._sleep = sleep
         self._heartbeat = heartbeat
         self._completion_sink = completion_sink
+        self._metadata_factory = metadata_factory
+        configured_start = config.runtime.prospective_start_utc.astimezone(UTC)
+        self._prospective_start_utc = metadata_factory(
+            configured_start,
+            (configured_start,),
+        ).prospective_start_utc.astimezone(UTC)
         self._last_credential_failure_date: date | None = None
 
     def _metadata(
@@ -230,26 +239,19 @@ class ParallelSourceCaptureService:
         *,
         source_timestamps: tuple[datetime, ...],
     ) -> EvidenceMetadata:
-        return EvidenceMetadata(
-            run_id=self.config.runtime.run_id or "",
-            prospective_start_utc=self.config.runtime.prospective_start_utc,
-            app_version=self.config.runtime.app_version,
-            git_commit=self.config.runtime.git_commit,
-            model_artifact_id=self.identity.model_artifact_id,
-            universe_id=self.identity.universe_id,
-            cohort=ANCHOR_COHORT,
-            source_timestamps=[value.astimezone(UTC).isoformat() for value in source_timestamps],
-            recorded_at_utc=max(
-                now.astimezone(UTC),
-                self.config.runtime.prospective_start_utc.astimezone(UTC),
-            ),
+        # The prospective run belongs to its first activation. A later
+        # release is evidenced by generation receipts and must not mint a
+        # conflicting identity when after-session capture becomes due.
+        return self._metadata_factory(
+            now.astimezone(UTC),
+            tuple(value.astimezone(UTC) for value in source_timestamps),
         )
 
     def _latest_due_session(self, now: datetime) -> tuple[date, datetime] | None:
         now_utc = now.astimezone(UTC)
-        if now_utc < self.config.runtime.prospective_start_utc.astimezone(UTC):
+        if now_utc < self._prospective_start_utc:
             return None
-        start_day = self.config.runtime.prospective_start_utc.astimezone(NEW_YORK).date()
+        start_day = self._prospective_start_utc.astimezone(NEW_YORK).date()
         end_day = now_utc.astimezone(NEW_YORK).date()
         import pandas_market_calendars as mcal
 
@@ -261,7 +263,7 @@ class ParallelSourceCaptureService:
         for index, row in schedule.iterrows():
             opened = pd.Timestamp(row["market_open"]).to_pydatetime().astimezone(UTC)
             closed = pd.Timestamp(row["market_close"]).to_pydatetime().astimezone(UTC)
-            if opened < self.config.runtime.prospective_start_utc.astimezone(UTC):
+            if opened < self._prospective_start_utc:
                 continue
             capture_at = closed + timedelta(
                 seconds=self.config.parallel_validation.capture_delay_seconds
@@ -469,6 +471,7 @@ def build_parallel_eodhd_service(
     config: ProspectiveConfig,
     repository: ProspectiveRepository,
     identity: RecorderDeploymentIdentity,
+    metadata_factory: EvidenceMetadataFactory,
     heartbeat: Callable[[], object] | None = None,
     completion_sink: Callable[[date, datetime], object] | None = None,
 ) -> ParallelSourceCaptureService:
@@ -493,6 +496,7 @@ def build_parallel_eodhd_service(
         provider=EODHDParallelBarProvider(client=client),
         heartbeat=heartbeat,
         completion_sink=completion_sink,
+        metadata_factory=metadata_factory,
     )
 
 

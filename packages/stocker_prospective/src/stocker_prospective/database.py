@@ -277,6 +277,16 @@ class ProspectiveRepository:
                     "blocked_unsafe_runtime_configuration: prospective run identity mismatch"
                 )
 
+    def prospective_run_app_version(self, *, run_id: str) -> str | None:
+        """Return the immutable first-activation application version, if present."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT app_version FROM prospective_run WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        return None if row is None else str(row["app_version"])
+
     def register_universe_membership(
         self,
         metadata: EvidenceMetadata,

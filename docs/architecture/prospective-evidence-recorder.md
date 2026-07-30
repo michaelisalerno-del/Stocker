@@ -556,6 +556,12 @@ an operator completes an evidence audit; when loss cannot be disproved, the
 operator starts a new run ID and retains the old run as invalid evidence.
 Inbox capacity, backlog, leasing, and health are scoped to run ID, so retained
 poison evidence from the invalid run cannot contaminate the new run.
+The immutable activation receipt is not regenerated for that rollover. The
+replacement ID is accepted only when substituting a historical
+`prospective_run.run_id` reconstructs the receipt's exact configuration hash;
+all scientific configuration and artifact checks remain unchanged. This
+database-backed proof prevents an arbitrary run-ID change from bypassing the
+activation boundary.
 
 ## Callback containment and request generations
 

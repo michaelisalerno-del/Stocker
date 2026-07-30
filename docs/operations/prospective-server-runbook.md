@@ -1080,6 +1080,15 @@ recording unless an explicit evidence audit resolves the latch and gaps. Old
 pending or quarantined rows remain queryable but are excluded from a different
 run's leasing, capacity, backlog, and health.
 
+Do not edit or replace the activation receipt during this rollover. Startup
+authorizes the replacement run ID only by reconstructing the receipt's exact
+configuration hash with a prior run ID already persisted in
+`prospective_run`. If no historical identity reproduces the immutable hash, or
+if any non-operational configuration field differs, startup exits with
+`blocked_existing_activation_configuration_mismatch`. The replacement run
+therefore creates a new operational lineage without changing activation time,
+artifacts, experiment receipts, thresholds, cohort, or causal rules.
+
 A graceful process stop is not allowed to hide an incomplete streaming option
 episode behind `STOPPED_CLEANLY`: shutdown records the same scientific gap and
 an ingestion-fatal continuity incident before releasing the recorder lease.

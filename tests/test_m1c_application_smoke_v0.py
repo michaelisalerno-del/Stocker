@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from stocker_prospective.activation import ActivationRecord
 from stocker_prospective.config import ProspectiveConfig, operational_thresholds
@@ -67,6 +68,7 @@ def _build_fake_application(
     git_commit: str = "a" * 40,
     app_version: str = "0.1.0",
     recorder_generation: int | None = None,
+    run_id: str = "fake-recorder-smoke-v0",
 ) -> tuple[object, ProspectiveConfig, FakeIBKRAdapter, tuple[str, ...]]:
     universe = json.loads(
         (ROOT / "configs/prospective/anchor-frozen-20.json").read_text(encoding="utf-8")
@@ -138,7 +140,7 @@ def _build_fake_application(
                 "instance_id": "fake-recorder-smoke",
                 "app_version": app_version,
                 "git_commit": git_commit,
-                "run_id": "fake-recorder-smoke-v0",
+                "run_id": run_id,
             },
             "risk": {"trading_enabled": False},
             "ibkr": {
@@ -588,6 +590,88 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
         ibkr_api_version=legacy_activation.ibkr_api_version,
         tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
     )
+
+
+def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(
+    tmp_path: Path,
+) -> None:
+    first_application, first_config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        recorder_generation=1,
+        run_id="failed-run-v0",
+    )
+    activation_before = (tmp_path / "activation.json").read_bytes()
+    activation = ActivationRecord.model_validate_json(activation_before)
+    first_application.shutdown(now=datetime.now(UTC))
+
+    replacement_candidate = first_config.model_copy(
+        update={
+            "runtime": first_config.runtime.model_copy(
+                update={"run_id": "isolated-replacement-run-v0"}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="blocked_existing_activation_configuration_mismatch"):
+        _require_compatible_existing_activation(
+            activation=activation,
+            config=replacement_candidate,
+            artifact_hashes=activation.model_artifact_hashes,
+            ibkr_api_version=activation.ibkr_api_version,
+            tws_or_gateway_version=activation.tws_or_gateway_version,
+        )
+    drifted_candidate = replacement_candidate.model_copy(
+        update={
+            "ibkr": replacement_candidate.ibkr.model_copy(
+                update={
+                    "max_option_subscriptions": (
+                        replacement_candidate.ibkr.max_option_subscriptions + 1
+                    )
+                }
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="blocked_existing_activation_configuration_mismatch"):
+        _require_compatible_existing_activation(
+            activation=activation,
+            config=drifted_candidate,
+            artifact_hashes=activation.model_artifact_hashes,
+            ibkr_api_version=activation.ibkr_api_version,
+            tws_or_gateway_version=activation.tws_or_gateway_version,
+            historical_run_ids=("failed-run-v0",),
+        )
+
+    replacement_application, replacement_config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        git_commit="b" * 40,
+        app_version="0.2.0",
+        recorder_generation=1,
+        run_id="isolated-replacement-run-v0",
+    )
+
+    assert replacement_config.runtime.run_id == "isolated-replacement-run-v0"
+    assert replacement_config.runtime.git_commit == "b" * 40
+    assert replacement_config.runtime.app_version == "0.2.0"
+    assert (tmp_path / "activation.json").read_bytes() == activation_before
+    with sqlite3.connect(first_config.paths.database) as connection:
+        run_ids = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT run_id FROM prospective_run ORDER BY run_id"
+            ).fetchall()
+        }
+        replacement_identity = connection.execute(
+            """
+            SELECT git_commit, app_version
+            FROM prospective_run
+            WHERE run_id = 'isolated-replacement-run-v0'
+            """
+        ).fetchone()
+    assert run_ids == {"failed-run-v0", "isolated-replacement-run-v0"}
+    assert replacement_identity == ("a" * 40, "0.1.0")
+
+    replacement_application.shutdown(now=datetime.now(UTC))
 
 
 def test_missing_scientific_inputs_degrade_to_live_acquisition(

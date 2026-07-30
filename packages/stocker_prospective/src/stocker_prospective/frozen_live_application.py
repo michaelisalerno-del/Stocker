@@ -170,6 +170,7 @@ def _configuration_hash(
     *,
     git_commit: str | None = None,
     app_version: str | None = None,
+    run_id: str | None = None,
     omitted_runtime_fields: frozenset[str] = frozenset(),
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
@@ -178,6 +179,8 @@ def _configuration_hash(
         runtime_payload["git_commit"] = git_commit
     if app_version is not None:
         runtime_payload["app_version"] = app_version
+    if run_id is not None:
+        runtime_payload["run_id"] = run_id
     for field_name in omitted_runtime_fields:
         runtime_payload.pop(field_name)
     return hashlib.sha256(
@@ -194,24 +197,34 @@ def _activation_configuration_hash_candidates(
     *,
     activation_git_commit: str,
     activation_app_version: str | None = None,
+    historical_run_ids: tuple[str, ...] = (),
 ) -> frozenset[str]:
-    """Reconstruct only the supported first-activation configuration shapes."""
+    """Reconstruct supported activation shapes without weakening scientific fields."""
 
-    return frozenset(
-        {
-            _configuration_hash(
-                config,
-                git_commit=activation_git_commit,
-                app_version=activation_app_version,
-            ),
-            _configuration_hash(
-                config,
-                git_commit=activation_git_commit,
-                app_version=activation_app_version,
-                omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
-            ),
-        }
-    )
+    candidates: set[str] = set()
+    # A fatal run is never rewritten or cleared. A replacement run may reuse
+    # the immutable activation only when a persisted historical run ID
+    # reconstructs the exact original configuration hash. This makes run_id an
+    # operational lineage boundary while every scientific input remains bound.
+    for historical_run_id in (None, *sorted(set(historical_run_ids))):
+        candidates.update(
+            {
+                _configuration_hash(
+                    config,
+                    git_commit=activation_git_commit,
+                    app_version=activation_app_version,
+                    run_id=historical_run_id,
+                ),
+                _configuration_hash(
+                    config,
+                    git_commit=activation_git_commit,
+                    app_version=activation_app_version,
+                    run_id=historical_run_id,
+                    omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
+                ),
+            }
+        )
+    return frozenset(candidates)
 
 
 def _require_compatible_existing_activation(
@@ -222,6 +235,7 @@ def _require_compatible_existing_activation(
     ibkr_api_version: str,
     tws_or_gateway_version: str,
     activation_app_version: str | None = None,
+    historical_run_ids: tuple[str, ...] = (),
 ) -> None:
     """Preserve first activation while failing closed on scientific drift."""
 
@@ -239,6 +253,7 @@ def _require_compatible_existing_activation(
         config,
         activation_git_commit=activation.git_sha,
         activation_app_version=activation_app_version,
+        historical_run_ids=historical_run_ids,
     ):
         raise ValueError("blocked_existing_activation_configuration_mismatch")
 
@@ -1178,8 +1193,14 @@ def build_frozen_prospective_application(
         else RecorderOperationalRepository(repository.database_path)
     )
     activation_ledger = ProspectiveActivationLedger(resolved_paths["recorder_activation"])
+    historical_run_ids = repository.prospective_run_ids()
     first_activation_app_version = (
         repository.prospective_run_app_version(run_id=config.runtime.run_id)
+        or (
+            repository.prospective_run_app_version(run_id=historical_run_ids[0])
+            if historical_run_ids
+            else None
+        )
         or config.runtime.app_version
     )
     artifact_root = resolved_paths["frozen_m1c_artifact_root"]
@@ -1522,6 +1543,7 @@ def build_frozen_prospective_application(
             ibkr_api_version=ibkr_api_version,
             tws_or_gateway_version=gateway_version,
             activation_app_version=first_activation_app_version,
+            historical_run_ids=historical_run_ids,
         )
         activation = existing_activation
     prospective_start = activation.prospective_collection_start_utc

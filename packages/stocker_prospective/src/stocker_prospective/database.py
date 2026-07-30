@@ -287,6 +287,19 @@ class ProspectiveRepository:
             ).fetchone()
         return None if row is None else str(row["app_version"])
 
+    def prospective_run_ids(self) -> tuple[str, ...]:
+        """Return persisted run identities eligible for activation-hash reconstruction."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_id
+                FROM prospective_run
+                ORDER BY created_at_utc, run_id
+                """
+            ).fetchall()
+        return tuple(str(row["run_id"]) for row in rows)
+
     def register_universe_membership(
         self,
         metadata: EvidenceMetadata,

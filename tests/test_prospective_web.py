@@ -277,8 +277,53 @@ def test_health_reports_live_recorder_waiting_for_prospective_start(
 
     assert health["recorder"]["lease"]["owner_id"] == "server-instance:recorder-process"
     assert health["recorder"]["operational_status"] == "waiting_for_prospective_start"
+    recorder = TestClient(create_web_app(cfg)).get("/api/recorder/status").json()
+    assert recorder["state"] == "waiting_for_prospective_start"
+    assert recorder["operational_state"]["reason"] == (
+        health["recorder"]["operational_state"]["reason"]
+    )
     with sqlite3.connect(cfg.paths.database) as connection:
         assert connection.execute("SELECT count(*) FROM prospective_run").fetchone() == (0,)
+
+
+def test_health_and_recorder_status_share_terminal_operational_state(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+    with sqlite3.connect(cfg.paths.database) as connection:
+        connection.execute(
+            """
+            INSERT INTO raw_partition_manifest_v0(
+                run_id, data_source, session_date, symbol, event_type,
+                file_path, row_count, minimum_timestamp_utc,
+                maximum_timestamp_utc, schema_version, content_hash,
+                complete, gap_count, recorder_version, contract_version,
+                recorded_at_utc, claims_json
+            ) VALUES (?, 'synthetic', '2026-07-24', 'AAPL', 'synthetic',
+                      'synthetic.complete.parquet', 1,
+                      '2026-07-24T13:30:00+00:00',
+                      '2026-07-24T13:35:00+00:00', 'test',
+                      'terminal-session-history', 1, 0, 'test', 'test',
+                      '2026-07-24T13:35:01+00:00', '{}')
+            """,
+            (cfg.runtime.run_id,),
+        )
+
+    health = client.get("/api/health").json()
+    recorder = client.get("/api/recorder/status").json()
+
+    assert recorder["latest_checkpoint"] is None
+    assert recorder["last_event_timestamp"] is not None
+    assert recorder["state"] == "inactive"
+    assert recorder["operational_state"]["reason"] == "runtime_session_stopped"
+    assert recorder["operational_state"]["state"] == (
+        health["recorder"]["operational_state"]["state"]
+    )
+    assert recorder["operational_state"]["reason"] == (
+        health["recorder"]["operational_state"]["reason"]
+    )
+    assert health["recorder"]["operational_status"] == "inactive"
 
 
 def test_runtime_projection_ignores_informational_ibkr_event_for_latest_health(

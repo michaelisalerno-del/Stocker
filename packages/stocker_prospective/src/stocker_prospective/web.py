@@ -27,6 +27,9 @@ from stocker_prospective.config import (
     validate_runtime_safety,
 )
 from stocker_prospective.contract import claims_boundary
+from stocker_prospective.dashboard_projection import (
+    project_recorder_operational_state,
+)
 from stocker_prospective.evidence_replay import replay_persisted_evidence
 from stocker_prospective.ibkr import official_ibkr_api_projection
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
@@ -89,26 +92,6 @@ def _parity_projection(config: ProspectiveConfig) -> dict[str, Any]:
             "counts": {},
             "report": None,
         }
-
-
-def _recorder_operational_status(
-    config: ProspectiveConfig,
-    lease: dict[str, Any] | None,
-) -> str:
-    if lease is None:
-        return "inactive"
-    try:
-        heartbeat = datetime.fromisoformat(str(lease["heartbeat_at_utc"]))
-    except (KeyError, TypeError, ValueError):
-        return "stale"
-    if heartbeat.tzinfo is None:
-        return "stale"
-    now = datetime.now(UTC)
-    if (now - heartbeat).total_seconds() > config.runtime.recorder_lease_stale_seconds:
-        return "stale"
-    if now < config.runtime.prospective_start_utc:
-        return "waiting_for_prospective_start"
-    return "active"
 
 
 def _json_artifact(path: Path | None) -> dict[str, Any] | None:
@@ -371,6 +354,11 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         runtime = store.runtime_projection()
+        recorder_operational_state = project_recorder_operational_state(
+            runtime=runtime,
+            prospective_start_utc=config.runtime.prospective_start_utc,
+            stale_after_seconds=config.runtime.recorder_lease_stale_seconds,
+        )
         bundle = _active_bundle_projection(config)
         parity = _parity_projection(config)
         ibkr_api = official_ibkr_api_projection()
@@ -397,8 +385,18 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             parallel_blocker,
         ]
         blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
+        recorder_state = str(recorder_operational_state["state"])
+        health_status = (
+            "blocked"
+            if blockers or recorder_state == "blocked"
+            else "healthy"
+            if recorder_state == "recording"
+            else "waiting"
+            if recorder_state == "waiting_for_prospective_start"
+            else "degraded"
+        )
         return {
-            "status": "blocked" if blockers else "healthy",
+            "status": health_status,
             "research_only": True,
             "trading_status": "LIVE TRADING DISABLED",
             "instance_identity": config.runtime.instance_id,
@@ -410,10 +408,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "mode": config.runtime.mode,
                 "run_id": config.runtime.run_id,
                 "lease": runtime["recorder_lease"],
-                "operational_status": _recorder_operational_status(
-                    config,
-                    runtime["recorder_lease"],
-                ),
+                "operational_status": recorder_state,
+                "operational_state": recorder_operational_state,
             },
             "ibkr": runtime["ibkr_connection"],
             "ibkr_api": ibkr_api,
@@ -535,7 +531,15 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
 
     @app.get("/api/recorder/status")
     def recorder_status() -> dict[str, Any]:
+        runtime_projection = store.runtime_projection()
+        operational_state = project_recorder_operational_state(
+            runtime=runtime_projection,
+            prospective_start_utc=config.runtime.prospective_start_utc,
+            stale_after_seconds=config.runtime.recorder_lease_stale_seconds,
+        )
         status = store.recorder_status_v0()
+        status["state"] = operational_state["state"]
+        status["operational_state"] = operational_state
         m1c_parity = _json_artifact(config.paths.m1c_live_parity_report)
         direction_parity = _json_artifact(config.paths.direction_live_parity_report)
         completed_bar = status["latest_completed_bar"]

@@ -464,7 +464,6 @@ class ProspectiveReadStore:
         if run_id is None:
             return {
                 "run_id": None,
-                "state": "inactive",
                 "latest_checkpoint": None,
                 "latest_completed_bar": None,
                 "latest_episode": None,
@@ -522,7 +521,6 @@ class ProspectiveReadStore:
             ).fetchone()
         return {
             "run_id": run_id,
-            "state": "recording",
             "latest_checkpoint": (None if checkpoint is None else self._decoded(checkpoint)),
             "latest_completed_bar": (
                 None if completed_bar is None else self._decoded(completed_bar)
@@ -548,25 +546,52 @@ class ProspectiveReadStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                WITH latest_checkpoint AS (
-                    SELECT c.*
+                WITH current_session AS (
+                    SELECT COALESCE(
+                        (
+                            SELECT session_date
+                            FROM runtime_session
+                            WHERE run_id = ?
+                            ORDER BY opened_at_utc DESC, id DESC
+                            LIMIT 1
+                        ),
+                        (
+                            SELECT MAX(session_date)
+                            FROM m1c_checkpoint_completion_v0
+                            WHERE run_id = ?
+                        )
+                    ) AS session_date
+                ),
+                ranked_checkpoint AS (
+                    SELECT c.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY c.symbol
+                               ORDER BY c.checkpoint DESC, c.bar_end_utc DESC, c.id DESC
+                           ) AS freshness_rank
                     FROM m1c_checkpoint_v0 c
-                    JOIN (
-                        SELECT symbol, MAX(bar_end_utc) AS maximum_bar_end
-                        FROM m1c_checkpoint_v0 WHERE run_id = ? GROUP BY symbol
-                    ) x ON x.symbol = c.symbol
-                       AND x.maximum_bar_end = c.bar_end_utc
+                    JOIN m1c_checkpoint_completion_v0 completed
+                      ON completed.checkpoint_id = c.id
+                    JOIN current_session current
+                      ON current.session_date = c.session_date
                     WHERE c.run_id = ?
                 ),
-                latest_episode AS (
-                    SELECT e.*
+                latest_checkpoint AS (
+                    SELECT * FROM ranked_checkpoint WHERE freshness_rank = 1
+                ),
+                ranked_episode AS (
+                    SELECT e.*,
+                           COALESCE(schedule.status, e.completion_status) AS projected_status,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY e.symbol
+                               ORDER BY e.trigger_bar_end_utc DESC, e.episode_id DESC
+                           ) AS freshness_rank
                     FROM m1c_episode_v0 e
-                    JOIN (
-                        SELECT symbol, MAX(trigger_bar_end_utc) AS maximum_trigger
-                        FROM m1c_episode_v0 WHERE run_id = ? GROUP BY symbol
-                    ) x ON x.symbol = e.symbol
-                       AND x.maximum_trigger = e.trigger_bar_end_utc
+                    LEFT JOIN option_episode_schedule_v0 schedule
+                      ON schedule.episode_id = e.episode_id
                     WHERE e.run_id = ?
+                ),
+                latest_episode AS (
+                    SELECT * FROM ranked_episode WHERE freshness_rank = 1
                 ),
                 latest_legacy_quote AS (
                     SELECT q.*
@@ -579,11 +604,34 @@ class ProspectiveReadStore:
                     WHERE q.run_id = ?
                 )
                 SELECT u.symbol, u.operational_status,
+                       current.session_date AS current_session_date,
                        b.bar_end_utc AS last_completed_bar,
                        c.probability AS m1c_probability,
                        c.threshold AS m1c_threshold,
                        c.threshold_passed,
-                       e.episode_id, e.completion_status AS episode_status,
+                       c.checkpoint AS latest_completed_checkpoint,
+                       c.bar_end_utc AS latest_completed_checkpoint_utc,
+                       e.episode_id AS latest_episode_id,
+                       e.session_date AS latest_episode_session_date,
+                       e.projected_status AS latest_episode_status,
+                       e.episode_id,
+                       e.projected_status AS episode_status,
+                       CASE WHEN e.episode_id IS NULL THEN 0 ELSE 1 END
+                         AS has_historical_episode,
+                       CASE
+                         WHEN e.episode_id IS NOT NULL
+                          AND e.run_id = u.run_id
+                          AND e.symbol = u.symbol
+                          AND e.session_date = current.session_date
+                          AND e.checkpoint_id = c.id
+                          AND e.trigger_checkpoint = c.checkpoint
+                          AND e.trigger_bar_end_utc = c.bar_end_utc
+                          AND e.scientific_recording_valid = 1
+                          AND e.projected_status IN (
+                              'active', 'scheduled', 'streaming', 'complete'
+                          )
+                         THEN 1 ELSE 0
+                       END AS fresh_episode,
                        COALESCE(s.bid, q.bid) AS bid,
                        COALESCE(s.ask, q.ask) AS ask,
                        COALESCE(s.bid_size, q.bid_size) AS bid_size,
@@ -609,6 +657,7 @@ class ProspectiveReadStore:
                          WHERE d.episode_id = e.episode_id AND d.archetype = 'R1'
                        ) AS r1_classification
                 FROM universe_membership u
+                LEFT JOIN current_session current ON 1 = 1
                 LEFT JOIN latest_checkpoint c ON c.symbol = u.symbol
                 LEFT JOIN latest_episode e ON e.symbol = u.symbol
                 LEFT JOIN completed_bar_state_v0 b
@@ -642,7 +691,8 @@ class ProspectiveReadStore:
                 else (float(bid_size) - float(ask_size))
                 / (float(bid_size) + float(ask_size) + 1e-12)
             )
-            item["fresh_episode"] = item.get("episode_id") is not None
+            item["has_historical_episode"] = bool(item["has_historical_episode"])
+            item["fresh_episode"] = bool(item["fresh_episode"])
             items.append(item)
         return items
 

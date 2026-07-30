@@ -351,6 +351,23 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(static_root / "index.html")
 
+    def no_order_path_verified() -> bool:
+        return config.risk.trading_enabled is False and all(
+            not _path_exposes_forbidden_broker_resource(
+                str(getattr(route, "path", ""))
+            )
+            and (
+                set(getattr(route, "methods", set()) or set())
+                <= {"GET", "HEAD", "OPTIONS"}
+                or (
+                    str(getattr(route, "path", "")) in replay_control_paths
+                    and set(getattr(route, "methods", set()) or set()) == {"POST"}
+                )
+            )
+            for route in app.routes
+            if str(getattr(route, "path", "")).startswith("/api/")
+        )
+
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         runtime = store.runtime_projection()
@@ -441,19 +458,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "latest_score": runtime["latest_score"],
             "latest_signal_episode": runtime["latest_signal_episode"],
             "blockers": blockers,
-            "no_order_path_verified": config.risk.trading_enabled is False
-            and all(
-                not _path_exposes_forbidden_broker_resource(str(getattr(route, "path", "")))
-                and (
-                    set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
-                    or (
-                        str(getattr(route, "path", "")) in replay_control_paths
-                        and set(getattr(route, "methods", set()) or set()) == {"POST"}
-                    )
-                )
-                for route in app.routes
-                if str(getattr(route, "path", "")).startswith("/api/")
-            ),
+            "no_order_path_verified": no_order_path_verified(),
             "claims_boundary": claims_boundary(),
         }
 
@@ -614,6 +619,51 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             }
         )
         return status
+
+    @app.get("/api/dashboard/summary")
+    def dashboard_summary() -> dict[str, Any]:
+        recorder_projection = recorder_status()
+        operational = recorder_projection["operational_state"]
+        blockers = list(operational["runtime_blockers"])
+        recorder_state = str(operational["state"])
+        health_projection = {
+            "status": (
+                "blocked"
+                if recorder_state == "blocked"
+                else "healthy"
+                if recorder_state == "recording"
+                else "waiting"
+                if recorder_state == "waiting_for_prospective_start"
+                else "degraded"
+            ),
+            "research_only": True,
+            "trading_status": "LIVE TRADING DISABLED",
+            "recorder": {
+                "mode": config.runtime.mode,
+                "run_id": config.runtime.run_id,
+                "operational_status": recorder_state,
+                "operational_state": operational,
+            },
+            "blockers": blockers,
+            "no_order_path_verified": no_order_path_verified(),
+        }
+        return {
+            "health": health_projection,
+            "recorder": recorder_projection,
+            "latest_checkpoints": {
+                "m1c": recorder_projection["latest_checkpoint"],
+                "completed_bar": recorder_projection["latest_completed_bar"],
+            },
+            "current_universe": {
+                "items": store.universe_live_v0(),
+                "classification_label": "directional research classification",
+                "recommendations": False,
+            },
+            "capacity": recorder_projection["capacity"],
+            "replay": recorder_projection["replay"],
+            "blockers": blockers,
+            "claims_boundary": claims_boundary(),
+        }
 
     @app.get("/api/market-data-budget")
     def market_data_budget() -> dict[str, Any]:

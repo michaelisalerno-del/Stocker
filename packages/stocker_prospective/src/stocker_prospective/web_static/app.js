@@ -20,7 +20,13 @@ const state = {
   transfer: null,
   reportPackages: [],
   selectedQuietEpisode: null,
+  activeScreen: "live-monitor",
 };
+
+const polling = new window.StockerPolling.RequestCoordinator();
+const pollingPolicy = window.StockerPolling.POLLING_POLICY;
+let refreshAllPromise = null;
+let refreshGeneration = 0;
 
 function node(tag, className = "", text = null) {
   const element = document.createElement(tag);
@@ -130,23 +136,11 @@ function jsonBlock(value) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    ...options,
-  });
-  if (!response.ok) {
-    const error = new Error(`${response.status} ${path}`);
-    error.status = response.status;
-    throw error;
-  }
-  return response.json();
+  return polling.request(path, options);
 }
 
 function showScreen(screenId) {
+  state.activeScreen = screenId;
   document.querySelectorAll(".screen").forEach((screen) => {
     screen.classList.toggle("is-active", screen.id === screenId);
   });
@@ -159,16 +153,16 @@ function showScreen(screenId) {
 }
 
 function subscriptionCapacity(kind) {
-  const capacity = state.status.capacity?.[kind] || {};
+  const capacity = state.status?.capacity?.[kind] || {};
   return `${capacity.used ?? 0} / ${capacity.available ?? 0}`;
 }
 
 function renderStatus() {
-  const status = state.status;
-  const capabilities = state.capabilities;
+  const status = state.status || {};
+  const capabilities = state.capabilities || {};
   const manifest = capabilities.manifest || {};
   const blockers = [
-    ...(state.health.blockers || []),
+    ...(state.health?.blockers || []),
     ...(manifest.blockers || []),
   ];
   const strip = document.createDocumentFragment();
@@ -348,7 +342,11 @@ function renderEpisodeIndex() {
       { label: "Valid", value: "scientific_recording_valid" },
     ],
     state.episodes,
-    (row) => loadEpisode(row.episode_id),
+    (row) => polling.run(
+      "detail:episode",
+      (signal) => loadEpisode(row.episode_id, signal),
+      { supersede: true },
+    ),
   ));
 
   const picker = document.getElementById("option-episode");
@@ -503,13 +501,13 @@ function renderMicrostructure(items, quoteSeries = [], depth = null) {
   return stack;
 }
 
-async function loadEpisode(episodeId) {
+async function loadEpisode(episodeId, signal = undefined) {
   replace("signal-evidence", node("div", "empty-state", "Reading causal evidence…"));
   try {
     const [detail, microstructure, options] = await Promise.all([
-      api(`/api/episodes/${encodeURIComponent(episodeId)}`),
-      api(`/api/episodes/${encodeURIComponent(episodeId)}/microstructure`),
-      api(`/api/episodes/${encodeURIComponent(episodeId)}/options`),
+      api(`/api/episodes/${encodeURIComponent(episodeId)}`, { signal }),
+      api(`/api/episodes/${encodeURIComponent(episodeId)}/microstructure`, { signal }),
+      api(`/api/episodes/${encodeURIComponent(episodeId)}/options`, { signal }),
     ]);
     state.selectedEpisode = episodeId;
     const episode = detail.episode;
@@ -551,6 +549,7 @@ async function loadEpisode(episodeId) {
     if ([...picker.options].some((item) => item.value === episodeId)) picker.value = episodeId;
     renderOptions(options.items || []);
   } catch (error) {
+    if (isAbort(error)) return;
     replace("signal-evidence", node("div", "empty-state value-danger", "Episode evidence is unavailable."));
   }
 }
@@ -584,13 +583,16 @@ function renderOptions(items) {
   replace("options-panel", region);
 }
 
-async function loadSelectedOptions() {
+async function loadSelectedOptions(signal = undefined) {
   const episodeId = document.getElementById("option-episode").value;
   if (!episodeId) {
     renderOptions([]);
     return;
   }
-  const payload = await api(`/api/episodes/${encodeURIComponent(episodeId)}/options`);
+  const payload = await api(
+    `/api/episodes/${encodeURIComponent(episodeId)}/options`,
+    { signal },
+  );
   renderOptions(payload.items || []);
 }
 
@@ -669,7 +671,11 @@ function renderQuietEpisodeIndex() {
       { label: "Complete", value: "completion_status" },
     ],
     state.quietEpisodes,
-    (row) => loadQuietEpisode(row.observation_id),
+    (row) => polling.run(
+      "detail:quiet-episode",
+      (signal) => loadQuietEpisode(row.observation_id, signal),
+      { supersede: true },
+    ),
   ));
 }
 
@@ -717,12 +723,14 @@ function quietOptionTable(items) {
   );
 }
 
-async function loadQuietEpisode(observationId) {
+async function loadQuietEpisode(observationId, signal = undefined) {
   replace("quiet-episode-evidence", node("div", "empty-state", "Reading quiet-state evidence…"));
   try {
     const [detail, options] = await Promise.all([
-      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}`),
-      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}/options`),
+      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}`, { signal }),
+      api(`/api/quiet-state/episodes/${encodeURIComponent(observationId)}/options`, {
+        signal,
+      }),
     ]);
     state.selectedQuietEpisode = observationId;
     const episode = detail.episode;
@@ -786,6 +794,7 @@ async function loadQuietEpisode(observationId) {
     );
     replace("quiet-episode-evidence", stack);
   } catch (error) {
+    if (isAbort(error)) return;
     replace(
       "quiet-episode-evidence",
       node("div", "empty-state value-danger", "Quiet-state evidence is unavailable."),
@@ -972,95 +981,195 @@ function renderAudit() {
     `REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER ${clean(state.status.state).toUpperCase()} // IBKR CONNECTIONS ${replay.ibkr_connections_attempted || 0}`;
 }
 
-async function refreshAll() {
-  const button = document.getElementById("refresh");
-  button.disabled = true;
-  button.textContent = "Reading…";
-  try {
-    const [
-      health,
-      status,
-      capabilities,
-      universe,
-      episodes,
-      shadow,
-      audit,
-      reports,
-      quietStatus,
-      quietUniverse,
-      quietEpisodes,
-      quietShadow,
-      quietSessionQuality,
-      concentrationAudit,
-      budget,
-      transfer,
-      reportPackages,
-    ] = await Promise.all([
-      api("/api/health"),
-      api("/api/recorder/status"),
-      api("/api/recorder/capabilities"),
-      api("/api/universe/live"),
-      api("/api/episodes"),
-      api("/api/shadow-outcomes"),
-      api("/api/audit/events"),
-      api("/api/recorder/session-reports"),
-      api("/api/quiet-state/status"),
-      api("/api/quiet-state/universe"),
-      api("/api/quiet-state/episodes"),
-      api("/api/quiet-state/shadow-structures"),
-      api("/api/quiet-state/session-quality"),
-      api("/api/quiet-state/concentration-audit"),
-      api("/api/market-data-budget"),
-      api("/api/source-transfer"),
-      api("/api/reports/daily"),
-    ]);
-    state.health = health;
-    state.status = status;
-    state.capabilities = capabilities;
-    state.universe = universe.items || [];
-    state.episodes = episodes.items || [];
-    state.shadow = shadow.items || [];
-    state.audit = audit.items || [];
-    state.sessionReports = reports.items || [];
-    state.quietStatus = quietStatus;
-    state.quietUniverse = quietUniverse.items || [];
-    state.quietEpisodes = quietEpisodes.items || [];
-    state.quietShadow = quietShadow.items || [];
-    state.quietSessionQuality = quietSessionQuality.items || [];
-    state.concentrationAudit = concentrationAudit;
-    state.budget = budget;
-    state.transfer = transfer;
-    state.reportPackages = reportPackages.items || [];
-    renderStatus();
-    renderUniverse();
-    renderEpisodeIndex();
-    renderShadow();
-    renderAudit();
-    renderQuietUniverse();
-    renderQuietEpisodeIndex();
-    renderQuietShadow();
-    renderConcentrationAudit();
-    renderBudgetTransfer();
-    const legacyEvidence = !state.selectedEpisode && state.episodes.length
-      ? loadEpisode(state.episodes[0].episode_id)
-      : loadSelectedOptions();
-    const quietEvidence = !state.selectedQuietEpisode && state.quietEpisodes.length
-      ? loadQuietEpisode(state.quietEpisodes[0].observation_id)
-      : Promise.resolve();
-    await Promise.all([legacyEvidence, quietEvidence]);
+function applyDashboardSummary(summary) {
+  state.health = summary.health;
+  state.status = summary.recorder;
+  state.universe = summary.current_universe?.items || [];
+  renderStatus();
+  renderUniverse();
+  if (state.activeScreen === "safety-audit") renderAudit();
+}
+
+function isAbort(error) {
+  return error?.name === "AbortError";
+}
+
+function showRefreshError(error) {
+  if (isAbort(error)) return;
+  const requestSuffix = error.requestId ? ` Request ${error.requestId}.` : "";
+  const message = error.status === 401
+    ? "Authentication required."
+    : `Persistent recorder state is unavailable.${requestSuffix}`;
+  replace("blocker-strip", node("span", "blocker", message));
+  document.getElementById("last-sync").textContent =
+    `SYNC FAILED ${new Date().toISOString()}`;
+}
+
+function refreshFast({ supersede = false } = {}) {
+  return polling.run("fast", async (signal) => {
+    const summary = await api("/api/dashboard/summary", { signal });
+    applyDashboardSummary(summary);
     document.getElementById("last-sync").textContent =
       `SYNCHRONIZED ${new Date().toISOString()}`;
-  } catch (error) {
-    const message = error.status === 401
-      ? "Authentication required."
-      : "Persistent recorder state is unavailable.";
-    replace("blocker-strip", node("span", "blocker", message));
-    document.getElementById("last-sync").textContent =
-      `SYNC FAILED ${new Date().toISOString()}`;
-  } finally {
-    button.disabled = false;
-    button.textContent = "Refresh evidence";
+  }, { supersede });
+}
+
+function refreshSlow(screenId, { supersede = false } = {}) {
+  const key = `slow:${screenId}`;
+  if (screenId === "live-monitor") {
+    return polling.run(key, async (signal) => {
+      const [capabilities, budget] = await Promise.all([
+        api("/api/recorder/capabilities", { signal }),
+        api("/api/market-data-budget", { signal }),
+      ]);
+      state.capabilities = capabilities;
+      state.budget = budget;
+      renderStatus();
+      renderBudgetTransfer();
+    }, { supersede });
   }
+  if (screenId === "signal-detail" || screenId === "options-recorder") {
+    return polling.run(key, async (signal) => {
+      const episodes = await api("/api/episodes", { signal });
+      state.episodes = episodes.items || [];
+      renderEpisodeIndex();
+    }, { supersede });
+  }
+  if (screenId === "quiet-universe") {
+    return polling.run(key, async (signal) => {
+      const [quietStatus, quietUniverse] = await Promise.all([
+        api("/api/quiet-state/status", { signal }),
+        api("/api/quiet-state/universe", { signal }),
+      ]);
+      state.quietStatus = quietStatus;
+      state.quietUniverse = quietUniverse.items || [];
+      renderQuietUniverse();
+    }, { supersede });
+  }
+  if (screenId === "quiet-episode") {
+    return polling.run(key, async (signal) => {
+      const [quietStatus, quietEpisodes] = await Promise.all([
+        api("/api/quiet-state/status", { signal }),
+        api("/api/quiet-state/episodes", { signal }),
+      ]);
+      state.quietStatus = quietStatus;
+      state.quietEpisodes = quietEpisodes.items || [];
+      renderQuietEpisodeIndex();
+    }, { supersede });
+  }
+  if (screenId === "quiet-shadow") {
+    return polling.run(key, async (signal) => {
+      const quality = await api("/api/quiet-state/session-quality", { signal });
+      state.quietSessionQuality = quality.items || [];
+      renderQuietShadow();
+    }, { supersede });
+  }
+  return Promise.resolve();
+}
+
+function refreshManualTier(screenId, { supersede = false } = {}) {
+  const key = `manual:${screenId}`;
+  if (screenId === "live-monitor") {
+    return polling.run(key, async (signal) => {
+      const [transfer, reportPackages] = await Promise.all([
+        api("/api/source-transfer", { signal }),
+        api("/api/reports/daily", { signal }),
+      ]);
+      state.transfer = transfer;
+      state.reportPackages = reportPackages.items || [];
+      renderBudgetTransfer();
+    }, { supersede });
+  }
+  if (screenId === "shadow-blotter") {
+    return polling.run(key, async (signal) => {
+      const shadow = await api("/api/shadow-outcomes", { signal });
+      state.shadow = shadow.items || [];
+      renderShadow();
+    }, { supersede });
+  }
+  if (screenId === "safety-audit") {
+    return polling.run(key, async (signal) => {
+      const [audit, reports] = await Promise.all([
+        api("/api/audit/events?limit=100", { signal }),
+        api("/api/recorder/session-reports", { signal }),
+      ]);
+      state.audit = audit.items || [];
+      state.sessionReports = reports.items || [];
+      renderAudit();
+    }, { supersede });
+  }
+  if (screenId === "quiet-shadow") {
+    return polling.run(key, async (signal) => {
+      const quietShadow = await api("/api/quiet-state/shadow-structures", { signal });
+      state.quietShadow = quietShadow.items || [];
+      renderQuietShadow();
+    }, { supersede });
+  }
+  if (screenId === "concentration-audit") {
+    return polling.run(key, async (signal) => {
+      state.concentrationAudit = await api(
+        "/api/quiet-state/concentration-audit",
+        { signal },
+      );
+      renderConcentrationAudit();
+    }, { supersede });
+  }
+  if (screenId === "signal-detail" && state.episodes.length) {
+    return polling.run(
+      key,
+      (signal) => loadEpisode(
+        state.selectedEpisode || state.episodes[0].episode_id,
+        signal,
+      ),
+      { supersede },
+    );
+  }
+  if (screenId === "options-recorder" && state.episodes.length) {
+    return polling.run(key, (signal) => loadSelectedOptions(signal), { supersede });
+  }
+  if (screenId === "quiet-episode" && state.quietEpisodes.length) {
+    return polling.run(
+      key,
+      (signal) => loadQuietEpisode(
+        state.selectedQuietEpisode || state.quietEpisodes[0].observation_id,
+        signal,
+      ),
+      { supersede },
+    );
+  }
+  return Promise.resolve();
+}
+
+function refreshAll({ manual = false, screenActivation = false } = {}) {
+  if (refreshAllPromise && !manual && !screenActivation) return refreshAllPromise;
+  const supersede = manual || screenActivation;
+  if (supersede) polling.cancelAll();
+  const generation = ++refreshGeneration;
+  const screenId = state.activeScreen;
+  const button = document.getElementById("refresh");
+  if (manual) {
+    button.disabled = true;
+    button.textContent = "Reading…";
+  }
+  const promise = (async () => {
+    try {
+      await refreshFast({ supersede });
+      await refreshSlow(screenId, { supersede });
+      if (manual || screenActivation) {
+        await refreshManualTier(screenId, { supersede });
+      }
+    } catch (error) {
+      showRefreshError(error);
+    } finally {
+      if (generation === refreshGeneration) {
+        refreshAllPromise = null;
+        button.disabled = false;
+        button.textContent = "Refresh evidence";
+      }
+    }
+  })();
+  refreshAllPromise = promise;
+  return promise;
 }
 
 async function controlReplay(action) {
@@ -1073,21 +1182,51 @@ async function controlReplay(action) {
       method: "POST",
       body: payload ? JSON.stringify(payload) : undefined,
     });
+    if (!state.status) state.status = {};
     state.status.replay = result;
-    renderAudit();
+    if (state.health) renderAudit();
   } catch (error) {
     document.getElementById("replay-state").textContent = "REPLAY CONTROL REJECTED";
   }
 }
 
+function runAutomatic(promise) {
+  promise.catch(showRefreshError);
+}
+
 document.querySelectorAll(".nav-item").forEach((button) => {
-  button.addEventListener("click", () => showScreen(button.dataset.screen));
+  button.addEventListener("click", () => {
+    showScreen(button.dataset.screen);
+    runAutomatic(refreshAll({ screenActivation: true }));
+  });
 });
-document.getElementById("refresh").addEventListener("click", refreshAll);
-document.getElementById("option-episode").addEventListener("change", loadSelectedOptions);
+document.getElementById("refresh").addEventListener(
+  "click",
+  () => refreshAll({ manual: true }),
+);
+document.getElementById("option-episode").addEventListener("change", () => {
+  runAutomatic(polling.run(
+    "detail:options",
+    (signal) => loadSelectedOptions(signal),
+    { supersede: true },
+  ));
+});
 document.getElementById("replay-start").addEventListener("click", () => controlReplay("start"));
 document.getElementById("replay-stop").addEventListener("click", () => controlReplay("stop"));
-refreshAll();
+runAutomatic(refreshAll({ screenActivation: true }));
 setInterval(() => {
-  if (document.visibilityState === "visible") refreshAll();
-}, 15000);
+  if (document.visibilityState === "visible") runAutomatic(refreshFast());
+}, pollingPolicy.fastIntervalMs);
+setInterval(() => {
+  if (document.visibilityState === "visible") {
+    runAutomatic(refreshSlow(state.activeScreen));
+  }
+}, pollingPolicy.slowIntervalMs);
+setInterval(() => {
+  if (document.visibilityState === "visible") {
+    runAutomatic(refreshManualTier(state.activeScreen));
+  }
+}, pollingPolicy.manualIntervalMs);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") runAutomatic(refreshFast());
+});

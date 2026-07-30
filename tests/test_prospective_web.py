@@ -123,6 +123,9 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     assert 'id="safety-audit"' in response.text
     script = client.get("/assets/app.js")
     assert script.status_code == 200
+    polling_script = client.get("/assets/polling.js")
+    assert polling_script.status_code == 200
+    assert 'fastEndpoints: Object.freeze(["/api/dashboard/summary"])' in polling_script.text
     assert "Official IBKR API" in script.text
     assert "Recorder readiness" in script.text
     assert "REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER" in script.text
@@ -428,6 +431,7 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     assert "renderConcentrationAudit" in script
 
     for path in (
+        "/api/dashboard/summary",
         "/api/recorder/status",
         "/api/recorder/capabilities",
         "/api/recorder/session-reports",
@@ -714,6 +718,84 @@ def test_web_boundary_refuses_symlinks_in_installed_bundle_tree(tmp_path: Path) 
 
     assert blocked.value.code == 78
     assert target.read_bytes() == b""
+
+
+def test_dashboard_summary_is_compact_and_never_calls_heavy_read_projections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = seeded_app(tmp_path)
+
+    def forbidden_heavy_read(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("dashboard summary invoked a heavy read projection")
+
+    for method_name in (
+        "episode_quote_series_v0",
+        "episode_depth_snapshot_v0",
+        "raw_event_sample_v0",
+        "audit_events_v0",
+        "episodes_v0",
+        "shadow_outcomes_v0",
+        "quiet_state_episodes_v0",
+        "quiet_state_shadow_structures_v0",
+        "session_reports_v0",
+    ):
+        monkeypatch.setattr(ProspectiveReadStore, method_name, forbidden_heavy_read)
+
+    response = client.get("/api/dashboard/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "health",
+        "recorder",
+        "latest_checkpoints",
+        "current_universe",
+        "capacity",
+        "replay",
+        "blockers",
+        "claims_boundary",
+    }
+    assert body["recorder"]["state"] == body["health"]["recorder"]["operational_status"]
+    assert body["current_universe"]["items"]
+    assert body["claims_boundary"] == claims_boundary()
+    assert not {"audit", "episodes", "reports", "parquet_series"}.intersection(body)
+
+
+def test_two_tabs_fit_within_a_low_eight_request_per_minute_limit(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    cfg = cfg.model_copy(
+        update={
+            "web": cfg.web.model_copy(update={"requests_per_minute": 8}),
+        }
+    )
+    ProspectiveRepository(cfg.paths.database).migrate()
+    app = create_web_app(cfg)
+    first_tab = TestClient(app)
+    second_tab = TestClient(app)
+
+    statuses = []
+    for _ in range(4):
+        statuses.append(first_tab.get("/api/dashboard/summary").status_code)
+        statuses.append(second_tab.get("/api/dashboard/summary").status_code)
+
+    assert statuses == [200] * 8
+    assert first_tab.get("/api/dashboard/summary").status_code == 429
+
+
+def test_trusted_host_middleware_rejects_unconfigured_host(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    ProspectiveRepository(cfg.paths.database).migrate()
+    client = TestClient(create_web_app(cfg))
+
+    rejected = client.get(
+        "/api/dashboard/summary",
+        headers={"Host": "attacker.invalid"},
+    )
+    assert rejected.status_code == 400
+    assert client.get("/api/dashboard/summary", headers={"Host": "testserver"}).status_code == 200
 
 
 def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> None:

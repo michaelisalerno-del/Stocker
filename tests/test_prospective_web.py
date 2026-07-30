@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import os
 import sqlite3
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -14,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import stocker_prospective.read_store as read_store_module
+import stocker_prospective.web as web_module
 from stocker_prospective.budget_reports import BudgetAwareDailyReportWriter
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.contract import claims_boundary
@@ -515,6 +517,52 @@ def test_no_order_account_threshold_or_upload_endpoint_exists(tmp_path: Path) ->
     assert client.post("/api/orders").status_code == 404
     assert client.post("/api/replay/start", json={"mode": "accelerated"}).status_code == 200
     assert client.post("/api/replay/stop").status_code == 200
+
+
+def test_application_shutdown_cancels_and_joins_active_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = config(tmp_path)
+    run_deterministic_replay(
+        ReplaySettings(
+            database_path=cfg.paths.database,
+            run_id="replay-run-001",
+            prospective_start_utc=datetime(2026, 7, 24, 13, 0, tzinfo=UTC),
+            app_version="0.1.0-test",
+            git_commit="deadbeef",
+            universe_path=ROOT / "configs/prospective/anchor-frozen-20.json",
+            owner_id="test-web-fixture",
+            recorder_lease_stale_seconds=60,
+        )
+    )
+    started = threading.Event()
+    cancelled = threading.Event()
+
+    def controlled_replay(**arguments: object) -> SimpleNamespace:
+        stop_event = arguments["stop_event"]
+        assert isinstance(stop_event, threading.Event)
+        started.set()
+        assert stop_event.wait(timeout=1.0)
+        cancelled.set()
+        return SimpleNamespace(
+            records_replayed=0,
+            raw_events_replayed=0,
+            digest=hashlib.sha256(b"[]").hexdigest(),
+            stage_counts={},
+            maximum_floating_difference=0.0,
+            ibkr_connections_attempted=0,
+            broker_state_mutated=False,
+        )
+
+    monkeypatch.setattr(web_module, "replay_persisted_evidence", controlled_replay)
+
+    with TestClient(create_web_app(cfg)) as client:
+        response = client.post("/api/replay/start", json={"mode": "accelerated"})
+        assert response.status_code == 200
+        assert started.wait(timeout=1.0)
+
+    assert cancelled.wait(timeout=1.0)
 
 
 def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(

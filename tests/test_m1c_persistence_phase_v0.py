@@ -386,6 +386,150 @@ def test_persisted_evidence_replay_reads_hashed_partitions_without_ibkr(
     assert first.ibkr_connections_attempted == 0
 
 
+def test_persisted_evidence_replay_rejects_manifest_over_memory_bound_before_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "bounded-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="bounded-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    partition = store.write_events(
+        data_source="fake_ibkr",
+        events=(raw_event(1), raw_event(2)),
+        complete=True,
+    )
+    FrozenRecorderRepository(database).record_partition(
+        metadata,
+        data_source="fake_ibkr",
+        session_date=START.date(),
+        symbol="AAL",
+        event_type="underlying_level1_quote_event",
+        partition=partition,
+    )
+    with database._connect() as connection:
+        connection.execute(
+            "UPDATE raw_partition_manifest_v0 SET row_count = 1000 WHERE run_id = ?",
+            (metadata.run_id,),
+        )
+
+    parquet_opened = False
+
+    def fail_if_opened(_path: object) -> object:
+        nonlocal parquet_opened
+        parquet_opened = True
+        raise AssertionError("Parquet must not open after the manifest bound fails")
+
+    monkeypatch.setattr("pyarrow.parquet.ParquetFile", fail_if_opened)
+
+    with pytest.raises(
+        RuntimeError,
+        match="blocked_replay_record_limit_exceeded: estimated=1000 limit=100",
+    ):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+        )
+
+    assert parquet_opened is False
+
+
+def test_persisted_evidence_replay_streams_parquet_batches_instead_of_full_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    database = ProspectiveRepository(tmp_path / "batch-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="batch-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    partition = store.write_events(
+        data_source="fake_ibkr",
+        events=tuple(raw_event(index) for index in range(12)),
+        complete=True,
+    )
+    FrozenRecorderRepository(database).record_partition(
+        metadata,
+        data_source="fake_ibkr",
+        session_date=START.date(),
+        symbol="AAL",
+        event_type="underlying_level1_quote_event",
+        partition=partition,
+    )
+    original_parquet_file = pq.ParquetFile
+    batch_sizes: list[int] = []
+
+    class BatchOnlyParquetFile:
+        def __init__(self, path: Path) -> None:
+            self._delegate = original_parquet_file(path)
+
+        def read(self) -> object:
+            raise AssertionError("full Parquet table reads are forbidden during replay")
+
+        def iter_batches(self, *, batch_size: int) -> object:
+            batch_sizes.append(batch_size)
+            return self._delegate.iter_batches(batch_size=batch_size)
+
+    monkeypatch.setattr(pq, "ParquetFile", BatchOnlyParquetFile)
+
+    result = replay_persisted_evidence(
+        database_path=database.database_path,
+        run_id=metadata.run_id,
+        mode="accelerated",
+        speed=10.0,
+        episode_id=None,
+        m1c_feature_manifest_path=None,
+        m1c_threshold_path=None,
+        stop_event=threading.Event(),
+        maximum_records=100,
+    )
+
+    assert result.raw_events_replayed == 12
+    assert batch_sizes == [100]
+    assert result.ibkr_connections_attempted == 0
+    assert result.broker_state_mutated is False
+
+
 def test_phase_ledger_is_chronological_immutable_and_keeps_confirmation_closed(
     tmp_path: Path,
 ) -> None:

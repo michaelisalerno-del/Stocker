@@ -96,6 +96,8 @@ class WebConfig(BaseModel):
         le=1_000_000,
     )
     audit_page_maximum_items: int = Field(default=200, ge=1, le=1_000)
+    replay_stop_timeout_seconds: float = Field(default=2.0, ge=0.05, le=30.0)
+    replay_maximum_records: int = Field(default=250_000, ge=1, le=5_000_000)
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
 
     @model_validator(mode="after")

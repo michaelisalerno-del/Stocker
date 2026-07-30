@@ -243,9 +243,13 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 None if artifact_root is None else artifact_root / "causal_movement_threshold.json"
             ),
             stop_event=stop_event,
+            maximum_records=config.web.replay_maximum_records,
         )
 
-    replay_controller = ReplayController(runner=run_replay)
+    replay_controller = ReplayController(
+        runner=run_replay,
+        stop_timeout_seconds=config.web.replay_stop_timeout_seconds,
+    )
     static_root = Path(__file__).with_name("web_static")
     authentication_token: str | None = None
     if config.web.authentication_enabled:
@@ -262,6 +266,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         try:
             yield
         finally:
+            replay_controller.shutdown()
             store.close_anchor()
 
     app = FastAPI(

@@ -106,9 +106,7 @@ _STAGE_SPECIFICATIONS = (
     ),
 )
 
-_RAW_REPLAY_STAGES = frozenset(
-    {"raw_market_event", "five_minute_bar", "option_quote"}
-)
+_RAW_REPLAY_STAGES = frozenset({"raw_market_event", "five_minute_bar", "option_quote"})
 
 
 def _sha256(path: Path) -> str:
@@ -431,8 +429,7 @@ def replay_persisted_evidence(
     records.extend(stage_rows)
     if len(records) > maximum_records:
         raise RuntimeError(
-            "blocked_replay_record_limit_exceeded: "
-            f"actual={len(records)} limit={maximum_records}"
+            f"blocked_replay_record_limit_exceeded: actual={len(records)} limit={maximum_records}"
         )
     if mode == "episode_only":
         if not episode_id:
@@ -456,11 +453,7 @@ def replay_persisted_evidence(
         run_id=selected_run,
         mode=mode,
         records_replayed=len(records),
-        raw_events_replayed=sum(
-            1
-            for item in records
-            if item["stage"] in _RAW_REPLAY_STAGES
-        ),
+        raw_events_replayed=sum(1 for item in records if item["stage"] in _RAW_REPLAY_STAGES),
         stage_counts=dict(sorted(counts.items())),
         digest=_canonical_records_digest(records),
         raw_partition_hash_mismatches=partition_mismatches,

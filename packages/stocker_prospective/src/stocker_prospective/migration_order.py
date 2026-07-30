@@ -61,9 +61,7 @@ def migration_plan(root: Path) -> tuple[Migration, ...]:
             ordered_paths = tuple(paths_by_name[name] for name in expected_legacy)
         elif len(paths_by_name) > 1:
             names = ", ".join(sorted(paths_by_name))
-            raise MigrationOrderError(
-                f"duplicate migration sequence {sequence:04d}: {names}"
-            )
+            raise MigrationOrderError(f"duplicate migration sequence {sequence:04d}: {names}")
         else:
             ordered_paths = tuple(paths_by_name.values())
         plan.extend(Migration(sequence=sequence, path=path) for path in ordered_paths)

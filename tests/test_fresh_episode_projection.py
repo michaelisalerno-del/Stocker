@@ -360,9 +360,7 @@ def test_fresh_episode_requires_current_session_latest_completed_checkpoint_and_
     assert items["NONE"]["latest_episode_id"] is None
 
     assert items["MULTIPLE"]["fresh_episode"] is True
-    assert items["MULTIPLE"]["latest_episode_id"] == (
-        f"MULTIPLE-{CURRENT_SESSION}-2"
-    )
+    assert items["MULTIPLE"]["latest_episode_id"] == (f"MULTIPLE-{CURRENT_SESSION}-2")
 
 
 def test_recorder_latest_event_summary_work_is_independent_of_manifest_history(

@@ -103,9 +103,7 @@ def structured_log(
         allow_nan=False,
     )
     exception_info = (
-        None
-        if exception is None
-        else (type(exception), exception, exception.__traceback__)
+        None if exception is None else (type(exception), exception, exception.__traceback__)
     )
     logger.log(level, payload, exc_info=exception_info)
 

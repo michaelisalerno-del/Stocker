@@ -53,9 +53,7 @@ def runtime_evidence(
             for blocker in blockers
         ],
         "last_completed_bar": (
-            {"bar_end_utc": (NOW - timedelta(minutes=5)).isoformat()}
-            if historical_rows
-            else None
+            {"bar_end_utc": (NOW - timedelta(minutes=5)).isoformat()} if historical_rows else None
         ),
         "latest_capture": (
             {"target_timestamp_utc": (NOW - timedelta(minutes=4)).isoformat()}

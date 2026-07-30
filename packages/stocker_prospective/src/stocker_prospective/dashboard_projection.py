@@ -107,11 +107,7 @@ def project_recorder_operational_state(
         heartbeat: datetime | None = None,
     ) -> dict[str, Any]:
         heartbeat_utc = None if heartbeat is None else heartbeat.astimezone(UTC)
-        age = (
-            None
-            if heartbeat_utc is None
-            else (evaluated_at - heartbeat_utc).total_seconds()
-        )
+        age = None if heartbeat_utc is None else (evaluated_at - heartbeat_utc).total_seconds()
         return RecorderOperationalState(
             state=state,
             reason=reason,
@@ -120,9 +116,7 @@ def project_recorder_operational_state(
             prospective_start_utc=prospective_start.isoformat(),
             stale_after_seconds=stale_after_seconds,
             lease_present=isinstance(lease, dict),
-            heartbeat_at_utc=(
-                None if heartbeat_utc is None else heartbeat_utc.isoformat()
-            ),
+            heartbeat_at_utc=(None if heartbeat_utc is None else heartbeat_utc.isoformat()),
             heartbeat_age_seconds=age,
             last_completed_bar_timestamp_utc=last_completed_bar,
             last_raw_or_capture_timestamp_utc=last_capture,
@@ -133,9 +127,7 @@ def project_recorder_operational_state(
         return result("inactive", "run_absent")
     run_status = None if not isinstance(run, dict) else run.get("status")
     session_status = None if not isinstance(session, dict) else session.get("status")
-    session_closed = (
-        isinstance(session, dict) and session.get("closed_at_utc") is not None
-    )
+    session_closed = isinstance(session, dict) and session.get("closed_at_utc") is not None
     if (
         str(run_status).lower() in _TERMINAL_RUN_STATUSES
         or str(session_status).lower() in _TERMINAL_SESSION_STATUSES

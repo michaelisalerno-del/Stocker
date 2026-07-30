@@ -43,9 +43,7 @@ class _TimedReadConnection(sqlite3.Connection):
         try:
             return super().execute(sql, parameters)
         finally:
-            record_sqlite_operation(
-                duration_ms=(time.perf_counter() - started) * 1_000.0
-            )
+            record_sqlite_operation(duration_ms=(time.perf_counter() - started) * 1_000.0)
 
 
 def _record_parquet_metrics(metrics: ParquetReadMetrics) -> None:
@@ -922,10 +920,7 @@ class ProspectiveReadStore:
                     or total_size <= 0.0
                     or bid_size_value is None
                     or ask_size_value is None
-                    else (
-                        ask_value * bid_size_value + bid_value * ask_size_value
-                    )
-                    / total_size
+                    else (ask_value * bid_size_value + bid_value * ask_size_value) / total_size
                 )
                 event_id = row.get("event_id")
                 identity = (

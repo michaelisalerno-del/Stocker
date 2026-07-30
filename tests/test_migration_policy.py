@@ -75,9 +75,7 @@ def _schema_snapshot(database_path: Path) -> dict[str, object]:
                             )
                         ),
                         "sql": (
-                            None
-                            if index_sql_row is None
-                            else _normalise_sql(index_sql_row["sql"])
+                            None if index_sql_row is None else _normalise_sql(index_sql_row["sql"])
                         ),
                     }
                 )
@@ -120,9 +118,7 @@ def _migration_ledger(database_path: Path) -> tuple[str, ...]:
     with sqlite3.connect(database_path) as connection:
         return tuple(
             str(row[0])
-            for row in connection.execute(
-                "SELECT version FROM schema_migrations ORDER BY rowid"
-            )
+            for row in connection.execute("SELECT version FROM schema_migrations ORDER BY rowid")
         )
 
 

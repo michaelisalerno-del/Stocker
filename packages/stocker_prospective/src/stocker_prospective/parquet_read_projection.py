@@ -152,9 +152,8 @@ def read_parquet_window(
     for timestamp_column in projected_timestamps:
         data_type = parquet_dataset.schema.field(timestamp_column).type
         field = dataset.field(timestamp_column)  # type: ignore[attr-defined,no-untyped-call]
-        within_window = (
-            (field >= _filter_scalar(data_type, start_utc))
-            & (field <= _filter_scalar(data_type, end_utc))
+        within_window = (field >= _filter_scalar(data_type, start_utc)) & (
+            field <= _filter_scalar(data_type, end_utc)
         )
         predicate = within_window if predicate is None else predicate | within_window
     assert predicate is not None

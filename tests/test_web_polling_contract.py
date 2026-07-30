@@ -5,19 +5,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 STATIC_ROOT = (
-    ROOT
-    / "packages"
-    / "stocker_prospective"
-    / "src"
-    / "stocker_prospective"
-    / "web_static"
+    ROOT / "packages" / "stocker_prospective" / "src" / "stocker_prospective" / "web_static"
 )
 POLLING = (STATIC_ROOT / "polling.js").read_text(encoding="utf-8")
 APPLICATION = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 INDEX = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
-SERVER_CONFIG = (ROOT / "configs/prospective/server.example.yaml").read_text(
-    encoding="utf-8"
-)
+SERVER_CONFIG = (ROOT / "configs/prospective/server.example.yaml").read_text(encoding="utf-8")
 
 
 def interval_milliseconds(name: str) -> int:
@@ -74,10 +67,6 @@ def test_polling_supersedes_manual_refresh_and_pauses_while_hidden() -> None:
 
 
 def test_heavy_data_is_routed_by_visible_screen_and_polling_loads_first() -> None:
-    assert POLLING.index('"/api/audit/events?limit=100"') > POLLING.index(
-        "manualEndpointsByScreen"
-    )
-    assert POLLING.index('"/api/reports/daily"') > POLLING.index(
-        "manualEndpointsByScreen"
-    )
+    assert POLLING.index('"/api/audit/events?limit=100"') > POLLING.index("manualEndpointsByScreen")
+    assert POLLING.index('"/api/reports/daily"') > POLLING.index("manualEndpointsByScreen")
     assert INDEX.index("/assets/polling.js") < INDEX.index("/assets/app.js")

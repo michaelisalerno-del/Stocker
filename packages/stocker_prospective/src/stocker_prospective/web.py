@@ -327,10 +327,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             if (
                 request.url.path.startswith("/api/")
                 and request.method not in {"GET", "HEAD", "OPTIONS"}
-                and not (
-                    request.method == "POST"
-                    and request.url.path in replay_control_paths
-                )
+                and not (request.method == "POST" and request.url.path in replay_control_paths)
             ):
                 response = JSONResponse(
                     status_code=404,
@@ -380,9 +377,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
 
             if response is None:
                 response = await call_next(request)
-            elapsed_ms = (
-                time.monotonic() - request.state.request_started_monotonic
-            ) * 1_000.0
+            elapsed_ms = (time.monotonic() - request.state.request_started_monotonic) * 1_000.0
             request.state.elapsed_ms = elapsed_ms
             apply_response_headers(response, request_id=request_id)
             structured_log(
@@ -444,12 +439,9 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
 
     def no_order_path_verified() -> bool:
         return config.risk.trading_enabled is False and all(
-            not _path_exposes_forbidden_broker_resource(
-                str(getattr(route, "path", ""))
-            )
+            not _path_exposes_forbidden_broker_resource(str(getattr(route, "path", "")))
             and (
-                set(getattr(route, "methods", set()) or set())
-                <= {"GET", "HEAD", "OPTIONS"}
+                set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
                 or (
                     str(getattr(route, "path", "")) in replay_control_paths
                     and set(getattr(route, "methods", set()) or set()) == {"POST"}
@@ -940,9 +932,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         content_hash: str,
         limit: int = Query(default=100, ge=1, le=100),
     ) -> dict[str, Any]:
-        if (
-            len(content_hash) != 64
-            or any(character not in "0123456789abcdef" for character in content_hash)
+        if len(content_hash) != 64 or any(
+            character not in "0123456789abcdef" for character in content_hash
         ):
             raise HTTPException(status_code=404, detail="not_found")
         result = store.raw_event_detail_v0(

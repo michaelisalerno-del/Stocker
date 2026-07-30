@@ -153,10 +153,7 @@ class ReplayController:
             )
 
     def _owns_state(self, *, generation: int, execution_id: str) -> bool:
-        return (
-            self._state.generation == generation
-            and self._state.execution_id == execution_id
-        )
+        return self._state.generation == generation and self._state.execution_id == execution_id
 
     def _record_failure(
         self,
@@ -220,10 +217,7 @@ class ReplayController:
                 return
             if self._state.state != "running":
                 return
-            if (
-                int(result.ibkr_connections_attempted) != 0
-                or bool(result.broker_state_mutated)
-            ):
+            if int(result.ibkr_connections_attempted) != 0 or bool(result.broker_state_mutated):
                 self._state = ReplayControlState(
                     state="failed",
                     execution_id=execution_id,

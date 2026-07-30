@@ -394,8 +394,9 @@ def test_health_reports_live_recorder_waiting_for_prospective_start(
     assert health["recorder"]["operational_status"] == "waiting_for_prospective_start"
     recorder = TestClient(create_web_app(cfg)).get("/api/recorder/status").json()
     assert recorder["state"] == "waiting_for_prospective_start"
-    assert recorder["operational_state"]["reason"] == (
-        health["recorder"]["operational_state"]["reason"]
+    assert (
+        recorder["operational_state"]["reason"]
+        == (health["recorder"]["operational_state"]["reason"])
     )
     with sqlite3.connect(cfg.paths.database) as connection:
         assert connection.execute("SELECT count(*) FROM prospective_run").fetchone() == (0,)
@@ -432,11 +433,12 @@ def test_health_and_recorder_status_share_terminal_operational_state(
     assert recorder["last_event_timestamp"] is not None
     assert recorder["state"] == "inactive"
     assert recorder["operational_state"]["reason"] == "runtime_session_stopped"
-    assert recorder["operational_state"]["state"] == (
-        health["recorder"]["operational_state"]["state"]
+    assert (
+        recorder["operational_state"]["state"] == (health["recorder"]["operational_state"]["state"])
     )
-    assert recorder["operational_state"]["reason"] == (
-        health["recorder"]["operational_state"]["reason"]
+    assert (
+        recorder["operational_state"]["reason"]
+        == (health["recorder"]["operational_state"]["reason"])
     )
     assert health["recorder"]["operational_status"] == "inactive"
 
@@ -626,8 +628,7 @@ def test_request_log_includes_aggregate_sqlite_and_replay_fields(
     payload = next(
         item
         for item in request_records
-        if item["request_id"] == request_id
-        and item["route"] == "/api/dashboard/summary"
+        if item["request_id"] == request_id and item["route"] == "/api/dashboard/summary"
     )
     assert payload["response_status"] == 200
     assert payload["elapsed_ms"] >= 0.0

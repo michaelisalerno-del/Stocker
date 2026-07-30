@@ -286,6 +286,61 @@ def test_audit_events_are_sqlite_only_bounded_and_cursor_paginated(
     assert all("must-not-open" not in str(item) for item in first.json()["items"])
 
 
+def test_audit_projection_records_immutable_subscription_transitions(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+    with sqlite3.connect(cfg.paths.database) as connection:
+        envelope_id = int(
+            connection.execute(
+                "SELECT id FROM evidence_envelope WHERE run_id = ? ORDER BY id LIMIT 1",
+                (cfg.runtime.run_id,),
+            ).fetchone()[0]
+        )
+        connection.executemany(
+            """
+            INSERT INTO subscription_lifecycle_event_v0(
+                envelope_id, run_id, occurred_at_utc, subscription_key,
+                request_id, subscription_kind, subscription_class, symbol,
+                con_id, status, owner_ids_json, owner_count, generation,
+                reason, payload_json, claims_json
+            ) VALUES (?, ?, ?, 'audit-subscription', 91001, 'level1', 1,
+                      'AAPL', 265598, ?, '[]', 0, ?, ?, '{}', '{}')
+            """,
+            [
+                (
+                    envelope_id,
+                    cfg.runtime.run_id,
+                    "2026-07-30T14:00:00+00:00",
+                    "started",
+                    1,
+                    None,
+                ),
+                (
+                    envelope_id,
+                    cfg.runtime.run_id,
+                    "2026-07-30T14:01:00+00:00",
+                    "cancelled",
+                    2,
+                    "test_cancel",
+                ),
+            ],
+        )
+
+    response = client.get("/api/audit/events?limit=200")
+
+    assert response.status_code == 200
+    transitions = [
+        json.loads(item["details"])
+        for item in response.json()["items"]
+        if item["audit_type"] == "subscription_transition"
+        and json.loads(item["details"])["subscription_key"] == "audit-subscription"
+    ]
+    assert [item["status"] for item in transitions] == ["cancelled", "started"]
+    assert transitions[0]["reason"] == "test_cancel"
+
+
 def test_raw_event_detail_requires_explicit_partition_and_is_bounded(
     tmp_path: Path,
 ) -> None:
@@ -510,10 +565,19 @@ def test_no_order_account_threshold_or_upload_endpoint_exists(tmp_path: Path) ->
         "position",
         "positions",
         "trade",
+        "trades",
         "buy",
+        "buys",
         "sell",
+        "sells",
+        "broker",
+        "brokers",
+        "execution",
+        "executions",
         "upload",
+        "uploads",
         "credential",
+        "credentials",
     }
     assert not any(
         forbidden_segments.intersection(segment for segment in path.lower().split("/") if segment)
@@ -708,12 +772,63 @@ def test_dashboard_summary_latency_is_stable_with_enlarged_manifest_history(
                 for index in range(5_000)
             ],
         )
+        envelope_id = int(
+            connection.execute(
+                "SELECT id FROM evidence_envelope WHERE run_id = ? ORDER BY id LIMIT 1",
+                (cfg.runtime.run_id,),
+            ).fetchone()[0]
+        )
+        connection.executemany(
+            """
+            INSERT INTO subscription_lifecycle_v0(
+                envelope_id, run_id, subscription_key, request_id,
+                subscription_kind, symbol, con_id, priority, owner_episode,
+                started_at_utc, cancelled_at_utc, cancellation_reason,
+                ibkr_error_codes_json, capacity_denied, claims_json
+            ) VALUES (?, ?, ?, ?, 'level1', 'AAPL', 265598, 1, NULL,
+                      ?, ?, 'synthetic_history', '[]', 0, '{}')
+            """,
+            [
+                (
+                    envelope_id,
+                    cfg.runtime.run_id,
+                    f"summary-history-subscription-{index:05d}",
+                    50_000 + index,
+                    (base + timedelta(seconds=index)).isoformat(),
+                    (base + timedelta(seconds=index + 1)).isoformat(),
+                )
+                for index in range(5_000)
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO data_health_event(
+                envelope_id, run_id, severity, blocker_code,
+                component, message, details_json
+            ) VALUES (?, ?, 'warning', ?, 'synthetic-history', ?, '{}')
+            """,
+            [
+                (
+                    envelope_id,
+                    cfg.runtime.run_id,
+                    (None if index == 4_999 else f"blocked_synthetic_history_{index % 3}"),
+                    (
+                        "previous_session_options_context_ready"
+                        if index == 4_999
+                        else "synthetic historical blocker"
+                    ),
+                )
+                for index in range(5_000)
+            ],
+        )
     enlarged_ms = median_summary_latency_ms()
 
     print(
         "dashboard_summary_latency "
         f"baseline_median_ms={baseline_ms:.3f} "
-        f"history_rows=5000 enlarged_median_ms={enlarged_ms:.3f}"
+        "manifest_history_rows=5000 subscription_history_rows=5000 "
+        "data_health_history_rows=5000 "
+        f"enlarged_median_ms={enlarged_ms:.3f}"
     )
     assert enlarged_ms <= baseline_ms * 2.5 + 5.0
 
@@ -820,6 +935,39 @@ def test_daily_chatgpt_report_package_is_listed_and_downloadable(
         client.get(f"/api/reports/daily/{session.isoformat()}/../prospective.sqlite3").status_code
         == 404
     )
+    assert (
+        client.get(
+            f"/api/reports/daily/{session.isoformat()}/%2e%2e%2fprospective.sqlite3"
+        ).status_code
+        == 404
+    )
+
+
+def test_daily_report_listing_and_download_reject_symlink_escape(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+    report_root = cfg.paths.prospective_report_root
+    assert report_root is not None
+    session = "2026-07-25"
+    session_root = report_root / session
+    session_root.mkdir(parents=True)
+    outside = tmp_path / "outside-sensitive.zip"
+    outside.write_bytes(b"must-not-be-served")
+    archive_name = "chatgpt-report-package-symlink.zip"
+    archive = session_root / archive_name
+    archive.symlink_to(outside)
+    (session_root / "package-symlink.json").write_text(
+        json.dumps({"session": session, "archive": archive_name}),
+        encoding="utf-8",
+    )
+
+    listing = client.get("/api/reports/daily")
+    download = client.get(f"/api/reports/daily/{session}/{archive_name}")
+
+    assert download.status_code == 404
+    assert all(item.get("archive") != archive_name for item in listing.json()["items"])
 
 
 def test_web_sqlite_connections_cannot_write_domain_records(tmp_path: Path) -> None:
@@ -1141,9 +1289,13 @@ def test_parallel_vendor_credential_blocker_is_boolean_only(
     client = TestClient(create_web_app(cfg))
 
     health = client.get("/api/health").json()
+    summary = client.get("/api/dashboard/summary").json()
     public = client.get("/api/config/public").json()
 
     assert "blocked_missing_eodhd_server_token" in health["blockers"]
+    assert summary["health"]["status"] == health["status"] == "blocked"
+    assert summary["health"]["blockers"] == health["blockers"]
+    assert summary["blockers"] == health["blockers"]
     assert health["parallel_validation"]["credential_configured"] is False
     assert public["parallel_validation"]["credential_configured"] is False
     assert "EODHD_API_TOKEN" not in str(public)
@@ -1155,6 +1307,64 @@ def test_parallel_vendor_credential_blocker_is_boolean_only(
     projected = client.get("/api/health").json()
     assert projected["parallel_validation"]["credential_configured"] is True
     assert "must-not-enter-web-process" not in str(projected)
+
+
+def test_dashboard_summary_and_health_share_all_cached_safety_blockers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = config(tmp_path).model_copy(
+        update={
+            "runtime": config(tmp_path).runtime.model_copy(update={"source": "ibkr"}),
+        }
+    )
+    ProspectiveRepository(cfg.paths.database).migrate()
+    monkeypatch.setattr(
+        web_module,
+        "_active_bundle_projection",
+        lambda _config: {
+            "bundle_id": None,
+            "manifest_sha256": None,
+            "verified": False,
+            "blockers": ["blocked_test_bundle"],
+            "feature_runtime": {
+                "installed": False,
+                "contract_version": None,
+                "scoring_authorized_by_registry": False,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        web_module,
+        "_parity_projection",
+        lambda _config: {
+            "scoring_allowed": False,
+            "blocker": "blocked_test_parity",
+            "counts": {},
+            "report": None,
+        },
+    )
+    monkeypatch.setattr(
+        web_module,
+        "official_ibkr_api_projection",
+        lambda: {
+            "verified": False,
+            "automatic_installation": False,
+            "blocker": "blocked_test_ibkr_api",
+        },
+    )
+    client = TestClient(create_web_app(cfg))
+
+    health = client.get("/api/health").json()
+    summary = client.get("/api/dashboard/summary").json()
+
+    assert health["status"] == summary["health"]["status"] == "blocked"
+    assert health["blockers"] == summary["health"]["blockers"] == summary["blockers"]
+    assert {
+        "blocked_test_bundle",
+        "blocked_test_parity",
+        "blocked_test_ibkr_api",
+    } <= set(summary["blockers"])
 
 
 def test_optional_auth_protects_browser_and_api_with_secure_cookie_support(

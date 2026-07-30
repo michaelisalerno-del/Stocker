@@ -86,7 +86,50 @@ def test_window_projection_fails_before_exceeding_python_row_budget(
             maximum_input_rows=20,
         )
 
-    assert blocked.value.metrics.input_rows == 21
+    assert blocked.value.metrics.selected_row_group_rows == 50
+    assert blocked.value.metrics.input_rows == 0
+    assert blocked.value.metrics.output_rows == 0
+
+
+def test_window_projection_rejects_oversized_overlapping_row_group_before_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partition = tmp_path / "oversized-row-group.parquet"
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = [
+        {
+            "event_id": f"event-{index:05d}",
+            "received_timestamp_utc": (
+                start + timedelta(minutes=5) if index == 500 else start + timedelta(days=1)
+            ).isoformat(),
+        }
+        for index in range(1_000)
+    ]
+    pq.write_table(
+        pa.Table.from_pylist(rows),
+        partition,
+        row_group_size=1_000,
+        compression=None,
+    )
+
+    def scanner_must_not_run(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("oversized row group reached the dataset scanner")
+
+    monkeypatch.setattr("pyarrow.dataset.dataset", scanner_must_not_run)
+
+    with pytest.raises(ParquetProjectionLimitExceeded) as blocked:
+        read_parquet_window(
+            partition,
+            columns=("event_id", "received_timestamp_utc"),
+            timestamp_columns=("received_timestamp_utc",),
+            start=start,
+            end=start + timedelta(minutes=10),
+            maximum_input_rows=100,
+        )
+
+    assert blocked.value.metrics.selected_row_group_rows == 1_000
+    assert blocked.value.metrics.input_rows == 0
     assert blocked.value.metrics.output_rows == 0
 
 

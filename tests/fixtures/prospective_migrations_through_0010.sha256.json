@@ -1,0 +1,12 @@
+{
+  "0001_prospective.sql": "ef2507cc68d0d97a5a3d2fe237e9c5e4442840daae0e64ff223c5615c015fa4b",
+  "0002_runtime_state.sql": "ece29663fcfebf8e770982828cfee4d21729464e78f6b03fe92d7b1740c677f9",
+  "0003_option_computations.sql": "13d96c12a245fa5277199923152911b04e06409d448112e94828a5cd5beb0b68",
+  "0004_underlying_quote_identity.sql": "bb6fd961777675e64d7d178946e3bc1c89144279047d84dda76062e0743ce0a1",
+  "0005_market_data_budget_events.sql": "58c9ae9544219e9e743a9c00169581f3ff6867492ce4d81a58e348998413e11f",
+  "0006_parallel_source_bars.sql": "d32dd082d1cd9ec173dbe151d4933018be71a2b4b0f963062af953a225c6853c",
+  "0007_frozen_m1c_recorder_v0.sql": "609fe3170b388c4253f0025f9aa2c58b6cf04bd3b634c1b1ae8f06046a2e208d",
+  "0008_promotion_decisions_and_option_model_sources.sql": "aa50955aa256fcd36b4821600cd213346aba9d09f640b9d141897f5daaea94e8",
+  "0009_quiet_state_options_shadow_v0.sql": "9fd7692fdfe926946b3ed7fee1ecf1c4ed20f65e33784cdd2a3a3f9ee1118df8",
+  "0010_ibkr_budget_transfer_v0.sql": "7bfa2482aa2f1c346bf87781ac1cb9bd715afd44d06b73d463fa88542db55782"
+}

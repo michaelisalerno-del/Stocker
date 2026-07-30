@@ -457,6 +457,80 @@ def test_persisted_evidence_replay_rejects_manifest_over_memory_bound_before_rea
     assert parquet_opened is False
 
 
+def test_persisted_evidence_replay_rejects_uncompressed_byte_budget_before_decode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    database = ProspectiveRepository(tmp_path / "byte-bounded-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="byte-bounded-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    partition = store.write_events(
+        data_source="fake_ibkr",
+        events=(raw_event(1), raw_event(2)),
+        complete=True,
+    )
+    FrozenRecorderRepository(database).record_partition(
+        metadata,
+        data_source="fake_ibkr",
+        session_date=START.date(),
+        symbol="AAL",
+        event_type="underlying_level1_quote_event",
+        partition=partition,
+    )
+    original_parquet_file = pq.ParquetFile
+    decoded = False
+
+    class MetadataOnlyParquetFile:
+        def __init__(self, path: Path) -> None:
+            self._delegate = original_parquet_file(path)
+            self.metadata = self._delegate.metadata
+
+        def iter_batches(self, *, batch_size: int) -> object:
+            nonlocal decoded
+            decoded = True
+            raise AssertionError(f"byte-over-budget partition decoded with batch {batch_size}")
+
+    monkeypatch.setattr(pq, "ParquetFile", MetadataOnlyParquetFile)
+
+    with pytest.raises(
+        RuntimeError,
+        match="blocked_replay_byte_limit_exceeded",
+    ):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+            maximum_materialized_bytes=1,
+        )
+
+    assert decoded is False
+
+
 def test_persisted_evidence_replay_streams_parquet_batches_instead_of_full_table(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -502,6 +576,7 @@ def test_persisted_evidence_replay_streams_parquet_batches_instead_of_full_table
     class BatchOnlyParquetFile:
         def __init__(self, path: Path) -> None:
             self._delegate = original_parquet_file(path)
+            self.metadata = self._delegate.metadata
 
         def read(self) -> object:
             raise AssertionError("full Parquet table reads are forbidden during replay")

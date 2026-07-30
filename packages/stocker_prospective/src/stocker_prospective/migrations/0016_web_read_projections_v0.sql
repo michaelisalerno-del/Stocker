@@ -46,17 +46,18 @@ FROM (
     FROM raw_partition_manifest_v0
     UNION ALL
     SELECT run_id,
-           'subscription' AS audit_type,
-           subscription_key AS identity,
-           started_at_utc AS recorded_at_utc,
+           'subscription_transition' AS audit_type,
+           subscription_key || ':' || CAST(id AS TEXT) AS identity,
+           occurred_at_utc AS recorded_at_utc,
            json_object(
+               'subscription_key', subscription_key,
                'subscription_kind', subscription_kind,
                'symbol', symbol,
-               'cancelled_at_utc', cancelled_at_utc,
-               'cancellation_reason', cancellation_reason,
-               'capacity_denied', capacity_denied
+               'status', status,
+               'generation', generation,
+               'reason', reason
            ) AS details
-    FROM subscription_lifecycle_v0
+    FROM subscription_lifecycle_event_v0
     UNION ALL
     SELECT run_id,
            'm1c_prediction' AS audit_type,
@@ -123,22 +124,23 @@ BEGIN
     );
 END;
 
-CREATE TRIGGER IF NOT EXISTS web_audit_subscription_insert_v0
-AFTER INSERT ON subscription_lifecycle_v0
+CREATE TRIGGER IF NOT EXISTS web_audit_subscription_transition_insert_v0
+AFTER INSERT ON subscription_lifecycle_event_v0
 BEGIN
     INSERT OR IGNORE INTO web_audit_projection_v0(
         run_id, audit_type, identity, recorded_at_utc, details
     ) VALUES (
         NEW.run_id,
-        'subscription',
-        NEW.subscription_key,
-        NEW.started_at_utc,
+        'subscription_transition',
+        NEW.subscription_key || ':' || CAST(NEW.id AS TEXT),
+        NEW.occurred_at_utc,
         json_object(
+            'subscription_key', NEW.subscription_key,
             'subscription_kind', NEW.subscription_kind,
             'symbol', NEW.symbol,
-            'cancelled_at_utc', NEW.cancelled_at_utc,
-            'cancellation_reason', NEW.cancellation_reason,
-            'capacity_denied', NEW.capacity_denied
+            'status', NEW.status,
+            'generation', NEW.generation,
+            'reason', NEW.reason
         )
     );
 END;

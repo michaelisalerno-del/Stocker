@@ -241,18 +241,9 @@ class ProspectiveReadStore:
             blockers = connection.execute(
                 """
                 SELECT blocker_code, component, message, severity
-                FROM data_health_event AS blocked
-                WHERE run_id = ? AND blocker_code IS NOT NULL
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM data_health_event AS resolved
-                    WHERE resolved.run_id = blocked.run_id
-                      AND resolved.component = blocked.component
-                      AND resolved.id > blocked.id
-                      AND resolved.blocker_code IS NULL
-                      AND resolved.message = 'previous_session_options_context_ready'
-                  )
-                ORDER BY id
+                FROM web_active_runtime_blocker_v0
+                WHERE run_id = ?
+                ORDER BY event_id
                 """,
                 (run_id,),
             ).fetchall()

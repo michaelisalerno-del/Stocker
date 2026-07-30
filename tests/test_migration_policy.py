@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from pathlib import Path
 
@@ -18,6 +20,12 @@ MIGRATION_ROOT = (
     / "src"
     / "stocker_prospective"
     / "migrations"
+)
+OLDER_FIXTURE_MANIFEST = (
+    Path(__file__).parents[1]
+    / "tests"
+    / "fixtures"
+    / "prospective_migrations_through_0010.sha256.json"
 )
 
 
@@ -91,6 +99,7 @@ def _schema_snapshot(database_path: Path) -> dict[str, object]:
 
 def _apply_older_fixture(database_path: Path, *, through_sequence: int) -> None:
     plan = migration_plan(MIGRATION_ROOT)
+    frozen_hashes = json.loads(OLDER_FIXTURE_MANIFEST.read_text(encoding="utf-8"))
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(
@@ -104,6 +113,11 @@ def _apply_older_fixture(database_path: Path, *, through_sequence: int) -> None:
         for migration in plan:
             if migration.sequence > through_sequence:
                 break
+            expected_hash = frozen_hashes[migration.path.name]
+            actual_hash = hashlib.sha256(migration.path.read_bytes()).hexdigest()
+            assert actual_hash == expected_hash, (
+                f"deployed migration changed: {migration.path.name}"
+            )
             version = migration.path.name.replace("'", "''")
             connection.executescript(
                 "BEGIN IMMEDIATE;\n"
@@ -149,6 +163,48 @@ def test_migration_plan_rejects_any_new_duplicate_prefix(tmp_path: Path) -> None
         match="duplicate migration sequence 0016",
     ):
         migration_plan(migration_root)
+
+
+def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) -> None:
+    database = tmp_path / "indexed.sqlite3"
+    ProspectiveRepository(database).migrate()
+    expected_indexes = {
+        "idx_underlying_bar_web_latest",
+        "idx_model_score_web_latest",
+        "idx_previous_session_context_web_latest",
+        "idx_ibkr_connection_event_web_latest",
+        "idx_option_surface_capture_web_latest",
+        "idx_market_data_budget_event_run",
+        "idx_source_capture_completion_web_latest",
+        "idx_signal_episode_time",
+        "idx_data_health_event_web_active",
+        "idx_web_active_runtime_blocker",
+        "idx_subscription_lifecycle_web_active",
+        "idx_m1c_checkpoint_web_latest",
+        "idx_m1c_episode_web_latest_exact",
+    }
+    with sqlite3.connect(database) as connection:
+        index_rows = connection.execute(
+            "SELECT name, sql FROM sqlite_schema WHERE type = 'index'"
+        ).fetchall()
+        indexes = {str(name): sql for name, sql in index_rows}
+        active_subscription_plan = " ".join(
+            str(row[3])
+            for row in connection.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT subscription_kind, COUNT(*) AS used
+                FROM subscription_lifecycle_v0
+                WHERE run_id = ? AND cancelled_at_utc IS NULL
+                GROUP BY subscription_kind
+                """,
+                ("synthetic",),
+            )
+        )
+
+    assert expected_indexes <= indexes.keys()
+    assert "WHERE cancelled_at_utc IS NULL" in str(indexes["idx_subscription_lifecycle_web_active"])
+    assert "idx_subscription_lifecycle_web_active" in active_subscription_plan
 
 
 def test_fresh_and_upgrade_migrations_produce_equivalent_schema(tmp_path: Path) -> None:

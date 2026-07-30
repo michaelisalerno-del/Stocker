@@ -146,6 +146,15 @@ def read_parquet_window(
     )
     if not projected_columns or not projected_timestamps or not selected_row_groups:
         return ParquetProjection(rows=(), metrics=empty_metrics)
+    if selected_row_group_rows > maximum_input_rows:
+        raise ParquetProjectionLimitExceeded(
+            ParquetReadMetrics(
+                **{
+                    **empty_metrics.model_dump(),
+                    "row_groups_read": 0,
+                }
+            )
+        )
 
     parquet_dataset = dataset.dataset(source, format="parquet")  # type: ignore[no-untyped-call]
     predicate = None
@@ -159,29 +168,18 @@ def read_parquet_window(
     assert predicate is not None
 
     rows: list[dict[str, Any]] = []
-    input_rows = 0
     scanner = parquet_dataset.scanner(
         columns=list(projected_columns),
         filter=predicate,
-        batch_size=min(8192, maximum_input_rows + 1),
+        batch_size=min(8192, maximum_input_rows),
         use_threads=False,
     )
     for batch in scanner.to_batches():
-        next_count = input_rows + batch.num_rows
-        if next_count > maximum_input_rows:
-            metrics = ParquetReadMetrics(
-                **{
-                    **empty_metrics.model_dump(),
-                    "input_rows": next_count,
-                }
-            )
-            raise ParquetProjectionLimitExceeded(metrics)
-        input_rows = next_count
         rows.extend(batch.to_pylist())
     metrics = ParquetReadMetrics(
         **{
             **empty_metrics.model_dump(),
-            "input_rows": input_rows,
+            "input_rows": selected_row_group_rows,
             "output_rows": len(rows),
         }
     )

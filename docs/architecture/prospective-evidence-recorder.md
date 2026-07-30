@@ -206,22 +206,38 @@ at most `11.467` steady-state requests/minute, below both the 40-request
 acceptance ceiling and the example 240-request rate limit. Initial navigation
 can create a small bounded screen-activation burst.
 
+The fast summary and full health route call the same compact health projection.
+Frozen bundle, parity, and first-party IBKR-package checks are immutable for
+one web-process generation and are cached at application construction.
+Runtime, credential-presence, lease, and blocker evidence remains live. A
+non-runtime safety blocker therefore cannot disappear from the 15-second view.
+
 ### Bounded evidence reads
 
 - Quote charts project only event identity, timestamps, bid/ask, and sizes.
   Manifest predicates, Parquet timestamp filters, and row-group metadata limit
   reads to 15 minutes before the trigger through 30 minutes after entry.
-  Input is capped by `parquet_projection_maximum_input_rows`; output is
-  deterministically sampled to `quote_series_maximum_points`, preserving the
-  first and last valid observations.
+  Before a scanner is constructed, the sum of physical rows in every
+  overlapping row group must fit
+  `parquet_projection_maximum_input_rows`; an oversized overlapping group is
+  rejected even when its timestamp predicate would return only one row.
+  Output is deterministically sampled to `quote_series_maximum_points`,
+  preserving the first and last valid observations.
 - Depth reads use the same episode window and a minimal column projection.
-- The fast summary reads a constant-size SQLite latest-event projection.
+- The fast summary reads constant-size SQLite latest-event/active-blocker
+  projections and indexed latest rows. Historical cancelled subscriptions do
+  not enter the partial active-subscription index.
 - Audit pages use the indexed `web_audit_projection_v0` identity table,
   opaque cursors, and a configured maximum page size. They never scan raw
-  Parquet.
+  Parquet. Subscription history comes from immutable
+  `subscription_lifecycle_event_v0` transitions, not a mutable lifecycle-row
+  snapshot.
 - Raw market-event detail is an explicit hash-addressed request. It reads only
   bounded trailing row groups and safe projected columns; paths are never
   returned.
+- Daily-report metadata and archives are rejected if the date directory,
+  metadata, or archive is a symlink, or if resolution escapes the configured
+  report root.
 
 ### Replay lifecycle and memory bound
 
@@ -237,10 +253,15 @@ cannot overwrite a newer generation. Application shutdown follows the same
 cancel-and-join path.
 
 Canonical replay ordering still requires materialising globally sortable
-records. Replay therefore preflights manifest and SQLite row counts, streams
-Parquet in batches rather than loading full Arrow tables, hashes canonical JSON
-incrementally, and fails before input when `replay_maximum_records` is
-exceeded. The default hard bound is 250,000 records. Safety fields remain
+records. Replay stores bounded canonical JSON bytes rather than nested payload
+objects, preflights manifest/SQLite row counts and Parquet uncompressed
+row-group bytes, streams SQLite cursors and Parquet batches, and hashes the
+stored bytes incrementally. It fails before decode when the Parquet input
+would exceed `replay_maximum_materialized_bytes`, and fails before retaining a
+record when either that byte budget or `replay_maximum_records` would be
+exceeded. Defaults are 64 MiB and 250,000 records. The largest transient Arrow
+input and the retained encoded-record collection are each independently
+bounded by 64 MiB; batch size is at most 1,024 records. Safety fields remain
 `ibkr_connections_attempted = 0` and `broker_state_mutated = false`.
 
 ### Operational logging and request IDs
@@ -259,17 +280,21 @@ raw market payloads.
 ### Measured synthetic acceptance evidence
 
 On 2026-07-30, CPython 3.12/TestClient against temporary synthetic SQLite data
-measured a median compact-summary latency of 7.530 ms over 12 warmed requests.
-After adding 5,000 synthetic historical raw-manifest identities, the same
-measurement was 7.221 ms. The indexed latest-event lookup remained below 50
-SQLite VM progress steps. This is a regression measurement, not a production
-capacity claim.
+measured a median compact-summary latency of 7.174 ms over 12 warmed requests.
+After adding 5,000 synthetic raw-manifest identities, 5,000 cancelled
+subscription rows, and 5,000 resolved data-health events, the same measurement
+was 7.174 ms. The indexed latest-event lookup remained below 50 SQLite VM
+progress steps. This is a regression measurement, not a production capacity
+claim.
 
 The quote-window test used 1,000 synthetic rows in 10 row groups. It examined
-metadata for 10 groups, read the one overlapping group (100 input rows), and
-returned 10 deterministic points with both endpoints preserved. The polling
-contract test measures 5.733 steady-state requests/minute. These results are
-reproducible with:
+metadata for 10 groups, read the one overlapping group (100 physical input
+rows), and returned 10 deterministic points with both endpoints preserved. A
+second test rejects a 1,000-row overlapping group before constructing a
+scanner when the physical-row budget is 100. Replay likewise rejects a
+Parquet file whose uncompressed metadata exceeds its byte limit before calling
+`iter_batches`. The polling contract test measures 5.733 steady-state
+requests/minute. These results are reproducible with:
 
 ```bash
 uv run pytest tests/test_prospective_web.py -q -s \
@@ -501,9 +526,13 @@ Group O context. Existing rows remain readable; new recorder rows preserve the
 exact phase-at-trigger values without changing the episode definition.
 Migration `0016` adds the bounded audit identity projection and supporting
 indexes. Migration `0017` adds the constant-size latest raw-event/gap summary
-and exact latest-state indexes. Fresh-from-zero and upgrade-from-`0010` schema
+and active-runtime-blocker projections, partial active-subscription index, and
+exact latest-state indexes. Fresh-from-zero and upgrade-from-`0010` schema
 tests compare tables, columns, indexes, foreign keys, normalized table
-constraints, foreign-key integrity, and the complete filename ledger.
+constraints, foreign-key integrity, and the complete filename ledger. The
+upgrade fixture also hash-pins every deployed migration through `0010`, so
+editing a historical migration cannot make both sides of the comparison
+silently agree.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

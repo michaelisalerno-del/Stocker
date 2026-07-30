@@ -182,16 +182,19 @@ def _daily_report_packages(root: Path | None) -> list[dict[str, Any]]:
         return []
     packages: list[dict[str, Any]] = []
     for metadata_path in sorted(root.glob("????-??-??/package-*.json"), reverse=True):
-        payload = _json_artifact(metadata_path)
+        safe_metadata = _safe_contained_file(root, metadata_path)
+        if safe_metadata is None:
+            continue
+        payload = _json_artifact(safe_metadata)
         if payload is None:
             continue
         archive_name = str(payload.get("archive", ""))
-        archive = metadata_path.parent / archive_name
+        archive = _safe_contained_file(root, metadata_path.parent / archive_name)
         if (
             not archive_name
             or Path(archive_name).name != archive_name
+            or archive is None
             or archive.suffix != ".zip"
-            or not archive.is_file()
         ):
             continue
         packages.append(
@@ -202,6 +205,24 @@ def _daily_report_packages(root: Path | None) -> list[dict[str, Any]]:
             }
         )
     return packages
+
+
+def _safe_contained_file(root: Path, candidate: Path) -> Path | None:
+    """Resolve one regular file without following symlinked report components."""
+
+    try:
+        relative = candidate.relative_to(root)
+        current = root
+        for component in relative.parts:
+            current = current / component
+            if current.is_symlink():
+                return None
+        resolved_root = root.resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=True)
+        resolved_candidate.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return resolved_candidate if resolved_candidate.is_file() else None
 
 
 def _path_exposes_forbidden_broker_resource(path: str) -> bool:
@@ -218,11 +239,19 @@ def _path_exposes_forbidden_broker_resource(path: str) -> bool:
                 "position",
                 "positions",
                 "trade",
+                "trades",
                 "buy",
+                "buys",
                 "sell",
+                "sells",
+                "broker",
+                "brokers",
+                "execution",
+                "executions",
                 "credential",
                 "credentials",
                 "upload",
+                "uploads",
             }
         )
     )
@@ -233,6 +262,11 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
 
     validate_runtime_safety(config, object())
     store = ProspectiveReadStore(config.paths.database, run_id=config.runtime.run_id)
+    cached_bundle_projection = _active_bundle_projection(config)
+    cached_parity_projection = _parity_projection(config)
+    cached_ibkr_api_projection = official_ibkr_api_projection()
+    cached_m1c_live_parity_report = _json_artifact(config.paths.m1c_live_parity_report)
+    cached_direction_live_parity_report = _json_artifact(config.paths.direction_live_parity_report)
 
     def run_replay(
         request: ReplayStartRequest,
@@ -255,6 +289,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             ),
             stop_event=stop_event,
             maximum_records=config.web.replay_maximum_records,
+            maximum_materialized_bytes=config.web.replay_maximum_materialized_bytes,
         )
 
     replay_controller = ReplayController(
@@ -451,17 +486,12 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             if str(getattr(route, "path", "")).startswith("/api/")
         )
 
-    @app.get("/api/health")
-    def health() -> dict[str, Any]:
-        runtime = store.runtime_projection()
+    def compact_health_projection(runtime: dict[str, Any]) -> dict[str, Any]:
         recorder_operational_state = project_recorder_operational_state(
             runtime=runtime,
             prospective_start_utc=config.runtime.prospective_start_utc,
             stale_after_seconds=config.runtime.recorder_lease_stale_seconds,
         )
-        bundle = _active_bundle_projection(config)
-        parity = _parity_projection(config)
-        ibkr_api = official_ibkr_api_projection()
         parallel_credential_configured = bool(
             os.environ.get(config.parallel_validation.credential_status_env) == "1"
         )
@@ -475,13 +505,13 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             *(item["blocker_code"] for item in runtime["blockers"]),
             *(
                 blocker
-                for blocker in bundle["blockers"]
+                for blocker in cached_bundle_projection["blockers"]
                 if not (
                     frozen_m1c_configured and blocker == "blocked_feature_source_semantics_mismatch"
                 )
             ),
-            None if frozen_m1c_configured else parity["blocker"],
-            ibkr_api["blocker"] if config.runtime.source == "ibkr" else None,
+            None if frozen_m1c_configured else cached_parity_projection["blocker"],
+            (cached_ibkr_api_projection["blocker"] if config.runtime.source == "ibkr" else None),
             parallel_blocker,
         ]
         blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
@@ -497,6 +527,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         )
         return {
             "status": health_status,
+            "blockers": blockers,
+            "recorder_operational_state": recorder_operational_state,
+            "recorder_state": recorder_state,
+            "parallel_credential_configured": parallel_credential_configured,
+            "parallel_blocker": parallel_blocker,
+        }
+
+    @app.get("/api/health")
+    def health() -> dict[str, Any]:
+        runtime = store.runtime_projection()
+        compact = compact_health_projection(runtime)
+        return {
+            "status": compact["status"],
             "research_only": True,
             "trading_status": "LIVE TRADING DISABLED",
             "instance_identity": config.runtime.instance_id,
@@ -508,11 +551,11 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "mode": config.runtime.mode,
                 "run_id": config.runtime.run_id,
                 "lease": runtime["recorder_lease"],
-                "operational_status": recorder_state,
-                "operational_state": recorder_operational_state,
+                "operational_status": compact["recorder_state"],
+                "operational_state": compact["recorder_operational_state"],
             },
             "ibkr": runtime["ibkr_connection"],
-            "ibkr_api": ibkr_api,
+            "ibkr_api": cached_ibkr_api_projection,
             "market_data": {
                 "latest": runtime["latest_capture"],
                 "line_budget": config.ibkr.market_data_line_budget,
@@ -520,27 +563,27 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "current_budget": runtime["market_data_budget"],
             },
             "database": store.database_health(),
-            "active_bundle": bundle,
+            "active_bundle": cached_bundle_projection,
             "feature_parity": {
                 "scope": "legacy_m1_diagnostic_not_frozen_m1c_runtime_gate",
-                "scoring_allowed": parity["scoring_allowed"],
-                "blocker": parity["blocker"],
-                "counts": parity["counts"],
+                "scoring_allowed": cached_parity_projection["scoring_allowed"],
+                "blocker": cached_parity_projection["blocker"],
+                "counts": cached_parity_projection["counts"],
             },
             "parallel_validation": {
                 "enabled": config.parallel_validation.enabled,
                 "provider": config.parallel_validation.provider,
-                "credential_configured": parallel_credential_configured,
+                "credential_configured": compact["parallel_credential_configured"],
                 "capture_delay_seconds": (config.parallel_validation.capture_delay_seconds),
                 "latest_capture": runtime["parallel_source_capture"],
                 "scoring_allowed": False,
-                "blocker": parallel_blocker,
+                "blocker": compact["parallel_blocker"],
             },
             "previous_session_context": runtime["previous_session_context"],
             "last_completed_bar": runtime["last_completed_bar"],
             "latest_score": runtime["latest_score"],
             "latest_signal_episode": runtime["latest_signal_episode"],
-            "blockers": blockers,
+            "blockers": compact["blockers"],
             "no_order_path_verified": no_order_path_verified(),
             "claims_boundary": claims_boundary(),
         }
@@ -617,9 +660,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "claims_boundary": claims_boundary(),
         }
 
-    @app.get("/api/recorder/status")
-    def recorder_status() -> dict[str, Any]:
-        runtime_projection = store.runtime_projection()
+    def recorder_status_projection(runtime_projection: dict[str, Any]) -> dict[str, Any]:
         operational_state = project_recorder_operational_state(
             runtime=runtime_projection,
             prospective_start_utc=config.runtime.prospective_start_utc,
@@ -628,8 +669,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         status = store.recorder_status_v0()
         status["state"] = operational_state["state"]
         status["operational_state"] = operational_state
-        m1c_parity = _json_artifact(config.paths.m1c_live_parity_report)
-        direction_parity = _json_artifact(config.paths.direction_live_parity_report)
+        m1c_parity = cached_m1c_live_parity_report
+        direction_parity = cached_direction_live_parity_report
         completed_bar = status["latest_completed_bar"]
         last_completed = None if completed_bar is None else completed_bar["bar_end_utc"]
         next_expected = (
@@ -703,29 +744,26 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         )
         return status
 
+    @app.get("/api/recorder/status")
+    def recorder_status() -> dict[str, Any]:
+        return recorder_status_projection(store.runtime_projection())
+
     @app.get("/api/dashboard/summary")
     def dashboard_summary() -> dict[str, Any]:
-        recorder_projection = recorder_status()
-        operational = recorder_projection["operational_state"]
-        blockers = list(operational["runtime_blockers"])
-        recorder_state = str(operational["state"])
+        runtime_projection = store.runtime_projection()
+        compact_health = compact_health_projection(runtime_projection)
+        recorder_projection = recorder_status_projection(runtime_projection)
+        blockers = list(compact_health["blockers"])
+        recorder_state = str(compact_health["recorder_state"])
         health_projection = {
-            "status": (
-                "blocked"
-                if recorder_state == "blocked"
-                else "healthy"
-                if recorder_state == "recording"
-                else "waiting"
-                if recorder_state == "waiting_for_prospective_start"
-                else "degraded"
-            ),
+            "status": compact_health["status"],
             "research_only": True,
             "trading_status": "LIVE TRADING DISABLED",
             "recorder": {
                 "mode": config.runtime.mode,
                 "run_id": config.runtime.run_id,
                 "operational_status": recorder_state,
-                "operational_state": operational,
+                "operational_state": compact_health["recorder_operational_state"],
             },
             "blockers": blockers,
             "no_order_path_verified": no_order_path_verified(),
@@ -808,8 +846,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             or not archive_name.endswith(".zip")
         ):
             raise HTTPException(status_code=404, detail="not_found")
-        archive = root / session_date / archive_name
-        if not archive.is_file():
+        archive = _safe_contained_file(root, root / session_date / archive_name)
+        if archive is None:
             raise HTTPException(status_code=404, detail="not_found")
         return FileResponse(
             archive,

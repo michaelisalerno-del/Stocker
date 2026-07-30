@@ -830,6 +830,9 @@ use one otherwise-unused prefix greater than the current maximum; the
 repository and CI duplicate-prefix checks must pass before deployment. Never
 test an upgrade against the active production database: use a checked copy or
 temporary fixture.
+The repository upgrade-equivalence test hash-pins the deployed migration
+contents through `0010`; a hash mismatch means a historical migration was
+edited and must be investigated rather than accepted by updating the fixture.
 
 ## 8. Start deterministic replay mode
 
@@ -899,6 +902,22 @@ compact summary every 15 seconds, at most two visible-screen slow requests
 every 90 seconds, and at most two visible-screen heavy requests every five
 minutes. Hidden documents pause. Audit, report, transfer, outcome, and Parquet
 episode-detail endpoints must not appear in the 15-second loop.
+The compact summary and `/api/health` share one health/blocker projection; if
+their status or blocker lists differ, treat the web build as invalid.
+
+Quote/depth reads reject an overlapping Parquet row group before scanning when
+its physical row count exceeds `parquet_projection_maximum_input_rows`.
+Audit pages are cursor-bounded SQLite projections of immutable identities and
+subscription-transition events. Daily-report downloads reject path traversal,
+symlinked date directories, metadata, and archives.
+
+In-process replay has two independent hard limits:
+`replay_maximum_records` (250,000 by default) and
+`replay_maximum_materialized_bytes` (67,108,864 bytes by default). The latter
+preflights uncompressed Parquet row-group bytes before decode and bounds the
+retained canonical record bytes. A byte-limit failure is an operational
+blocker; do not raise the limit without a measured synthetic replay on the
+target host.
 
 ## 10. Start record-only IBKR mode
 

@@ -48,8 +48,10 @@ own exact-session pointer and is reverified when loaded.
 
 The browser never receives an IBKR client, socket configuration, signing
 secret, database path, model file, or mutating control. `stocker-web` opens
-SQLite in URI `mode=ro` with `PRAGMA query_only=ON`. Its OpenAPI surface contains
-GET routes only.
+SQLite in URI `mode=ro` with `PRAGMA query_only=ON`. Its evidence surface is
+read-only. The only POST routes control broker-isolated replay of already
+persisted evidence; they cannot reach a recorder, IBKR adapter, order API, or
+broker state.
 
 ## Process responsibilities
 
@@ -138,33 +140,144 @@ it never downloads or installs broker code.
 - reads only persisted state;
 - serves the Live Monitor, Signal Detail, Shadow Blotter, and Safety + Audit
   screens;
-- exposes only:
-  - `GET /api/health`
-  - `GET /api/runtime`
-  - `GET /api/universe`
-  - `GET /api/signals`
-  - `GET /api/signals/{signal_id}`
-  - `GET /api/shadow`
-  - `GET /api/shadow/{structure_id}`
-  - `GET /api/audit`
-  - `GET /api/config/public`
-  - `GET /api/recorder/status`
-  - `GET /api/recorder/capabilities`
-  - `GET /api/recorder/session-reports`
-  - `GET /api/market-data-budget`
-  - `GET /api/source-transfer`
-  - `GET /api/reports/daily`
-  - `GET /api/reports/daily/{session_date}/{archive_name}`
-  - `GET /api/universe/live`
-  - `GET /api/episodes`
-  - `GET /api/episodes/{episode_id}`
-  - `GET /api/episodes/{episode_id}/microstructure`
-  - `GET /api/episodes/{episode_id}/options`
-  - `GET /api/shadow-outcomes`
+- exposes read-only status, current-universe, episode, quiet-state, bounded
+  audit, and report GET routes, including the compact
+  `GET /api/dashboard/summary`;
+- exposes only two mutations:
+  `POST /api/replay/start` and `POST /api/replay/stop`; these operate on a
+  read-only replay worker and are mechanically excluded from broker access;
 - applies host validation, rate limiting, no-store and browser security
   headers, optional environment-backed authentication, and production-safe
   error responses; and
 - never imports an execution broker or runs an IBKR callback loop.
+
+## Web operational reliability contract
+
+### Authoritative recorder state
+
+`/api/health`, `/api/recorder/status`, and `/api/dashboard/summary` use the
+same evidence-derived recorder-state projection. Historical run, episode, or
+bar rows never imply that a recorder process is alive.
+
+| State | Meaning |
+| --- | --- |
+| `inactive` | No run/lease exists, or the latest runtime session is explicitly stopped, closed, or complete. |
+| `waiting_for_prospective_start` | The lease heartbeat is valid and fresh, but the configured prospective start is still in the future. |
+| `recording` | The run and lease agree, the timezone-aware heartbeat is within the configured stale interval, the prospective start has passed, and no runtime blocker is active. This is the only healthy/green state. |
+| `stale` | A valid lease exists, but its heartbeat exceeds `recorder_lease_stale_seconds`. |
+| `blocked` | A current runtime blocker is active. |
+| `unknown` | Lease evidence is malformed, timezone-naive, mismatched to the run, or otherwise not safely interpretable. |
+
+An absent, malformed, or stale lease cannot produce `recording`. The
+projection also carries the evaluation time, stale threshold, heartbeat age,
+latest completed-bar/capture timestamps, and blocker codes.
+
+### Fresh-episode meaning
+
+`fresh_episode` is true only when the latest valid episode for a symbol:
+
+1. belongs to the configured current run, current runtime session, and symbol;
+2. points to that symbol's latest completed checkpoint in that session;
+3. matches the checkpoint number and triggering bar timestamp;
+4. has `scientific_recording_valid = 1`; and
+5. has lifecycle status `active`, `scheduled`, `streaming`, or `complete`.
+
+An older-session, older-checkpoint, rejected, or expired episode is historical,
+not fresh. The projection separately exposes `has_historical_episode`,
+`latest_episode_id`, `latest_episode_session_date`, and
+`latest_episode_status`.
+
+### Polling tiers and request budget
+
+The browser has one request coordinator and one in-flight refresh generation.
+Manual refresh or screen activation aborts and supersedes the previous
+generation. Duplicate automatic refreshes share the existing promise.
+Automatic polling pauses while the document is hidden.
+
+| Tier | Interval | Requests |
+| --- | ---: | --- |
+| Fast | 15 seconds | Only `GET /api/dashboard/summary`; no Parquet or historical tables. |
+| Slow | 90 seconds | Only the visible screen's episode index, quiet-state summary, budget/capability details, or session-quality summary. |
+| Manual/very slow | 5 minutes, screen activation, or explicit refresh | Only the visible screen's audit, reports, transfer, concentration, shadow-outcome, or completed quiet-state table. |
+
+The busiest steady-state screen is
+`4 + (2 × 60/90) + (2 × 60/300) = 5.733` requests/minute. Two tabs produce
+at most `11.467` steady-state requests/minute, below both the 40-request
+acceptance ceiling and the example 240-request rate limit. Initial navigation
+can create a small bounded screen-activation burst.
+
+### Bounded evidence reads
+
+- Quote charts project only event identity, timestamps, bid/ask, and sizes.
+  Manifest predicates, Parquet timestamp filters, and row-group metadata limit
+  reads to 15 minutes before the trigger through 30 minutes after entry.
+  Input is capped by `parquet_projection_maximum_input_rows`; output is
+  deterministically sampled to `quote_series_maximum_points`, preserving the
+  first and last valid observations.
+- Depth reads use the same episode window and a minimal column projection.
+- The fast summary reads a constant-size SQLite latest-event projection.
+- Audit pages use the indexed `web_audit_projection_v0` identity table,
+  opaque cursors, and a configured maximum page size. They never scan raw
+  Parquet.
+- Raw market-event detail is an explicit hash-addressed request. It reads only
+  bounded trailing row groups and safe projected columns; paths are never
+  returned.
+
+### Replay lifecycle and memory bound
+
+Replay remains in-process and read-only. Each invocation receives a UUID
+execution ID and monotonic generation. States are `stopped`, `running`,
+`stopping`, `completed`, and `failed`.
+
+`stop()` first sets cancellation and publishes `stopping`, then joins for at
+most `replay_stop_timeout_seconds` (2 seconds by default). A still-live worker
+produces `blocked_replay_stop_timeout_worker_alive`; no restart is admitted
+until that thread has actually exited. Completion from an older generation
+cannot overwrite a newer generation. Application shutdown follows the same
+cancel-and-join path.
+
+Canonical replay ordering still requires materialising globally sortable
+records. Replay therefore preflights manifest and SQLite row counts, streams
+Parquet in batches rather than loading full Arrow tables, hashes canonical JSON
+incrementally, and fails before input when `replay_maximum_records` is
+exceeded. The default hard bound is 250,000 records. Safety fields remain
+`ibkr_connections_attempted = 0` and `broker_state_mutated = false`.
+
+### Operational logging and request IDs
+
+Every response carries `X-Request-ID`. Request-completion JSON logs contain
+the request ID, method, route template, status, elapsed milliseconds, run ID,
+aggregate SQLite operation count/duration, aggregate Parquet file/row-group
+and input/output row counts, and the current replay execution ID. Unexpected
+exceptions retain the safe `{"detail":"internal_error"}` response and log the
+exception class with a server-side stack trace.
+
+Logs deliberately exclude request headers, cookies, authentication material,
+credentials, configuration bodies, SQL text, filesystem evidence paths, and
+raw market payloads.
+
+### Measured synthetic acceptance evidence
+
+On 2026-07-30, CPython 3.12/TestClient against temporary synthetic SQLite data
+measured a median compact-summary latency of 7.530 ms over 12 warmed requests.
+After adding 5,000 synthetic historical raw-manifest identities, the same
+measurement was 7.221 ms. The indexed latest-event lookup remained below 50
+SQLite VM progress steps. This is a regression measurement, not a production
+capacity claim.
+
+The quote-window test used 1,000 synthetic rows in 10 row groups. It examined
+metadata for 10 groups, read the one overlapping group (100 input rows), and
+returned 10 deterministic points with both endpoints preserved. The polling
+contract test measures 5.733 steady-state requests/minute. These results are
+reproducible with:
+
+```bash
+uv run pytest tests/test_prospective_web.py -q -s \
+  -k dashboard_summary_latency_is_stable
+uv run pytest tests/test_fresh_episode_projection.py \
+  tests/test_parquet_read_projection.py -q
+uv run pytest tests/test_web_polling_contract.py -q
+```
 
 ### IB Gateway or TWS
 
@@ -374,10 +487,23 @@ quotes. Migration application and its registry insert are one SQLite
 transaction.
 Migration `0005` records current active/pending/cancelling lines, request rate,
 waiting/rejected signals, and reserved capacity for the separate web process.
-Migration `0011` adds nullable M1C Tail Phase V1 checkpoint and episode fields
-plus the explicit previous-close implied 15-minute movement on Group O
-context. Existing rows remain readable; new recorder rows preserve the exact
-phase-at-trigger values without changing the episode definition.
+The already-deployed migration ledger uses complete filenames as identities.
+It contains two historical `0011_*` files and two historical `0012_*` files.
+Those four filenames and their explicit historical within-prefix order remain
+recognized and must not be renamed. Every new migration uses one unique,
+monotonically increasing four-digit prefix. `migration_order.py` validates the
+plan before application, and both CI and `scripts/check.sh` reject any new
+duplicate prefix.
+
+`0011_m1c_tail_phase_v1.sql` adds nullable M1C Tail Phase V1 checkpoint and
+episode fields plus the explicit previous-close implied 15-minute movement on
+Group O context. Existing rows remain readable; new recorder rows preserve the
+exact phase-at-trigger values without changing the episode definition.
+Migration `0016` adds the bounded audit identity projection and supporting
+indexes. Migration `0017` adds the constant-size latest raw-event/gap summary
+and exact latest-state indexes. Fresh-from-zero and upgrade-from-`0010` schema
+tests compare tables, columns, indexes, foreign keys, normalized table
+constraints, foreign-key integrity, and the complete filename ledger.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

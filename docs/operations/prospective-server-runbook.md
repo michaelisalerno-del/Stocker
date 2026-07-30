@@ -809,7 +809,12 @@ the command line or exposing them to the web process.
 
 ## 7. Migrate the database
 
+Stop the recorder, web process, and any replay worker before applying an
+upgrade migration. Validate the packaged order first:
+
 ```bash
+cd /opt/stocker/current
+sudo -u stocker .venv/bin/python scripts/check_prospective_migrations.py
 sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective db migrate \
   --database /var/lib/stocker/prospective/prospective.sqlite3
 sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
@@ -817,6 +822,14 @@ sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
 ```
 
 Expected results include `wal` and `ok`.
+
+The migration ledger stores full filenames. The deployed `0011_*` and
+`0012_*` duplicate-prefix pairs are frozen compatibility exceptions with an
+explicit order. Do not rename or consolidate them. Every new migration must
+use one otherwise-unused prefix greater than the current maximum; the
+repository and CI duplicate-prefix checks must pass before deployment. Never
+test an upgrade against the active production database: use a checked copy or
+temporary fixture.
 
 ## 8. Start deterministic replay mode
 
@@ -871,6 +884,21 @@ database path. The `ibkr_api` section independently reports whether the
 first-party package is installed, source-tree verified, and current. That does
 not imply that IB Gateway is installed, authenticated, connected, or permitted
 for live market data.
+
+Recorder liveness is lease-based. Only `recording` is healthy. `inactive`
+means no active lease or an explicitly stopped/completed runtime;
+`waiting_for_prospective_start` means a fresh lease exists before the
+configured start; `stale` means the heartbeat exceeded the configured limit;
+`blocked` means a current runtime blocker exists; and `unknown` means lease
+evidence is malformed or mismatched. Historical database rows never establish
+liveness. `/api/health`, `/api/recorder/status`, and
+`/api/dashboard/summary` must report the same projected state.
+
+Normal browser polling is 5.733 requests/minute on the busiest screen: one
+compact summary every 15 seconds, at most two visible-screen slow requests
+every 90 seconds, and at most two visible-screen heavy requests every five
+minutes. Hidden documents pause. Audit, report, transfer, outcome, and Parquet
+episode-detail endpoints must not appear in the 15-second loop.
 
 ## 10. Start record-only IBKR mode
 
@@ -987,6 +1015,21 @@ sudo journalctl -u stocker-recorder.service -f
 
 Do not paste the environment file into logs or support tickets.
 
+Browser/API responses carry `X-Request-ID`. When the browser reports an
+internal error, copy that ID and correlate it with the structured web log:
+
+```bash
+REQUEST_ID=REPLACE_WITH_X_REQUEST_ID
+sudo journalctl -u stocker-web.service --since '-30 minutes' --no-pager |
+  grep -F "\"request_id\":\"$REQUEST_ID\""
+```
+
+The matching JSON record contains route, status, elapsed time, run ID,
+aggregate SQLite timing, bounded Parquet counters, and any replay execution
+ID. Unexpected failures also retain the server-side stack trace. It must not
+contain cookies, bearer tokens, credentials, SQL text, evidence paths, full
+configuration, or raw market payloads.
+
 ## 12. Graceful shutdown
 
 ```bash
@@ -997,6 +1040,10 @@ sudo systemctl status stocker-recorder.service stocker-web.service
 
 The recorder handles `SIGTERM`, stops admissions, cancels pending temporary
 subscriptions, disconnects, and leaves missed captures missed.
+The web process sets replay cancellation, reports `stopping`, and joins the
+replay worker for the configured bounded timeout. A timed-out live worker is a
+failure and remains a restart blocker; do not start a second web process to
+work around it.
 
 ## 13. Roll back the application release
 
@@ -1098,6 +1145,8 @@ explicitly listed. When application authentication is enabled, the proxy may
 send the token as a bearer credential or a `Secure`, `HttpOnly`,
 `SameSite=Strict`, `__Host-stocker_session` cookie.
 
-There are no state-changing web routes in this slice, so there is no CSRF
-mutation surface. Any future recorder start/stop control must add authenticated
-operator authorization and CSRF protection and still cannot enable orders.
+The only state-changing web routes start and stop the local read-only evidence
+replay worker. They do not receive a recorder or broker object and cannot
+enable orders. Any future recorder start/stop control would require separate
+authenticated operator authorization and CSRF protection and still could not
+enable orders.

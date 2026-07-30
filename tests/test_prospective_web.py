@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
+import logging
 import os
 import sqlite3
+import statistics
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -563,6 +567,154 @@ def test_application_shutdown_cancels_and_joins_active_replay(
         assert started.wait(timeout=1.0)
 
     assert cancelled.wait(timeout=1.0)
+
+
+def test_production_error_is_logged_with_safe_request_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    seeded = seeded_app(tmp_path)
+
+    def fail_projection(_self: ProspectiveReadStore) -> list[dict[str, object]]:
+        raise RuntimeError("synthetic operational failure")
+
+    monkeypatch.setattr(ProspectiveReadStore, "universe_live_v0", fail_projection)
+    caplog.set_level(logging.INFO, logger="stocker_prospective.web")
+    client = TestClient(seeded.app, raise_server_exceptions=False)
+
+    response = client.get("/api/dashboard/summary")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "internal_error"}
+    request_id = response.headers["X-Request-ID"]
+    assert request_id
+    exception_records = [
+        record
+        for record in caplog.records
+        if json.loads(record.getMessage()).get("event") == "unexpected_exception"
+    ]
+    assert len(exception_records) == 1
+    record = exception_records[0]
+    payload = json.loads(record.getMessage())
+    assert payload["request_id"] == request_id
+    assert payload["method"] == "GET"
+    assert payload["route"] == "/api/dashboard/summary"
+    assert payload["response_status"] == 500
+    assert payload["run_id"] == "replay-run-001"
+    assert payload["exception_class"] == "RuntimeError"
+    assert "synthetic operational failure" not in record.getMessage()
+    assert record.exc_info is not None
+
+
+def test_request_log_includes_aggregate_sqlite_and_replay_fields(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = seeded_app(tmp_path)
+    caplog.set_level(logging.INFO, logger="stocker_prospective.web")
+
+    response = client.get("/api/dashboard/summary")
+
+    assert response.status_code == 200
+    request_id = response.headers["X-Request-ID"]
+    request_records = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if json.loads(record.getMessage()).get("event") == "request_completed"
+    ]
+    payload = next(
+        item
+        for item in request_records
+        if item["request_id"] == request_id
+        and item["route"] == "/api/dashboard/summary"
+    )
+    assert payload["response_status"] == 200
+    assert payload["elapsed_ms"] >= 0.0
+    assert payload["sqlite_operations"] > 0
+    assert payload["sqlite_duration_ms"] >= 0.0
+    assert payload["parquet_files_examined"] == 0
+    assert payload["parquet_row_groups_examined"] == 0
+    assert payload["parquet_input_rows"] == 0
+    assert payload["parquet_output_rows"] == 0
+    assert payload["replay_execution_id"] is None
+
+
+def test_replay_control_request_log_uses_replay_execution_id(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = seeded_app(tmp_path)
+    caplog.set_level(logging.INFO, logger="stocker_prospective.web")
+
+    response = client.post("/api/replay/start", json={"mode": "accelerated"})
+
+    assert response.status_code == 200
+    execution_id = response.json()["execution_id"]
+    request_id = response.headers["X-Request-ID"]
+    request_records = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if json.loads(record.getMessage()).get("event") == "request_completed"
+    ]
+    payload = next(item for item in request_records if item["request_id"] == request_id)
+    assert payload["route"] == "/api/replay/start"
+    assert payload["replay_execution_id"] == execution_id
+    client.post("/api/replay/stop")
+
+
+def test_dashboard_summary_latency_is_stable_with_enlarged_manifest_history(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    cfg = config(tmp_path)
+
+    def median_summary_latency_ms() -> float:
+        assert client.get("/api/dashboard/summary").status_code == 200
+        timings: list[float] = []
+        for _ in range(12):
+            started = time.perf_counter()
+            response = client.get("/api/dashboard/summary")
+            timings.append((time.perf_counter() - started) * 1_000.0)
+            assert response.status_code == 200
+        return statistics.median(timings)
+
+    baseline_ms = median_summary_latency_ms()
+    base = datetime(2026, 7, 30, 13, 0, tzinfo=UTC)
+    with sqlite3.connect(cfg.paths.database) as connection:
+        connection.executemany(
+            """
+            INSERT INTO raw_partition_manifest_v0(
+                run_id, data_source, session_date, symbol, event_type,
+                file_path, row_count, minimum_timestamp_utc,
+                maximum_timestamp_utc, schema_version, content_hash,
+                complete, gap_count, recorder_version, contract_version,
+                recorded_at_utc, claims_json
+            ) VALUES (
+                'replay-run-001', 'synthetic', '2026-07-30', 'AAL',
+                'underlying_level1_quote_event', ?, 1, ?, ?, 'test', ?,
+                1, 0, 'test', 'test', ?, '{}'
+            )
+            """,
+            [
+                (
+                    f"/synthetic/not-opened/{index}.parquet",
+                    (base + timedelta(seconds=index)).isoformat(),
+                    (base + timedelta(seconds=index)).isoformat(),
+                    f"summary-history-{index:05d}",
+                    (base + timedelta(seconds=index)).isoformat(),
+                )
+                for index in range(5_000)
+            ],
+        )
+    enlarged_ms = median_summary_latency_ms()
+
+    print(
+        "dashboard_summary_latency "
+        f"baseline_median_ms={baseline_ms:.3f} "
+        f"history_rows=5000 enlarged_median_ms={enlarged_ms:.3f}"
+    )
+    assert enlarged_ms <= baseline_ms * 2.5 + 5.0
 
 
 def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(

@@ -10,6 +10,10 @@ import pytest
 
 import stocker_prospective.read_store as read_store_module
 from stocker_prospective.database import ProspectiveRepository
+from stocker_prospective.operational_logging import (
+    begin_request_metrics,
+    reset_request_metrics,
+)
 from stocker_prospective.read_store import ProspectiveReadStore
 
 RUN_ID = "synthetic-freshness-run"
@@ -361,6 +365,93 @@ def test_fresh_episode_requires_current_session_latest_completed_checkpoint_and_
     )
 
 
+def test_recorder_latest_event_summary_work_is_independent_of_manifest_history(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "synthetic.sqlite3"
+    seed_freshness_database(database)
+    rows = [
+        (
+            RUN_ID,
+            CURRENT_SESSION,
+            "LATEST",
+            f"/synthetic/not-opened/{index}.parquet",
+            f"manifest-{index:05d}",
+            (datetime(2026, 7, 30, 14, 0, tzinfo=UTC) + timedelta(seconds=index)).isoformat(),
+            index % 3,
+        )
+        for index in range(5_000)
+    ]
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            """
+            INSERT INTO raw_partition_manifest_v0(
+                run_id, data_source, session_date, symbol, event_type,
+                file_path, row_count, minimum_timestamp_utc,
+                maximum_timestamp_utc, schema_version, content_hash,
+                complete, gap_count, recorder_version, contract_version,
+                recorded_at_utc, claims_json
+            ) VALUES (?, 'synthetic', ?, ?,
+                      'underlying_level1_quote_event', ?, 1, ?, ?,
+                      'test', ?, 1, ?, 'test', 'test', ?, '{}')
+            """,
+            [
+                (
+                    run_id,
+                    session,
+                    symbol,
+                    file_path,
+                    observed_at,
+                    observed_at,
+                    content_hash,
+                    gap_count,
+                    observed_at,
+                )
+                for (
+                    run_id,
+                    session,
+                    symbol,
+                    file_path,
+                    content_hash,
+                    observed_at,
+                    gap_count,
+                ) in rows
+            ],
+        )
+
+    projected = ProspectiveReadStore(
+        database,
+        run_id=RUN_ID,
+    ).recorder_status_v0()
+
+    assert projected["last_event_timestamp"] == rows[-1][5]
+    assert projected["data_gaps"] == sum(row[6] for row in rows)
+    progress_steps = 0
+
+    def count_progress() -> int:
+        nonlocal progress_steps
+        progress_steps += 1
+        return 0
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "SELECT 1 FROM web_run_event_summary_v0 WHERE run_id = ?",
+            (RUN_ID,),
+        ).fetchone()
+        connection.set_progress_handler(count_progress, 1)
+        summary = connection.execute(
+            """
+            SELECT last_event_timestamp, data_gaps
+            FROM web_run_event_summary_v0
+            WHERE run_id = ?
+            """,
+            (RUN_ID,),
+        ).fetchone()
+        connection.set_progress_handler(None, 0)
+    assert summary == (rows[-1][5], sum(row[6] for row in rows))
+    assert progress_steps < 50
+
+
 def test_quote_chart_projection_is_windowed_column_bounded_and_preserves_endpoints(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -439,14 +530,18 @@ def test_quote_chart_projection_is_windowed_column_bounded_and_preserves_endpoin
         return projection
 
     monkeypatch.setattr(read_store_module, "read_parquet_window", tracking_read)
-    projected = ProspectiveReadStore(
-        database,
-        run_id=RUN_ID,
-    ).episode_quote_series_v0(
-        f"LATEST-{CURRENT_SESSION}-1",
-        maximum_points=10,
-        maximum_input_rows=500,
-    )
+    request_metrics, metrics_token = begin_request_metrics()
+    try:
+        projected = ProspectiveReadStore(
+            database,
+            run_id=RUN_ID,
+        ).episode_quote_series_v0(
+            f"LATEST-{CURRENT_SESSION}-1",
+            maximum_points=10,
+            maximum_input_rows=500,
+        )
+    finally:
+        reset_request_metrics(metrics_token)
 
     assert len(projected) == 10
     assert projected[0]["event_id"] == "window-000"
@@ -455,3 +550,8 @@ def test_quote_chart_projection_is_windowed_column_bounded_and_preserves_endpoin
     assert observed_metrics[0].row_groups_examined == 10
     assert observed_metrics[0].row_groups_read == 1
     assert "ignored_payload" not in observed_metrics[0].columns_read
+    assert request_metrics.parquet_files_examined == 1
+    assert request_metrics.parquet_row_groups_examined == 10
+    assert request_metrics.parquet_row_groups_read == 1
+    assert request_metrics.parquet_input_rows == 100
+    assert request_metrics.parquet_output_rows == 100

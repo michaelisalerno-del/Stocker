@@ -7,12 +7,18 @@ import binascii
 import hashlib
 import json
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from stocker_prospective.operational_logging import (
+    record_parquet_read,
+    record_sqlite_operation,
+)
 from stocker_prospective.parquet_read_projection import (
     ParquetProjectionLimitExceeded,
+    ParquetReadMetrics,
     read_parquet_tail,
     read_parquet_window,
 )
@@ -26,6 +32,32 @@ from stocker_prospective.quiet_state import (
 )
 
 
+class _TimedReadConnection(sqlite3.Connection):
+    def execute(
+        self,
+        sql: str,
+        parameters: Any = (),
+        /,
+    ) -> sqlite3.Cursor:
+        started = time.perf_counter()
+        try:
+            return super().execute(sql, parameters)
+        finally:
+            record_sqlite_operation(
+                duration_ms=(time.perf_counter() - started) * 1_000.0
+            )
+
+
+def _record_parquet_metrics(metrics: ParquetReadMetrics) -> None:
+    record_parquet_read(
+        files_examined=metrics.files_examined,
+        row_groups_examined=metrics.row_groups_examined,
+        row_groups_read=metrics.row_groups_read,
+        input_rows=metrics.input_rows,
+        output_rows=metrics.output_rows,
+    )
+
+
 class ProspectiveReadStore:
     """A query-only store that opens SQLite with ``mode=ro``."""
 
@@ -36,7 +68,12 @@ class ProspectiveReadStore:
 
     def _connect(self) -> sqlite3.Connection:
         uri = f"file:{self.database_path.resolve()}?mode=ro"
-        connection = sqlite3.connect(uri, uri=True, timeout=2.0)
+        connection = sqlite3.connect(
+            uri,
+            uri=True,
+            timeout=2.0,
+            factory=_TimedReadConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only = ON")
         connection.execute("PRAGMA busy_timeout = 2000")
@@ -503,9 +540,9 @@ class ProspectiveReadStore:
             ).fetchone()
             partition = connection.execute(
                 """
-                SELECT MAX(maximum_timestamp_utc) AS last_event_timestamp,
-                       COALESCE(SUM(gap_count), 0) AS data_gaps
-                FROM raw_partition_manifest_v0 WHERE run_id = ?
+                SELECT last_event_timestamp, data_gaps
+                FROM web_run_event_summary_v0
+                WHERE run_id = ?
                 """,
                 (run_id,),
             ).fetchone()
@@ -567,47 +604,6 @@ class ProspectiveReadStore:
                             WHERE run_id = ?
                         )
                     ) AS session_date
-                ),
-                ranked_checkpoint AS (
-                    SELECT c.*,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY c.symbol
-                               ORDER BY c.checkpoint DESC, c.bar_end_utc DESC, c.id DESC
-                           ) AS freshness_rank
-                    FROM m1c_checkpoint_v0 c
-                    JOIN m1c_checkpoint_completion_v0 completed
-                      ON completed.checkpoint_id = c.id
-                    JOIN current_session current
-                      ON current.session_date = c.session_date
-                    WHERE c.run_id = ?
-                ),
-                latest_checkpoint AS (
-                    SELECT * FROM ranked_checkpoint WHERE freshness_rank = 1
-                ),
-                ranked_episode AS (
-                    SELECT e.*,
-                           COALESCE(schedule.status, e.completion_status) AS projected_status,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY e.symbol
-                               ORDER BY e.trigger_bar_end_utc DESC, e.episode_id DESC
-                           ) AS freshness_rank
-                    FROM m1c_episode_v0 e
-                    LEFT JOIN option_episode_schedule_v0 schedule
-                      ON schedule.episode_id = e.episode_id
-                    WHERE e.run_id = ?
-                ),
-                latest_episode AS (
-                    SELECT * FROM ranked_episode WHERE freshness_rank = 1
-                ),
-                latest_legacy_quote AS (
-                    SELECT q.*
-                    FROM underlying_quote q
-                    JOIN (
-                        SELECT symbol, MAX(target_timestamp_utc) AS maximum_quote
-                        FROM underlying_quote WHERE run_id = ? GROUP BY symbol
-                    ) x ON x.symbol = q.symbol
-                       AND x.maximum_quote = q.target_timestamp_utc
-                    WHERE q.run_id = ?
                 )
                 SELECT u.symbol, u.operational_status,
                        current.session_date AS current_session_date,
@@ -619,9 +615,15 @@ class ProspectiveReadStore:
                        c.bar_end_utc AS latest_completed_checkpoint_utc,
                        e.episode_id AS latest_episode_id,
                        e.session_date AS latest_episode_session_date,
-                       e.projected_status AS latest_episode_status,
+                       COALESCE(
+                         schedule.status,
+                         e.completion_status
+                       ) AS latest_episode_status,
                        e.episode_id,
-                       e.projected_status AS episode_status,
+                       COALESCE(
+                         schedule.status,
+                         e.completion_status
+                       ) AS episode_status,
                        CASE WHEN e.episode_id IS NULL THEN 0 ELSE 1 END
                          AS has_historical_episode,
                        CASE
@@ -633,7 +635,10 @@ class ProspectiveReadStore:
                           AND e.trigger_checkpoint = c.checkpoint
                           AND e.trigger_bar_end_utc = c.bar_end_utc
                           AND e.scientific_recording_valid = 1
-                          AND e.projected_status IN (
+                          AND COALESCE(
+                              schedule.status,
+                              e.completion_status
+                          ) IN (
                               'active', 'scheduled', 'streaming', 'complete'
                           )
                          THEN 1 ELSE 0
@@ -664,17 +669,47 @@ class ProspectiveReadStore:
                        ) AS r1_classification
                 FROM universe_membership u
                 LEFT JOIN current_session current ON 1 = 1
-                LEFT JOIN latest_checkpoint c ON c.symbol = u.symbol
-                LEFT JOIN latest_episode e ON e.symbol = u.symbol
+                LEFT JOIN m1c_checkpoint_v0 c ON c.id = (
+                    SELECT candidate.id
+                    FROM m1c_checkpoint_v0 candidate
+                    JOIN m1c_checkpoint_completion_v0 completed
+                      ON completed.checkpoint_id = candidate.id
+                    WHERE candidate.run_id = u.run_id
+                      AND candidate.symbol = u.symbol
+                      AND candidate.session_date = current.session_date
+                    ORDER BY candidate.checkpoint DESC,
+                             candidate.bar_end_utc DESC,
+                             candidate.id DESC
+                    LIMIT 1
+                )
+                LEFT JOIN m1c_episode_v0 e ON e.episode_id = (
+                    SELECT candidate.episode_id
+                    FROM m1c_episode_v0 candidate
+                    WHERE candidate.run_id = u.run_id
+                      AND candidate.symbol = u.symbol
+                    ORDER BY candidate.trigger_bar_end_utc DESC,
+                             candidate.episode_id DESC
+                    LIMIT 1
+                )
+                LEFT JOIN option_episode_schedule_v0 schedule
+                  ON schedule.episode_id = e.episode_id
                 LEFT JOIN completed_bar_state_v0 b
                   ON b.symbol = u.symbol AND b.run_id = u.run_id
-                LEFT JOIN latest_legacy_quote q ON q.symbol = u.symbol
+                LEFT JOIN underlying_quote q ON q.id = (
+                    SELECT candidate.id
+                    FROM underlying_quote candidate
+                    WHERE candidate.run_id = u.run_id
+                      AND candidate.symbol = u.symbol
+                    ORDER BY candidate.target_timestamp_utc DESC,
+                             candidate.id DESC
+                    LIMIT 1
+                )
                 LEFT JOIN underlying_live_state_v0 s
                   ON s.symbol = u.symbol AND s.run_id = u.run_id
                 WHERE u.run_id = ?
                 ORDER BY u.symbol
                 """,
-                (run_id, run_id, run_id, run_id, run_id, run_id, run_id),
+                (run_id, run_id, run_id),
             ).fetchall()
         items: list[dict[str, Any]] = []
         for row in rows:
@@ -847,8 +882,12 @@ class ProspectiveReadStore:
                     end=end,
                     maximum_input_rows=remaining_rows,
                 )
-            except (OSError, ParquetProjectionLimitExceeded):
+            except ParquetProjectionLimitExceeded as exc:
+                _record_parquet_metrics(exc.metrics)
                 return []
+            except OSError:
+                return []
+            _record_parquet_metrics(projection.metrics)
             input_rows += projection.metrics.input_rows
             for row in projection.rows:
                 raw_timestamp = row.get("provider_timestamp_utc") or row.get(
@@ -870,15 +909,23 @@ class ProspectiveReadStore:
                     continue
                 bid_size = row.get("bid_size")
                 ask_size = row.get("ask_size")
+                bid_size_value = None if bid_size is None else float(bid_size)
+                ask_size_value = None if ask_size is None else float(ask_size)
                 total_size = (
                     None
-                    if bid_size is None or ask_size is None
-                    else float(bid_size) + float(ask_size)
+                    if bid_size_value is None or ask_size_value is None
+                    else bid_size_value + ask_size_value
                 )
                 microprice = (
                     None
-                    if total_size is None or total_size <= 0.0
-                    else (ask_value * float(bid_size) + bid_value * float(ask_size)) / total_size
+                    if total_size is None
+                    or total_size <= 0.0
+                    or bid_size_value is None
+                    or ask_size_value is None
+                    else (
+                        ask_value * bid_size_value + bid_value * ask_size_value
+                    )
+                    / total_size
                 )
                 event_id = row.get("event_id")
                 identity = (
@@ -968,8 +1015,12 @@ class ProspectiveReadStore:
                     end=end,
                     maximum_input_rows=remaining_rows,
                 )
-            except (OSError, ParquetProjectionLimitExceeded):
+            except ParquetProjectionLimitExceeded as exc:
+                _record_parquet_metrics(exc.metrics)
                 return None
+            except OSError:
+                return None
+            _record_parquet_metrics(projection.metrics)
             input_rows += projection.metrics.input_rows
             for row in projection.rows:
                 raw_timestamp = row.get("received_timestamp_utc")
@@ -1237,6 +1288,8 @@ class ProspectiveReadStore:
                 maximum_input_rows=maximum_input_rows,
             )
         except (OSError, ParquetProjectionLimitExceeded) as exc:
+            if isinstance(exc, ParquetProjectionLimitExceeded):
+                _record_parquet_metrics(exc.metrics)
             metrics = (
                 exc.metrics.model_dump()
                 if isinstance(exc, ParquetProjectionLimitExceeded)
@@ -1248,6 +1301,7 @@ class ProspectiveReadStore:
                 "blocked_reason": "projection_limit_exceeded",
                 "read_metrics": metrics,
             }
+        _record_parquet_metrics(projection.metrics)
         return {
             "partition": public_partition,
             "items": list(projection.rows),

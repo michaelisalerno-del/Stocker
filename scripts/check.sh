@@ -12,4 +12,5 @@ fi
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy packages apps
+uv run python scripts/check_prospective_migrations.py
 uv run pytest

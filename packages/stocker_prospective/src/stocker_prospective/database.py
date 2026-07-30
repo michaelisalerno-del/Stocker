@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from stocker_prospective.bars import CompletedBar
 from stocker_prospective.bundle import SCIENTIFIC_CLASSIFICATION
 from stocker_prospective.market_data import MarketDataBudgetSnapshot
+from stocker_prospective.migration_order import migration_plan
 
 
 class RecorderLeaseHeld(RuntimeError):
@@ -195,7 +196,8 @@ class ProspectiveRepository:
                 str(row["version"])
                 for row in connection.execute("SELECT version FROM schema_migrations")
             }
-            for path in sorted(migration_root.glob("*.sql")):
+            for migration in migration_plan(migration_root):
+                path = migration.path
                 if path.name in applied:
                     continue
                 version = path.name.replace("'", "''")

@@ -31,5 +31,8 @@ jobs:
       - name: Type check
         run: uv run mypy packages apps
 
+      - name: Validate prospective migration order
+        run: uv run python scripts/check_prospective_migrations.py
+
       - name: Test
         run: uv run pytest

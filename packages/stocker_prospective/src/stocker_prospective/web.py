@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import secrets
 import threading
 import time
+import uuid
 from collections import OrderedDict, defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -32,9 +34,18 @@ from stocker_prospective.dashboard_projection import (
 )
 from stocker_prospective.evidence_replay import replay_persisted_evidence
 from stocker_prospective.ibkr import official_ibkr_api_projection
+from stocker_prospective.operational_logging import (
+    OperationLogFields,
+    RequestOperationMetrics,
+    begin_request_metrics,
+    reset_request_metrics,
+    structured_log,
+)
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay_control import ReplayController, ReplayStartRequest
+
+_LOGGER = logging.getLogger("stocker_prospective.web")
 
 
 def _active_bundle_projection(config: ProspectiveConfig) -> dict[str, Any]:
@@ -283,54 +294,18 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     maximum_rate_limit_identities = 4096
     replay_control_paths = {"/api/replay/start", "/api/replay/stop"}
 
-    @app.middleware("http")
-    async def security_boundary(request: Request, call_next: Any) -> Any:
-        if (
-            request.url.path.startswith("/api/")
-            and request.method not in {"GET", "HEAD", "OPTIONS"}
-            and not (request.method == "POST" and request.url.path in replay_control_paths)
-        ):
-            return JSONResponse(
-                status_code=404,
-                content={"detail": "not_found"},
-            )
-        if authentication_token is not None:
-            authorization = request.headers.get("authorization", "")
-            bearer = (
-                authorization.removeprefix("Bearer ").strip()
-                if authorization.startswith("Bearer ")
-                else ""
-            )
-            cookie = request.cookies.get(config.web.auth_cookie_name, "")
-            supplied = bearer or cookie
-            if not supplied or not secrets.compare_digest(supplied, authentication_token):
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "authentication_required"},
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+    def route_template(request: Request) -> str:
+        route = request.scope.get("route")
+        return str(getattr(route, "path", request.url.path))
 
-        client_ip = "unknown" if request.client is None else request.client.host
-        if (
-            config.web.trust_proxy_headers
-            and client_ip in config.web.trusted_proxy_ips
-            and request.headers.get("x-forwarded-for")
-        ):
-            client_ip = request.headers["x-forwarded-for"].split(",", 1)[0].strip()
-        now = time.monotonic()
-        window = rate_windows.setdefault(client_ip, deque())
-        rate_windows.move_to_end(client_ip)
-        while len(rate_windows) > maximum_rate_limit_identities:
-            rate_windows.popitem(last=False)
-        while window and window[0] <= now - 60:
-            window.popleft()
-        if len(window) >= config.web.requests_per_minute:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "rate_limit_exceeded"},
-            )
-        window.append(now)
-        response = await call_next(request)
+    def operation_log_fields(request: Request) -> OperationLogFields:
+        metrics = getattr(request.state, "operation_metrics", None)
+        if isinstance(metrics, RequestOperationMetrics):
+            return metrics.log_fields()
+        return RequestOperationMetrics().log_fields()
+
+    def apply_response_headers(response: Any, *, request_id: str) -> None:
+        response.headers["X-Request-ID"] = request_id
         response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self'; "
@@ -339,18 +314,129 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        return response
+
+    @app.middleware("http")
+    async def security_boundary(request: Request, call_next: Any) -> Any:
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+        request.state.request_started_monotonic = time.monotonic()
+        metrics, metrics_token = begin_request_metrics()
+        request.state.operation_metrics = metrics
+        try:
+            response: Any | None = None
+            if (
+                request.url.path.startswith("/api/")
+                and request.method not in {"GET", "HEAD", "OPTIONS"}
+                and not (
+                    request.method == "POST"
+                    and request.url.path in replay_control_paths
+                )
+            ):
+                response = JSONResponse(
+                    status_code=404,
+                    content={"detail": "not_found"},
+                )
+            if response is None and authentication_token is not None:
+                authorization = request.headers.get("authorization", "")
+                bearer = (
+                    authorization.removeprefix("Bearer ").strip()
+                    if authorization.startswith("Bearer ")
+                    else ""
+                )
+                cookie = request.cookies.get(config.web.auth_cookie_name, "")
+                supplied = bearer or cookie
+                if not supplied or not secrets.compare_digest(
+                    supplied,
+                    authentication_token,
+                ):
+                    response = JSONResponse(
+                        status_code=401,
+                        content={"detail": "authentication_required"},
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+
+            if response is None:
+                client_ip = "unknown" if request.client is None else request.client.host
+                if (
+                    config.web.trust_proxy_headers
+                    and client_ip in config.web.trusted_proxy_ips
+                    and request.headers.get("x-forwarded-for")
+                ):
+                    client_ip = request.headers["x-forwarded-for"].split(",", 1)[0].strip()
+                now = time.monotonic()
+                window = rate_windows.setdefault(client_ip, deque())
+                rate_windows.move_to_end(client_ip)
+                while len(rate_windows) > maximum_rate_limit_identities:
+                    rate_windows.popitem(last=False)
+                while window and window[0] <= now - 60:
+                    window.popleft()
+                if len(window) >= config.web.requests_per_minute:
+                    response = JSONResponse(
+                        status_code=429,
+                        content={"detail": "rate_limit_exceeded"},
+                    )
+                else:
+                    window.append(now)
+
+            if response is None:
+                response = await call_next(request)
+            elapsed_ms = (
+                time.monotonic() - request.state.request_started_monotonic
+            ) * 1_000.0
+            request.state.elapsed_ms = elapsed_ms
+            apply_response_headers(response, request_id=request_id)
+            structured_log(
+                _LOGGER,
+                event="request_completed",
+                request_id=request_id,
+                method=request.method,
+                route=route_template(request),
+                response_status=int(response.status_code),
+                elapsed_ms=round(elapsed_ms, 3),
+                run_id=config.runtime.run_id,
+                replay_execution_id=replay_controller.status().execution_id,
+                **operation_log_fields(request),
+            )
+            return response
+        except Exception:
+            request.state.elapsed_ms = (
+                time.monotonic() - request.state.request_started_monotonic
+            ) * 1_000.0
+            raise
+        finally:
+            reset_request_metrics(metrics_token)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
-        _request: Request,
+        request: Request,
         _exc: RequestValidationError,
     ) -> JSONResponse:
-        return JSONResponse(status_code=422, content={"detail": "invalid_request"})
+        request_id = str(getattr(request.state, "request_id", uuid.uuid4()))
+        response = JSONResponse(status_code=422, content={"detail": "invalid_request"})
+        apply_response_headers(response, request_id=request_id)
+        return response
 
     @app.exception_handler(Exception)
-    async def production_error(_request: Request, _exc: Exception) -> JSONResponse:
-        return JSONResponse(status_code=500, content={"detail": "internal_error"})
+    async def production_error(request: Request, exc: Exception) -> JSONResponse:
+        request_id = str(getattr(request.state, "request_id", uuid.uuid4()))
+        structured_log(
+            _LOGGER,
+            event="unexpected_exception",
+            level=logging.ERROR,
+            exception=exc,
+            request_id=request_id,
+            method=request.method,
+            route=route_template(request),
+            response_status=500,
+            elapsed_ms=round(float(getattr(request.state, "elapsed_ms", 0.0)), 3),
+            run_id=config.runtime.run_id,
+            replay_execution_id=replay_controller.status().execution_id,
+            exception_class=type(exc).__name__,
+            **operation_log_fields(request),
+        )
+        response = JSONResponse(status_code=500, content={"detail": "internal_error"})
+        apply_response_headers(response, request_id=request_id)
+        return response
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:

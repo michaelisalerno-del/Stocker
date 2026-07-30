@@ -110,7 +110,9 @@ _STAGE_SPECIFICATIONS = (
 
 _RAW_REPLAY_STAGES = frozenset({"raw_market_event", "five_minute_bar", "option_quote"})
 _ENCODED_RECORD_OVERHEAD_BYTES = 256
-_SQLITE_PYTHON_EXPANSION_FACTOR = 4
+_SQLITE_SCALAR_EXPANSION_FACTOR = 4
+_PYTHON_OBJECT_BYTES_PER_SOURCE_UNIT = 1_024
+_MAXIMUM_JSON_NESTING_DEPTH = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +143,7 @@ class _ReplayMaterializationBudget:
 
     def reserve_sqlite_source(self, source_bytes: int) -> None:
         projected = self.sqlite_source_bytes + (
-            max(0, source_bytes) * _SQLITE_PYTHON_EXPANSION_FACTOR
+            max(0, source_bytes) * _SQLITE_SCALAR_EXPANSION_FACTOR
         )
         if projected > self.maximum_bytes:
             raise RuntimeError(
@@ -149,6 +151,33 @@ class _ReplayMaterializationBudget:
                 f"sqlite_source_bytes={projected} limit={self.maximum_bytes}"
             )
         self.sqlite_source_bytes = projected
+
+    def assert_python_expansion_safe(self, *, source: str, source_units: int) -> None:
+        projected = max(1, source_units) * _PYTHON_OBJECT_BYTES_PER_SOURCE_UNIT
+        if projected > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_python_expansion_limit_exceeded: "
+                f"{source} source_units={source_units} "
+                f"allowance={projected} limit={self.maximum_bytes}"
+            )
+
+    def assert_json_decoding_safe(self, documents: tuple[str, ...]) -> None:
+        source_characters = 0
+        for document in documents:
+            nesting_depth = _json_nesting_depth(document)
+            if nesting_depth > _MAXIMUM_JSON_NESTING_DEPTH:
+                raise RuntimeError(
+                    "blocked_replay_json_depth_limit_exceeded: "
+                    f"depth={nesting_depth} limit={_MAXIMUM_JSON_NESTING_DEPTH}"
+                )
+            source_characters += len(document)
+        projected = source_characters * _PYTHON_OBJECT_BYTES_PER_SOURCE_UNIT
+        if projected > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_json_expansion_limit_exceeded: "
+                f"source_characters={source_characters} "
+                f"allowance={projected} limit={self.maximum_bytes}"
+            )
 
     def reserve_auxiliary_identity(self, identity: str) -> None:
         next_bytes = (
@@ -241,6 +270,32 @@ def _json_encoding_upper_bound(value: object, *, stop_after: int) -> int:
     return total
 
 
+def _json_nesting_depth(document: str) -> int:
+    """Measure JSON container depth without allocating decoded containers."""
+
+    depth = 0
+    maximum_depth = 0
+    in_string = False
+    escaped = False
+    for character in document:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            maximum_depth = max(maximum_depth, depth)
+        elif character in "]}":
+            depth = max(0, depth - 1)
+    return maximum_depth
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -249,8 +304,27 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _decode_json_columns(row: dict[str, Any]) -> dict[str, Any]:
+def _decode_json_columns(
+    row: dict[str, Any],
+    *,
+    budget: _ReplayMaterializationBudget,
+) -> dict[str, Any]:
     decoded = dict(row)
+    json_documents = tuple(
+        value
+        for name, value in decoded.items()
+        if isinstance(value, str)
+        and (
+            name.endswith("_json")
+            or name
+            in {
+                "conditions",
+                "quote_attributes",
+                "snapshot",
+            }
+        )
+    )
+    budget.assert_json_decoding_safe(json_documents)
     for name, value in tuple(decoded.items()):
         if isinstance(value, str) and (
             name.endswith("_json")
@@ -382,10 +456,22 @@ def _load_raw_records(
         for batch in parquet_file.iter_batches(  # type: ignore[no-untyped-call]
             batch_size=batch_size
         ):
-            for raw in batch.to_pylist():
+            for row_index in range(batch.num_rows):
                 if stop_event.is_set():
                     break
-                event = model.model_validate(_decode_json_columns(dict(raw)))
+                row_batch = batch.slice(row_index, 1)
+                source_units = int(row_batch.nbytes) + int(getattr(row_batch, "num_columns", 1))
+                budget.assert_python_expansion_safe(
+                    source="parquet_row",
+                    source_units=source_units,
+                )
+                raw = row_batch.to_pylist()[0]
+                event = model.model_validate(
+                    _decode_json_columns(
+                        dict(raw),
+                        budget=budget,
+                    )
+                )
                 records.append(budget.encode(_raw_replay_record(event)))
             if stop_event.is_set():
                 break
@@ -396,6 +482,7 @@ def _stage_rows(
     connection: sqlite3.Connection,
     *,
     run_id: str,
+    budget: _ReplayMaterializationBudget,
 ) -> Iterator[dict[str, Any]]:
     for stage, table, timestamp_column, identity_column in _STAGE_SPECIFICATIONS:
         selected = connection.execute(
@@ -403,7 +490,10 @@ def _stage_rows(
             (run_id,),
         )
         for selected_row in selected:
-            payload = _decode_json_columns(dict(selected_row))
+            payload = _decode_json_columns(
+                dict(selected_row),
+                budget=budget,
+            )
             raw_timestamp = payload.get(timestamp_column)
             if raw_timestamp is None:
                 raw_timestamp = payload.get("id", 0)
@@ -445,7 +535,9 @@ def _verify_m1c(
         if stop_event.is_set():
             return 0, 0, 0.0
         payload = dict(row)
-        features = json.loads(str(payload["feature_values_json"]))
+        raw_features = str(payload["feature_values_json"])
+        budget.assert_json_decoding_safe((raw_features,))
+        features = json.loads(raw_features)
         if runtime is not None:
             score = runtime.score(
                 symbol=str(payload["symbol"]),
@@ -607,7 +699,11 @@ def replay_persisted_evidence(
                 f"partitions={partition_mismatches},"
                 f"m1c={probability_mismatches},episodes={episode_mismatches}"
             )
-        for stage_row in _stage_rows(connection, run_id=selected_run):
+        for stage_row in _stage_rows(
+            connection,
+            run_id=selected_run,
+            budget=budget,
+        ):
             if stop_event.is_set():
                 break
             raw_records.append(budget.encode(stage_row))

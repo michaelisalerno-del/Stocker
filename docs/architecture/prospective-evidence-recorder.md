@@ -257,19 +257,25 @@ cancel-and-join path.
 
 Canonical replay ordering still requires materialising globally sortable
 records. Replay stores bounded canonical JSON bytes rather than nested payload
-objects, preflights manifest/SQLite row counts, run-scoped SQLite source bytes
-with a conservative 4× Python-object expansion allowance, and Parquet
-uncompressed row-group bytes, streams all SQLite cursors and Parquet batches,
-and hashes the stored bytes incrementally. A conservative JSON upper bound is
-checked before allocating each canonical string. It fails before decode when
-Parquet or expanded SQLite input would exceed
+objects, preflights manifest/SQLite row counts, run-scoped SQLite scalar source
+bytes with a 4× allowance, and Parquet uncompressed row-group bytes, streams
+all SQLite cursors and Parquet batches, and hashes the stored bytes
+incrementally. Parquet batches are converted to Python one row at a time only
+after charging 1,024 bytes per Arrow source byte/column unit. Before
+`json.loads`, the aggregate JSON documents in that row are scanned without
+allocation, capped at 64 container levels, and charged 1,024 bytes per source
+character. A separate conservative JSON-output upper bound is checked before
+allocating each canonical string. Replay fails before decode when any of those
+envelopes would exceed
 `replay_maximum_materialized_bytes`, and fails before retaining a record or
 auxiliary episode identity when either that byte budget or
 `replay_maximum_records` would be exceeded. Defaults are 64 MiB and 250,000
-records. The largest transient source input (after the SQLite expansion
-allowance) and the retained encoded-record collection are independently
-bounded by 64 MiB; batch size is at most 1,024 records. Safety fields remain
-`ibkr_connections_attempted = 0` and `broker_state_mutated = false`.
+records. At the 64 MiB default this admits at most 64 Ki source units to any
+one Python/JSON expansion, while the largest transient source input and
+retained encoded-record collection remain independently bounded by 64 MiB.
+Parquet batch size is at most 1,024 rows, but conversion is row-wise. Safety
+fields remain `ibkr_connections_attempted = 0` and
+`broker_state_mutated = false`.
 
 ### Operational logging and request IDs
 
@@ -302,9 +308,11 @@ rows), and returned 10 deterministic points with both endpoints preserved. A
 second test rejects a 1,000-row overlapping group before constructing a
 scanner when the physical-row budget is 100. Replay likewise rejects a
 Parquet file whose uncompressed metadata exceeds its byte limit before calling
-`iter_batches`, and rejects an oversized SQLite checkpoint payload before M1C
-verification or JSON decode. The polling contract test measures 5.733
-steady-state requests/minute. These results are reproducible with:
+`iter_batches`, rejects a row before `to_pylist` when its Python expansion
+allowance is too large, and rejects oversized, structurally dense, or
+over-64-level SQLite JSON before M1C verification or JSON decode. The polling
+contract test measures 5.733 steady-state requests/minute. These results are
+reproducible with:
 
 ```bash
 uv run pytest tests/test_prospective_web.py -q -s \

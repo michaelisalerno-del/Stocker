@@ -919,11 +919,14 @@ In-process replay has two independent hard limits:
 `replay_maximum_records` (250,000 by default) and
 `replay_maximum_materialized_bytes` (67,108,864 bytes by default). The latter
 preflights uncompressed Parquet row-group bytes and charges run-scoped SQLite
-source bytes at a conservative 4× Python-object expansion allowance before
-decode, bounds retained canonical record/identity bytes, and checks a
-conservative JSON upper bound before allocating each encoded record. A
-byte-limit failure is an operational blocker; do not raise the limit without a
-measured synthetic replay on the target host.
+scalar source bytes at 4× before decode. It converts Parquet one row at a time
+only after charging 1,024 bytes per Arrow source unit. Before JSON decode it
+charges 1,024 bytes per aggregate source character and rejects nesting beyond
+64 container levels. Retained canonical record/identity bytes have their own
+bound, and a conservative JSON-output bound is checked before allocating each
+encoded record. A byte-, expansion-, or depth-limit failure is an operational
+blocker; do not raise the limit without a measured synthetic replay on the
+target host.
 
 ## 10. Start record-only IBKR mode
 

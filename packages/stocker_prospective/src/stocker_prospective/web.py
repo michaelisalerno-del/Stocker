@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict, defaultdict, deque
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -257,16 +258,47 @@ def _path_exposes_forbidden_broker_resource(path: str) -> bool:
     )
 
 
+class _OperationalProjectionCache:
+    """Small TTL cache for bounded filesystem/package safety checks."""
+
+    def __init__(self, *, ttl_seconds: float) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._lock = threading.Lock()
+        self._loaded_at = 0.0
+        self._value: dict[str, Any] | None = None
+
+    def get(self, loader: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._value is None
+                or self._ttl_seconds == 0.0
+                or now - self._loaded_at >= self._ttl_seconds
+            ):
+                self._value = loader()
+                self._loaded_at = now
+            return self._value
+
+
 def create_web_app(config: ProspectiveConfig) -> FastAPI:
     """Create a web app that receives no recorder or broker object."""
 
     validate_runtime_safety(config, object())
     store = ProspectiveReadStore(config.paths.database, run_id=config.runtime.run_id)
-    cached_bundle_projection = _active_bundle_projection(config)
-    cached_parity_projection = _parity_projection(config)
-    cached_ibkr_api_projection = official_ibkr_api_projection()
-    cached_m1c_live_parity_report = _json_artifact(config.paths.m1c_live_parity_report)
-    cached_direction_live_parity_report = _json_artifact(config.paths.direction_live_parity_report)
+    operational_projection_cache = _OperationalProjectionCache(
+        ttl_seconds=config.web.operational_projection_cache_seconds
+    )
+
+    def operational_artifacts() -> dict[str, Any]:
+        return operational_projection_cache.get(
+            lambda: {
+                "bundle": _active_bundle_projection(config),
+                "parity": _parity_projection(config),
+                "ibkr_api": official_ibkr_api_projection(),
+                "m1c_live_parity": _json_artifact(config.paths.m1c_live_parity_report),
+                "direction_live_parity": _json_artifact(config.paths.direction_live_parity_report),
+            }
+        )
 
     def run_replay(
         request: ReplayStartRequest,
@@ -487,6 +519,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         )
 
     def compact_health_projection(runtime: dict[str, Any]) -> dict[str, Any]:
+        artifacts = operational_artifacts()
+        bundle_projection = artifacts["bundle"]
+        parity_projection = artifacts["parity"]
+        ibkr_api_projection = artifacts["ibkr_api"]
         recorder_operational_state = project_recorder_operational_state(
             runtime=runtime,
             prospective_start_utc=config.runtime.prospective_start_utc,
@@ -505,13 +541,13 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             *(item["blocker_code"] for item in runtime["blockers"]),
             *(
                 blocker
-                for blocker in cached_bundle_projection["blockers"]
+                for blocker in bundle_projection["blockers"]
                 if not (
                     frozen_m1c_configured and blocker == "blocked_feature_source_semantics_mismatch"
                 )
             ),
-            None if frozen_m1c_configured else cached_parity_projection["blocker"],
-            (cached_ibkr_api_projection["blocker"] if config.runtime.source == "ibkr" else None),
+            None if frozen_m1c_configured else parity_projection["blocker"],
+            (ibkr_api_projection["blocker"] if config.runtime.source == "ibkr" else None),
             parallel_blocker,
         ]
         blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
@@ -532,12 +568,15 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "recorder_state": recorder_state,
             "parallel_credential_configured": parallel_credential_configured,
             "parallel_blocker": parallel_blocker,
+            "artifacts": artifacts,
         }
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         runtime = store.runtime_projection()
         compact = compact_health_projection(runtime)
+        artifacts = compact["artifacts"]
+        parity_projection = artifacts["parity"]
         return {
             "status": compact["status"],
             "research_only": True,
@@ -555,7 +594,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "operational_state": compact["recorder_operational_state"],
             },
             "ibkr": runtime["ibkr_connection"],
-            "ibkr_api": cached_ibkr_api_projection,
+            "ibkr_api": artifacts["ibkr_api"],
             "market_data": {
                 "latest": runtime["latest_capture"],
                 "line_budget": config.ibkr.market_data_line_budget,
@@ -563,12 +602,12 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "current_budget": runtime["market_data_budget"],
             },
             "database": store.database_health(),
-            "active_bundle": cached_bundle_projection,
+            "active_bundle": artifacts["bundle"],
             "feature_parity": {
                 "scope": "legacy_m1_diagnostic_not_frozen_m1c_runtime_gate",
-                "scoring_allowed": cached_parity_projection["scoring_allowed"],
-                "blocker": cached_parity_projection["blocker"],
-                "counts": cached_parity_projection["counts"],
+                "scoring_allowed": parity_projection["scoring_allowed"],
+                "blocker": parity_projection["blocker"],
+                "counts": parity_projection["counts"],
             },
             "parallel_validation": {
                 "enabled": config.parallel_validation.enabled,
@@ -660,7 +699,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "claims_boundary": claims_boundary(),
         }
 
-    def recorder_status_projection(runtime_projection: dict[str, Any]) -> dict[str, Any]:
+    def recorder_status_projection(
+        runtime_projection: dict[str, Any],
+        artifacts: dict[str, Any],
+    ) -> dict[str, Any]:
         operational_state = project_recorder_operational_state(
             runtime=runtime_projection,
             prospective_start_utc=config.runtime.prospective_start_utc,
@@ -669,8 +711,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         status = store.recorder_status_v0()
         status["state"] = operational_state["state"]
         status["operational_state"] = operational_state
-        m1c_parity = cached_m1c_live_parity_report
-        direction_parity = cached_direction_live_parity_report
+        m1c_parity = artifacts["m1c_live_parity"]
+        direction_parity = artifacts["direction_live_parity"]
         completed_bar = status["latest_completed_bar"]
         last_completed = None if completed_bar is None else completed_bar["bar_end_utc"]
         next_expected = (
@@ -746,13 +788,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
 
     @app.get("/api/recorder/status")
     def recorder_status() -> dict[str, Any]:
-        return recorder_status_projection(store.runtime_projection())
+        return recorder_status_projection(
+            store.runtime_projection(),
+            operational_artifacts(),
+        )
 
     @app.get("/api/dashboard/summary")
     def dashboard_summary() -> dict[str, Any]:
         runtime_projection = store.runtime_projection()
         compact_health = compact_health_projection(runtime_projection)
-        recorder_projection = recorder_status_projection(runtime_projection)
+        recorder_projection = recorder_status_projection(
+            runtime_projection,
+            compact_health["artifacts"],
+        )
         blockers = list(compact_health["blockers"])
         recorder_state = str(compact_health["recorder_state"])
         health_projection = {

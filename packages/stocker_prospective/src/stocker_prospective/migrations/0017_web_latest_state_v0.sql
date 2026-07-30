@@ -145,6 +145,9 @@ ON m1c_checkpoint_v0(
     id DESC
 );
 
+CREATE INDEX IF NOT EXISTS idx_m1c_checkpoint_web_latest_global
+ON m1c_checkpoint_v0(run_id, bar_end_utc DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_m1c_episode_web_latest_exact
 ON m1c_episode_v0(
     run_id,
@@ -180,6 +183,9 @@ WHERE COALESCE(
     json_extract(details_json, '$.event_kind'),
     'state_transition'
 ) = 'state_transition';
+
+CREATE INDEX IF NOT EXISTS idx_ibkr_connection_event_web_any_latest
+ON ibkr_connection_event(run_id, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_option_surface_capture_web_latest
 ON option_surface_capture(run_id, target_timestamp_utc DESC, id DESC);

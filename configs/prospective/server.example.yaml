@@ -61,6 +61,7 @@ web:
   replay_stop_timeout_seconds: 2.0
   replay_maximum_records: 250000
   replay_maximum_materialized_bytes: 67108864
+  operational_projection_cache_seconds: 60.0
   allowed_hosts:
     - 127.0.0.1
     - localhost

@@ -110,6 +110,7 @@ _STAGE_SPECIFICATIONS = (
 
 _RAW_REPLAY_STAGES = frozenset({"raw_market_event", "five_minute_bar", "option_quote"})
 _ENCODED_RECORD_OVERHEAD_BYTES = 256
+_SQLITE_PYTHON_EXPANSION_FACTOR = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +128,7 @@ class _ReplayMaterializationBudget:
     records: int = 0
     materialized_bytes: int = 0
     parquet_uncompressed_bytes: int = 0
+    sqlite_source_bytes: int = 0
 
     def reserve_parquet_source(self, uncompressed_bytes: int) -> None:
         projected = self.parquet_uncompressed_bytes + max(0, uncompressed_bytes)
@@ -137,12 +139,47 @@ class _ReplayMaterializationBudget:
             )
         self.parquet_uncompressed_bytes = projected
 
+    def reserve_sqlite_source(self, source_bytes: int) -> None:
+        projected = self.sqlite_source_bytes + (
+            max(0, source_bytes) * _SQLITE_PYTHON_EXPANSION_FACTOR
+        )
+        if projected > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"sqlite_source_bytes={projected} limit={self.maximum_bytes}"
+            )
+        self.sqlite_source_bytes = projected
+
+    def reserve_auxiliary_identity(self, identity: str) -> None:
+        next_bytes = (
+            self.materialized_bytes + len(identity.encode()) + _ENCODED_RECORD_OVERHEAD_BYTES
+        )
+        if next_bytes > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"materialized_bytes={next_bytes} limit={self.maximum_bytes}"
+            )
+        self.materialized_bytes = next_bytes
+
     def encode(self, record: dict[str, Any]) -> _EncodedReplayRecord:
         next_records = self.records + 1
         if next_records > self.maximum_records:
             raise RuntimeError(
                 "blocked_replay_record_limit_exceeded: "
                 f"actual>{self.maximum_records} limit={self.maximum_records}"
+            )
+        available_bytes = (
+            self.maximum_bytes - self.materialized_bytes - _ENCODED_RECORD_OVERHEAD_BYTES
+        )
+        upper_bound = _json_encoding_upper_bound(
+            record,
+            stop_after=max(0, available_bytes),
+        )
+        if available_bytes < 0 or upper_bound > available_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"canonical_json_upper_bound={upper_bound} "
+                f"available={max(0, available_bytes)}"
             )
         canonical_json = json.dumps(
             record,
@@ -172,6 +209,36 @@ class _ReplayMaterializationBudget:
         self.records = next_records
         self.materialized_bytes = next_bytes
         return encoded
+
+
+def _json_encoding_upper_bound(value: object, *, stop_after: int) -> int:
+    """Conservatively bound canonical JSON bytes before allocating the string."""
+
+    total = 0
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if item is None:
+            total += 4
+        elif isinstance(item, bool):
+            total += 5
+        elif isinstance(item, str):
+            total += len(item) * 12 + 2
+        elif isinstance(item, (int, float)):
+            total += len(str(item)) + 2
+        elif isinstance(item, dict):
+            total += 2 + max(0, len(item) - 1) + len(item)
+            for key, nested in item.items():
+                pending.append(str(key))
+                pending.append(nested)
+        elif isinstance(item, (list, tuple)):
+            total += 2 + max(0, len(item) - 1)
+            pending.extend(item)
+        else:
+            total += len(str(item)) * 12 + 2
+        if total > stop_after:
+            return total
+    return total
 
 
 def _sha256(path: Path) -> str:
@@ -247,6 +314,31 @@ def _estimated_record_count(connection: sqlite3.Connection, *, run_id: str) -> i
     return estimated
 
 
+def _sqlite_source_bytes(
+    connection: sqlite3.Connection,
+    *,
+    table: str,
+    run_id: str,
+) -> int:
+    """Measure run-scoped SQLite payload bytes without transferring row payloads."""
+
+    columns = [
+        str(row[1])
+        for row in connection.execute(  # noqa: S608 - fixed internal table contract
+            f'PRAGMA table_info("{table}")'
+        )
+    ]
+    byte_expression = " + ".join(
+        f'COALESCE(LENGTH(CAST("{column}" AS BLOB)), 0)' for column in columns
+    )
+    row = connection.execute(
+        f'SELECT COALESCE(SUM({byte_expression}), 0) FROM "{table}" '  # noqa: S608
+        "WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    return int(row[0])
+
+
 def _load_raw_records(
     connection: sqlite3.Connection,
     *,
@@ -266,7 +358,7 @@ def _load_raw_records(
         ORDER BY minimum_timestamp_utc, content_hash
         """,
         (run_id,),
-    ).fetchall()
+    )
     records: list[_EncodedReplayRecord] = []
     mismatches = 0
     batch_size = min(1_024, budget.maximum_records)
@@ -333,6 +425,8 @@ def _verify_m1c(
     *,
     run_id: str,
     runtime: FrozenM1CRuntime | None,
+    stop_event: threading.Event,
+    budget: _ReplayMaterializationBudget,
 ) -> tuple[int, int, float]:
     rows = connection.execute(
         """
@@ -341,13 +435,15 @@ def _verify_m1c(
         ORDER BY symbol, session_date, checkpoint
         """,
         (run_id,),
-    ).fetchall()
+    )
     probability_mismatches = 0
     episode_mismatches = 0
     maximum_difference = 0.0
     tracker = FreshEpisodeTracker()
     replayed_episode_ids: set[str] = set()
     for row in rows:
+        if stop_event.is_set():
+            return 0, 0, 0.0
         payload = dict(row)
         features = json.loads(str(payload["feature_values_json"]))
         if runtime is not None:
@@ -373,16 +469,25 @@ def _verify_m1c(
             probability=float(payload["probability"]),
             eligible=bool(payload["eligible"]),
         )
-        if decision.fresh_episode and decision.episode_id is not None:
+        if (
+            decision.fresh_episode
+            and decision.episode_id is not None
+            and decision.episode_id not in replayed_episode_ids
+        ):
+            budget.reserve_auxiliary_identity(decision.episode_id)
             replayed_episode_ids.add(decision.episode_id)
-    persisted_episode_ids = {
-        str(row["episode_id"])
-        for row in connection.execute(
-            "SELECT episode_id FROM m1c_episode_v0 WHERE run_id = ?",
-            (run_id,),
-        ).fetchall()
-    }
-    episode_mismatches = len(replayed_episode_ids.symmetric_difference(persisted_episode_ids))
+    for row in connection.execute(
+        "SELECT episode_id FROM m1c_episode_v0 WHERE run_id = ?",
+        (run_id,),
+    ):
+        if stop_event.is_set():
+            return 0, 0, 0.0
+        persisted_episode_id = str(row["episode_id"])
+        if persisted_episode_id in replayed_episode_ids:
+            replayed_episode_ids.remove(persisted_episode_id)
+        else:
+            episode_mismatches += 1
+    episode_mismatches += len(replayed_episode_ids)
     return probability_mismatches, episode_mismatches, maximum_difference
 
 
@@ -458,6 +563,22 @@ def replay_persisted_evidence(
                 "blocked_replay_record_limit_exceeded: "
                 f"estimated={estimated_records} limit={maximum_records}"
             )
+        sqlite_tables = tuple(
+            dict.fromkeys(
+                (
+                    "raw_partition_manifest_v0",
+                    *(table for _stage, table, _timestamp, _identity in _STAGE_SPECIFICATIONS),
+                )
+            )
+        )
+        for table in sqlite_tables:
+            budget.reserve_sqlite_source(
+                _sqlite_source_bytes(
+                    connection,
+                    table=table,
+                    run_id=selected_run,
+                )
+            )
         raw_records, partition_mismatches = _load_raw_records(
             connection,
             run_id=selected_run,
@@ -477,6 +598,8 @@ def replay_persisted_evidence(
             connection,
             run_id=selected_run,
             runtime=runtime,
+            stop_event=stop_event,
+            budget=budget,
         )
         if partition_mismatches or probability_mismatches or episode_mismatches:
             raise ValueError(
@@ -485,6 +608,8 @@ def replay_persisted_evidence(
                 f"m1c={probability_mismatches},episodes={episode_mismatches}"
             )
         for stage_row in _stage_rows(connection, run_id=selected_run):
+            if stop_event.is_set():
+                break
             raw_records.append(budget.encode(stage_row))
 
     records = raw_records

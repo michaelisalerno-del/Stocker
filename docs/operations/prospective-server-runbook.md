@@ -831,7 +831,8 @@ repository and CI duplicate-prefix checks must pass before deployment. Never
 test an upgrade against the active production database: use a checked copy or
 temporary fixture.
 The repository upgrade-equivalence test hash-pins the deployed migration
-contents through `0010`; a hash mismatch means a historical migration was
+contents through `0015`; its older ledger already contains both `0011` and
+both `0012` identities. A hash mismatch means a historical migration was
 edited and must be investigated rather than accepted by updating the fixture.
 
 ## 8. Start deterministic replay mode
@@ -904,6 +905,9 @@ minutes. Hidden documents pause. Audit, report, transfer, outcome, and Parquet
 episode-detail endpoints must not appear in the 15-second loop.
 The compact summary and `/api/health` share one health/blocker projection; if
 their status or blocker lists differ, treat the web build as invalid.
+Bounded filesystem/package checks refresh at most
+`operational_projection_cache_seconds` (60 seconds by default); they are not
+cached for the lifetime of the process.
 
 Quote/depth reads reject an overlapping Parquet row group before scanning when
 its physical row count exceeds `parquet_projection_maximum_input_rows`.
@@ -914,10 +918,12 @@ symlinked date directories, metadata, and archives.
 In-process replay has two independent hard limits:
 `replay_maximum_records` (250,000 by default) and
 `replay_maximum_materialized_bytes` (67,108,864 bytes by default). The latter
-preflights uncompressed Parquet row-group bytes before decode and bounds the
-retained canonical record bytes. A byte-limit failure is an operational
-blocker; do not raise the limit without a measured synthetic replay on the
-target host.
+preflights uncompressed Parquet row-group bytes and charges run-scoped SQLite
+source bytes at a conservative 4× Python-object expansion allowance before
+decode, bounds retained canonical record/identity bytes, and checks a
+conservative JSON upper bound before allocating each encoded record. A
+byte-limit failure is an operational blocker; do not raise the limit without a
+measured synthetic replay on the target host.
 
 ## 10. Start record-only IBKR mode
 

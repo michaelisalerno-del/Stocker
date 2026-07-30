@@ -8,5 +8,12 @@
   "0007_frozen_m1c_recorder_v0.sql": "609fe3170b388c4253f0025f9aa2c58b6cf04bd3b634c1b1ae8f06046a2e208d",
   "0008_promotion_decisions_and_option_model_sources.sql": "aa50955aa256fcd36b4821600cd213346aba9d09f640b9d141897f5daaea94e8",
   "0009_quiet_state_options_shadow_v0.sql": "9fd7692fdfe926946b3ed7fee1ecf1c4ed20f65e33784cdd2a3a3f9ee1118df8",
-  "0010_ibkr_budget_transfer_v0.sql": "7bfa2482aa2f1c346bf87781ac1cb9bd715afd44d06b73d463fa88542db55782"
+  "0010_ibkr_budget_transfer_v0.sql": "7bfa2482aa2f1c346bf87781ac1cb9bd715afd44d06b73d463fa88542db55782",
+  "0011_m1c_checkpoint_completion_v0.sql": "ed253fd5fba5712890bea6dff39d0f89bb5d358ae4fd048114ccc70c5411ab79",
+  "0011_m1c_tail_phase_v1.sql": "385caf38fb6f818b02e0b039a80c7fb4f16f7ff645c9c319ad9f954666aa27e4",
+  "0012_m1c_signed_market_shock_v1.sql": "09ddf8d6f03e516b2656c6b6093a0be8446213733d13492af8903b13431d39ee",
+  "0012_option_schedule_degradation_v0.sql": "bb95832a733433f00de671b7ff7fa07a15117913a26535c97f90aca4a591b469",
+  "0013_m1c_opening_market_transition_v1.sql": "91ec2e2532a77938d9afe7cb2ee95b702a94695a7f6ece7b3f3936f6c2ea758a",
+  "0014_m1c_prospective_opening_reversal_v1.sql": "2e196b2036ab5a6d86fd8774b96fea0a0844fe5121958cae3f33e9372cef83de",
+  "0015_m1c_prospective_opening_reversal_v1_1.sql": "584ae4ed122262694e8bbead0875b3620a492f80379263859bf3d906a52346dc"
 }

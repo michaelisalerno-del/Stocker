@@ -728,7 +728,7 @@ def test_replay_control_request_log_uses_replay_execution_id(
     client.post("/api/replay/stop")
 
 
-def test_dashboard_summary_latency_is_stable_with_enlarged_manifest_history(
+def test_dashboard_summary_latency_is_stable_with_enlarged_operational_history(
     tmp_path: Path,
 ) -> None:
     client = seeded_app(tmp_path)
@@ -821,6 +821,77 @@ def test_dashboard_summary_latency_is_stable_with_enlarged_manifest_history(
                 for index in range(5_000)
             ],
         )
+        connection.executemany(
+            """
+            INSERT INTO m1c_checkpoint_v0(
+                envelope_id, run_id, symbol, session_date, checkpoint,
+                bar_start_utc, bar_end_utc, feature_as_of_utc, model_id,
+                model_version, model_hash, feature_hash, session_context_hash,
+                feature_values_json, probability, threshold, threshold_passed,
+                eligible, feature_freshness, missing_feature_count,
+                rejection_reasons_json, claims_json
+            ) VALUES (?, ?, ?, '2026-07-30', 1, ?, ?, ?, 'M1C', 'perf',
+                      'model-hash', ?, 'context-hash', '{}', 0.10, 0.20,
+                      0, 0, 'fresh', 0, '[]', '{}')
+            """,
+            [
+                (
+                    envelope_id,
+                    cfg.runtime.run_id,
+                    f"PERF{index:04d}",
+                    (base + timedelta(seconds=index)).isoformat(),
+                    (base + timedelta(seconds=index + 300)).isoformat(),
+                    (base + timedelta(seconds=index + 300)).isoformat(),
+                    f"perf-feature-{index:04d}",
+                )
+                for index in range(1_000)
+            ],
+        )
+        checkpoint_rows = connection.execute(
+            """
+            SELECT id, symbol, bar_end_utc
+            FROM m1c_checkpoint_v0
+            WHERE run_id = ? AND symbol LIKE 'PERF%'
+            ORDER BY id
+            """,
+            (cfg.runtime.run_id,),
+        ).fetchall()
+        connection.executemany(
+            """
+            INSERT INTO m1c_episode_v0(
+                episode_id, envelope_id, checkpoint_id, run_id, symbol,
+                session_date, trigger_checkpoint, trigger_bar_end_utc,
+                prospective_entry_timestamp_utc, m1c_probability,
+                previous_m1c_probability, episode_number,
+                minutes_since_previous_episode, scientific_recording_valid,
+                rejection_reasons_json, phase, completion_status,
+                completed_at_utc, claims_json
+            ) VALUES (?, ?, ?, ?, ?, '2026-07-30', 1, ?, ?, 0.10, NULL,
+                      1, NULL, 0, '[]', 'active', 'streaming', NULL, '{}')
+            """,
+            [
+                (
+                    f"perf-episode-{index:04d}",
+                    envelope_id,
+                    int(row[0]),
+                    cfg.runtime.run_id,
+                    str(row[1]),
+                    str(row[2]),
+                    (datetime.fromisoformat(str(row[2])) + timedelta(minutes=5)).isoformat(),
+                )
+                for index, row in enumerate(checkpoint_rows)
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO ibkr_connection_event(
+                envelope_id, run_id, state, error_code, message,
+                data_maintained, reconnect_attempt, details_json
+            ) VALUES (?, ?, 'connected', NULL, 'synthetic notification',
+                      1, 0, '{"event_kind":"informational_notification"}')
+            """,
+            [(envelope_id, cfg.runtime.run_id) for _ in range(1_000)],
+        )
     enlarged_ms = median_summary_latency_ms()
 
     print(
@@ -828,6 +899,8 @@ def test_dashboard_summary_latency_is_stable_with_enlarged_manifest_history(
         f"baseline_median_ms={baseline_ms:.3f} "
         "manifest_history_rows=5000 subscription_history_rows=5000 "
         "data_health_history_rows=5000 "
+        "checkpoint_history_rows=1000 episode_history_rows=1000 "
+        "ibkr_event_history_rows=1000 "
         f"enlarged_median_ms={enlarged_ms:.3f}"
     )
     assert enlarged_ms <= baseline_ms * 2.5 + 5.0
@@ -1365,6 +1438,48 @@ def test_dashboard_summary_and_health_share_all_cached_safety_blockers(
         "blocked_test_parity",
         "blocked_test_ibkr_api",
     } <= set(summary["blockers"])
+
+
+def test_health_projection_cache_refreshes_without_recreating_application(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = config(tmp_path)
+    cfg = cfg.model_copy(
+        update={
+            "web": cfg.web.model_copy(update={"operational_projection_cache_seconds": 0.0}),
+        }
+    )
+    ProspectiveRepository(cfg.paths.database).migrate()
+    mutable_blockers: list[str] = []
+
+    def bundle_projection(_config: ProspectiveConfig) -> dict[str, object]:
+        return {
+            "bundle_id": None,
+            "manifest_sha256": None,
+            "verified": not mutable_blockers,
+            "blockers": list(mutable_blockers),
+            "feature_runtime": {
+                "installed": False,
+                "contract_version": None,
+                "scoring_authorized_by_registry": False,
+            },
+        }
+
+    monkeypatch.setattr(web_module, "_active_bundle_projection", bundle_projection)
+    client = TestClient(create_web_app(cfg))
+
+    initial_health = client.get("/api/health").json()
+    initial_summary = client.get("/api/dashboard/summary").json()
+    mutable_blockers.append("blocked_bundle_changed_after_start")
+    refreshed_health = client.get("/api/health").json()
+    refreshed_summary = client.get("/api/dashboard/summary").json()
+
+    assert "blocked_bundle_changed_after_start" not in initial_health["blockers"]
+    assert initial_health["blockers"] == initial_summary["blockers"]
+    assert refreshed_health["status"] == refreshed_summary["health"]["status"] == "blocked"
+    assert refreshed_health["blockers"] == refreshed_summary["blockers"]
+    assert "blocked_bundle_changed_after_start" in refreshed_summary["blockers"]
 
 
 def test_optional_auth_protects_browser_and_api_with_secure_cookie_support(

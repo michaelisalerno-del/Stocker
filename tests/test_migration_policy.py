@@ -25,7 +25,7 @@ OLDER_FIXTURE_MANIFEST = (
     Path(__file__).parents[1]
     / "tests"
     / "fixtures"
-    / "prospective_migrations_through_0010.sha256.json"
+    / "prospective_migrations_through_0015.sha256.json"
 )
 
 
@@ -181,7 +181,9 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
         "idx_web_active_runtime_blocker",
         "idx_subscription_lifecycle_web_active",
         "idx_m1c_checkpoint_web_latest",
+        "idx_m1c_checkpoint_web_latest_global",
         "idx_m1c_episode_web_latest_exact",
+        "idx_ibkr_connection_event_web_any_latest",
     }
     with sqlite3.connect(database) as connection:
         index_rows = connection.execute(
@@ -201,16 +203,58 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
                 ("synthetic",),
             )
         )
+        latest_checkpoint_plan = " ".join(
+            str(row[3])
+            for row in connection.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT * FROM m1c_checkpoint_v0
+                WHERE run_id = ? ORDER BY bar_end_utc DESC, id DESC LIMIT 1
+                """,
+                ("synthetic",),
+            )
+        )
+        latest_episode_plan = " ".join(
+            str(row[3])
+            for row in connection.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT * FROM m1c_episode_v0
+                WHERE run_id = ? ORDER BY trigger_bar_end_utc DESC LIMIT 1
+                """,
+                ("synthetic",),
+            )
+        )
+        latest_connection_plan = " ".join(
+            str(row[3])
+            for row in connection.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT * FROM ibkr_connection_event
+                WHERE run_id = ? ORDER BY id DESC LIMIT 1
+                """,
+                ("synthetic",),
+            )
+        )
 
     assert expected_indexes <= indexes.keys()
     assert "WHERE cancelled_at_utc IS NULL" in str(indexes["idx_subscription_lifecycle_web_active"])
     assert "idx_subscription_lifecycle_web_active" in active_subscription_plan
+    assert "idx_m1c_checkpoint_web_latest_global" in latest_checkpoint_plan
+    assert "idx_m1c_episode_live" in latest_episode_plan
+    assert "USE TEMP B-TREE" not in latest_episode_plan
+    assert "idx_ibkr_connection_event_web_any_latest" in latest_connection_plan
 
 
 def test_fresh_and_upgrade_migrations_produce_equivalent_schema(tmp_path: Path) -> None:
     fresh = tmp_path / "fresh.sqlite3"
     upgraded = tmp_path / "upgraded.sqlite3"
-    _apply_older_fixture(upgraded, through_sequence=10)
+    _apply_older_fixture(upgraded, through_sequence=15)
+    deployed_ledger = _migration_ledger(upgraded)
+    assert "0011_m1c_checkpoint_completion_v0.sql" in deployed_ledger
+    assert "0011_m1c_tail_phase_v1.sql" in deployed_ledger
+    assert "0012_m1c_signed_market_shock_v1.sql" in deployed_ledger
+    assert "0012_option_schedule_degradation_v0.sql" in deployed_ledger
 
     ProspectiveRepository(fresh).migrate()
     ProspectiveRepository(upgraded).migrate()

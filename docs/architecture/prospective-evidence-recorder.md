@@ -207,10 +207,13 @@ acceptance ceiling and the example 240-request rate limit. Initial navigation
 can create a small bounded screen-activation burst.
 
 The fast summary and full health route call the same compact health projection.
-Frozen bundle, parity, and first-party IBKR-package checks are immutable for
-one web-process generation and are cached at application construction.
-Runtime, credential-presence, lease, and blocker evidence remains live. A
-non-runtime safety blocker therefore cannot disappear from the 15-second view.
+Bundle, parity, first-party IBKR-package, and live-parity checks use one
+thread-safe 60-second TTL cache (`operational_projection_cache_seconds`).
+That bounds filesystem/hash work without letting IBKR's time-sensitive
+freshness check or replaced parity/blocker artifacts remain stale for the
+process lifetime. Runtime, credential-presence, lease, and blocker evidence
+remains live. A non-runtime safety blocker therefore cannot disappear from the
+15-second view.
 
 ### Bounded evidence reads
 
@@ -254,13 +257,17 @@ cancel-and-join path.
 
 Canonical replay ordering still requires materialising globally sortable
 records. Replay stores bounded canonical JSON bytes rather than nested payload
-objects, preflights manifest/SQLite row counts and Parquet uncompressed
-row-group bytes, streams SQLite cursors and Parquet batches, and hashes the
-stored bytes incrementally. It fails before decode when the Parquet input
-would exceed `replay_maximum_materialized_bytes`, and fails before retaining a
-record when either that byte budget or `replay_maximum_records` would be
-exceeded. Defaults are 64 MiB and 250,000 records. The largest transient Arrow
-input and the retained encoded-record collection are each independently
+objects, preflights manifest/SQLite row counts, run-scoped SQLite source bytes
+with a conservative 4× Python-object expansion allowance, and Parquet
+uncompressed row-group bytes, streams all SQLite cursors and Parquet batches,
+and hashes the stored bytes incrementally. A conservative JSON upper bound is
+checked before allocating each canonical string. It fails before decode when
+Parquet or expanded SQLite input would exceed
+`replay_maximum_materialized_bytes`, and fails before retaining a record or
+auxiliary episode identity when either that byte budget or
+`replay_maximum_records` would be exceeded. Defaults are 64 MiB and 250,000
+records. The largest transient source input (after the SQLite expansion
+allowance) and the retained encoded-record collection are independently
 bounded by 64 MiB; batch size is at most 1,024 records. Safety fields remain
 `ibkr_connections_attempted = 0` and `broker_state_mutated = false`.
 
@@ -280,12 +287,14 @@ raw market payloads.
 ### Measured synthetic acceptance evidence
 
 On 2026-07-30, CPython 3.12/TestClient against temporary synthetic SQLite data
-measured a median compact-summary latency of 7.174 ms over 12 warmed requests.
+measured a median compact-summary latency of 7.846 ms over 12 warmed requests.
 After adding 5,000 synthetic raw-manifest identities, 5,000 cancelled
-subscription rows, and 5,000 resolved data-health events, the same measurement
-was 7.174 ms. The indexed latest-event lookup remained below 50 SQLite VM
-progress steps. This is a regression measurement, not a production capacity
-claim.
+subscription rows, 5,000 resolved data-health events, 1,000 checkpoints, 1,000
+episodes, and 1,000 informational IBKR events, the same measurement was
+7.896 ms. Actual query-plan assertions prove that global latest checkpoint,
+episode, and connection queries use matching indexes; the indexed latest-event
+lookup remained below 50 SQLite VM progress steps. This is a regression
+measurement, not a production capacity claim.
 
 The quote-window test used 1,000 synthetic rows in 10 row groups. It examined
 metadata for 10 groups, read the one overlapping group (100 physical input
@@ -293,8 +302,9 @@ rows), and returned 10 deterministic points with both endpoints preserved. A
 second test rejects a 1,000-row overlapping group before constructing a
 scanner when the physical-row budget is 100. Replay likewise rejects a
 Parquet file whose uncompressed metadata exceeds its byte limit before calling
-`iter_batches`. The polling contract test measures 5.733 steady-state
-requests/minute. These results are reproducible with:
+`iter_batches`, and rejects an oversized SQLite checkpoint payload before M1C
+verification or JSON decode. The polling contract test measures 5.733
+steady-state requests/minute. These results are reproducible with:
 
 ```bash
 uv run pytest tests/test_prospective_web.py -q -s \
@@ -530,9 +540,10 @@ and active-runtime-blocker projections, partial active-subscription index, and
 exact latest-state indexes. Fresh-from-zero and upgrade-from-`0010` schema
 tests compare tables, columns, indexes, foreign keys, normalized table
 constraints, foreign-key integrity, and the complete filename ledger. The
-upgrade fixture also hash-pins every deployed migration through `0010`, so
-editing a historical migration cannot make both sides of the comparison
-silently agree.
+upgrade fixture hash-pins every deployed migration through `0015`, starts with
+both `0011` and both `0012` filenames already in its ledger, and applies only
+the new web migrations. Editing a historical migration therefore cannot make
+both sides of the comparison silently agree.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

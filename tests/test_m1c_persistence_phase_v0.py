@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import stocker_prospective.evidence_replay as evidence_replay_module
 from stocker_prospective.activation import ProspectiveActivationLedger
 from stocker_prospective.contract import CLAIMS_BOUNDARY
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
@@ -529,6 +530,82 @@ def test_persisted_evidence_replay_rejects_uncompressed_byte_budget_before_decod
         )
 
     assert decoded is False
+
+
+def test_persisted_evidence_replay_rejects_oversized_sqlite_payload_before_decode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "sqlite-byte-bounded-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="sqlite-byte-bounded-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    with database._connect() as connection:
+        envelope_id = database._insert_envelope(connection, metadata)
+        connection.execute(
+            """
+            INSERT INTO m1c_checkpoint_v0(
+                envelope_id, run_id, symbol, session_date, checkpoint,
+                bar_start_utc, bar_end_utc, feature_as_of_utc, model_id,
+                model_version, model_hash, feature_hash, session_context_hash,
+                feature_values_json, probability, threshold, threshold_passed,
+                eligible, feature_freshness, missing_feature_count,
+                rejection_reasons_json, claims_json
+            ) VALUES (?, ?, 'AAL', '2026-07-24', 1, ?, ?, ?, 'M1C',
+                      'test', 'model-hash', 'feature-hash', 'context-hash',
+                      ?, 0.25, 0.20, 1, 1, 'fresh', 0, '[]', '{}')
+            """,
+            (
+                envelope_id,
+                metadata.run_id,
+                START.isoformat(),
+                (START + timedelta(minutes=5)).isoformat(),
+                (START + timedelta(minutes=5)).isoformat(),
+                json.dumps({"oversized": "x" * 16_384}),
+            ),
+        )
+
+    verification_called = False
+
+    def verification_must_not_run(*_args: object, **_kwargs: object) -> object:
+        nonlocal verification_called
+        verification_called = True
+        raise AssertionError("oversized SQLite payload reached M1C verification")
+
+    monkeypatch.setattr(
+        evidence_replay_module,
+        "_verify_m1c",
+        verification_must_not_run,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="blocked_replay_byte_limit_exceeded: sqlite_source_bytes=",
+    ):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+            maximum_materialized_bytes=1_024,
+        )
+
+    assert verification_called is False
 
 
 def test_persisted_evidence_replay_streams_parquet_batches_instead_of_full_table(

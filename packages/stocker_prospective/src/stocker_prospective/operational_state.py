@@ -483,9 +483,19 @@ def project_operational_state_from_database(
         (run_id,),
     ).fetchone()
 
+    def parsed_timestamp(value: object) -> datetime | None:
+        if value is None:
+            return None
+        try:
+            observed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if observed.tzinfo is None or observed.utcoffset() is None:
+            return None
+        return observed.astimezone(UTC)
+
     def timestamp(name: str) -> datetime | None:
-        value = state[name]
-        return None if value is None else datetime.fromisoformat(str(value))
+        return parsed_timestamp(state[name])
 
     signals = RecorderStateSignals(
         run_id=run_id,
@@ -533,7 +543,7 @@ def project_operational_state_from_database(
         lease_run_id=None if lease is None else str(lease["run_id"]),
         lease_generation=None if lease is None else int(lease["generation"]),
         lease_heartbeat_at_utc=(
-            None if lease is None else datetime.fromisoformat(str(lease["heartbeat_at_utc"]))
+            None if lease is None else parsed_timestamp(lease["heartbeat_at_utc"])
         ),
     )
     return evaluate_operational_state(

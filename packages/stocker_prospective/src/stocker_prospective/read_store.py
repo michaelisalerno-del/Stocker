@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
-import math
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -14,11 +16,21 @@ from pathlib import Path
 from typing import Any
 
 from stocker_prospective.database import SchemaVersionTooNew
+from stocker_prospective.operational_logging import (
+    record_parquet_read,
+    record_sqlite_operation,
+)
 from stocker_prospective.operational_state import (
     OperationalStateProjection,
     OperationalThresholds,
     inactive_operational_projection,
     project_operational_state_from_database,
+)
+from stocker_prospective.parquet_read_projection import (
+    ParquetProjectionLimitExceeded,
+    ParquetReadMetrics,
+    read_parquet_tail,
+    read_parquet_window,
 )
 from stocker_prospective.quiet_state import (
     BOTTOM_5_THRESHOLD,
@@ -35,6 +47,30 @@ from stocker_prospective.virtual_positions import (
 )
 
 
+class _TimedReadConnection(sqlite3.Connection):
+    def execute(
+        self,
+        sql: str,
+        parameters: Any = (),
+        /,
+    ) -> sqlite3.Cursor:
+        started = time.perf_counter()
+        try:
+            return super().execute(sql, parameters)
+        finally:
+            record_sqlite_operation(duration_ms=(time.perf_counter() - started) * 1_000.0)
+
+
+def _record_parquet_metrics(metrics: ParquetReadMetrics) -> None:
+    record_parquet_read(
+        files_examined=metrics.files_examined,
+        row_groups_examined=metrics.row_groups_examined,
+        row_groups_read=metrics.row_groups_read,
+        input_rows=metrics.input_rows,
+        output_rows=metrics.output_rows,
+    )
+
+
 class ProspectiveReadStore:
     """A query-only store that opens SQLite with ``mode=ro``."""
 
@@ -49,7 +85,12 @@ class ProspectiveReadStore:
 
     def _connect(self) -> sqlite3.Connection:
         uri = f"file:{self.database_path.resolve()}?mode=ro"
-        connection = sqlite3.connect(uri, uri=True, timeout=2.0)
+        connection = sqlite3.connect(
+            uri,
+            uri=True,
+            timeout=2.0,
+            factory=_TimedReadConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only = ON")
         connection.execute("PRAGMA busy_timeout = 2000")
@@ -276,18 +317,9 @@ class ProspectiveReadStore:
             blockers = connection.execute(
                 """
                 SELECT blocker_code, component, message, severity
-                FROM data_health_event AS blocked
-                WHERE run_id = ? AND blocker_code IS NOT NULL
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM data_health_event AS resolved
-                    WHERE resolved.run_id = blocked.run_id
-                      AND resolved.component = blocked.component
-                      AND resolved.id > blocked.id
-                      AND resolved.blocker_code IS NULL
-                      AND resolved.message = 'previous_session_options_context_ready'
-                  )
-                ORDER BY id
+                FROM web_active_runtime_blocker_v0
+                WHERE run_id = ?
+                ORDER BY event_id
                 """,
                 (run_id,),
             ).fetchall()
@@ -643,6 +675,7 @@ class ProspectiveReadStore:
         now: datetime | None = None,
         prospective_start_utc: datetime | None = None,
         thresholds: OperationalThresholds | None = None,
+        include_gap_details: bool = True,
     ) -> dict[str, Any]:
         observed = datetime.now(UTC) if now is None else now.astimezone(UTC)
         operational = self.recorder_operational_state(
@@ -661,6 +694,15 @@ class ProspectiveReadStore:
                 "latest_episode": None,
                 "last_event_timestamp": None,
                 "data_gaps": 0,
+                "raw_partition_gap_count": 0,
+                "gaps": {
+                    "active_gaps": 0,
+                    "resolved_recoverable_gaps": 0,
+                    "unresolved_scientific_gaps": 0,
+                    "connection_interruptions": 0,
+                    "optional_feed_degradations": 0,
+                },
+                "gap_details_included": include_gap_details,
                 "subscriptions": {},
                 "record_only": True,
                 "execution_enabled": False,
@@ -689,33 +731,38 @@ class ProspectiveReadStore:
             ).fetchone()
             partition = connection.execute(
                 """
-                SELECT MAX(maximum_timestamp_utc) AS last_event_timestamp
-                FROM raw_partition_manifest_v0 WHERE run_id = ?
-                """,
-                (run_id,),
-            ).fetchone()
-            gaps = connection.execute(
-                """
-                SELECT
-                    SUM(CASE WHEN resolution_timestamp_utc IS NULL THEN 1 ELSE 0 END)
-                        AS active_gaps,
-                    SUM(CASE WHEN resolution_timestamp_utc IS NOT NULL
-                                  AND recoverability = 'recoverable'
-                             THEN 1 ELSE 0 END) AS resolved_recoverable_gaps,
-                    SUM(CASE WHEN resolution_timestamp_utc IS NULL
-                                  AND severity = 'scientific'
-                             THEN 1 ELSE 0 END) AS unresolved_scientific_gaps,
-                    SUM(CASE WHEN cause_code LIKE 'CONNECTION_%'
-                                  OR stream_kind = 'connection'
-                             THEN 1 ELSE 0 END) AS connection_interruptions,
-                    SUM(CASE WHEN resolution_timestamp_utc IS NULL
-                                  AND severity = 'optional'
-                             THEN 1 ELSE 0 END) AS optional_feed_degradations
-                FROM gap_incident_v1
+                SELECT last_event_timestamp, data_gaps
+                FROM web_run_event_summary_v0
                 WHERE run_id = ?
                 """,
                 (run_id,),
             ).fetchone()
+            gaps = (
+                connection.execute(
+                    """
+                    SELECT
+                        SUM(CASE WHEN resolution_timestamp_utc IS NULL THEN 1 ELSE 0 END)
+                            AS active_gaps,
+                        SUM(CASE WHEN resolution_timestamp_utc IS NOT NULL
+                                      AND recoverability = 'recoverable'
+                                 THEN 1 ELSE 0 END) AS resolved_recoverable_gaps,
+                        SUM(CASE WHEN resolution_timestamp_utc IS NULL
+                                      AND severity = 'scientific'
+                                 THEN 1 ELSE 0 END) AS unresolved_scientific_gaps,
+                        SUM(CASE WHEN cause_code LIKE 'CONNECTION_%'
+                                      OR stream_kind = 'connection'
+                                 THEN 1 ELSE 0 END) AS connection_interruptions,
+                        SUM(CASE WHEN resolution_timestamp_utc IS NULL
+                                      AND severity = 'optional'
+                                 THEN 1 ELSE 0 END) AS optional_feed_degradations
+                    FROM gap_incident_v1
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                ).fetchone()
+                if include_gap_details
+                else None
+            )
             subscriptions = connection.execute(
                 """
                 SELECT subscription_kind, COUNT(*) AS used
@@ -745,12 +792,15 @@ class ProspectiveReadStore:
                 None if partition is None else partition["last_event_timestamp"]
             ),
             "data_gaps": (
-                0
-                if gaps is None or gaps["unresolved_scientific_gaps"] is None
+                int(operational.conditions["unresolved_required_gap_count"] or 0)
+                if gaps is None
+                else 0
+                if gaps["unresolved_scientific_gaps"] is None
                 else int(gaps["unresolved_scientific_gaps"])
             ),
+            "raw_partition_gap_count": (0 if partition is None else int(partition["data_gaps"])),
             "gaps": {
-                name: (0 if gaps is None or gaps[name] is None else int(gaps[name]))
+                name: (None if gaps is None else 0 if gaps[name] is None else int(gaps[name]))
                 for name in (
                     "active_gaps",
                     "resolved_recoverable_gaps",
@@ -759,6 +809,7 @@ class ProspectiveReadStore:
                     "optional_feed_degradations",
                 )
             },
+            "gap_details_included": include_gap_details,
             "subscriptions": {
                 str(row["subscription_kind"]): int(row["used"]) for row in subscriptions
             },
@@ -775,44 +826,58 @@ class ProspectiveReadStore:
         with self._connection() as connection:
             rows = connection.execute(
                 """
-                WITH latest_checkpoint AS (
-                    SELECT c.*
-                    FROM m1c_checkpoint_v0 c
-                    JOIN (
-                        SELECT symbol, MAX(bar_end_utc) AS maximum_bar_end
-                        FROM m1c_checkpoint_v0 WHERE run_id = ? GROUP BY symbol
-                    ) x ON x.symbol = c.symbol
-                       AND x.maximum_bar_end = c.bar_end_utc
-                    WHERE c.run_id = ?
-                ),
-                latest_episode AS (
-                    SELECT e.*
-                    FROM m1c_episode_v0 e
-                    JOIN (
-                        SELECT symbol, MAX(trigger_bar_end_utc) AS maximum_trigger
-                        FROM m1c_episode_v0 WHERE run_id = ? GROUP BY symbol
-                    ) x ON x.symbol = e.symbol
-                       AND x.maximum_trigger = e.trigger_bar_end_utc
-                    WHERE e.run_id = ?
-                ),
-                latest_legacy_quote AS (
-                    SELECT q.*
-                    FROM underlying_quote q
-                    JOIN (
-                        SELECT symbol, MAX(target_timestamp_utc) AS maximum_quote
-                        FROM underlying_quote WHERE run_id = ? GROUP BY symbol
-                    ) x ON x.symbol = q.symbol
-                       AND x.maximum_quote = q.target_timestamp_utc
-                    WHERE q.run_id = ?
+                WITH current_session AS (
+                    SELECT COALESCE(
+                        (
+                            SELECT session_date
+                            FROM runtime_session
+                            WHERE run_id = ?
+                            ORDER BY opened_at_utc DESC, id DESC
+                            LIMIT 1
+                        ),
+                        (
+                            SELECT MAX(session_date)
+                            FROM m1c_checkpoint_completion_v0
+                            WHERE run_id = ?
+                        )
+                    ) AS session_date
                 )
                 SELECT u.symbol, u.operational_status,
+                       current.session_date AS current_session_date,
                        b.bar_end_utc AS last_completed_bar,
                        c.probability AS m1c_probability,
                        c.threshold AS m1c_threshold,
                        c.threshold_passed,
                        c.eligible AS m1c_scientific_eligible,
                        c.rejection_reasons_json AS m1c_rejection_reasons_json,
-                       e.episode_id, e.completion_status AS episode_status,
+                       c.checkpoint AS latest_completed_checkpoint,
+                       c.bar_end_utc AS latest_completed_checkpoint_utc,
+                       e.episode_id AS latest_episode_id,
+                       e.session_date AS latest_episode_session_date,
+                       COALESCE(schedule.status, e.completion_status)
+                         AS latest_episode_status,
+                       e.episode_id,
+                       COALESCE(schedule.status, e.completion_status)
+                         AS episode_status,
+                       CASE WHEN e.episode_id IS NULL THEN 0 ELSE 1 END
+                         AS has_historical_episode,
+                       CASE
+                         WHEN e.episode_id IS NOT NULL
+                          AND e.run_id = u.run_id
+                          AND e.symbol = u.symbol
+                          AND e.session_date = current.session_date
+                          AND e.checkpoint_id = c.id
+                          AND e.trigger_checkpoint = c.checkpoint
+                          AND e.trigger_bar_end_utc = c.bar_end_utc
+                          AND e.scientific_recording_valid = 1
+                          AND COALESCE(
+                              schedule.status,
+                              e.completion_status
+                          ) IN (
+                              'active', 'scheduled', 'streaming', 'complete'
+                          )
+                         THEN 1 ELSE 0
+                       END AS fresh_episode,
                        COALESCE(s.bid, q.bid) AS bid,
                        COALESCE(s.ask, q.ask) AS ask,
                        COALESCE(s.bid_size, q.bid_size) AS bid_size,
@@ -838,17 +903,48 @@ class ProspectiveReadStore:
                          WHERE d.episode_id = e.episode_id AND d.archetype = 'R1'
                        ) AS r1_classification
                 FROM universe_membership u
-                LEFT JOIN latest_checkpoint c ON c.symbol = u.symbol
-                LEFT JOIN latest_episode e ON e.symbol = u.symbol
+                LEFT JOIN current_session current ON 1 = 1
+                LEFT JOIN m1c_checkpoint_v0 c ON c.id = (
+                    SELECT candidate.id
+                    FROM m1c_checkpoint_v0 candidate
+                    JOIN m1c_checkpoint_completion_v0 completed
+                      ON completed.checkpoint_id = candidate.id
+                    WHERE candidate.run_id = u.run_id
+                      AND candidate.symbol = u.symbol
+                      AND candidate.session_date = current.session_date
+                    ORDER BY candidate.checkpoint DESC,
+                             candidate.bar_end_utc DESC,
+                             candidate.id DESC
+                    LIMIT 1
+                )
+                LEFT JOIN m1c_episode_v0 e ON e.episode_id = (
+                    SELECT candidate.episode_id
+                    FROM m1c_episode_v0 candidate
+                    WHERE candidate.run_id = u.run_id
+                      AND candidate.symbol = u.symbol
+                    ORDER BY candidate.trigger_bar_end_utc DESC,
+                             candidate.episode_id DESC
+                    LIMIT 1
+                )
+                LEFT JOIN option_episode_schedule_v0 schedule
+                  ON schedule.episode_id = e.episode_id
                 LEFT JOIN completed_bar_state_v0 b
                   ON b.symbol = u.symbol AND b.run_id = u.run_id
-                LEFT JOIN latest_legacy_quote q ON q.symbol = u.symbol
+                LEFT JOIN underlying_quote q ON q.id = (
+                    SELECT candidate.id
+                    FROM underlying_quote candidate
+                    WHERE candidate.run_id = u.run_id
+                      AND candidate.symbol = u.symbol
+                    ORDER BY candidate.target_timestamp_utc DESC,
+                             candidate.id DESC
+                    LIMIT 1
+                )
                 LEFT JOIN underlying_live_state_v0 s
                   ON s.symbol = u.symbol AND s.run_id = u.run_id
                 WHERE u.run_id = ?
                 ORDER BY u.symbol
                 """,
-                (run_id, run_id, run_id, run_id, run_id, run_id, run_id),
+                (run_id, run_id, run_id),
             ).fetchall()
         items: list[dict[str, Any]] = []
         for row in rows:
@@ -883,7 +979,8 @@ class ProspectiveReadStore:
                 else (float(bid_size) - float(ask_size))
                 / (float(bid_size) + float(ask_size) + 1e-12)
             )
-            item["fresh_episode"] = item.get("episode_id") is not None
+            item["has_historical_episode"] = bool(item["has_historical_episode"])
+            item["fresh_episode"] = bool(item["fresh_episode"])
             items.append(item)
         return items
 
@@ -960,11 +1057,14 @@ class ProspectiveReadStore:
         episode_id: str,
         *,
         maximum_points: int = 600,
+        maximum_input_rows: int = 50_000,
     ) -> list[dict[str, Any]]:
         """Read a bounded chart projection from immutable quote partitions."""
 
-        if maximum_points <= 0:
-            raise ValueError("maximum quote-series points must be positive")
+        if maximum_points < 2:
+            raise ValueError("maximum quote-series points must be at least two")
+        if maximum_input_rows <= 0:
+            raise ValueError("maximum quote-series input rows must be positive")
         run_id = self._selected_run_id()
         if run_id is None:
             return []
@@ -1000,17 +1100,43 @@ class ProspectiveReadStore:
                 """,
                 (run_id, str(episode["symbol"]), start.isoformat(), end.isoformat()),
             ).fetchall()
-        try:
-            import pyarrow.parquet as pq
-        except ImportError:
-            return []
         points: dict[str, dict[str, Any]] = {}
+        input_rows = 0
         for partition in partitions:
             path = Path(str(partition["file_path"]))
             if not path.is_file():
                 continue
-            table = pq.ParquetFile(path).read()  # type: ignore[no-untyped-call]
-            for row in table.to_pylist():
+            remaining_rows = maximum_input_rows - input_rows
+            if remaining_rows <= 0:
+                return []
+            try:
+                projection = read_parquet_window(
+                    path,
+                    columns=(
+                        "event_id",
+                        "provider_timestamp_utc",
+                        "received_timestamp_utc",
+                        "bid",
+                        "ask",
+                        "bid_size",
+                        "ask_size",
+                    ),
+                    timestamp_columns=(
+                        "provider_timestamp_utc",
+                        "received_timestamp_utc",
+                    ),
+                    start=start,
+                    end=end,
+                    maximum_input_rows=remaining_rows,
+                )
+            except ParquetProjectionLimitExceeded as exc:
+                _record_parquet_metrics(exc.metrics)
+                return []
+            except OSError:
+                return []
+            _record_parquet_metrics(projection.metrics)
+            input_rows += projection.metrics.input_rows
+            for row in projection.rows:
                 raw_timestamp = row.get("provider_timestamp_utc") or row.get(
                     "received_timestamp_utc"
                 )
@@ -1030,17 +1156,28 @@ class ProspectiveReadStore:
                     continue
                 bid_size = row.get("bid_size")
                 ask_size = row.get("ask_size")
+                bid_size_value = None if bid_size is None else float(bid_size)
+                ask_size_value = None if ask_size is None else float(ask_size)
                 total_size = (
                     None
-                    if bid_size is None or ask_size is None
-                    else float(bid_size) + float(ask_size)
+                    if bid_size_value is None or ask_size_value is None
+                    else bid_size_value + ask_size_value
                 )
                 microprice = (
                     None
-                    if total_size is None or total_size <= 0.0
-                    else (ask_value * float(bid_size) + bid_value * float(ask_size)) / total_size
+                    if total_size is None
+                    or total_size <= 0.0
+                    or bid_size_value is None
+                    or ask_size_value is None
+                    else (ask_value * bid_size_value + bid_value * ask_size_value) / total_size
                 )
-                points[str(row.get("event_id"))] = {
+                event_id = row.get("event_id")
+                identity = (
+                    str(event_id)
+                    if event_id is not None
+                    else f"{observed.isoformat()}:{bid_value}:{ask_value}"
+                )
+                points[identity] = {
                     "event_id": row.get("event_id"),
                     "timestamp_utc": observed.isoformat(),
                     "bid": bid_value,
@@ -1053,13 +1190,22 @@ class ProspectiveReadStore:
             points.values(),
             key=lambda item: (str(item["timestamp_utc"]), str(item["event_id"])),
         )
-        stride = max(1, math.ceil(len(ordered) / maximum_points))
-        sampled = ordered[::stride]
-        if ordered and sampled[-1] != ordered[-1]:
-            sampled.append(ordered[-1])
-        return sampled[:maximum_points]
+        if len(ordered) <= maximum_points:
+            return ordered
+        sample_indexes = tuple(
+            round(index * (len(ordered) - 1) / (maximum_points - 1))
+            for index in range(maximum_points)
+        )
+        return [ordered[index] for index in sample_indexes]
 
-    def episode_depth_snapshot_v0(self, episode_id: str) -> dict[str, Any] | None:
+    def episode_depth_snapshot_v0(
+        self,
+        episode_id: str,
+        *,
+        maximum_input_rows: int = 20_000,
+    ) -> dict[str, Any] | None:
+        if maximum_input_rows <= 0:
+            raise ValueError("maximum depth-snapshot input rows must be positive")
         run_id = self._selected_run_id()
         if run_id is None:
             return None
@@ -1091,17 +1237,36 @@ class ProspectiveReadStore:
                 """,
                 (run_id, str(episode["symbol"]), start.isoformat(), end.isoformat()),
             ).fetchall()
-        try:
-            import pyarrow.parquet as pq
-        except ImportError:
-            return None
         candidates: list[dict[str, Any]] = []
+        input_rows = 0
         for partition in partitions:
             path = Path(str(partition["file_path"]))
             if not path.is_file():
                 continue
-            table = pq.ParquetFile(path).read()  # type: ignore[no-untyped-call]
-            for row in table.to_pylist():
+            remaining_rows = maximum_input_rows - input_rows
+            if remaining_rows <= 0:
+                return None
+            try:
+                projection = read_parquet_window(
+                    path,
+                    columns=(
+                        "event_id",
+                        "received_timestamp_utc",
+                        "snapshot",
+                    ),
+                    timestamp_columns=("received_timestamp_utc",),
+                    start=start,
+                    end=end,
+                    maximum_input_rows=remaining_rows,
+                )
+            except ParquetProjectionLimitExceeded as exc:
+                _record_parquet_metrics(exc.metrics)
+                return None
+            except OSError:
+                return None
+            _record_parquet_metrics(projection.metrics)
+            input_rows += projection.metrics.input_rows
+            for row in projection.rows:
                 raw_timestamp = row.get("received_timestamp_utc")
                 snapshot = row.get("snapshot")
                 if raw_timestamp is None or snapshot is None:
@@ -1413,178 +1578,189 @@ class ProspectiveReadStore:
             items.append(item.model_dump(mode="json"))
         return items
 
-    def raw_event_sample_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        """Return a bounded recent sample for audit inspection, never broker state."""
+    @staticmethod
+    def _audit_cursor(*, recorded_at_utc: str, audit_id: int) -> str:
+        payload = json.dumps(
+            {"recorded_at_utc": recorded_at_utc, "audit_id": audit_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
-        if limit <= 0:
-            return []
-        run_id = self._selected_run_id()
-        if run_id is None:
-            return []
-        with self._connection() as connection:
-            partitions = connection.execute(
-                """
-                SELECT file_path, event_type
-                FROM raw_partition_manifest_v0
-                WHERE run_id = ?
-                ORDER BY maximum_timestamp_utc DESC, content_hash DESC
-                LIMIT 12
-                """,
-                (run_id,),
-            ).fetchall()
+    @staticmethod
+    def _decode_audit_cursor(cursor: str) -> tuple[str, int]:
         try:
-            import pyarrow.parquet as pq
-        except ImportError:
-            return []
-        sample: list[dict[str, Any]] = []
-        for partition in partitions:
-            path = Path(str(partition["file_path"]))
-            try:
-                is_file = path.is_file()
-            except OSError:
-                is_file = False
-            if not is_file:
-                continue
-            try:
-                rows = pq.ParquetFile(path).read().to_pylist()  # type: ignore[no-untyped-call]
-            except OSError:
-                continue
-            for row in rows[-limit:]:
-                timestamp = row.get("provider_timestamp_utc") or row.get("received_timestamp_utc")
-                detail = {
-                    key: row.get(key)
-                    for key in (
-                        "bid",
-                        "ask",
-                        "last",
-                        "price",
-                        "size",
-                        "operation",
-                        "side",
-                        "position",
-                        "checkpoint",
-                        "market_data_type",
-                    )
-                    if row.get(key) is not None
-                }
-                sample.append(
-                    {
-                        "audit_type": "raw_event",
-                        "identity": row.get("event_id"),
-                        "recorded_at_utc": timestamp,
-                        "details": json.dumps(
-                            {
-                                "event_type": str(partition["event_type"]),
-                                "symbol": row.get("symbol"),
-                                "source_sequence": row.get("source_sequence"),
-                                **detail,
-                            },
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
-                    }
-                )
-        return sorted(
-            sample,
-            key=lambda item: str(item["recorded_at_utc"]),
-            reverse=True,
-        )[:limit]
+            padded = cursor + ("=" * (-len(cursor) % 4))
+            payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+            recorded_at_utc = str(payload["recorded_at_utc"])
+            audit_id = int(payload["audit_id"])
+        except (
+            binascii.Error,
+            KeyError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as exc:
+            raise ValueError("invalid audit cursor") from exc
+        if audit_id <= 0:
+            raise ValueError("invalid audit cursor")
+        return recorded_at_utc, audit_id
 
-    def audit_events_v0(self, *, limit: int = 1000) -> list[dict[str, Any]]:
+    def audit_event_page_v0(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        if limit <= 0:
+            raise ValueError("audit page limit must be positive")
         run_id = self._selected_run_id()
         if run_id is None:
-            return []
+            return {
+                "items": [],
+                "next_cursor": None,
+                "has_more": False,
+                "limit": limit,
+            }
+        cursor_timestamp: str | None = None
+        cursor_id: int | None = None
+        if cursor is not None:
+            cursor_timestamp, cursor_id = self._decode_audit_cursor(cursor)
         with self._connection() as connection:
-            partitions = connection.execute(
+            rows = connection.execute(
                 """
-                SELECT 'raw_partition' AS audit_type, content_hash AS identity,
-                       maximum_timestamp_utc AS recorded_at_utc,
-                       file_path AS details
-                FROM raw_partition_manifest_v0 WHERE run_id = ?
-                ORDER BY maximum_timestamp_utc DESC LIMIT ?
+                SELECT id AS audit_id, audit_type, identity,
+                       recorded_at_utc, details
+                FROM web_audit_projection_v0
+                WHERE run_id = ?
+                  AND (
+                    ? IS NULL
+                    OR recorded_at_utc < ?
+                    OR (recorded_at_utc = ? AND id < ?)
+                  )
+                ORDER BY recorded_at_utc DESC, id DESC
+                LIMIT ?
                 """,
-                (run_id, limit),
+                (
+                    run_id,
+                    cursor_timestamp,
+                    cursor_timestamp,
+                    cursor_timestamp,
+                    cursor_id,
+                    limit + 1,
+                ),
             ).fetchall()
-            lifecycle = connection.execute(
-                """
-                SELECT 'subscription' AS audit_type,
-                       subscription_key AS identity,
-                       started_at_utc AS recorded_at_utc,
-                       cancellation_reason AS details
-                FROM subscription_lifecycle_v0 WHERE run_id = ?
-                ORDER BY started_at_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-            model_events = connection.execute(
-                """
-                SELECT 'm1c_prediction' AS audit_type,
-                       feature_hash AS identity,
-                       bar_end_utc AS recorded_at_utc,
-                       json_object(
-                         'symbol', symbol,
-                         'checkpoint', checkpoint,
-                         'model_hash', model_hash,
-                         'probability', probability,
-                         'threshold', threshold,
-                         'threshold_passed', threshold_passed,
-                         'eligible', eligible,
-                         'rejection_reasons', rejection_reasons_json
-                       ) AS details
-                FROM m1c_checkpoint_v0 WHERE run_id = ?
-                ORDER BY bar_end_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-            episode_events = connection.execute(
-                """
-                SELECT 'episode_decision' AS audit_type,
-                       episode_id AS identity,
-                       trigger_bar_end_utc AS recorded_at_utc,
-                       json_object(
-                         'symbol', symbol,
-                         'checkpoint', trigger_checkpoint,
-                         'entry', prospective_entry_timestamp_utc,
-                         'probability', m1c_probability,
-                         'previous_probability', previous_m1c_probability,
-                         'scientific_recording_valid', scientific_recording_valid,
-                         'rejection_reasons', rejection_reasons_json
-                       ) AS details
-                FROM m1c_episode_v0 WHERE run_id = ?
-                ORDER BY trigger_bar_end_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-            shadow_events = connection.execute(
-                """
-                SELECT 'shadow_quote_selection' AS audit_type,
-                       episode_id || ':' || archetype || ':' ||
-                         contract_identity || ':' || horizon_minutes AS identity,
-                       target_timestamp_utc AS recorded_at_utc,
-                       payload_json AS details
-                FROM shadow_quote_outcome_v0 WHERE run_id = ?
-                ORDER BY target_timestamp_utc DESC LIMIT ?
-                """,
-                (run_id, limit),
-            ).fetchall()
-        combined = [
-            *self.raw_event_sample_v0(limit=min(limit, 100)),
-            *(
-                dict(row)
-                for row in (
-                    *partitions,
-                    *lifecycle,
-                    *model_events,
-                    *episode_events,
-                    *shadow_events,
-                )
-            ),
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        items = [dict(row) for row in visible]
+        next_cursor = None
+        if has_more and items:
+            next_cursor = self._audit_cursor(
+                recorded_at_utc=str(items[-1]["recorded_at_utc"]),
+                audit_id=int(items[-1]["audit_id"]),
+            )
+        return {
+            "items": items,
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+            "limit": limit,
+        }
+
+    def audit_events_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Compatibility wrapper over the indexed first audit page."""
+
+        return list(self.audit_event_page_v0(limit=limit)["items"])
+
+    def raw_event_sample_v0(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent raw-partition identities without opening Parquet files."""
+
+        return [
+            item
+            for item in self.audit_events_v0(limit=limit)
+            if item["audit_type"] == "raw_partition"
         ]
-        return sorted(
-            combined,
-            key=lambda item: str(item["recorded_at_utc"]),
-            reverse=True,
-        )[:limit]
+
+    def raw_event_detail_v0(
+        self,
+        content_hash: str,
+        *,
+        limit: int = 100,
+        maximum_input_rows: int = 50_000,
+    ) -> dict[str, Any] | None:
+        """Explicitly inspect one immutable partition with bounded columns and rows."""
+
+        if limit <= 0 or maximum_input_rows <= 0:
+            raise ValueError("raw-event detail limits must be positive")
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return None
+        with self._connection() as connection:
+            partition = connection.execute(
+                """
+                SELECT content_hash, event_type, symbol, session_date, file_path,
+                       row_count, minimum_timestamp_utc, maximum_timestamp_utc,
+                       complete, gap_count
+                FROM raw_partition_manifest_v0
+                WHERE run_id = ? AND content_hash = ?
+                """,
+                (run_id, content_hash),
+            ).fetchone()
+        if partition is None:
+            return None
+        path = Path(str(partition["file_path"]))
+        public_partition = dict(partition)
+        public_partition.pop("file_path")
+        if not path.is_file():
+            return {
+                "partition": public_partition,
+                "items": [],
+                "blocked_reason": "partition_unavailable",
+                "read_metrics": None,
+            }
+        try:
+            projection = read_parquet_tail(
+                path,
+                columns=(
+                    "event_id",
+                    "provider_timestamp_utc",
+                    "received_timestamp_utc",
+                    "source_sequence",
+                    "symbol",
+                    "bid",
+                    "ask",
+                    "last",
+                    "price",
+                    "size",
+                    "operation",
+                    "side",
+                    "position",
+                    "checkpoint",
+                    "market_data_type",
+                ),
+                maximum_rows=limit,
+                maximum_input_rows=maximum_input_rows,
+            )
+        except (OSError, ParquetProjectionLimitExceeded) as exc:
+            if isinstance(exc, ParquetProjectionLimitExceeded):
+                _record_parquet_metrics(exc.metrics)
+            metrics = (
+                exc.metrics.model_dump()
+                if isinstance(exc, ParquetProjectionLimitExceeded)
+                else None
+            )
+            return {
+                "partition": public_partition,
+                "items": [],
+                "blocked_reason": "projection_limit_exceeded",
+                "read_metrics": metrics,
+            }
+        _record_parquet_metrics(projection.metrics)
+        return {
+            "partition": public_partition,
+            "items": list(projection.rows),
+            "blocked_reason": None,
+            "read_metrics": projection.metrics.model_dump(),
+        }
 
     def quiet_state_status_v0(self) -> dict[str, Any]:
         """Project frozen quiet-state collection status without broker access."""

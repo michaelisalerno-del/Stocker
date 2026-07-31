@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from stocker_prospective.bars import CompletedBar
 from stocker_prospective.bundle import SCIENTIFIC_CLASSIFICATION
 from stocker_prospective.market_data import MarketDataBudgetSnapshot
+from stocker_prospective.migration_order import migration_plan
 
 
 class RecorderLeaseHeld(RuntimeError):
@@ -190,7 +191,7 @@ class ProspectiveRepository:
         """Apply package migrations exactly once."""
 
         migration_root = Path(__file__).with_name("migrations")
-        migration_paths = tuple(sorted(migration_root.glob("*.sql")))
+        migration_paths = tuple(item.path for item in migration_plan(migration_root))
         supported = {path.name for path in migration_paths}
         with self._connect() as connection:
             connection.execute(

@@ -103,6 +103,21 @@ class WebConfig(BaseModel):
     auth_cookie_name: str = "__Host-stocker_session"
     auth_cookie_secure: bool = True
     requests_per_minute: int = Field(default=120, ge=1, le=10_000)
+    quote_series_maximum_points: int = Field(default=600, ge=2, le=5_000)
+    parquet_projection_maximum_input_rows: int = Field(
+        default=50_000,
+        ge=100,
+        le=1_000_000,
+    )
+    audit_page_maximum_items: int = Field(default=200, ge=1, le=1_000)
+    replay_stop_timeout_seconds: float = Field(default=2.0, ge=0.05, le=30.0)
+    replay_maximum_records: int = Field(default=250_000, ge=1, le=5_000_000)
+    replay_maximum_materialized_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=512 * 1024 * 1024,
+    )
+    operational_projection_cache_seconds: float = Field(default=60.0, ge=0.0, le=300.0)
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
 
     @model_validator(mode="after")

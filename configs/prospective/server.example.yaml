@@ -55,6 +55,13 @@ web:
   auth_cookie_name: __Host-stocker_session
   auth_cookie_secure: true
   requests_per_minute: 240
+  quote_series_maximum_points: 600
+  parquet_projection_maximum_input_rows: 50000
+  audit_page_maximum_items: 200
+  replay_stop_timeout_seconds: 2.0
+  replay_maximum_records: 250000
+  replay_maximum_materialized_bytes: 67108864
+  operational_projection_cache_seconds: 60.0
   allowed_hosts:
     - 127.0.0.1
     - localhost

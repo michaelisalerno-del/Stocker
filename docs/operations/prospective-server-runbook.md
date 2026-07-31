@@ -818,14 +818,60 @@ the command line or exposing them to the web process.
 
 ## 7. Migrate the database
 
+Never migrate the active recorder database while the recorder, web process, or
+an evidence-replay worker is running. Before changing runtime state, require a
+proven terminal dashboard replay-controller state: `stopped`, `completed`, or
+`failed`. Abort on `running`, `stopping`, or `stop_failed`; `stop_failed` means
+the worker remained alive after the bounded join, and an OS process search
+cannot detect that in-process thread. Once the terminal state is proven, run:
+
 ```bash
-sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective db migrate \
-  --database /var/lib/stocker/prospective/prospective.sqlite3
-sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
-  'PRAGMA journal_mode; PRAGMA quick_check;'
+sudo systemctl is-active stocker-recorder.service
+pgrep -af '[s]tocker-prospective.*replay|[e]vidence_replay'
 ```
 
-Expected results include `wal` and `ok`.
+The recorder result must already be `inactive`, and `pgrep` must return no
+external replay worker. If either check differs, stop the deployment without
+changing runtime state. Once those checks pass, stop the web service and verify
+the complete application boundary is inactive:
+
+```bash
+sudo systemctl stop stocker-web.service
+sudo systemctl is-active stocker-recorder.service stocker-web.service
+pgrep -af '[s]tocker-prospective.*replay|[e]vidence_replay'
+```
+
+Both `systemctl` results must now be `inactive`, and `pgrep` must still return
+no worker. The web shutdown hook cancels and joins an in-process replay before
+the process exits. With both services stopped, create a checked backup using
+the currently installed release:
+
+```bash
+sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective db backup \
+  --database /var/lib/stocker/prospective/prospective.sqlite3 \
+  --destination /var/lib/stocker/backups
+```
+
+Record the emitted backup and manifest paths. Do not continue unless the
+command succeeds and reports `quick_check: ok`; the backup command uses
+SQLite's backup API and writes a SHA-256 manifest. The recorder stays stopped
+after a web-only deployment unless an operator separately authorizes a new
+recording session.
+
+Only after that preflight may the staged release apply its migrations:
+
+```bash
+sudo -u stocker /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective \
+  db migrate \
+  --database /var/lib/stocker/prospective/prospective.sqlite3
+sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
+  'PRAGMA journal_mode; PRAGMA quick_check; PRAGMA foreign_key_check;'
+```
+
+Expected results include `wal` and `ok`, with no foreign-key rows. Abort the
+release promotion if any validation fails. Do not restore a pre-migration
+backup automatically after a forward migration; retain it for an explicit
+operator-led recovery decision.
 
 Migration `0016_prospective_recorder_hardening_v1` is forward-only and retains
 all pre-hardening rows. It places the callback inbox, leases,
@@ -843,6 +889,26 @@ Migration `0021_opening_reversal_activation_run_binding_v1` separates
 operational run lineage from immutable V1/V1.1 activation identity. It
 preserves existing receipt rows as originals and permits only append-only,
 byte-identical audited bindings in a replacement run.
+
+Migrations `0022_web_read_projections_v0` and
+`0023_web_latest_state_v0` add only derived web indexes, bounded audit
+identities, latest raw-event counters, and current runtime-blocker projections.
+They do not rewrite immutable raw evidence or alter scientific rows.
+
+The migration ledger key is the complete filename. Already deployed
+filenames are never renamed. Historical duplicate prefixes `0011` and `0012`
+have an explicit frozen order; every new migration must use a unique,
+monotonically increasing four-digit prefix. Before packaging a release run:
+
+```bash
+uv run python scripts/check_prospective_migrations.py
+uv run pytest tests/test_migration_policy.py
+```
+
+The equivalence test builds one database from zero and upgrades another from
+the frozen through-`0021` migration-hash fixture, then compares schema
+objects, foreign keys, indexes, constraints visible in SQLite schema SQL, and
+the complete migration ledger.
 
 ## 8. Start deterministic replay mode
 
@@ -1183,11 +1249,25 @@ sudo journalctl -u stocker-recorder.service -f
 
 Do not paste the environment file into logs or support tickets.
 
-Every HTTP response includes a correlation ID. Production bodies remain
-generic; server logs contain the path, method, correlation ID, stable internal
-code, exception class, version, safe run ID, and stack trace. An
-evidence-validity error must also appear as a persisted operational incident,
-not only a log line.
+Every HTTP response includes the same value in `X-Request-ID` and
+`X-Correlation-ID`. Production bodies remain generic; unexpected failures
+return exactly `{"detail":"internal_error"}`. Structured server logs contain the request ID,
+method, route template, response status, elapsed milliseconds, safe run ID,
+exception class and stack trace, SQLite operation count/duration, Parquet
+files and row groups examined/read, input/output row counts, and replay
+execution ID. They never include authorization headers, cookies, tokens,
+credentials, full configuration, or raw market-data payloads.
+
+To correlate a browser response:
+
+```bash
+REQUEST_ID=REPLACE_WITH_X_REQUEST_ID
+sudo journalctl -u stocker-web.service --since "15 minutes ago" --no-pager \
+  | grep --fixed-strings "$REQUEST_ID"
+```
+
+An evidence-validity error must also appear as a persisted operational
+incident, not only a log line.
 
 ## 14. Graceful shutdown
 
@@ -1282,24 +1362,81 @@ Retain `pre-restore.sqlite3` until the restored run is independently audited.
 
 ## Replay ownership and dashboard polling
 
-Each replay start has a generation. `stop` changes only that generation to
-`STOPPING`, signals its private event, and joins for a configured bound. Do not
-start another replay while an earlier worker can still mutate state. If a
-worker ignores stop, the API exposes an explicit failed-stop state and clean
-stop is false; investigate the fixture/worker before retrying. A stale worker
-cannot publish completion, digest, counters, or errors into a newer
-generation. Replay has no broker object and broker mutation count remains
-zero.
+Each replay start has a UUID execution ID and monotonic generation. `stop`
+changes only that execution to `STOPPING`, signals its private event, and joins
+for the configured `replay_stop_timeout_seconds`. Do not start another replay
+while an earlier worker can still mutate state. If a worker ignores stop, the
+API exposes `stop_failed`, clean stop is false, and restart remains blocked. A
+stale worker cannot publish completion, digest, counters, or errors into a
+newer execution. Application shutdown calls the same bounded stop path.
+Replay has no broker object; both `ibkr_connections_attempted` and
+`broker_state_mutated` remain fixed at zero.
 
-The browser issues one `/api/dashboard-snapshot` request per interval, never
-overlaps requests, aborts an obsolete request, and pauses while hidden. Episode
-details load only when selection changes or an operator explicitly refreshes
-them. A section-level error leaves other snapshot sections visible. The UI
-shows the last successful snapshot and distinguishes stale from unavailable
-data. Its ledger section is bounded: the quiet capture table shows the latest
-persisted bid/ask for each selected quiet contract, while the finalized quiet
-table shows immutable per-leg quote evidence and conservative virtual P&L.
-Neither table represents an IBKR account or order.
+Replay global ordering is deliberately bounded rather than silently
+unbounded. The defaults are 250,000 records and 64 MiB of materialised
+canonical data. The preflight includes manifest row counts, SQLite scalar
+bytes, Parquet uncompressed row-group bytes, JSON expansion/depth, and encoded
+record bytes. Exceeding a limit produces a `blocked_replay_*_limit_exceeded`
+failure; raise a limit only after measuring a copied or synthetic fixture,
+never by trying the active database.
+
+The browser polling budget is:
+
+| Tier | Interval | Requests |
+| --- | --- | --- |
+| Fast | 15 seconds | One `/api/dashboard/summary`; no Parquet or historical tables. |
+| Slow | 90 seconds | Only lightweight endpoints associated with the visible screen. |
+| Manual/very slow | 300 seconds, screen activation, or explicit refresh | Audit, reports, concentration/source-transfer history, virtual ledgers, and completed shadow outcomes for that screen only. |
+
+The busiest scheduled screen is approximately 6.34 requests/minute for one
+visible tab and 12.67 for two tabs. The scheduler never overlaps refresh
+generations, explicit refresh cancels/supersedes prior work, and hidden tabs
+pause. The legacy full snapshot route is not automatically polled.
+
+Audit pages are capped by `audit_page_maximum_items` and use the opaque
+`next_cursor` from `/api/audit/events`; do not construct cursors manually.
+The list comes from the indexed SQLite audit-identity projection and does not
+open raw Parquet. Raw rows are read only through an explicit
+`/api/audit/raw-events/{content_hash}` request, from one partition, with
+projected columns and the configured input-row bound.
+
+Episode quote/depth views use only manifest partitions and row groups
+overlapping the episode window. They project required columns, fail closed if
+the input-row ceiling would be exceeded, deterministically sample chart
+points, and retain the first and last valid observations. The quiet capture
+table shows the latest persisted bid/ask for each selected quiet contract,
+while the finalized quiet table shows immutable per-leg quote evidence and
+conservative virtual P&L. Neither table represents an IBKR account or order.
+
+### Reliability measurement evidence
+
+The committed measurement is temporary and synthetic:
+
+```bash
+uv run python scripts/measure_prospective_web_reliability.py
+uv run pytest \
+  tests/test_fresh_episode_projection.py \
+  tests/test_parquet_read_projection.py \
+  tests/test_web_polling_contract.py
+```
+
+On 2026-07-31, 30 warmed sequential FastAPI `TestClient` summary requests had
+a 3.626 ms median and 3.782 ms p95 on the baseline synthetic database. After
+adding 10,000 synthetic manifest/audit-projection rows, the median was
+3.613 ms and p95 was 3.817 ms; response sizes were 29,343 and 29,366 bytes.
+This measures application projection cost on the test host, not network or
+production-host latency.
+
+The enlarged quote fixture contains 1,000 rows in ten row groups, including a
+100-row episode window and an unprojected 2 KiB payload column. The test reads
+one row group and seven required columns, examines 100 input rows, returns 100
+valid rows, and deterministically emits ten chart points with the first and
+last retained. The raw-tail fixture contains 2,000 rows in 40 row groups; a
+five-row request reads one 50-row group. Oversized row groups fail before the
+scanner runs. Static polling tests calculate 6.333 scheduled requests per
+minute on the busiest visible screen and verify that the fast function
+contains no audit, report, transfer, shadow-history, concentration, or episode
+detail path.
 
 ## Gap incident lifecycle
 

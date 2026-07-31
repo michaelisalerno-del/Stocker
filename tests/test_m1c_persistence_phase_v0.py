@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import stocker_prospective.evidence_replay as evidence_replay_module
 from stocker_prospective.activation import ProspectiveActivationLedger
 from stocker_prospective.contract import CLAIMS_BOUNDARY
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
@@ -407,6 +408,473 @@ def test_persisted_evidence_replay_reads_hashed_partitions_without_ibkr(
     assert first.digest == second.digest
     assert first.stage_counts == {"raw_market_event": 2}
     assert first.ibkr_connections_attempted == 0
+
+
+def test_persisted_evidence_replay_rejects_manifest_over_memory_bound_before_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "bounded-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="bounded-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    partition = store.write_events(
+        data_source="fake_ibkr",
+        events=(raw_event(1), raw_event(2)),
+        complete=True,
+    )
+    FrozenRecorderRepository(database).record_partition(
+        metadata,
+        data_source="fake_ibkr",
+        session_date=START.date(),
+        symbol="AAL",
+        event_type="underlying_level1_quote_event",
+        partition=partition,
+    )
+    with database._connect() as connection:
+        connection.execute(
+            "UPDATE raw_partition_manifest_v0 SET row_count = 1000 WHERE run_id = ?",
+            (metadata.run_id,),
+        )
+
+    parquet_opened = False
+
+    def fail_if_opened(_path: object) -> object:
+        nonlocal parquet_opened
+        parquet_opened = True
+        raise AssertionError("Parquet must not open after the manifest bound fails")
+
+    monkeypatch.setattr("pyarrow.parquet.ParquetFile", fail_if_opened)
+
+    with pytest.raises(
+        RuntimeError,
+        match="blocked_replay_record_limit_exceeded: estimated=1000 limit=100",
+    ):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+        )
+
+    assert parquet_opened is False
+
+
+def test_persisted_evidence_replay_rejects_uncompressed_byte_budget_before_decode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    database = ProspectiveRepository(tmp_path / "byte-bounded-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="byte-bounded-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    partition = store.write_events(
+        data_source="fake_ibkr",
+        events=(raw_event(1), raw_event(2)),
+        complete=True,
+    )
+    FrozenRecorderRepository(database).record_partition(
+        metadata,
+        data_source="fake_ibkr",
+        session_date=START.date(),
+        symbol="AAL",
+        event_type="underlying_level1_quote_event",
+        partition=partition,
+    )
+    original_parquet_file = pq.ParquetFile
+    decoded = False
+
+    class MetadataOnlyParquetFile:
+        def __init__(self, path: Path) -> None:
+            self._delegate = original_parquet_file(path)
+            self.metadata = self._delegate.metadata
+
+        def iter_batches(self, *, batch_size: int) -> object:
+            nonlocal decoded
+            decoded = True
+            raise AssertionError(f"byte-over-budget partition decoded with batch {batch_size}")
+
+    monkeypatch.setattr(pq, "ParquetFile", MetadataOnlyParquetFile)
+
+    with pytest.raises(
+        RuntimeError,
+        match="blocked_replay_byte_limit_exceeded",
+    ):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+            maximum_materialized_bytes=1,
+        )
+
+    assert decoded is False
+
+
+def test_persisted_evidence_replay_bounds_parquet_row_expansion_before_to_pylist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    database = ProspectiveRepository(tmp_path / "parquet-row-bounded-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="parquet-row-bounded-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    partition = store.write_events(
+        data_source="fake_ibkr",
+        events=(raw_event(1),),
+        complete=True,
+    )
+    FrozenRecorderRepository(database).record_partition(
+        metadata,
+        data_source="fake_ibkr",
+        session_date=START.date(),
+        symbol="AAL",
+        event_type="underlying_level1_quote_event",
+        partition=partition,
+    )
+    original_parquet_file = pq.ParquetFile
+    converted = False
+
+    class DenseRowBatch:
+        num_rows = 1
+        nbytes = 2_048
+
+        def slice(self, _offset: int, _length: int) -> DenseRowBatch:
+            return self
+
+        def to_pylist(self) -> list[dict[str, object]]:
+            nonlocal converted
+            converted = True
+            raise AssertionError("over-budget Parquet row reached to_pylist")
+
+    class DenseRowParquetFile:
+        def __init__(self, path: Path) -> None:
+            self._delegate = original_parquet_file(path)
+            self.metadata = self._delegate.metadata
+
+        def iter_batches(self, *, batch_size: int) -> object:
+            assert batch_size > 0
+            return iter((DenseRowBatch(),))
+
+    monkeypatch.setattr(pq, "ParquetFile", DenseRowParquetFile)
+
+    with pytest.raises(
+        RuntimeError,
+        match="blocked_replay_python_expansion_limit_exceeded: parquet_row",
+    ):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+            maximum_materialized_bytes=128 * 1_024,
+        )
+
+    assert converted is False
+
+
+def test_persisted_evidence_replay_rejects_oversized_sqlite_payload_before_decode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "sqlite-byte-bounded-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="sqlite-byte-bounded-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    with database._connect() as connection:
+        envelope_id = database._insert_envelope(connection, metadata)
+        connection.execute(
+            """
+            INSERT INTO m1c_checkpoint_v0(
+                envelope_id, run_id, symbol, session_date, checkpoint,
+                bar_start_utc, bar_end_utc, feature_as_of_utc, model_id,
+                model_version, model_hash, feature_hash, session_context_hash,
+                feature_values_json, probability, threshold, threshold_passed,
+                eligible, feature_freshness, missing_feature_count,
+                rejection_reasons_json, claims_json
+            ) VALUES (?, ?, 'AAL', '2026-07-24', 1, ?, ?, ?, 'M1C',
+                      'test', 'model-hash', 'feature-hash', 'context-hash',
+                      ?, 0.25, 0.20, 1, 1, 'fresh', 0, '[]', '{}')
+            """,
+            (
+                envelope_id,
+                metadata.run_id,
+                START.isoformat(),
+                (START + timedelta(minutes=5)).isoformat(),
+                (START + timedelta(minutes=5)).isoformat(),
+                json.dumps({"oversized": "x" * 16_384}),
+            ),
+        )
+
+    verification_called = False
+
+    def verification_must_not_run(*_args: object, **_kwargs: object) -> object:
+        nonlocal verification_called
+        verification_called = True
+        raise AssertionError("oversized SQLite payload reached M1C verification")
+
+    monkeypatch.setattr(
+        evidence_replay_module,
+        "_verify_m1c",
+        verification_must_not_run,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="blocked_replay_byte_limit_exceeded: sqlite_source_bytes=",
+    ):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+            maximum_materialized_bytes=1_024,
+        )
+
+    assert verification_called is False
+
+
+@pytest.mark.parametrize(
+    ("feature_values_json", "maximum_materialized_bytes", "error"),
+    [
+        (
+            json.dumps({"dense": [{"v": []} for _ in range(512)]}),
+            64 * 1_024,
+            "blocked_replay_json_expansion_limit_exceeded",
+        ),
+        (
+            '{"deep":' + ("[" * 65) + "0" + ("]" * 65) + "}",
+            1 * 1_024 * 1_024,
+            "blocked_replay_json_depth_limit_exceeded",
+        ),
+    ],
+)
+def test_persisted_evidence_replay_rejects_dense_or_deep_json_before_decode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    feature_values_json: str,
+    maximum_materialized_bytes: int,
+    error: str,
+) -> None:
+    database = ProspectiveRepository(tmp_path / f"{error}.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id=error,
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    with database._connect() as connection:
+        envelope_id = database._insert_envelope(connection, metadata)
+        connection.execute(
+            """
+            INSERT INTO m1c_checkpoint_v0(
+                envelope_id, run_id, symbol, session_date, checkpoint,
+                bar_start_utc, bar_end_utc, feature_as_of_utc, model_id,
+                model_version, model_hash, feature_hash, session_context_hash,
+                feature_values_json, probability, threshold, threshold_passed,
+                eligible, feature_freshness, missing_feature_count,
+                rejection_reasons_json, claims_json
+            ) VALUES (?, ?, 'AAL', '2026-07-24', 1, ?, ?, ?, 'M1C',
+                      'test', 'model-hash', 'feature-hash', 'context-hash',
+                      ?, 0.25, 0.20, 1, 1, 'fresh', 0, '[]', '{}')
+            """,
+            (
+                envelope_id,
+                metadata.run_id,
+                START.isoformat(),
+                (START + timedelta(minutes=5)).isoformat(),
+                (START + timedelta(minutes=5)).isoformat(),
+                feature_values_json,
+            ),
+        )
+
+    decoded = False
+
+    def decode_must_not_run(*_args: object, **_kwargs: object) -> object:
+        nonlocal decoded
+        decoded = True
+        raise AssertionError("over-budget JSON reached json.loads")
+
+    monkeypatch.setattr(evidence_replay_module.json, "loads", decode_must_not_run)
+
+    with pytest.raises(RuntimeError, match=error):
+        replay_persisted_evidence(
+            database_path=database.database_path,
+            run_id=metadata.run_id,
+            mode="accelerated",
+            speed=10.0,
+            episode_id=None,
+            m1c_feature_manifest_path=None,
+            m1c_threshold_path=None,
+            stop_event=threading.Event(),
+            maximum_records=100,
+            maximum_materialized_bytes=maximum_materialized_bytes,
+        )
+
+    assert decoded is False
+
+
+def test_persisted_evidence_replay_streams_parquet_batches_instead_of_full_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    database = ProspectiveRepository(tmp_path / "batch-replay.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="batch-replay",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    store = PartitionedEventStore(
+        root=tmp_path / "raw",
+        prospective_collection_start=START,
+        recorder_version="test",
+        contract_version="frozen-m1c-microstructure-recorder-v0",
+    )
+    partition = store.write_events(
+        data_source="fake_ibkr",
+        events=tuple(raw_event(index) for index in range(12)),
+        complete=True,
+    )
+    FrozenRecorderRepository(database).record_partition(
+        metadata,
+        data_source="fake_ibkr",
+        session_date=START.date(),
+        symbol="AAL",
+        event_type="underlying_level1_quote_event",
+        partition=partition,
+    )
+    original_parquet_file = pq.ParquetFile
+    batch_sizes: list[int] = []
+
+    class BatchOnlyParquetFile:
+        def __init__(self, path: Path) -> None:
+            self._delegate = original_parquet_file(path)
+            self.metadata = self._delegate.metadata
+
+        def read(self) -> object:
+            raise AssertionError("full Parquet table reads are forbidden during replay")
+
+        def iter_batches(self, *, batch_size: int) -> object:
+            batch_sizes.append(batch_size)
+            return self._delegate.iter_batches(batch_size=batch_size)
+
+    monkeypatch.setattr(pq, "ParquetFile", BatchOnlyParquetFile)
+
+    result = replay_persisted_evidence(
+        database_path=database.database_path,
+        run_id=metadata.run_id,
+        mode="accelerated",
+        speed=10.0,
+        episode_id=None,
+        m1c_feature_manifest_path=None,
+        m1c_threshold_path=None,
+        stop_event=threading.Event(),
+        maximum_records=100,
+    )
+
+    assert result.raw_events_replayed == 12
+    assert batch_sizes == [100]
+    assert result.ibkr_connections_attempted == 0
+    assert result.broker_state_mutated is False
 
 
 def test_phase_ledger_is_chronological_immutable_and_keeps_confirmation_closed(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -884,6 +885,37 @@ def test_production_errors_have_correlation_ids_and_generic_browser_payloads(
     assert unexpected["request_id"] == "test-correlation-123"
     assert "sqlite_duration_ms" in unexpected
     assert "parquet_files_examined" in unexpected
+
+
+def test_successful_requests_emit_structured_uvicorn_operational_logs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = seeded_app(tmp_path)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="uvicorn.error.stocker_prospective.web",
+    ):
+        response = client.get(
+            "/api/dashboard/summary",
+            headers={"x-request-id": "structured-success-test"},
+        )
+
+    assert response.status_code == 200
+    completed = next(
+        json.loads(record.message)
+        for record in caplog.records
+        if '"event":"request_completed"' in record.message
+    )
+    assert completed["request_id"] == "structured-success-test"
+    assert completed["route"] == "/api/dashboard/summary"
+    assert completed["response_status"] == 200
+    assert completed["run_id"] == "replay-run-001"
+    assert "elapsed_ms" in completed
+    assert "sqlite_duration_ms" in completed
+    assert "parquet_files_examined" in completed
+    assert "replay_execution_id" in completed
 
 
 def test_quiet_state_read_only_api_preserves_frozen_decision(tmp_path: Path) -> None:

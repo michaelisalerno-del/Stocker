@@ -49,7 +49,7 @@ from stocker_prospective.parity import FeatureParityError, load_feature_parity_r
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay_control import ReplayController, ReplayStartRequest
 
-LOGGER = logging.getLogger("stocker_prospective.web")
+LOGGER = logging.getLogger("uvicorn.error.stocker_prospective.web")
 
 
 def _active_bundle_projection(config: ProspectiveConfig) -> dict[str, Any]:

@@ -2,7 +2,9 @@
 
 import {
   DashboardPollCoordinator,
+  POLLING_POLICY,
   detailRequestPlan,
+  endpointsForScreen,
 } from "/assets/polling.mjs";
 
 const state = {
@@ -179,7 +181,12 @@ function subscriptionCapacity(kind) {
 
 function renderStatus() {
   const status = state.status;
-  const capabilities = state.capabilities;
+  const capabilities = state.capabilities || {
+    manifest: null,
+    scientific_recording_valid: false,
+    diagnostic_display_allowed: true,
+    required_market_data_type: "live",
+  };
   const manifest = capabilities.manifest || {};
   const noOrderChecks = state.health.no_order_checks || {};
   const noOrderVerified = noOrderChecks.aggregate_no_order_verdict === true;
@@ -1135,63 +1142,124 @@ function renderAudit() {
     `REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER ${clean(state.status.state).toUpperCase()} // IBKR CONNECTIONS ${replay.ibkr_connections_attempted || 0}`;
 }
 
-async function performRefresh({ refreshDetails = false, signal } = {}) {
-  const button = document.getElementById("refresh");
-  button.disabled = true;
-  button.textContent = "Reading…";
-  try {
-    const snapshot = await api("/api/dashboard-snapshot", {
-      signal,
-    });
-    const sections = snapshot.sections || {};
-    state.sectionErrors = snapshot.section_errors || {};
-    state.lastSnapshotAt = snapshot.snapshot_at_utc || null;
-    if (sections.health) state.health = sections.health;
-    if (sections.status) state.status = sections.status;
-    if (sections.capabilities) state.capabilities = sections.capabilities;
-    if (sections.universe) state.universe = sections.universe.items || [];
-    if (sections.episodes) state.episodes = sections.episodes.items || [];
-    if (sections.shadow) state.shadow = sections.shadow.items || [];
-    if (sections.virtual_ledgers) state.virtualLedgers = sections.virtual_ledgers;
-    if (sections.audit) state.audit = sections.audit.items || [];
-    if (sections.session_reports) {
-      state.sessionReports = sections.session_reports.items || [];
+function activeScreenId() {
+  return document.querySelector(".screen.is-active")?.id || "live-monitor";
+}
+
+function sectionErrorKey(path) {
+  return path
+    .split("?", 1)[0]
+    .replace(/^\/api\//, "")
+    .replaceAll("/", "_")
+    .replaceAll("-", "_");
+}
+
+function applySummary(summary) {
+  state.health = summary.health;
+  state.status = summary.recorder;
+  state.universe = summary.current_universe?.items || [];
+  state.lastSnapshotAt = summary.summary_at_utc || null;
+  delete state.sectionErrors.dashboard_summary;
+}
+
+function applyEndpoint(path, payload) {
+  const endpoint = path.split("?", 1)[0];
+  if (endpoint === "/api/recorder/capabilities") state.capabilities = payload;
+  else if (endpoint === "/api/market-data-budget") state.budget = payload;
+  else if (endpoint === "/api/episodes") state.episodes = payload.items || [];
+  else if (endpoint === "/api/shadow-outcomes") state.shadow = payload.items || [];
+  else if (endpoint === "/api/virtual-ledgers") state.virtualLedgers = payload;
+  else if (endpoint === "/api/audit/events") state.audit = payload.items || [];
+  else if (endpoint === "/api/recorder/session-reports") {
+    state.sessionReports = payload.items || [];
+  } else if (endpoint === "/api/quiet-state/status") state.quietStatus = payload;
+  else if (endpoint === "/api/quiet-state/universe") {
+    state.quietUniverse = payload.items || [];
+  } else if (endpoint === "/api/quiet-state/episodes") {
+    state.quietEpisodes = payload.items || [];
+  } else if (endpoint === "/api/quiet-state/shadow-structures") {
+    state.quietShadow = payload.items || [];
+  } else if (endpoint === "/api/quiet-state/session-quality") {
+    state.quietSessionQuality = payload.items || [];
+  } else if (endpoint === "/api/quiet-state/concentration-audit") {
+    state.concentrationAudit = payload;
+  } else if (endpoint === "/api/source-transfer") state.transfer = payload;
+  else if (endpoint === "/api/reports/daily") {
+    state.reportPackages = payload.items || [];
+  }
+  delete state.sectionErrors[sectionErrorKey(path)];
+}
+
+async function refreshFast(signal) {
+  const summary = await api("/api/dashboard/summary", { signal });
+  applySummary(summary);
+}
+
+async function refreshScreenTier(tier, screenId, signal) {
+  const paths = endpointsForScreen(tier, screenId);
+  const results = await Promise.allSettled(
+    paths.map(async (path) => [path, await api(path, { signal })]),
+  );
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      applyEndpoint(result.value[0], result.value[1]);
+      continue;
     }
-    if (sections.quiet_status) state.quietStatus = sections.quiet_status;
-    if (sections.quiet_universe) {
-      state.quietUniverse = sections.quiet_universe.items || [];
+    if (result.reason?.name === "AbortError" || result.reason?.status === 401) {
+      throw result.reason;
     }
-    if (sections.quiet_episodes) {
-      state.quietEpisodes = sections.quiet_episodes.items || [];
-    }
-    if (sections.quiet_shadow) {
-      state.quietShadow = sections.quiet_shadow.items || [];
-    }
-    if (sections.quiet_session_quality) {
-      state.quietSessionQuality = sections.quiet_session_quality.items || [];
-    }
-    if (sections.concentration_audit) {
-      state.concentrationAudit = sections.concentration_audit;
-    }
-    if (sections.budget) state.budget = sections.budget;
-    if (sections.transfer) state.transfer = sections.transfer;
-    if (sections.report_packages) {
-      state.reportPackages = sections.report_packages.items || [];
-    }
-    if (!state.health || !state.status || !state.capabilities) {
-      throw new Error("dashboard_core_sections_unavailable");
-    }
-    renderStatus();
-    renderUniverse();
-    renderEpisodeIndex();
-    renderShadow();
-    renderVirtualLedgers();
-    renderAudit();
+    const path = paths[results.indexOf(result)];
+    const key = sectionErrorKey(path);
+    state.sectionErrors[key] = {
+      error_code: `DASHBOARD_SECTION_${key.toUpperCase()}_UNAVAILABLE`,
+    };
+  }
+}
+
+function renderDashboard() {
+  if (!state.health || !state.status) return;
+  renderStatus();
+  renderUniverse();
+  renderEpisodeIndex();
+  renderShadow();
+  renderVirtualLedgers();
+  renderAudit();
+  if (state.quietStatus) {
     renderQuietUniverse();
     renderQuietEpisodeIndex();
-    renderQuietShadow();
-    renderConcentrationAudit();
-    renderBudgetTransfer();
+  }
+  renderQuietShadow();
+  renderConcentrationAudit();
+  renderBudgetTransfer();
+}
+
+async function performRefresh({
+  tier = "fast",
+  refreshDetails = false,
+  signal,
+} = {}) {
+  const button = document.getElementById("refresh");
+  const screenId = activeScreenId();
+  const showButtonBusy = refreshDetails;
+  if (showButtonBusy) {
+    button.disabled = true;
+    button.textContent = "Reading…";
+  }
+  try {
+    const tasks = [];
+    if (tier === "fast" || tier === "manual") tasks.push(refreshFast(signal));
+    if (tier === "slow" || tier === "manual") {
+      tasks.push(refreshScreenTier("slow", screenId, signal));
+    }
+    if (tier === "manual") {
+      tasks.push(refreshScreenTier("manual", screenId, signal));
+    }
+    await Promise.all(tasks);
+    if (!state.health || !state.status) {
+      throw new Error("dashboard_core_sections_unavailable");
+    }
+    renderDashboard();
+
     if (
       state.selectedEpisode
       && !state.episodes.some((item) => item.episode_id === state.selectedEpisode)
@@ -1208,25 +1276,25 @@ async function performRefresh({ refreshDetails = false, signal } = {}) {
       if (quietEpisodeController) quietEpisodeController.abort();
       state.selectedQuietEpisode = null;
     }
-    const legacyEpisodeToLoad = detailRequestPlan({
-      selectedId: state.selectedEpisode,
-      availableIds: state.episodes.map((item) => item.episode_id),
-      explicitRefresh: refreshDetails,
-    });
-    const quietEpisodeToLoad = detailRequestPlan({
-      selectedId: state.selectedQuietEpisode,
-      availableIds: state.quietEpisodes.map((item) => item.observation_id),
-      explicitRefresh: refreshDetails,
-    });
-    const legacyEvidence = legacyEpisodeToLoad
-      ? loadEpisode(legacyEpisodeToLoad)
-      : Promise.resolve();
-    const quietEvidence = quietEpisodeToLoad
-      ? loadQuietEpisode(quietEpisodeToLoad)
-      : Promise.resolve();
-    await Promise.all([legacyEvidence, quietEvidence]);
+    if (tier !== "fast" && ["signal-detail", "options-recorder"].includes(screenId)) {
+      const legacyEpisodeToLoad = detailRequestPlan({
+        selectedId: state.selectedEpisode,
+        availableIds: state.episodes.map((item) => item.episode_id),
+        explicitRefresh: refreshDetails,
+      });
+      if (legacyEpisodeToLoad) await loadEpisode(legacyEpisodeToLoad);
+    }
+    if (tier !== "fast" && screenId === "quiet-episode") {
+      const quietEpisodeToLoad = detailRequestPlan({
+        selectedId: state.selectedQuietEpisode,
+        availableIds: state.quietEpisodes.map((item) => item.observation_id),
+        explicitRefresh: refreshDetails,
+      });
+      if (quietEpisodeToLoad) await loadQuietEpisode(quietEpisodeToLoad);
+    }
+    const partial = Object.keys(state.sectionErrors).length > 0;
     document.getElementById("last-sync").textContent =
-      `${snapshot.partial ? "PARTIAL SNAPSHOT" : "SYNCHRONIZED"} ${clock(state.lastSnapshotAt)}`;
+      `${partial ? "PARTIAL SNAPSHOT" : "SYNCHRONIZED"} ${clock(state.lastSnapshotAt)}`;
   } catch (error) {
     if (error.name === "AbortError") return;
     const message = error.status === 401
@@ -1240,8 +1308,10 @@ async function performRefresh({ refreshDetails = false, signal } = {}) {
         ? `STALE SINCE ${clock(state.lastSnapshotAt)}`
         : `UNAVAILABLE ${new Date().toISOString()}`;
   } finally {
-    button.disabled = false;
-    button.textContent = "Refresh evidence";
+    if (showButtonBusy) {
+      button.disabled = false;
+      button.textContent = "Refresh evidence";
+    }
   }
 }
 
@@ -1250,12 +1320,38 @@ const polling = new DashboardPollCoordinator({
   isVisible: () => document.visibilityState === "visible",
 });
 
-function refreshAll({ refreshDetails = false } = {}) {
+let refreshAllPromise = null;
+
+function refreshAll({
+  tier = "fast",
+  refreshDetails = false,
+  supersede = false,
+} = {}) {
   if (refreshDetails) {
     if (episodeController) episodeController.abort();
     if (quietEpisodeController) quietEpisodeController.abort();
   }
-  return polling.refresh({ refreshDetails });
+  if (supersede) polling.cancelAll();
+  const pending = polling.refresh({
+    tier,
+    refreshDetails,
+    supersede,
+  });
+  refreshAllPromise = pending;
+  void pending.then(
+    () => {
+      if (refreshAllPromise === pending) refreshAllPromise = null;
+    },
+    () => {
+      if (refreshAllPromise === pending) refreshAllPromise = null;
+    },
+  );
+  return pending;
+}
+
+function refreshForScreenActivation(screenId) {
+  const tier = endpointsForScreen("manual", screenId).length ? "manual" : "slow";
+  return refreshAll({ tier, supersede: true });
 }
 
 async function controlReplay(action) {
@@ -1276,11 +1372,18 @@ async function controlReplay(action) {
 }
 
 document.querySelectorAll(".nav-item").forEach((button) => {
-  button.addEventListener("click", () => showScreen(button.dataset.screen));
+  button.addEventListener("click", () => {
+    showScreen(button.dataset.screen);
+    refreshForScreenActivation(button.dataset.screen);
+  });
 });
 document.getElementById("refresh").addEventListener(
   "click",
-  () => refreshAll({ refreshDetails: true }),
+  () => refreshAll({
+    tier: "manual",
+    refreshDetails: true,
+    supersede: true,
+  }),
 );
 document.getElementById("option-episode").addEventListener("change", (event) => {
   const episodeId = event.target.value;
@@ -1288,12 +1391,26 @@ document.getElementById("option-episode").addEventListener("change", (event) => 
 });
 document.getElementById("replay-start").addEventListener("click", () => controlReplay("start"));
 document.getElementById("replay-stop").addEventListener("click", () => controlReplay("stop"));
-refreshAll();
+refreshAll({ tier: "manual", supersede: true });
 setInterval(() => {
-  if (document.visibilityState === "visible") refreshAll();
-}, 15000);
+  if (document.visibilityState === "visible") refreshAll({ tier: "fast" });
+}, POLLING_POLICY.fastIntervalMs);
+setInterval(() => {
+  if (document.visibilityState === "visible") refreshAll({ tier: "slow" });
+}, POLLING_POLICY.slowIntervalMs);
+setInterval(() => {
+  if (document.visibilityState === "visible") refreshAll({ tier: "manual" });
+}, POLLING_POLICY.manualIntervalMs);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") polling.show();
+  if (document.visibilityState === "visible") {
+    const screenId = activeScreenId();
+    if (endpointsForScreen("manual", screenId).length) {
+      refreshAll({ tier: "manual", supersede: true });
+    } else {
+      refreshAll({ tier: "fast", supersede: true });
+      refreshAll({ tier: "slow" });
+    }
+  }
   else {
     polling.hide();
     if (episodeController) episodeController.abort();

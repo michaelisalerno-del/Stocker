@@ -10,13 +10,15 @@ import os
 import secrets
 import threading
 import time
+import uuid
 from collections import OrderedDict, defaultdict, deque
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +37,13 @@ from stocker_prospective.ibkr import (
     FORBIDDEN_BROKER_SURFACE,
     IBKRMarketDataAdapter,
     official_ibkr_api_projection,
+)
+from stocker_prospective.operational_logging import (
+    OperationLogFields,
+    RequestOperationMetrics,
+    begin_request_metrics,
+    reset_request_metrics,
+    structured_log,
 )
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.read_store import ProspectiveReadStore
@@ -98,26 +107,6 @@ def _parity_projection(config: ProspectiveConfig) -> dict[str, Any]:
             "counts": {},
             "report": None,
         }
-
-
-def _recorder_operational_status(
-    config: ProspectiveConfig,
-    lease: dict[str, Any] | None,
-) -> str:
-    if lease is None:
-        return "inactive"
-    try:
-        heartbeat = datetime.fromisoformat(str(lease["heartbeat_at_utc"]))
-    except (KeyError, TypeError, ValueError):
-        return "stale"
-    if heartbeat.tzinfo is None:
-        return "stale"
-    now = datetime.now(UTC)
-    if (now - heartbeat).total_seconds() > config.runtime.recorder_lease_stale_seconds:
-        return "stale"
-    if now < config.runtime.prospective_start_utc:
-        return "waiting_for_prospective_start"
-    return "active"
 
 
 def _json_artifact(path: Path | None) -> dict[str, Any] | None:
@@ -197,16 +186,19 @@ def _daily_report_packages(root: Path | None) -> list[dict[str, Any]]:
         return []
     packages: list[dict[str, Any]] = []
     for metadata_path in sorted(root.glob("????-??-??/package-*.json"), reverse=True):
-        payload = _json_artifact(metadata_path)
+        safe_metadata = _safe_contained_file(root, metadata_path)
+        if safe_metadata is None:
+            continue
+        payload = _json_artifact(safe_metadata)
         if payload is None:
             continue
         archive_name = str(payload.get("archive", ""))
-        archive = metadata_path.parent / archive_name
+        archive = _safe_contained_file(root, metadata_path.parent / archive_name)
         if (
             not archive_name
             or Path(archive_name).name != archive_name
+            or archive is None
             or archive.suffix != ".zip"
-            or not archive.is_file()
         ):
             continue
         packages.append(
@@ -217,6 +209,26 @@ def _daily_report_packages(root: Path | None) -> list[dict[str, Any]]:
             }
         )
     return packages
+
+
+def _safe_contained_file(root: Path, candidate: Path) -> Path | None:
+    """Resolve one regular file without following symlinked report components."""
+
+    try:
+        if root.is_symlink():
+            return None
+        relative = candidate.relative_to(root)
+        current = root
+        for component in relative.parts:
+            current = current / component
+            if current.is_symlink():
+                return None
+        resolved_root = root.resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=True)
+        resolved_candidate.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return resolved_candidate if resolved_candidate.is_file() else None
 
 
 def _path_exposes_forbidden_broker_resource(path: str) -> bool:
@@ -233,14 +245,44 @@ def _path_exposes_forbidden_broker_resource(path: str) -> bool:
                 "position",
                 "positions",
                 "trade",
+                "trades",
                 "buy",
+                "buys",
                 "sell",
+                "sells",
+                "broker",
+                "brokers",
+                "execution",
+                "executions",
                 "credential",
                 "credentials",
                 "upload",
+                "uploads",
             }
         )
     )
+
+
+class _OperationalProjectionCache:
+    """Small TTL cache for bounded filesystem and package safety checks."""
+
+    def __init__(self, *, ttl_seconds: float) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._lock = threading.Lock()
+        self._loaded_at = 0.0
+        self._value: dict[str, Any] | None = None
+
+    def get(self, loader: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._value is None
+                or self._ttl_seconds == 0.0
+                or now - self._loaded_at >= self._ttl_seconds
+            ):
+                self._value = loader()
+                self._loaded_at = now
+            return self._value
 
 
 def create_web_app(config: ProspectiveConfig) -> FastAPI:
@@ -248,6 +290,20 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
 
     validate_runtime_safety(config, object())
     store = ProspectiveReadStore(config.paths.database, run_id=config.runtime.run_id)
+    operational_projection_cache = _OperationalProjectionCache(
+        ttl_seconds=config.web.operational_projection_cache_seconds
+    )
+
+    def operational_artifacts() -> dict[str, Any]:
+        return operational_projection_cache.get(
+            lambda: {
+                "bundle": _active_bundle_projection(config),
+                "parity": _parity_projection(config),
+                "ibkr_api": official_ibkr_api_projection(),
+                "m1c_live_parity": _json_artifact(config.paths.m1c_live_parity_report),
+                "direction_live_parity": _json_artifact(config.paths.direction_live_parity_report),
+            }
+        )
 
     def run_replay(
         request: ReplayStartRequest,
@@ -269,9 +325,14 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 None if artifact_root is None else artifact_root / "causal_movement_threshold.json"
             ),
             stop_event=stop_event,
+            maximum_records=config.web.replay_maximum_records,
+            maximum_materialized_bytes=config.web.replay_maximum_materialized_bytes,
         )
 
-    replay_controller = ReplayController(runner=run_replay)
+    replay_controller = ReplayController(
+        runner=run_replay,
+        stop_join_timeout_seconds=config.web.replay_stop_timeout_seconds,
+    )
     static_root = Path(__file__).with_name("web_static")
     authentication_token: str | None = None
     if config.web.authentication_enabled:
@@ -288,6 +349,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         try:
             yield
         finally:
+            replay_controller.shutdown()
             store.close_anchor()
 
     app = FastAPI(
@@ -304,7 +366,17 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     maximum_rate_limit_identities = 4096
     replay_control_paths = {"/api/replay/start", "/api/replay/stop"}
 
-    def security_headers(correlation_id: str) -> dict[str, str]:
+    def route_template(request: Request) -> str:
+        route = request.scope.get("route")
+        return str(getattr(route, "path", request.url.path))
+
+    def operation_log_fields(request: Request) -> OperationLogFields:
+        metrics = getattr(request.state, "operation_metrics", None)
+        if isinstance(metrics, RequestOperationMetrics):
+            return metrics.log_fields()
+        return RequestOperationMetrics().log_fields()
+
+    def security_headers(request_id: str) -> dict[str, str]:
         return {
             "Cache-Control": "no-store",
             "Content-Security-Policy": (
@@ -314,137 +386,157 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
-            "X-Correlation-ID": correlation_id,
+            "X-Correlation-ID": request_id,
+            "X-Request-ID": request_id,
         }
 
     @app.middleware("http")
     async def security_boundary(request: Request, call_next: Any) -> Any:
-        supplied_correlation = request.headers.get("x-correlation-id", "")
-        correlation_id = (
-            supplied_correlation
-            if supplied_correlation
-            and len(supplied_correlation) <= 128
-            and all(character.isalnum() or character in "-_." for character in supplied_correlation)
-            else secrets.token_hex(16)
+        supplied_request_id = request.headers.get(
+            "x-request-id",
+            request.headers.get("x-correlation-id", ""),
         )
-        request.state.correlation_id = correlation_id
-
-        def secured(response: Any) -> Any:
-            response.headers.update(security_headers(correlation_id))
-            return response
-
-        if (
-            request.url.path.startswith("/api/")
-            and request.method not in {"GET", "HEAD", "OPTIONS"}
-            and not (request.method == "POST" and request.url.path in replay_control_paths)
-        ):
-            return secured(
-                JSONResponse(
+        request_id = (
+            supplied_request_id
+            if supplied_request_id
+            and len(supplied_request_id) <= 128
+            and all(character.isalnum() or character in "-_." for character in supplied_request_id)
+            else str(uuid.uuid4())
+        )
+        request.state.correlation_id = request_id
+        request.state.request_id = request_id
+        request.state.request_started_monotonic = time.monotonic()
+        metrics, metrics_token = begin_request_metrics()
+        request.state.operation_metrics = metrics
+        try:
+            response: Any | None = None
+            if (
+                request.url.path.startswith("/api/")
+                and request.method not in {"GET", "HEAD", "OPTIONS"}
+                and not (request.method == "POST" and request.url.path in replay_control_paths)
+            ):
+                response = JSONResponse(
                     status_code=404,
                     content={
                         "detail": "not_found",
-                        "correlation_id": correlation_id,
+                        "correlation_id": request_id,
                     },
                 )
-            )
-        if authentication_token is not None:
-            authorization = request.headers.get("authorization", "")
-            bearer = (
-                authorization.removeprefix("Bearer ").strip()
-                if authorization.startswith("Bearer ")
-                else ""
-            )
-            cookie = request.cookies.get(config.web.auth_cookie_name, "")
-            supplied = bearer or cookie
-            if not supplied or not secrets.compare_digest(supplied, authentication_token):
-                return secured(
-                    JSONResponse(
+            if response is None and authentication_token is not None:
+                authorization = request.headers.get("authorization", "")
+                bearer = (
+                    authorization.removeprefix("Bearer ").strip()
+                    if authorization.startswith("Bearer ")
+                    else ""
+                )
+                cookie = request.cookies.get(config.web.auth_cookie_name, "")
+                supplied = bearer or cookie
+                if not supplied or not secrets.compare_digest(
+                    supplied,
+                    authentication_token,
+                ):
+                    response = JSONResponse(
                         status_code=401,
                         content={
                             "detail": "authentication_required",
-                            "correlation_id": correlation_id,
+                            "correlation_id": request_id,
                         },
                         headers={"WWW-Authenticate": "Bearer"},
                     )
-                )
 
-        client_ip = "unknown" if request.client is None else request.client.host
-        if (
-            config.web.trust_proxy_headers
-            and client_ip in config.web.trusted_proxy_ips
-            and request.headers.get("x-forwarded-for")
-        ):
-            client_ip = request.headers["x-forwarded-for"].split(",", 1)[0].strip()
-        now = time.monotonic()
-        window = rate_windows.setdefault(client_ip, deque())
-        rate_windows.move_to_end(client_ip)
-        while len(rate_windows) > maximum_rate_limit_identities:
-            rate_windows.popitem(last=False)
-        while window and window[0] <= now - 60:
-            window.popleft()
-        if len(window) >= config.web.requests_per_minute:
-            return secured(
-                JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "rate_limit_exceeded",
-                        "correlation_id": correlation_id,
-                    },
-                )
+            if response is None:
+                client_ip = "unknown" if request.client is None else request.client.host
+                if (
+                    config.web.trust_proxy_headers
+                    and client_ip in config.web.trusted_proxy_ips
+                    and request.headers.get("x-forwarded-for")
+                ):
+                    client_ip = request.headers["x-forwarded-for"].split(",", 1)[0].strip()
+                now = time.monotonic()
+                window = rate_windows.setdefault(client_ip, deque())
+                rate_windows.move_to_end(client_ip)
+                while len(rate_windows) > maximum_rate_limit_identities:
+                    rate_windows.popitem(last=False)
+                while window and window[0] <= now - 60:
+                    window.popleft()
+                if len(window) >= config.web.requests_per_minute:
+                    response = JSONResponse(
+                        status_code=429,
+                        content={
+                            "detail": "rate_limit_exceeded",
+                            "correlation_id": request_id,
+                        },
+                    )
+                else:
+                    window.append(now)
+
+            if response is None:
+                response = await call_next(request)
+            elapsed_ms = (time.monotonic() - request.state.request_started_monotonic) * 1_000.0
+            request.state.elapsed_ms = elapsed_ms
+            response.headers.update(security_headers(request_id))
+            structured_log(
+                LOGGER,
+                event="request_completed",
+                request_id=request_id,
+                method=request.method,
+                route=route_template(request),
+                response_status=int(response.status_code),
+                elapsed_ms=round(elapsed_ms, 3),
+                run_id=config.runtime.run_id,
+                replay_execution_id=replay_controller.status().execution_id,
+                **operation_log_fields(request),
             )
-        window.append(now)
-        response = await call_next(request)
-        return secured(response)
+            return response
+        except Exception:
+            request.state.elapsed_ms = (
+                time.monotonic() - request.state.request_started_monotonic
+            ) * 1_000.0
+            raise
+        finally:
+            reset_request_metrics(metrics_token)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
         request: Request,
-        exc: RequestValidationError,
+        _exc: RequestValidationError,
     ) -> JSONResponse:
-        correlation_id = getattr(request.state, "correlation_id", secrets.token_hex(16))
-        LOGGER.warning(
-            "web_request_error path=%s method=%s correlation_id=%s "
-            "exception_class=%s error_code=%s version=%s run_id=%s",
-            request.url.path,
-            request.method,
-            correlation_id,
-            type(exc).__name__,
-            "WEB_INVALID_REQUEST",
-            config.runtime.app_version,
-            config.runtime.run_id,
-        )
-        return JSONResponse(
+        request_id = str(getattr(request.state, "request_id", uuid.uuid4()))
+        response = JSONResponse(
             status_code=422,
             content={
                 "detail": "invalid_request",
-                "correlation_id": correlation_id,
+                "correlation_id": request_id,
             },
-            headers=security_headers(correlation_id),
         )
+        response.headers.update(security_headers(request_id))
+        return response
 
     @app.exception_handler(Exception)
     async def production_error(request: Request, exc: Exception) -> JSONResponse:
-        correlation_id = getattr(request.state, "correlation_id", secrets.token_hex(16))
-        LOGGER.exception(
-            "web_request_error path=%s method=%s correlation_id=%s "
-            "exception_class=%s error_code=%s version=%s run_id=%s",
-            request.url.path,
-            request.method,
-            correlation_id,
-            type(exc).__name__,
-            "WEB_INTERNAL_ERROR",
-            config.runtime.app_version,
-            config.runtime.run_id,
-            exc_info=exc,
+        request_id = str(getattr(request.state, "request_id", uuid.uuid4()))
+        structured_log(
+            LOGGER,
+            event="unexpected_exception",
+            level=logging.ERROR,
+            exception=exc,
+            request_id=request_id,
+            method=request.method,
+            route=route_template(request),
+            response_status=500,
+            elapsed_ms=round(float(getattr(request.state, "elapsed_ms", 0.0)), 3),
+            run_id=config.runtime.run_id,
+            replay_execution_id=replay_controller.status().execution_id,
+            exception_class=type(exc).__name__,
+            error_code="WEB_INTERNAL_ERROR",
+            **operation_log_fields(request),
         )
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
-            content={
-                "detail": "internal_error",
-                "correlation_id": correlation_id,
-            },
-            headers=security_headers(correlation_id),
+            content={"detail": "internal_error"},
         )
+        response.headers.update(security_headers(request_id))
+        return response
 
     def no_order_safety_projection() -> dict[str, Any]:
         forbidden_methods = set(FORBIDDEN_BROKER_SURFACE)
@@ -547,9 +639,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             thresholds=operational_thresholds(config),
         )
         runtime_artifacts = store.runtime_artifact_verification()
-        bundle = _active_bundle_projection(config)
-        parity = _parity_projection(config)
-        ibkr_api = official_ibkr_api_projection()
+        artifacts = operational_artifacts()
+        bundle = artifacts["bundle"]
+        parity = artifacts["parity"]
+        ibkr_api = artifacts["ibkr_api"]
         parallel_credential_configured = bool(
             os.environ.get(config.parallel_validation.credential_status_env) == "1"
         )
@@ -696,15 +789,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "claims_boundary": claims_boundary(),
         }
 
-    @app.get("/api/recorder/status")
-    def recorder_status() -> dict[str, Any]:
+    def recorder_status_projection(
+        *,
+        include_gap_details: bool = True,
+    ) -> dict[str, Any]:
         status = store.recorder_status_v0(
             now=datetime.now(UTC),
             prospective_start_utc=config.runtime.prospective_start_utc,
             thresholds=operational_thresholds(config),
+            include_gap_details=include_gap_details,
         )
-        m1c_parity = _json_artifact(config.paths.m1c_live_parity_report)
-        direction_parity = _json_artifact(config.paths.direction_live_parity_report)
+        artifacts = operational_artifacts()
+        m1c_parity = artifacts["m1c_live_parity"]
+        direction_parity = artifacts["direction_live_parity"]
         completed_bar = status["latest_completed_bar"]
         last_completed = None if completed_bar is None else completed_bar["bar_end_utc"]
         next_expected = (
@@ -781,6 +878,88 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         )
         return status
 
+    @app.get("/api/recorder/status")
+    def recorder_status() -> dict[str, Any]:
+        return recorder_status_projection()
+
+    @app.get("/api/dashboard/summary")
+    def dashboard_summary() -> dict[str, Any]:
+        """Return only bounded, frequently changing primary-view projections."""
+
+        with store.snapshot_transaction():
+            status = recorder_status_projection(include_gap_details=False)
+            runtime = store.runtime_projection()
+            universe_projection = universe_live()
+
+        artifacts = operational_artifacts()
+        operational = status["operational"]
+        alert_codes = [item["stable_error_code"] for item in operational_alerts(operational)]
+        parallel_blocker = (
+            "blocked_missing_eodhd_server_token"
+            if config.parallel_validation.enabled
+            and os.environ.get(config.parallel_validation.credential_status_env) != "1"
+            else None
+        )
+        blocker_candidates = [
+            *(item["blocker_code"] for item in runtime["blockers"]),
+            *artifacts["bundle"]["blockers"],
+            *status["runtime_artifact_verification"]["blockers"],
+            artifacts["parity"]["blocker"],
+            (artifacts["ibkr_api"]["blocker"] if config.runtime.source == "ibkr" else None),
+            parallel_blocker,
+            *alert_codes,
+            (
+                None
+                if status["no_order_checks"]["aggregate_no_order_verdict"]
+                else "NO_ORDER_INVARIANT_FAILED"
+            ),
+        ]
+        blockers = list(dict.fromkeys(str(item) for item in blocker_candidates if item))
+        recorder_state = str(status["state"])
+        health_status = (
+            "blocked"
+            if blockers
+            else "healthy"
+            if recorder_state == "RECORDING_HEALTHY"
+            else "waiting"
+            if recorder_state in {"MARKET_CLOSED", "WAITING_FOR_PROSPECTIVE_START"}
+            else "degraded"
+        )
+        health_projection = {
+            "status": health_status,
+            "research_only": True,
+            "trading_status": "LIVE TRADING DISABLED",
+            "recorder": {
+                "mode": config.runtime.mode,
+                "run_id": status["run_id"],
+                "operational_status": recorder_state,
+                "operational": operational,
+            },
+            "blockers": blockers,
+            "no_order_path_verified": status["no_order_checks"]["aggregate_no_order_verdict"],
+            "no_order_checks": status["no_order_checks"],
+        }
+        return {
+            "summary_at_utc": datetime.now(UTC).isoformat(),
+            "health": health_projection,
+            "recorder": status,
+            "latest_checkpoints": {
+                "m1c": status["latest_checkpoint"],
+                "completed_bar": status["latest_completed_bar"],
+                "episode": status["latest_episode"],
+            },
+            "current_universe": universe_projection,
+            "capacity": status["capacity"],
+            "current_budget": {
+                "current_usage": status["subscriptions"],
+                "current_recorder_usage": sum(status["subscriptions"].values()),
+                "detail_refresh_tier": "slow",
+            },
+            "replay": status["replay"],
+            "current_blockers": blockers,
+            "claims_boundary": claims_boundary(),
+        }
+
     @app.get("/api/market-data-budget")
     def market_data_budget() -> dict[str, Any]:
         return {
@@ -841,8 +1020,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             or not archive_name.endswith(".zip")
         ):
             raise HTTPException(status_code=404, detail="not_found")
-        archive = root / session_date / archive_name
-        if not archive.is_file():
+        archive = _safe_contained_file(root, root / session_date / archive_name)
+        if archive is None:
             raise HTTPException(status_code=404, detail="not_found")
         return FileResponse(
             archive,
@@ -911,8 +1090,15 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     def episode_microstructure(episode_id: str) -> dict[str, Any]:
         return {
             "items": store.episode_microstructure_v0(episode_id),
-            "quote_series": store.episode_quote_series_v0(episode_id),
-            "latest_depth_snapshot": store.episode_depth_snapshot_v0(episode_id),
+            "quote_series": store.episode_quote_series_v0(
+                episode_id,
+                maximum_points=config.web.quote_series_maximum_points,
+                maximum_input_rows=config.web.parquet_projection_maximum_input_rows,
+            ),
+            "latest_depth_snapshot": store.episode_depth_snapshot_v0(
+                episode_id,
+                maximum_input_rows=config.web.parquet_projection_maximum_input_rows,
+            ),
             "label": "microstructure descriptive score",
             "direction_model_fitted": False,
             "claims_boundary": claims_boundary(),
@@ -995,11 +1181,48 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             quiet_capture_limit=quiet_capture_limit,
         )
 
-    @app.get("/api/audit/events")
-    def audit_events() -> dict[str, Any]:
+    def audit_events_projection(
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> dict[str, Any]:
+        if limit > config.web.audit_page_maximum_items:
+            raise HTTPException(status_code=422, detail="invalid_request")
+        try:
+            page = store.audit_event_page_v0(limit=limit, cursor=cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid_cursor") from exc
         return {
             "ordered": True,
-            "items": store.audit_events_v0(),
+            **page,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/audit/events")
+    def audit_events(
+        limit: int = Query(default=100, ge=1, le=1_000),
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        return audit_events_projection(limit=limit, cursor=cursor)
+
+    @app.get("/api/audit/raw-events/{content_hash}")
+    def raw_event_detail(
+        content_hash: str,
+        limit: int = Query(default=100, ge=1, le=100),
+    ) -> dict[str, Any]:
+        if len(content_hash) != 64 or any(
+            character not in "0123456789abcdef" for character in content_hash
+        ):
+            raise HTTPException(status_code=404, detail="not_found")
+        result = store.raw_event_detail_v0(
+            content_hash,
+            limit=limit,
+            maximum_input_rows=config.web.parquet_projection_maximum_input_rows,
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="not_found")
+        return {
+            **result,
             "claims_boundary": claims_boundary(),
         }
 
@@ -1089,7 +1312,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 quiet_limit=50,
                 quiet_capture_limit=25,
             ),
-            "audit": audit_events,
+            "audit": lambda: audit_events_projection(
+                limit=min(100, config.web.audit_page_maximum_items),
+                cursor=None,
+            ),
             "session_reports": recorder_session_reports,
             "quiet_status": quiet_state_status,
             "quiet_universe": quiet_state_universe,
@@ -1113,18 +1339,35 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                     errors[name] = {
                         "error_code": error_code,
                     }
-                    LOGGER.exception(
-                        "dashboard_section_error path=%s method=%s "
-                        "correlation_id=%s exception_class=%s error_code=%s "
-                        "version=%s run_id=%s",
-                        request.url.path,
-                        request.method,
-                        getattr(request.state, "correlation_id", "unavailable"),
-                        type(exc).__name__,
-                        error_code,
-                        config.runtime.app_version,
-                        config.runtime.run_id,
-                        exc_info=exc,
+                    structured_log(
+                        LOGGER,
+                        event="dashboard_section_error",
+                        level=logging.ERROR,
+                        exception=exc,
+                        request_id=str(getattr(request.state, "request_id", "unavailable")),
+                        method=request.method,
+                        route=route_template(request),
+                        response_status=200,
+                        elapsed_ms=round(
+                            (
+                                time.monotonic()
+                                - float(
+                                    getattr(
+                                        request.state,
+                                        "request_started_monotonic",
+                                        time.monotonic(),
+                                    )
+                                )
+                            )
+                            * 1_000.0,
+                            3,
+                        ),
+                        run_id=config.runtime.run_id,
+                        replay_execution_id=replay_controller.status().execution_id,
+                        exception_class=type(exc).__name__,
+                        error_code=error_code,
+                        section=name,
+                        **operation_log_fields(request),
                     )
         return {
             "snapshot_at_utc": snapshot_at.isoformat(),

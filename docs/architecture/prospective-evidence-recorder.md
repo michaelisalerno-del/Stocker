@@ -632,20 +632,59 @@ unresolved scientific gaps, connection interruptions, and optional-feed
 degradations. Legacy per-partition `gap_count` remains readable but is never
 summed into the new operational total.
 
-Every replay start owns a new operation generation and its own stop event.
-Only the active generation may publish counters, digest, completion, or error.
-Stop moves to `STOPPING`, signals that generation, and joins for a bound. A
-worker that ignores the bound produces an explicit failed-stop result and
-blocks a new start while it can still mutate state. Replays remain
-broker-isolated.
+Every replay start owns a unique execution ID, a monotonic generation, and its
+own stop event. Only that exact execution may publish counters, digest,
+completion, or error. Stop moves to `STOPPING`, signals that generation, and
+joins for a configured bound. A worker that ignores the bound produces an
+explicit failed-stop result and blocks a new start while it can still mutate
+state. Canonical global ordering is materialised only inside the configured
+record and byte limits (defaults: 250,000 records and 64 MiB). SQLite rows are
+streamed, Parquet is read in batches, source-size expansion is preflighted,
+and an oversized replay fails closed before unbounded allocation. Replays
+remain broker-isolated with zero IBKR connections and no broker mutation.
 
-The main browser poll is one read-only `GET /api/dashboard-snapshot` request
-inside one SQLite read transaction. Optional section failures carry stable
-section error codes while successful sections remain visible. The browser
-prevents overlap, aborts obsolete requests, pauses while hidden, and fetches
-episode detail only on selection or explicit refresh. It renders values with
-text nodes, preserves CSP/authentication/no-store controls, and distinguishes
-unavailable data from a stale last-successful snapshot.
+Browser refreshes are split into explicit tiers:
+
+- fast, every 15 seconds: one `GET /api/dashboard/summary` request containing
+  operational health, recorder status, latest checkpoints, current universe,
+  compact capacity, replay status, and blockers;
+- slow, every 90 seconds and only for the visible screen: recent episode
+  indexes, quiet-state summaries, budget details, capabilities, or
+  session-quality summaries;
+- manual/very slow, every 300 seconds, on screen activation, or on explicit
+  refresh: audit history, reports, concentration/source-transfer history,
+  virtual ledgers, and completed shadow outcomes.
+
+The scheduler permits only one refresh generation at a time. An explicit
+refresh aborts and supersedes older work, hidden tabs pause, and episode
+detail loads only on the relevant screen, selection, or explicit refresh.
+The busiest scheduled screen is 6.34 requests per minute per visible tab;
+two tabs are approximately 12.67 requests per minute, below the example
+240-request limit. The legacy full snapshot route is not scheduled.
+
+`fresh_episode` is not shorthand for an episode ID. The current run, current
+runtime session, symbol, latest completed checkpoint identity and timestamp,
+scientific-valid flag, and an active/scheduled/streaming/complete episode
+status must all match. `has_historical_episode`, `latest_episode_id`,
+`latest_episode_session_date`, and `latest_episode_status` remain separate so
+a prior-session episode stays visible without remaining fresh.
+
+Routine browser reads never open complete Parquet partitions. Quote and depth
+projections select only required columns and manifest partitions overlapping
+the episode window, use row-group statistics and timestamp predicates, impose
+an input-row ceiling, and deterministically retain first and last chart
+observations. Recent audit identities live in indexed
+`web_audit_projection_v0`; `/api/audit/events` uses an opaque cursor and hard
+page limit. Raw detail opens one named immutable partition only on explicit
+request and reads a bounded projected tail.
+
+Migration identity remains the complete deployed filename. Historical
+duplicate prefixes `0011` and `0012` have a frozen explicit order and are
+recognised forever. Every migration after that legacy set must use a unique,
+monotonically increasing four-digit prefix. Repository checks reject a new
+duplicate, and fresh-versus-through-`0021` upgrade tests compare tables,
+columns, indexes, foreign keys, constraints represented by SQLite schema SQL,
+and the complete ledger.
 
 Artifact verification is persisted by the recorder generation that actually
 found, loaded, schema-validated, hash-verified, contract-checked, and used each

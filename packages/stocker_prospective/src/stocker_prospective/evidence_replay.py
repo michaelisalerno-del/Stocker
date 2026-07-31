@@ -13,6 +13,8 @@ import json
 import sqlite3
 import threading
 from collections import Counter
+from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -61,6 +63,242 @@ _EVENT_MODELS: dict[str, type[RawEvent]] = {
     "five_minute_bar_event": FiveMinuteBarEvent,
 }
 
+_STAGE_SPECIFICATIONS = (
+    ("m1c_prediction", "m1c_checkpoint_v0", "bar_end_utc", "id"),
+    ("m1c_episode", "m1c_episode_v0", "trigger_bar_end_utc", "episode_id"),
+    (
+        "directional_archetype",
+        "direction_classification_v0",
+        "maximum_feature_timestamp_utc",
+        "id",
+    ),
+    (
+        "microstructure_summary",
+        "microstructure_summary_v0",
+        "window_end_utc",
+        "id",
+    ),
+    (
+        "promotion_decision",
+        "promotion_decision_v0",
+        "promotion_time_utc",
+        "id",
+    ),
+    (
+        "subscription_lifecycle",
+        "subscription_lifecycle_v0",
+        "started_at_utc",
+        "id",
+    ),
+    (
+        "option_contract",
+        "episode_option_contract_v0",
+        "recording_started_at_utc",
+        "id",
+    ),
+    (
+        "shadow_quote_outcome",
+        "shadow_quote_outcome_v0",
+        "target_timestamp_utc",
+        "id",
+    ),
+    (
+        "shadow_structure_outcome",
+        "shadow_structure_outcome_v0",
+        "id",
+        "id",
+    ),
+)
+
+_RAW_REPLAY_STAGES = frozenset(
+    {"raw_callback_envelope", "raw_market_event", "five_minute_bar", "option_quote"}
+)
+_ENCODED_RECORD_OVERHEAD_BYTES = 256
+_SQLITE_SCALAR_EXPANSION_FACTOR = 4
+_PYTHON_OBJECT_BYTES_PER_SOURCE_UNIT = 1_024
+_MAXIMUM_JSON_NESTING_DEPTH = 64
+
+
+@dataclass(frozen=True, slots=True)
+class _EncodedReplayRecord:
+    sort_key: tuple[str, str, str]
+    stage: str
+    episode_id: str | None
+    canonical_json: bytes
+
+
+@dataclass
+class _ReplayMaterializationBudget:
+    maximum_records: int
+    maximum_bytes: int
+    records: int = 0
+    materialized_bytes: int = 0
+    parquet_uncompressed_bytes: int = 0
+    sqlite_source_bytes: int = 0
+
+    def reserve_parquet_source(self, uncompressed_bytes: int) -> None:
+        projected = self.parquet_uncompressed_bytes + max(0, uncompressed_bytes)
+        if projected > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"parquet_uncompressed_bytes={projected} limit={self.maximum_bytes}"
+            )
+        self.parquet_uncompressed_bytes = projected
+
+    def reserve_sqlite_source(self, source_bytes: int) -> None:
+        projected = self.sqlite_source_bytes + (
+            max(0, source_bytes) * _SQLITE_SCALAR_EXPANSION_FACTOR
+        )
+        if projected > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"sqlite_source_bytes={projected} limit={self.maximum_bytes}"
+            )
+        self.sqlite_source_bytes = projected
+
+    def assert_python_expansion_safe(self, *, source: str, source_units: int) -> None:
+        projected = max(1, source_units) * _PYTHON_OBJECT_BYTES_PER_SOURCE_UNIT
+        if projected > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_python_expansion_limit_exceeded: "
+                f"{source} source_units={source_units} "
+                f"allowance={projected} limit={self.maximum_bytes}"
+            )
+
+    def assert_json_decoding_safe(self, documents: tuple[str, ...]) -> None:
+        source_characters = 0
+        for document in documents:
+            nesting_depth = _json_nesting_depth(document)
+            if nesting_depth > _MAXIMUM_JSON_NESTING_DEPTH:
+                raise RuntimeError(
+                    "blocked_replay_json_depth_limit_exceeded: "
+                    f"depth={nesting_depth} limit={_MAXIMUM_JSON_NESTING_DEPTH}"
+                )
+            source_characters += len(document)
+        projected = source_characters * _PYTHON_OBJECT_BYTES_PER_SOURCE_UNIT
+        if projected > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_json_expansion_limit_exceeded: "
+                f"source_characters={source_characters} "
+                f"allowance={projected} limit={self.maximum_bytes}"
+            )
+
+    def reserve_auxiliary_identity(self, identity: str) -> None:
+        next_bytes = (
+            self.materialized_bytes + len(identity.encode()) + _ENCODED_RECORD_OVERHEAD_BYTES
+        )
+        if next_bytes > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"materialized_bytes={next_bytes} limit={self.maximum_bytes}"
+            )
+        self.materialized_bytes = next_bytes
+
+    def encode(self, record: dict[str, Any]) -> _EncodedReplayRecord:
+        next_records = self.records + 1
+        if next_records > self.maximum_records:
+            raise RuntimeError(
+                "blocked_replay_record_limit_exceeded: "
+                f"actual>{self.maximum_records} limit={self.maximum_records}"
+            )
+        available_bytes = (
+            self.maximum_bytes - self.materialized_bytes - _ENCODED_RECORD_OVERHEAD_BYTES
+        )
+        upper_bound = _json_encoding_upper_bound(
+            record,
+            stop_after=max(0, available_bytes),
+        )
+        if available_bytes < 0 or upper_bound > available_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"canonical_json_upper_bound={upper_bound} "
+                f"available={max(0, available_bytes)}"
+            )
+        canonical_json = json.dumps(
+            record,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode()
+        next_bytes = self.materialized_bytes + len(canonical_json) + _ENCODED_RECORD_OVERHEAD_BYTES
+        if next_bytes > self.maximum_bytes:
+            raise RuntimeError(
+                "blocked_replay_byte_limit_exceeded: "
+                f"materialized_bytes={next_bytes} limit={self.maximum_bytes}"
+            )
+        payload = record.get("payload")
+        episode_id = payload.get("episode_id") if isinstance(payload, dict) else None
+        encoded = _EncodedReplayRecord(
+            sort_key=(
+                str(record["timestamp"]),
+                str(record["stage"]),
+                str(record["identity"]),
+            ),
+            stage=str(record["stage"]),
+            episode_id=None if episode_id is None else str(episode_id),
+            canonical_json=canonical_json,
+        )
+        self.records = next_records
+        self.materialized_bytes = next_bytes
+        return encoded
+
+
+def _json_encoding_upper_bound(value: object, *, stop_after: int) -> int:
+    """Conservatively bound canonical JSON bytes before allocating the string."""
+
+    total = 0
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if item is None:
+            total += 4
+        elif isinstance(item, bool):
+            total += 5
+        elif isinstance(item, str):
+            total += len(item) * 12 + 2
+        elif isinstance(item, (int, float)):
+            total += len(str(item)) + 2
+        elif isinstance(item, dict):
+            total += 2 + max(0, len(item) - 1) + len(item)
+            for key, nested in item.items():
+                pending.append(str(key))
+                pending.append(nested)
+        elif isinstance(item, (list, tuple)):
+            total += 2 + max(0, len(item) - 1)
+            pending.extend(item)
+        else:
+            total += len(str(item)) * 12 + 2
+        if total > stop_after:
+            return total
+    return total
+
+
+def _json_nesting_depth(document: str) -> int:
+    """Measure JSON container depth without allocating decoded containers."""
+
+    depth = 0
+    maximum_depth = 0
+    in_string = False
+    escaped = False
+    for character in document:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            maximum_depth = max(maximum_depth, depth)
+        elif character in "]}":
+            depth = max(0, depth - 1)
+    return maximum_depth
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -70,8 +308,29 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _decode_json_columns(row: dict[str, Any]) -> dict[str, Any]:
+def _decode_json_columns(
+    row: dict[str, Any],
+    *,
+    budget: _ReplayMaterializationBudget,
+) -> dict[str, Any]:
     decoded = dict(row)
+    json_documents = tuple(
+        value
+        for name, value in decoded.items()
+        if isinstance(value, str)
+        and (
+            name.endswith("_json")
+            or name
+            in {
+                "conditions",
+                "original_payload",
+                "quote_attributes",
+                "snapshot",
+                "stream_owner",
+            }
+        )
+    )
+    budget.assert_json_decoding_safe(json_documents)
     for name, value in tuple(decoded.items()):
         if isinstance(value, str) and (
             name.endswith("_json")
@@ -103,21 +362,74 @@ def _timestamp(value: object) -> datetime:
     return result.astimezone(UTC)
 
 
-def _raw_sort_key(event: RawEvent) -> tuple[datetime, int, int, str]:
-    return (
-        event.ordering_timestamp,
-        event.received_monotonic_ns,
-        event.source_sequence,
-        event.event_id,
+def _raw_replay_record(event: RawEvent) -> dict[str, Any]:
+    return {
+        "stage": (
+            "raw_callback_envelope"
+            if isinstance(event, RawCallbackEnvelopeEvent)
+            else "five_minute_bar"
+            if isinstance(event, FiveMinuteBarEvent)
+            else "option_quote"
+            if isinstance(event, OptionQuoteEvent)
+            else "raw_market_event"
+        ),
+        "timestamp": event.ordering_timestamp.isoformat(),
+        "identity": event.event_id,
+        "payload": event.model_dump(mode="json"),
+    }
+
+
+def _estimated_record_count(connection: sqlite3.Connection, *, run_id: str) -> int:
+    raw_row = connection.execute(
+        """
+        SELECT COALESCE(SUM(row_count), 0)
+        FROM raw_partition_manifest_v0
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    estimated = int(raw_row[0])
+    for _stage, table, _timestamp_column, _identity_column in _STAGE_SPECIFICATIONS:
+        count_row = connection.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE run_id = ?",  # noqa: S608
+            (run_id,),
+        ).fetchone()
+        estimated += int(count_row[0])
+    return estimated
+
+
+def _sqlite_source_bytes(
+    connection: sqlite3.Connection,
+    *,
+    table: str,
+    run_id: str,
+) -> int:
+    """Measure run-scoped SQLite payload bytes without transferring row payloads."""
+
+    columns = [
+        str(row[1])
+        for row in connection.execute(  # noqa: S608 - fixed internal table contract
+            f'PRAGMA table_info("{table}")'
+        )
+    ]
+    byte_expression = " + ".join(
+        f'COALESCE(LENGTH(CAST("{column}" AS BLOB)), 0)' for column in columns
     )
+    row = connection.execute(
+        f'SELECT COALESCE(SUM({byte_expression}), 0) FROM "{table}" '  # noqa: S608
+        "WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    return int(row[0])
 
 
-def _load_raw_events(
+def _load_raw_records(
     connection: sqlite3.Connection,
     *,
     run_id: str,
     stop_event: threading.Event,
-) -> tuple[tuple[RawEvent, ...], int]:
+    budget: _ReplayMaterializationBudget,
+) -> tuple[list[_EncodedReplayRecord], int]:
     try:
         import pyarrow.parquet as pq
     except ImportError as exc:
@@ -130,9 +442,10 @@ def _load_raw_events(
         ORDER BY minimum_timestamp_utc, content_hash
         """,
         (run_id,),
-    ).fetchall()
-    events: list[RawEvent] = []
+    )
+    records: list[_EncodedReplayRecord] = []
     mismatches = 0
+    batch_size = min(1_024, budget.maximum_records)
     for manifest in manifests:
         if stop_event.is_set():
             break
@@ -144,71 +457,53 @@ def _load_raw_events(
         model = _EVENT_MODELS.get(event_type)
         if model is None:
             raise ValueError(f"unsupported replay raw event type: {event_type}")
-        table = pq.ParquetFile(path).read()  # type: ignore[no-untyped-call]
-        for raw in table.to_pylist():
-            events.append(model.model_validate(_decode_json_columns(dict(raw))))
-    return tuple(sorted(events, key=_raw_sort_key)), mismatches
+        parquet_file = pq.ParquetFile(path)  # type: ignore[no-untyped-call]
+        uncompressed_bytes = sum(
+            parquet_file.metadata.row_group(index).total_byte_size
+            for index in range(parquet_file.metadata.num_row_groups)
+        )
+        budget.reserve_parquet_source(uncompressed_bytes)
+        for batch in parquet_file.iter_batches(  # type: ignore[no-untyped-call]
+            batch_size=batch_size
+        ):
+            for row_index in range(batch.num_rows):
+                if stop_event.is_set():
+                    break
+                row_batch = batch.slice(row_index, 1)
+                source_units = int(row_batch.nbytes) + int(getattr(row_batch, "num_columns", 1))
+                budget.assert_python_expansion_safe(
+                    source="parquet_row",
+                    source_units=source_units,
+                )
+                raw = row_batch.to_pylist()[0]
+                event = model.model_validate(
+                    _decode_json_columns(
+                        dict(raw),
+                        budget=budget,
+                    )
+                )
+                records.append(budget.encode(_raw_replay_record(event)))
+            if stop_event.is_set():
+                break
+    return records, mismatches
 
 
 def _stage_rows(
     connection: sqlite3.Connection,
     *,
     run_id: str,
-) -> tuple[dict[str, Any], ...]:
-    specifications = (
-        ("m1c_prediction", "m1c_checkpoint_v0", "bar_end_utc", "id"),
-        ("m1c_episode", "m1c_episode_v0", "trigger_bar_end_utc", "episode_id"),
-        (
-            "directional_archetype",
-            "direction_classification_v0",
-            "maximum_feature_timestamp_utc",
-            "id",
-        ),
-        (
-            "microstructure_summary",
-            "microstructure_summary_v0",
-            "window_end_utc",
-            "id",
-        ),
-        (
-            "promotion_decision",
-            "promotion_decision_v0",
-            "promotion_time_utc",
-            "id",
-        ),
-        (
-            "subscription_lifecycle",
-            "subscription_lifecycle_v0",
-            "started_at_utc",
-            "id",
-        ),
-        (
-            "option_contract",
-            "episode_option_contract_v0",
-            "recording_started_at_utc",
-            "id",
-        ),
-        (
-            "shadow_quote_outcome",
-            "shadow_quote_outcome_v0",
-            "target_timestamp_utc",
-            "id",
-        ),
-        (
-            "shadow_structure_outcome",
-            "shadow_structure_outcome_v0",
-            "id",
-            "id",
-        ),
-    )
-    rows: list[dict[str, Any]] = []
-    for stage, table, timestamp_column, identity_column in specifications:
+    budget: _ReplayMaterializationBudget,
+) -> Iterator[dict[str, Any]]:
+    for stage, table, timestamp_column, identity_column in _STAGE_SPECIFICATIONS:
         selected = connection.execute(
             f"SELECT * FROM {table} WHERE run_id = ?",  # noqa: S608 - fixed table contract
             (run_id,),
-        ).fetchall()
+        )
         for selected_row in selected:
-            payload = _decode_json_columns(dict(selected_row))
+            payload = _decode_json_columns(
+                dict(selected_row),
+                budget=budget,
+            )
             raw_timestamp = payload.get(timestamp_column)
             if raw_timestamp is None:
                 raw_timestamp = payload.get("id", 0)
@@ -217,15 +512,12 @@ def _stage_rows(
                 if isinstance(raw_timestamp, int)
                 else _timestamp(raw_timestamp).isoformat()
             )
-            rows.append(
-                {
-                    "stage": stage,
-                    "timestamp": timestamp,
-                    "identity": str(payload.get(identity_column)),
-                    "payload": payload,
-                }
-            )
-    return tuple(rows)
+            yield {
+                "stage": stage,
+                "timestamp": timestamp,
+                "identity": str(payload.get(identity_column)),
+                "payload": payload,
+            }
 
 
 def _verify_m1c(
@@ -233,6 +525,8 @@ def _verify_m1c(
     *,
     run_id: str,
     runtime: FrozenM1CRuntime | None,
+    stop_event: threading.Event,
+    budget: _ReplayMaterializationBudget,
 ) -> tuple[int, int, float]:
     rows = connection.execute(
         """
@@ -241,15 +535,19 @@ def _verify_m1c(
         ORDER BY symbol, session_date, checkpoint
         """,
         (run_id,),
-    ).fetchall()
+    )
     probability_mismatches = 0
     episode_mismatches = 0
     maximum_difference = 0.0
     tracker = FreshEpisodeTracker()
     replayed_episode_ids: set[str] = set()
     for row in rows:
+        if stop_event.is_set():
+            return 0, 0, 0.0
         payload = dict(row)
-        features = json.loads(str(payload["feature_values_json"]))
+        raw_features = str(payload["feature_values_json"])
+        budget.assert_json_decoding_safe((raw_features,))
+        features = json.loads(raw_features)
         if runtime is not None:
             score = runtime.score(
                 symbol=str(payload["symbol"]),
@@ -273,17 +571,39 @@ def _verify_m1c(
             probability=float(payload["probability"]),
             eligible=bool(payload["eligible"]),
         )
-        if decision.fresh_episode and decision.episode_id is not None:
+        if (
+            decision.fresh_episode
+            and decision.episode_id is not None
+            and decision.episode_id not in replayed_episode_ids
+        ):
+            budget.reserve_auxiliary_identity(decision.episode_id)
             replayed_episode_ids.add(decision.episode_id)
-    persisted_episode_ids = {
-        str(row["episode_id"])
-        for row in connection.execute(
-            "SELECT episode_id FROM m1c_episode_v0 WHERE run_id = ?",
-            (run_id,),
-        ).fetchall()
-    }
-    episode_mismatches = len(replayed_episode_ids.symmetric_difference(persisted_episode_ids))
+    for row in connection.execute(
+        "SELECT episode_id FROM m1c_episode_v0 WHERE run_id = ?",
+        (run_id,),
+    ):
+        if stop_event.is_set():
+            return 0, 0, 0.0
+        persisted_episode_id = str(row["episode_id"])
+        if persisted_episode_id in replayed_episode_ids:
+            replayed_episode_ids.remove(persisted_episode_id)
+        else:
+            episode_mismatches += 1
+    episode_mismatches += len(replayed_episode_ids)
     return probability_mismatches, episode_mismatches, maximum_difference
+
+
+def _canonical_records_digest(records: list[_EncodedReplayRecord]) -> str:
+    """Hash the bounded canonical JSON records without another full-size string."""
+
+    digest = hashlib.sha256()
+    digest.update(b"[")
+    for index, record in enumerate(records):
+        if index:
+            digest.update(b",")
+        digest.update(record.canonical_json)
+    digest.update(b"]")
+    return digest.hexdigest()
 
 
 def replay_persisted_evidence(
@@ -296,11 +616,26 @@ def replay_persisted_evidence(
     m1c_feature_manifest_path: str | Path | None,
     m1c_threshold_path: str | Path | None,
     stop_event: threading.Event,
+    maximum_records: int = 250_000,
+    maximum_materialized_bytes: int = 64 * 1024 * 1024,
 ) -> EvidenceReplayResult:
-    """Replay one immutable evidence run without constructing broker connectivity."""
+    """Replay one immutable evidence run without constructing broker connectivity.
+
+    Canonical global ordering requires materialising canonical record bytes.
+    Record count, Parquet uncompressed bytes, and encoded bytes all fail closed
+    before their configured bounds are exceeded.
+    """
 
     if speed <= 0.0:
         raise ValueError("replay speed must be positive")
+    if maximum_records <= 0:
+        raise ValueError("maximum_records must be positive")
+    if maximum_materialized_bytes <= 0:
+        raise ValueError("maximum_materialized_bytes must be positive")
+    budget = _ReplayMaterializationBudget(
+        maximum_records=maximum_records,
+        maximum_bytes=maximum_materialized_bytes,
+    )
     uri = f"file:{Path(database_path).resolve()}?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
         connection.row_factory = sqlite3.Row
@@ -324,10 +659,33 @@ def replay_persisted_evidence(
                 episode_identity_mismatches=0,
                 maximum_floating_difference=0.0,
             )
-        raw_events, partition_mismatches = _load_raw_events(
+        estimated_records = _estimated_record_count(connection, run_id=selected_run)
+        if estimated_records > maximum_records:
+            raise RuntimeError(
+                "blocked_replay_record_limit_exceeded: "
+                f"estimated={estimated_records} limit={maximum_records}"
+            )
+        sqlite_tables = tuple(
+            dict.fromkeys(
+                (
+                    "raw_partition_manifest_v0",
+                    *(table for _stage, table, _timestamp, _identity in _STAGE_SPECIFICATIONS),
+                )
+            )
+        )
+        for table in sqlite_tables:
+            budget.reserve_sqlite_source(
+                _sqlite_source_bytes(
+                    connection,
+                    table=table,
+                    run_id=selected_run,
+                )
+            )
+        raw_records, partition_mismatches = _load_raw_records(
             connection,
             run_id=selected_run,
             stop_event=stop_event,
+            budget=budget,
         )
         runtime = None
         if m1c_feature_manifest_path is not None and m1c_threshold_path is not None:
@@ -342,6 +700,8 @@ def replay_persisted_evidence(
             connection,
             run_id=selected_run,
             runtime=runtime,
+            stop_event=stop_event,
+            budget=budget,
         )
         if partition_mismatches or probability_mismatches or episode_mismatches:
             raise ValueError(
@@ -349,68 +709,33 @@ def replay_persisted_evidence(
                 f"partitions={partition_mismatches},"
                 f"m1c={probability_mismatches},episodes={episode_mismatches}"
             )
-        stage_rows = list(_stage_rows(connection, run_id=selected_run))
+        for stage_row in _stage_rows(
+            connection,
+            run_id=selected_run,
+            budget=budget,
+        ):
+            if stop_event.is_set():
+                break
+            raw_records.append(budget.encode(stage_row))
 
-    raw_records = [
-        {
-            "stage": (
-                "raw_callback_envelope"
-                if isinstance(event, RawCallbackEnvelopeEvent)
-                else "five_minute_bar"
-                if isinstance(event, FiveMinuteBarEvent)
-                else "option_quote"
-                if isinstance(event, OptionQuoteEvent)
-                else "raw_market_event"
-            ),
-            "timestamp": event.ordering_timestamp.isoformat(),
-            "identity": event.event_id,
-            "payload": event.model_dump(mode="json"),
-        }
-        for event in raw_events
-    ]
-    records = [*raw_records, *stage_rows]
+    records = raw_records
     if mode == "episode_only":
         if not episode_id:
             raise ValueError("episode-only replay requires episode_id")
-        records = [
-            item for item in records if item["payload"].get("episode_id") in {None, episode_id}
-        ]
-    records.sort(
-        key=lambda item: (
-            item["timestamp"],
-            item["stage"],
-            item["identity"],
-        )
-    )
+        records = [item for item in records if item.episode_id in {None, episode_id}]
+    records.sort(key=lambda item: item.sort_key)
     if mode == "step":
         records = records[:1]
     if stop_event.is_set():
         records = []
-    canonical = json.dumps(
-        records,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    )
-    counts = Counter(str(item["stage"]) for item in records)
+    counts = Counter(item.stage for item in records)
     return EvidenceReplayResult(
         run_id=selected_run,
         mode=mode,
         records_replayed=len(records),
-        raw_events_replayed=sum(
-            1
-            for item in records
-            if item["stage"]
-            in {
-                "raw_callback_envelope",
-                "raw_market_event",
-                "five_minute_bar",
-                "option_quote",
-            }
-        ),
+        raw_events_replayed=sum(1 for item in records if item.stage in _RAW_REPLAY_STAGES),
         stage_counts=dict(sorted(counts.items())),
-        digest=hashlib.sha256(canonical.encode()).hexdigest(),
+        digest=_canonical_records_digest(records),
         raw_partition_hash_mismatches=partition_mismatches,
         m1c_probability_mismatches=probability_mismatches,
         episode_identity_mismatches=episode_mismatches,

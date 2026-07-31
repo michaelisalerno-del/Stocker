@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sqlite3
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -50,7 +52,9 @@ def config(
     *,
     authenticated: bool = False,
     parallel_enabled: bool = False,
+    concentration_audit_root: Path | None = None,
 ) -> ProspectiveConfig:
+    audit_root = concentration_audit_root or (tmp_path / "shared/synthetic-concentration-audit")
     return ProspectiveConfig.model_validate(
         {
             "paths": {
@@ -61,12 +65,7 @@ def config(
                     tmp_path / "shared/twenty-session-transfer-report.json"
                 ),
                 "feature_parity_report": str(ROOT / "configs/prospective/feature-parity-m1.json"),
-                "quiet_state_concentration_audit_root": str(
-                    ROOT
-                    / "research/options-feasibility"
-                    / "20260727-m1c-quiet-state-concentration-audit-v0"
-                    / "artifacts/primary"
-                ),
+                "quiet_state_concentration_audit_root": str(audit_root),
             },
             "runtime": {
                 "mode": "shadow",
@@ -102,8 +101,13 @@ def config(
     )
 
 
-def seeded_app(tmp_path: Path, *, authenticated: bool = False) -> TestClient:
-    cfg = config(tmp_path, authenticated=authenticated)
+def seeded_app(
+    tmp_path: Path,
+    *,
+    authenticated: bool = False,
+    app_config: ProspectiveConfig | None = None,
+) -> TestClient:
+    cfg = app_config or config(tmp_path, authenticated=authenticated)
     run_deterministic_replay(
         ReplaySettings(
             database_path=cfg.paths.database,
@@ -303,22 +307,43 @@ def test_audit_events_skip_raw_partitions_the_web_identity_cannot_read(
     )
 
 
+def test_audit_events_are_bounded_and_cursor_paginated(tmp_path: Path) -> None:
+    client = seeded_app(tmp_path)
+
+    first = client.get("/api/audit/events", params={"limit": 2})
+
+    assert first.status_code == 200
+    first_page = first.json()
+    assert len(first_page["items"]) <= 2
+    assert first_page["limit"] == 2
+    if first_page["has_more"]:
+        assert first_page["next_cursor"]
+        second = client.get(
+            "/api/audit/events",
+            params={"limit": 2, "cursor": first_page["next_cursor"]},
+        )
+        assert second.status_code == 200
+        first_ids = {item["audit_id"] for item in first_page["items"]}
+        second_ids = {item["audit_id"] for item in second.json()["items"]}
+        assert first_ids.isdisjoint(second_ids)
+    assert (
+        client.get(
+            "/api/audit/events",
+            params={"limit": 2, "cursor": "malformed"},
+        ).status_code
+        == 422
+    )
+
+
 def test_configured_artifact_path_does_not_suppress_runtime_verification_blockers(
     tmp_path: Path,
 ) -> None:
+    artifact_root = tmp_path / "synthetic-frozen-artifacts"
+    artifact_root.mkdir()
     cfg = config(tmp_path).model_copy(
         update={
             "paths": config(tmp_path).paths.model_copy(
-                update={
-                    "frozen_m1c_artifact_root": (
-                        ROOT
-                        / "research"
-                        / "directional-readiness"
-                        / "20260726-stock-local-directional-archetypes-v0"
-                        / "artifacts"
-                        / "primary"
-                    )
-                }
+                update={"frozen_m1c_artifact_root": artifact_root}
             )
         }
     )
@@ -355,11 +380,16 @@ def test_lease_without_active_recorder_generation_is_inactive(
         stale_after=timedelta(seconds=cfg.runtime.recorder_lease_stale_seconds),
     )
 
-    health = TestClient(create_web_app(cfg)).get("/api/health").json()
+    client = TestClient(create_web_app(cfg))
+    health = client.get("/api/health").json()
+    status = client.get("/api/recorder/status").json()
+    summary = client.get("/api/dashboard/summary").json()
 
     assert health["recorder"]["lease"]["owner_id"] == "server-instance:recorder-process"
     assert health["recorder"]["operational_status"] == "INACTIVE"
     assert health["recorder"]["operational"]["reason_code"] == "NO_ACTIVE_RECORDER_GENERATION"
+    assert status["state"] == health["recorder"]["operational_status"]
+    assert summary["recorder"]["state"] == status["state"]
     with sqlite3.connect(cfg.paths.database) as connection:
         assert connection.execute("SELECT count(*) FROM prospective_run").fetchone() == (0,)
 
@@ -431,10 +461,19 @@ def test_no_order_account_threshold_or_upload_endpoint_exists(tmp_path: Path) ->
         "position",
         "positions",
         "trade",
+        "trades",
         "buy",
+        "buys",
         "sell",
+        "sells",
         "upload",
+        "uploads",
         "credential",
+        "credentials",
+        "broker",
+        "brokers",
+        "execution",
+        "executions",
     }
     assert not any(
         forbidden_segments.intersection(segment for segment in path.lower().split("/") if segment)
@@ -468,8 +507,10 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
     assert "retrospective oracle" not in page.text.lower()
     script = client.get("/assets/app.js").text
     polling = client.get("/assets/polling.mjs").text
-    assert 'api("/api/dashboard-snapshot"' in script
-    assert "/api/quiet-state/universe" not in script
+    assert 'api("/api/dashboard/summary"' in script
+    assert 'fastEndpoints: Object.freeze(["/api/dashboard/summary"])' in polling
+    assert "/api/dashboard-snapshot" not in script
+    assert "/api/quiet-state/universe" in polling
     assert "DashboardPollCoordinator" in script
     assert "detailRequestPlan" in script
     assert "new AbortController()" in polling
@@ -506,6 +547,46 @@ def test_frozen_recorder_dashboard_and_read_only_api_surface_are_exposed(
         )
         assert response.status_code == 200
         assert response.json()["claims_boundary"] == claims_boundary()
+
+
+def test_web_lifespan_stops_running_replay_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = config(tmp_path)
+    seeded_app(tmp_path)
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def cooperative_replay(**kwargs: object) -> SimpleNamespace:
+        stop_event = kwargs["stop_event"]
+        assert isinstance(stop_event, threading.Event)
+        started.set()
+        assert stop_event.wait(2)
+        stopped.set()
+        return SimpleNamespace(
+            records_replayed=0,
+            raw_events_replayed=0,
+            digest="shutdown",
+            stage_counts={},
+            maximum_floating_difference=0.0,
+            ibkr_connections_attempted=0,
+            broker_state_mutated=False,
+        )
+
+    monkeypatch.setattr(
+        "stocker_prospective.web.replay_persisted_evidence",
+        cooperative_replay,
+    )
+    with TestClient(create_web_app(cfg)) as client:
+        response = client.post(
+            "/api/replay/start",
+            json={"mode": "accelerated"},
+        )
+        assert response.status_code == 200
+        assert started.wait(1)
+
+    assert stopped.wait(1)
 
 
 def test_dashboard_snapshot_is_one_consistent_projection(tmp_path: Path) -> None:
@@ -545,6 +626,46 @@ def test_dashboard_snapshot_is_one_consistent_projection(tmp_path: Path) -> None
     assert ledgers["quiet_state"]["capture_item_limit"] == 25
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-correlation-id"]
+
+
+def test_dashboard_summary_is_compact_consistent_and_never_reads_parquet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = seeded_app(tmp_path)
+
+    def forbidden_parquet_read(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("fast summary attempted a Parquet read")
+
+    monkeypatch.setattr(
+        "stocker_prospective.read_store.read_parquet_window",
+        forbidden_parquet_read,
+    )
+    monkeypatch.setattr(
+        "stocker_prospective.read_store.read_parquet_tail",
+        forbidden_parquet_read,
+    )
+
+    response = client.get("/api/dashboard/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {
+        "health",
+        "recorder",
+        "latest_checkpoints",
+        "current_universe",
+        "capacity",
+        "current_budget",
+        "replay",
+        "current_blockers",
+    } <= payload.keys()
+    assert payload["recorder"]["state"] == payload["health"]["recorder"]["operational_status"]
+    assert payload["recorder"]["gap_details_included"] is False
+    assert "audit" not in payload
+    assert "report_packages" not in payload
+    assert "shadow" not in payload
+    assert response.headers["x-request-id"]
 
 
 def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> None:
@@ -598,6 +719,7 @@ def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> N
 def test_optional_snapshot_section_failure_preserves_other_sections(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     cfg = config(tmp_path)
     seeded_app(tmp_path)
@@ -612,7 +734,11 @@ def test_optional_snapshot_section_failure_preserves_other_sections(
     )
     client = TestClient(create_web_app(cfg))
 
-    response = client.get("/api/dashboard-snapshot")
+    with caplog.at_level("ERROR"):
+        response = client.get(
+            "/api/dashboard-snapshot",
+            headers={"x-request-id": "snapshot-section-test"},
+        )
 
     assert response.status_code == 200
     payload = response.json()
@@ -623,6 +749,16 @@ def test_optional_snapshot_section_failure_preserves_other_sections(
     assert payload["section_errors"]["quiet_session_quality"] == {
         "error_code": "DASHBOARD_SECTION_QUIET_SESSION_QUALITY_UNAVAILABLE",
     }
+    logged = next(
+        json.loads(record.message)
+        for record in caplog.records
+        if '"event":"dashboard_section_error"' in record.message
+    )
+    assert logged["request_id"] == "snapshot-section-test"
+    assert logged["route"] == "/api/dashboard-snapshot"
+    assert logged["section"] == "quiet_session_quality"
+    assert logged["exception_class"] == "RuntimeError"
+    assert "sqlite_duration_ms" in logged
 
 
 @pytest.mark.parametrize("observed_hash", [None, "b" * 64])
@@ -734,18 +870,44 @@ def test_production_errors_have_correlation_ids_and_generic_browser_payloads(
         )
 
     assert response.status_code == 500
-    assert response.json() == {
-        "detail": "internal_error",
-        "correlation_id": "test-correlation-123",
-    }
+    assert response.json() == {"detail": "internal_error"}
     assert response.headers["x-correlation-id"] == "test-correlation-123"
-    assert "WEB_INTERNAL_ERROR" in caplog.text
-    assert "path=/api/universe" in caplog.text
-    assert "exception_class=RuntimeError" in caplog.text
+    assert response.headers["x-request-id"] == "test-correlation-123"
+    unexpected = next(
+        json.loads(record.message)
+        for record in caplog.records
+        if '"event":"unexpected_exception"' in record.message
+    )
+    assert unexpected["error_code"] == "WEB_INTERNAL_ERROR"
+    assert unexpected["route"] == "/api/universe"
+    assert unexpected["exception_class"] == "RuntimeError"
+    assert unexpected["request_id"] == "test-correlation-123"
+    assert "sqlite_duration_ms" in unexpected
+    assert "parquet_files_examined" in unexpected
 
 
 def test_quiet_state_read_only_api_preserves_frozen_decision(tmp_path: Path) -> None:
-    client = seeded_app(tmp_path)
+    audit_root = tmp_path / "synthetic-concentration-audit"
+    audit_root.mkdir()
+    artifacts = {
+        "decision.json": {
+            "decision": "blocked_insufficient_low_tail_support",
+            "gate_passed": False,
+        },
+        "stress_month_concentration_explanation.json": {
+            "failed_stress_month": "2025-10",
+            "exact_failed_share": 0.3709677419354839,
+        },
+        "surprise_concentration_explanation.json": {"synthetic_fixture": True},
+        "small_count_feasibility.json": {"synthetic_fixture": True},
+    }
+    for filename, payload in artifacts.items():
+        (audit_root / filename).write_text(
+            json.dumps(payload),
+            encoding="utf-8",
+        )
+    cfg = config(tmp_path, concentration_audit_root=audit_root)
+    client = seeded_app(tmp_path, app_config=cfg)
 
     for path in (
         "/api/quiet-state/status",
@@ -804,6 +966,13 @@ def test_daily_chatgpt_report_package_is_listed_and_downloadable(
         client.get(f"/api/reports/daily/{session.isoformat()}/../prospective.sqlite3").status_code
         == 404
     )
+    report_root = cfg.paths.prospective_report_root
+    assert report_root is not None
+    outside_archive = tmp_path / "outside-report.zip"
+    outside_archive.write_bytes(b"not a report package")
+    symlink_name = "chatgpt-report-package-symlink.zip"
+    (report_root / session.isoformat() / symlink_name).symlink_to(outside_archive)
+    assert client.get(f"/api/reports/daily/{session.isoformat()}/{symlink_name}").status_code == 404
 
 
 def test_web_sqlite_connections_cannot_write_domain_records(tmp_path: Path) -> None:
@@ -1084,6 +1253,39 @@ def test_optional_auth_protects_browser_and_api_with_secure_cookie_support(
         assert cookie_authorized.status_code == 200
     finally:
         os.environ.pop("STOCKER_WEB_TEST_TOKEN", None)
+
+
+def test_trusted_host_middleware_rejects_unconfigured_hosts(tmp_path: Path) -> None:
+    client = seeded_app(tmp_path)
+
+    rejected = client.get(
+        "/api/config/public",
+        headers={"host": "untrusted.example"},
+    )
+    allowed = client.get(
+        "/api/config/public",
+        headers={"host": "testserver"},
+    )
+
+    assert rejected.status_code == 400
+    assert allowed.status_code == 200
+
+
+def test_rate_limit_is_enforced_after_configured_request_budget(
+    tmp_path: Path,
+) -> None:
+    seeded_app(tmp_path)
+    baseline = config(tmp_path)
+    cfg = baseline.model_copy(
+        update={"web": baseline.web.model_copy(update={"requests_per_minute": 3})}
+    )
+    client = TestClient(create_web_app(cfg))
+
+    responses = [client.get("/api/config/public") for _ in range(4)]
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 429]
+    assert responses[-1].json()["detail"] == "rate_limit_exceeded"
+    assert responses[-1].headers["x-request-id"]
 
 
 def test_production_errors_do_not_leak_stack_traces(tmp_path: Path) -> None:

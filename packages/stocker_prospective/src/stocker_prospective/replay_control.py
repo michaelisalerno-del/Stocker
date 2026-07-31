@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -29,6 +30,7 @@ class ReplayControlState(BaseModel):
         "failed",
         "stop_failed",
     ]
+    execution_id: str | None = None
     generation: int = Field(ge=0)
     mode: str | None
     speed: float | None
@@ -45,8 +47,8 @@ class ReplayControlState(BaseModel):
     error: str | None = None
     termination_reason: str | None = None
     stop_clean: bool | None = None
-    ibkr_connections_attempted: int = 0
-    broker_state_mutated: bool = False
+    ibkr_connections_attempted: Literal[0] = 0
+    broker_state_mutated: Literal[False] = False
 
 
 ReplayRunner = Callable[[ReplayStartRequest, threading.Event], Any]
@@ -99,11 +101,13 @@ class ReplayController:
             self._worker = None
             self._generation += 1
             generation = self._generation
+            execution_id = str(uuid.uuid4())
             self._active_request = request
             self._stop_event = threading.Event()
             started_at = datetime.now(UTC)
             self._state = ReplayControlState(
                 state="running",
+                execution_id=execution_id,
                 generation=generation,
                 mode=request.mode,
                 speed=request.speed,
@@ -116,7 +120,7 @@ class ReplayController:
             started = self._state
             self._worker = threading.Thread(
                 target=self._run,
-                args=(generation, request, self._stop_event),
+                args=(generation, execution_id, request, self._stop_event),
                 name=f"stocker-evidence-replay-{generation}",
                 daemon=True,
             )
@@ -142,20 +146,26 @@ class ReplayController:
     def _run(
         self,
         generation: int,
+        execution_id: str,
         request: ReplayStartRequest,
         stop_event: threading.Event,
     ) -> None:
         try:
             result = self._runner(request, stop_event)
+            if int(getattr(result, "ibkr_connections_attempted", 0)) != 0 or bool(
+                getattr(result, "broker_state_mutated", False)
+            ):
+                raise RuntimeError("blocked_replay_broker_isolation_violation")
         except Exception as exc:
             with self._lock:
-                if generation != self._generation:
+                if generation != self._generation or execution_id != self._state.execution_id:
                     return
                 if self._state.state not in {"running", "stopping"}:
                     return
                 failed_at = datetime.now(UTC)
                 self._state = ReplayControlState(
                     state="failed",
+                    execution_id=execution_id,
                     generation=generation,
                     mode=request.mode,
                     speed=request.speed,
@@ -171,7 +181,7 @@ class ReplayController:
             return
 
         with self._lock:
-            if generation != self._generation:
+            if generation != self._generation or execution_id != self._state.execution_id:
                 return
             if self._state.state not in {"running", "stopping"}:
                 return
@@ -179,6 +189,7 @@ class ReplayController:
             stopped = self._state.state == "stopping" or stop_event.is_set()
             self._state = ReplayControlState(
                 state="stopped" if stopped else "completed",
+                execution_id=execution_id,
                 generation=generation,
                 mode=request.mode,
                 speed=request.speed,
@@ -196,6 +207,7 @@ class ReplayController:
         with self._lock:
             worker = self._worker
             generation = self._generation
+            execution_id = self._state.execution_id
             if worker is None or not worker.is_alive():
                 if self._state.state == "stopping":
                     stopped_at = datetime.now(UTC)
@@ -227,7 +239,7 @@ class ReplayController:
         worker.join(timeout=self._stop_join_timeout_seconds)
 
         with self._lock:
-            if generation != self._generation:
+            if generation != self._generation or execution_id != self._state.execution_id:
                 return self._state
             if worker.is_alive():
                 failed_at = datetime.now(UTC)
@@ -258,6 +270,11 @@ class ReplayController:
     def status(self) -> ReplayControlState:
         with self._lock:
             return self._state
+
+    def shutdown(self) -> ReplayControlState:
+        """Cancel and bounded-join an active replay during application shutdown."""
+
+        return self.stop()
 
 
 __all__ = ["ReplayController", "ReplayControlState", "ReplayStartRequest"]

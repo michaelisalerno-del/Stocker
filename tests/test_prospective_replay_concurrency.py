@@ -75,6 +75,7 @@ def test_old_worker_cannot_overwrite_new_generation(
         target=controller._run,
         args=(
             active.generation - 1,
+            "stale-execution",
             ReplayStartRequest(mode="episode_only", episode_id="stale"),
             threading.Event(),
         ),
@@ -167,3 +168,94 @@ def test_repeated_stop_is_idempotent() -> None:
     assert first == second
     assert second.state == "stopped"
     assert second.termination_reason == "stop_requested"
+
+
+def test_immediate_restart_is_rejected_while_stop_is_joining_worker() -> None:
+    started = threading.Event()
+    cancellation_seen = threading.Event()
+    release = threading.Event()
+
+    def runner(
+        _request: ReplayStartRequest,
+        stop_event: threading.Event,
+    ) -> SimpleNamespace:
+        started.set()
+        assert stop_event.wait(1)
+        cancellation_seen.set()
+        release.wait(1)
+        return result("stopped")
+
+    controller = ReplayController(runner=runner, stop_join_timeout_seconds=1)
+    controller.start(ReplayStartRequest())
+    assert started.wait(1)
+    stopping = threading.Thread(target=controller.stop)
+    stopping.start()
+    assert cancellation_seen.wait(1)
+
+    with pytest.raises(ValueError, match="still stopping"):
+        controller.start(ReplayStartRequest())
+
+    release.set()
+    stopping.join(1)
+    assert not stopping.is_alive()
+    assert controller.status().state == "stopped"
+
+
+def test_worker_exception_is_failed_and_preserves_broker_isolation() -> None:
+    def runner(
+        _request: ReplayStartRequest,
+        _stop_event: threading.Event,
+    ) -> SimpleNamespace:
+        raise RuntimeError("synthetic replay failure")
+
+    controller = ReplayController(runner=runner)
+    started = controller.start(ReplayStartRequest())
+    join_worker(controller)
+    failed = controller.status()
+
+    assert failed.state == "failed"
+    assert failed.execution_id == started.execution_id
+    assert failed.error == "REPLAY_WORKER_EXCEPTION:RuntimeError"
+    assert failed.ibkr_connections_attempted == 0
+    assert failed.broker_state_mutated is False
+
+
+def test_broker_isolation_violation_fails_closed() -> None:
+    def runner(
+        _request: ReplayStartRequest,
+        _stop_event: threading.Event,
+    ) -> SimpleNamespace:
+        unsafe = result()
+        unsafe.ibkr_connections_attempted = 1
+        return unsafe
+
+    controller = ReplayController(runner=runner)
+    controller.start(ReplayStartRequest())
+    join_worker(controller)
+
+    assert controller.status().state == "failed"
+    assert controller.status().ibkr_connections_attempted == 0
+    assert controller.status().broker_state_mutated is False
+
+
+def test_shutdown_cancels_and_joins_running_worker() -> None:
+    started = threading.Event()
+
+    def runner(
+        _request: ReplayStartRequest,
+        stop_event: threading.Event,
+    ) -> SimpleNamespace:
+        started.set()
+        assert stop_event.wait(1)
+        return result("shutdown")
+
+    controller = ReplayController(runner=runner, stop_join_timeout_seconds=1)
+    controller.start(ReplayStartRequest())
+    assert started.wait(1)
+
+    stopped = controller.shutdown()
+
+    assert stopped.state == "stopped"
+    assert stopped.stop_clean is True
+    assert stopped.ibkr_connections_attempted == 0
+    assert stopped.broker_state_mutated is False

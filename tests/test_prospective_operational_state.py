@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
+import pytest
+
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.operational_state import (
@@ -135,6 +137,99 @@ def test_old_historical_run_without_operational_generation_is_inactive(
     observed = projection(value)
 
     assert observed.state is RecorderOperationalState.INACTIVE
+    assert not observed.healthy
+
+
+def test_no_run_is_inactive(tmp_path: Path) -> None:
+    value = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    value.migrate()
+
+    observed = ProspectiveReadStore(
+        value.database_path,
+    ).recorder_operational_state(
+        now=NOW,
+        prospective_start_utc=NOW - timedelta(days=1),
+        thresholds=THRESHOLDS,
+    )
+
+    assert observed.state is RecorderOperationalState.INACTIVE
+    assert observed.conditions["fresh_recorder_lease"] is False
+
+
+def test_fresh_lease_and_heartbeats_are_recording_healthy(tmp_path: Path) -> None:
+    value, _ = active_repository(tmp_path)
+    set_signals(value)
+
+    observed = projection(value)
+
+    assert observed.state is RecorderOperationalState.RECORDING_HEALTHY
+    assert observed.healthy
+    assert observed.conditions["fresh_recorder_lease"] is True
+
+
+@pytest.mark.parametrize(
+    "heartbeat",
+    [
+        "not-a-timestamp",
+        NOW.replace(tzinfo=None).isoformat(),
+    ],
+)
+def test_malformed_or_naive_lease_heartbeat_is_stale(
+    tmp_path: Path,
+    heartbeat: str,
+) -> None:
+    value, _ = active_repository(tmp_path)
+    set_signals(value)
+    with value._connect() as connection:
+        connection.execute(
+            "UPDATE recorder_lease SET heartbeat_at_utc = ?",
+            (heartbeat,),
+        )
+
+    observed = projection(value)
+
+    assert observed.state is RecorderOperationalState.STALE_HEARTBEAT
+    assert observed.conditions["fresh_recorder_lease"] is False
+
+
+def test_future_prospective_start_waits_despite_fresh_heartbeats(
+    tmp_path: Path,
+) -> None:
+    value, _ = active_repository(tmp_path)
+    set_signals(value)
+
+    observed = ProspectiveReadStore(
+        value.database_path,
+        run_id=RUN_ID,
+    ).recorder_operational_state(
+        now=NOW,
+        prospective_start_utc=NOW + timedelta(hours=1),
+        thresholds=THRESHOLDS,
+    )
+
+    assert observed.state is RecorderOperationalState.WAITING_FOR_PROSPECTIVE_START
+    assert observed.scientific_recording_valid
+
+
+def test_active_scientific_blocker_prevents_recording_healthy(
+    tmp_path: Path,
+) -> None:
+    value, _ = active_repository(tmp_path)
+    set_signals(value)
+    with value._connect() as connection:
+        connection.execute(
+            """
+            UPDATE recorder_operational_state_v1
+            SET scientific_prerequisites_valid = 0
+            WHERE run_id = ?
+            """,
+            (RUN_ID,),
+        )
+
+    observed = projection(value)
+
+    assert observed.state is RecorderOperationalState.SCIENTIFICALLY_BLOCKED
+    assert observed.reason_code == "SCIENTIFIC_PREREQUISITES_INVALID"
     assert not observed.healthy
 
 

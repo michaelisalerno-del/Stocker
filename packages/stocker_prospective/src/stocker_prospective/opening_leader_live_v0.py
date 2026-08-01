@@ -266,11 +266,20 @@ def load_opening_leader_package_v0(
     return receipt
 
 
+def opening_leader_repository_root_v0(package: Path) -> Path:
+    """Resolve either an editable checkout or an immutable installed release."""
+
+    for candidate in package.resolve().parents:
+        if (candidate / "pyproject.toml").is_file() and (candidate / "uv.lock").is_file():
+            return candidate
+    raise FileNotFoundError("opening-leader immutable release root is unavailable")
+
+
 def opening_leader_runtime_source_files_v0() -> dict[str, Path]:
     """Return the complete installed runtime surface bound by the receipt."""
 
     package = Path(__file__).parent
-    repository_root = package.parents[3]
+    repository_root = opening_leader_repository_root_v0(package)
     return {
         "cli": package / "cli.py",
         "config": package / "config.py",
@@ -692,5 +701,6 @@ __all__ = [
     "assert_opening_leader_runtime_configuration_v0",
     "freeze_opening_leader_package_v0",
     "load_opening_leader_package_v0",
+    "opening_leader_repository_root_v0",
     "opening_leader_runtime_source_files_v0",
 ]

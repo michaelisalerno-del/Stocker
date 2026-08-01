@@ -47,10 +47,25 @@ from stocker_prospective.opening_leader_live_v0 import (
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
     load_opening_leader_package_v0,
+    opening_leader_repository_root_v0,
 )
 from stocker_prospective.read_store import ProspectiveReadStore
 
 SESSION = date(2026, 8, 3)
+
+
+def test_release_root_resolution_supports_no_editable_production_layout(
+    tmp_path: Path,
+) -> None:
+    release = tmp_path / "release"
+    installed_package = (
+        release / ".venv" / "lib" / "python3.12" / "site-packages" / "stocker_prospective"
+    )
+    installed_package.mkdir(parents=True)
+    (release / "pyproject.toml").write_text("[project]\nname = 'stocker'\n", encoding="utf-8")
+    (release / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+
+    assert opening_leader_repository_root_v0(installed_package) == release
 
 
 def _bar(

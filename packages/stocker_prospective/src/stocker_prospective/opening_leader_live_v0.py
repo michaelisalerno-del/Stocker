@@ -187,9 +187,9 @@ def freeze_opening_leader_package_v0(
         "source_hashes": source_hashes,
         "verification": dict(sorted(verification.items())),
     }
-    deployment_receipt_id = "olc-deploy-" + _sha256_bytes(
-        _canonical_json(unsigned_identity).encode("utf-8")
-    )[:24]
+    deployment_receipt_id = (
+        "olc-deploy-" + _sha256_bytes(_canonical_json(unsigned_identity).encode("utf-8"))[:24]
+    )
     provisional = OpeningLeaderDeploymentReceiptV0(
         schema_version=PACKAGE_SCHEMA_V0,
         recorder_version=RECORDER_VERSION_V0,
@@ -207,9 +207,7 @@ def freeze_opening_leader_package_v0(
         signature_scheme=SIGNATURE_SCHEME_V0,
         signature_sha256="0" * 64,
     )
-    signature = _sha256_bytes(
-        _canonical_json(_signature_payload(provisional)).encode("utf-8")
-    )
+    signature = _sha256_bytes(_canonical_json(_signature_payload(provisional)).encode("utf-8"))
     receipt = provisional.model_copy(update={"signature_sha256": signature})
     receipt_path.write_text(
         json.dumps(receipt.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
@@ -221,7 +219,7 @@ def freeze_opening_leader_package_v0(
 def load_opening_leader_package_v0(
     package_root: str | Path,
     *,
-    prospective_start_utc: datetime,
+    prospective_start_utc: datetime | None = None,
     source_files: Mapping[str, str | Path],
 ) -> OpeningLeaderDeploymentReceiptV0:
     """Fail closed on any artifact, source, safety, or time-boundary drift."""
@@ -229,9 +227,7 @@ def load_opening_leader_package_v0(
     root = Path(package_root)
     receipt_path = root / "deployment_freeze_receipt.json"
     absent = tuple(
-        name
-        for name in (*REQUIRED_ARTIFACTS_V0, receipt_path.name)
-        if not (root / name).is_file()
+        name for name in (*REQUIRED_ARTIFACTS_V0, receipt_path.name) if not (root / name).is_file()
     )
     if absent:
         raise ValueError("frozen opening-leader package incomplete: " + ",".join(absent))
@@ -239,12 +235,14 @@ def load_opening_leader_package_v0(
     receipt = OpeningLeaderDeploymentReceiptV0.model_validate_json(
         receipt_path.read_text(encoding="utf-8")
     )
-    start = _aware(prospective_start_utc, label="prospective start")
+    start = (
+        receipt.freeze_completed_at_utc
+        if prospective_start_utc is None
+        else _aware(prospective_start_utc, label="prospective start")
+    )
     if start < receipt.freeze_completed_at_utc:
         raise ValueError("prospective start precedes the deployment freeze receipt")
-    observed_artifacts = {
-        name: _sha256_path(root / name) for name in REQUIRED_ARTIFACTS_V0
-    }
+    observed_artifacts = {name: _sha256_path(root / name) for name in REQUIRED_ARTIFACTS_V0}
     if observed_artifacts != receipt.artifact_hashes:
         raise ValueError("opening-leader artifact hash mismatch")
     observed_sources = {
@@ -258,9 +256,7 @@ def load_opening_leader_package_v0(
         or receipt.cohort_hash != CANONICAL_COHORT_HASH_V0
     ):
         raise ValueError("opening-leader deployment identity mismatch")
-    expected_signature = _sha256_bytes(
-        _canonical_json(_signature_payload(receipt)).encode("utf-8")
-    )
+    expected_signature = _sha256_bytes(_canonical_json(_signature_payload(receipt)).encode("utf-8"))
     if expected_signature != receipt.signature_sha256:
         raise ValueError("opening-leader deployment receipt signature mismatch")
     if set(receipt.verification) != REQUIRED_VERIFICATION_V0 or set(
@@ -289,7 +285,7 @@ def opening_leader_runtime_source_files_v0() -> dict[str, Path]:
         "live_recorder": package / "live_recorder.py",
         "live_subscriptions": package / "live_subscriptions.py",
         "market_data": package / "market_data.py",
-        "migration_0016": package / "migrations" / "0016_opening_leader_continuation_v0.sql",
+        "migration_0026": package / "migrations" / "0026_opening_leader_continuation_v0.sql",
         "opening_leader_contract": package / "opening_leader_continuation_v0.py",
         "opening_leader_live": package / "opening_leader_live_v0.py",
         "option_discovery": package / "option_discovery.py",
@@ -298,6 +294,7 @@ def opening_leader_runtime_source_files_v0() -> dict[str, Path]:
         "read_store": package / "read_store.py",
         "static_app": package / "web_static" / "app.js",
         "static_index": package / "web_static" / "index.html",
+        "static_polling": package / "web_static" / "polling.mjs",
         "static_style": package / "web_static" / "app.css",
         "uv_lock": repository_root / "uv.lock",
         "web": package / "web.py",
@@ -385,23 +382,23 @@ def _merge_opening_leader_option_snapshot_v0(
             source = str(values.get("computation_source", "unknown"))
             if source in {"bid", "ask", "last", "model"}:
                 computations[source] = {
-                    name: (
-                        None
-                        if values.get(name) is None
-                        else float(cast(Any, values[name]))
-                    )
+                    name: (None if values.get(name) is None else float(cast(Any, values[name])))
                     for name in computation_fields
                 }
         elif isinstance(callback_field, str) and values.get("value") is not None:
             merged[callback_field] = values["value"]
         for name, value in values.items():
-            if name in {
-                "field",
-                "value",
-                "computation_source",
-                "receive_timestamp_utc",
-                *computation_fields,
-            } or value is None:
+            if (
+                name
+                in {
+                    "field",
+                    "value",
+                    "computation_source",
+                    "receive_timestamp_utc",
+                    *computation_fields,
+                }
+                or value is None
+            ):
                 continue
             merged[str(name)] = value
     model = computations.get("model", {})
@@ -542,9 +539,12 @@ class OpeningLeaderIBKROptionSnapshotterV0:
         observed_at: datetime,
     ) -> OptionSnapshotCaptureV0:
         observed = _aware(observed_at, label="option observation timestamp")
-        snapshot_id = "olc-options-" + _sha256_bytes(
-            f"{symbol}|C{checkpoint}|{observation_name}|{observed.isoformat()}".encode()
-        )[:24]
+        snapshot_id = (
+            "olc-options-"
+            + _sha256_bytes(
+                f"{symbol}|C{checkpoint}|{observation_name}|{observed.isoformat()}".encode()
+            )[:24]
+        )
         underlying = self.underlying_contracts.get(symbol)
         if underlying is None:
             return OptionSnapshotCaptureV0(
@@ -641,16 +641,12 @@ class OpeningLeaderIBKROptionSnapshotterV0:
                         right=request.right,
                         strike=request.strike,
                         expiry=request.expiry,
-                        multiplier=int(
-                            _attribute(qualified, "multiplier") or request.multiplier
-                        ),
+                        multiplier=int(_attribute(qualified, "multiplier") or request.multiplier),
                         trading_class=str(
                             _attribute(qualified, "tradingClass", "trading_class")
                             or request.trading_class
                         ),
-                        exchange=str(
-                            _attribute(qualified, "exchange") or request.exchange
-                        ),
+                        exchange=str(_attribute(qualified, "exchange") or request.exchange),
                         captured_at_utc=captured,
                         provider_timestamp_utc=provider,
                         received_timestamp_utc=received,
@@ -660,13 +656,11 @@ class OpeningLeaderIBKROptionSnapshotterV0:
                 )
             except (AttributeError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
                 failures.append(
-                    f"{request.expiry}:{request.right}:{request.strike}:"
-                    f"{type(exc).__name__}:{exc}"
+                    f"{request.expiry}:{request.right}:{request.strike}:{type(exc).__name__}:{exc}"
                 )
         usable_quotes = tuple(quote for quote in quotes if quote.available)
         quality_failures = [
-            f"{quote.expiry}:{quote.right}:{quote.strike}:"
-            + ",".join(quote.data_quality_flags)
+            f"{quote.expiry}:{quote.right}:{quote.strike}:" + ",".join(quote.data_quality_flags)
             for quote in quotes
             if not quote.available
         ]

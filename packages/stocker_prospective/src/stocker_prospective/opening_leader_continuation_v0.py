@@ -407,9 +407,7 @@ class OptionQuoteV0(BaseModel):
         )
         if provider is not None:
             quote_timestamp = provider
-            timestamp_provenance: Literal["provider", "receive", "capture_fallback"] = (
-                "provider"
-            )
+            timestamp_provenance: Literal["provider", "receive", "capture_fallback"] = "provider"
         elif received_timestamp_utc is not None:
             quote_timestamp = received
             timestamp_provenance = "receive"
@@ -481,9 +479,7 @@ class OptionQuoteV0(BaseModel):
             gamma=_finite_optional(values.get("gamma")),
             theta=_finite_optional(values.get("theta")),
             vega=_finite_optional(values.get("vega")),
-            underlying_reference_price=_finite_optional(
-                values.get("underlying_reference_price")
-            ),
+            underlying_reference_price=_finite_optional(values.get("underlying_reference_price")),
             greeks_source="model",
             option_computation_by_source=cast(
                 dict[str, dict[str, float | None]],
@@ -680,10 +676,7 @@ class OpeningLeaderContinuationRecorderV0:
         if quote is None:
             return
         source_timestamp = quote.provider_timestamp_utc or quote.actual_quote_timestamp_utc
-        if (
-            source_timestamp < self.boundary_utc
-            or quote.received_timestamp_utc < self.boundary_utc
-        ):
+        if source_timestamp < self.boundary_utc or quote.received_timestamp_utc < self.boundary_utc:
             raise ProspectiveBoundaryErrorV0(
                 "pre-freeze market data observed; a new recorder version is required"
             )
@@ -780,11 +773,7 @@ class OpeningLeaderContinuationRecorderV0:
             record_type="option_snapshot",
             observation_name=observation_name,
             payload=capture.model_dump(mode="json"),
-            flags=(
-                ()
-                if capture.reason is None
-                else (capture.reason,)
-            ),
+            flags=(() if capture.reason is None else (capture.reason,)),
             source_timestamps=(capture.captured_at_utc,),
         )
         for option_quote in capture.quotes:
@@ -891,9 +880,7 @@ class OpeningLeaderContinuationRecorderV0:
                 session,
                 checkpoint,
                 quote.actual_quote_timestamp_utc,
-                signal_quote.midpoint
-                or signal_quote.last
-                or cast(float, signal_quote.ask),
+                signal_quote.midpoint or signal_quote.last or cast(float, signal_quote.ask),
             )
         )
         shadow = (
@@ -1025,10 +1012,7 @@ class OpeningLeaderContinuationRecorderV0:
                     ),
                 )
             return True
-        if (
-            official_record is None
-            and observed >= market_close + timedelta(minutes=31)
-        ):
+        if official_record is None and observed >= market_close + timedelta(minutes=31):
             official_record = self._append(
                 observed=observed,
                 session=session,
@@ -1167,9 +1151,7 @@ class OpeningLeaderContinuationRecorderV0:
             raise ProspectiveBoundaryErrorV0("recorder freeze boundary has not been reached")
         run_id = self._metadata(observed).run_id
         records = tuple(
-            record
-            for record in self.store.records_for_run(run_id)
-            if record.session == session
+            record for record in self.store.records_for_run(run_id) if record.session == session
         )
         index = self._index(records)
         linked_by_original = {
@@ -1271,11 +1253,7 @@ class OpeningLeaderContinuationRecorderV0:
             if quote is None or not quote.valid_for_signal:
                 if observed < deadline:
                     continue
-                flags = (
-                    ("signal_quote_unavailable",)
-                    if quote is None
-                    else quote.data_quality_flags
-                )
+                flags = ("signal_quote_unavailable",) if quote is None else quote.data_quality_flags
                 self._append(
                     observed=observed,
                     session=session,
@@ -1427,9 +1405,7 @@ class OpeningLeaderContinuationRecorderV0:
                     and causal_signal_available
                     < e0_quote.actual_quote_timestamp_utc
                     <= causal_signal_available + timedelta(seconds=90)
-                    and market_open
-                    <= e0_quote.actual_quote_timestamp_utc
-                    < market_close
+                    and market_open <= e0_quote.actual_quote_timestamp_utc < market_close
                 )
                 if e0_valid and e0_quote is not None:
                     if e0_record is None:
@@ -1458,9 +1434,8 @@ class OpeningLeaderContinuationRecorderV0:
                         )
                     entry_quote = e0_quote
                     created_observations.append(f"{label}:E0")
-                elif (
-                    e0_record is None
-                    and observed > causal_signal_available + timedelta(seconds=90)
+                elif e0_record is None and observed > causal_signal_available + timedelta(
+                    seconds=90
                 ):
                     e0_record = self._append(
                         observed=observed,
@@ -1482,8 +1457,7 @@ class OpeningLeaderContinuationRecorderV0:
             if e0_record is not None and e0_option_key not in index:
                 if (
                     entry_quote is not None
-                    and observed - entry_quote.actual_quote_timestamp_utc
-                    <= timedelta(seconds=90)
+                    and observed - entry_quote.actual_quote_timestamp_utc <= timedelta(seconds=90)
                 ):
                     self._capture_option_snapshot(
                         observed=observed,
@@ -1539,10 +1513,7 @@ class OpeningLeaderContinuationRecorderV0:
                         effective_quote = None
                 if target.name == "FINAL_CONTINUOUS" and observed < market_close:
                     final_option_key = (checkpoint, "option_snapshot", target.name)
-                    if (
-                        observed >= target.target_timestamp_utc
-                        and final_option_key not in index
-                    ):
+                    if observed >= target.target_timestamp_utc and final_option_key not in index:
                         option_reference_quote = self.underlying_quote_provider(
                             selected_symbol,
                             checkpoint,
@@ -1583,8 +1554,7 @@ class OpeningLeaderContinuationRecorderV0:
                         None
                         if quote is None
                         else (
-                            quote.actual_quote_timestamp_utc
-                            - target.target_timestamp_utc
+                            quote.actual_quote_timestamp_utc - target.target_timestamp_utc
                         ).total_seconds()
                     )
                     quote_within_window = (
@@ -1593,10 +1563,7 @@ class OpeningLeaderContinuationRecorderV0:
                         and market_open <= quote.actual_quote_timestamp_utc < market_close
                         and (
                             target.name == "FINAL_CONTINUOUS"
-                            or (
-                                quote_lag is not None
-                                and 0.0 <= quote_lag <= 90.0
-                            )
+                            or (quote_lag is not None and 0.0 <= quote_lag <= 90.0)
                         )
                     )
                     if quote_within_window and quote is not None:
@@ -1734,9 +1701,7 @@ def calculate_rank_persistence_v0(
         current_rank=rank,
         remains_rank_1=rank == 1,
         remains_top_2=rank <= 2,
-        remains_above_cohort_median=(
-            current_return_bps_by_symbol[original_leader] > median
-        ),
+        remains_above_cohort_median=(current_return_bps_by_symbol[original_leader] > median),
         return_since_signal_bps=current,
         drawdown_from_signal_bps=min(0.0, current),
         maximum_favourable_excursion_bps=max((0.0, *path_returns)),
@@ -2067,9 +2032,7 @@ def select_option_chain_requests_v0(
         underlying=underlying,
         spot=spot,
         selected_expiries=expiries,
-        selected_strikes_by_expiry={
-            expiry.isoformat(): selected_strikes for expiry in expiries
-        },
+        selected_strikes_by_expiry={expiry.isoformat(): selected_strikes for expiry in expiries},
         requests=requests,
     )
 
@@ -2347,8 +2310,7 @@ def build_observation_schedule_v0(
     signal = _aware_utc(signal_timestamp_utc, label="signal timestamp")
     e0 = _aware_utc(e0_timestamp_utc, label="E0 timestamp")
     if signal not in {
-        checkpoint_timestamp_v0(session, checkpoint)
-        for checkpoint in FROZEN_SIGNAL_CHECKPOINTS_V0
+        checkpoint_timestamp_v0(session, checkpoint) for checkpoint in FROZEN_SIGNAL_CHECKPOINTS_V0
     }:
         raise ValueError("signal timestamp is not the canonical C6 or C12 close")
     if e0 < signal:

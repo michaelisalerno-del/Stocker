@@ -1269,7 +1269,6 @@ def build_frozen_prospective_application(
         )
         opening_leader_receipt = load_opening_leader_package_v0(
             paths.opening_leader_continuation_v0_root,
-            prospective_start_utc=config.runtime.prospective_start_utc,
             source_files=opening_leader_runtime_source_files_v0(),
         )
     required_paths = {
@@ -2186,10 +2185,7 @@ def build_frozen_prospective_application(
         opening_leader_recorder = OpeningLeaderContinuationRecorderV0(
             store=opening_leader_store,
             freeze_identity=opening_leader_receipt,
-            prospective_start_utc=max(
-                prospective_start,
-                config.runtime.prospective_start_utc.astimezone(UTC),
-            ),
+            prospective_start_utc=opening_leader_receipt.freeze_completed_at_utc,
             metadata_factory=metadata_factory,
             bar_provider=live.opening_leader_checkpoint_bars,
             underlying_quote_provider=live.opening_leader_underlying_quote,

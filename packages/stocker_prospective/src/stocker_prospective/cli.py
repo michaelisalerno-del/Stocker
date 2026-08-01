@@ -842,7 +842,6 @@ def recorder_run(
             )
             load_opening_leader_package_v0(
                 config.paths.opening_leader_continuation_v0_root,
-                prospective_start_utc=config.runtime.prospective_start_utc,
                 source_files=opening_leader_runtime_source_files_v0(),
             )
         owner_id = _recorder_owner_id(config)

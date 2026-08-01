@@ -222,9 +222,7 @@ def test_causal_slate_fails_closed_and_m1c_cannot_change_the_leader() -> None:
     assert len(incomplete.exclusions) == 6
     assert all(reason == "missing_checkpoint_bar" for reason in incomplete.exclusions.values())
 
-    future_bar = bars[0].model_copy(
-        update={"available_at_utc": evaluated + timedelta(seconds=1)}
-    )
+    future_bar = bars[0].model_copy(update={"available_at_utc": evaluated + timedelta(seconds=1)})
     future_contaminated = rank_opening_leader_v0(
         session=SESSION,
         checkpoint=6,
@@ -256,25 +254,15 @@ def test_observation_and_option_schedules_are_fixed_from_e0_and_xnys_close() -> 
     assert targets["H30"].target_timestamp_utc == e0_at + timedelta(minutes=30)
     assert targets["H60"].target_timestamp_utc == e0_at + timedelta(minutes=60)
     assert targets["H120"].target_timestamp_utc == e0_at + timedelta(minutes=120)
-    assert targets["PRE_CLOSE_30"].target_timestamp_utc == datetime(
-        2026, 8, 3, 19, 30, tzinfo=UTC
-    )
-    assert targets["PRE_CLOSE_15"].target_timestamp_utc == datetime(
-        2026, 8, 3, 19, 45, tzinfo=UTC
-    )
-    assert targets["PRE_CLOSE_5"].target_timestamp_utc == datetime(
-        2026, 8, 3, 19, 55, tzinfo=UTC
-    )
-    assert targets["PRE_CLOSE_1"].target_timestamp_utc == datetime(
-        2026, 8, 3, 19, 59, tzinfo=UTC
-    )
+    assert targets["PRE_CLOSE_30"].target_timestamp_utc == datetime(2026, 8, 3, 19, 30, tzinfo=UTC)
+    assert targets["PRE_CLOSE_15"].target_timestamp_utc == datetime(2026, 8, 3, 19, 45, tzinfo=UTC)
+    assert targets["PRE_CLOSE_5"].target_timestamp_utc == datetime(2026, 8, 3, 19, 55, tzinfo=UTC)
+    assert targets["PRE_CLOSE_1"].target_timestamp_utc == datetime(2026, 8, 3, 19, 59, tzinfo=UTC)
     assert targets["FINAL_CONTINUOUS"].target_timestamp_utc == datetime(
         2026, 8, 3, 19, 59, 59, tzinfo=UTC
     )
     assert targets["FINAL_CONTINUOUS"].executable is True
-    assert targets["OFFICIAL_CLOSE"].target_timestamp_utc == datetime(
-        2026, 8, 3, 20, 0, tzinfo=UTC
-    )
+    assert targets["OFFICIAL_CLOSE"].target_timestamp_utc == datetime(2026, 8, 3, 20, 0, tzinfo=UTC)
     assert targets["OFFICIAL_CLOSE"].executable is False
     assert targets["OFFICIAL_CLOSE"].source_kind == "official_bar_close_reference"
     assert schedule.option_snapshot_names == (
@@ -349,12 +337,8 @@ def test_underlying_quotes_preserve_staleness_and_conservative_shadow_sides() ->
     assert result.midpoint_to_midpoint_diagnostic_bps == pytest.approx(
         (103.5 / 100.5 - 1.0) * 10_000.0
     )
-    assert result.last_to_last_diagnostic_bps == pytest.approx(
-        (103.25 / 100.75 - 1.0) * 10_000.0
-    )
-    assert result.official_close_reference_bps == pytest.approx(
-        (104.5 / 101.0 - 1.0) * 10_000.0
-    )
+    assert result.last_to_last_diagnostic_bps == pytest.approx((103.25 / 100.75 - 1.0) * 10_000.0)
+    assert result.official_close_reference_bps == pytest.approx((104.5 / 101.0 - 1.0) * 10_000.0)
     assert result.official_close_executable is False
     assert result.friction_diagnostics_bps["10"] == pytest.approx(
         result.conservative_ask_to_bid_gross_bps - 10.0
@@ -418,9 +402,7 @@ def test_live_quote_projection_uses_exclusive_e0_and_last_continuous_quote() -> 
             )
         )
     }
-    signal_quote = live.opening_leader_underlying_quote(
-        "AAL", 6, "SIGNAL", signal, signal
-    )
+    signal_quote = live.opening_leader_underlying_quote("AAL", 6, "SIGNAL", signal, signal)
     e0 = live.opening_leader_underlying_quote("AAL", 6, "E0", signal, signal)
     final = live.opening_leader_underlying_quote(
         "AAL",
@@ -433,9 +415,7 @@ def test_live_quote_projection_uses_exclusive_e0_and_last_continuous_quote() -> 
     assert signal_quote is not None and signal_quote.valid_for_signal is True
     assert signal_quote.provider_timestamp_utc is None
     assert signal_quote.timestamp_provenance == "receive"
-    assert "provider_timestamp_unavailable_receive_fallback" in (
-        signal_quote.data_quality_flags
-    )
+    assert "provider_timestamp_unavailable_receive_fallback" in (signal_quote.data_quality_flags)
     assert e0 is not None and e0.quote_id == "next"
     assert final is not None and final.quote_id == "actual-final"
     assert final.actual_quote_timestamp_utc < market_close
@@ -797,9 +777,7 @@ def test_live_rank_persistence_uses_latest_causally_finalised_common_bar() -> No
     }
     live._bar_finalised_at = {
         (symbol, SESSION, checkpoint): (
-            target + timedelta(seconds=1)
-            if checkpoint == 8
-            else target - timedelta(seconds=1)
+            target + timedelta(seconds=1) if checkpoint == 8 else target - timedelta(seconds=1)
         )
         for symbol in CANONICAL_COHORT_V0
         for checkpoint in range(1, 9)
@@ -826,27 +804,28 @@ def test_official_close_uses_post_close_boundary_snapshot_and_stays_non_executab
         prospective_collection_start=datetime(2026, 8, 1, tzinfo=UTC)
     )
     finalizer.register(1, symbol="AAL", con_id=101)
-    assert finalizer.add(
-        request_id=1,
-        bar_start_utc=market_close - timedelta(minutes=5),
-        provider_timestamp_utc=market_close,
-        received_timestamp_utc=market_close + timedelta(milliseconds=100),
-        open=103.0,
-        high=104.0,
-        low=102.0,
-        close=103.75,
-        volume=1000.0,
-        wap=103.5,
-        trade_count=10,
-    ) == ()
+    assert (
+        finalizer.add(
+            request_id=1,
+            bar_start_utc=market_close - timedelta(minutes=5),
+            provider_timestamp_utc=market_close,
+            received_timestamp_utc=market_close + timedelta(milliseconds=100),
+            open=103.0,
+            high=104.0,
+            low=102.0,
+            close=103.75,
+            volume=1000.0,
+            wap=103.5,
+            trade_count=10,
+        )
+        == ()
+    )
     live = object.__new__(FrozenM1CLiveRecorder)
     live._bars = {}
     live._finalizer = finalizer
 
     assert (
-        live.opening_leader_official_close(
-            "AAL", SESSION, market_close + timedelta(seconds=4)
-        )
+        live.opening_leader_official_close("AAL", SESSION, market_close + timedelta(seconds=4))
         is None
     )
     official = live.opening_leader_official_close(
@@ -1037,13 +1016,16 @@ def test_synthetic_recorder_creates_independent_receipts_and_recovers_due_observ
         m1c_context_by_checkpoint={6: contexts, 12: contexts},
     )
     assert c12.created_signal_receipts == ("C12",)
-    assert len(
-        [
-            record
-            for record in store.records_for_run("opening-leader-test-run")
-            if record.record_type == "signal_receipt"
-        ]
-    ) == 2
+    assert (
+        len(
+            [
+                record
+                for record in store.records_for_run("opening-leader-test-run")
+                if record.record_type == "signal_receipt"
+            ]
+        )
+        == 2
+    )
     projection = ProspectiveReadStore(
         repository.database_path,
         run_id="opening-leader-test-run",
@@ -1079,9 +1061,7 @@ def test_synthetic_recorder_creates_independent_receipts_and_recovers_due_observ
         and record.observation_name == "FINAL_CONTINUOUS"
     )
     assert datetime.fromisoformat(
-        str(final_record.payload["quote"]["actual_quote_timestamp_utc"]).replace(
-            "Z", "+00:00"
-        )
+        str(final_record.payload["quote"]["actual_quote_timestamp_utc"]).replace("Z", "+00:00")
     ) == market_close - timedelta(milliseconds=200)
 
     second_session = date(2026, 8, 4)
@@ -1092,13 +1072,16 @@ def test_synthetic_recorder_creates_independent_receipts_and_recovers_due_observ
         m1c_context_by_checkpoint={6: contexts, 12: contexts},
     )
     assert next_day.created_signal_receipts == ("C6",)
-    assert len(
-        [
-            record
-            for record in store.records_for_run("opening-leader-test-run")
-            if record.record_type == "signal_receipt"
-        ]
-    ) == 3
+    assert (
+        len(
+            [
+                record
+                for record in store.records_for_run("opening-leader-test-run")
+                if record.record_type == "signal_receipt"
+            ]
+        )
+        == 3
+    )
 
     receipt_only_session = date(2026, 8, 5)
     receipt_only_signal = checkpoint_timestamp_v0(receipt_only_session, 6)
@@ -1284,6 +1267,13 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
         source_files={"opening_leader_source": source},
     )
     assert loaded == receipt
+    assert (
+        load_opening_leader_package_v0(
+            package,
+            source_files={"opening_leader_source": source},
+        )
+        == receipt
+    )
     assert loaded.source_hashes_signed is True
     assert loaded.order_routing_disabled is True
     assert loaded.protected_historical_outcomes_accessed is False
@@ -1374,9 +1364,7 @@ def test_option_snapshotter_uses_two_expiries_twenty_exact_contracts_and_pacing(
                     },
                     {
                         "field": (
-                            "put_open_interest"
-                            if contract.right == "P"
-                            else "call_open_interest"
+                            "put_open_interest" if contract.right == "P" else "call_open_interest"
                         ),
                         "value": 321.0,
                         "receive_timestamp_utc": received,

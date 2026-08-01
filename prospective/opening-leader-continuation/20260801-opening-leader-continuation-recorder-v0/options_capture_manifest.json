@@ -1,0 +1,46 @@
+{
+  "schema_version": "opening-leader-options-capture-v0",
+  "purpose": "prospective evidence capture, data quality, and feasibility diagnostics only",
+  "policy_authorized": false,
+  "snapshot_targets": ["SIGNAL", "E0", "H60", "H120", "PRE_CLOSE_30", "FINAL_CONTINUOUS"],
+  "final_continuous_snapshot_timing": "capture_during_continuous_market_at_or_after_close_minus_1_second_never_after_close",
+  "metadata_then_exact_bounded_snapshots": true,
+  "full_chain_streaming": false,
+  "maximum_expiries": 2,
+  "expiry_rule": "nearest_two_available_expiries_on_or_after_session_sorted_ascending",
+  "spot_band_fraction": 0.15,
+  "maximum_strikes_per_expiry": 5,
+  "strike_rule": "nearest_available_to_frozen_spot_fractions_0.85_0.925_1.0_1.075_1.15_then_nearest_spot_fill_then_lower_strike_tie_break",
+  "rights": ["P", "C"],
+  "maximum_exact_contracts_per_snapshot": 20,
+  "maximum_quote_age_seconds": 2.0,
+  "timestamp_policy": "provider_timestamp_when_available_else_explicit_callback_receive_timestamp_fallback",
+  "greeks_source": "model",
+  "all_option_computations_recorded_by_source": true,
+  "callback_order_may_change_diagnostic_greeks": false,
+  "right_specific_open_interest_mapping": true,
+  "snapshot_available_requires_at_least_one_usable_exact_contract_quote": true,
+  "partial_exact_contract_failures_are_recorded": true,
+  "no_opportunistic_substitution": true,
+  "unavailable_value": "UNAVAILABLE",
+  "diagnostics": {
+    "P20": {"target_put_delta": -0.20, "entry": "short_bid", "exit": "short_ask"},
+    "P30": {"target_put_delta": -0.30, "entry": "short_bid", "exit": "short_ask"},
+    "BPS20": {
+      "short_target_put_delta": -0.20,
+      "long_wing": "next_lower_strike_in_frozen_capture_slate",
+      "entry": "short_bid_minus_long_ask",
+      "exit": "short_ask_minus_long_bid"
+    }
+  },
+  "diagnostic_contract_tie_break": [
+    "minimum_absolute_delta_distance",
+    "nearest_expiry",
+    "lower_strike",
+    "lower_contract_id"
+  ],
+  "naked_call_diagnostics": false,
+  "long_call_and_long_strangle_evidence_supported_by_raw_quotes": true,
+  "live_dashboard_option_recommendation_allowed": false,
+  "underlying_recording_priority": "must_not_be_compromised"
+}

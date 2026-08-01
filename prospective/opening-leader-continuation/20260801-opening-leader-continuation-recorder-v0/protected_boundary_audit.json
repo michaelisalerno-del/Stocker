@@ -1,0 +1,18 @@
+{
+  "schema_version": "opening-leader-protected-boundary-audit-v0",
+  "status": "passed",
+  "protected_historical_start": "2026-01-01",
+  "protected_historical_outcomes_accessed": false,
+  "historical_or_earlier_2026_sessions_backfilled": false,
+  "real_market_data_consumed_during_build_or_test": false,
+  "test_data": "synthetic_only",
+  "permitted_inputs": [
+    "canonical cohort manifest",
+    "canonical XNYS checkpoint implementation",
+    "existing prospective recorder contracts and source code",
+    "user-supplied retrospective classification"
+  ],
+  "forbidden_paths_opened": [],
+  "runtime_rule": "reject observations before both deployment freeze and configured prospective start",
+  "pre_freeze_market_data_action": "fail_closed_and_require_new_recorder_version"
+}

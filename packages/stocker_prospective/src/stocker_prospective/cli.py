@@ -828,6 +828,23 @@ def recorder_run(
             raise RuntimeSafetyError(
                 "blocked_unsafe_runtime_configuration: runtime.run_id is required"
             )
+        if config.paths.opening_leader_continuation_v0_root is not None:
+            from stocker_prospective.opening_leader_live_v0 import (
+                assert_opening_leader_runtime_configuration_v0,
+                load_opening_leader_package_v0,
+                opening_leader_runtime_source_files_v0,
+            )
+
+            assert_opening_leader_runtime_configuration_v0(
+                mode=config.runtime.mode,
+                maximum_quote_age_seconds=config.ibkr.maximum_quote_age_seconds,
+                trading_enabled=config.risk.trading_enabled,
+            )
+            load_opening_leader_package_v0(
+                config.paths.opening_leader_continuation_v0_root,
+                prospective_start_utc=config.runtime.prospective_start_utc,
+                source_files=opening_leader_runtime_source_files_v0(),
+            )
         owner_id = _recorder_owner_id(config)
         if config.runtime.source == "replay":
             validate_runtime_safety(config, _ReplayMarketDataBoundary())

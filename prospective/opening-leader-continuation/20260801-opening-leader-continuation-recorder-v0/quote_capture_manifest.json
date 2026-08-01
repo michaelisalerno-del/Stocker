@@ -1,0 +1,46 @@
+{
+  "schema_version": "opening-leader-quote-capture-v0",
+  "source": "first causally available quote from the existing retained IBKR Level-I stream",
+  "additional_underlying_subscription_required": false,
+  "maximum_quote_age_seconds": 2.0,
+  "timestamp_policy": "provider_timestamp_when_available_else_explicit_causal_receive_timestamp_fallback",
+  "signal_capture_maximum_lag_seconds": 420.0,
+  "scheduled_capture_maximum_lag_seconds": 90.0,
+  "e0_selection_anchor": "strictly_after_maximum_rank_input_availability_and_signal_receipt_causal_time",
+  "entry_anchor": "E0_actual_timestamp",
+  "targets": [
+    "SIGNAL", "E0", "E1", "E2", "H30", "H60", "H120",
+    "PRE_CLOSE_30", "PRE_CLOSE_15", "PRE_CLOSE_5", "PRE_CLOSE_1",
+    "FINAL_CONTINUOUS", "OFFICIAL_CLOSE"
+  ],
+  "relative_targets": {
+    "E1": "E0_plus_5_minutes",
+    "E2": "E0_plus_10_minutes",
+    "H30": "E0_plus_30_minutes",
+    "H60": "E0_plus_60_minutes",
+    "H120": "E0_plus_120_minutes"
+  },
+  "final_continuous_target": "regular_session_close_minus_1_second",
+  "final_continuous_selection": "last_valid_retained_quote_strictly_before_regular_session_close",
+  "final_continuous_finalization": "only_after_regular_session_close_has_passed",
+  "final_continuous_scheduled_lag_tolerance_applies": false,
+  "all_executable_observations_must_be_strictly_before_regular_session_close": true,
+  "official_close_executable": false,
+  "official_close_source": "finalized_C78_or_post_close_IBKR_historical_close_boundary_snapshot",
+  "final_continuous_and_official_close_must_be_separate": true,
+  "fields": [
+    "IBKR timestamps", "last", "bid", "ask", "midpoint", "bid_size", "ask_size",
+    "spread_dollars", "spread_bps", "source", "market_data_status", "quote_age", "halted"
+  ],
+  "shadow_return": {
+    "direction": "LONG",
+    "primary_entry": "ask",
+    "diagnostic_entries": ["midpoint", "last"],
+    "primary_exit": "bid",
+    "diagnostic_exit": "midpoint",
+    "official_close": "non_executable_reference",
+    "configured_fee_bps": 1.0,
+    "friction_diagnostic_bps": [0.0, 1.0, 5.0, 10.0],
+    "raw_bid_ask_estimate_preserved": true
+  }
+}

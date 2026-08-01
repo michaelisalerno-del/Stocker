@@ -30,6 +30,7 @@ const state = {
   budget: null,
   transfer: null,
   reportPackages: [],
+  openingLeader: null,
   selectedQuietEpisode: null,
   sectionErrors: {},
   lastSnapshotAt: null,
@@ -1142,6 +1143,102 @@ function renderAudit() {
     `REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER ${clean(state.status.state).toUpperCase()} // IBKR CONNECTIONS ${replay.ibkr_connections_attempted || 0}`;
 }
 
+function openingLeaderCheckpointPanel(checkpoint) {
+  const wrapper = node("div");
+  const support = checkpoint.support || {};
+  const shadow = checkpoint.latest_hypothetical_underlying_return || {};
+  const optionSnapshots = Object.values(checkpoint.option_snapshots || {});
+  wrapper.append(
+    kvGrid([
+      ["Eligibility", checkpoint.eligibility],
+      ["Slate size", checkpoint.slate_size],
+      ["Rank 1", checkpoint.rank_1],
+      ["Rank 2", checkpoint.rank_2],
+      ["Rank-1 return (bps)", checkpoint.rank_1_return_from_open_bps],
+      ["Leader separation (bps)", checkpoint.leader_separation_bps],
+      ["Feed", checkpoint.source_feed_status],
+      ["Signal receipt", short(checkpoint.signal_receipt, 18)],
+      ["Ask→bid net (bps)", shadow.conservative_ask_to_bid_net_bps],
+      ["Option snapshots", `${optionSnapshots.filter((item) => item?.status === "AVAILABLE").length} / ${optionSnapshots.length}`],
+    ]),
+    subsection("Independent prospective support", kvGrid([
+      ["Valid sessions", `${support.valid_sessions || 0} / 60`],
+      ["Calendar months", `${support.calendar_months || 0} / 3`],
+      ["Selected stocks", `${support.distinct_selected_stocks || 0} / 15`],
+      ["Complete", support.complete],
+    ])),
+    subsection("Rank persistence (diagnostic only)", jsonBlock(checkpoint.rank_persistence)),
+    subsection("M1C context only", jsonBlock(checkpoint.m1c_context)),
+  );
+  return wrapper;
+}
+
+function renderOpeningLeader() {
+  const recorder = state.openingLeader;
+  if (!recorder) return;
+  const c6 = recorder.checkpoints?.C6 || {};
+  const c12 = recorder.checkpoints?.C12 || {};
+  const grid = node("div", "metric-grid");
+  [
+    metric("Recorder", recorder.recorder_status, recorder.banner),
+    metric("Sample", recorder.sample_status, "C6 and C12 never pooled", recorder.sample_status === "PROSPECTIVE SAMPLE INCOMPLETE" ? "warn" : "ok"),
+    metric("C6 / primary", c6.eligibility, `${clean(c6.rank_1)} over ${clean(c6.rank_2)}`),
+    metric("C12 / secondary", c12.eligibility, `${clean(c12.rank_1)} over ${clean(c12.rank_2)}`),
+    metric("M1C role", recorder.m1c_role, "Cannot admit, reject or rerank"),
+    metric("Option policy", recorder.option_policy_authorized ? "AUTHORIZED" : "NOT AUTHORIZED", "Quotes are evidence only"),
+  ].forEach((item) => grid.append(item));
+  replace("opening-leader-status-grid", grid);
+  replace("opening-leader-c6", openingLeaderCheckpointPanel(c6));
+  replace("opening-leader-c12", openingLeaderCheckpointPanel(c12));
+
+  const observationRows = [];
+  [["C6", c6], ["C12", c12]].forEach(([label, checkpoint]) => {
+    const merged = {
+      ...(checkpoint.observations || {}),
+      ...(checkpoint.pre_close_observations || {}),
+      FINAL_CONTINUOUS: checkpoint.final_continuous_observation,
+    };
+    Object.entries(merged).forEach(([name, payload]) => {
+      if (!payload) return;
+      const quote = payload.quote || {};
+      observationRows.push({
+        checkpoint: label,
+        observation: name,
+        timestamp: quote.actual_quote_timestamp_utc,
+        bid: quote.bid,
+        ask: quote.ask,
+        midpoint: quote.midpoint,
+        quote_age_seconds: quote.quote_age_seconds,
+        rank: payload.rank_persistence?.current_rank,
+        conservative_net_bps: payload.shadow_return?.conservative_ask_to_bid_net_bps,
+        status: payload.status || quote.market_data_status,
+      });
+    });
+  });
+  replace("opening-leader-observations", table(
+    [
+      { label: "Checkpoint", value: "checkpoint" },
+      { label: "Observation", value: "observation" },
+      { label: "Timestamp", value: "timestamp", format: clock },
+      { label: "Bid", value: "bid" },
+      { label: "Ask", value: "ask" },
+      { label: "Mid", value: "midpoint" },
+      { label: "Age (s)", value: "quote_age_seconds" },
+      { label: "Current rank", value: "rank" },
+      { label: "Ask→bid net (bps)", value: "conservative_net_bps" },
+      { label: "Feed/status", value: "status" },
+    ],
+    observationRows,
+  ));
+  const warnings = recorder.data_quality_warnings || [];
+  replace(
+    "opening-leader-warnings",
+    warnings.length
+      ? table([{ label: "Warning", value: "warning" }], warnings.map((warning) => ({ warning })))
+      : node("div", "empty-state", "No Opening Leader data-quality warnings recorded."),
+  );
+}
+
 function activeScreenId() {
   return document.querySelector(".screen.is-active")?.id || "live-monitor";
 }
@@ -1186,6 +1283,8 @@ function applyEndpoint(path, payload) {
   } else if (endpoint === "/api/source-transfer") state.transfer = payload;
   else if (endpoint === "/api/reports/daily") {
     state.reportPackages = payload.items || [];
+  } else if (endpoint === "/api/opening-leader-continuation-v0") {
+    state.openingLeader = payload;
   }
   delete state.sectionErrors[sectionErrorKey(path)];
 }
@@ -1231,6 +1330,7 @@ function renderDashboard() {
   renderQuietShadow();
   renderConcentrationAudit();
   renderBudgetTransfer();
+  renderOpeningLeader();
 }
 
 async function performRefresh({

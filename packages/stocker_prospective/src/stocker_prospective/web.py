@@ -960,6 +960,12 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "claims_boundary": claims_boundary(),
         }
 
+    @app.get("/api/opening-leader-continuation-v0")
+    def opening_leader_continuation_v0() -> dict[str, Any]:
+        projection = store.opening_leader_continuation_v0()
+        projection["claims_boundary"] = claims_boundary()
+        return projection
+
     @app.get("/api/market-data-budget")
     def market_data_budget() -> dict[str, Any]:
         return {

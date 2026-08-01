@@ -78,6 +78,18 @@ from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
     load_frozen_timing_addendum_config_v1_1,
 )
 from stocker_prospective.market_data import ConnectionState, MarketDataType
+from stocker_prospective.opening_leader_continuation_v0 import (
+    M1CContextV0,
+    OpeningLeaderContinuationRecorderV0,
+    OpeningLeaderEvidenceStoreV0,
+)
+from stocker_prospective.opening_leader_live_v0 import (
+    OpeningLeaderDeploymentReceiptV0,
+    OpeningLeaderIBKROptionSnapshotterV0,
+    assert_opening_leader_runtime_configuration_v0,
+    load_opening_leader_package_v0,
+    opening_leader_runtime_source_files_v0,
+)
 from stocker_prospective.opening_market_transition_v1 import (
     load_opening_transition_threshold_manifest_v1,
 )
@@ -457,6 +469,7 @@ class FrozenProspectiveApplication:
         ibkr_api_version: str,
         tws_or_gateway_version: str,
         session_context_preflight: Callable[[date, datetime], None],
+        opening_leader_recorder: OpeningLeaderContinuationRecorderV0 | None,
     ) -> None:
         self.config = config
         self.adapter = adapter
@@ -476,6 +489,11 @@ class FrozenProspectiveApplication:
         self.ibkr_api_version = ibkr_api_version
         self.tws_or_gateway_version = tws_or_gateway_version
         self.session_context_preflight = session_context_preflight
+        self.opening_leader_recorder = opening_leader_recorder
+        self._opening_leader_m1c_contexts: dict[
+            tuple[date, int],
+            dict[str, M1CContextV0],
+        ] = {}
         self._probabilities: dict[str, float] = {}
         self._eligible_symbols: set[str] = set()
         self._active_episode_end: dict[str, tuple[str, datetime]] = {}
@@ -565,11 +583,14 @@ class FrozenProspectiveApplication:
         observed = now.astimezone(UTC)
         self._persist_connection_events(observed)
         observed_session = observed.astimezone(NEW_YORK).date()
+        market_session_valid = False
+        observed_market_open: datetime | None = None
         try:
-            xnys_session_bounds(observed_session)
+            observed_market_open, _ = xnys_session_bounds(observed_session)
         except ValueError:
             pass
         else:
+            market_session_valid = True
             self._sessions_seen.add(observed_session)
             if observed_session not in self._session_context_checked:
                 try:
@@ -652,6 +673,41 @@ class FrozenProspectiveApplication:
         checkpoints_to_complete: list[RecorderCheckpointResult] = []
         for checkpoint in result.checkpoint_results:
             symbol = checkpoint.episode_decision.symbol
+            fresh_status = "NO_QUALIFIED_FRESH_EVENT"
+            if checkpoint.episode_decision.fresh_episode and not checkpoint.rejection_reasons:
+                fresh_status = (
+                    "FIRST_ENTRY"
+                    if checkpoint.tail_phase_v1.m1c_tail_phase_v1 == "FIRST_ENTRY"
+                    else (
+                        "QUALIFIED_RE_ENTRY"
+                        if checkpoint.tail_phase_v1.m1c_tail_phase_v1 == "RE_ENTRY"
+                        else "QUALIFIED_FRESH_EVENT_OTHER_PHASE"
+                    )
+                )
+            elif checkpoint.episode_decision.fresh_episode:
+                fresh_status = "UNQUALIFIED_FRESH_EVENT"
+            self._opening_leader_m1c_contexts.setdefault(
+                (
+                    checkpoint.episode_decision.session,
+                    checkpoint.episode_decision.checkpoint,
+                ),
+                {},
+            )[symbol] = M1CContextV0(
+                probability=checkpoint.score.probability,
+                high_low_state=(
+                    "HIGH" if checkpoint.score.threshold_passed else "LOW"
+                ),
+                tail_phase=str(checkpoint.tail_phase_v1.m1c_tail_phase_v1),
+                qualified_fresh_event_status=fresh_status,
+                movement_consumed=(
+                    checkpoint.movement_consumed_state_v1.movement_consumed_v1
+                ),
+                source_completeness=(
+                    "complete"
+                    if checkpoint.score.missing_feature_count == 0
+                    else f"incomplete:{checkpoint.score.missing_feature_count}_missing_features"
+                ),
+            )
             opening_receipt = checkpoint.opening_reversal_prediction_v1
             if opening_receipt is not None:
                 opening_reversal_seen = True
@@ -717,6 +773,46 @@ class FrozenProspectiveApplication:
             if opening_receipt is None:
                 self.option_discovery.persist_checkpoint_schedules(checkpoint)
             checkpoints_to_complete.append(checkpoint)
+        if (
+            self.opening_leader_recorder is not None
+            and observed >= self.opening_leader_recorder.boundary_utc
+        ):
+            for recovery_session in self.opening_leader_recorder.outstanding_sessions(
+                now=observed
+            ):
+                if recovery_session == observed_session:
+                    continue
+                self.opening_leader_recorder.poll(
+                    session=recovery_session,
+                    now=observed,
+                    m1c_context_by_checkpoint={
+                        checkpoint: dict(
+                            self._opening_leader_m1c_contexts.get(
+                                (recovery_session, checkpoint),
+                                {},
+                            )
+                        )
+                        for checkpoint in (6, 12)
+                    },
+                )
+            if (
+                market_session_valid
+                and observed_market_open is not None
+                and observed_market_open >= self.opening_leader_recorder.boundary_utc
+            ):
+                self.opening_leader_recorder.poll(
+                    session=observed_session,
+                    now=observed,
+                    m1c_context_by_checkpoint={
+                        checkpoint: dict(
+                            self._opening_leader_m1c_contexts.get(
+                                (observed_session, checkpoint),
+                                {},
+                            )
+                        )
+                        for checkpoint in (6, 12)
+                    },
+                )
         for receipt in result.opening_reversal_prediction_receipts:
             opening_reversal_seen = True
             self._opening_reversal_receipts.setdefault(
@@ -1164,6 +1260,18 @@ def build_frozen_prospective_application(
     if config.runtime.run_id is None:
         raise ValueError("frozen M1C application requires runtime.run_id")
     paths = config.paths
+    opening_leader_receipt: OpeningLeaderDeploymentReceiptV0 | None = None
+    if paths.opening_leader_continuation_v0_root is not None:
+        assert_opening_leader_runtime_configuration_v0(
+            mode=config.runtime.mode,
+            maximum_quote_age_seconds=config.ibkr.maximum_quote_age_seconds,
+            trading_enabled=config.risk.trading_enabled,
+        )
+        opening_leader_receipt = load_opening_leader_package_v0(
+            paths.opening_leader_continuation_v0_root,
+            prospective_start_utc=config.runtime.prospective_start_utc,
+            source_files=opening_leader_runtime_source_files_v0(),
+        )
     required_paths = {
         "raw_event_root": paths.raw_event_root,
         "recorder_activation": paths.recorder_activation,
@@ -2047,6 +2155,48 @@ def build_frozen_prospective_application(
         run_id=config.runtime.run_id or "",
         report_root=resolved_paths["prospective_report_root"],
     )
+    opening_leader_recorder: OpeningLeaderContinuationRecorderV0 | None = None
+    if opening_leader_receipt is not None:
+        opening_leader_store = OpeningLeaderEvidenceStoreV0(
+            repository,
+            deployment_receipt_id=opening_leader_receipt.deployment_receipt_id,
+            contract_hash=opening_leader_receipt.contract_hash,
+            code_hash=opening_leader_receipt.code_hash,
+            cohort_hash=opening_leader_receipt.cohort_hash,
+        )
+        opening_leader_option_snapshotter = OpeningLeaderIBKROptionSnapshotterV0(
+            adapter=adapter,
+            underlying_contracts={
+                item.symbol: item for item in qualified if not item.market_proxy
+            },
+            contract_factory=lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
+                option_contract_factory(
+                    symbol,
+                    expiry,
+                    strike,
+                    cast(Any, right),
+                    multiplier,
+                    exchange,
+                    trading,
+                )
+            ),
+            request_heartbeat=pace_request,
+            maximum_quote_age_seconds=config.ibkr.maximum_quote_age_seconds,
+        )
+        opening_leader_recorder = OpeningLeaderContinuationRecorderV0(
+            store=opening_leader_store,
+            freeze_identity=opening_leader_receipt,
+            prospective_start_utc=max(
+                prospective_start,
+                config.runtime.prospective_start_utc.astimezone(UTC),
+            ),
+            metadata_factory=metadata_factory,
+            bar_provider=live.opening_leader_checkpoint_bars,
+            underlying_quote_provider=live.opening_leader_underlying_quote,
+            option_snapshot_provider=opening_leader_option_snapshotter,
+            rank_persistence_provider=live.opening_leader_rank_persistence,
+            official_close_provider=live.opening_leader_official_close,
+        )
     application = FrozenProspectiveApplication(
         config=config,
         adapter=adapter,
@@ -2073,6 +2223,7 @@ def build_frozen_prospective_application(
         ibkr_api_version=ibkr_api_version,
         tws_or_gateway_version=gateway_version,
         session_context_preflight=session_context_preflight,
+        opening_leader_recorder=opening_leader_recorder,
     )
     if operational_repository is not None:
         assert recorder_generation is not None

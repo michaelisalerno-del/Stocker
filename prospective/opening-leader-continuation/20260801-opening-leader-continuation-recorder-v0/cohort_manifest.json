@@ -1,0 +1,16 @@
+{
+  "schema_version": "opening-leader-cohort-v0",
+  "cohort": "anchor_frozen_20",
+  "universe_id": "anchor-frozen-20-20260724",
+  "symbols": [
+    "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+    "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+  ],
+  "universe_hash": "ab2a55b55329b83e410ebdf46fa5d47f5a75a44798d01374a4d7f072da57b634",
+  "canonical_source": "configs/prospective/anchor-frozen-20.json",
+  "membership_changes_allowed": false,
+  "symbol_substitution_allowed": false,
+  "minimum_complete_stocks": 15,
+  "missing_symbol_exclusion_reason_required": true,
+  "exact_slate_membership_recorded": true
+}

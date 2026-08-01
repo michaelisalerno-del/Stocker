@@ -1,0 +1,19 @@
+{
+  "schema_version": "opening-leader-order-disable-audit-v0",
+  "status": "passed",
+  "record_only": true,
+  "orders_disabled": true,
+  "order_methods_available_to_module": false,
+  "broker_adapter_boundary": "market_data_only",
+  "forbidden_broker_methods": [
+    "placeOrder", "cancelOrder", "reqOpenOrders", "reqPositions", "reqAccountUpdates",
+    "reqAccountSummary", "reqGlobalCancel", "exerciseOptions"
+  ],
+  "order_construction_preview_stage_simulation_allowed": false,
+  "account_position_or_balance_fields_added": false,
+  "dashboard_controls_forbidden": [
+    "Buy", "Sell", "Confirm Trade", "order ticket", "position sizing", "account value"
+  ],
+  "dashboard_banner": "RECORD ONLY — ORDERS DISABLED",
+  "future_decision_category_can_activate_orders": false
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": "opening-leader-future-evaluation-v0",
+  "evaluation_status": "FROZEN_NOT_RUN",
+  "run_before_support_complete": false,
+  "primary": {
+    "checkpoint": "C6",
+    "entry": "E0_conservative_ask",
+    "exit": "FINAL_CONTINUOUS_bid",
+    "official_close_used_as_executable_exit": false,
+    "result": "underlying_net_after_observed_spread_and_configured_fees"
+  },
+  "secondary_outcomes": [
+    "E1_entry", "E2_entry", "H30", "H60", "H120", "official_close_reference",
+    "C12_equivalent_results"
+  ],
+  "metrics": [
+    "mean_return", "median_return", "win_rate", "profit_factor", "average_win",
+    "average_loss", "expected_shortfall_95", "maximum_drawdown", "positive_session_rate",
+    "stock_concentration", "month_concentration", "rank_1_vs_rank_2", "rank_1_vs_cohort",
+    "rank_1_vs_VTI", "temporal_placebo", "rank_identity_null"
+  ],
+  "options_reported_separately": true,
+  "valid_session_requires": [
+    "valid_signal_receipt",
+    "usable_E0_ask",
+    "usable_FINAL_CONTINUOUS_bid",
+    "matching_cohort_contract_and_code_hashes"
+  ],
+  "support": {
+    "C6": {"valid_sessions": 60, "minimum_calendar_months": 3, "distinct_selected_stocks": 15},
+    "C12": {"valid_sessions": 60, "minimum_calendar_months": 3, "distinct_selected_stocks": 15},
+    "pooling": false
+  },
+  "decision_categories": [
+    "prospective_opening_leader_persistence_supported",
+    "prospective_session_close_effect_not_executable",
+    "prospective_broad_cohort_drift_only",
+    "prospective_latency_fragile",
+    "prospective_opening_leader_not_supported",
+    "prospective_insufficient_support",
+    "prospective_source_or_quote_failure",
+    "prospective_contract_integrity_failure"
+  ],
+  "category_can_activate_orders": false
+}

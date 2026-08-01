@@ -25,6 +25,9 @@ export const POLLING_POLICY = Object.freeze({
     ]),
     "quiet-shadow": Object.freeze(["/api/quiet-state/session-quality"]),
     "concentration-audit": Object.freeze([]),
+    "opening-leader-continuation": Object.freeze([
+      "/api/opening-leader-continuation-v0",
+    ]),
   }),
   manualEndpointsByScreen: Object.freeze({
     "live-monitor": Object.freeze([
@@ -51,6 +54,7 @@ export const POLLING_POLICY = Object.freeze({
     "concentration-audit": Object.freeze([
       "/api/quiet-state/concentration-audit",
     ]),
+    "opening-leader-continuation": Object.freeze([]),
   }),
 });
 

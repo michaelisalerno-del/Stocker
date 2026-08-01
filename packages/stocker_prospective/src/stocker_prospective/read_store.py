@@ -2249,3 +2249,336 @@ class ProspectiveReadStore:
             "valid_session_count": sum(bool(row.get("valid")) for row in sessions),
             "decision": None if latest is None else latest.get("decision"),
         }
+
+    def opening_leader_continuation_v0(self) -> dict[str, Any]:
+        """Project immutable Opening Leader V0 evidence without evaluating it."""
+
+        empty = {
+            "title": "Opening Leader Continuation V0",
+            "banner": "RECORD ONLY — ORDERS DISABLED",
+            "sample_status": "PROSPECTIVE SAMPLE INCOMPLETE",
+            "recorder_status": "inactive",
+            "record_only": True,
+            "orders_disabled": True,
+            "primary_checkpoint": "C6",
+            "secondary_checkpoint": "C12",
+            "checkpoint_pooling_allowed": False,
+            "m1c_role": "context_only",
+            "option_policy_authorized": False,
+            "checkpoints": {
+                "C6": self._empty_opening_leader_checkpoint("primary"),
+                "C12": self._empty_opening_leader_checkpoint("secondary"),
+            },
+            "data_quality_warnings": [],
+        }
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return empty
+        with self._connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_schema WHERE type = 'table' "
+                "AND name = 'opening_leader_evidence_v0'"
+            ).fetchone()
+            if exists is None:
+                return empty
+            latest_session_row = connection.execute(
+                "SELECT MAX(session_date) AS session_date "
+                "FROM opening_leader_evidence_v0 WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            latest_session = (
+                None if latest_session_row is None else latest_session_row["session_date"]
+            )
+            rows = (
+                []
+                if latest_session is None
+                else connection.execute(
+                    "SELECT * FROM opening_leader_evidence_v0 "
+                    "WHERE run_id = ? AND session_date = ? ORDER BY id",
+                    (run_id, latest_session),
+                ).fetchall()
+            )
+            support_rows = connection.execute(
+                "SELECT * FROM opening_leader_evidence_v0 "
+                "WHERE run_id = ? ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        support_evidence = [self._decoded(row) for row in support_rows]
+        original_support = [
+            row for row in support_evidence if row.get("original_stable_id") is None
+        ]
+        linked_support = {
+            str(row["original_stable_id"]): row
+            for row in support_evidence
+            if row.get("original_stable_id") is not None
+        }
+        support_by_checkpoint: dict[int, dict[str, int]] = {}
+        for support_checkpoint in (6, 12):
+            valid_signals: list[dict[str, Any]] = []
+            signals = [
+                row
+                for row in original_support
+                if int(row["checkpoint"]) == support_checkpoint
+                and row["record_type"] == "signal_receipt"
+            ]
+            for signal in signals:
+                matching = [
+                    row
+                    for row in original_support
+                    if int(row["checkpoint"]) == support_checkpoint
+                    and row["session_date"] == signal["session_date"]
+                    and row["record_type"] == "underlying_observation"
+                ]
+                evidence_by_name = {
+                    str(row["observation_name"]): linked_support.get(
+                        str(row["stable_id"]),
+                        row,
+                    )
+                    for row in matching
+                }
+                e0_payload = evidence_by_name.get("E0", {}).get("payload") or {}
+                final_payload = evidence_by_name.get("FINAL_CONTINUOUS", {}).get(
+                    "payload"
+                ) or {}
+                e0_quote = e0_payload.get("quote") or {}
+                final_quote = final_payload.get("quote") or {}
+                identities_match = all(
+                    evidence_by_name.get(name, {}).get(identity) == signal.get(identity)
+                    for name in ("E0", "FINAL_CONTINUOUS")
+                    for identity in ("cohort_hash", "contract_hash", "code_hash")
+                )
+                if (
+                    identities_match
+                    and e0_quote.get("valid_for_signal") is True
+                    and final_quote.get("valid_for_signal") is True
+                    and isinstance(e0_quote.get("ask"), (int, float))
+                    and float(e0_quote["ask"]) > 0.0
+                    and isinstance(final_quote.get("bid"), (int, float))
+                    and float(final_quote["bid"]) > 0.0
+                ):
+                    valid_signals.append(signal)
+            valid_sessions = {str(row["session_date"]) for row in valid_signals}
+            support_by_checkpoint[support_checkpoint] = {
+                "valid_sessions": len(valid_sessions),
+                "calendar_months": len({value[:7] for value in valid_sessions}),
+                "distinct_selected_stocks": len(
+                    {
+                        str(row["selected_symbol"])
+                        for row in valid_signals
+                        if row.get("selected_symbol") is not None
+                    }
+                ),
+            }
+        decoded = [self._decoded(row) for row in rows]
+        checkpoints: dict[str, dict[str, Any]] = {}
+        warnings: list[str] = []
+        support_complete = True
+        for checkpoint, role in ((6, "primary"), (12, "secondary")):
+            checkpoint_rows = [row for row in decoded if int(row["checkpoint"]) == checkpoint]
+            projection = self._opening_leader_checkpoint_projection(
+                checkpoint_rows,
+                role=role,
+                support=support_by_checkpoint.get(
+                    checkpoint,
+                    {
+                        "valid_sessions": 0,
+                        "calendar_months": 0,
+                        "distinct_selected_stocks": 0,
+                    },
+                ),
+            )
+            checkpoints[f"C{checkpoint}"] = projection
+            warnings.extend(str(item) for item in projection["data_quality_warnings"])
+            support_complete = support_complete and bool(projection["support"]["complete"])
+        return {
+            **empty,
+            "recorder_status": "recording" if decoded else "waiting_for_signal",
+            "latest_session": latest_session,
+            "sample_status": (
+                "PROSPECTIVE SUPPORT COMPLETE"
+                if support_complete
+                else "PROSPECTIVE SAMPLE INCOMPLETE"
+            ),
+            "checkpoints": checkpoints,
+            "data_quality_warnings": list(dict.fromkeys(warnings)),
+        }
+
+    @staticmethod
+    def _empty_opening_leader_checkpoint(role: str) -> dict[str, Any]:
+        return {
+            "role": role,
+            "eligibility": "not_observed",
+            "slate_size": None,
+            "rank_1": None,
+            "rank_2": None,
+            "rank_1_return_from_open_bps": None,
+            "leader_separation_bps": None,
+            "signal_receipt": None,
+            "source_feed_status": None,
+            "observations": {},
+            "latest_hypothetical_underlying_return": None,
+            "rank_persistence": None,
+            "m1c_context": None,
+            "option_snapshots": {},
+            "pre_close_observations": {},
+            "final_continuous_observation": None,
+            "official_close_reference": None,
+            "support": {
+                "valid_sessions": 0,
+                "required_valid_sessions": 60,
+                "calendar_months": 0,
+                "required_calendar_months": 3,
+                "distinct_selected_stocks": 0,
+                "required_distinct_selected_stocks": 15,
+                "complete": False,
+            },
+            "data_quality_warnings": [],
+        }
+
+    @classmethod
+    def _opening_leader_checkpoint_projection(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        role: str,
+        support: dict[str, int],
+    ) -> dict[str, Any]:
+        projection = cls._empty_opening_leader_checkpoint(role)
+        original = [row for row in rows if row.get("original_stable_id") is None]
+        linked_by_original = {
+            str(row["original_stable_id"]): row
+            for row in rows
+            if row.get("original_stable_id") is not None
+        }
+        signal = next(
+            (row for row in original if row["record_type"] == "signal_receipt"),
+            None,
+        )
+        failure = next(
+            (row for row in original if row["record_type"] == "signal_failure"),
+            None,
+        )
+        support_projection = {
+            **support,
+            "required_valid_sessions": 60,
+            "required_calendar_months": 3,
+            "required_distinct_selected_stocks": 15,
+            "complete": (
+                support["valid_sessions"] >= 60
+                and support["calendar_months"] >= 3
+                and support["distinct_selected_stocks"] >= 15
+            ),
+        }
+        if signal is None:
+            projection.update(
+                {
+                    "eligibility": "failed" if failure is not None else "not_observed",
+                    "signal_receipt": None if failure is None else failure["stable_id"],
+                    "support": support_projection,
+                    "data_quality_warnings": (
+                        []
+                        if failure is None
+                        else list(failure.get("data_quality_flags", ()))
+                    ),
+                }
+            )
+            return projection
+        signal_payload = signal.get("payload") or {}
+        ranking = signal_payload.get("ranking") or {}
+        signal_quote = signal_payload.get("signal_quote") or {}
+        original_observation_rows = [
+            row for row in original if row["record_type"] == "underlying_observation"
+        ]
+        observation_rows = [
+            linked_by_original.get(str(row["stable_id"]), row)
+            for row in original_observation_rows
+        ]
+        observations = {
+            str(row["observation_name"]): row.get("payload") for row in observation_rows
+        }
+        latest_quote = next(
+            (
+                payload.get("quote")
+                for payload in reversed(list(observations.values()))
+                if isinstance(payload, dict) and payload.get("quote") is not None
+            ),
+            signal_quote,
+        )
+        if not isinstance(latest_quote, dict):
+            latest_quote = {}
+        latest_shadow = next(
+            (
+                payload.get("shadow_return")
+                for payload in reversed(list(observations.values()))
+                if isinstance(payload, dict) and payload.get("shadow_return") is not None
+            ),
+            None,
+        )
+        latest_persistence = next(
+            (
+                payload.get("rank_persistence")
+                for payload in reversed(list(observations.values()))
+                if isinstance(payload, dict) and payload.get("rank_persistence") is not None
+            ),
+            None,
+        )
+        option_snapshots = {
+            str(row["observation_name"]): row.get("payload")
+            for row in original
+            if row["record_type"] == "option_snapshot"
+        }
+        original_official = next(
+            (row for row in original if row["record_type"] == "official_close_reference"),
+            None,
+        )
+        official = (
+            None
+            if original_official is None
+            else linked_by_original.get(
+                str(original_official["stable_id"]),
+                original_official,
+            ).get("payload")
+        )
+        warning_values = [
+            str(flag)
+            for row in rows
+            for flag in row.get("data_quality_flags", ())
+            if flag
+        ]
+        warning_values.extend(
+            f"linked_{row['record_type']}:{row['stable_id']}"
+            for row in rows
+            if row.get("original_stable_id") is not None
+        )
+        rank_1 = ranking.get("rank_1") or {}
+        rank_2 = ranking.get("rank_2") or {}
+        projection.update(
+            {
+                "eligibility": "eligible",
+                "slate_size": ranking.get("slate_size"),
+                "rank_1": rank_1.get("symbol"),
+                "rank_2": rank_2.get("symbol"),
+                "rank_1_return_from_open_bps": rank_1.get(
+                    "open_to_checkpoint_return_bps"
+                ),
+                "leader_separation_bps": ranking.get("rank_1_minus_rank_2_bps"),
+                "signal_receipt": signal["stable_id"],
+                "source_feed_status": latest_quote.get("market_data_status"),
+                "observations": {
+                    name: observations.get(name) for name in ("SIGNAL", "E0", "E1", "E2")
+                },
+                "latest_hypothetical_underlying_return": latest_shadow,
+                "rank_persistence": latest_persistence,
+                "m1c_context": rank_1.get("m1c_context"),
+                "option_snapshots": option_snapshots,
+                "pre_close_observations": {
+                    name: observations.get(name)
+                    for name in ("PRE_CLOSE_30", "PRE_CLOSE_15", "PRE_CLOSE_5", "PRE_CLOSE_1")
+                },
+                "final_continuous_observation": observations.get("FINAL_CONTINUOUS"),
+                "official_close_reference": official,
+                "support": support_projection,
+                "data_quality_warnings": list(dict.fromkeys(warning_values)),
+            }
+        )
+        return projection

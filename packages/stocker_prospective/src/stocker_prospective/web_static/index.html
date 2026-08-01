@@ -62,6 +62,9 @@
         <button class="nav-item" type="button" data-screen="concentration-audit">
           <span>10</span> Concentration
         </button>
+        <button class="nav-item" type="button" data-screen="opening-leader-continuation">
+          <span>11</span> Opening leader
+        </button>
       </nav>
       <div class="rail-meta">
         <span>M1C 0.488333710794033</span>
@@ -375,6 +378,48 @@
         <article class="panel wide-panel stacked-panel">
           <header><span>L</span><h3>Leave-one-month-out sensitivity — descriptive only</h3></header>
           <div id="leave-month-panel" class="data-region"></div>
+        </article>
+      </section>
+
+      <section
+        id="opening-leader-continuation"
+        class="screen"
+        aria-labelledby="opening-leader-title"
+        tabindex="-1"
+      >
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">11 / Frozen prospective persistence recorder</span>
+            <h2 id="opening-leader-title">Opening Leader Continuation V0</h2>
+          </div>
+          <p>
+            The rank-1 stock at each causal opening checkpoint is recorded without
+            adaptation. C6 is primary, C12 is secondary, and their support is never pooled.
+          </p>
+        </div>
+        <div class="ledger-banner" role="status">
+          <strong>RECORD ONLY — ORDERS DISABLED</strong>
+          <span>PROSPECTIVE SAMPLE INCOMPLETE</span>
+          <span>NO OPTION POLICY AUTHORIZED</span>
+        </div>
+        <div id="opening-leader-status-grid" class="metric-grid" aria-live="polite"></div>
+        <div class="monitor-lower">
+          <article class="panel">
+            <header><span>6</span><h3>C6 primary signal</h3></header>
+            <div id="opening-leader-c6" class="data-region"></div>
+          </article>
+          <article class="panel">
+            <header><span>12</span><h3>C12 secondary replication</h3></header>
+            <div id="opening-leader-c12" class="data-region"></div>
+          </article>
+        </div>
+        <article class="panel wide-panel stacked-panel">
+          <header><span>Q</span><h3>Underlying quote and rank-persistence observations</h3></header>
+          <div id="opening-leader-observations" class="data-region"></div>
+        </article>
+        <article class="panel wide-panel stacked-panel">
+          <header><span>!</span><h3>Immutable data-quality warnings</h3></header>
+          <div id="opening-leader-warnings" class="data-region"></div>
         </article>
       </section>
     </main>

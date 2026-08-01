@@ -1,0 +1,48 @@
+{
+  "schema_version": "opening-leader-continuation-contract-v0",
+  "recorder_version": "opening-leader-continuation-recorder-v0",
+  "title": "Opening Leader Continuation Prospective Recorder V0",
+  "hypothesis": "The single strongest stock in the frozen cohort at the causal opening checkpoint may continue outperforming by the end of the regular session.",
+  "retrospective_result": "session_close_persistence_only",
+  "candidate_identity": "rank_1",
+  "direction": "LONG",
+  "primary_checkpoint": "C6",
+  "secondary_checkpoint": "C12",
+  "checkpoint_pooling_allowed": false,
+  "record_only": true,
+  "trading_strategy_authorized": false,
+  "orders": {
+    "construction_allowed": false,
+    "preview_allowed": false,
+    "staging_allowed": false,
+    "simulation_allowed": false,
+    "submission_allowed": false,
+    "cancellation_allowed": false,
+    "account_or_position_access_required": false
+  },
+  "m1c": {
+    "role": "context_only",
+    "may_admit_or_reject": false,
+    "may_change_rank_direction_size_frequency_or_option": false
+  },
+  "options": {
+    "quotes_recorded": true,
+    "policy_authorized": false,
+    "recommendation_display_allowed": false,
+    "diagnostics": ["P20", "P30", "BPS20"],
+    "naked_call_diagnostics_allowed": false
+  },
+  "prospective_only": {
+    "historical_backfill_allowed": false,
+    "earlier_2026_sessions_allowed": false,
+    "protected_historical_outcome_access_allowed": false,
+    "real_market_data_before_freeze_receipt_allowed": false,
+    "pre_freeze_data_requires_new_recorder_version": true
+  },
+  "scientific_promotion_allowed_before_support": false,
+  "sample_support": {
+    "C6": {"valid_sessions": 60, "minimum_calendar_months": 3, "distinct_selected_stocks": 15},
+    "C12": {"valid_sessions": 60, "minimum_calendar_months": 3, "distinct_selected_stocks": 15},
+    "pooled_support_allowed": false
+  }
+}

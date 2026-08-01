@@ -49,6 +49,7 @@ class PathsConfig(BaseModel):
     historical_activity_bars: Path | None = None
     bar_compatibility_report: Path | None = None
     quiet_state_concentration_audit_root: Path | None = None
+    opening_leader_continuation_v0_root: Path | None = None
 
 
 class RuntimeConfig(BaseModel):

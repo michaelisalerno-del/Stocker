@@ -1,0 +1,25 @@
+{
+  "schema_version": "opening-leader-rank-v0",
+  "formula": "10000 * (checkpoint_close / regular_session_open - 1)",
+  "field": "open_to_checkpoint_return_bps",
+  "sort": [
+    {"field": "open_to_checkpoint_return_bps", "order": "descending"},
+    {"field": "symbol", "order": "alphabetical_ascending"}
+  ],
+  "candidate": "rank_1",
+  "direction": "LONG",
+  "record": [
+    "rank_1", "rank_2", "rank_1_minus_rank_2_bps", "complete_rank_ordering",
+    "exact_slate_size", "exact_rank_inputs", "session_open_source_id",
+    "checkpoint_source_id", "bar_start_utc", "bar_end_utc", "available_at_utc",
+    "source_timestamp_utc", "received_timestamp_utc", "slate_hash"
+  ],
+  "input_requirements": [
+    "canonical_symbol", "exact_checkpoint_timestamp", "causally_available",
+    "finite_positive_ohlc", "session_open_identity", "complete_source",
+    "causally_resolved_duplicate_status"
+  ],
+  "imputation_allowed": false,
+  "m1c_used_in_sort_or_selection": false,
+  "adaptive_identity_change_allowed": false
+}

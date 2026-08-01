@@ -207,11 +207,25 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     assert 'id="signal-detail"' in response.text
     assert 'id="shadow-blotter"' in response.text
     assert 'id="safety-audit"' in response.text
+    assert 'id="opening-leader-continuation"' in response.text
+    assert "Opening Leader Continuation V0" in response.text
+    assert "RECORD ONLY — ORDERS DISABLED" in response.text
+    opening_section = response.text.split(
+        'id="opening-leader-continuation"',
+        maxsplit=1,
+    )[1].split("</section>", maxsplit=1)[0]
+    assert "<button" not in opening_section
+    assert not any(
+        forbidden in opening_section.lower()
+        for forbidden in ("buy button", "sell button", "confirm trade", "order ticket")
+    )
     script = client.get("/assets/app.js")
     assert script.status_code == 200
     assert "Official IBKR API" in script.text
     assert "Recorder readiness" in script.text
     assert "REPLAY ${clean(replay.state).toUpperCase()} // LIVE RECORDER" in script.text
+    assert "/api/opening-leader-continuation-v0" in script.text
+    assert "renderOpeningLeader" in script.text
 
     endpoints = (
         "/api/health",
@@ -224,6 +238,7 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         "/api/market-data-budget",
         "/api/source-transfer",
         "/api/reports/daily",
+        "/api/opening-leader-continuation-v0",
     )
     for endpoint in endpoints:
         api_response = client.get(endpoint)
@@ -234,6 +249,14 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
     assert None not in health["blockers"]
     assert health["feature_parity"]["blocker"] == "blocked_feature_source_semantics_mismatch"
     assert health["no_order_path_verified"] is True
+    opening_leader = client.get("/api/opening-leader-continuation-v0").json()
+    assert opening_leader["banner"] == "RECORD ONLY — ORDERS DISABLED"
+    assert opening_leader["sample_status"] == "PROSPECTIVE SAMPLE INCOMPLETE"
+    assert opening_leader["primary_checkpoint"] == "C6"
+    assert opening_leader["secondary_checkpoint"] == "C12"
+    assert opening_leader["checkpoint_pooling_allowed"] is False
+    assert opening_leader["m1c_role"] == "context_only"
+    assert opening_leader["option_policy_authorized"] is False
     assert health["market_data"]["current_budget"]["rejected_signals"] == 1
     assert health["ibkr_api"]["verified"] is False
     assert health["ibkr_api"]["automatic_installation"] is False

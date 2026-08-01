@@ -76,6 +76,14 @@ from stocker_prospective.microstructure import (
     standard_window_summaries,
     summarise_microstructure_window,
 )
+from stocker_prospective.opening_leader_continuation_v0 import (
+    CausalCheckpointBarV0,
+    RankPersistenceV0,
+    UnderlyingQuoteV0,
+    calculate_rank_persistence_v0,
+    checkpoint_timestamp_v0,
+    normalize_underlying_quote_v0,
+)
 from stocker_prospective.opening_market_transition_v1 import (
     calculate_opening_preentry_window_v1,
     classify_opening_market_transition_v1,
@@ -319,6 +327,11 @@ class FrozenM1CLiveRecorder:
         self._last_depth_snapshot_at: dict[str, datetime] = {}
         self._last_depth_validity: dict[str, bool] = {}
         self._bar_order: dict[tuple[int, datetime], tuple[int, int]] = {}
+        self._bar_finalised_at: dict[tuple[str, date, int], datetime] = {}
+        self._opening_leader_quote_retention: dict[
+            str,
+            tuple[datetime, datetime],
+        ] = {}
         self._episode_windows: dict[tuple[str, str], tuple[str, datetime, datetime]] = {}
         self._episode_actions: dict[str, dict[str, str]] = {}
         self._opening_reversal_outcome_inputs: dict[
@@ -598,6 +611,272 @@ class FrozenM1CLiveRecorder:
                 item.event_id,
             ),
             default=None,
+        )
+
+    def opening_leader_checkpoint_bars(
+        self,
+        session: date,
+        checkpoint: int,
+    ) -> tuple[CausalCheckpointBarV0, ...]:
+        """Project only already-finalised causal bars into the frozen leader slate."""
+
+        if checkpoint not in {6, 12}:
+            raise ValueError("opening leader V0 permits only C6 and C12")
+        output: list[CausalCheckpointBarV0] = []
+        required = set(range(1, checkpoint + 1))
+        for symbol in self.universe_symbols:
+            bars = self._bars.get((symbol, session), {})
+            opening = bars.get(1)
+            current = bars.get(checkpoint)
+            if opening is None or current is None:
+                continue
+            causal_prices = (
+                opening.open,
+                current.open,
+                current.high,
+                current.low,
+                current.close,
+            )
+            if any(
+                not math.isfinite(value) or value <= 0.0 for value in causal_prices
+            ):
+                continue
+            causal_bars = tuple(bars[index] for index in sorted(required.intersection(bars)))
+            complete = required.issubset(bars) and all(
+                bar.finalised and bar.source_completeness == "complete" for bar in causal_bars
+            )
+            open_identity = hashlib.sha256(
+                (
+                    f"{symbol}|{session.isoformat()}|C1|"
+                    f"{opening.bar_start_utc.isoformat()}|{opening.open:.17g}"
+                ).encode()
+            ).hexdigest()
+            checkpoint_identity = hashlib.sha256(
+                (
+                    f"{symbol}|{session.isoformat()}|C{checkpoint}|"
+                    f"{current.bar_start_utc.isoformat()}|{current.close:.17g}"
+                ).encode()
+            ).hexdigest()
+            output.append(
+                CausalCheckpointBarV0(
+                    symbol=symbol,
+                    session=session,
+                    checkpoint=checkpoint,
+                    bar_start_utc=current.bar_start_utc,
+                    bar_end_utc=current.bar_end_utc,
+                    available_at_utc=max(
+                        self._bar_finalised_at.get(
+                            (bar.symbol, bar.session, bar.checkpoint),
+                            bar.received_timestamp_utc,
+                        )
+                        for bar in causal_bars
+                    ),
+                    regular_session_open=opening.open,
+                    checkpoint_open=current.open,
+                    checkpoint_high=current.high,
+                    checkpoint_low=current.low,
+                    checkpoint_close=current.close,
+                    session_open_source_id=open_identity,
+                    checkpoint_source_id=checkpoint_identity,
+                    source_timestamp_utc=current.provider_timestamp_utc,
+                    received_timestamp_utc=current.received_timestamp_utc,
+                    source_completeness="complete" if complete else "partial",
+                    duplicate_resolution="unique",
+                )
+            )
+        return tuple(output)
+
+    def opening_leader_underlying_quote(
+        self,
+        symbol: str,
+        _checkpoint: int,
+        observation_name: str,
+        target: datetime,
+        observed: datetime,
+    ) -> UnderlyingQuoteV0 | None:
+        """Return the first retained causal Level-I quote at or after a target."""
+
+        if observation_name == "SIGNAL":
+            session = target.astimezone(NEW_YORK).date()
+            _, market_close = xnys_session_bounds(session)
+            retention = getattr(self, "_opening_leader_quote_retention", {})
+            previous = retention.get(symbol)
+            retain_from = target if previous is None else min(previous[0], target)
+            retain_until = (
+                market_close + timedelta(minutes=31)
+                if previous is None
+                else max(previous[1], market_close + timedelta(minutes=31))
+            )
+            retention[symbol] = (retain_from, retain_until)
+            self._opening_leader_quote_retention = retention
+
+        if observation_name == "E0":
+            event = min(
+                (
+                    candidate
+                    for candidate in self._quotes.get(symbol, ())
+                    if candidate.ordering_timestamp > target and candidate.quote_valid
+                ),
+                key=lambda item: (
+                    item.ordering_timestamp,
+                    item.received_monotonic_ns,
+                    item.source_sequence,
+                    item.event_id,
+                ),
+                default=None,
+            )
+        elif observation_name == "FINAL_CONTINUOUS":
+            session = target.astimezone(NEW_YORK).date()
+            market_open, market_close = xnys_session_bounds(session)
+            event = max(
+                (
+                    candidate
+                    for candidate in self._quotes.get(symbol, ())
+                    if market_open <= candidate.ordering_timestamp < market_close
+                    and candidate.ordering_timestamp <= observed.astimezone(UTC)
+                    and candidate.quote_valid
+                ),
+                key=lambda item: (
+                    item.ordering_timestamp,
+                    item.received_monotonic_ns,
+                    item.source_sequence,
+                    item.event_id,
+                ),
+                default=None,
+            )
+        else:
+            event = self.first_valid_quote_at_or_after(symbol, target)
+        if event is None:
+            return None
+        return normalize_underlying_quote_v0(
+            quote_id=event.event_id,
+            symbol=symbol,
+            target_timestamp_utc=target,
+            captured_at_utc=event.received_timestamp_utc,
+            provider_timestamp_utc=event.provider_timestamp_utc,
+            values={
+                "last": event.last,
+                "bid": event.bid,
+                "ask": event.ask,
+                "bid_size": event.bid_size,
+                "ask_size": event.ask_size,
+                "market_data_type": event.market_data_type.value,
+                "halted": event.halted,
+            },
+            source=event.source,
+            maximum_quote_age_seconds=self.maximum_quote_age.total_seconds(),
+        )
+
+    def opening_leader_rank_persistence(
+        self,
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        target: datetime,
+        signal_price: float,
+    ) -> RankPersistenceV0 | None:
+        """Derive context-only leader persistence from causal retained observations."""
+
+        market_open, market_close = xnys_session_bounds(session)
+        causal_target = min(target.astimezone(UTC), market_close)
+        maximum_checkpoint = min(
+            78,
+            int(max(0.0, (causal_target - market_open).total_seconds()) // 300),
+        )
+        if maximum_checkpoint < checkpoint:
+            return None
+        selected_checkpoint: int | None = None
+        returns: dict[str, float] = {}
+        prices: dict[str, float] = {}
+        finalised_at = getattr(self, "_bar_finalised_at", {})
+        for candidate_checkpoint in range(maximum_checkpoint, checkpoint - 1, -1):
+            candidate_returns: dict[str, float] = {}
+            candidate_prices: dict[str, float] = {}
+            required = set(range(1, candidate_checkpoint + 1))
+            for candidate in self.universe_symbols:
+                bars = self._bars.get((candidate, session), {})
+                if not required.issubset(bars):
+                    continue
+                causal_bars = tuple(bars[index] for index in sorted(required))
+                if not all(
+                    bar.finalised
+                    and finalised_at.get(
+                        (bar.symbol, bar.session, bar.checkpoint),
+                        bar.received_timestamp_utc,
+                    )
+                    <= causal_target
+                    for bar in causal_bars
+                ):
+                    continue
+                opening = bars[1]
+                current = bars[candidate_checkpoint]
+                candidate_prices[candidate] = current.close
+                candidate_returns[candidate] = (
+                    10_000.0 * (current.close / opening.open - 1.0)
+                )
+            if symbol in candidate_returns and len(candidate_returns) >= 15:
+                selected_checkpoint = candidate_checkpoint
+                returns = candidate_returns
+                prices = candidate_prices
+                break
+        if selected_checkpoint is None:
+            return None
+        event = self.first_valid_quote_at_or_after(symbol, target)
+        if event is not None and event.bid is not None and event.ask is not None:
+            prices[symbol] = (event.bid + event.ask) / 2.0
+        return calculate_rank_persistence_v0(
+            original_leader=symbol,
+            signal_price=signal_price,
+            current_price=prices[symbol],
+            current_return_bps_by_symbol=returns,
+            observed_path_prices=self.underlying_price_path(
+                symbol,
+                checkpoint_timestamp_v0(session, checkpoint),
+                causal_target,
+            ),
+        )
+
+    def opening_leader_official_close(
+        self,
+        symbol: str,
+        session: date,
+        observed_at: datetime,
+    ) -> tuple[float, str, datetime] | None:
+        """Expose the final official bar close as a non-executable reference only."""
+
+        _, market_close = xnys_session_bounds(session)
+        candidate = self._bars.get((symbol, session), {}).get(78)
+        if candidate is not None and candidate.finalised and candidate.bar_end_utc == market_close:
+            close = candidate.close
+            source_timestamp = candidate.provider_timestamp_utc
+            source_label = candidate.source
+        else:
+            observed = observed_at.astimezone(UTC)
+            if observed < market_close + timedelta(seconds=5):
+                return None
+            pending = self._finalizer.pending_for_symbol_session(
+                symbol=symbol,
+                session=session,
+            )
+            if (
+                pending is None
+                or pending.bar_start_utc != market_close - timedelta(minutes=5)
+                or pending.received_timestamp_utc > observed
+            ):
+                return None
+            close = pending.close
+            source_timestamp = pending.provider_timestamp_utc
+            source_label = "ibkr_historical_close_boundary_snapshot"
+        source_id = hashlib.sha256(
+            (
+                f"{symbol}|{session.isoformat()}|OFFICIAL_CLOSE|"
+                f"{market_close.isoformat()}|{close:.17g}|{source_label}"
+            ).encode()
+        ).hexdigest()
+        return (
+            close,
+            source_id,
+            source_timestamp,
         )
 
     def episode_window_completed(self, episode_id: str, window_name: str) -> bool:
@@ -1154,9 +1433,16 @@ class FrozenM1CLiveRecorder:
         return None
 
     def _trim_history(self, as_of: datetime) -> None:
-        cutoff = as_of - timedelta(minutes=60)
+        default_cutoff = as_of - timedelta(minutes=60)
+        retention = getattr(self, "_opening_leader_quote_retention", {})
         for collection in (self._quotes, self._trades):
-            for events in collection.values():
+            for symbol, events in collection.items():
+                retained = retention.get(symbol)
+                cutoff = (
+                    min(default_cutoff, retained[0])
+                    if retained is not None and as_of <= retained[1]
+                    else default_cutoff
+                )
                 while events and events[0].ordering_timestamp < cutoff:
                     events.popleft()
 
@@ -1191,6 +1477,9 @@ class FrozenM1CLiveRecorder:
         )
         for completed in completed_updates:
             for bar in self._bar_adapter.add(completed):
+                self._bar_finalised_at[
+                    (bar.symbol, bar.session, bar.checkpoint)
+                ] = update.received_timestamp_utc
                 sequence, monotonic = self._bar_order[
                     (completed.request_id, completed.bar_start_utc)
                 ]

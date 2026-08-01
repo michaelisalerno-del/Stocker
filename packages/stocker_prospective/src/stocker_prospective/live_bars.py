@@ -164,6 +164,29 @@ class KeepUpToDateBarFinalizer:
             return ()
         return (finalised,)
 
+    def pending_for_symbol_session(
+        self,
+        *,
+        symbol: str,
+        session: date,
+    ) -> HistoricalBarUpdate | None:
+        """Expose the latest received update without mutating bar finalization state."""
+
+        candidates = tuple(
+            update
+            for update in self._pending.values()
+            if update.symbol == symbol and update.bar_start_utc.date() == session
+        )
+        return max(
+            candidates,
+            key=lambda update: (
+                update.bar_start_utc,
+                update.received_timestamp_utc,
+                update.request_id,
+            ),
+            default=None,
+        )
+
 
 class AuditedFiveMinuteBarAdapter:
     """Emit each explicitly completed keepUpToDate bar exactly once."""

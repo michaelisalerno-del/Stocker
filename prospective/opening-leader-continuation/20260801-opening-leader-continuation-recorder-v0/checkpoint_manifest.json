@@ -1,0 +1,28 @@
+{
+  "schema_version": "opening-leader-checkpoints-v0",
+  "canonical_mapping_source": "packages/stocker_prospective/src/stocker_prospective/live_bars.py:checkpoint_for_bar",
+  "session_calendar": "XNYS",
+  "bar_width_minutes": 5,
+  "checkpoints": [
+    {
+      "label": "C6",
+      "checkpoint": 6,
+      "role": "primary",
+      "last_input_bar_start": "regular_session_open_plus_25_minutes",
+      "signal_timestamp": "regular_session_open_plus_30_minutes",
+      "new_york_clock_label": "10:00 America/New_York"
+    },
+    {
+      "label": "C12",
+      "checkpoint": 12,
+      "role": "secondary_replication",
+      "last_input_bar_start": "regular_session_open_plus_55_minutes",
+      "signal_timestamp": "regular_session_open_plus_60_minutes",
+      "new_york_clock_label": "10:30 America/New_York"
+    }
+  ],
+  "additional_checkpoints_allowed": false,
+  "checkpoint_pooling_allowed": false,
+  "whole_session_quality_at_signal_allowed": false,
+  "timestamps_must_be_derived_from_xnys_session_bounds": true
+}

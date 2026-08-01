@@ -28,6 +28,7 @@ paths:
   historical_activity_bars: /var/lib/stocker/preprocessing/prior-session-five-minute-bars.parquet
   bar_compatibility_report: /var/lib/stocker/prospective/bar_compatibility_report.json
   quiet_state_concentration_audit_root: /opt/stocker/current/research/options-feasibility/20260727-m1c-quiet-state-concentration-audit-v0/artifacts/primary
+  opening_leader_continuation_v0_root: /opt/stocker/current/prospective/opening-leader-continuation/20260801-opening-leader-continuation-recorder-v0
 
 runtime:
   # Set both values deliberately before first service start.

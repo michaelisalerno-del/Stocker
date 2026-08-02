@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -315,7 +316,7 @@ def _mock_command(path: Path, output: str) -> Path:
     return path
 
 
-def _valid_nft_payload(*, port: int = 4002, priority: int = -300) -> dict:
+def _valid_nft_payload(*, port: int = 4002, priority: int = -300) -> dict[str, Any]:
     return {
         "nftables": [
             {
@@ -390,7 +391,7 @@ def _run_boundary_verifier(
     ufw_status: str = "Status: active\n",
     ipv4_rules: str | None = None,
     ipv6_rules: str | None = None,
-    nft_payload: dict | None = None,
+    nft_payload: dict[str, Any] | None = None,
     include_config: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     config = tmp_path / "proxy.env"

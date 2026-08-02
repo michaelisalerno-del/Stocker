@@ -807,6 +807,76 @@ stores source-labelled evidence that is permanently ineligible for scoring.
 Never put IBKR username, password, or 2FA material in any Stocker file. Stocker
 has no fields for them.
 
+### Group O exact-chain publication and pre-signal recovery
+
+An EODHD HTTP 200 response is not sufficient to finalize Group O context. Every
+frozen cohort symbol must have at least one canonical exact-session option row.
+If any symbol has zero canonical rows, the recorder writes an immutable
+`pending_exact_chain` attempt receipt under:
+
+```text
+/var/lib/stocker/daily-context/source-cache/eodhd-group-o/
+  <observation-session>/attempts/<attempt-id>/attempt_receipt.json
+```
+
+The signal-session package is not published in that state. Each retry uses the
+next four-digit attempt directory so an earlier empty provider response is
+preserved and cannot be reused as a completed cache entry.
+
+If an older recorder already finalized a `missing_exact_chain` base package,
+the base file remains byte-for-byte unchanged. A successful later acquisition
+may append a self-binding revision under:
+
+```text
+/var/lib/stocker/daily-context/group-o/revisions/
+  <signal-session>/<four-digit-revision-number>.json
+```
+
+Revision numbers must form a contiguous hash-linked chain from the exact base
+file. The frozen contract version, feature and regime hashes, cohort ordering,
+signal session, and exact D-1 observation identity cannot change. The loader
+rejects a revision created at or after the exact XNYS signal-session open. This
+permits delayed D-1 publication before a future signal while prohibiting
+same-session or retrospective eligibility changes.
+
+For the audited Friday 2026-07-31 source-publication recovery targeting Monday
+2026-08-03, stop the recorder and run the dedicated pre-adapter command from
+the staged release before promotion or recorder restart:
+
+```bash
+sudo -u stocker sh -c '
+  set -a
+  . /etc/stocker/stocker.env
+  exec /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective \
+    scientific-inputs recover-group-o-exact-chain-v1 \
+    --config /etc/stocker/prospective.yaml \
+    --release-directory /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
+'
+```
+
+The command verifies the signed recovery freeze, exact 20-symbol cohort, failed
+base hash, and pre-open cutoff; then it writes
+`<attempt>/recovery_start_receipt.json` before making any EODHD request. The
+same release blocks before constructing the IBKR adapter unless that start
+receipt, acquisition receipt, hash-linked revision, and the self-binding
+`<attempt>/recovery_completion_receipt.json` agree. The completion receipt
+hash-links the deployment, start, failed base, staged candidate, revision, and
+acquisition-attempt identities and file bytes. If EODHD still has no exact
+Friday rows, the command preserves the attempt, waits until its signed
+`retry_after_utc`, and retries automatically at the frozen 15-minute interval
+until the pre-open cutoff. Leave the recorder stopped and do not run a second
+recovery process. Never bypass the gate or edit the failed package.
+
+This pre-adapter gate is permanent for the recovery version; it does not
+expire after the target session closes. Removing it requires a new signed
+recorder version and deployment receipt, not a clock-based bypass.
+
+Do not delete, rename, edit, or replace the failed base, an acquisition-attempt
+receipt, or a revision. A missing or invalid chain remains fail-closed for M1C.
+Opening Leader Continuation V0 treats M1C as context only and continues to obey
+its independently signed rank-selection contract. None of these files enables
+orders or changes the record-only runtime mode.
+
 Before the first recorder start, create the immutable frozen activity baseline:
 
 ```bash

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import sqlite3
 from collections import deque
@@ -9,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from stocker_prospective import opening_leader_live_v0 as opening_leader_live
 from stocker_prospective.contract import assert_no_broker_mutation_surface
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.events import UnderlyingLevel1QuoteEvent
@@ -43,11 +46,13 @@ from stocker_prospective.opening_leader_continuation_v0 import (
     stable_evidence_id_v0,
 )
 from stocker_prospective.opening_leader_live_v0 import (
+    OpeningLeaderDeploymentRefreezeReceiptV1,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
     load_opening_leader_package_v0,
     opening_leader_repository_root_v0,
+    opening_leader_runtime_source_files_v0,
 )
 from stocker_prospective.read_store import ProspectiveReadStore
 
@@ -1256,7 +1261,10 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
     shutil.copytree(
         source_package,
         package,
-        ignore=shutil.ignore_patterns("deployment_freeze_receipt.json"),
+        ignore=shutil.ignore_patterns(
+            "deployment_freeze_receipt.json",
+            "deployment_freeze_receipt_v1.json",
+        ),
     )
     source = tmp_path / "opening_leader_source.py"
     source.write_text("ORDER_ROUTING_ENABLED = False\n", encoding="utf-8")
@@ -1310,6 +1318,81 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
             package,
             prospective_start_utc=frozen_at + timedelta(seconds=1),
             source_files={"opening_leader_source": source},
+        )
+
+
+def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_sources() -> None:
+    package = (
+        Path(__file__).parents[1]
+        / "prospective"
+        / "opening-leader-continuation"
+        / "20260801-opening-leader-continuation-recorder-v0"
+    )
+    original = package / "deployment_freeze_receipt.json"
+
+    receipt = load_opening_leader_package_v0(
+        package,
+        source_files=opening_leader_runtime_source_files_v0(),
+    )
+
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == (
+        "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
+    )
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV1)
+    assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
+    assert receipt.supersedes_receipt_sha256 == (
+        "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
+    )
+    assert receipt.frozen_semantics_changed is False
+
+
+def test_opening_leader_refreeze_cannot_move_freeze_boundary_backward(
+    tmp_path: Path,
+) -> None:
+    source_package = (
+        Path(__file__).parents[1]
+        / "prospective"
+        / "opening-leader-continuation"
+        / "20260801-opening-leader-continuation-recorder-v0"
+    )
+    package = tmp_path / "opening-leader-package"
+    shutil.copytree(source_package, package)
+    original = opening_leader_live.OpeningLeaderDeploymentReceiptV0.model_validate_json(
+        (package / "deployment_freeze_receipt.json").read_text(encoding="utf-8")
+    )
+    refreeze_path = package / "deployment_freeze_receipt_v1.json"
+    payload = json.loads(refreeze_path.read_text(encoding="utf-8"))
+    payload["freeze_completed_at_utc"] = (
+        original.freeze_completed_at_utc - timedelta(seconds=1)
+    ).isoformat()
+    payload["deployment_receipt_id"] = "olc-deploy-placeholder"
+    payload["signature_sha256"] = "0" * 64
+    provisional = OpeningLeaderDeploymentRefreezeReceiptV1.model_validate(payload)
+    with_id = provisional.model_copy(
+        update={
+            "deployment_receipt_id": opening_leader_live._expected_deployment_receipt_id(
+                provisional
+            )
+        }
+    )
+    signed = with_id.model_copy(
+        update={
+            "signature_sha256": hashlib.sha256(
+                opening_leader_live._canonical_json(
+                    opening_leader_live._signature_payload(with_id)
+                ).encode("utf-8")
+            ).hexdigest()
+        }
+    )
+    refreeze_path.write_text(
+        json.dumps(signed.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="refreeze lineage mismatch"):
+        load_opening_leader_package_v0(
+            package,
+            source_files=opening_leader_runtime_source_files_v0(),
         )
 
 

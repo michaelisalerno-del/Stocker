@@ -85,6 +85,7 @@ from stocker_prospective.opening_leader_continuation_v0 import (
 )
 from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentReceiptV0,
+    OpeningLeaderDeploymentRefreezeReceiptV1,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1260,7 +1261,9 @@ def build_frozen_prospective_application(
     if config.runtime.run_id is None:
         raise ValueError("frozen M1C application requires runtime.run_id")
     paths = config.paths
-    opening_leader_receipt: OpeningLeaderDeploymentReceiptV0 | None = None
+    opening_leader_receipt: (
+        OpeningLeaderDeploymentReceiptV0 | OpeningLeaderDeploymentRefreezeReceiptV1 | None
+    ) = None
     if paths.opening_leader_continuation_v0_root is not None:
         assert_opening_leader_runtime_configuration_v0(
             mode=config.runtime.mode,

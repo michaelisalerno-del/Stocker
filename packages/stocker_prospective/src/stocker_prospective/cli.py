@@ -49,6 +49,11 @@ from stocker_prospective.frozen_artifacts import (
     FrozenArtifactReconstructionError,
     reconstruct_frozen_artifacts,
 )
+from stocker_prospective.group_o_recovery import (
+    group_o_recovery_result_payload,
+    recover_group_o_exact_chain_until_ready_v1,
+    require_group_o_recovery_ready_before_adapter_v1,
+)
 from stocker_prospective.ibkr import (
     IBKRConnectionConfig,
     IBKRMarketDataAdapter,
@@ -574,6 +579,31 @@ def build_activity_baseline(
         _fatal(str(exc))
 
 
+@scientific_inputs_app.command("recover-group-o-exact-chain-v1")
+def recover_group_o_exact_chain(
+    config_path: Path = typer.Option(..., "--config", exists=True),
+    release_directory: Path = typer.Option(..., exists=True, file_okay=False),
+) -> None:
+    """Recover the audited Friday exact chain before any IBKR adapter is opened."""
+
+    try:
+        config = load_prospective_config(config_path)
+        if config.runtime.mode != "record_only" or config.risk.trading_enabled:
+            raise RuntimeSafetyError("Group O recovery requires record-only, orders-disabled mode")
+        if config.paths.context_root is None:
+            raise RuntimeSafetyError("Group O recovery requires a persistent context root")
+        verification = load_active_bundle(config.paths.bundle_root)
+        identity = RecorderDeploymentIdentity.from_bundle(verification)
+        result = recover_group_o_exact_chain_until_ready_v1(
+            context_root=config.paths.context_root,
+            release_directory=release_directory,
+            symbols=identity.symbols,
+        )
+        _emit(group_o_recovery_result_payload(result))
+    except Exception as exc:
+        _fatal(str(exc), exit_code=75)
+
+
 @replay_app.command("run")
 def replay_run(config_path: Path = typer.Option(..., "--config", exists=True)) -> None:
     """Run the deterministic fixture and exit."""
@@ -871,6 +901,15 @@ def recorder_run(
                     "requires the durable raw recorder; legacy memory-drain "
                     "diagnostic mode cannot open a socket"
                 )
+            if config.paths.context_root is None:
+                raise RuntimeSafetyError(
+                    "blocked_pre_adapter_group_o_recovery_missing_context_root"
+                )
+            require_group_o_recovery_ready_before_adapter_v1(
+                context_root=config.paths.context_root,
+                release_directory=release_directory,
+                now=datetime.now(UTC),
+            )
             adapter = _ibkr_adapter(config)
             validate_runtime_safety(config, adapter)
             ibkr_api_module = require_official_ibkr_api()

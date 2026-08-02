@@ -520,6 +520,11 @@ def test_transient_ibkr_failure_uses_restartable_exit_and_releases_lease(
             self.stopped = True
 
     adapter = FakeAdapter()
+    monkeypatch.setattr(
+        cli_module,
+        "require_group_o_recovery_ready_before_adapter_v1",
+        lambda **_kwargs: None,
+    )
     monkeypatch.setattr(cli_module, "_ibkr_adapter", lambda _config: adapter)
     monkeypatch.setattr(cli_module, "require_official_ibkr_api", lambda: object())
     monkeypatch.setattr(cli_module, "_validate_ibkr_scoring_inputs", lambda _config: None)
@@ -596,6 +601,11 @@ def test_permanent_bundle_failure_uses_restart_preventing_exit(
         def stop(self) -> None:
             return None
 
+    monkeypatch.setattr(
+        cli_module,
+        "require_group_o_recovery_ready_before_adapter_v1",
+        lambda **_kwargs: None,
+    )
     monkeypatch.setattr(cli_module, "_ibkr_adapter", lambda _config: FakeAdapter())
     monkeypatch.setattr(cli_module, "require_official_ibkr_api", lambda: object())
     monkeypatch.setattr(

@@ -490,6 +490,9 @@ sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/verify-ibgateway-loopback-boundary.sh \
   /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/verify-ibgateway-daily-readiness.sh \
+  /usr/local/libexec/stocker-verify-ibgateway-daily-readiness
+sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/run-ibgateway-loopback-proxy.sh \
   /usr/local/libexec/stocker-ibgateway-loopback-proxy
 sudo install -o root -g root -m 0644 \
@@ -499,12 +502,15 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-boundary.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.socket \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.timer \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo /usr/local/libexec/stocker-install-ibgateway-loopback-boundary
 sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo systemctl enable stocker-ibgateway-loopback-proxy.socket
+sudo systemctl enable --now stocker-ibgateway-daily-readiness.timer
 sudo systemctl enable --now stocker-ibgateway.service
 ```
 
@@ -544,14 +550,17 @@ database, commands, or logs. Choose the paper session. In Gateway API settings:
    the runtime must use the value actually displayed.
 3. Permit localhost only.
 4. Keep API message logging free of unnecessary market-data payloads.
-5. Configure the supported daily auto-restart window if desired. Plan for
-   manual authentication again after the weekly reset.
+5. Configure **Auto restart** for 23:45 UTC. Plan for manual authentication
+   again after the weekly reset.
 
 The systemd unit uses `Restart=always` because Gateway reports its scheduled
 daily auto-restart as a successful process exit. This lets systemd relaunch the
-official application immediately while its broker-managed restart session is
-still resumable. An operator-issued `systemctl stop` does not trigger a
-restart. A weekly broker reset may still require manual authentication.
+official application after `RestartSec=1`, while its broker-managed restart
+session is still resumable. Do not increase that delay: the restart credential
+is short-lived. An operator-issued `systemctl stop` does not trigger a restart.
+The read-only readiness timer checks the authenticated upstream port at 23:46
+UTC, retrying for up to two minutes without starting, stopping, or restarting
+Gateway. A weekly broker reset may still require manual authentication.
 
 Verify that the upstream port is firewall-restricted, the Stocker endpoint is
 loopback-only, and VNC remains private:
@@ -566,6 +575,8 @@ sudo ufw status verbose
 sudo nft -j list table inet stocker_ibgateway | jq .
 sudo systemctl status \
   stocker-ibgateway.service \
+  stocker-ibgateway-daily-readiness.service \
+  stocker-ibgateway-daily-readiness.timer \
   stocker-ibgateway-loopback-boundary.service \
   stocker-ibgateway-loopback-proxy.socket \
   stocker-ibgateway-vnc.service
@@ -1333,8 +1344,10 @@ sudo systemctl status stocker-backup.service stocker-backup.timer
 sudo ls -l /var/lib/stocker/backups
 ```
 
-The SQLite backup includes the durable callback inbox and every hardening
-state table. It does not copy immutable Parquet files; replicate the entire raw
+The timer starts at 00:05 UTC with up to five minutes of random delay, keeping
+backup work outside the Gateway's short-lived 23:45 restart-resume window. The
+SQLite backup includes the durable callback inbox and every hardening state
+table. It does not copy immutable Parquet files; replicate the entire raw
 partition tree, metadata sidecars, staged/quarantine tree, SQLite backup, and
 its hash manifest as one recovery set. The application never automatically
 deletes evidence or backups. Configure encrypted off-host replication and
@@ -1461,7 +1474,7 @@ evidence without its own audit.
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
-| Gateway process restarted but API port is absent | The Java process and loopback proxy are not proof of an authenticated API session. Confirm the configured upstream port is listening before starting the recorder. Authenticate only in the official Gateway window, keep Read-Only API and localhost-only enabled, and confirm `AutoRestart=1`. A broker weekly reset can still require manual credentials and 2FA; never store them in Stocker. |
+| Gateway process restarted but API port is absent | The Java process and loopback proxy are not proof of an authenticated API session. Inspect `stocker-ibgateway-daily-readiness.service` and confirm the configured upstream port is listening. Confirm the unit still has `Restart=always` and `RestartSec=1`; a longer delay can outlive the short broker restart credential. Authenticate only in the official Gateway window, keep Read-Only API and localhost-only enabled, and confirm `AutoRestart=1`. A broker weekly reset can still require manual credentials and 2FA; never store them in Stocker. |
 | Recorder exits at after-session capture with `prospective run identity mismatch` | Preserve the immutable first-activation `prospective_run` row. After-session source capture must obtain metadata from the frozen application's activation metadata factory; the current release SHA belongs in generation artifact receipts, not a replacement run identity. Do not edit the existing run row to match a deployment. |
 | Universe Tape has symbols and bars but no probabilities | Confirm a frozen checkpoint (6, 8, …, 34) completed with the prior-session activity baseline and Group-O package available. A pending bar-compatibility receipt should show an engineering score marked `scientific_recording_not_authorized`; it must not suppress that score. Bid/ask remains intentionally blank until the bounded promotion scheduler arms Level I for a low/high candidate. |
 | Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation and bounded contract plan. The quiet capture table may show current persisted bid/ask before a structure closes; a finalized row additionally requires complete immutable per-leg entry/exit quotes. Inspect the wait/invalid reason and never manufacture a position from configuration, a latest quote, or a partial leg. |

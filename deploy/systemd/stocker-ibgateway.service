@@ -27,7 +27,7 @@ ExecStart=/opt/ibgateway/current/ibgateway
 # Relaunch it so the broker-managed restart session can resume before expiry.
 # An explicit `systemctl stop` still suppresses service restarts.
 Restart=always
-RestartSec=20
+RestartSec=1
 KillSignal=SIGTERM
 SuccessExitStatus=143
 TimeoutStopSec=60

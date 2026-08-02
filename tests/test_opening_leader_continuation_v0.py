@@ -47,6 +47,7 @@ from stocker_prospective.opening_leader_continuation_v0 import (
 )
 from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV1,
+    OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
@@ -1264,6 +1265,7 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
         ignore=shutil.ignore_patterns(
             "deployment_freeze_receipt.json",
             "deployment_freeze_receipt_v1.json",
+            "deployment_freeze_receipt_v2.json",
         ),
     )
     source = tmp_path / "opening_leader_source.py"
@@ -1338,10 +1340,13 @@ def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
     )
-    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV1)
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV2)
     assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
     assert receipt.supersedes_receipt_sha256 == (
-        "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
+        "65c3f9aa2bd788850d5beacd968992503ced47849b1634ed068f032e0910a306"
+    )
+    assert receipt.supersedes_deployment_receipt_id == (
+        "olc-deploy-7d2019790b5d19f6982cb835"
     )
     assert receipt.frozen_semantics_changed is False
 
@@ -1357,6 +1362,7 @@ def test_opening_leader_refreeze_cannot_move_freeze_boundary_backward(
     )
     package = tmp_path / "opening-leader-package"
     shutil.copytree(source_package, package)
+    (package / "deployment_freeze_receipt_v2.json").unlink(missing_ok=True)
     original = opening_leader_live.OpeningLeaderDeploymentReceiptV0.model_validate_json(
         (package / "deployment_freeze_receipt.json").read_text(encoding="utf-8")
     )
@@ -1390,6 +1396,56 @@ def test_opening_leader_refreeze_cannot_move_freeze_boundary_backward(
     )
 
     with pytest.raises(ValueError, match="refreeze lineage mismatch"):
+        load_opening_leader_package_v0(
+            package,
+            source_files=opening_leader_runtime_source_files_v0(),
+        )
+
+
+def test_opening_leader_v2_refreeze_cannot_move_freeze_boundary_backward(
+    tmp_path: Path,
+) -> None:
+    source_package = (
+        Path(__file__).parents[1]
+        / "prospective"
+        / "opening-leader-continuation"
+        / "20260801-opening-leader-continuation-recorder-v0"
+    )
+    package = tmp_path / "opening-leader-package"
+    shutil.copytree(source_package, package)
+    prior = OpeningLeaderDeploymentRefreezeReceiptV1.model_validate_json(
+        (package / "deployment_freeze_receipt_v1.json").read_text(encoding="utf-8")
+    )
+    refreeze_path = package / "deployment_freeze_receipt_v2.json"
+    payload = json.loads(refreeze_path.read_text(encoding="utf-8"))
+    payload["freeze_completed_at_utc"] = (
+        prior.freeze_completed_at_utc - timedelta(seconds=1)
+    ).isoformat()
+    payload["deployment_receipt_id"] = "olc-deploy-placeholder"
+    payload["signature_sha256"] = "0" * 64
+    provisional = OpeningLeaderDeploymentRefreezeReceiptV2.model_validate(payload)
+    with_id = provisional.model_copy(
+        update={
+            "deployment_receipt_id": opening_leader_live._expected_deployment_receipt_id(
+                provisional
+            )
+        }
+    )
+    signed = with_id.model_copy(
+        update={
+            "signature_sha256": hashlib.sha256(
+                opening_leader_live._canonical_json(
+                    opening_leader_live._signature_payload(with_id)
+                ).encode("utf-8")
+            ).hexdigest()
+        }
+    )
+    refreeze_path.write_text(
+        json.dumps(signed.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="V2 deployment refreeze lineage mismatch"):
         load_opening_leader_package_v0(
             package,
             source_files=opening_leader_runtime_source_files_v0(),

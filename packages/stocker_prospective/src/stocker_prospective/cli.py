@@ -51,8 +51,8 @@ from stocker_prospective.frozen_artifacts import (
 )
 from stocker_prospective.group_o_recovery import (
     group_o_recovery_result_payload,
-    recover_group_o_exact_chain_until_ready_v1,
-    require_group_o_recovery_ready_before_adapter_v1,
+    recover_group_o_exact_chain_until_ready_v2,
+    require_group_o_recovery_ready_before_adapter_v2,
 )
 from stocker_prospective.ibkr import (
     IBKRConnectionConfig,
@@ -579,7 +579,7 @@ def build_activity_baseline(
         _fatal(str(exc))
 
 
-@scientific_inputs_app.command("recover-group-o-exact-chain-v1")
+@scientific_inputs_app.command("recover-group-o-exact-chain-v2")
 def recover_group_o_exact_chain(
     config_path: Path = typer.Option(..., "--config", exists=True),
     release_directory: Path = typer.Option(..., exists=True, file_okay=False),
@@ -594,7 +594,7 @@ def recover_group_o_exact_chain(
             raise RuntimeSafetyError("Group O recovery requires a persistent context root")
         verification = load_active_bundle(config.paths.bundle_root)
         identity = RecorderDeploymentIdentity.from_bundle(verification)
-        result = recover_group_o_exact_chain_until_ready_v1(
+        result = recover_group_o_exact_chain_until_ready_v2(
             context_root=config.paths.context_root,
             release_directory=release_directory,
             symbols=identity.symbols,
@@ -905,7 +905,7 @@ def recorder_run(
                 raise RuntimeSafetyError(
                     "blocked_pre_adapter_group_o_recovery_missing_context_root"
                 )
-            require_group_o_recovery_ready_before_adapter_v1(
+            require_group_o_recovery_ready_before_adapter_v2(
                 context_root=config.paths.context_root,
                 release_directory=release_directory,
                 now=datetime.now(UTC),

@@ -522,7 +522,7 @@ def test_transient_ibkr_failure_uses_restartable_exit_and_releases_lease(
     adapter = FakeAdapter()
     monkeypatch.setattr(
         cli_module,
-        "require_group_o_recovery_ready_before_adapter_v1",
+        "require_group_o_recovery_ready_before_adapter_v2",
         lambda **_kwargs: None,
     )
     monkeypatch.setattr(cli_module, "_ibkr_adapter", lambda _config: adapter)
@@ -603,7 +603,7 @@ def test_permanent_bundle_failure_uses_restart_preventing_exit(
 
     monkeypatch.setattr(
         cli_module,
-        "require_group_o_recovery_ready_before_adapter_v1",
+        "require_group_o_recovery_ready_before_adapter_v2",
         lambda **_kwargs: None,
     )
     monkeypatch.setattr(cli_module, "_ibkr_adapter", lambda _config: FakeAdapter())

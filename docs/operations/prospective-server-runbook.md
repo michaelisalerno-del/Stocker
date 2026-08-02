@@ -848,14 +848,15 @@ sudo -u stocker sh -c '
   set -a
   . /etc/stocker/stocker.env
   exec /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective \
-    scientific-inputs recover-group-o-exact-chain-v1 \
+    scientific-inputs recover-group-o-exact-chain-v2 \
     --config /etc/stocker/prospective.yaml \
     --release-directory /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
 '
 ```
 
 The command verifies the signed recovery freeze, exact 20-symbol cohort, failed
-base hash, and pre-open cutoff; then it writes
+base hash, exact V1 deployment/start/failed-attempt chain, and pre-open cutoff;
+then it writes
 `<attempt>/recovery_start_receipt.json` before making any EODHD request. The
 same release blocks before constructing the IBKR adapter unless that start
 receipt, acquisition receipt, hash-linked revision, and the self-binding
@@ -870,6 +871,19 @@ recovery process. Never bypass the gate or edit the failed package.
 This pre-adapter gate is permanent for the recovery version; it does not
 expire after the target session closes. Removing it requires a new signed
 recorder version and deployment receipt, not a clock-based bypass.
+
+Recovery V1 failed closed in append-only attempt `0001` after EODHD began
+publishing the Friday rows: the provider's after-midnight-UTC `dte` values did
+not equal the calendar interval from the EOD resource identity. V2 does not
+rewrite or reuse that attempt. Its signed policy treats every provider `dte`
+value as a non-admission diagnostic, deterministically recomputes DTE from the
+exact EOD observation date and expiration, and writes an immutable
+`provider_dte_diagnostics.json` linked from the signed attempt receipt. It
+continues to reject inconsistent bid/ask observation dates and downloads a
+fresh attempt. V2 also enforces V1 freeze, V1 start, V1 completion, V2 freeze,
+then V2 start chronology. Reconciliation verifies and skips V1 attempt `0001`
+before examining subsequent V2 attempts. Never run the retired V1 command
+again.
 
 Do not delete, rename, edit, or replace the failed base, an acquisition-attempt
 receipt, or a revision. A missing or invalid chain remains fail-closed for M1C.

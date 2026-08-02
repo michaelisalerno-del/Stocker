@@ -27,7 +27,9 @@ from stocker_prospective.scientific_inputs import (
 from stocker_research.eodhd_options_downloader_v0 import (
     CanonicalizationResult,
     DownloadResult,
+    ProviderDTEDiagnostic,
     RequestManifestRow,
+    canonicalize_response_records,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +41,149 @@ FRONT_OPTIONS_ROOT = (
     / "artifacts"
     / "primary"
 )
+
+
+def _provider_option_record(
+    *, dte: object, ask_date: str = "2026-07-31 19:59:59"
+) -> dict[str, object]:
+    return {
+        "id": "AAL260911C00012000-2026-07-31",
+        "type": "options-eod",
+        "attributes": {
+            "contract": "AAL260911C00012000",
+            "underlying_symbol": "AAL",
+            "type": "call",
+            "strike": 12,
+            "exp_date": "2026-09-11",
+            "bid_date": "2026-08-01T03:59:59.000000Z",
+            "ask_date": ask_date,
+            "tradetime": "2026-07-31",
+            "dte": dte,
+            "bid": 1.0,
+            "ask": 1.2,
+        },
+    }
+
+
+def test_v2_provider_dte_policy_recomputes_from_exact_eod_identity() -> None:
+    strict = canonicalize_response_records(
+        [_provider_option_record(dte=41)],
+        request_id="strict-fixture",
+        provider_schema_version="eodhd-options-eod-v1",
+    )
+    recomputed = canonicalize_response_records(
+        [_provider_option_record(dte=41)],
+        request_id="v2-fixture",
+        provider_schema_version="eodhd-options-eod-v1",
+        provider_dte_policy="recompute_from_eod_identity",
+    )
+    stale_quote = canonicalize_response_records(
+        [_provider_option_record(dte=41, ask_date="2026-07-30 19:59:59")],
+        request_id="stale-quote-fixture",
+        provider_schema_version="eodhd-options-eod-v1",
+        provider_dte_policy="recompute_from_eod_identity",
+    )
+
+    assert [item.reason_code for item in strict.rejections] == [
+        "contract_date_dte_inconsistency"
+    ]
+    assert recomputed.rejections == []
+    assert recomputed.records[0]["trade_date"] == date(2026, 7, 31)
+    assert recomputed.records[0]["dte"] == 42
+    assert [item.reason_code for item in stale_quote.rejections] == [
+        "eod_observation_date_mismatch"
+    ]
+    assert stale_quote.provider_dte_diagnostics[0].status == "mismatch"
+
+
+@pytest.mark.parametrize(
+    ("provider_dte", "diagnostic_status"),
+    (
+        ("malformed", "invalid"),
+        (41.5, "fractional"),
+        (-1, "negative"),
+        (10**400, "mismatch"),
+    ),
+)
+def test_v2_provider_dte_is_diagnostic_only_for_every_provider_value(
+    provider_dte: object,
+    diagnostic_status: str,
+) -> None:
+    result = canonicalize_response_records(
+        [_provider_option_record(dte=provider_dte)],
+        request_id="v2-diagnostic-fixture",
+        provider_schema_version="eodhd-options-eod-v1",
+        provider_dte_policy="recompute_from_eod_identity",
+    )
+
+    assert result.rejections == []
+    assert result.records[0]["dte"] == 42
+    assert len(result.provider_dte_diagnostics) == 1
+    diagnostic = result.provider_dte_diagnostics[0]
+    assert diagnostic.status == diagnostic_status
+    assert diagnostic.provider_dte_value == provider_dte
+    assert diagnostic.calculated_dte == 42
+    assert diagnostic.used_for_admission is False
+
+
+def test_v2_acquisition_persists_provider_dte_as_separate_diagnostic_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal_session = date(2026, 8, 3)
+    observation = date(2026, 7, 31)
+    _install_fake_group_o_sources(
+        monkeypatch,
+        observation=observation,
+        canonical_records=[],
+    )
+    diagnostic = ProviderDTEDiagnostic(
+        request_id="group-o|AAL|2026-07-31",
+        record_index=0,
+        provider_record_id="AAL260911C00012000-2026-07-31",
+        raw_record_hash="d" * 64,
+        provider_dte_value="malformed",
+        status="invalid",
+        calculated_dte=42,
+        used_for_admission=False,
+    )
+    monkeypatch.setattr(
+        scientific_inputs,
+        "canonicalize_response_records",
+        lambda *_args, **_kwargs: CanonicalizationResult(
+            records=[],
+            rejections=[],
+            provider_dte_diagnostics=[diagnostic],
+        ),
+    )
+    cache_root = tmp_path / "cache"
+
+    with pytest.raises(GroupOAcquisitionPending, match="exact chain is not yet available"):
+        acquire_eodhd_group_o_session_package(
+            signal_session=signal_session,
+            symbols=("AAL",),
+            output_path=tmp_path / "context/group-o/2026-08-03.json",
+            cache_root=cache_root,
+            cache_attempt_id="0001",
+            feature_manifest_path=FRONT_OPTIONS_ROOT / "front_options_feature_manifest.json",
+            regime_mapping_path=FRONT_OPTIONS_ROOT / "front_options_regime_mapping.json",
+            provider_dte_policy="recompute_from_eod_identity",
+            clock=lambda: datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
+        )
+
+    attempt_root = cache_root / observation.isoformat() / "attempts/0001"
+    diagnostics_path = attempt_root / "provider_dte_diagnostics.json"
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    receipt = scientific_inputs.load_group_o_attempt_receipt(
+        attempt_root / "attempt_receipt.json"
+    )
+    assert diagnostics["provider_dte_used_for_admission"] is False
+    assert diagnostics["status_counts"] == {"invalid": 1}
+    assert diagnostics["rows"] == [diagnostic.to_dict()]
+    assert receipt["provider_dte_diagnostics_path"] == str(diagnostics_path)
+    assert receipt["provider_dte_diagnostics_file_sha256"] == hashlib.sha256(
+        diagnostics_path.read_bytes()
+    ).hexdigest()
 
 
 def test_historical_activity_builder_keeps_one_regular_session_stream_per_symbol(
@@ -656,14 +801,20 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
         regime_mapping_path=FRONT_OPTIONS_ROOT / "front_options_regime_mapping.json",
         output_path=base_path,
     )
-    attempt_path = (
+    attempts_root = (
         context_root
         / "source-cache"
         / "eodhd-group-o"
         / observation.isoformat()
         / "attempts"
-        / "0001"
     )
+    failed_v1_attempt_path = attempts_root / "0001"
+    failed_v1_attempt_path.mkdir(parents=True)
+    (failed_v1_attempt_path / "recovery_start_receipt.json").write_text(
+        '{"schema_version":"m1c-group-o-recovery-start-v1"}\n',
+        encoding="utf-8",
+    )
+    attempt_path = attempts_root / "0002"
     candidate = build_group_o_session_package(
         signal_session=signal_session,
         symbols=("AAL",),
@@ -676,24 +827,96 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
         regime_mapping_path=FRONT_OPTIONS_ROOT / "front_options_regime_mapping.json",
         output_path=attempt_path / "candidate_package.json",
     )
+    diagnostics_path = attempt_path / "provider_dte_diagnostics.json"
+    diagnostics_payload = {
+        "schema_version": "group-o-provider-dte-diagnostics-v1",
+        "attempt_id": "0002",
+        "signal_session": signal_session.isoformat(),
+        "observation_session": observation.isoformat(),
+        "provider_dte_policy": "recompute_from_eod_identity",
+        "provider_dte_used_for_admission": False,
+        "diagnostic_count": 1,
+        "status_counts": {"mismatch": 1},
+        "rows": [
+            {
+                "request_id": "group-o|AAL|2026-07-31",
+                "record_index": 0,
+                "provider_record_id": "AAL260807P00010000-2026-07-31",
+                "raw_record_hash": "d" * 64,
+                "provider_dte_value": 6,
+                "status": "mismatch",
+                "calculated_dte": 7,
+                "used_for_admission": False,
+            }
+        ],
+    }
+    diagnostics_path.write_text(
+        json.dumps(diagnostics_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    diagnostics_bytes = diagnostics_path.read_bytes()
     freeze = {
         "deployment_receipt_id": "group-o-recovery-deploy-" + "e" * 24,
         "audited_failed_base_sha256": hashlib.sha256(base_path.read_bytes()).hexdigest(),
+        "freeze_completed_at_utc": "2026-08-02T11:59:00+00:00",
     }
+    release = tmp_path / "release"
+    deployment_receipt = (
+        release / recovery.RECOVERY_PACKAGE_RELATIVE_V2 / "deployment_freeze_receipt.json"
+    )
+    deployment_receipt.parent.mkdir(parents=True)
+    deployment_receipt.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(recovery, "CANONICAL_COHORT_V0", ("AAL",))
     monkeypatch.setattr(
         recovery,
-        "verify_group_o_recovery_freeze_v1",
+        "verify_group_o_recovery_freeze_v2",
         lambda _release: freeze,
+    )
+    monkeypatch.setattr(
+        recovery,
+        "_require_failed_v1_attempt",
+        lambda _root, **_kwargs: failed_v1_attempt_path / "attempt_receipt.json",
     )
     recovery._write_recovery_start_receipt(
         attempt_path=attempt_path,
-        attempt_id="0001",
+        attempt_id="0002",
         context_root=context_root,
-        release_directory=ROOT,
+        release_directory=release,
         freeze_receipt=freeze,
         started_at_utc=datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
     )
+    start_receipt = recovery.GroupORecoveryStartReceiptV2.model_validate_json(
+        (attempt_path / "recovery_start_receipt.json").read_text(encoding="utf-8")
+    )
+    monkeypatch.setattr(recovery, "CANONICAL_COHORT_V0", ("AAL", "MSFT"))
+    with pytest.raises(
+        recovery.GroupORecoveryIntegrityError,
+        match="provider DTE diagnostics cohort coverage",
+    ):
+        recovery._validate_provider_dte_diagnostics(
+            attempt_path=attempt_path,
+            start=start_receipt,
+        )
+    empty_diagnostics = {
+        **diagnostics_payload,
+        "diagnostic_count": 0,
+        "status_counts": {},
+        "rows": [],
+    }
+    diagnostics_path.write_text(
+        json.dumps(empty_diagnostics, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        recovery.GroupORecoveryIntegrityError,
+        match="provider DTE diagnostics cohort coverage",
+    ):
+        recovery._validate_provider_dte_diagnostics(
+            attempt_path=attempt_path,
+            start=start_receipt,
+        )
+    diagnostics_path.write_bytes(diagnostics_bytes)
+    monkeypatch.setattr(recovery, "CANONICAL_COHORT_V0", ("AAL",))
     append_group_o_session_revision(
         context_root=context_root,
         revised_package=candidate,
@@ -702,9 +925,31 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
     completion = attempt_path / "attempt_receipt.json"
     assert not completion.exists()
 
-    assert recovery.reconcile_group_o_recovery_completion_v1(
+    missing_identity = json.loads(json.dumps(diagnostics_payload))
+    del missing_identity["rows"][0]["request_id"]
+    forged_classification = json.loads(json.dumps(diagnostics_payload))
+    forged_classification["rows"][0]["status"] = "match"
+    forged_classification["status_counts"] = {"match": 1}
+    for invalid_diagnostics in (missing_identity, forged_classification):
+        diagnostics_path.write_text(
+            json.dumps(invalid_diagnostics, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(
+            recovery.GroupORecoveryIntegrityError,
+            match="provider DTE diagnostics",
+        ):
+            recovery.reconcile_group_o_recovery_completion_v2(
+                context_root=context_root,
+                release_directory=release,
+                clock=lambda: datetime(2026, 8, 2, 12, 2, tzinfo=UTC),
+            )
+        assert not completion.exists()
+    diagnostics_path.write_bytes(diagnostics_bytes)
+
+    assert recovery.reconcile_group_o_recovery_completion_v2(
         context_root=context_root,
-        release_directory=ROOT,
+        release_directory=release,
         clock=lambda: datetime(2026, 8, 2, 12, 2, tzinfo=UTC),
     )
 
@@ -712,6 +957,11 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
     assert payload["status"] == "published_revision_reconciled_after_restart"
     assert payload["published_revision_id"].startswith("group-o-revision-")
     assert len(payload["attempt_receipt_sha256"]) == 64
+    assert payload["provider_dte_diagnostics_path"] == str(diagnostics_path)
+    assert payload["provider_dte_diagnostics_file_sha256"] == hashlib.sha256(
+        diagnostics_bytes
+    ).hexdigest()
+    assert payload["provider_dte_diagnostic_counts"] == {"mismatch": 1}
     linked_path = attempt_path / "recovery_completion_receipt.json"
     linked = json.loads(linked_path.read_text(encoding="utf-8"))
     assert linked["status"] == "published_revision_reconciled"
@@ -723,6 +973,18 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
     ]
     assert len(linked["completion_receipt_sha256"]) == 64
 
+    diagnostics_path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(
+        recovery.GroupORecoveryIntegrityError,
+        match="provider DTE diagnostics",
+    ):
+        recovery.require_group_o_recovery_ready_before_adapter_v2(
+            context_root=context_root,
+            release_directory=release,
+            now=datetime(2026, 8, 2, 12, 3, tzinfo=UTC),
+        )
+    diagnostics_path.write_bytes(diagnostics_bytes)
+
     start_path = attempt_path / "recovery_start_receipt.json"
     tampered = json.loads(start_path.read_text(encoding="utf-8"))
     tampered["monday_market_data_consumed"] = True
@@ -731,9 +993,9 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
         recovery.GroupORecoveryIntegrityError,
         match="recovery start receipt",
     ):
-        recovery.require_group_o_recovery_ready_before_adapter_v1(
+        recovery.require_group_o_recovery_ready_before_adapter_v2(
             context_root=context_root,
-            release_directory=ROOT,
+            release_directory=release,
             now=datetime(2026, 8, 2, 12, 3, tzinfo=UTC),
         )
 

@@ -1,0 +1,28 @@
+{
+  "audited_failed_base_sha256_after_v1": "b8ba77cfcb6ff82c7fd1f205e5b2cbcd562ea2a09d7e3e1afa703fb0cc77d75c",
+  "canonical_option_rows": 0,
+  "failed_v1_attempt_id": "0001",
+  "failed_v1_attempt_completed_at_utc": "2026-08-02T16:35:27.212704+00:00",
+  "failed_v1_attempt_receipt_file_sha256": "77174c002021a30ca2088203d69ea7c878c69ab30d66ad6977264075afdb86a2",
+  "failed_v1_attempt_receipt_identity_sha256": "0005c52323e91f6ab23d93abd58b01e932d73cc97cff0c6e181bd206fc85d27b",
+  "failed_v1_deployment_receipt_sha256": "557df7e4b043da54325c9453f4f0d2838d5d142189576fcf3c2a63feff8c3528",
+  "failed_v1_deployment_freeze_at_utc": "2026-08-02T16:20:05.115630Z",
+  "failed_v1_release_commit": "4cd8ae79177e69331e3289cc744726a65ca9ba90",
+  "failed_v1_start_receipt_file_sha256": "b3f740fac0ae6f7314e7f7a984d955953bcfcebfc3ee056fbdf597b98d5249db",
+  "failed_v1_start_receipt_identity_sha256": "ebc3d8790eb8627e22cd3097a56f1781dc9ae946b8f6fa0d7c3c80e84ca17625",
+  "failed_v1_start_receipt_id": "group-o-recovery-start-ebc3d8790eb8627e22cd3097",
+  "missing_exact_chain_symbol_count": 20,
+  "monday_market_data_consumed": false,
+  "protected_outcomes_accessed": false,
+  "rejected_option_rows": 6364,
+  "rejection_counts": {
+    "contract_date_dte_inconsistency": 5965,
+    "eod_observation_date_mismatch": 399
+  },
+  "revision_created": false,
+  "schema_version": "m1c-group-o-recovery-prior-failure-audit-v2",
+  "status": "pending_exact_chain",
+  "target_observation_session": "2026-07-31",
+  "target_signal_session": "2026-08-03",
+  "v1_attempt_reuse_allowed": false
+}

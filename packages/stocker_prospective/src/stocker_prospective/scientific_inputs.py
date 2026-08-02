@@ -7,6 +7,7 @@ import json
 import math
 import os
 import uuid
+from collections import Counter
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -53,6 +54,7 @@ from stocker_research.eodhd_options_downloader_v0 import (
     DownloadConfig,
     EODHDOptionsDownloader,
     OptionsRequest,
+    ProviderDTEPolicy,
     TransportLike,
     canonicalize_response_records,
     resolve_canonical_duplicates,
@@ -779,6 +781,7 @@ def acquire_eodhd_group_o_session_package(
     feature_manifest_path: str | Path,
     regime_mapping_path: str | Path,
     supersedes_path: str | Path | None = None,
+    provider_dte_policy: ProviderDTEPolicy = "strict_match",
     heartbeat: Callable[[], object] | None = None,
     cancellation_requested: Callable[[], bool] = lambda: False,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -787,6 +790,8 @@ def acquire_eodhd_group_o_session_package(
 
     if len(cache_attempt_id) != 4 or not cache_attempt_id.isdigit():
         raise ValueError("Group O cache attempt ID must be four decimal digits")
+    if provider_dte_policy not in {"strict_match", "recompute_from_eod_identity"}:
+        raise ValueError("invalid Group O provider DTE policy")
     observation_session = previous_xnys_session(signal_session)
     signal_open, _ = xnys_session_bounds(signal_session)
     attempt_started = clock().astimezone(UTC)
@@ -806,6 +811,7 @@ def acquire_eodhd_group_o_session_package(
     receipt_hashes: dict[str, tuple[str, ...]] = {}
     accepted_rows_by_symbol: dict[str, int] = {}
     rejected_rows_by_symbol: dict[str, int] = {}
+    provider_dte_diagnostics: list[dict[str, object]] = []
     accepted_rows = 0
     rejected_rows = 0
     cache = Path(cache_root) / observation_session.isoformat() / "attempts" / cache_attempt_id
@@ -865,6 +871,7 @@ def acquire_eodhd_group_o_session_package(
                 result.records,
                 request_id=f"group-o|{symbol}|{observation_session.isoformat()}",
                 provider_schema_version="eodhd-options-eod-v1",
+                provider_dte_policy=provider_dte_policy,
             )
             deduplicated = resolve_canonical_duplicates(canonical.records)
             if deduplicated.conflicting_duplicate_groups:
@@ -906,6 +913,9 @@ def acquire_eodhd_group_o_session_package(
                 )
                 raise ValueError(f"Group O option observation identity differs for {symbol}")
             options_by_symbol[symbol] = pd.DataFrame(deduplicated.records)
+            provider_dte_diagnostics.extend(
+                diagnostic.to_dict() for diagnostic in canonical.provider_dte_diagnostics
+            )
             accepted_rows_by_symbol[symbol] = len(deduplicated.records)
             rejected_rows_by_symbol[symbol] = len(canonical.rejections)
             accepted_rows += len(deduplicated.records)
@@ -921,6 +931,25 @@ def acquire_eodhd_group_o_session_package(
     finally:
         transport.close()
     completed_at = clock().astimezone(UTC)
+    provider_dte_diagnostics_path = cache / "provider_dte_diagnostics.json"
+    provider_dte_status_counts = dict(
+        sorted(Counter(str(row["status"]) for row in provider_dte_diagnostics).items())
+    )
+    write_immutable_json(
+        provider_dte_diagnostics_path,
+        {
+            "schema_version": "group-o-provider-dte-diagnostics-v1",
+            "attempt_id": cache_attempt_id,
+            "signal_session": signal_session.isoformat(),
+            "observation_session": observation_session.isoformat(),
+            "provider_dte_policy": provider_dte_policy,
+            "provider_dte_used_for_admission": provider_dte_policy == "strict_match",
+            "diagnostic_count": len(provider_dte_diagnostics),
+            "status_counts": provider_dte_status_counts,
+            "rows": provider_dte_diagnostics,
+        },
+        conflict_message="immutable Group O provider DTE diagnostics differ",
+    )
     missing_exact_chain_symbols = tuple(
         symbol for symbol in symbols if accepted_rows_by_symbol.get(symbol, 0) == 0
     )
@@ -940,6 +969,12 @@ def acquire_eodhd_group_o_session_package(
             symbol: list(receipt_hashes.get(symbol, ())) for symbol in symbols
         },
         "missing_exact_chain_symbols": list(missing_exact_chain_symbols),
+        "provider_dte_policy": provider_dte_policy,
+        "provider_dte_diagnostics_path": str(provider_dte_diagnostics_path),
+        "provider_dte_diagnostics_file_sha256": _sha256_path(
+            provider_dte_diagnostics_path
+        ),
+        "provider_dte_diagnostic_counts": provider_dte_status_counts,
     }
     if missing_exact_chain_symbols:
         write_group_o_attempt_receipt(

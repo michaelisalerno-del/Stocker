@@ -9,11 +9,11 @@ import os
 import re
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
 from pathlib import Path
-from typing import Any, Final, Protocol, Self, cast
+from typing import Any, Final, Literal, Protocol, Self, cast
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
@@ -22,6 +22,15 @@ _TOKEN_QUERY = re.compile(r"([?&]api_token=)[^&\s]+", flags=re.IGNORECASE)
 OPTIONS_EOD_ENDPOINT: Final[str] = "/mp/unicornbay/options/eod"
 TRANSIENT_STATUSES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
 NEW_YORK: Final[ZoneInfo] = ZoneInfo("America/New_York")
+ProviderDTEPolicy = Literal["strict_match", "recompute_from_eod_identity"]
+ProviderDTEStatus = Literal[
+    "missing",
+    "invalid",
+    "fractional",
+    "negative",
+    "match",
+    "mismatch",
+]
 CANONICAL_OPTION_COLUMNS: Final[tuple[str, ...]] = (
     "provider",
     "provider_schema_version",
@@ -264,11 +273,31 @@ class CanonicalRejection:
 
 
 @dataclass(frozen=True)
+class ProviderDTEDiagnostic:
+    """Provider DTE retained as evidence without controlling V2 admission."""
+
+    request_id: str
+    record_index: int
+    provider_record_id: str | None
+    raw_record_hash: str
+    provider_dte_value: object
+    status: ProviderDTEStatus
+    calculated_dte: int
+    used_for_admission: bool
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-safe diagnostic row sourced from provider JSON."""
+
+        return cast(dict[str, object], asdict(self))
+
+
+@dataclass(frozen=True)
 class CanonicalizationResult:
     """Accepted canonical records and explicit rejection provenance."""
 
     records: list[dict[str, Any]]
     rejections: list[CanonicalRejection]
+    provider_dte_diagnostics: list[ProviderDTEDiagnostic] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -323,7 +352,10 @@ def _optional_number(value: object, field: str) -> float | None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"invalid_numeric_field:{field}")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"invalid_numeric_field:{field}") from exc
     if not math.isfinite(number):
         raise ValueError(f"invalid_numeric_field:{field}")
     return number
@@ -395,16 +427,44 @@ def _reason_from_error(error: ValueError) -> str:
     return message
 
 
+def classify_provider_dte(value: object, *, calculated_dte: int) -> ProviderDTEStatus:
+    """Classify provider DTE without allowing its representation to raise."""
+
+    if value is None or value == "":
+        return "missing"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "invalid"
+    if isinstance(value, int):
+        parsed = value
+    else:
+        number = float(value)
+        if not math.isfinite(number):
+            return "invalid"
+        if not number.is_integer():
+            return "fractional"
+        parsed = int(number)
+    if parsed < 0:
+        return "negative"
+    if parsed == calculated_dte:
+        return "match"
+    return "mismatch"
+
+
 def canonicalize_response_records(
     records: Sequence[Mapping[str, Any]],
     *,
     request_id: str,
     provider_schema_version: str,
+    provider_dte_policy: ProviderDTEPolicy = "strict_match",
 ) -> CanonicalizationResult:
     """Map documented EODHD EOD fields without treating last trade as chain date."""
 
+    if provider_dte_policy not in {"strict_match", "recompute_from_eod_identity"}:
+        raise ValueError("invalid provider DTE policy")
+
     accepted: list[dict[str, Any]] = []
     rejected: list[CanonicalRejection] = []
+    provider_dte_diagnostics: list[ProviderDTEDiagnostic] = []
     for index, item in enumerate(records):
         raw_hash = sha256_bytes(_canonical_provider_payload(item))
         provider_id_value = item.get("id")
@@ -430,20 +490,37 @@ def canonicalize_response_records(
                 raise ValueError("invalid_strike")
             expiration = _parse_expiration(attributes.get("exp_date"))
             observation_day = provider_eod_observation_date(item)
+            trade_day = observation_day
+            if expiration < trade_day:
+                raise ValueError("expiration_before_trade_date")
+            calculated_dte = (expiration - trade_day).days
+            provider_dte_value = attributes.get("dte")
+            provider_dte_diagnostics.append(
+                ProviderDTEDiagnostic(
+                    request_id=request_id,
+                    record_index=index,
+                    provider_record_id=provider_id,
+                    raw_record_hash=raw_hash,
+                    provider_dte_value=provider_dte_value,
+                    status=classify_provider_dte(
+                        provider_dte_value,
+                        calculated_dte=calculated_dte,
+                    ),
+                    calculated_dte=calculated_dte,
+                    used_for_admission=provider_dte_policy == "strict_match",
+                )
+            )
             bid_observation_day = _quote_observation_date(attributes.get("bid_date"), "bid")
             ask_observation_day = _quote_observation_date(attributes.get("ask_date"), "ask")
             if not (observation_day == bid_observation_day == ask_observation_day):
                 raise ValueError("eod_observation_date_mismatch")
             _, trade_timestamp = _parse_trade_time(attributes.get("tradetime"))
-            trade_day = observation_day
-            if expiration < trade_day:
-                raise ValueError("expiration_before_trade_date")
-            calculated_dte = (expiration - trade_day).days
-            provider_dte = _optional_integer(attributes.get("dte"), "dte")
-            if provider_dte is not None and provider_dte < 0:
-                raise ValueError("negative_dte")
-            if provider_dte is not None and provider_dte != calculated_dte:
-                raise ValueError("contract_date_dte_inconsistency")
+            if provider_dte_policy == "strict_match":
+                provider_dte = _optional_integer(provider_dte_value, "dte")
+                if provider_dte is not None and provider_dte < 0:
+                    raise ValueError("negative_dte")
+                if provider_dte is not None and provider_dte != calculated_dte:
+                    raise ValueError("contract_date_dte_inconsistency")
             bid = _optional_number(attributes.get("bid"), "bid")
             ask = _optional_number(attributes.get("ask"), "ask")
             midpoint = _optional_number(attributes.get("midpoint"), "midpoint")
@@ -497,7 +574,11 @@ def canonicalize_response_records(
                     raw_record_hash=raw_hash,
                 )
             )
-    return CanonicalizationResult(records=accepted, rejections=rejected)
+    return CanonicalizationResult(
+        records=accepted,
+        rejections=rejected,
+        provider_dte_diagnostics=provider_dte_diagnostics,
+    )
 
 
 def resolve_canonical_duplicates(
@@ -1223,6 +1304,9 @@ __all__ = [
     "OptionsRequest",
     "OptionsResourceLimitExceeded",
     "OptionsSchemaError",
+    "ProviderDTEPolicy",
+    "ProviderDTEDiagnostic",
+    "ProviderDTEStatus",
     "RequestManifestRow",
     "CANONICAL_OPTION_COLUMNS",
     "CanonicalRejection",
@@ -1231,6 +1315,7 @@ __all__ = [
     "SymbolMappingResult",
     "UnderlyingSymbolMapping",
     "canonicalize_response_records",
+    "classify_provider_dte",
     "deterministic_symbol_mapping",
     "provider_eod_observation_date",
     "redact_secrets",

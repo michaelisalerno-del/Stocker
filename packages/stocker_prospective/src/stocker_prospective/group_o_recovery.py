@@ -1,4 +1,4 @@
-"""Pre-adapter recovery for the audited Friday 2026-07-31 Group O source lag."""
+"""V2 pre-adapter recovery for the audited Friday 2026-07-31 Group O source lag."""
 
 from __future__ import annotations
 
@@ -29,20 +29,50 @@ from stocker_prospective.scientific_inputs import (
     load_group_o_attempt_receipt,
     write_group_o_attempt_receipt,
 )
+from stocker_research.eodhd_options_downloader_v0 import classify_provider_dte
 
-RECOVERY_VERSION_V1: Final[str] = "m1c-group-o-late-revision-v1"
-TARGET_OBSERVATION_SESSION_V1: Final[date] = date(2026, 7, 31)
-TARGET_SIGNAL_SESSION_V1: Final[date] = date(2026, 8, 3)
-RECOVERY_PACKAGE_RELATIVE_V1: Final[Path] = Path(
+RECOVERY_VERSION_V2: Final[str] = "m1c-group-o-late-revision-v2"
+TARGET_OBSERVATION_SESSION_V2: Final[date] = date(2026, 7, 31)
+TARGET_SIGNAL_SESSION_V2: Final[date] = date(2026, 8, 3)
+RECOVERY_PACKAGE_RELATIVE_V2: Final[Path] = Path(
+    "prospective/m1c-group-o-recovery/20260802-m1c-group-o-late-revision-v2"
+)
+FAILED_V1_PACKAGE_RELATIVE: Final[Path] = Path(
     "prospective/m1c-group-o-recovery/20260802-m1c-group-o-late-revision-v1"
 )
-RECOVERY_ARTIFACTS_V1: Final[tuple[str, ...]] = (
+PROVIDER_DTE_POLICY_V2: Final[Literal["recompute_from_eod_identity"]] = (
+    "recompute_from_eod_identity"
+)
+FAILED_V1_DEPLOYMENT_RECEIPT_SHA256: Final[str] = (
+    "557df7e4b043da54325c9453f4f0d2838d5d142189576fcf3c2a63feff8c3528"
+)
+FAILED_V1_DEPLOYMENT_RECEIPT_ID: Final[str] = (
+    "group-o-recovery-deploy-21e71f3460d0f63353cb5b2a"
+)
+FAILED_V1_DEPLOYMENT_FREEZE_AT_UTC: Final[str] = "2026-08-02T16:20:05.115630Z"
+FAILED_V1_START_RECEIPT_FILE_SHA256: Final[str] = (
+    "b3f740fac0ae6f7314e7f7a984d955953bcfcebfc3ee056fbdf597b98d5249db"
+)
+FAILED_V1_START_RECEIPT_IDENTITY_SHA256: Final[str] = (
+    "ebc3d8790eb8627e22cd3097a56f1781dc9ae946b8f6fa0d7c3c80e84ca17625"
+)
+FAILED_V1_ATTEMPT_RECEIPT_SHA256: Final[str] = (
+    "77174c002021a30ca2088203d69ea7c878c69ab30d66ad6977264075afdb86a2"
+)
+FAILED_V1_ATTEMPT_IDENTITY_SHA256: Final[str] = (
+    "0005c52323e91f6ab23d93abd58b01e932d73cc97cff0c6e181bd206fc85d27b"
+)
+FAILED_V1_ATTEMPT_COMPLETED_AT_UTC: Final[str] = (
+    "2026-08-02T16:35:27.212704+00:00"
+)
+RECOVERY_ARTIFACTS_V2: Final[tuple[str, ...]] = (
     "README.md",
     "contract.json",
     "order_disable_audit.json",
+    "prior_failure_audit.json",
     "protected_boundary_audit.json",
 )
-RECOVERY_SOURCE_FILES_V1: Final[Mapping[str, str]] = {
+RECOVERY_SOURCE_FILES_V2: Final[Mapping[str, str]] = {
     "append_only": (
         "packages/stocker_prospective/src/stocker_prospective/append_only.py"
     ),
@@ -81,7 +111,7 @@ RECOVERY_SOURCE_FILES_V1: Final[Mapping[str, str]] = {
     "project_configuration": "pyproject.toml",
     "resolved_dependencies": "uv.lock",
 }
-RECOVERY_VERIFICATION_KEYS_V1: Final[frozenset[str]] = frozenset(
+RECOVERY_VERIFICATION_KEYS_V2: Final[frozenset[str]] = frozenset(
     {
         "review_findings_addressed",
         "scientific_input_tests",
@@ -114,8 +144,8 @@ class GroupORecoveryResult:
     canonical_option_rows: int | None
 
 
-class GroupORecoveryStartReceiptV1(BaseModel):
-    """Self-binding evidence written before the target EODHD request."""
+class FailedGroupORecoveryStartReceiptV1(BaseModel):
+    """Exact self-binding V1 start evidence required before any V2 request."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -123,7 +153,7 @@ class GroupORecoveryStartReceiptV1(BaseModel):
     recovery_version: Literal["m1c-group-o-late-revision-v1"]
     deployment_receipt_id: str = Field(pattern=r"^group-o-recovery-deploy-[a-f0-9]{24}$")
     deployment_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    attempt_id: str = Field(pattern=r"^[0-9]{4}$")
+    attempt_id: Literal["0001"]
     target_observation_session: date
     target_signal_session: date
     signal_open_utc: datetime
@@ -142,20 +172,19 @@ class GroupORecoveryStartReceiptV1(BaseModel):
     @classmethod
     def _aware_utc(cls, value: datetime) -> datetime:
         if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("Group O recovery timestamps must be timezone-aware")
+            raise ValueError("failed V1 recovery timestamps must be timezone-aware")
         return value.astimezone(UTC)
 
     @model_validator(mode="after")
-    def _self_binding_causal_identity(self) -> GroupORecoveryStartReceiptV1:
-        expected_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V1)
+    def _self_binding_causal_identity(self) -> FailedGroupORecoveryStartReceiptV1:
+        expected_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
         if (
-            self.target_observation_session != TARGET_OBSERVATION_SESSION_V1
-            or self.target_signal_session != TARGET_SIGNAL_SESSION_V1
+            self.target_observation_session != TARGET_OBSERVATION_SESSION_V2
+            or self.target_signal_session != TARGET_SIGNAL_SESSION_V2
             or self.signal_open_utc != expected_open
+            or self.started_at_utc >= self.signal_open_utc
         ):
-            raise ValueError("Group O recovery start session identity differs")
-        if self.started_at_utc >= self.signal_open_utc:
-            raise ValueError("Group O recovery start must precede signal open")
+            raise ValueError("failed V1 recovery start session identity differs")
         identity = {
             "schema_version": self.schema_version,
             "recovery_version": self.recovery_version,
@@ -176,19 +205,89 @@ class GroupORecoveryStartReceiptV1(BaseModel):
         }
         digest = hashlib.sha256(_canonical_json(identity).encode("utf-8")).hexdigest()
         if self.start_receipt_sha256 != digest:
+            raise ValueError("failed V1 recovery start receipt hash differs")
+        if self.start_receipt_id != f"group-o-recovery-start-{digest[:24]}":
+            raise ValueError("failed V1 recovery start receipt ID differs")
+        return self
+
+
+class GroupORecoveryStartReceiptV2(BaseModel):
+    """Self-binding evidence written before the target EODHD request."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["m1c-group-o-recovery-start-v2"]
+    recovery_version: Literal["m1c-group-o-late-revision-v2"]
+    deployment_receipt_id: str = Field(pattern=r"^group-o-recovery-deploy-[a-f0-9]{24}$")
+    deployment_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    attempt_id: str = Field(pattern=r"^[0-9]{4}$")
+    target_observation_session: date
+    target_signal_session: date
+    signal_open_utc: datetime
+    started_at_utc: datetime
+    base_package_path: str
+    base_package_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    provider_dte_policy: Literal["recompute_from_eod_identity"]
+    ibkr_adapter_opened: Literal[False]
+    monday_market_data_consumed: Literal[False]
+    order_construction_allowed: Literal[False]
+    order_placement_allowed: Literal[False]
+    status: Literal["authorised_pre_signal_acquisition"]
+    start_receipt_id: str = Field(pattern=r"^group-o-recovery-start-[a-f0-9]{24}$")
+    start_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("signal_open_utc", "started_at_utc")
+    @classmethod
+    def _aware_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Group O recovery timestamps must be timezone-aware")
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def _self_binding_causal_identity(self) -> GroupORecoveryStartReceiptV2:
+        expected_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
+        if (
+            self.target_observation_session != TARGET_OBSERVATION_SESSION_V2
+            or self.target_signal_session != TARGET_SIGNAL_SESSION_V2
+            or self.signal_open_utc != expected_open
+        ):
+            raise ValueError("Group O recovery start session identity differs")
+        if self.started_at_utc >= self.signal_open_utc:
+            raise ValueError("Group O recovery start must precede signal open")
+        identity = {
+            "schema_version": self.schema_version,
+            "recovery_version": self.recovery_version,
+            "deployment_receipt_id": self.deployment_receipt_id,
+            "deployment_receipt_sha256": self.deployment_receipt_sha256,
+            "attempt_id": self.attempt_id,
+            "target_observation_session": self.target_observation_session.isoformat(),
+            "target_signal_session": self.target_signal_session.isoformat(),
+            "signal_open_utc": self.signal_open_utc.isoformat(),
+            "started_at_utc": self.started_at_utc.isoformat(),
+            "base_package_path": self.base_package_path,
+            "base_package_sha256": self.base_package_sha256,
+            "provider_dte_policy": self.provider_dte_policy,
+            "ibkr_adapter_opened": self.ibkr_adapter_opened,
+            "monday_market_data_consumed": self.monday_market_data_consumed,
+            "order_construction_allowed": self.order_construction_allowed,
+            "order_placement_allowed": self.order_placement_allowed,
+            "status": self.status,
+        }
+        digest = hashlib.sha256(_canonical_json(identity).encode("utf-8")).hexdigest()
+        if self.start_receipt_sha256 != digest:
             raise ValueError("Group O recovery start receipt hash differs")
         if self.start_receipt_id != f"group-o-recovery-start-{digest[:24]}":
             raise ValueError("Group O recovery start receipt ID differs")
         return self
 
 
-class GroupORecoveryCompletionReceiptV1(BaseModel):
+class GroupORecoveryCompletionReceiptV2(BaseModel):
     """Fully linked proof that the pre-adapter revision completed immutably."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["m1c-group-o-recovery-completion-v1"]
-    recovery_version: Literal["m1c-group-o-late-revision-v1"]
+    schema_version: Literal["m1c-group-o-recovery-completion-v2"]
+    recovery_version: Literal["m1c-group-o-late-revision-v2"]
     status: Literal["published_revision_verified", "published_revision_reconciled"]
     attempt_id: str = Field(pattern=r"^[0-9]{4}$")
     target_observation_session: date
@@ -204,6 +303,7 @@ class GroupORecoveryCompletionReceiptV1(BaseModel):
     start_receipt_file_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     base_package_path: str
     base_package_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    provider_dte_policy: Literal["recompute_from_eod_identity"]
     candidate_package_path: str
     candidate_package_file_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     candidate_package_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -245,6 +345,7 @@ class GroupORecoveryCompletionReceiptV1(BaseModel):
             "start_receipt_file_sha256": self.start_receipt_file_sha256,
             "base_package_path": self.base_package_path,
             "base_package_sha256": self.base_package_sha256,
+            "provider_dte_policy": self.provider_dte_policy,
             "candidate_package_path": self.candidate_package_path,
             "candidate_package_file_sha256": self.candidate_package_file_sha256,
             "candidate_package_hash": self.candidate_package_hash,
@@ -264,11 +365,11 @@ class GroupORecoveryCompletionReceiptV1(BaseModel):
         }
 
     @model_validator(mode="after")
-    def _self_binding_causal_identity(self) -> GroupORecoveryCompletionReceiptV1:
-        expected_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V1)
+    def _self_binding_causal_identity(self) -> GroupORecoveryCompletionReceiptV2:
+        expected_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
         if (
-            self.target_observation_session != TARGET_OBSERVATION_SESSION_V1
-            or self.target_signal_session != TARGET_SIGNAL_SESSION_V1
+            self.target_observation_session != TARGET_OBSERVATION_SESSION_V2
+            or self.target_signal_session != TARGET_SIGNAL_SESSION_V2
             or self.signal_open_utc != expected_open
             or self.published_at_utc >= self.signal_open_utc
             or self.completed_at_utc < self.published_at_utc
@@ -299,11 +400,23 @@ def _sha256_path(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def verify_group_o_recovery_freeze_v1(release_directory: str | Path) -> dict[str, Any]:
+def _parse_utc_timestamp(value: object, *, label: str) -> datetime:
+    if not isinstance(value, str):
+        raise GroupORecoveryIntegrityError(f"{label} is invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise GroupORecoveryIntegrityError(f"{label} is invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise GroupORecoveryIntegrityError(f"{label} is invalid")
+    return parsed.astimezone(UTC)
+
+
+def verify_group_o_recovery_freeze_v2(release_directory: str | Path) -> dict[str, Any]:
     """Verify every signed artifact and source before any EODHD request."""
 
     release = Path(release_directory)
-    package_root = release / RECOVERY_PACKAGE_RELATIVE_V1
+    package_root = release / RECOVERY_PACKAGE_RELATIVE_V2
     receipt_path = package_root / "deployment_freeze_receipt.json"
     if not receipt_path.is_file() or receipt_path.is_symlink():
         raise GroupORecoveryIntegrityError("missing Group O recovery deployment freeze receipt")
@@ -316,16 +429,73 @@ def verify_group_o_recovery_freeze_v1(release_directory: str | Path) -> dict[str
     if not isinstance(receipt, dict):
         raise GroupORecoveryIntegrityError("invalid Group O recovery deployment freeze receipt")
     required_identity = {
-        "schema_version": "m1c-group-o-recovery-deployment-freeze-v1",
-        "recovery_version": RECOVERY_VERSION_V1,
-        "target_observation_session": TARGET_OBSERVATION_SESSION_V1.isoformat(),
-        "target_signal_session": TARGET_SIGNAL_SESSION_V1.isoformat(),
+        "schema_version": "m1c-group-o-recovery-deployment-freeze-v2",
+        "recovery_version": RECOVERY_VERSION_V2,
+        "target_observation_session": TARGET_OBSERVATION_SESSION_V2.isoformat(),
+        "target_signal_session": TARGET_SIGNAL_SESSION_V2.isoformat(),
+        "provider_dte_policy": PROVIDER_DTE_POLICY_V2,
+        "supersedes_recovery_deployment_receipt_sha256": (
+            FAILED_V1_DEPLOYMENT_RECEIPT_SHA256
+        ),
+        "failed_v1_start_receipt_file_sha256": (
+            FAILED_V1_START_RECEIPT_FILE_SHA256
+        ),
+        "failed_v1_start_receipt_identity_sha256": (
+            FAILED_V1_START_RECEIPT_IDENTITY_SHA256
+        ),
+        "failed_v1_attempt_receipt_file_sha256": FAILED_V1_ATTEMPT_RECEIPT_SHA256,
+        "failed_v1_attempt_receipt_identity_sha256": (
+            FAILED_V1_ATTEMPT_IDENTITY_SHA256
+        ),
+        "failed_v1_attempt_completed_at_utc": FAILED_V1_ATTEMPT_COMPLETED_AT_UTC,
         "order_placement_disabled": True,
         "protected_outcomes_accessed": False,
         "source_hashes_signed": True,
     }
     if any(receipt.get(key) != value for key, value in required_identity.items()):
         raise GroupORecoveryIntegrityError("Group O recovery freeze identity differs")
+    failed_v1_receipt = release / FAILED_V1_PACKAGE_RELATIVE / "deployment_freeze_receipt.json"
+    if (
+        not failed_v1_receipt.is_file()
+        or failed_v1_receipt.is_symlink()
+        or _sha256_path(failed_v1_receipt) != FAILED_V1_DEPLOYMENT_RECEIPT_SHA256
+    ):
+        raise GroupORecoveryIntegrityError("Group O failed V1 recovery lineage differs")
+    try:
+        failed_v1_deployment = json.loads(failed_v1_receipt.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GroupORecoveryIntegrityError(
+            "Group O failed V1 recovery lineage differs"
+        ) from exc
+    if (
+        not isinstance(failed_v1_deployment, dict)
+        or failed_v1_deployment.get("deployment_receipt_id")
+        != FAILED_V1_DEPLOYMENT_RECEIPT_ID
+        or failed_v1_deployment.get("freeze_completed_at_utc")
+        != FAILED_V1_DEPLOYMENT_FREEZE_AT_UTC
+        or failed_v1_deployment.get("target_observation_session")
+        != TARGET_OBSERVATION_SESSION_V2.isoformat()
+        or failed_v1_deployment.get("target_signal_session")
+        != TARGET_SIGNAL_SESSION_V2.isoformat()
+        or failed_v1_deployment.get("order_placement_disabled") is not True
+        or failed_v1_deployment.get("protected_outcomes_accessed") is not False
+    ):
+        raise GroupORecoveryIntegrityError("Group O failed V1 recovery lineage differs")
+    failed_v1_freeze = _parse_utc_timestamp(
+        failed_v1_deployment.get("freeze_completed_at_utc"),
+        label="Group O failed V1 deployment freeze timestamp",
+    )
+    failed_v1_completion = _parse_utc_timestamp(
+        receipt.get("failed_v1_attempt_completed_at_utc"),
+        label="Group O failed V1 attempt completion timestamp",
+    )
+    v2_freeze = _parse_utc_timestamp(
+        receipt.get("freeze_completed_at_utc"),
+        label="Group O recovery V2 deployment freeze timestamp",
+    )
+    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
+    if not failed_v1_freeze < failed_v1_completion < v2_freeze < signal_open:
+        raise GroupORecoveryIntegrityError("Group O recovery freeze chronology differs")
     audited_base_hash = receipt.get("audited_failed_base_sha256")
     if (
         not isinstance(audited_base_hash, str)
@@ -336,20 +506,20 @@ def verify_group_o_recovery_freeze_v1(release_directory: str | Path) -> dict[str
     artifact_hashes = receipt.get("artifact_hashes")
     source_hashes = receipt.get("source_hashes")
     if not isinstance(artifact_hashes, dict) or set(artifact_hashes) != set(
-        RECOVERY_ARTIFACTS_V1
+        RECOVERY_ARTIFACTS_V2
     ):
         raise GroupORecoveryIntegrityError("Group O recovery artifact set differs")
     if not isinstance(source_hashes, dict) or set(source_hashes) != set(
-        RECOVERY_SOURCE_FILES_V1
+        RECOVERY_SOURCE_FILES_V2
     ):
         raise GroupORecoveryIntegrityError("Group O recovery source set differs")
-    for name in RECOVERY_ARTIFACTS_V1:
+    for name in RECOVERY_ARTIFACTS_V2:
         artifact = package_root / name
         if not artifact.is_file() or artifact.is_symlink():
             raise GroupORecoveryIntegrityError(f"Group O recovery artifact is invalid: {name}")
         if artifact_hashes[name] != _sha256_path(artifact):
             raise GroupORecoveryIntegrityError(f"Group O recovery artifact hash differs: {name}")
-    for name, relative_path in RECOVERY_SOURCE_FILES_V1.items():
+    for name, relative_path in RECOVERY_SOURCE_FILES_V2.items():
         source = release / relative_path
         if not source.is_file() or source.is_symlink():
             raise GroupORecoveryIntegrityError(f"Group O recovery source is invalid: {name}")
@@ -376,7 +546,7 @@ def verify_group_o_recovery_freeze_v1(release_directory: str | Path) -> dict[str
     verification = receipt.get("verification")
     if (
         not isinstance(verification, dict)
-        or set(verification) != RECOVERY_VERIFICATION_KEYS_V1
+        or set(verification) != RECOVERY_VERIFICATION_KEYS_V2
         or any(value != "passed" for value in verification.values())
     ):
         raise GroupORecoveryIntegrityError("Group O recovery verification is incomplete")
@@ -384,7 +554,7 @@ def verify_group_o_recovery_freeze_v1(release_directory: str | Path) -> dict[str
 
 
 def _target_base_path(context_root: Path) -> Path:
-    return context_root / "group-o" / f"{TARGET_SIGNAL_SESSION_V1.isoformat()}.json"
+    return context_root / "group-o" / f"{TARGET_SIGNAL_SESSION_V2.isoformat()}.json"
 
 
 def _require_audited_failed_base(
@@ -405,7 +575,7 @@ def _require_audited_failed_base(
     except Exception as exc:
         raise GroupORecoveryIntegrityError("Group O recovery audited base is invalid") from exc
     if (
-        package.signal_session != TARGET_SIGNAL_SESSION_V1
+        package.signal_session != TARGET_SIGNAL_SESSION_V2
         or tuple(context.symbol for context in package.contexts) != CANONICAL_COHORT_V0
         or not any(
             context.quality_status == "missing_exact_chain" for context in package.contexts
@@ -415,17 +585,104 @@ def _require_audited_failed_base(
     return base_path
 
 
+def _require_failed_v1_attempt(
+    context_root: Path,
+    *,
+    freeze_receipt: Mapping[str, Any],
+) -> Path:
+    attempt_directory = (
+        context_root
+        / "source-cache"
+        / "eodhd-group-o"
+        / TARGET_OBSERVATION_SESSION_V2.isoformat()
+        / "attempts"
+        / "0001"
+    )
+    start_path = attempt_directory / "recovery_start_receipt.json"
+    if (
+        not start_path.is_file()
+        or start_path.is_symlink()
+        or _sha256_path(start_path) != FAILED_V1_START_RECEIPT_FILE_SHA256
+    ):
+        raise GroupORecoveryIntegrityError("Group O failed V1 start receipt file differs")
+    try:
+        start = FailedGroupORecoveryStartReceiptV1.model_validate_json(
+            start_path.read_text(encoding="utf-8")
+        )
+    except Exception as exc:
+        raise GroupORecoveryIntegrityError("Group O failed V1 start receipt is invalid") from exc
+    base_path = _target_base_path(context_root)
+    if (
+        start.start_receipt_sha256 != FAILED_V1_START_RECEIPT_IDENTITY_SHA256
+        or start.deployment_receipt_id != FAILED_V1_DEPLOYMENT_RECEIPT_ID
+        or start.deployment_receipt_sha256 != FAILED_V1_DEPLOYMENT_RECEIPT_SHA256
+        or start.base_package_path != str(base_path)
+        or start.base_package_sha256 != freeze_receipt.get("audited_failed_base_sha256")
+    ):
+        raise GroupORecoveryIntegrityError("Group O failed V1 start receipt identity differs")
+    attempt_path = attempt_directory / "attempt_receipt.json"
+    if (
+        not attempt_path.is_file()
+        or attempt_path.is_symlink()
+        or _sha256_path(attempt_path) != FAILED_V1_ATTEMPT_RECEIPT_SHA256
+    ):
+        raise GroupORecoveryIntegrityError("Group O failed V1 attempt file differs")
+    try:
+        attempt = load_group_o_attempt_receipt(attempt_path)
+    except ValueError as exc:
+        raise GroupORecoveryIntegrityError("Group O failed V1 attempt is invalid") from exc
+    if (
+        attempt.get("attempt_receipt_sha256") != FAILED_V1_ATTEMPT_IDENTITY_SHA256
+        or attempt.get("attempt_id") != "0001"
+        or attempt.get("status") != "pending_exact_chain"
+        or attempt.get("signal_session") != TARGET_SIGNAL_SESSION_V2.isoformat()
+        or attempt.get("observation_session")
+        != TARGET_OBSERVATION_SESSION_V2.isoformat()
+        or attempt.get("completed_at_utc") != FAILED_V1_ATTEMPT_COMPLETED_AT_UTC
+        or attempt.get("canonical_option_rows") != 0
+        or attempt.get("rejected_option_rows") != 6364
+        or attempt.get("missing_exact_chain_symbols") != list(CANONICAL_COHORT_V0)
+        or "provider_dte_policy" in attempt
+    ):
+        raise GroupORecoveryIntegrityError("Group O failed V1 attempt identity differs")
+    attempt_started = _parse_utc_timestamp(
+        attempt.get("started_at_utc"),
+        label="Group O failed V1 attempt start timestamp",
+    )
+    attempt_completed = _parse_utc_timestamp(
+        attempt.get("completed_at_utc"),
+        label="Group O failed V1 attempt completion timestamp",
+    )
+    failed_v1_freeze = _parse_utc_timestamp(
+        FAILED_V1_DEPLOYMENT_FREEZE_AT_UTC,
+        label="Group O failed V1 deployment freeze timestamp",
+    )
+    v2_freeze = _parse_utc_timestamp(
+        freeze_receipt.get("freeze_completed_at_utc"),
+        label="Group O recovery V2 deployment freeze timestamp",
+    )
+    if not (
+        failed_v1_freeze
+        < start.started_at_utc
+        <= attempt_started
+        <= attempt_completed
+        < v2_freeze
+    ):
+        raise GroupORecoveryIntegrityError("Group O failed V1 evidence chronology differs")
+    return attempt_path
+
+
 def _load_recovery_start_receipt(
     *,
     path: Path,
     context_root: Path,
     release_directory: Path,
     freeze_receipt: Mapping[str, Any],
-) -> GroupORecoveryStartReceiptV1:
+) -> GroupORecoveryStartReceiptV2:
     if not path.is_file() or path.is_symlink():
         raise GroupORecoveryIntegrityError("Group O recovery start receipt is invalid")
     try:
-        receipt = GroupORecoveryStartReceiptV1.model_validate_json(
+        receipt = GroupORecoveryStartReceiptV2.model_validate_json(
             path.read_text(encoding="utf-8")
         )
     except Exception as exc:
@@ -435,7 +692,7 @@ def _load_recovery_start_receipt(
         freeze_receipt=freeze_receipt,
     )
     deployment_path = (
-        release_directory / RECOVERY_PACKAGE_RELATIVE_V1 / "deployment_freeze_receipt.json"
+        release_directory / RECOVERY_PACKAGE_RELATIVE_V2 / "deployment_freeze_receipt.json"
     )
     if (
         path.parent.name != receipt.attempt_id
@@ -445,6 +702,14 @@ def _load_recovery_start_receipt(
         or receipt.base_package_sha256 != freeze_receipt.get("audited_failed_base_sha256")
     ):
         raise GroupORecoveryIntegrityError("Group O recovery start receipt linkage differs")
+    freeze_completed = _parse_utc_timestamp(
+        freeze_receipt.get("freeze_completed_at_utc"),
+        label="Group O recovery V2 deployment freeze timestamp",
+    )
+    if receipt.started_at_utc <= freeze_completed:
+        raise GroupORecoveryIntegrityError(
+            "Group O recovery start must follow deployment freeze"
+        )
     return receipt
 
 
@@ -453,7 +718,7 @@ def _load_target_revision(context_root: Path) -> tuple[Path, FrozenGroupOSession
         context_root
         / "group-o"
         / "revisions"
-        / TARGET_SIGNAL_SESSION_V1.isoformat()
+        / TARGET_SIGNAL_SESSION_V2.isoformat()
         / "0001.json"
     )
     if not revision_path.is_file() or revision_path.is_symlink():
@@ -473,10 +738,136 @@ def _package_hash(package: FrozenGroupOSessionPackage) -> str:
     ).hexdigest()
 
 
+def _validate_provider_dte_diagnostics(
+    *,
+    attempt_path: Path,
+    start: GroupORecoveryStartReceiptV2,
+) -> tuple[Path, str, dict[str, int]]:
+    path = attempt_path / "provider_dte_diagnostics.json"
+    if not path.is_file() or path.is_symlink():
+        raise GroupORecoveryIntegrityError("Group O provider DTE diagnostics are invalid")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GroupORecoveryIntegrityError(
+            "Group O provider DTE diagnostics are invalid"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise GroupORecoveryIntegrityError("Group O provider DTE diagnostics are invalid")
+    required_payload_fields = {
+        "schema_version",
+        "attempt_id",
+        "signal_session",
+        "observation_session",
+        "provider_dte_policy",
+        "provider_dte_used_for_admission",
+        "diagnostic_count",
+        "status_counts",
+        "rows",
+    }
+    rows = payload.get("rows")
+    status_counts = payload.get("status_counts")
+    diagnostic_count = payload.get("diagnostic_count")
+    if (
+        set(payload) != required_payload_fields
+        or not isinstance(rows, list)
+        or not isinstance(status_counts, dict)
+        or isinstance(diagnostic_count, bool)
+        or not isinstance(diagnostic_count, int)
+        or any(
+            not isinstance(status, str)
+            or isinstance(count, bool)
+            or not isinstance(count, int)
+            or count < 0
+            for status, count in status_counts.items()
+        )
+    ):
+        raise GroupORecoveryIntegrityError("Group O provider DTE diagnostics are invalid")
+    derived_counts: dict[str, int] = {}
+    allowed_statuses = {"missing", "invalid", "fractional", "negative", "match", "mismatch"}
+    required_row_fields = {
+        "request_id",
+        "record_index",
+        "provider_record_id",
+        "raw_record_hash",
+        "provider_dte_value",
+        "status",
+        "calculated_dte",
+        "used_for_admission",
+    }
+    observed_row_identities: set[tuple[str, int]] = set()
+    observed_request_symbols: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != required_row_fields:
+            raise GroupORecoveryIntegrityError("Group O provider DTE diagnostics are invalid")
+        request_id = row.get("request_id")
+        record_index = row.get("record_index")
+        provider_record_id = row.get("provider_record_id")
+        calculated_dte = row.get("calculated_dte")
+        status = row.get("status")
+        raw_hash = row.get("raw_record_hash")
+        request_parts = request_id.split("|") if isinstance(request_id, str) else []
+        if (
+            len(request_parts) != 3
+            or request_parts[0] != "group-o"
+            or request_parts[1] not in CANONICAL_COHORT_V0
+            or request_parts[2] != TARGET_OBSERVATION_SESSION_V2.isoformat()
+            or isinstance(record_index, bool)
+            or not isinstance(record_index, int)
+            or record_index < 0
+            or (provider_record_id is not None and not isinstance(provider_record_id, str))
+            or isinstance(calculated_dte, bool)
+            or not isinstance(calculated_dte, int)
+            or calculated_dte < 0
+            or not isinstance(status, str)
+            or status not in allowed_statuses
+            or row.get("used_for_admission") is not False
+            or not isinstance(raw_hash, str)
+            or len(raw_hash) != 64
+            or any(character not in "0123456789abcdef" for character in raw_hash)
+        ):
+            raise GroupORecoveryIntegrityError(
+                "Group O provider DTE diagnostics are invalid"
+            )
+        row_identity = ("|".join(request_parts), record_index)
+        if row_identity in observed_row_identities:
+            raise GroupORecoveryIntegrityError(
+                "Group O provider DTE diagnostics are invalid"
+            )
+        observed_row_identities.add(row_identity)
+        observed_request_symbols.add(request_parts[1])
+        if status != classify_provider_dte(
+            row.get("provider_dte_value"),
+            calculated_dte=calculated_dte,
+        ):
+            raise GroupORecoveryIntegrityError(
+                "Group O provider DTE diagnostics are invalid"
+            )
+        derived_counts[status] = derived_counts.get(status, 0) + 1
+    if observed_request_symbols != set(CANONICAL_COHORT_V0):
+        raise GroupORecoveryIntegrityError(
+            "Group O provider DTE diagnostics cohort coverage differs"
+        )
+    derived_counts = dict(sorted(derived_counts.items()))
+    if (
+        payload.get("schema_version") != "group-o-provider-dte-diagnostics-v1"
+        or payload.get("attempt_id") != start.attempt_id
+        or payload.get("signal_session") != TARGET_SIGNAL_SESSION_V2.isoformat()
+        or payload.get("observation_session")
+        != TARGET_OBSERVATION_SESSION_V2.isoformat()
+        or payload.get("provider_dte_policy") != PROVIDER_DTE_POLICY_V2
+        or payload.get("provider_dte_used_for_admission") is not False
+        or diagnostic_count != len(rows)
+        or status_counts != derived_counts
+    ):
+        raise GroupORecoveryIntegrityError("Group O provider DTE diagnostics are invalid")
+    return path, _sha256_path(path), derived_counts
+
+
 def _validate_acquisition_attempt_receipt(
     *,
     path: Path,
-    start: GroupORecoveryStartReceiptV1,
+    start: GroupORecoveryStartReceiptV2,
     revision: FrozenGroupOSessionRevision,
     base_path: Path,
 ) -> dict[str, object]:
@@ -488,10 +879,11 @@ def _validate_acquisition_attempt_receipt(
         ) from exc
     if (
         completed.get("attempt_id") != start.attempt_id
-        or completed.get("signal_session") != TARGET_SIGNAL_SESSION_V1.isoformat()
-        or completed.get("observation_session") != TARGET_OBSERVATION_SESSION_V1.isoformat()
+        or completed.get("signal_session") != TARGET_SIGNAL_SESSION_V2.isoformat()
+        or completed.get("observation_session") != TARGET_OBSERVATION_SESSION_V2.isoformat()
         or completed.get("status")
         not in {"published_revision", "published_revision_reconciled_after_restart"}
+        or completed.get("provider_dte_policy") != PROVIDER_DTE_POLICY_V2
         or completed.get("published_revision_id") != revision.revision_id
         or completed.get("published_base_path") != str(base_path)
     ):
@@ -502,9 +894,23 @@ def _validate_acquisition_attempt_receipt(
     published = datetime.fromisoformat(raw_published)
     if published.tzinfo is None or published.utcoffset() is None:
         raise GroupORecoveryIntegrityError("Group O recovery completion timestamp is invalid")
-    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V1)
+    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
     if published.astimezone(UTC) >= signal_open:
         raise GroupORecoveryIntegrityError("Group O recovery completion crossed signal open")
+    diagnostics_path, diagnostics_hash, diagnostic_counts = (
+        _validate_provider_dte_diagnostics(
+            attempt_path=path.parent,
+            start=start,
+        )
+    )
+    if (
+        completed.get("provider_dte_diagnostics_path") != str(diagnostics_path)
+        or completed.get("provider_dte_diagnostics_file_sha256") != diagnostics_hash
+        or completed.get("provider_dte_diagnostic_counts") != diagnostic_counts
+    ):
+        raise GroupORecoveryIntegrityError(
+            "Group O provider DTE diagnostics linkage differs"
+        )
     return completed
 
 
@@ -513,7 +919,7 @@ def _validate_linked_recovery_completion_receipt(
     path: Path,
     release_directory: Path,
     start_path: Path,
-    start: GroupORecoveryStartReceiptV1,
+    start: GroupORecoveryStartReceiptV2,
     base_path: Path,
     candidate_path: Path,
     candidate: FrozenGroupOSessionPackage,
@@ -521,11 +927,11 @@ def _validate_linked_recovery_completion_receipt(
     revision: FrozenGroupOSessionRevision,
     attempt_receipt_path: Path,
     attempt_receipt: Mapping[str, object],
-) -> GroupORecoveryCompletionReceiptV1:
+) -> GroupORecoveryCompletionReceiptV2:
     if not path.is_file() or path.is_symlink():
         raise GroupORecoveryIntegrityError("Group O linked completion receipt is invalid")
     try:
-        receipt = GroupORecoveryCompletionReceiptV1.model_validate_json(
+        receipt = GroupORecoveryCompletionReceiptV2.model_validate_json(
             path.read_text(encoding="utf-8")
         )
     except Exception as exc:
@@ -533,7 +939,7 @@ def _validate_linked_recovery_completion_receipt(
             "Group O linked completion receipt is invalid"
         ) from exc
     deployment_path = (
-        release_directory / RECOVERY_PACKAGE_RELATIVE_V1 / "deployment_freeze_receipt.json"
+        release_directory / RECOVERY_PACKAGE_RELATIVE_V2 / "deployment_freeze_receipt.json"
     )
     expected_status = (
         "published_revision_reconciled"
@@ -551,6 +957,7 @@ def _validate_linked_recovery_completion_receipt(
         "start_receipt_file_sha256": _sha256_path(start_path),
         "base_package_path": str(base_path),
         "base_package_sha256": _sha256_path(base_path),
+        "provider_dte_policy": PROVIDER_DTE_POLICY_V2,
         "candidate_package_path": str(candidate_path),
         "candidate_package_file_sha256": _sha256_path(candidate_path),
         "candidate_package_hash": _package_hash(candidate),
@@ -581,7 +988,7 @@ def _write_or_validate_linked_completion_receipt(
     attempt_path: Path,
     release_directory: Path,
     start_path: Path,
-    start: GroupORecoveryStartReceiptV1,
+    start: GroupORecoveryStartReceiptV2,
     base_path: Path,
     candidate_path: Path,
     candidate: FrozenGroupOSessionPackage,
@@ -590,10 +997,10 @@ def _write_or_validate_linked_completion_receipt(
     attempt_receipt_path: Path,
     attempt_receipt: Mapping[str, object],
     completed_at_utc: datetime,
-) -> GroupORecoveryCompletionReceiptV1:
+) -> GroupORecoveryCompletionReceiptV2:
     destination = attempt_path / "recovery_completion_receipt.json"
     if not destination.exists():
-        signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V1)
+        signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
         status = (
             "published_revision_reconciled"
             if attempt_receipt.get("status")
@@ -601,12 +1008,12 @@ def _write_or_validate_linked_completion_receipt(
             else "published_revision_verified"
         )
         identity: dict[str, object] = {
-            "schema_version": "m1c-group-o-recovery-completion-v1",
-            "recovery_version": RECOVERY_VERSION_V1,
+            "schema_version": "m1c-group-o-recovery-completion-v2",
+            "recovery_version": RECOVERY_VERSION_V2,
             "status": status,
             "attempt_id": start.attempt_id,
-            "target_observation_session": TARGET_OBSERVATION_SESSION_V1.isoformat(),
-            "target_signal_session": TARGET_SIGNAL_SESSION_V1.isoformat(),
+            "target_observation_session": TARGET_OBSERVATION_SESSION_V2.isoformat(),
+            "target_signal_session": TARGET_SIGNAL_SESSION_V2.isoformat(),
             "signal_open_utc": signal_open.isoformat(),
             "published_at_utc": revision.created_at_utc.isoformat(),
             "completed_at_utc": completed_at_utc.astimezone(UTC).isoformat(),
@@ -618,6 +1025,7 @@ def _write_or_validate_linked_completion_receipt(
             "start_receipt_file_sha256": _sha256_path(start_path),
             "base_package_path": str(base_path),
             "base_package_sha256": _sha256_path(base_path),
+            "provider_dte_policy": PROVIDER_DTE_POLICY_V2,
             "candidate_package_path": str(candidate_path),
             "candidate_package_file_sha256": _sha256_path(candidate_path),
             "candidate_package_hash": _package_hash(candidate),
@@ -640,7 +1048,7 @@ def _write_or_validate_linked_completion_receipt(
             "completion_receipt_sha256": digest,
         }
         try:
-            validated = GroupORecoveryCompletionReceiptV1.model_validate(payload)
+            validated = GroupORecoveryCompletionReceiptV2.model_validate(payload)
         except Exception as exc:
             raise GroupORecoveryIntegrityError(
                 "Group O linked completion receipt is invalid"
@@ -674,17 +1082,25 @@ def _write_recovery_start_receipt(
     freeze_receipt: Mapping[str, Any],
     started_at_utc: datetime,
 ) -> Path:
-    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V1)
+    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
     if started_at_utc.tzinfo is None or started_at_utc.utcoffset() is None:
         raise GroupORecoveryIntegrityError("Group O recovery start timestamp is invalid")
     started_at_utc = started_at_utc.astimezone(UTC)
     if started_at_utc >= signal_open:
         raise GroupORecoveryIntegrityError("Group O recovery start must precede Monday open")
+    freeze_completed = _parse_utc_timestamp(
+        freeze_receipt.get("freeze_completed_at_utc"),
+        label="Group O recovery V2 deployment freeze timestamp",
+    )
+    if started_at_utc <= freeze_completed:
+        raise GroupORecoveryIntegrityError(
+            "Group O recovery start must follow deployment freeze"
+        )
     expected_attempt = (
         context_root
         / "source-cache"
         / "eodhd-group-o"
-        / TARGET_OBSERVATION_SESSION_V1.isoformat()
+        / TARGET_OBSERVATION_SESSION_V2.isoformat()
         / "attempts"
         / attempt_id
     )
@@ -695,22 +1111,23 @@ def _write_recovery_start_receipt(
         freeze_receipt=freeze_receipt,
     )
     package_receipt = (
-        release_directory / RECOVERY_PACKAGE_RELATIVE_V1 / "deployment_freeze_receipt.json"
+        release_directory / RECOVERY_PACKAGE_RELATIVE_V2 / "deployment_freeze_receipt.json"
     )
     if not package_receipt.is_file() or package_receipt.is_symlink():
         raise GroupORecoveryIntegrityError("Group O recovery deployment receipt is invalid")
     identity: dict[str, object] = {
-        "schema_version": "m1c-group-o-recovery-start-v1",
-        "recovery_version": RECOVERY_VERSION_V1,
+        "schema_version": "m1c-group-o-recovery-start-v2",
+        "recovery_version": RECOVERY_VERSION_V2,
         "deployment_receipt_id": str(freeze_receipt["deployment_receipt_id"]),
         "deployment_receipt_sha256": _sha256_path(package_receipt),
         "attempt_id": attempt_id,
-        "target_observation_session": TARGET_OBSERVATION_SESSION_V1.isoformat(),
-        "target_signal_session": TARGET_SIGNAL_SESSION_V1.isoformat(),
+        "target_observation_session": TARGET_OBSERVATION_SESSION_V2.isoformat(),
+        "target_signal_session": TARGET_SIGNAL_SESSION_V2.isoformat(),
         "signal_open_utc": signal_open.isoformat(),
         "started_at_utc": started_at_utc.isoformat(),
         "base_package_path": str(base_path),
         "base_package_sha256": _sha256_path(base_path),
+        "provider_dte_policy": PROVIDER_DTE_POLICY_V2,
         "ibkr_adapter_opened": False,
         "monday_market_data_consumed": False,
         "order_construction_allowed": False,
@@ -724,7 +1141,7 @@ def _write_recovery_start_receipt(
         "start_receipt_sha256": digest,
     }
     try:
-        validated = GroupORecoveryStartReceiptV1.model_validate(receipt)
+        validated = GroupORecoveryStartReceiptV2.model_validate(receipt)
     except Exception as exc:
         raise GroupORecoveryIntegrityError("Group O recovery start receipt is invalid") from exc
     destination = attempt_path / "recovery_start_receipt.json"
@@ -736,7 +1153,7 @@ def _write_recovery_start_receipt(
     return destination
 
 
-def reconcile_group_o_recovery_completion_v1(
+def reconcile_group_o_recovery_completion_v2(
     *,
     context_root: str | Path,
     release_directory: str | Path,
@@ -746,7 +1163,8 @@ def reconcile_group_o_recovery_completion_v1(
 
     root = Path(context_root)
     release = Path(release_directory)
-    freeze = verify_group_o_recovery_freeze_v1(release)
+    freeze = verify_group_o_recovery_freeze_v2(release)
+    _require_failed_v1_attempt(root, freeze_receipt=freeze)
     base_path = _require_audited_failed_base(
         context_root=root,
         freeze_receipt=freeze,
@@ -758,7 +1176,7 @@ def reconcile_group_o_recovery_completion_v1(
             return False
         raise
     if (
-        revision.signal_session != TARGET_SIGNAL_SESSION_V1
+        revision.signal_session != TARGET_SIGNAL_SESSION_V2
         or revision.supersedes_sha256 != _sha256_path(base_path)
         or tuple(context.symbol for context in revision.package.contexts)
         != CANONICAL_COHORT_V0
@@ -768,13 +1186,15 @@ def reconcile_group_o_recovery_completion_v1(
         root
         / "source-cache"
         / "eodhd-group-o"
-        / TARGET_OBSERVATION_SESSION_V1.isoformat()
+        / TARGET_OBSERVATION_SESSION_V2.isoformat()
         / "attempts"
     )
     if not attempts_root.is_dir() or attempts_root.is_symlink():
         return False
     for attempt in sorted(attempts_root.iterdir(), key=lambda path: path.name):
         if not attempt.is_dir() or attempt.is_symlink() or not attempt.name.isdigit():
+            continue
+        if attempt.name == "0001":
             continue
         start_path = attempt / "recovery_start_receipt.json"
         if not start_path.exists():
@@ -833,17 +1253,27 @@ def reconcile_group_o_recovery_completion_v1(
             raise GroupORecoveryIntegrityError(
                 "Group O recovery reconciliation timestamp is invalid"
             )
+        diagnostics_path, diagnostics_hash, diagnostic_counts = (
+            _validate_provider_dte_diagnostics(
+                attempt_path=attempt,
+                start=start,
+            )
+        )
         write_group_o_attempt_receipt(
             completion_path,
             {
                 "schema_version": "group-o-acquisition-attempt-v1",
                 "attempt_id": start.attempt_id,
-                "signal_session": TARGET_SIGNAL_SESSION_V1.isoformat(),
-                "observation_session": TARGET_OBSERVATION_SESSION_V1.isoformat(),
+                "signal_session": TARGET_SIGNAL_SESSION_V2.isoformat(),
+                "observation_session": TARGET_OBSERVATION_SESSION_V2.isoformat(),
                 "started_at_utc": start.started_at_utc.isoformat(),
                 "completed_at_utc": revision.created_at_utc.isoformat(),
                 "reconciled_at_utc": reconciled_at.astimezone(UTC).isoformat(),
                 "status": "published_revision_reconciled_after_restart",
+                "provider_dte_policy": PROVIDER_DTE_POLICY_V2,
+                "provider_dte_diagnostics_path": str(diagnostics_path),
+                "provider_dte_diagnostics_file_sha256": diagnostics_hash,
+                "provider_dte_diagnostic_counts": diagnostic_counts,
                 "published_at_utc": revision.created_at_utc.isoformat(),
                 "published_base_path": str(base_path),
                 "published_revision_id": revision.revision_id,
@@ -878,7 +1308,7 @@ def reconcile_group_o_recovery_completion_v1(
     return False
 
 
-def recover_group_o_exact_chain_v1(
+def recover_group_o_exact_chain_v2(
     *,
     context_root: str | Path,
     release_directory: str | Path,
@@ -891,19 +1321,20 @@ def recover_group_o_exact_chain_v1(
         raise GroupORecoveryIntegrityError("Group O recovery canonical cohort differs")
     root = Path(context_root)
     release = Path(release_directory)
-    freeze_receipt = verify_group_o_recovery_freeze_v1(release)
+    freeze_receipt = verify_group_o_recovery_freeze_v2(release)
     base_path = _require_audited_failed_base(
         context_root=root,
         freeze_receipt=freeze_receipt,
     )
+    _require_failed_v1_attempt(root, freeze_receipt=freeze_receipt)
     resolved = load_group_o_session_package(
         context_root=root,
-        signal_session=TARGET_SIGNAL_SESSION_V1,
+        signal_session=TARGET_SIGNAL_SESSION_V2,
     )
     if tuple(context.symbol for context in resolved.contexts) != CANONICAL_COHORT_V0:
         raise GroupORecoveryIntegrityError("Group O recovery base cohort differs")
     if not any(context.quality_status == "missing_exact_chain" for context in resolved.contexts):
-        if not reconcile_group_o_recovery_completion_v1(
+        if not reconcile_group_o_recovery_completion_v2(
             context_root=root,
             release_directory=release,
             clock=clock,
@@ -913,26 +1344,29 @@ def recover_group_o_exact_chain_v1(
             )
         return GroupORecoveryResult(
             status="already_recovered",
-            signal_session=TARGET_SIGNAL_SESSION_V1,
-            observation_session=TARGET_OBSERVATION_SESSION_V1,
+            signal_session=TARGET_SIGNAL_SESSION_V2,
+            observation_session=TARGET_OBSERVATION_SESSION_V2,
             attempt_id=None,
             start_receipt_path=None,
             canonical_option_rows=None,
         )
-    started = clock().astimezone(UTC)
-    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V1)
+    observed_start = clock()
+    if observed_start.tzinfo is None or observed_start.utcoffset() is None:
+        raise GroupORecoveryIntegrityError("Group O recovery start clock is invalid")
+    started = observed_start.astimezone(UTC)
+    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
     if started >= signal_open:
         raise GroupORecoveryIntegrityError("Group O recovery cutoff passed before acquisition")
     cache_root = root / "source-cache" / "eodhd-group-o"
     retry_after = group_o_retry_not_before(
         cache_root=cache_root,
-        observation_session=TARGET_OBSERVATION_SESSION_V1,
+        observation_session=TARGET_OBSERVATION_SESSION_V2,
     )
     if retry_after is not None and started < retry_after:
         raise GroupORecoveryRetryNotDue(retry_after)
     attempt_id, attempt_path = allocate_group_o_attempt(
         cache_root=cache_root,
-        observation_session=TARGET_OBSERVATION_SESSION_V1,
+        observation_session=TARGET_OBSERVATION_SESSION_V2,
     )
     start_receipt = _write_recovery_start_receipt(
         attempt_path=attempt_path,
@@ -951,7 +1385,7 @@ def recover_group_o_exact_chain_v1(
         / "primary"
     )
     result = acquire_eodhd_group_o_session_package(
-        signal_session=TARGET_SIGNAL_SESSION_V1,
+        signal_session=TARGET_SIGNAL_SESSION_V2,
         symbols=symbols,
         output_path=base_path,
         cache_root=cache_root,
@@ -959,15 +1393,16 @@ def recover_group_o_exact_chain_v1(
         feature_manifest_path=artifacts / "front_options_feature_manifest.json",
         regime_mapping_path=artifacts / "front_options_regime_mapping.json",
         supersedes_path=base_path,
+        provider_dte_policy=PROVIDER_DTE_POLICY_V2,
         clock=clock,
     )
     revised = load_group_o_session_package(
         context_root=root,
-        signal_session=TARGET_SIGNAL_SESSION_V1,
+        signal_session=TARGET_SIGNAL_SESSION_V2,
     )
     if any(context.quality_status == "missing_exact_chain" for context in revised.contexts):
         raise GroupORecoveryIntegrityError("Group O recovery did not resolve the exact chain")
-    if not reconcile_group_o_recovery_completion_v1(
+    if not reconcile_group_o_recovery_completion_v2(
         context_root=root,
         release_directory=release,
         clock=clock,
@@ -975,15 +1410,15 @@ def recover_group_o_exact_chain_v1(
         raise GroupORecoveryIntegrityError("Group O recovery completion evidence is unavailable")
     return GroupORecoveryResult(
         status="recovered",
-        signal_session=TARGET_SIGNAL_SESSION_V1,
-        observation_session=TARGET_OBSERVATION_SESSION_V1,
+        signal_session=TARGET_SIGNAL_SESSION_V2,
+        observation_session=TARGET_OBSERVATION_SESSION_V2,
         attempt_id=attempt_id,
         start_receipt_path=start_receipt,
         canonical_option_rows=result.canonical_option_rows,
     )
 
 
-def recover_group_o_exact_chain_until_ready_v1(
+def recover_group_o_exact_chain_until_ready_v2(
     *,
     context_root: str | Path,
     release_directory: str | Path,
@@ -994,10 +1429,10 @@ def recover_group_o_exact_chain_until_ready_v1(
     """Retry automatically on the signed 15-minute cadence until the pre-open cutoff."""
 
     cache_root = Path(context_root) / "source-cache" / "eodhd-group-o"
-    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V1)
+    signal_open, _ = xnys_session_bounds(TARGET_SIGNAL_SESSION_V2)
     while True:
         try:
-            return recover_group_o_exact_chain_v1(
+            return recover_group_o_exact_chain_v2(
                 context_root=context_root,
                 release_directory=release_directory,
                 symbols=symbols,
@@ -1008,7 +1443,7 @@ def recover_group_o_exact_chain_until_ready_v1(
         except GroupOAcquisitionPending:
             pending_retry = group_o_retry_not_before(
                 cache_root=cache_root,
-                observation_session=TARGET_OBSERVATION_SESSION_V1,
+                observation_session=TARGET_OBSERVATION_SESSION_V2,
             )
             if pending_retry is None:
                 raise GroupORecoveryIntegrityError(
@@ -1027,7 +1462,7 @@ def recover_group_o_exact_chain_until_ready_v1(
         sleeper(wait_seconds)
 
 
-def require_group_o_recovery_ready_before_adapter_v1(
+def require_group_o_recovery_ready_before_adapter_v2(
     *,
     context_root: str | Path,
     release_directory: str | Path,
@@ -1038,18 +1473,19 @@ def require_group_o_recovery_ready_before_adapter_v1(
     if now.tzinfo is None or now.utcoffset() is None:
         raise GroupORecoveryIntegrityError("pre-adapter recovery clock is invalid")
     release = Path(release_directory)
-    freeze = verify_group_o_recovery_freeze_v1(release)
+    freeze = verify_group_o_recovery_freeze_v2(release)
     root = Path(context_root)
     _require_audited_failed_base(context_root=root, freeze_receipt=freeze)
+    _require_failed_v1_attempt(root, freeze_receipt=freeze)
     resolved = load_group_o_session_package(
         context_root=root,
-        signal_session=TARGET_SIGNAL_SESSION_V1,
+        signal_session=TARGET_SIGNAL_SESSION_V2,
     )
     if any(context.quality_status == "missing_exact_chain" for context in resolved.contexts):
         raise GroupORecoveryIntegrityError(
             "blocked_pre_adapter_group_o_recovery_incomplete"
         )
-    if not reconcile_group_o_recovery_completion_v1(
+    if not reconcile_group_o_recovery_completion_v2(
         context_root=root,
         release_directory=release,
         clock=lambda: now,
@@ -1067,15 +1503,15 @@ __all__ = [
     "GroupORecoveryIntegrityError",
     "GroupORecoveryResult",
     "GroupORecoveryRetryNotDue",
-    "GroupORecoveryStartReceiptV1",
-    "RECOVERY_PACKAGE_RELATIVE_V1",
-    "RECOVERY_VERSION_V1",
-    "TARGET_OBSERVATION_SESSION_V1",
-    "TARGET_SIGNAL_SESSION_V1",
+    "GroupORecoveryStartReceiptV2",
+    "RECOVERY_PACKAGE_RELATIVE_V2",
+    "RECOVERY_VERSION_V2",
+    "TARGET_OBSERVATION_SESSION_V2",
+    "TARGET_SIGNAL_SESSION_V2",
     "group_o_recovery_result_payload",
-    "recover_group_o_exact_chain_v1",
-    "recover_group_o_exact_chain_until_ready_v1",
-    "reconcile_group_o_recovery_completion_v1",
-    "require_group_o_recovery_ready_before_adapter_v1",
-    "verify_group_o_recovery_freeze_v1",
+    "recover_group_o_exact_chain_v2",
+    "recover_group_o_exact_chain_until_ready_v2",
+    "reconcile_group_o_recovery_completion_v2",
+    "require_group_o_recovery_ready_before_adapter_v2",
+    "verify_group_o_recovery_freeze_v2",
 ]

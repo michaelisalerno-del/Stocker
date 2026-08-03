@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum, StrEnum
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_TRANSIENT_WRITER_RETRY_DELAYS_SECONDS = (0.005, 0.01, 0.025, 0.05)
 
 
 class CallbackInboxError(RuntimeError):
@@ -286,6 +289,29 @@ class DurableCallbackInbox:
         return connection
 
     @staticmethod
+    def _is_transient_writer_contention(error: sqlite3.OperationalError) -> bool:
+        error_code = getattr(error, "sqlite_errorcode", None)
+        if isinstance(error_code, int) and error_code & 0xFF in {
+            sqlite3.SQLITE_BUSY,
+            sqlite3.SQLITE_LOCKED,
+        }:
+            return True
+        message = str(error).lower()
+        return "database is locked" in message or "database is busy" in message
+
+    def _begin_immediate(self, connection: sqlite3.Connection) -> None:
+        """Wait through bounded transient writer contention without losing ingress."""
+
+        for delay_seconds in (*_TRANSIENT_WRITER_RETRY_DELAYS_SECONDS, None):
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                return
+            except sqlite3.OperationalError as error:
+                if delay_seconds is None or not self._is_transient_writer_contention(error):
+                    raise
+                time.sleep(delay_seconds)
+
+    @staticmethod
     def _event(row: sqlite3.Row) -> CallbackInboxEvent:
         return CallbackInboxEvent(
             inbox_event_id=str(row["inbox_event_id"]),
@@ -441,7 +467,7 @@ class DurableCallbackInbox:
         failure = classification.value if initial_status is InboxStatus.QUARANTINED else None
         acknowledgement = received_encoded if initial_status is InboxStatus.DIAGNOSTIC else None
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             existing = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
                 (event_id,),
@@ -578,7 +604,7 @@ class DurableCallbackInbox:
         observed = _utc(attached_at, label="stream owner attachment timestamp")
         encoded_owner = _encoded(dict(stream_owner))
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             conflicting = connection.execute(
                 """
                 SELECT inbox_event_id
@@ -690,7 +716,7 @@ class DurableCallbackInbox:
 
         observed = _utc(completed_at, label="provider envelope completion timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             self._complete_provider_envelope_in_transaction(
                 connection,
                 provider_envelope_event_id=provider_envelope_event_id,
@@ -743,7 +769,7 @@ class DurableCallbackInbox:
             raise ValueError("recorder generation must be positive")
         observed = _utc(observed_at, label="provider envelope recovery timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             rows = connection.execute(
                 """
                 SELECT *
@@ -840,7 +866,7 @@ class DurableCallbackInbox:
             )
 
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             # An explicitly abandoned run retains its poison/pending evidence
             # for audit, but it is never part of a different run's backlog.
             # Run identity is the isolation boundary for leasing and health.
@@ -1009,7 +1035,7 @@ class DurableCallbackInbox:
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
         encoded_event_ids = _encoded(tuple(sorted(raw_event_ids)))
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             for event in batch:
                 if event.admission_run_id != run_id:
                     connection.rollback()
@@ -1113,7 +1139,7 @@ class DurableCallbackInbox:
         observed = _utc(now, label="callback release timestamp")
         released = 0
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             for event in events:
                 cursor = connection.execute(
                     """
@@ -1182,7 +1208,7 @@ class DurableCallbackInbox:
             raise ValueError("quarantine resolution evidence is required")
         observed = _utc(resolved_at, label="quarantine resolution timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             cursor = connection.execute(
                 """
                 UPDATE callback_inbox_v1
@@ -1232,7 +1258,7 @@ class DurableCallbackInbox:
             "official_provider_contract_details_end",
         }
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             row = connection.execute(
                 """
                 SELECT *
@@ -1340,7 +1366,7 @@ class DurableCallbackInbox:
             raise ValueError("fatal-latch resolution evidence is required")
         observed = _utc(resolved_at, label="fatal-latch resolution timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             if latch_kind == "ingestion":
                 quarantined = int(
                     connection.execute(
@@ -1417,7 +1443,7 @@ class DurableCallbackInbox:
         observed = _utc(committed_at, label="callback processing commit timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             for event in events:
                 if event.admission_run_id != run_id:
                     connection.rollback()
@@ -1497,7 +1523,7 @@ class DurableCallbackInbox:
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
         acknowledged = 0
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             for event in events:
                 commit = connection.execute(
                     """
@@ -1635,7 +1661,7 @@ class DurableCallbackInbox:
             raise ValueError("callback inbox compaction requires an explicit retention policy")
         cutoff = _utc(before, label="callback retention cutoff")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             rows = connection.execute(
                 """
                 SELECT inbox_event_id, original_payload_json
@@ -1710,7 +1736,7 @@ class DurableCallbackInbox:
         if not reason:
             raise ValueError("request cancellation reason is required")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             connection.execute(
                 "DELETE FROM callback_request_tombstone_v1 WHERE expires_at_utc <= ?",
                 (observed.isoformat(),),
@@ -1889,7 +1915,7 @@ class DurableCallbackInbox:
             ).encode()
         ).hexdigest()
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             active = connection.execute(
                 """
                 SELECT latch_id

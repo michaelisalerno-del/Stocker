@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -41,10 +43,12 @@ def adapter(
     tmp_path: Path,
     *,
     max_unacknowledged: int = 100,
+    busy_timeout_ms: int = 5_000,
 ) -> tuple[IBKRMarketDataAdapter, DurableCallbackInbox]:
     inbox = DurableCallbackInbox(
         database(tmp_path),
         max_unacknowledged=max_unacknowledged,
+        busy_timeout_ms=busy_timeout_ms,
         run_id=RUN_ID,
         recorder_generation=1,
         owner_id="recorder",
@@ -266,6 +270,40 @@ def test_durable_inbox_exhaustion_latches_fatal_without_silent_drop(
     accounting = inbox.accounting()
     assert accounting.admitted == 2
     assert accounting.pending == 1
+
+
+def test_transient_sqlite_writer_contention_does_not_latch_callback_loss(
+    tmp_path: Path,
+) -> None:
+    value, inbox = adapter(tmp_path, busy_timeout_ms=10)
+    activate(value)
+    lock_acquired = threading.Event()
+
+    def hold_writer_lock() -> None:
+        with sqlite3.connect(inbox.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            lock_acquired.set()
+            time.sleep(0.05)
+
+    lock_thread = threading.Thread(target=hold_writer_lock)
+    lock_thread.start()
+    assert lock_acquired.wait(timeout=1)
+
+    value.contain_official_callback(
+        "tick_price",
+        7,
+        lambda: value.on_quote_update(7, {"field": "bid", "value": 10.0}),
+    )
+    lock_thread.join(timeout=1)
+
+    assert not lock_thread.is_alive()
+    assert value.fatal_callback_code is None
+    assert value.scientific_recording_valid
+    accounting = inbox.accounting()
+    assert accounting.admitted == 2
+    assert accounting.pending == 1
+    assert accounting.diagnostic == 1
+    assert not inbox.has_active_fatal("ingestion")
 
 
 @pytest.mark.parametrize(

@@ -306,6 +306,56 @@ def test_transient_sqlite_writer_contention_does_not_latch_callback_loss(
     assert not inbox.has_active_fatal("ingestion")
 
 
+def test_callback_reader_reuses_sqlite_connection_and_keeps_up_with_stream_rate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_connect = sqlite3.connect
+    connection_count = 0
+
+    def slow_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        nonlocal connection_count
+        connection_count += 1
+        time.sleep(0.075)
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", slow_connect)
+    value, inbox = adapter(tmp_path)
+    setup_connection_count = connection_count
+    request_ids = tuple(range(100, 108))
+    for request_id in request_ids:
+        activate(value, request_id)
+    payload = {
+        "date": "20260803 14:00:00",
+        "open": 10.0,
+        "high": 10.1,
+        "low": 9.9,
+        "close": 10.05,
+        "volume": 1_000,
+    }
+
+    started = time.perf_counter()
+    for request_id in request_ids:
+        value.contain_official_callback(
+            "historical_data_update",
+            request_id,
+            lambda request_id=request_id: value.on_historical_bar(
+                request_id,
+                payload,
+                update=True,
+            ),
+            provider_arguments=(request_id, payload),
+        )
+    elapsed_seconds = time.perf_counter() - started
+
+    callback_rate_hz = len(request_ids) / elapsed_seconds
+    required_stream_rate_hz = 28 / 5
+    assert callback_rate_hz >= required_stream_rate_hz
+    assert connection_count == setup_connection_count
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == len(request_ids)
+
+
 @pytest.mark.parametrize(
     ("error", "expected_code"),
     [

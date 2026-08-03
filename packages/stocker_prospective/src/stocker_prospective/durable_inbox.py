@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import threading
 import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime, timedelta
@@ -262,6 +263,7 @@ class DurableCallbackInbox:
         self.run_id = run_id
         self.recorder_generation = recorder_generation
         self.owner_id = owner_id
+        self._connection_local = threading.local()
 
     def configure_recorder(
         self,
@@ -277,6 +279,14 @@ class DurableCallbackInbox:
         self.owner_id = owner_id
 
     def _connect(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = getattr(
+            self._connection_local,
+            "connection",
+            None,
+        )
+        if connection is not None:
+            return connection
+
         connection = sqlite3.connect(
             self.database_path,
             timeout=self.busy_timeout_ms / 1_000,
@@ -286,6 +296,7 @@ class DurableCallbackInbox:
         connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = FULL")
+        self._connection_local.connection = connection
         return connection
 
     @staticmethod

@@ -615,6 +615,38 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
     )
 
 
+def test_existing_activation_accepts_verified_api_and_gateway_maintenance(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        git_commit="a" * 40,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+    maintained_config = config.model_copy(
+        update={
+            "runtime": config.runtime.model_copy(update={"git_commit": "b" * 40}),
+            "ibkr": config.ibkr.model_copy(
+                update={"tws_or_gateway_version": "10491c-latest-ae1600e7c3a1"}
+            ),
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=activation,
+        config=maintained_config,
+        artifact_hashes=activation.model_artifact_hashes,
+        ibkr_api_version="10.49.1",
+        tws_or_gateway_version="10491c-latest-ae1600e7c3a1",
+    )
+    assert activation.ibkr_api_version != "10.49.1"
+    assert activation.tws_or_gateway_version != "10491c-latest-ae1600e7c3a1"
+
+
 def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(
     tmp_path: Path,
 ) -> None:

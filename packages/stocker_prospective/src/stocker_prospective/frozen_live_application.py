@@ -89,6 +89,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
+    OpeningLeaderDeploymentRefreezeReceiptV5,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -187,16 +188,20 @@ def _configuration_hash(
     git_commit: str | None = None,
     app_version: str | None = None,
     run_id: str | None = None,
+    tws_or_gateway_version: str | None = None,
     omitted_runtime_fields: frozenset[str] = frozenset(),
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
     runtime_payload = cast(dict[str, Any], payload["runtime"])
+    ibkr_payload = cast(dict[str, Any], payload["ibkr"])
     if git_commit is not None:
         runtime_payload["git_commit"] = git_commit
     if app_version is not None:
         runtime_payload["app_version"] = app_version
     if run_id is not None:
         runtime_payload["run_id"] = run_id
+    if tws_or_gateway_version is not None:
+        ibkr_payload["tws_or_gateway_version"] = tws_or_gateway_version
     for field_name in omitted_runtime_fields:
         runtime_payload.pop(field_name)
     return hashlib.sha256(
@@ -213,6 +218,7 @@ def _activation_configuration_hash_candidates(
     *,
     activation_git_commit: str,
     activation_app_version: str | None = None,
+    activation_tws_or_gateway_version: str | None = None,
     historical_run_ids: tuple[str, ...] = (),
 ) -> frozenset[str]:
     """Reconstruct supported activation shapes without weakening scientific fields."""
@@ -230,12 +236,14 @@ def _activation_configuration_hash_candidates(
                     git_commit=activation_git_commit,
                     app_version=activation_app_version,
                     run_id=historical_run_id,
+                    tws_or_gateway_version=activation_tws_or_gateway_version,
                 ),
                 _configuration_hash(
                     config,
                     git_commit=activation_git_commit,
                     app_version=activation_app_version,
                     run_id=historical_run_id,
+                    tws_or_gateway_version=activation_tws_or_gateway_version,
                     omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
                 ),
             }
@@ -261,14 +269,20 @@ def _require_compatible_existing_activation(
         raise ValueError("blocked_existing_activation_claims_boundary_mismatch")
     if activation.model_artifact_hashes != dict(sorted(artifact_hashes.items())):
         raise ValueError("blocked_existing_activation_artifact_hash_mismatch")
-    if activation.ibkr_api_version != ibkr_api_version:
-        raise ValueError("blocked_existing_activation_ibkr_api_version_mismatch")
-    if activation.tws_or_gateway_version != tws_or_gateway_version:
-        raise ValueError("blocked_existing_activation_gateway_version_mismatch")
+    # The activation records the dependency baseline used at first collection.
+    # Later official API/Gateway maintenance is operational: current versions
+    # are independently verified and written to capability evidence. Rebuild
+    # the old configuration hash with the baseline Gateway identity so only
+    # that dependency field may roll without changing scientific admission.
+    if not ibkr_api_version or ibkr_api_version == "unknown":
+        raise ValueError("blocked_existing_activation_ibkr_api_version_unavailable")
+    if not tws_or_gateway_version:
+        raise ValueError("blocked_existing_activation_gateway_version_unavailable")
     if activation.configuration_hash not in _activation_configuration_hash_candidates(
         config,
         activation_git_commit=activation.git_sha,
         activation_app_version=activation_app_version,
+        activation_tws_or_gateway_version=activation.tws_or_gateway_version,
         historical_run_ids=historical_run_ids,
     ):
         raise ValueError("blocked_existing_activation_configuration_mismatch")
@@ -1264,6 +1278,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV2
         | OpeningLeaderDeploymentRefreezeReceiptV3
         | OpeningLeaderDeploymentRefreezeReceiptV4
+        | OpeningLeaderDeploymentRefreezeReceiptV5
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

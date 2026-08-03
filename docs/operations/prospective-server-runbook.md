@@ -172,18 +172,18 @@ enter the virtual environment.
 Recheck the official download page at install time:
 <https://interactivebrokers.github.io/>.
 
-Do not run `pip install ibapi` from a package registry. On 2026-07-25, Python
-was provided in the official **Latest** Mac/Unix archive. The first verified
-server archive is `twsapi_macunix.1048.01.zip`, which contains
-`API_Version=10.48.01` and installs `ibapi==10.48.1`. Its expected SHA-256 is
-`0446c403cdfd3a059685c5e11814b32e0b811fdf5e1f68564f8e08b655e49547`.
+Do not run `pip install ibapi` from a package registry. On 2026-08-03, Python
+was provided in the official **Latest** Mac/Unix archive. The current verified
+server archive is `twsapi_macunix.1049.01.zip`, which contains
+`API_Version=10.49.01` and installs `ibapi==10.49.1`. Its expected SHA-256 is
+`f5d31e05f63be0d0fddc13ea8267c3a1625b0783baa17a44832e9151f8402b27`.
 
 The operator must accept IBKR's licence and download the archive manually.
 Copy it directly into restricted server staging:
 
 ```bash
-scp /path/to/twsapi_macunix.1048.01.zip \
-  root@SERVER:/var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+scp /path/to/twsapi_macunix.1049.01.zip \
+  root@SERVER:/var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
 ```
 
 Then verify it and install it into the **staged release** before that release is
@@ -191,18 +191,19 @@ made immutable or promoted:
 
 ```bash
 sudo chown root:stocker \
-  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
 sudo chmod 0640 \
-  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
-sha256sum /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
+sha256sum /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
 IBKR_EXTRACT_DIR="$(
-  sudo -u stocker mktemp -d /var/lib/stocker/ibkr-api-extract.XXXXXX
+  sudo -u stocker mktemp -d \
+    /var/lib/stocker/secure-transfer/ibkr-api-extract.XXXXXX
 )"
 sudo -u stocker python3.12 -m zipfile -e \
-  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip \
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip \
   "$IBKR_EXTRACT_DIR"
 cat "$IBKR_EXTRACT_DIR/IBJts/API_VersionNum.txt"
-sudo -u stocker uv pip install \
+sudo -u stocker uv --no-config pip install \
   --python /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/python \
   "$IBKR_EXTRACT_DIR/IBJts/source/pythonclient"
 sudo -u stocker rm -rf -- "$IBKR_EXTRACT_DIR"
@@ -222,14 +223,14 @@ IBKR_PACKAGE_ROOT="$(
 )"
 sudo /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective \
   ibkr-api register \
-  --archive /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip \
+  --archive /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip \
   --installed-package-root "$IBKR_PACKAGE_ROOT" \
-  --provenance /var/lib/stocker/ibkr-api/provenance/10.48.1.json \
+  --provenance /var/lib/stocker/ibkr-api/provenance/10.49.1.json \
   --operator REPLACE_WITH_OPERATOR_ID
 sudo chown root:stocker-readers \
-  /var/lib/stocker/ibkr-api/provenance/10.48.1.json
-sudo chmod 0640 /var/lib/stocker/ibkr-api/provenance/10.48.1.json
-sudo ln -s provenance/10.48.1.json \
+  /var/lib/stocker/ibkr-api/provenance/10.49.1.json
+sudo chmod 0640 /var/lib/stocker/ibkr-api/provenance/10.49.1.json
+sudo ln -s provenance/10.49.1.json \
   /var/lib/stocker/ibkr-api/active-provenance.json.next
 sudo mv -Tf /var/lib/stocker/ibkr-api/active-provenance.json.next \
   /var/lib/stocker/ibkr-api/active-provenance.json
@@ -1264,6 +1265,15 @@ V1.1 receipts for the replacement run as byte-identical, hash-identical
 bindings to each original activation row. Database triggers reject a binding
 whose timestamps, hashes, frozen rules, receipt JSON, reserved-line count, or
 no-order flag differs, and reject every later update or delete.
+
+Official IBKR dependency maintenance does not rewrite that activation. The
+activation's API and Gateway values remain the immutable first-collection
+baseline, while the active official-archive provenance and Gateway release
+manifest verify the maintained runtime versions. Startup reconstructs the old
+configuration hash with only the baseline Gateway identity; every signal,
+capacity, cohort, threshold, artifact, and safety field must still match. The
+current API and Gateway identities are recorded separately in capability
+evidence. Missing or unverified current identities remain fail-closed.
 
 A graceful process stop is not allowed to hide an incomplete streaming option
 episode behind `STOPPED_CLEANLY`: shutdown records the same scientific gap and

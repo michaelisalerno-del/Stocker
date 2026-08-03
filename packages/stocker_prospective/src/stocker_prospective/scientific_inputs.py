@@ -7,6 +7,7 @@ import json
 import math
 import os
 import uuid
+from collections import Counter
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -25,14 +26,19 @@ from stocker_data.vendors.eodhd import (
     normalize_eod_response,
     normalize_intraday_response,
 )
+from stocker_prospective.append_only import write_immutable_bytes, write_immutable_json
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.group_o import (
     GROUP_O_FEATURE_MANIFEST_SHA256,
     GROUP_O_REGIME_MAPPING_SHA256,
     FrozenGroupOContext,
     FrozenGroupOSessionPackage,
+    GroupORevisionCutoffError,
+    append_group_o_session_revision,
     build_group_o_context,
+    load_group_o_session_package,
 )
+from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_research.broad_conflict_options_iv_screen_v0 import (
     calculate_primary_option_features,
     select_primary_atm_pair,
@@ -48,6 +54,7 @@ from stocker_research.eodhd_options_downloader_v0 import (
     DownloadConfig,
     EODHDOptionsDownloader,
     OptionsRequest,
+    ProviderDTEPolicy,
     TransportLike,
     canonicalize_response_records,
     resolve_canonical_duplicates,
@@ -78,6 +85,7 @@ GROUP_O_FEATURES = (
     *GROUP_O_REGIME_FEATURES,
     *GROUP_O_MISSING_INDICATORS,
 )
+GROUP_O_RETRY_DELAY = timedelta(minutes=15)
 
 
 @dataclass(frozen=True)
@@ -97,6 +105,35 @@ class GroupOAcquisitionResult:
     symbol_count: int
     canonical_option_rows: int
     rejected_option_rows: int
+
+
+class GroupOAcquisitionPending(RuntimeError):
+    """The exact D-1 chain is not published yet and acquisition must retry."""
+
+
+def allocate_group_o_attempt(
+    *,
+    cache_root: str | Path,
+    observation_session: date,
+) -> tuple[str, Path]:
+    """Reserve the next append-only attempt directory without an allocation race."""
+
+    attempts_root = Path(cache_root) / observation_session.isoformat() / "attempts"
+    attempts_root.mkdir(parents=True, exist_ok=True)
+    existing = [
+        int(path.name)
+        for path in attempts_root.iterdir()
+        if path.is_dir() and len(path.name) == 4 and path.name.isdigit()
+    ]
+    for number in range(max(existing, default=0) + 1, 10_000):
+        attempt_id = f"{number:04d}"
+        attempt_path = attempts_root / attempt_id
+        try:
+            attempt_path.mkdir()
+        except FileExistsError:
+            continue
+        return attempt_id, attempt_path
+    raise RuntimeError("Group O acquisition attempt identity exhausted")
 
 
 @dataclass(frozen=True)
@@ -601,20 +638,167 @@ def _payload_hash(payload: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def signed_group_o_attempt_receipt(payload: Mapping[str, object]) -> dict[str, object]:
+    if "attempt_receipt_sha256" in payload:
+        raise ValueError("Group O attempt receipt payload is already signed")
+    signed = dict(payload)
+    signed["attempt_receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    return signed
+
+
+def write_group_o_attempt_receipt(path: Path, payload: Mapping[str, object]) -> None:
+    write_immutable_json(
+        path,
+        signed_group_o_attempt_receipt(payload),
+        conflict_message="immutable Group O acquisition attempt differs",
+    )
+
+
+def load_group_o_attempt_receipt(path: Path) -> dict[str, object]:
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("Group O attempt receipt is not an immutable regular file")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Group O attempt receipt is invalid") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Group O attempt receipt is invalid")
+    unsigned = dict(payload)
+    signature = unsigned.pop("attempt_receipt_sha256", None)
+    expected = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    if signature != expected:
+        raise ValueError("Group O attempt receipt signature differs")
+    return payload
+
+
+def group_o_retry_not_before(
+    *,
+    cache_root: str | Path,
+    observation_session: date,
+) -> datetime | None:
+    """Return the signed persisted retry boundary for the newest completed attempt."""
+
+    attempts_root = Path(cache_root) / observation_session.isoformat() / "attempts"
+    if not attempts_root.is_dir() or attempts_root.is_symlink():
+        return None
+    attempts = sorted(
+        (
+            path
+            for path in attempts_root.iterdir()
+            if path.is_dir() and not path.is_symlink() and path.name.isdigit()
+        ),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for attempt in attempts:
+        receipt_path = attempt / "attempt_receipt.json"
+        if not receipt_path.exists():
+            continue
+        receipt = load_group_o_attempt_receipt(receipt_path)
+        if receipt.get("status") != "pending_exact_chain":
+            return None
+        if (
+            receipt.get("schema_version") != "group-o-acquisition-attempt-v1"
+            or receipt.get("attempt_id") != attempt.name
+            or len(attempt.name) != 4
+            or receipt.get("observation_session") != observation_session.isoformat()
+        ):
+            raise ValueError("Group O pending attempt identity differs")
+        raw_signal = receipt.get("signal_session")
+        raw_completed = receipt.get("completed_at_utc")
+        raw_retry = receipt.get("retry_after_utc")
+        if not all(isinstance(value, str) for value in (raw_signal, raw_completed, raw_retry)):
+            raise ValueError("Group O pending attempt lacks frozen chronology")
+        try:
+            signal_session = date.fromisoformat(cast(str, raw_signal))
+            completed_at = datetime.fromisoformat(cast(str, raw_completed))
+            retry_after = datetime.fromisoformat(cast(str, raw_retry))
+        except ValueError as exc:
+            raise ValueError("Group O pending attempt chronology is invalid") from exc
+        if previous_xnys_session(signal_session) != observation_session:
+            raise ValueError("Group O pending attempt session chronology differs")
+        if (
+            completed_at.tzinfo is None
+            or completed_at.utcoffset() is None
+            or retry_after.tzinfo is None
+            or retry_after.utcoffset() is None
+        ):
+            raise ValueError("Group O attempt retry chronology must be timezone-aware")
+        completed_at = completed_at.astimezone(UTC)
+        retry_after = retry_after.astimezone(UTC)
+        if retry_after != completed_at + GROUP_O_RETRY_DELAY:
+            raise ValueError("Group O pending attempt retry interval differs from 15 minutes")
+        return retry_after.astimezone(UTC)
+    return None
+
+
+def _preserve_resolved_group_o_contexts(
+    *,
+    previous: FrozenGroupOSessionPackage,
+    candidate: FrozenGroupOSessionPackage,
+) -> FrozenGroupOSessionPackage:
+    """Keep every context outside the exact-chain failure byte-for-byte unchanged."""
+
+    previous_by_symbol = {context.symbol: context for context in previous.contexts}
+    contexts = tuple(
+        (
+            previous_by_symbol[context.symbol]
+            if previous_by_symbol[context.symbol].quality_status != "missing_exact_chain"
+            else context
+        )
+        for context in candidate.contexts
+    )
+    return FrozenGroupOSessionPackage.model_validate(
+        {**candidate.model_dump(mode="python"), "contexts": contexts}
+    )
+
+
 def acquire_eodhd_group_o_session_package(
     *,
     signal_session: date,
     symbols: tuple[str, ...],
     output_path: str | Path,
     cache_root: str | Path,
+    cache_attempt_id: str,
     feature_manifest_path: str | Path,
     regime_mapping_path: str | Path,
+    supersedes_path: str | Path | None = None,
+    provider_dte_policy: ProviderDTEPolicy = "strict_match",
     heartbeat: Callable[[], object] | None = None,
     cancellation_requested: Callable[[], bool] = lambda: False,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> GroupOAcquisitionResult:
     """Download bounded D-1 EOD evidence and materialize the frozen Group O package."""
 
+    if len(cache_attempt_id) != 4 or not cache_attempt_id.isdigit():
+        raise ValueError("Group O cache attempt ID must be four decimal digits")
+    if provider_dte_policy not in {"strict_match", "recompute_from_eod_identity"}:
+        raise ValueError("invalid Group O provider DTE policy")
     observation_session = previous_xnys_session(signal_session)
+    signal_open, _ = xnys_session_bounds(signal_session)
+    attempt_started = clock().astimezone(UTC)
+    if attempt_started >= signal_open:
+        raise GroupOAcquisitionPending(
+            "Group O exact-chain acquisition cutoff passed before the signal session open"
+        )
     eodhd = EODHDClient(
         config=EODHDConfig(
             request_timeout_seconds=10.0,
@@ -625,9 +809,13 @@ def acquire_eodhd_group_o_session_package(
     daily_frames: list[pd.DataFrame] = []
     options_by_symbol: dict[str, pd.DataFrame] = {}
     receipt_hashes: dict[str, tuple[str, ...]] = {}
+    accepted_rows_by_symbol: dict[str, int] = {}
+    rejected_rows_by_symbol: dict[str, int] = {}
+    provider_dte_diagnostics: list[dict[str, object]] = []
     accepted_rows = 0
     rejected_rows = 0
-    cache = Path(cache_root) / observation_session.isoformat()
+    cache = Path(cache_root) / observation_session.isoformat() / "attempts" / cache_attempt_id
+    attempt_receipt_path = cache / "attempt_receipt.json"
     transport = httpx.Client()
     downloader = EODHDOptionsDownloader(
         DownloadConfig(
@@ -683,11 +871,53 @@ def acquire_eodhd_group_o_session_package(
                 result.records,
                 request_id=f"group-o|{symbol}|{observation_session.isoformat()}",
                 provider_schema_version="eodhd-options-eod-v1",
+                provider_dte_policy=provider_dte_policy,
             )
             deduplicated = resolve_canonical_duplicates(canonical.records)
             if deduplicated.conflicting_duplicate_groups:
                 raise ValueError(f"Group O options contain conflicting duplicate rows for {symbol}")
+            if any(
+                str(record.get("underlying_symbol", "")) != symbol
+                for record in deduplicated.records
+            ):
+                write_group_o_attempt_receipt(
+                    attempt_receipt_path,
+                    {
+                        "schema_version": "group-o-acquisition-attempt-v1",
+                        "attempt_id": cache_attempt_id,
+                        "signal_session": signal_session.isoformat(),
+                        "observation_session": observation_session.isoformat(),
+                        "started_at_utc": attempt_started.isoformat(),
+                        "completed_at_utc": clock().astimezone(UTC).isoformat(),
+                        "status": "blocked_source_underlying_identity",
+                        "requested_symbol": symbol,
+                    },
+                )
+                raise ValueError(f"Group O option underlying identity differs for {symbol}")
+            if any(
+                record.get("trade_date") != observation_session
+                for record in deduplicated.records
+            ):
+                write_group_o_attempt_receipt(
+                    attempt_receipt_path,
+                    {
+                        "schema_version": "group-o-acquisition-attempt-v1",
+                        "attempt_id": cache_attempt_id,
+                        "signal_session": signal_session.isoformat(),
+                        "observation_session": observation_session.isoformat(),
+                        "started_at_utc": attempt_started.isoformat(),
+                        "completed_at_utc": clock().astimezone(UTC).isoformat(),
+                        "status": "blocked_source_observation_identity",
+                        "requested_symbol": symbol,
+                    },
+                )
+                raise ValueError(f"Group O option observation identity differs for {symbol}")
             options_by_symbol[symbol] = pd.DataFrame(deduplicated.records)
+            provider_dte_diagnostics.extend(
+                diagnostic.to_dict() for diagnostic in canonical.provider_dte_diagnostics
+            )
+            accepted_rows_by_symbol[symbol] = len(deduplicated.records)
+            rejected_rows_by_symbol[symbol] = len(canonical.rejections)
             accepted_rows += len(deduplicated.records)
             rejected_rows += len(canonical.rejections)
             receipt_hashes[symbol] = tuple(
@@ -700,7 +930,75 @@ def acquire_eodhd_group_o_session_package(
             )
     finally:
         transport.close()
-    build_group_o_session_package(
+    completed_at = clock().astimezone(UTC)
+    provider_dte_diagnostics_path = cache / "provider_dte_diagnostics.json"
+    provider_dte_status_counts = dict(
+        sorted(Counter(str(row["status"]) for row in provider_dte_diagnostics).items())
+    )
+    write_immutable_json(
+        provider_dte_diagnostics_path,
+        {
+            "schema_version": "group-o-provider-dte-diagnostics-v1",
+            "attempt_id": cache_attempt_id,
+            "signal_session": signal_session.isoformat(),
+            "observation_session": observation_session.isoformat(),
+            "provider_dte_policy": provider_dte_policy,
+            "provider_dte_used_for_admission": provider_dte_policy == "strict_match",
+            "diagnostic_count": len(provider_dte_diagnostics),
+            "status_counts": provider_dte_status_counts,
+            "rows": provider_dte_diagnostics,
+        },
+        conflict_message="immutable Group O provider DTE diagnostics differ",
+    )
+    missing_exact_chain_symbols = tuple(
+        symbol for symbol in symbols if accepted_rows_by_symbol.get(symbol, 0) == 0
+    )
+    attempt_receipt: dict[str, object] = {
+        "schema_version": "group-o-acquisition-attempt-v1",
+        "attempt_id": cache_attempt_id,
+        "signal_session": signal_session.isoformat(),
+        "observation_session": observation_session.isoformat(),
+        "started_at_utc": attempt_started.isoformat(),
+        "completed_at_utc": completed_at.isoformat(),
+        "symbol_count": len(symbols),
+        "canonical_option_rows": accepted_rows,
+        "rejected_option_rows": rejected_rows,
+        "canonical_rows_by_symbol": dict(sorted(accepted_rows_by_symbol.items())),
+        "rejected_rows_by_symbol": dict(sorted(rejected_rows_by_symbol.items())),
+        "source_receipt_hashes_by_symbol": {
+            symbol: list(receipt_hashes.get(symbol, ())) for symbol in symbols
+        },
+        "missing_exact_chain_symbols": list(missing_exact_chain_symbols),
+        "provider_dte_policy": provider_dte_policy,
+        "provider_dte_diagnostics_path": str(provider_dte_diagnostics_path),
+        "provider_dte_diagnostics_file_sha256": _sha256_path(
+            provider_dte_diagnostics_path
+        ),
+        "provider_dte_diagnostic_counts": provider_dte_status_counts,
+    }
+    if missing_exact_chain_symbols:
+        write_group_o_attempt_receipt(
+            attempt_receipt_path,
+            {
+                **attempt_receipt,
+                "status": "pending_exact_chain",
+                "retry_after_utc": (completed_at + GROUP_O_RETRY_DELAY).isoformat(),
+            },
+        )
+        raise GroupOAcquisitionPending(
+            "Group O exact chain is not yet available for every frozen symbol"
+        )
+    if completed_at >= signal_open:
+        write_group_o_attempt_receipt(
+            attempt_receipt_path,
+            {**attempt_receipt, "status": "blocked_signal_open_cutoff"},
+        )
+        raise GroupOAcquisitionPending(
+            "Group O exact-chain acquisition completed after the signal session open"
+        )
+    destination = Path(output_path)
+    candidate_path = cache / "candidate_package.json"
+    package = build_group_o_session_package(
         signal_session=signal_session,
         symbols=symbols,
         canonical_options_by_symbol=options_by_symbol,
@@ -708,10 +1006,101 @@ def acquire_eodhd_group_o_session_package(
         source_receipt_hashes_by_symbol=receipt_hashes,
         feature_manifest_path=feature_manifest_path,
         regime_mapping_path=regime_mapping_path,
-        output_path=output_path,
+        output_path=candidate_path,
+    )
+    published_revision_id: str | None = None
+    published_at: datetime
+    if supersedes_path is not None:
+        if Path(supersedes_path) != destination:
+            raise ValueError("Group O superseded path must be the exact base package")
+        previous = load_group_o_session_package(
+            context_root=destination.parents[1],
+            signal_session=signal_session,
+        )
+        package = _preserve_resolved_group_o_contexts(previous=previous, candidate=package)
+        write_immutable_bytes(
+            cache / "revision_candidate_package.json",
+            (package.model_dump_json(indent=2) + "\n").encode("utf-8"),
+            conflict_message="immutable Group O revision candidate differs",
+        )
+        try:
+            revision = append_group_o_session_revision(
+                context_root=destination.parents[1],
+                revised_package=package,
+                clock=clock,
+            )
+        except GroupORevisionCutoffError as exc:
+            write_group_o_attempt_receipt(
+                attempt_receipt_path,
+                {
+                    **attempt_receipt,
+                    "status": "blocked_signal_open_cutoff",
+                    "publication_attempt_at_utc": exc.observed_at_utc.isoformat(),
+                },
+            )
+            raise GroupOAcquisitionPending(
+                "Group O exact-chain acquisition completed after the signal session open"
+            ) from exc
+        published_revision_id = revision.revision_id
+        published_at = revision.created_at_utc
+    else:
+        published_at = clock().astimezone(UTC)
+        if published_at >= signal_open:
+            write_group_o_attempt_receipt(
+                attempt_receipt_path,
+                {
+                    **attempt_receipt,
+                    "status": "blocked_signal_open_cutoff",
+                    "publication_attempt_at_utc": published_at.isoformat(),
+                },
+            )
+            raise GroupOAcquisitionPending(
+                "Group O exact-chain acquisition completed after the signal session open"
+            )
+
+        def require_base_link_preopen() -> None:
+            nonlocal published_at
+            observed = clock()
+            if observed.tzinfo is None or observed.utcoffset() is None:
+                raise ValueError("Group O publication timestamp must be timezone-aware")
+            published_at = observed.astimezone(UTC)
+            if published_at >= signal_open:
+                raise GroupORevisionCutoffError(
+                    observed_at_utc=published_at,
+                    signal_open_utc=signal_open,
+                )
+
+        try:
+            write_immutable_bytes(
+                destination,
+                candidate_path.read_bytes(),
+                conflict_message="immutable Group O package differs",
+                before_link=require_base_link_preopen,
+            )
+        except GroupORevisionCutoffError as exc:
+            write_group_o_attempt_receipt(
+                attempt_receipt_path,
+                {
+                    **attempt_receipt,
+                    "status": "blocked_signal_open_cutoff",
+                    "publication_attempt_at_utc": exc.observed_at_utc.isoformat(),
+                },
+            )
+            raise GroupOAcquisitionPending(
+                "Group O exact-chain acquisition completed after the signal session open"
+            ) from exc
+    write_group_o_attempt_receipt(
+        attempt_receipt_path,
+        {
+            **attempt_receipt,
+            "status": "published_revision" if published_revision_id else "published_base",
+            "published_at_utc": published_at.isoformat(),
+            "published_base_path": str(destination),
+            "published_revision_id": published_revision_id,
+        },
     )
     return GroupOAcquisitionResult(
-        output_path=Path(output_path),
+        output_path=destination,
         signal_session=signal_session,
         observation_session=observation_session,
         symbol_count=len(symbols),
@@ -733,7 +1122,7 @@ class EODHDGroupOPreparationService:
         regime_mapping_path: str | Path,
         capture_delay_seconds: int,
         heartbeat: Callable[[], object] | None = None,
-        retry_delay: timedelta = timedelta(minutes=15),
+        retry_delay: timedelta = GROUP_O_RETRY_DELAY,
     ) -> None:
         self.symbols = symbols
         self.context_root = Path(context_root)
@@ -742,6 +1131,8 @@ class EODHDGroupOPreparationService:
         self.regime_mapping_path = Path(regime_mapping_path)
         self.capture_delay = timedelta(seconds=capture_delay_seconds)
         self.heartbeat = heartbeat
+        if retry_delay != GROUP_O_RETRY_DELAY:
+            raise ValueError("Group O retry interval is frozen at 15 minutes")
         self.retry_delay = retry_delay
         self.last_error: str | None = None
         self._retry_after: datetime | None = None
@@ -768,6 +1159,10 @@ class EODHDGroupOPreparationService:
                 due.append(signal_session)
         return None if not due else due[-1]
 
+    @staticmethod
+    def _requires_exact_chain_revision(package: FrozenGroupOSessionPackage) -> bool:
+        return any(context.quality_status == "missing_exact_chain" for context in package.contexts)
+
     def poll(self, *, now: datetime) -> GroupOAcquisitionResult | None:
         now_utc = now.astimezone(UTC)
         if self._future is not None:
@@ -791,18 +1186,55 @@ class EODHDGroupOPreparationService:
         if signal_session is None:
             return None
         output = self.context_root / "group-o" / f"{signal_session.isoformat()}.json"
+        supersedes_path: Path | None = None
         if output.is_file():
-            self.last_error = None
+            try:
+                resolved = load_group_o_session_package(
+                    context_root=self.context_root,
+                    signal_session=signal_session,
+                )
+            except ValueError as exc:
+                self.last_error = f"blocked_invalid_group_o_package: {exc}"
+                self._retry_after = None
+                return None
+            if not self._requires_exact_chain_revision(resolved):
+                self.last_error = None
+                self._retry_after = None
+                return None
+            supersedes_path = output
+        observation_session = previous_xnys_session(signal_session)
+        signal_open, _ = xnys_session_bounds(signal_session)
+        if now_utc >= signal_open:
+            self.last_error = (
+                "blocked_group_o_acquisition_cutoff: exact chain remained unavailable "
+                "at signal-session open"
+            )
             self._retry_after = None
             return None
+        persisted_retry = group_o_retry_not_before(
+            cache_root=self.cache_root,
+            observation_session=observation_session,
+        )
+        if persisted_retry is not None and now_utc < persisted_retry:
+            self.last_error = (
+                f"deferred_group_o_retry_not_before: {persisted_retry.isoformat()}"
+            )
+            self._retry_after = persisted_retry
+            return None
+        attempt_id, _ = allocate_group_o_attempt(
+            cache_root=self.cache_root,
+            observation_session=observation_session,
+        )
         self._future = self._executor.submit(
             acquire_eodhd_group_o_session_package,
             signal_session=signal_session,
             symbols=self.symbols,
             output_path=output,
             cache_root=self.cache_root,
+            cache_attempt_id=attempt_id,
             feature_manifest_path=self.feature_manifest_path,
             regime_mapping_path=self.regime_mapping_path,
+            supersedes_path=supersedes_path,
             heartbeat=self.heartbeat,
             cancellation_requested=self._stop.is_set,
         )
@@ -817,10 +1249,17 @@ __all__ = [
     "EODHDGroupOPreparationService",
     "FrozenGroupOArtifacts",
     "GROUP_O_FEATURES",
+    "GROUP_O_RETRY_DELAY",
     "GroupOAcquisitionResult",
+    "GroupOAcquisitionPending",
     "HistoricalActivityBuildResult",
     "acquire_eodhd_historical_activity_baseline",
     "acquire_eodhd_group_o_session_package",
+    "allocate_group_o_attempt",
     "build_group_o_session_package",
     "build_historical_activity_baseline",
+    "group_o_retry_not_before",
+    "load_group_o_attempt_receipt",
+    "signed_group_o_attempt_receipt",
+    "write_group_o_attempt_receipt",
 ]

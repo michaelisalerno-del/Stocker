@@ -1,0 +1,11 @@
+[Unit]
+Description=Check IB Gateway after its 23:45 UTC daily auto-restart
+
+[Timer]
+OnCalendar=*-*-* 23:46:00 UTC
+AccuracySec=1s
+Persistent=true
+Unit=stocker-ibgateway-daily-readiness.service
+
+[Install]
+WantedBy=timers.target

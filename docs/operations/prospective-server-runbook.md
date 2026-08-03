@@ -490,6 +490,9 @@ sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/verify-ibgateway-loopback-boundary.sh \
   /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo install -o root -g root -m 0755 \
+  /opt/stocker/current/deploy/scripts/verify-ibgateway-daily-readiness.sh \
+  /usr/local/libexec/stocker-verify-ibgateway-daily-readiness
+sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/run-ibgateway-loopback-proxy.sh \
   /usr/local/libexec/stocker-ibgateway-loopback-proxy
 sudo install -o root -g root -m 0644 \
@@ -499,12 +502,15 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-boundary.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.socket \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.service \
+  /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.timer \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo /usr/local/libexec/stocker-install-ibgateway-loopback-boundary
 sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo systemctl enable stocker-ibgateway-loopback-proxy.socket
+sudo systemctl enable --now stocker-ibgateway-daily-readiness.timer
 sudo systemctl enable --now stocker-ibgateway.service
 ```
 
@@ -544,14 +550,19 @@ database, commands, or logs. Choose the paper session. In Gateway API settings:
    the runtime must use the value actually displayed.
 3. Permit localhost only.
 4. Keep API message logging free of unnecessary market-data payloads.
-5. Configure the supported daily auto-restart window if desired. Plan for
-   manual authentication again after the weekly reset.
+5. Configure **Auto restart** for 23:45 UTC. Plan for manual authentication
+   again after the weekly reset.
 
-The systemd unit uses `Restart=always` because Gateway reports its scheduled
-daily auto-restart as a successful process exit. This lets systemd relaunch the
-official application immediately while its broker-managed restart session is
-still resumable. An operator-issued `systemctl stop` does not trigger a
-restart. A weekly broker reset may still require manual authentication.
+The systemd unit uses `ExitType=cgroup` because Gateway's scheduled restart
+passes its short-lived broker session to an authenticated handoff child before
+the original Java process exits. Tracking the whole cgroup keeps the unit active
+and prevents systemd's control-group cleanup from killing that child. The unit's
+`Restart=always` and `RestartSec=1` remain a fallback only when the entire cgroup
+exits without a surviving handoff process. An operator-issued `systemctl stop`
+does not trigger a restart.
+The read-only readiness timer checks the authenticated upstream port at 23:46
+UTC, retrying for up to two minutes without starting, stopping, or restarting
+Gateway. A weekly broker reset may still require manual authentication.
 
 Verify that the upstream port is firewall-restricted, the Stocker endpoint is
 loopback-only, and VNC remains private:
@@ -566,6 +577,8 @@ sudo ufw status verbose
 sudo nft -j list table inet stocker_ibgateway | jq .
 sudo systemctl status \
   stocker-ibgateway.service \
+  stocker-ibgateway-daily-readiness.service \
+  stocker-ibgateway-daily-readiness.timer \
   stocker-ibgateway-loopback-boundary.service \
   stocker-ibgateway-loopback-proxy.socket \
   stocker-ibgateway-vnc.service
@@ -795,6 +808,90 @@ separate service. The recorder makes bounded requests after the session and
 stores source-labelled evidence that is permanently ineligible for scoring.
 Never put IBKR username, password, or 2FA material in any Stocker file. Stocker
 has no fields for them.
+
+### Group O exact-chain publication and pre-signal recovery
+
+An EODHD HTTP 200 response is not sufficient to finalize Group O context. Every
+frozen cohort symbol must have at least one canonical exact-session option row.
+If any symbol has zero canonical rows, the recorder writes an immutable
+`pending_exact_chain` attempt receipt under:
+
+```text
+/var/lib/stocker/daily-context/source-cache/eodhd-group-o/
+  <observation-session>/attempts/<attempt-id>/attempt_receipt.json
+```
+
+The signal-session package is not published in that state. Each retry uses the
+next four-digit attempt directory so an earlier empty provider response is
+preserved and cannot be reused as a completed cache entry.
+
+If an older recorder already finalized a `missing_exact_chain` base package,
+the base file remains byte-for-byte unchanged. A successful later acquisition
+may append a self-binding revision under:
+
+```text
+/var/lib/stocker/daily-context/group-o/revisions/
+  <signal-session>/<four-digit-revision-number>.json
+```
+
+Revision numbers must form a contiguous hash-linked chain from the exact base
+file. The frozen contract version, feature and regime hashes, cohort ordering,
+signal session, and exact D-1 observation identity cannot change. The loader
+rejects a revision created at or after the exact XNYS signal-session open. This
+permits delayed D-1 publication before a future signal while prohibiting
+same-session or retrospective eligibility changes.
+
+For the audited Friday 2026-07-31 source-publication recovery targeting Monday
+2026-08-03, stop the recorder and run the dedicated pre-adapter command from
+the staged release before promotion or recorder restart:
+
+```bash
+sudo -u stocker sh -c '
+  set -a
+  . /etc/stocker/stocker.env
+  exec /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective \
+    scientific-inputs recover-group-o-exact-chain-v2 \
+    --config /etc/stocker/prospective.yaml \
+    --release-directory /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT
+'
+```
+
+The command verifies the signed recovery freeze, exact 20-symbol cohort, failed
+base hash, exact V1 deployment/start/failed-attempt chain, and pre-open cutoff;
+then it writes
+`<attempt>/recovery_start_receipt.json` before making any EODHD request. The
+same release blocks before constructing the IBKR adapter unless that start
+receipt, acquisition receipt, hash-linked revision, and the self-binding
+`<attempt>/recovery_completion_receipt.json` agree. The completion receipt
+hash-links the deployment, start, failed base, staged candidate, revision, and
+acquisition-attempt identities and file bytes. If EODHD still has no exact
+Friday rows, the command preserves the attempt, waits until its signed
+`retry_after_utc`, and retries automatically at the frozen 15-minute interval
+until the pre-open cutoff. Leave the recorder stopped and do not run a second
+recovery process. Never bypass the gate or edit the failed package.
+
+This pre-adapter gate is permanent for the recovery version; it does not
+expire after the target session closes. Removing it requires a new signed
+recorder version and deployment receipt, not a clock-based bypass.
+
+Recovery V1 failed closed in append-only attempt `0001` after EODHD began
+publishing the Friday rows: the provider's after-midnight-UTC `dte` values did
+not equal the calendar interval from the EOD resource identity. V2 does not
+rewrite or reuse that attempt. Its signed policy treats every provider `dte`
+value as a non-admission diagnostic, deterministically recomputes DTE from the
+exact EOD observation date and expiration, and writes an immutable
+`provider_dte_diagnostics.json` linked from the signed attempt receipt. It
+continues to reject inconsistent bid/ask observation dates and downloads a
+fresh attempt. V2 also enforces V1 freeze, V1 start, V1 completion, V2 freeze,
+then V2 start chronology. Reconciliation verifies and skips V1 attempt `0001`
+before examining subsequent V2 attempts. Never run the retired V1 command
+again.
+
+Do not delete, rename, edit, or replace the failed base, an acquisition-attempt
+receipt, or a revision. A missing or invalid chain remains fail-closed for M1C.
+Opening Leader Continuation V0 treats M1C as context only and continues to obey
+its independently signed rank-selection contract. None of these files enables
+orders or changes the record-only runtime mode.
 
 Before the first recorder start, create the immutable frozen activity baseline:
 
@@ -1333,8 +1430,10 @@ sudo systemctl status stocker-backup.service stocker-backup.timer
 sudo ls -l /var/lib/stocker/backups
 ```
 
-The SQLite backup includes the durable callback inbox and every hardening
-state table. It does not copy immutable Parquet files; replicate the entire raw
+The timer starts at 00:05 UTC with up to five minutes of random delay, keeping
+backup work outside the Gateway's short-lived 23:45 restart-resume window. The
+SQLite backup includes the durable callback inbox and every hardening state
+table. It does not copy immutable Parquet files; replicate the entire raw
 partition tree, metadata sidecars, staged/quarantine tree, SQLite backup, and
 its hash manifest as one recovery set. The application never automatically
 deletes evidence or backups. Configure encrypted off-host replication and
@@ -1461,7 +1560,7 @@ evidence without its own audit.
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
-| Gateway process restarted but API port is absent | The Java process and loopback proxy are not proof of an authenticated API session. Confirm the configured upstream port is listening before starting the recorder. Authenticate only in the official Gateway window, keep Read-Only API and localhost-only enabled, and confirm `AutoRestart=1`. A broker weekly reset can still require manual credentials and 2FA; never store them in Stocker. |
+| Gateway process restarted but API port is absent | The Java process and loopback proxy are not proof of an authenticated API session. Inspect `stocker-ibgateway-daily-readiness.service` and confirm the configured upstream port is listening. Confirm the unit still has `ExitType=cgroup`, `Restart=always`, and `RestartSec=1`; default main-process exit semantics kill the authenticated handoff child. Authenticate only in the official Gateway window, keep Read-Only API and localhost-only enabled, and confirm `AutoRestart=1`. A broker weekly reset can still require manual credentials and 2FA; never store them in Stocker. |
 | Recorder exits at after-session capture with `prospective run identity mismatch` | Preserve the immutable first-activation `prospective_run` row. After-session source capture must obtain metadata from the frozen application's activation metadata factory; the current release SHA belongs in generation artifact receipts, not a replacement run identity. Do not edit the existing run row to match a deployment. |
 | Universe Tape has symbols and bars but no probabilities | Confirm a frozen checkpoint (6, 8, …, 34) completed with the prior-session activity baseline and Group-O package available. A pending bar-compatibility receipt should show an engineering score marked `scientific_recording_not_authorized`; it must not suppress that score. Bid/ask remains intentionally blank until the bounded promotion scheduler arms Level I for a low/high candidate. |
 | Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation and bounded contract plan. The quiet capture table may show current persisted bid/ask before a structure closes; a finalized row additionally requires complete immutable per-leg entry/exit quotes. Inspect the wait/invalid reason and never manufacture a position from configuration, a latest quote, or a partial leg. |

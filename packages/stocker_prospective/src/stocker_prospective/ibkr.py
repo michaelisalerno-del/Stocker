@@ -852,7 +852,10 @@ class IBKRMarketDataAdapter:
         if self._client is None:
             return None
         method = getattr(self._client, "serverVersion", None)
-        return None if not callable(method) else int(method())
+        if not callable(method):
+            return None
+        value = method()
+        return None if value is None else int(value)
 
     def _begin_stream_subscription(
         self,

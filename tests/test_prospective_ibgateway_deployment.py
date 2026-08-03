@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,6 +18,7 @@ PROXY_SCRIPT = ROOT / "deploy/scripts/run-ibgateway-loopback-proxy.sh"
 BOUNDARY_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-loopback-boundary.sh"
 INSTALL_BOUNDARY_SCRIPT = ROOT / "deploy/scripts/install-ibgateway-loopback-boundary.sh"
 NFT_JSON_VERIFIER = ROOT / "deploy/scripts/verify-ibgateway-nft-boundary-json.py"
+READINESS_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-daily-readiness.sh"
 RUNBOOK = ROOT / "docs/operations/prospective-server-runbook.md"
 SERVER_CONFIG = ROOT / "configs/prospective/server.example.yaml"
 
@@ -61,11 +63,97 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
     assert "SuccessExitStatus=143" in unit
+    # IBKR transfers its authenticated auto-restart session to a child process.
+    # The service must remain alive for that child instead of killing its cgroup.
+    assert "ExitType=cgroup" in unit
+    assert "ExitType=main" not in unit
     assert "Restart=always" in unit
+    assert "RestartSec=1" in unit
+    assert "RestartSec=20" not in unit
     assert "Restart=on-failure" not in unit
     assert "username" not in lowered
     assert "password" not in lowered
     assert "2fa" not in lowered
+
+
+def test_gateway_daily_restart_readiness_is_observed_without_mutating_gateway() -> None:
+    service = _unit("stocker-ibgateway-daily-readiness.service")
+    timer = _unit("stocker-ibgateway-daily-readiness.timer")
+    backup_timer = _unit("stocker-backup.timer")
+    verifier = READINESS_SCRIPT.read_text(encoding="utf-8")
+
+    assert "User=ibgateway" in service
+    assert "ExecStart=/usr/local/libexec/stocker-verify-ibgateway-daily-readiness" in service
+    assert "After=stocker-ibgateway.service" in service
+    assert "OnCalendar=*-*-* 23:46:00 UTC" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=stocker-ibgateway-daily-readiness.service" in timer
+    assert "OnCalendar=*-*-* 00:05:00 UTC" in backup_timer
+    assert "OnCalendar=*-*-* 23:45:00 UTC" not in backup_timer
+    assert '"$systemctl_bin" is-active --quiet stocker-ibgateway.service' in verifier
+    assert '"$ss_bin" -H -ltn "sport = :$upstream_port"' in verifier
+    assert '"$systemctl_bin" restart' not in verifier
+    assert '"$systemctl_bin" start' not in verifier
+    assert '"$systemctl_bin" stop' not in verifier
+
+
+def test_gateway_daily_restart_readiness_accepts_authenticated_api_port(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "proxy.env"
+    config.write_text("IBGATEWAY_UPSTREAM_PORT=4002\n", encoding="ascii")
+    systemctl = _mock_command(tmp_path / "systemctl", "")
+    ss = _mock_command(
+        tmp_path / "ss",
+        "LISTEN 0 50 *:4002 *:*\n",
+    )
+    sleep = _mock_command(tmp_path / "sleep", "")
+
+    verified = subprocess.run(
+        [str(READINESS_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "IBGATEWAY_PROXY_CONFIG": str(config),
+            "IBGATEWAY_SYSTEMCTL": str(systemctl),
+            "IBGATEWAY_SS": str(ss),
+            "IBGATEWAY_READINESS_ATTEMPTS": "1",
+            "IBGATEWAY_SLEEP": str(sleep),
+        },
+    )
+
+    assert verified.returncode == 0, verified.stderr
+    assert "ibgateway_daily_restart:ready:4002" in verified.stdout
+
+
+def test_gateway_daily_restart_readiness_fails_when_api_port_stays_absent(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "proxy.env"
+    config.write_text("IBGATEWAY_UPSTREAM_PORT=4002\n", encoding="ascii")
+    systemctl = _mock_command(tmp_path / "systemctl", "")
+    ss = _mock_command(tmp_path / "ss", "")
+    sleep = _mock_command(tmp_path / "sleep", "")
+
+    rejected = subprocess.run(
+        [str(READINESS_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "IBGATEWAY_PROXY_CONFIG": str(config),
+            "IBGATEWAY_SYSTEMCTL": str(systemctl),
+            "IBGATEWAY_SS": str(ss),
+            "IBGATEWAY_READINESS_ATTEMPTS": "1",
+            "IBGATEWAY_SLEEP": str(sleep),
+        },
+    )
+
+    assert rejected.returncode == 1
+    assert "ibgateway_daily_restart:api_port_not_ready:4002" in rejected.stderr
 
 
 def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
@@ -232,7 +320,7 @@ def _mock_command(path: Path, output: str) -> Path:
     return path
 
 
-def _valid_nft_payload(*, port: int = 4002, priority: int = -300) -> dict:
+def _valid_nft_payload(*, port: int = 4002, priority: int = -300) -> dict[str, Any]:
     return {
         "nftables": [
             {
@@ -307,7 +395,7 @@ def _run_boundary_verifier(
     ufw_status: str = "Status: active\n",
     ipv4_rules: str | None = None,
     ipv6_rules: str | None = None,
-    nft_payload: dict | None = None,
+    nft_payload: dict[str, Any] | None = None,
     include_config: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     config = tmp_path / "proxy.env"
@@ -460,6 +548,8 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "manual IBKR username, password, and 2FA" in runbook
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
+    assert "ExitType=cgroup" in runbook
+    assert "authenticated handoff child" in runbook
     assert "ufw default deny incoming" in runbook
     assert 'case "$IBKR_GATEWAY_PORT" in' in runbook
     assert "sudo ufw insert 1 deny in" in runbook

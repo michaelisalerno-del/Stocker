@@ -79,8 +79,9 @@ class OfficialMarketDataOnlyClient:
     def reqMarketDataType(self, market_data_type: int) -> None:  # noqa: N802
         self.__client.reqMarketDataType(market_data_type)
 
-    def serverVersion(self) -> int:  # noqa: N802
-        return int(self.__client.serverVersion())
+    def serverVersion(self) -> int | None:  # noqa: N802
+        value = self.__client.serverVersion()
+        return None if value is None else int(value)
 
 
 def create_official_stock_contract(symbol: str) -> Any:

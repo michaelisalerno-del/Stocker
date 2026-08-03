@@ -7,10 +7,11 @@ export const POLLING_POLICY = Object.freeze({
   fastEndpoints: Object.freeze(["/api/dashboard/summary"]),
   slowEndpointsByScreen: Object.freeze({
     "live-monitor": Object.freeze([
+      "/api/recorder/status",
       "/api/recorder/capabilities",
       "/api/market-data-budget",
     ]),
-    "universe-monitor": Object.freeze([]),
+    "universe-monitor": Object.freeze(["/api/universe/live"]),
     "signal-detail": Object.freeze(["/api/episodes"]),
     "options-recorder": Object.freeze(["/api/episodes"]),
     "shadow-blotter": Object.freeze([]),

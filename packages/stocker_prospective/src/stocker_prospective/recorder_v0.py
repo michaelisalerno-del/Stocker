@@ -447,6 +447,7 @@ class FrozenM1CRecorderEngine:
         stock_opening_response_v1: StockOpeningResponseResultV1,
         classifications: dict[str, DirectionClassification],
         signal_inputs_eligible: bool,
+        scientific_recording_authorized: bool,
     ) -> OpeningReversalPredictionReceiptV1:
         assert self.opening_reversal_activation_v1 is not None
         phase, transfer_status = self.repository.opening_reversal_phase_for_session(
@@ -496,6 +497,7 @@ class FrozenM1CRecorderEngine:
                 experiment_version="1" if addendum is None else "1.1",
                 cohort_phase=phase,
                 transfer_status=transfer_status,
+                scientific_recording_authorized=scientific_recording_authorized,
                 session=item.session,
                 stock=item.symbol,
                 checkpoint=checkpoint,
@@ -1319,6 +1321,7 @@ class FrozenM1CRecorderEngine:
                     stock_opening_response_v1=stock_opening_response_v1,
                     classifications=classifications,
                     signal_inputs_eligible=signal_inputs_eligible,
+                    scientific_recording_authorized=scientific_recording_authorized,
                 )
                 self.repository.record_opening_reversal_prediction_v1(
                     item.metadata,

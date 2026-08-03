@@ -131,9 +131,7 @@ def _prediction_input(
         if state == "NEGATIVE_SEVERE_OPENING_TRANSITION"
         else 0.0
     )
-    opening_range = (
-        0.002 if state == "NORMAL_OPENING" else 0.006
-    )
+    opening_range = 0.002 if state == "NORMAL_OPENING" else 0.006
     return OpeningReversalPredictionInputV1(
         activation_timestamp_utc=ACTIVATION,
         cohort_phase=phase,
@@ -172,9 +170,7 @@ def _prediction_input(
 def test_frozen_identity_and_thresholds_are_exact() -> None:
     rule = FrozenOpeningReversalRuleV1()
 
-    assert M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID == (
-        "m1c-prospective-opening-reversal-v1"
-    )
+    assert M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID == ("m1c-prospective-opening-reversal-v1")
     assert M1C_PROSPECTIVE_OPENING_REVERSAL_V1_VERSION == "1"
     assert rule.checkpoint == 6
     assert rule.m1c_probability_threshold == 0.488333710794033
@@ -237,9 +233,7 @@ def test_prediction_is_exact_opposition_or_abstain(
     prediction: str,
     prediction_sign: int,
 ) -> None:
-    receipt = build_prediction_receipt_v1(
-        _prediction_input(state=state, sign=sign)
-    )
+    receipt = build_prediction_receipt_v1(_prediction_input(state=state, sign=sign))
 
     assert receipt.prediction_v1 == prediction
     assert receipt.prediction_sign_v1 == prediction_sign
@@ -307,7 +301,6 @@ def test_non_frozen_comparisons_cannot_change_prediction_or_promotion() -> None:
             {"previous_close_atm_iv_scale_valid": False},
             "previous_close_atm_iv_scale_invalid",
         ),
-        ({"transfer_status": "UNKNOWN_INCOMPLETE"}, "transfer_status_incomplete"),
     ],
 )
 def test_every_frozen_eligibility_guard_fails_closed(
@@ -322,10 +315,19 @@ def test_every_frozen_eligibility_guard_fails_closed(
     assert reason in receipt.ineligibility_reasons_v1
 
 
-def test_receipt_must_be_completed_strictly_before_entry() -> None:
-    receipt = build_prediction_receipt_v1(
-        _prediction_input(receipt_created_at=SIGNAL_AND_ENTRY)
+def test_cross_vendor_status_is_diagnostic_not_prediction_eligibility() -> None:
+    baseline = build_prediction_receipt_v1(_prediction_input())
+    unavailable = build_prediction_receipt_v1(
+        _prediction_input().model_copy(update={"transfer_status": "UNKNOWN_INCOMPLETE"})
     )
+
+    assert unavailable.eligibility_v1 == baseline.eligibility_v1
+    assert unavailable.prediction_v1 == baseline.prediction_v1
+    assert "transfer_status_incomplete" not in unavailable.ineligibility_reasons_v1
+
+
+def test_receipt_must_be_completed_strictly_before_entry() -> None:
+    receipt = build_prediction_receipt_v1(_prediction_input(receipt_created_at=SIGNAL_AND_ENTRY))
 
     assert not receipt.eligibility_v1
     assert receipt.prediction_v1 == "ABSTAIN"
@@ -386,9 +388,9 @@ def test_promotion_is_probability_then_receipt_time_then_ticker() -> None:
     assert selection.promoted.stock == "AAOI"
     assert [row.stock for row in selection.non_promoted] == ["APLD", "AAL"]
     assert {row.winning_promoted_stock for row in selection.non_promoted} == {"AAOI"}
-    assert {
-        row.reason_not_promoted_v1 for row in selection.non_promoted
-    } == {"lower_frozen_promotion_rank"}
+    assert {row.reason_not_promoted_v1 for row in selection.non_promoted} == {
+        "lower_frozen_promotion_rank"
+    }
 
 
 def _post_entry_bars(final_close: float) -> tuple[PostEntryBarV1, ...]:
@@ -396,10 +398,8 @@ def _post_entry_bars(final_close: float) -> tuple[PostEntryBarV1, ...]:
     output = [
         PostEntryBarV1(
             ordinal=index,
-            bar_start_timestamp_utc=SIGNAL_AND_ENTRY
-            + timedelta(minutes=5 * index),
-            bar_complete_timestamp_utc=SIGNAL_AND_ENTRY
-            + timedelta(minutes=5 * (index + 1)),
+            bar_start_timestamp_utc=SIGNAL_AND_ENTRY + timedelta(minutes=5 * index),
+            bar_complete_timestamp_utc=SIGNAL_AND_ENTRY + timedelta(minutes=5 * (index + 1)),
             open=open_,
             high=high,
             low=low,
@@ -440,9 +440,7 @@ def test_material_partition_keeps_exact_threshold_equality_as_no_move(
 
 
 def test_outcome_is_opposition_aligned_and_does_not_mutate_prediction() -> None:
-    receipt = build_prediction_receipt_v1(
-        _prediction_input(phase="prospective_development")
-    )
+    receipt = build_prediction_receipt_v1(_prediction_input(phase="prospective_development"))
     receipt_dump = receipt.model_dump(mode="json")
     outcome = build_opening_reversal_outcome_v1(
         prediction_receipt=receipt,
@@ -462,9 +460,7 @@ def test_outcome_is_opposition_aligned_and_does_not_mutate_prediction() -> None:
 
 
 def test_incomplete_outcome_records_missingness_without_inventing_a_return() -> None:
-    receipt = build_prediction_receipt_v1(
-        _prediction_input(phase="prospective_development")
-    )
+    receipt = build_prediction_receipt_v1(_prediction_input(phase="prospective_development"))
 
     outcome = build_incomplete_opening_reversal_outcome_v1(
         prediction_receipt=receipt,
@@ -559,10 +555,8 @@ def test_transfer_compares_predictors_without_requiring_exact_ohlc() -> None:
         return tuple(
             OpeningTransferBarV1(
                 ordinal=ordinal,
-                bar_start_timestamp_utc=SESSION_OPEN
-                + timedelta(minutes=5 * ordinal),
-                bar_complete_timestamp_utc=SESSION_OPEN
-                + timedelta(minutes=5 * (ordinal + 1)),
+                bar_start_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * ordinal),
+                bar_complete_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * (ordinal + 1)),
                 open=100.0 - 0.1 * ordinal + source_shift,
                 high=100.4 - 0.1 * ordinal + source_shift,
                 low=99.6 - 0.1 * ordinal + source_shift,
@@ -594,10 +588,8 @@ def test_transfer_rejects_six_bars_from_the_wrong_session_window() -> None:
     bars = tuple(
         OpeningTransferBarV1(
             ordinal=ordinal,
-            bar_start_timestamp_utc=SESSION_OPEN
-            + timedelta(minutes=5 * (ordinal + 1)),
-            bar_complete_timestamp_utc=SESSION_OPEN
-            + timedelta(minutes=5 * (ordinal + 2)),
+            bar_start_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * (ordinal + 1)),
+            bar_complete_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * (ordinal + 2)),
             open=100.0,
             high=100.5,
             low=99.5,
@@ -626,10 +618,8 @@ def test_transfer_disagreement_counts_in_fixed_engineering_cohort() -> None:
         return tuple(
             OpeningTransferBarV1(
                 ordinal=ordinal,
-                bar_start_timestamp_utc=SESSION_OPEN
-                + timedelta(minutes=5 * ordinal),
-                bar_complete_timestamp_utc=SESSION_OPEN
-                + timedelta(minutes=5 * (ordinal + 1)),
+                bar_start_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * ordinal),
+                bar_complete_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * (ordinal + 1)),
                 open=100.0,
                 high=101.0,
                 low=99.0,
@@ -658,10 +648,8 @@ def test_aggregate_transfer_receipt_uses_exactly_first_twenty_valid_sessions() -
         bars = tuple(
             OpeningTransferBarV1(
                 ordinal=index,
-                bar_start_timestamp_utc=session_open
-                + timedelta(minutes=5 * index),
-                bar_complete_timestamp_utc=session_open
-                + timedelta(minutes=5 * (index + 1)),
+                bar_start_timestamp_utc=session_open + timedelta(minutes=5 * index),
+                bar_complete_timestamp_utc=session_open + timedelta(minutes=5 * (index + 1)),
                 open=100.0,
                 high=100.5,
                 low=99.5,
@@ -705,10 +693,8 @@ def test_transfer_without_operational_guard_evidence_fails_closed() -> None:
     bars = tuple(
         OpeningTransferBarV1(
             ordinal=index,
-            bar_start_timestamp_utc=SESSION_OPEN
-            + timedelta(minutes=5 * index),
-            bar_complete_timestamp_utc=SESSION_OPEN
-            + timedelta(minutes=5 * (index + 1)),
+            bar_start_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * index),
+            bar_complete_timestamp_utc=SESSION_OPEN + timedelta(minutes=5 * (index + 1)),
             open=100.0,
             high=100.5,
             low=99.5,

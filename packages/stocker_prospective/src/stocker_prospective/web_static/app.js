@@ -177,7 +177,8 @@ function showScreen(screenId) {
 
 function subscriptionCapacity(kind) {
   const capacity = state.status.capacity?.[kind] || {};
-  return `${capacity.used ?? 0} / ${capacity.available ?? 0}`;
+  const used = state.status.subscriptions?.[kind] ?? capacity.used ?? 0;
+  return `${used} / ${capacity.available ?? "—"}`;
 }
 
 function renderStatus() {
@@ -309,8 +310,11 @@ function renderBudgetTransfer() {
   const tails = aggregate.tail_metrics || {};
   const episodes = aggregate.episode_metrics || {};
   replace("transfer-panel", kvGrid([
-    ["Decision", transfer.decision || "blocked_insufficient_valid_sessions"],
+    ["Diagnostic status", transfer.cross_vendor_validation_status || "not_configured"],
+    ["Diagnostic decision", transfer.decision],
     ["Valid sessions", transfer.valid_session_count || 0],
+    ["Recorder blocking", transfer.recorder_blocking === true],
+    ["Diagnostic only", transfer.cross_vendor_validation_diagnostic_only !== false],
     ["Exact vendor equality required", false],
     ["Pearson / Spearman", `${clean(probability.pearson)} / ${clean(probability.spearman)}`],
     ["Mean probability bias", probability.mean_signed_bias],
@@ -1252,17 +1256,60 @@ function sectionErrorKey(path) {
 }
 
 function applySummary(summary) {
-  state.health = summary.health;
-  state.status = summary.recorder;
-  state.universe = summary.current_universe?.items || [];
+  const recorder = summary.recorder || {};
+  const previousStatus = state.status || {};
+  const previousTimestamps = previousStatus.operational?.timestamps || {};
+  const completedBar = recorder.latest_completed_five_minute_bar || null;
+  const checkpoint = recorder.latest_successful_checkpoint || null;
+  state.health = {
+    blockers: (summary.alerts || []).map((item) => item.code),
+    no_order_checks: summary.no_order || {},
+  };
+  state.status = {
+    ...previousStatus,
+    run_id: summary.run_id,
+    state: recorder.state,
+    operational: {
+      ...(previousStatus.operational || {}),
+      reason_code: recorder.reason_code,
+      timestamps: {
+        ...previousTimestamps,
+        process_heartbeat_at_utc: recorder.heartbeat_at_utc,
+        latest_callback_received_at_utc: recorder.latest_callback_received_at_utc,
+        latest_callback_durably_admitted_at_utc:
+          recorder.latest_callback_durably_admitted_at_utc,
+        latest_inbox_acknowledgement_at_utc:
+          recorder.latest_inbox_acknowledgement_at_utc,
+        latest_completed_five_minute_bar_at_utc: completedBar?.bar_end_utc || null,
+        latest_successful_checkpoint_at_utc: checkpoint?.bar_end_utc || null,
+      },
+      inbox: recorder.callback_inbox || {},
+    },
+    latest_checkpoint: checkpoint,
+    latest_completed_bar: completedBar,
+    latest_episode: recorder.latest_episode || null,
+    ibkr_connection: summary.ibkr?.connection || null,
+    subscriptions: summary.ibkr?.subscriptions?.by_kind || {},
+    replay: summary.replay,
+  };
   state.lastSnapshotAt = summary.summary_at_utc || null;
   delete state.sectionErrors.dashboard_summary;
 }
 
 function applyEndpoint(path, payload) {
   const endpoint = path.split("?", 1)[0];
-  if (endpoint === "/api/recorder/capabilities") state.capabilities = payload;
+  if (endpoint === "/api/recorder/status") {
+    state.status = {
+      ...(state.status || {}),
+      ...payload,
+      operational: {
+        ...(state.status?.operational || {}),
+        ...(payload.operational || {}),
+      },
+    };
+  } else if (endpoint === "/api/recorder/capabilities") state.capabilities = payload;
   else if (endpoint === "/api/market-data-budget") state.budget = payload;
+  else if (endpoint === "/api/universe/live") state.universe = payload.items || [];
   else if (endpoint === "/api/episodes") state.episodes = payload.items || [];
   else if (endpoint === "/api/shadow-outcomes") state.shadow = payload.items || [];
   else if (endpoint === "/api/virtual-ledgers") state.virtualLedgers = payload;
@@ -1346,8 +1393,14 @@ async function performRefresh({
     button.textContent = "Reading…";
   }
   try {
+    if (tier === "fast" || refreshDetails) {
+      await refreshFast(signal);
+      if (!state.health || !state.status) {
+        throw new Error("dashboard_core_sections_unavailable");
+      }
+      renderDashboard();
+    }
     const tasks = [];
-    if (tier === "fast" || tier === "manual") tasks.push(refreshFast(signal));
     if (tier === "slow" || tier === "manual") {
       tasks.push(refreshScreenTier("slow", screenId, signal));
     }
@@ -1491,7 +1544,9 @@ document.getElementById("option-episode").addEventListener("change", (event) => 
 });
 document.getElementById("replay-start").addEventListener("click", () => controlReplay("start"));
 document.getElementById("replay-stop").addEventListener("click", () => controlReplay("stop"));
-refreshAll({ tier: "manual", supersede: true });
+void refreshAll({ tier: "fast", supersede: true }).then(() => {
+  refreshAll({ tier: "manual" });
+});
 setInterval(() => {
   if (document.visibilityState === "visible") refreshAll({ tier: "fast" });
 }, POLLING_POLICY.fastIntervalMs);

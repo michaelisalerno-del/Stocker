@@ -1766,7 +1766,7 @@ def build_frozen_prospective_application(
         )
 
     static_scientific_prerequisites_passed = (
-        m1c_parity and direction_parity and bar_compatibility and historical_activity_available
+        m1c_parity and direction_parity and historical_activity_available
     )
 
     def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:

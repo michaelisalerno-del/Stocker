@@ -509,6 +509,7 @@ class OpeningReversalPredictionInputV1(BaseModel):
     activation_timestamp_utc: datetime
     cohort_phase: CohortPhaseV1
     transfer_status: str
+    scientific_recording_authorized: bool = True
     session: date
     stock: str = Field(min_length=1)
     checkpoint: int
@@ -728,12 +729,6 @@ def build_prediction_receipt_v1(
         or scale <= 0.0
     ):
         reasons.append("previous_close_atm_iv_scale_invalid")
-    if (
-        not source.transfer_status.strip()
-        or "UNKNOWN_INCOMPLETE" in source.transfer_status.upper()
-        or source.transfer_status.lower() == "missing"
-    ):
-        reasons.append("transfer_status_incomplete")
     if source.capacity_snapshot_id is None:
         reasons.append("capacity_snapshot_missing")
     timing = source.timing_evidence_v1_1
@@ -798,7 +793,6 @@ def build_prediction_receipt_v1(
         "vti_opening_transition_incomplete",
         "stock_causal_data_incomplete",
         "previous_close_atm_iv_scale_invalid",
-        "transfer_status_incomplete",
         "capacity_snapshot_missing",
         "receipt_not_completed_before_entry",
         "timing_addendum_evidence_missing",
@@ -823,14 +817,19 @@ def build_prediction_receipt_v1(
         prediction = "PUT"
         prediction_sign = -1
 
-    scientific = eligible and source.cohort_phase != "engineering_transfer"
-    scientific_exclusion = (
-        None
-        if scientific
-        else "engineering_transfer"
-        if eligible and source.cohort_phase == "engineering_transfer"
-        else "prediction_ineligible"
+    scientific = (
+        eligible
+        and source.cohort_phase != "engineering_transfer"
+        and source.scientific_recording_authorized
     )
+    if scientific:
+        scientific_exclusion = None
+    elif not eligible:
+        scientific_exclusion = "prediction_ineligible"
+    elif source.cohort_phase == "engineering_transfer":
+        scientific_exclusion = "engineering_transfer"
+    else:
+        scientific_exclusion = "scientific_recording_not_authorized"
     payload: dict[str, object] = {
         "experiment_id": frozen_rule.experiment_id,
         "experiment_version": source.experiment_version,

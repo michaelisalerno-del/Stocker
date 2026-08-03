@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -281,6 +282,20 @@ def test_short_put_uses_bid_entry_ask_exit_and_signed_contract_quantity() -> Non
     assert result.ibkr_maintenance_margin == MARGIN_UNAVAILABLE
     assert result.maximum_observed_initial_margin == MARGIN_UNAVAILABLE
     assert result.maximum_observed_maintenance_margin == MARGIN_UNAVAILABLE
+    assert result.entry_margin_roi is None
+    assert result.peak_margin_roi is None
+    assert result.primary_capital_basis == "cash_secured_capital"
+    assert result.primary_capital_amount == pytest.approx(4_800.0)
+    assert result.primary_roi == pytest.approx(98.40 / 4_800.0)
+    assert result.executable_entry_prices_by_leg == {"put-50": 2.0}
+    assert result.executable_exit_prices_by_leg == {"put-50": 1.0}
+    assert result.executable_pnl_is_primary is True
+    assert result.greek_attribution_diagnostic_only is True
+    assert result.greek_attribution_performed is False
+    assert result.maximum_adverse_excursion == pytest.approx(21.60)
+    assert result.maximum_drawdown == pytest.approx(21.60)
+    assert result.market_data_source == "ibkr"
+    assert result.order_routing == "disabled"
 
 
 def test_long_option_uses_ask_entry_bid_exit_and_premium_specific_roi() -> None:
@@ -344,6 +359,12 @@ def test_long_option_uses_ask_entry_bid_exit_and_premium_specific_roi() -> None:
     assert result.bid_ask_cost == pytest.approx(10.0)
     assert result.cash_secured_roi is None
     assert result.full_risk_roi is None
+    assert result.primary_capital_basis == "premium_paid"
+    assert result.primary_capital_amount == pytest.approx(100.0)
+    assert result.primary_roi == pytest.approx(49.0 / 100.0)
+    assert result.executable_entry_prices_by_leg == {"call-55": 2.0}
+    assert result.executable_exit_prices_by_leg == {"call-55": 3.0}
+    assert result.theta_attribution_status == THETA_ATTRIBUTION_INCOMPLETE
     assert "roi" not in result.model_dump()
     assert not any("annual" in field for field in type(result).model_fields)
 
@@ -467,6 +488,9 @@ def test_bull_put_spread_uses_each_executable_side_and_defined_risk_capital() ->
     assert result.midpoint_pnl == pytest.approx(85.0)
     assert result.bid_ask_cost == pytest.approx(25.0)
     assert result.capital_hours_employed == pytest.approx(705.60)
+    assert result.primary_capital_basis == "maximum_defined_risk"
+    assert result.primary_capital_amount == pytest.approx(352.80)
+    assert result.primary_roi == pytest.approx(57.20 / 352.80)
 
 
 def test_generic_defined_risk_candidate_uses_expiry_payoff_maximum_loss() -> None:
@@ -777,6 +801,7 @@ def test_theta_uses_trapezoidal_calendar_day_integration_at_irregular_intervals(
         strategy=strategy,
         snapshots=(snapshot(0, -0.10), snapshot(6, -0.06), snapshot(18, -0.02)),
         maximum_attribution_gap=timedelta(days=1),
+        include_greek_attribution=True,
     )
 
     assert records[1].theta_interval_contribution == pytest.approx(-2.0)
@@ -834,6 +859,7 @@ def test_theta_records_incomplete_for_missing_observations_or_long_quote_gaps(
         strategy=strategy,
         snapshots=(snapshot(0, -0.10), snapshot(6, middle_theta)),
         maximum_attribution_gap=maximum_gap,
+        include_greek_attribution=True,
     )[-1]
 
     assert result.estimated_theta_contribution is None
@@ -885,6 +911,7 @@ def test_theta_records_incomplete_when_sticky_greek_timestamp_is_stale() -> None
             snapshot(ENTRY + timedelta(minutes=1), ENTRY - timedelta(minutes=5)),
         ),
         maximum_attribution_gap=timedelta(minutes=2),
+        include_greek_attribution=True,
     )[-1]
 
     assert result.estimated_theta_contribution is None
@@ -964,6 +991,7 @@ def test_greek_attribution_uses_frozen_units_and_records_model_price_residual() 
             ),
         ),
         maximum_attribution_gap=timedelta(days=2),
+        include_greek_attribution=True,
     )[-1]
 
     attribution = result.greek_attribution_interval
@@ -1019,10 +1047,14 @@ def test_underlying_long_uses_entry_notional_and_executable_bid_ask_marks() -> N
     assert result.account_independent_notional_exposure == pytest.approx(5_010.0)
     assert result.capital_hours_employed == pytest.approx(2_505.0)
     assert result.return_per_1000_reserved_capital == pytest.approx(88.50 / 5_010.0 * 1_000.0)
+    assert result.market_data_source == "ibkr"
     assert result.can_authorize_trade is False
+    assert result.order_routing == "disabled"
 
 
-def test_comparison_report_keeps_strategy_specific_returns_and_tail_metrics() -> None:
+def test_comparison_report_keeps_strategy_specific_returns_and_tail_metrics(
+    tmp_path: Path,
+) -> None:
     underlying_path = calculate_underlying_strategy_path(
         strategy=UnderlyingStrategy(strategy_id="underlying", quantity=100),
         snapshots=(
@@ -1175,10 +1207,59 @@ def test_comparison_report_keeps_strategy_specific_returns_and_tail_metrics() ->
     assert rows["UNDERLYING_LONG"].maximum_drawdown >= 0.0
     assert rows["SHORT_PUT"].expected_shortfall is not None
     assert rows["BULL_PUT_SPREAD"].bid_ask_cost == pytest.approx(25.0)
+    assert all(row.market_data_source == "ibkr" for row in report.strategies)
+    assert report.market_data_source == "ibkr"
+    assert report.research_only is True
+    assert report.order_routing == "disabled"
     assert not any("annual" in field for field in type(rows["SHORT_PUT"]).model_fields)
     assert "roi" not in rows["SHORT_PUT"].model_dump()
     assert "trade_roi_metric" not in rows["SHORT_PUT"].model_dump()
     assert "trade_roi_value" not in rows["SHORT_PUT"].model_dump()
+
+    repository, _read_store, metadata, observation_id = _quiet_repository(tmp_path)
+    comparison_id = repository.record_quiet_option_strategy_comparison(
+        metadata,
+        observation_id=observation_id,
+        dte_bucket="1DTE",
+        horizon_label="5m",
+        horizon_minutes=5,
+        report=report,
+    )
+    with repository.repository._connect() as connection:
+        stored = connection.execute(
+            "SELECT payload_json FROM quiet_option_strategy_comparison_v0 WHERE id = ?",
+            (comparison_id,),
+        ).fetchone()
+        assert stored is not None
+        legacy_payload = json.loads(str(stored["payload_json"]))
+        legacy_payload.pop("accounting_payload_version")
+        legacy_encoded = json.dumps(
+            legacy_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        connection.execute(
+            "UPDATE quiet_option_strategy_comparison_v0 SET payload_json = ? WHERE id = ?",
+            (legacy_encoded, comparison_id),
+        )
+    assert (
+        repository.record_quiet_option_strategy_comparison(
+            metadata,
+            observation_id=observation_id,
+            dte_bucket="1DTE",
+            horizon_label="5m",
+            horizon_minutes=5,
+            report=report,
+        )
+        == comparison_id
+    )
+    with repository.repository._connect() as connection:
+        unchanged = connection.execute(
+            "SELECT payload_json FROM quiet_option_strategy_comparison_v0 WHERE id = ?",
+            (comparison_id,),
+        ).fetchone()
+    assert unchanged is not None
+    assert str(unchanged["payload_json"]) == legacy_encoded
 
 
 def test_ibkr_quote_event_preserves_each_greek_source_timestamp_and_status() -> None:
@@ -1318,6 +1399,59 @@ def test_quiet_risk_observations_are_append_only_and_readable(tmp_path: Path) ->
     assert persisted[-1]["payload"]["ibkr_initial_margin"] == MARGIN_UNAVAILABLE
     assert persisted[-1]["payload"]["can_authorize_trade"] is False
     assert persisted[-1]["policy_gate"] == 0
+
+    with repository.repository._connect() as connection:
+        stored = connection.execute(
+            "SELECT payload_json FROM quiet_option_risk_observation_v0 WHERE id = ?",
+            (ids[-1],),
+        ).fetchone()
+        assert stored is not None
+        legacy_payload = json.loads(str(stored["payload_json"]))
+        legacy_payload.pop("accounting_payload_version")
+        legacy_encoded = json.dumps(
+            legacy_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        connection.execute(
+            "UPDATE quiet_option_risk_observation_v0 SET payload_json = ? WHERE id = ?",
+            (legacy_encoded, ids[-1]),
+        )
+    assert (
+        repository.record_quiet_option_risk_observation(
+            metadata,
+            observation_id=observation_id,
+            dte_bucket="1DTE",
+            horizon_label="5m",
+            record=records[-1],
+        )
+        == ids[-1]
+    )
+    with repository.repository._connect() as connection:
+        unchanged = connection.execute(
+            "SELECT payload_json FROM quiet_option_risk_observation_v0 WHERE id = ?",
+            (ids[-1],),
+        ).fetchone()
+        versioned_tamper = dict(legacy_payload)
+        versioned_tamper["accounting_payload_version"] = "option_risk_accounting_v1"
+        versioned_tamper["net_option_pnl"] = 999.0
+        connection.execute(
+            "UPDATE quiet_option_risk_observation_v0 SET payload_json = ? WHERE id = ?",
+            (
+                json.dumps(versioned_tamper, sort_keys=True, separators=(",", ":")),
+                ids[-1],
+            ),
+        )
+    assert unchanged is not None
+    assert str(unchanged["payload_json"]) == legacy_encoded
+    with pytest.raises(ValueError, match="immutable quiet option risk observation differs"):
+        repository.record_quiet_option_risk_observation(
+            metadata,
+            observation_id=observation_id,
+            dte_bucket="1DTE",
+            horizon_label="5m",
+            record=records[-1],
+        )
 
 
 def test_bounded_recorder_emits_record_only_paths_and_three_strategy_comparison() -> None:

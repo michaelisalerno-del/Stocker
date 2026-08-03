@@ -306,9 +306,12 @@ def _write_valid_group_o_package(
     output.write_text(package.model_dump_json(indent=2), encoding="utf-8")
 
 
-def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_claim(
+def test_first_ibkr_session_is_authorized_without_transfer_history(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("EODHD_API_TOKEN", raising=False)
+    monkeypatch.delenv("STOCKER_EODHD_TOKEN_CONFIGURED", raising=False)
     events, observed = _completed_bar_events()
     application, config, adapter, symbols = _build_fake_application(
         tmp_path,
@@ -331,8 +334,8 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
     )
 
     assert application.live_recorder.shadow_evaluation_enabled is True
-    # Runtime artifacts are verified, but the immutable 20-session transfer
-    # cohort still keeps this checkpoint out of scientific evidence.
+    # Runtime artifacts and the IBKR observation itself determine eligibility;
+    # cross-vendor comparison history is diagnostic only.
     assert application.live_recorder.scientific_scoring_enabled is True
     assert len(checkpoint_results) == 1, [
         (
@@ -344,7 +347,7 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
         )
         for result in results
     ]
-    assert "scientific_recording_not_authorized" in (checkpoint_results[0].rejection_reasons)
+    assert "scientific_recording_not_authorized" not in (checkpoint_results[0].rejection_reasons)
     universe = ProspectiveReadStore(
         config.paths.database,
         run_id=config.runtime.run_id,
@@ -352,8 +355,10 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
     aal = next(item for item in universe if item["symbol"] == "AAL")
     assert aal["m1c_probability"] is not None
     assert aal["m1c_threshold"] == 0.488333710794033
+    # The fixture is independently rejected for a stale underlying quote, but
+    # it is no longer rejected for absent cross-vendor history.
     assert aal["m1c_scientific_eligible"] is False
-    assert "scientific_recording_not_authorized" in aal["m1c_rejection_reasons"]
+    assert "scientific_recording_not_authorized" not in aal["m1c_rejection_reasons"]
     assert ("level1", "AAL") in adapter.active_subscriptions.values()
     with sqlite3.connect(config.paths.database) as connection:
         checkpoint_eligibility = connection.execute(
@@ -378,7 +383,7 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
     application.shutdown(now=observed + timedelta(seconds=1))
 
 
-def test_missing_bar_compatibility_report_keeps_science_blocked_but_not_shadow(
+def test_missing_bar_compatibility_report_is_diagnostic_not_scientific_gate(
     tmp_path: Path,
 ) -> None:
     events, observed = _completed_bar_events()
@@ -398,7 +403,7 @@ def test_missing_bar_compatibility_report_keeps_science_blocked_but_not_shadow(
         application.poll(now=observed + timedelta(seconds=offset))
 
     assert application.live_recorder.shadow_evaluation_enabled is True
-    assert application.live_recorder.scientific_scoring_enabled is False
+    assert application.live_recorder.scientific_scoring_enabled is True
 
     application.shutdown(now=observed + timedelta(seconds=3))
 

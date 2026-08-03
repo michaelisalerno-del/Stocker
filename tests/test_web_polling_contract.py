@@ -21,13 +21,13 @@ def interval_milliseconds(name: str) -> int:
 
 def test_normal_visible_tab_polling_budget_is_below_forty_requests_per_minute() -> None:
     fast_per_minute = 60_000 / interval_milliseconds("fastIntervalMs")
-    busiest_slow_screen = 2 * 60_000 / interval_milliseconds("slowIntervalMs")
+    busiest_slow_screen = 3 * 60_000 / interval_milliseconds("slowIntervalMs")
     # A manual-tier cycle on the busiest screen contains one summary, two
     # slow-tier requests, and two manual-tier requests.
     busiest_manual_screen = 5 * 60_000 / interval_milliseconds("manualIntervalMs")
     requests_per_minute = fast_per_minute + busiest_slow_screen + busiest_manual_screen
 
-    assert requests_per_minute == 6.333333333333333
+    assert requests_per_minute == 7.0
     assert requests_per_minute < 40
     configured_limit = int(
         re.search(r"web:.*?requests_per_minute:\s*(\d+)", SERVER_CONFIG, re.DOTALL).group(1)  # type: ignore[union-attr]

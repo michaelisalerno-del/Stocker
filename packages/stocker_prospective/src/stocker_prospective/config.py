@@ -118,7 +118,7 @@ class WebConfig(BaseModel):
         ge=1024 * 1024,
         le=512 * 1024 * 1024,
     )
-    operational_projection_cache_seconds: float = Field(default=60.0, ge=0.0, le=300.0)
+    operational_projection_cache_seconds: float = Field(default=300.0, ge=300.0, le=3_600.0)
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
 
     @model_validator(mode="after")
@@ -439,6 +439,9 @@ def validate_persistent_paths(config: ProspectiveConfig, release_directory: str 
 def public_config(config: ProspectiveConfig) -> dict[str, object]:
     """Return a secret-free public configuration projection."""
 
+    cross_vendor_credential_configured = (
+        os.environ.get(config.parallel_validation.credential_status_env) == "1"
+    )
     return {
         "runtime": {
             "mode": config.runtime.mode,
@@ -488,9 +491,14 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
         "parallel_validation": {
             "enabled": config.parallel_validation.enabled,
             "provider": config.parallel_validation.provider,
-            "credential_configured": (
-                os.environ.get(config.parallel_validation.credential_status_env) == "1"
+            "credential_configured": cross_vendor_credential_configured,
+            "cross_vendor_validation_status": (
+                "pending"
+                if config.parallel_validation.enabled and cross_vendor_credential_configured
+                else "not_configured"
             ),
+            "diagnostic_only": True,
+            "recorder_blocking": False,
             "capture_delay_seconds": config.parallel_validation.capture_delay_seconds,
         },
     }

@@ -374,9 +374,9 @@ class FrozenM1CLiveRecorder:
             and readiness.historical_activity_baseline_available
             and readiness.clock_drift_within_tolerance
         )
-        self._scientific_prerequisites_passed = (
-            self._shadow_prerequisites_passed and readiness.bar_compatibility_passed
-        )
+        # Cross-vendor bar compatibility is retained as a diagnostic.  It does
+        # not authorize otherwise-valid IBKR prospective evidence.
+        self._scientific_prerequisites_passed = self._shadow_prerequisites_passed
         self._scientific_block_latched = (
             durable_inbox is not None and durable_inbox.has_active_fatal()
         )

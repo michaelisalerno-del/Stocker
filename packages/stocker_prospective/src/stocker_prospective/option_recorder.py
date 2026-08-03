@@ -1351,6 +1351,7 @@ class BoundedOptionRecorder:
                 strategy=strategy,
                 snapshots=snapshots,
                 maximum_attribution_gap=self.maximum_greek_attribution_gap,
+                include_greek_attribution=False,
             )
             if strategy.strategy_type in {
                 StrategyType.SHORT_PUT,

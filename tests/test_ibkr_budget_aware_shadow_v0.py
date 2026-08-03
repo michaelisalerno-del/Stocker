@@ -60,6 +60,8 @@ from stocker_prospective.transfer import (
     M1CTransferMonitor,
     ProviderM1CObservation,
     TransferBar,
+    TransferDecision,
+    classify_cross_vendor_validation_status,
     create_ibkr_calibration_candidate,
 )
 
@@ -69,6 +71,37 @@ BUDGET_FAKE_FIXTURE = (
     / "packages/stocker_prospective/src/stocker_prospective/fixtures"
     / "ibkr-budget-aware-shadow-v0.json"
 )
+
+
+def test_cross_vendor_status_is_diagnostic_and_never_a_science_gate() -> None:
+    assert (
+        classify_cross_vendor_validation_status(
+            enabled=True,
+            credential_configured=True,
+            valid_session_count=3,
+            decision=TransferDecision.BLOCKED_INSUFFICIENT_VALID_SESSIONS,
+        )
+        == "insufficient_sessions"
+    )
+    assert (
+        classify_cross_vendor_validation_status(
+            enabled=True,
+            credential_configured=True,
+            valid_session_count=20,
+            decision=TransferDecision.NOT_SUPPORTED,
+        )
+        == "warning"
+    )
+    assert (
+        classify_cross_vendor_validation_status(
+            enabled=True,
+            credential_configured=True,
+            valid_session_count=0,
+            decision=None,
+            latest_diagnostic_status="failed_diagnostic",
+        )
+        == "failed_diagnostic"
+    )
 
 
 def test_runtime_capacity_prefers_discovery_and_preserves_future_trading_reserve(
@@ -277,7 +310,11 @@ def test_binding_claims_include_transfer_budget_and_no_order_boundary() -> None:
         "source_transfer_monitoring": True,
         "exact_vendor_bar_equality_required": False,
         "option_shadow_outcomes_only": True,
-        "engineering_phase_sessions": 20,
+        "historical_engineering_phase_sessions": 20,
+        "market_data_source": "ibkr",
+        "historical_research_source": "eodhd",
+        "cross_vendor_validation_diagnostic_only": True,
+        "cross_vendor_validation_required_for_science": False,
         "market_data_budget_enforced": True,
         "market_data_limits_runtime_discovered": True,
         "full_option_chain_streaming_allowed": False,
@@ -338,11 +375,11 @@ def test_twenty_valid_sessions_open_option_development_without_outcomes(
         session=date(2026, 6, 21),
     )
     assert phase == ("option_development", True)
-    engineering = frozen.prospective_phase_for_session(
+    first_ibkr_session = frozen.prospective_phase_for_session(
         run_id=metadata.run_id,
         session=date(2026, 6, 20),
     )
-    assert engineering == ("engineering_transfer", False)
+    assert first_ibkr_session == ("option_development", True)
 
 
 def test_skipped_recording_idempotency_preserves_distinct_subscription_payloads(
@@ -433,8 +470,11 @@ def test_daily_report_package_contains_exact_required_files(tmp_path) -> None:
     with zipfile.ZipFile(package.archive_path) as archive:
         assert tuple(archive.namelist()) == DAILY_REPORT_FILENAMES
         summary = json.loads(archive.read("session_summary.json"))
-    assert summary["cohort_phase"] == "engineering_transfer"
+    assert summary["cohort_phase"] == "option_development"
     assert summary["scientific_option_evidence"] is False
+    assert summary["scientific_option_evidence_allowed"] is True
+    assert summary["cross_vendor_validation_status"] == "not_configured"
+    assert summary["cross_vendor_validation_diagnostic_only"] is True
     assert summary["claims_boundary"] == claims_boundary()
 
 

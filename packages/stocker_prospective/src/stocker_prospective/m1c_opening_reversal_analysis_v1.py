@@ -913,7 +913,19 @@ def build_opening_reversal_direction_decision_receipt_v1(
         cluster_bootstrap_replications=CLUSTER_BOOTSTRAP_REPLICATIONS_V1,
         primary_null_replications=PRIMARY_NULL_REPLICATIONS_V1,
     )
-    if recalculated != result:
+    legacy_transfer_blocked_result = (
+        result.transfer_failure
+        and result.decision == "blocked_opening_transfer"
+        and result.decision_reasons == ("opening_transfer_not_supported",)
+        and result.model_copy(
+            update={
+                "decision": recalculated.decision,
+                "decision_reasons": recalculated.decision_reasons,
+            }
+        )
+        == recalculated
+    )
+    if recalculated != result and not legacy_transfer_blocked_result:
         raise ValueError("decision receipt statistics differ from frozen analysis")
     stock_counts = Counter(row.stock for row in rows)
     event_counts = Counter(row.opening_transition_event_id_v1 for row in rows)
@@ -952,8 +964,9 @@ def _decision(
 ) -> tuple[DirectionDecisionV1, tuple[str, ...]]:
     if operational_failure:
         return "operational_failure", ("critical_operational_failure",)
-    if transfer_failure:
-        return "blocked_opening_transfer", ("opening_transfer_not_supported",)
+    # Retain the immutable diagnostic flag in the result, but cross-vendor
+    # disagreement no longer participates in prospective evidence decisions.
+    _ = transfer_failure
     if not support.passes:
         return (
             "blocked_insufficient_prospective_development_support"

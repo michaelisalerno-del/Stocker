@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+import json
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -15,9 +17,12 @@ from stocker_prospective.database import (
 )
 from stocker_prospective.parallel import (
     EODHDParallelBarProvider,
+    ParallelSourceBar,
     ParallelSourceCaptureService,
 )
+from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder import RecorderDeploymentIdentity
+from stocker_prospective.source_transfer import SourceTransferCoordinator
 
 FROZEN_SYMBOLS = (
     "AAL",
@@ -235,6 +240,53 @@ class _FakeParallelProvider:
         return ()
 
 
+def test_missing_optional_eodhd_credential_records_neutral_diagnostic(
+    tmp_path: Path,
+) -> None:
+    class MissingCredentialProvider(_FakeParallelProvider):
+        def require_credentials(self) -> None:
+            raise RuntimeError("credential unavailable")
+
+    config = _service_config(tmp_path)
+    repository = ProspectiveRepository(config.paths.database)
+    repository.migrate()
+    provider = MissingCredentialProvider()
+    service = ParallelSourceCaptureService(
+        config=config,
+        repository=repository,
+        identity=_identity(),
+        provider=provider,
+        metadata_factory=_metadata_factory,
+        sleep=lambda _seconds: None,
+    )
+
+    service.poll(now=datetime(2026, 7, 27, 22, 0, tzinfo=UTC))
+
+    with repository._connect() as connection:
+        event = connection.execute(
+            """
+            SELECT severity, blocker_code, message, details_json
+            FROM data_health_event
+            WHERE component = 'parallel_feature_validation'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert event is not None
+    assert event["severity"] == "info"
+    assert event["blocker_code"] is None
+    assert event["message"] == "cross_vendor_validation_not_configured"
+    assert json.loads(event["details_json"])["prospective_ibkr_evidence_allowed"] is True
+    assert provider.calls == []
+
+
+def test_live_source_transfer_never_creates_a_calibration_candidate() -> None:
+    source = inspect.getsource(SourceTransferCoordinator)
+
+    assert "create_ibkr_calibration_candidate" not in source
+    assert "M1C_IBKR_CALIBRATION_V1_CANDIDATE.json" not in source
+
+
 def test_parallel_capture_waits_for_registered_delay_and_never_backfills(
     tmp_path: Path,
 ) -> None:
@@ -271,6 +323,88 @@ def test_parallel_capture_waits_for_registered_delay_and_never_backfills(
     assert completion is not None
     assert completion["status"] == "partial"
     assert completion["captured_symbol_count"] == 0
+    with repository._connect() as connection:
+        blocking_diagnostic_events = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM data_health_event
+            WHERE component = 'parallel_feature_validation'
+              AND blocker_code IS NOT NULL
+            """
+        ).fetchone()[0]
+    assert blocking_diagnostic_events == 0
+
+
+def test_cross_vendor_report_failure_is_diagnostic_and_does_not_stop_recorder(
+    tmp_path: Path,
+) -> None:
+    class CompleteProvider(_FakeParallelProvider):
+        def fetch_session(
+            self,
+            *,
+            symbol: str,
+            session_date: date,
+            received_at_utc: datetime,
+        ) -> tuple[ParallelSourceBar, ...]:
+            opened = datetime(2026, 7, 27, 13, 30, tzinfo=UTC)
+            return tuple(
+                ParallelSourceBar(
+                    provider_record_id=f"{symbol}:{ordinal}",
+                    symbol=symbol,
+                    session_date=session_date,
+                    bar_start_utc=(start := opened + timedelta(minutes=5 * ordinal)),
+                    bar_end_utc=start + timedelta(minutes=5),
+                    open=10.0,
+                    high=10.1,
+                    low=9.9,
+                    close=10.0,
+                    activity_value=100.0,
+                    source_timestamp_utc=start,
+                    receive_timestamp_utc=received_at_utc,
+                    completeness="complete",
+                )
+                for ordinal in range(78)
+            )
+
+    config = _service_config(tmp_path)
+    repository = ProspectiveRepository(config.paths.database)
+    repository.migrate()
+
+    def fail_diagnostic_report(_session: date, _now: datetime) -> None:
+        raise RuntimeError("diagnostic renderer failed")
+
+    service = ParallelSourceCaptureService(
+        config=config,
+        repository=repository,
+        identity=_identity(),
+        provider=CompleteProvider(),
+        metadata_factory=_metadata_factory,
+        sleep=lambda _seconds: None,
+        completion_sink=fail_diagnostic_report,
+    )
+
+    service.poll(now=datetime(2026, 7, 27, 22, 0, tzinfo=UTC))
+
+    with repository._connect() as connection:
+        event = connection.execute(
+            """
+            SELECT severity, blocker_code, message, details_json
+            FROM data_health_event
+            WHERE component = 'parallel_feature_validation'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert event is not None
+    assert event["severity"] == "warning"
+    assert event["blocker_code"] is None
+    assert event["message"] == "cross_vendor_validation_failed_diagnostic:RuntimeError"
+    assert json.loads(event["details_json"])["prospective_ibkr_evidence_allowed"] is True
+    status = ProspectiveReadStore(
+        config.paths.database,
+        run_id=config.runtime.run_id,
+    ).source_transfer_status_v0()
+    assert status["latest_diagnostic_status"] == "failed_diagnostic"
 
 
 def test_parallel_capture_reuses_immutable_run_identity_after_release_change(

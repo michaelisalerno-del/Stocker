@@ -88,12 +88,6 @@ from stocker_prospective.tail_phase_v1 import (
     assign_movement_consumed_bucket_v1,
 )
 
-TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT = frozenset(
-    {
-        "ibkr_transfer_supported_without_recalibration",
-        "ibkr_ranking_supported_probability_scale_shifted",
-    }
-)
 SIGNED_MARKET_SHOCK_COLUMNS_V1: Final[tuple[str, ...]] = (
     "canonical_market_proxy_v1",
     "market_return_w0_v1",
@@ -152,6 +146,16 @@ def _json(value: object) -> str:
         allow_nan=False,
         default=str,
     )
+
+
+def _is_legacy_accounting_payload(encoded: str) -> bool:
+    """Recognise immutable pre-version accounting JSON during idempotent replay."""
+
+    try:
+        payload = json.loads(encoded)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, dict) and "accounting_payload_version" not in payload
 
 
 def _content_hash(value: object) -> str:
@@ -542,26 +546,16 @@ class FrozenRecorderRepository:
         session: date,
         connection: sqlite3.Connection | None = None,
     ) -> tuple[str, bool]:
-        """Resolve the immutable cohort phase without consulting any outcome value."""
+        """Resolve the outcome-blind IBKR evidence phase.
+
+        Cross-vendor observations remain immutable diagnostics, but they do not
+        authorize prospective evidence.  The first otherwise-valid IBKR session
+        therefore enters option development immediately.
+        """
 
         owns_connection = connection is None
         active_connection = self.repository._connect() if connection is None else connection
         try:
-            transfer_rows = active_connection.execute(
-                """
-                SELECT session_date, decision
-                FROM source_transfer_session_v0
-                WHERE run_id = ? AND valid = 1 AND session_date < ?
-                ORDER BY session_date
-                """,
-                (run_id, session.isoformat()),
-            ).fetchall()
-            if (
-                len(transfer_rows) < 20
-                or str(transfer_rows[-1]["decision"])
-                not in TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT
-            ):
-                return "engineering_transfer", False
             completed_development = int(
                 active_connection.execute(
                     """
@@ -600,21 +594,41 @@ class FrozenRecorderRepository:
             raise ValueError("unsupported prospective phase parent")
         row = connection.execute(
             f"""
-            SELECT session_date, scientific_recording_valid FROM {parent_table}
+            SELECT phase, scientific_recording_valid, session_date FROM {parent_table}
             WHERE run_id = ? AND {parent_id_column} = ?
             """,
             (run_id, parent_id),
         ).fetchone()
         if row is None:
             raise KeyError(parent_id)
-        phase, phase_allows_scientific_evidence = self.prospective_phase_for_session(
-            run_id=run_id,
-            session=date.fromisoformat(str(row["session_date"])),
-            connection=connection,
-        )
+        phase = str(row["phase"])
+        if phase not in {
+            "engineering_transfer",
+            "option_development",
+            "untouched_confirmation",
+        }:
+            persisted_phase = connection.execute(
+                """
+                SELECT phase
+                FROM prospective_session_phase_v0
+                WHERE run_id = ? AND session_date = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id, str(row["session_date"])),
+            ).fetchone()
+            phase = (
+                str(persisted_phase["phase"])
+                if persisted_phase is not None
+                else self.prospective_phase_for_session(
+                    run_id=run_id,
+                    session=date.fromisoformat(str(row["session_date"])),
+                    connection=connection,
+                )[0]
+            )
         return (
             phase,
-            phase_allows_scientific_evidence and bool(row["scientific_recording_valid"]),
+            phase != "engineering_transfer" and bool(row["scientific_recording_valid"]),
         )
 
     @staticmethod
@@ -3543,7 +3557,10 @@ class FrozenRecorderRepository:
                 ),
             ).fetchone()
             if existing is not None:
-                if str(existing["payload_json"]) != encoded:
+                existing_payload = str(existing["payload_json"])
+                if existing_payload != encoded and not _is_legacy_accounting_payload(
+                    existing_payload
+                ):
                     raise ValueError("immutable quiet option risk observation differs")
                 return int(existing["id"])
             envelope_id = self.repository._insert_envelope(connection, metadata)
@@ -3608,7 +3625,10 @@ class FrozenRecorderRepository:
                 (observation_id, dte_bucket, horizon_label),
             ).fetchone()
             if existing is not None:
-                if str(existing["payload_json"]) != encoded:
+                existing_payload = str(existing["payload_json"])
+                if existing_payload != encoded and not _is_legacy_accounting_payload(
+                    existing_payload
+                ):
                     raise ValueError("immutable quiet option strategy comparison differs")
                 return int(existing["id"])
             envelope_id = self.repository._insert_envelope(connection, metadata)
@@ -4133,7 +4153,7 @@ class FrozenRecorderRepository:
         ],
         str,
     ]:
-        """Resolve V1 phase only from immutable aggregate boundary receipts."""
+        """Resolve V1 phase without making cross-vendor receipts an evidence gate."""
 
         with self.repository._connect() as connection:
             decisions = connection.execute(
@@ -4146,17 +4166,13 @@ class FrozenRecorderRepository:
             ).fetchall()
         by_kind = {str(row["receipt_kind"]): row for row in decisions}
         transfer = by_kind.get("transfer")
-        if transfer is None:
-            return "engineering_transfer", "engineering_transfer_pending"
-        transfer_decision = str(transfer["decision"])
-        transfer_last = transfer["cohort_last_session"]
-        if transfer_last is None or str(transfer_last) >= session.isoformat():
-            return "engineering_transfer", "engineering_transfer_pending"
-        if transfer_decision not in {
-            "opening_transfer_supported_without_recalibration",
-            "opening_transfer_supported_with_predictor_only_mapping",
-        }:
-            return "engineering_transfer", transfer_decision
+        transfer_decision = "cross_vendor_validation_not_configured"
+        if (
+            transfer is not None
+            and transfer["cohort_last_session"] is not None
+            and str(transfer["cohort_last_session"]) < session.isoformat()
+        ):
+            transfer_decision = str(transfer["decision"])
         development = by_kind.get("development")
         confirmation = by_kind.get("confirmation_start")
         if (
@@ -4904,8 +4920,8 @@ class FrozenRecorderRepository:
             )
             if prior_experiment_rows:
                 raise ValueError(
-                    "opening reversal V1.1 requires a fresh run so the "
-                    "20-session engineering transfer restarts"
+                    "opening reversal V1.1 requires a fresh run so its "
+                    "prospective experiment boundary remains distinct"
                 )
             return self._record_opening_reversal_activation_binding_v1(
                 connection,

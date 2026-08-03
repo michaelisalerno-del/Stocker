@@ -17,6 +17,11 @@ THETA_ATTRIBUTION_INCOMPLETE: Literal["THETA_ATTRIBUTION_INCOMPLETE"] = (
 )
 type MarginValue = float | Literal["MARGIN_UNAVAILABLE"]
 type GreekSource = Literal["bid", "ask", "last", "model"]
+type PrimaryCapitalBasis = Literal[
+    "premium_paid",
+    "cash_secured_capital",
+    "maximum_defined_risk",
+]
 
 
 class StrategyType(StrEnum):
@@ -258,8 +263,13 @@ class UnderlyingRiskAccountingRecord(BaseModel):
     net_gamma_exposure: float = Field(default=0.0, ge=0.0, le=0.0)
     net_vega_exposure: float = Field(default=0.0, ge=0.0, le=0.0)
     estimated_theta_contribution: float = Field(default=0.0, ge=0.0, le=0.0)
+    accounting_payload_version: Literal["underlying_risk_accounting_v1"] = (
+        "underlying_risk_accounting_v1"
+    )
+    market_data_source: Literal["ibkr"] = "ibkr"
     research_only: Literal[True] = True
     can_authorize_trade: Literal[False] = False
+    order_routing: Literal["disabled"] = "disabled"
 
 
 class StrategyComparisonRow(BaseModel):
@@ -268,6 +278,9 @@ class StrategyComparisonRow(BaseModel):
     strategy_id: str
     strategy_type: Literal["UNDERLYING_LONG", "SHORT_PUT", "BULL_PUT_SPREAD"]
     net_monetary_pnl: float | None
+    primary_capital_basis: str
+    primary_capital_amount: float
+    primary_roi: float | None
     underlying_roi: float | None
     premium_roi: float | None
     cash_secured_roi: float | None
@@ -288,6 +301,7 @@ class StrategyComparisonRow(BaseModel):
     maximum_drawdown: float
     expected_shortfall: float | None
     expected_shortfall_confidence: float = Field(default=0.95, ge=0.95, le=0.95)
+    market_data_source: Literal["ibkr"] = "ibkr"
     research_only: Literal[True] = True
     can_authorize_trade: Literal[False] = False
 
@@ -296,9 +310,13 @@ class StrategyComparisonReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     strategies: tuple[StrategyComparisonRow, StrategyComparisonRow, StrategyComparisonRow]
+    accounting_payload_version: Literal["strategy_comparison_v1"] = "strategy_comparison_v1"
     executable_pnl_is_primary: Literal[True] = True
     greek_attribution_is_diagnostic_only: Literal[True] = True
+    market_data_source: Literal["ibkr"] = "ibkr"
+    research_only: Literal[True] = True
     can_authorize_trade: Literal[False] = False
+    order_routing: Literal["disabled"] = "disabled"
 
 
 class OptionRiskAccountingRecord(BaseModel):
@@ -327,8 +345,14 @@ class OptionRiskAccountingRecord(BaseModel):
     ibkr_maintenance_margin: MarginValue
     maximum_observed_initial_margin: MarginValue
     maximum_observed_maintenance_margin: MarginValue
+    primary_capital_basis: PrimaryCapitalBasis
+    primary_capital_amount: float = Field(ge=0.0)
+    primary_roi: float | None
     gross_executable_pnl: float | None
     net_option_pnl: float | None
+    executable_entry_prices_by_leg: dict[str, float]
+    executable_exit_prices_by_leg: dict[str, float | None]
+    executable_pnl_is_primary: Literal[True] = True
     midpoint_pnl: float | None
     model_price_pnl: float | None
     bid_ask_cost: float | None
@@ -362,8 +386,17 @@ class OptionRiskAccountingRecord(BaseModel):
     )
     greek_attribution_interval: GreekAttribution | None
     greek_residual: float | None
+    greek_attribution_diagnostic_only: Literal[True] = True
+    greek_attribution_performed: bool
+    maximum_adverse_excursion: float = Field(ge=0.0)
+    maximum_drawdown: float = Field(ge=0.0)
+    unexplained_quote_gap: bool
+    quote_quality_flags: tuple[str, ...]
+    accounting_payload_version: Literal["option_risk_accounting_v1"] = "option_risk_accounting_v1"
+    market_data_source: Literal["ibkr"] = "ibkr"
     research_only: Literal[True] = True
     can_authorize_trade: Literal[False] = False
+    order_routing: Literal["disabled"] = "disabled"
 
 
 def _finite_price(value: float | None) -> float | None:
@@ -484,6 +517,23 @@ def _liquidation_value(
             return None
         value += price * leg.multiplier * leg.signed_contract_quantity
     return value
+
+
+def _executable_prices_by_leg(
+    strategy: OptionStrategy,
+    quotes: dict[str, OptionLegQuote],
+    *,
+    entry: bool,
+) -> dict[str, float | None]:
+    prices: dict[str, float | None] = {}
+    for leg in strategy.legs:
+        quote = quotes[leg.leg_id]
+        if entry:
+            raw_price = quote.ask if leg.signed_contract_quantity > 0 else quote.bid
+        else:
+            raw_price = quote.bid if leg.signed_contract_quantity > 0 else quote.ask
+        prices[leg.leg_id] = _finite_price(raw_price)
+    return prices
 
 
 def _midpoint_change(
@@ -731,8 +781,14 @@ def calculate_option_strategy_path(
     strategy: OptionStrategy,
     snapshots: tuple[OptionStrategySnapshot, ...],
     maximum_attribution_gap: timedelta,
+    include_greek_attribution: bool = False,
 ) -> tuple[OptionRiskAccountingRecord, ...]:
-    """Calculate immutable marks without consulting an account or execution surface."""
+    """Calculate executable marks without consulting an account or execution surface.
+
+    Raw source-separated Greeks are always retained.  Taylor-path attribution
+    is optional because it is diagnostic and is not required to finalize the
+    executable P&L record.
+    """
 
     if not snapshots:
         raise ValueError("option strategy path requires at least one observation")
@@ -749,6 +805,10 @@ def calculate_option_strategy_path(
     entry_cash_flow = _entry_cash_flow(strategy, entry_quotes)
     if entry_cash_flow is None:
         raise ValueError("strategy path requires every executable entry quote")
+    entry_price_values = _executable_prices_by_leg(strategy, entry_quotes, entry=True)
+    executable_entry_prices = {
+        leg_id: price for leg_id, price in entry_price_values.items() if price is not None
+    }
     gross_credit = max(entry_cash_flow, 0.0)
     gross_debit = max(-entry_cash_flow, 0.0)
     costs = strategy.costs.total
@@ -768,20 +828,25 @@ def calculate_option_strategy_path(
         spread_max_loss = None
         defined_risk_capital = None
         reserved_capital = cash_secured_capital
+        primary_capital_basis: PrimaryCapitalBasis = "cash_secured_capital"
     elif strategy.strategy_type is StrategyType.BULL_PUT_SPREAD:
         short_leg = next(item for item in strategy.legs if item.signed_contract_quantity < 0)
         long_leg = next(item for item in strategy.legs if item.signed_contract_quantity > 0)
         contracts = abs(short_leg.signed_contract_quantity)
         cash_secured_capital = None
         total_premium_paid = None
-        spread_max_loss = (
-            (short_leg.strike - long_leg.strike) * short_leg.multiplier * contracts
-            - gross_credit
-            + costs
+        spread_max_loss = max(
+            0.0,
+            (
+                (short_leg.strike - long_leg.strike) * short_leg.multiplier * contracts
+                - gross_credit
+                + costs
+            ),
         )
         maximum_loss = spread_max_loss
         defined_risk_capital = spread_max_loss
         reserved_capital = defined_risk_capital
+        primary_capital_basis = "maximum_defined_risk"
     elif strategy.strategy_type is StrategyType.DEFINED_RISK_OPTION:
         cash_secured_capital = None
         total_premium_paid = None
@@ -795,6 +860,7 @@ def calculate_option_strategy_path(
         spread_max_loss = None
         defined_risk_capital = maximum_loss
         reserved_capital = defined_risk_capital
+        primary_capital_basis = "maximum_defined_risk"
     else:
         cash_secured_capital = None
         total_premium_paid = gross_debit
@@ -802,16 +868,20 @@ def calculate_option_strategy_path(
         spread_max_loss = None
         defined_risk_capital = None
         reserved_capital = total_premium_paid
+        primary_capital_basis = "premium_paid"
+    assert reserved_capital is not None and reserved_capital >= 0.0
+    primary_capital_amount = reserved_capital
     records: list[OptionRiskAccountingRecord] = []
+    observed_net_pnls: list[float] = []
     observed_initial_margins: list[float] = []
     observed_maintenance_margins: list[float] = []
-    theta_complete = True
+    theta_complete = include_greek_attribution
     cumulative_theta = 0.0
     previous_snapshot: OptionStrategySnapshot | None = None
     previous_position_greeks: dict[GreekSource, PositionGreeks] | None = None
     cumulative_greek_contributions = 0.0
     cumulative_mark_change = 0.0
-    greek_attribution_complete = True
+    greek_attribution_complete = include_greek_attribution
     for index, snapshot in enumerate(ordered):
         quotes = _quote_map(strategy, snapshot)
         liquidation = _liquidation_value(strategy, quotes)
@@ -850,7 +920,7 @@ def calculate_option_strategy_path(
         current_theta = None if model_greeks is None else model_greeks.theta
         theta_interval: float | None = None
         interval_attribution: GreekAttribution | None = None
-        if index == 0:
+        if include_greek_attribution and index == 0:
             if current_theta is None or not _model_theta_timestamp_complete(
                 strategy,
                 snapshot,
@@ -858,7 +928,7 @@ def calculate_option_strategy_path(
                 maximum_attribution_gap,
             ):
                 theta_complete = False
-        else:
+        elif include_greek_attribution:
             assert previous_snapshot is not None and previous_position_greeks is not None
             elapsed = snapshot.observed_at - previous_snapshot.observed_at
             previous_model = previous_position_greeks.get("model")
@@ -908,7 +978,31 @@ def calculate_option_strategy_path(
                 cumulative_mark_change += interval_attribution.model_or_midpoint_change
             else:
                 greek_attribution_complete = False
-        model_price_pnl = _model_price_change(strategy, entry_quotes, quotes)
+        model_price_pnl = (
+            _model_price_change(strategy, entry_quotes, quotes)
+            if include_greek_attribution
+            else None
+        )
+        executable_exit_prices = _executable_prices_by_leg(strategy, quotes, entry=False)
+        quality_flags: list[str] = []
+        if snapshot.unexplained_quote_gap:
+            quality_flags.append("unexplained_quote_gap")
+        for leg_id, price in executable_exit_prices.items():
+            quote = quotes[leg_id]
+            if price is None:
+                quality_flags.append(f"missing_executable_exit_quote:{leg_id}")
+            if quote.market_data_status.lower() != "live":
+                quality_flags.append(f"non_live_market_data:{leg_id}:{quote.market_data_status}")
+            quote_age = (snapshot.observed_at - quote.quote_timestamp).total_seconds()
+            if quote_age < 0.0:
+                quality_flags.append(f"quote_timestamp_after_observation:{leg_id}")
+        if net_pnl is not None:
+            observed_net_pnls.append(net_pnl)
+        maximum_adverse_excursion = max(
+            0.0,
+            -min((0.0, *observed_net_pnls)),
+        )
+        maximum_drawdown = _maximum_drawdown(tuple(observed_net_pnls))
         records.append(
             OptionRiskAccountingRecord(
                 strategy_id=strategy.strategy_id,
@@ -936,8 +1030,13 @@ def calculate_option_strategy_path(
                 ibkr_maintenance_margin=current_maintenance_margin,
                 maximum_observed_initial_margin=maximum_initial_margin,
                 maximum_observed_maintenance_margin=maximum_maintenance_margin,
+                primary_capital_basis=primary_capital_basis,
+                primary_capital_amount=primary_capital_amount,
+                primary_roi=_safe_ratio(net_pnl, primary_capital_amount),
                 gross_executable_pnl=gross_pnl,
                 net_option_pnl=net_pnl,
+                executable_entry_prices_by_leg=executable_entry_prices,
+                executable_exit_prices_by_leg=executable_exit_prices,
                 midpoint_pnl=midpoint_pnl,
                 model_price_pnl=model_price_pnl,
                 bid_ask_cost=(
@@ -1037,6 +1136,11 @@ def calculate_option_strategy_path(
                     if index > 0 and greek_attribution_complete
                     else None
                 ),
+                greek_attribution_performed=include_greek_attribution,
+                maximum_adverse_excursion=maximum_adverse_excursion,
+                maximum_drawdown=maximum_drawdown,
+                unexplained_quote_gap=snapshot.unexplained_quote_gap,
+                quote_quality_flags=tuple(quality_flags),
             )
         )
         previous_snapshot = snapshot
@@ -1164,6 +1268,9 @@ def build_strategy_comparison_report(
         strategy_id=underlying_last.strategy_id,
         strategy_type="UNDERLYING_LONG",
         net_monetary_pnl=underlying_last.net_underlying_pnl,
+        primary_capital_basis="underlying_notional",
+        primary_capital_amount=underlying_last.entry_underlying_notional,
+        primary_roi=underlying_last.underlying_roi,
         underlying_roi=underlying_last.underlying_roi,
         premium_roi=None,
         cash_secured_roi=None,
@@ -1196,6 +1303,9 @@ def build_strategy_comparison_report(
             strategy_id=last.strategy_id,
             strategy_type=strategy_type,
             net_monetary_pnl=last.net_option_pnl,
+            primary_capital_basis=last.primary_capital_basis,
+            primary_capital_amount=last.primary_capital_amount,
+            primary_roi=last.primary_roi,
             underlying_roi=None,
             premium_roi=last.premium_roi,
             cash_secured_roi=last.cash_secured_roi,

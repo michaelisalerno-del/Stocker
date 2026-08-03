@@ -465,7 +465,7 @@ class IBKRCallbackNormalizer:
             source = str(payload.get("computation_source", "unknown"))
             if source in {"model", "last", "bid", "ask"}:
                 source_values = cast(
-                    dict[str, dict[str, float | None]],
+                    dict[str, dict[str, float | str | None]],
                     state.setdefault("option_computation_by_source", {}),
                 )
                 snapshot = dict(source_values.get(source, {}))
@@ -482,6 +482,16 @@ class IBKRCallbackNormalizer:
                     snapshot[source_name] = value
                     if source == "model":
                         state[target_name] = value
+                snapshot["greek_timestamp_utc"] = received.astimezone(UTC).isoformat()
+                source_market_data_type = payload.get(
+                    "market_data_type",
+                    state.get("market_data_type"),
+                )
+                snapshot["market_data_status"] = (
+                    None
+                    if source_market_data_type is None
+                    else str(source_market_data_type)
+                )
                 source_values[source] = snapshot
         elif field == "market_data_type":
             state["market_data_type"] = payload.get("value")
@@ -527,7 +537,7 @@ class IBKRCallbackNormalizer:
                     )
                 ),
                 option_computation_by_source=cast(
-                    dict[str, dict[str, float | None]],
+                    dict[str, dict[str, float | str | None]],
                     state.get("option_computation_by_source", {}),
                 ),
                 quote_attributes=cast(

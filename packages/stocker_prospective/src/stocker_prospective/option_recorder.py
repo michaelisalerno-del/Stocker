@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from stocker_prospective.database import EvidenceMetadata
 from stocker_prospective.event_ingest import StreamKind, StreamOwner
-from stocker_prospective.events import OptionQuoteEvent
+from stocker_prospective.events import OptionQuoteEvent, UnderlyingLevel1QuoteEvent
 from stocker_prospective.ibkr import IBKRMarketDataAdapter
 from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_prospective.market_data import MarketDataType
@@ -28,6 +28,19 @@ from stocker_prospective.option_ledger import (
     retrospective_oracle,
     straddle_outcome,
 )
+from stocker_prospective.option_risk_accounting import (
+    OptionLeg,
+    OptionStrategy,
+    OptionStrategySnapshot,
+    StrategyType,
+    TransactionCosts,
+    UnderlyingQuoteSnapshot,
+    UnderlyingStrategy,
+    build_strategy_comparison_report,
+    calculate_option_strategy_path,
+    calculate_underlying_strategy_path,
+    option_leg_quote_from_event,
+)
 from stocker_prospective.options import DteBucket
 from stocker_prospective.partition_store import PartitionedEventStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
@@ -38,6 +51,7 @@ from stocker_prospective.safety import (
 from stocker_prospective.short_premium_shadow import (
     CreditShadowOutcome,
     DefinedRiskStructure,
+    StructureType,
     calculate_credit_shadow,
     select_delta_iron_condor,
     select_fixed_width_credit_spread,
@@ -234,13 +248,36 @@ class BoundedOptionRecorder:
         underlying_path_provider: (
             Callable[[str, datetime, datetime], tuple[float, ...]] | None
         ) = None,
+        underlying_quote_provider: (
+            Callable[
+                [str, datetime, datetime],
+                tuple[UnderlyingLevel1QuoteEvent, ...],
+            ]
+            | None
+        ) = None,
         underlying_halt_provider: Callable[[str, datetime, datetime], bool] | None = None,
         eviction_sink: Callable[[str, str, datetime], bool] | None = None,
+        configured_commission_per_contract: float = 0.65,
+        configured_regulatory_fee_per_contract: float = 0.0,
+        configured_exchange_fee_per_contract: float = 0.0,
+        underlying_transaction_costs: TransactionCosts | None = None,
+        maximum_greek_attribution_gap: timedelta = timedelta(minutes=5),
     ) -> None:
         if maximum_quote_age <= timedelta(0):
             raise ValueError("maximum_quote_age must be positive")
         if recording_duration < timedelta(minutes=30):
             raise ValueError("option recording must continue for at least thirty minutes")
+        if any(
+            value < 0.0
+            for value in (
+                configured_commission_per_contract,
+                configured_regulatory_fee_per_contract,
+                configured_exchange_fee_per_contract,
+            )
+        ):
+            raise ValueError("configured option transaction costs cannot be negative")
+        if maximum_greek_attribution_gap <= timedelta(0):
+            raise ValueError("maximum Greek attribution gap must be positive")
         self.adapter = adapter
         self.subscriptions = subscriptions
         self.repository = repository
@@ -251,8 +288,20 @@ class BoundedOptionRecorder:
         self.stream_unregistration_sink = stream_unregistration_sink
         self.request_pacer = request_pacer
         self.underlying_path_provider = underlying_path_provider
+        self.underlying_quote_provider = underlying_quote_provider
         self.underlying_halt_provider = underlying_halt_provider
         self.eviction_sink = eviction_sink
+        self.configured_commission_per_contract = configured_commission_per_contract
+        self.configured_regulatory_fee_per_contract = (
+            configured_regulatory_fee_per_contract
+        )
+        self.configured_exchange_fee_per_contract = configured_exchange_fee_per_contract
+        self.underlying_transaction_costs = (
+            TransactionCosts()
+            if underlying_transaction_costs is None
+            else underlying_transaction_costs
+        )
+        self.maximum_greek_attribution_gap = maximum_greek_attribution_gap
         self._active: dict[tuple[str, int], _ActiveOption] = {}
         self._planned_contracts_by_episode: dict[str, tuple[OptionContract, ...]] = {}
         self._selection_roles_by_episode: dict[
@@ -1068,6 +1117,293 @@ class BoundedOptionRecorder:
             quality_flags=tuple(sorted(flags)),
         )
 
+    def _option_transaction_costs(self, leg_count: int) -> TransactionCosts:
+        round_trip_legs = leg_count * 2
+        return TransactionCosts(
+            commissions=self.configured_commission_per_contract * round_trip_legs,
+            regulatory_fees=(
+                self.configured_regulatory_fee_per_contract * round_trip_legs
+            ),
+            exchange_fees=self.configured_exchange_fee_per_contract * round_trip_legs,
+        )
+
+    def _accounting_snapshots(
+        self,
+        *,
+        strategy: OptionStrategy,
+        quotes: tuple[OptionQuoteEvent, ...],
+        entry_timestamp: datetime,
+        target_timestamp: datetime,
+        subscription_gap_spans_horizon: bool,
+    ) -> tuple[OptionStrategySnapshot, ...]:
+        con_id_by_leg = {
+            leg.leg_id: int(leg.leg_id.removeprefix("conid:"))
+            for leg in strategy.legs
+        }
+        leg_by_con_id = {
+            con_id_by_leg[leg.leg_id]: leg for leg in strategy.legs
+        }
+        relevant = tuple(
+            quote for quote in quotes if quote.con_id in leg_by_con_id
+        )
+
+        def entry_price(quote: OptionQuoteEvent) -> float | None:
+            leg = leg_by_con_id[quote.con_id]
+            return quote.ask if leg.signed_contract_quantity > 0 else quote.bid
+
+        entry_eligible = tuple(
+            quote
+            for quote in relevant
+            if (price := entry_price(quote)) is not None
+            and math.isfinite(price)
+            and price >= 0.0
+        )
+        entry_surface = self._surface_at(
+            entry_eligible,
+            target=entry_timestamp,
+            entry=True,
+        )
+        entry_by_con_id = {quote.con_id: quote for quote in entry_surface}
+        if set(entry_by_con_id) != set(con_id_by_leg.values()):
+            return ()
+        entry_observed_at = max(quote.ordering_timestamp for quote in entry_surface)
+        snapshots: dict[datetime, OptionStrategySnapshot] = {
+            entry_observed_at: OptionStrategySnapshot(
+                observed_at=entry_observed_at,
+                legs=tuple(
+                    option_leg_quote_from_event(
+                        entry_by_con_id[con_id_by_leg[leg.leg_id]],
+                        leg_id=leg.leg_id,
+                    )
+                    for leg in strategy.legs
+                ),
+                unexplained_quote_gap=subscription_gap_spans_horizon,
+            )
+        }
+        observation_times = sorted(
+            {
+                quote.ordering_timestamp
+                for quote in relevant
+                if entry_observed_at < quote.ordering_timestamp <= target_timestamp
+            }
+        )
+        for observed_at in observation_times:
+            surface = self._surface_at(relevant, target=observed_at, entry=False)
+            by_con_id = {quote.con_id: quote for quote in surface}
+            if set(by_con_id) != set(con_id_by_leg.values()):
+                continue
+            snapshots[observed_at] = OptionStrategySnapshot(
+                observed_at=observed_at,
+                legs=tuple(
+                    option_leg_quote_from_event(
+                        by_con_id[con_id_by_leg[leg.leg_id]],
+                        leg_id=leg.leg_id,
+                    )
+                    for leg in strategy.legs
+                ),
+                unexplained_quote_gap=subscription_gap_spans_horizon,
+            )
+        return tuple(snapshots[timestamp] for timestamp in sorted(snapshots))
+
+    def _record_quiet_risk_accounting(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        symbol: str,
+        bucket: DteBucket,
+        horizon_label: str,
+        horizon_minutes: int,
+        entry_timestamp: datetime,
+        target_timestamp: datetime,
+        atm_call: OptionContract | None,
+        atm_put: OptionContract | None,
+        put_spread: DefinedRiskStructure,
+        quotes: tuple[OptionQuoteEvent, ...],
+        subscription_gap_spans_horizon: bool,
+    ) -> None:
+        risk_sink = getattr(
+            self.repository,
+            "record_quiet_option_risk_observation",
+            None,
+        )
+        if not callable(risk_sink):
+            return
+
+        strategies: list[OptionStrategy] = []
+        for label, contract in (("long-call", atm_call), ("long-put", atm_put)):
+            if contract is None or contract.con_id is None:
+                continue
+            strategies.append(
+                OptionStrategy(
+                    strategy_id=(
+                        f"{observation_id}:{bucket.value}:{horizon_label}:{label}"
+                    ),
+                    strategy_type=StrategyType.LONG_OPTION,
+                    legs=(
+                        OptionLeg(
+                            leg_id=f"conid:{contract.con_id}",
+                            right=contract.right,
+                            strike=contract.strike,
+                            multiplier=contract.multiplier,
+                            signed_contract_quantity=1,
+                        ),
+                    ),
+                    costs=self._option_transaction_costs(1),
+                )
+            )
+        if atm_put is not None and atm_put.con_id is not None:
+            strategies.append(
+                OptionStrategy(
+                    strategy_id=(
+                        f"{observation_id}:{bucket.value}:{horizon_label}:short-put"
+                    ),
+                    strategy_type=StrategyType.SHORT_PUT,
+                    legs=(
+                        OptionLeg(
+                            leg_id=f"conid:{atm_put.con_id}",
+                            right="P",
+                            strike=atm_put.strike,
+                            multiplier=atm_put.multiplier,
+                            signed_contract_quantity=-1,
+                        ),
+                    ),
+                    costs=self._option_transaction_costs(1),
+                )
+            )
+        if put_spread.available:
+            strategies.append(
+                OptionStrategy(
+                    strategy_id=(
+                        f"{observation_id}:{bucket.value}:{horizon_label}:bull-put-spread"
+                    ),
+                    strategy_type=StrategyType.BULL_PUT_SPREAD,
+                    legs=tuple(
+                        OptionLeg(
+                            leg_id=f"conid:{int(leg.contract.con_id or 0)}",
+                            right="P",
+                            strike=leg.contract.strike,
+                            multiplier=leg.contract.multiplier,
+                            signed_contract_quantity=(-1 if leg.side == "short" else 1),
+                        )
+                        for leg in put_spread.legs
+                    ),
+                    costs=self._option_transaction_costs(len(put_spread.legs)),
+                )
+            )
+
+        calculated_paths: dict[
+            StrategyType,
+            tuple[Any, ...],
+        ] = {}
+        for strategy in strategies:
+            snapshots = self._accounting_snapshots(
+                strategy=strategy,
+                quotes=quotes,
+                entry_timestamp=entry_timestamp,
+                target_timestamp=target_timestamp,
+                subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+            )
+            if not snapshots:
+                continue
+            path = calculate_option_strategy_path(
+                strategy=strategy,
+                snapshots=snapshots,
+                maximum_attribution_gap=self.maximum_greek_attribution_gap,
+            )
+            calculated_paths[strategy.strategy_type] = path
+            for record in path:
+                risk_sink(
+                    metadata,
+                    observation_id=observation_id,
+                    dte_bucket=bucket.value,
+                    horizon_label=horizon_label,
+                    record=record,
+                )
+
+        if self.underlying_quote_provider is None:
+            return
+        raw_underlying = tuple(
+            quote
+            for quote in self.underlying_quote_provider(
+                symbol,
+                entry_timestamp,
+                target_timestamp,
+            )
+            if entry_timestamp <= quote.ordering_timestamp <= target_timestamp
+            and quote.quote_valid
+        )
+        underlying_snapshots = tuple(
+            UnderlyingQuoteSnapshot(
+                observed_at=quote.ordering_timestamp,
+                quote_timestamp=quote.ordering_timestamp,
+                bid=quote.bid,
+                ask=quote.ask,
+                last=quote.last,
+                market_data_status=quote.market_data_type.value,
+            )
+            for quote in sorted(
+                raw_underlying,
+                key=lambda item: (
+                    item.ordering_timestamp,
+                    item.source_sequence,
+                    item.event_id,
+                ),
+            )
+        )
+        if not underlying_snapshots or underlying_snapshots[0].ask is None:
+            return
+        reference_multiplier = (
+            atm_put.multiplier
+            if atm_put is not None
+            else atm_call.multiplier
+            if atm_call is not None
+            else 1
+        )
+        underlying_path = calculate_underlying_strategy_path(
+            strategy=UnderlyingStrategy(
+                strategy_id=(
+                    f"{observation_id}:{bucket.value}:{horizon_label}:underlying-long"
+                ),
+                quantity=reference_multiplier,
+                costs=self.underlying_transaction_costs,
+            ),
+            snapshots=underlying_snapshots,
+        )
+        for underlying_record in underlying_path:
+            risk_sink(
+                metadata,
+                observation_id=observation_id,
+                dte_bucket=bucket.value,
+                horizon_label=horizon_label,
+                record=underlying_record,
+            )
+        short_put_path = calculated_paths.get(StrategyType.SHORT_PUT)
+        bull_put_path = calculated_paths.get(StrategyType.BULL_PUT_SPREAD)
+        comparison_sink = getattr(
+            self.repository,
+            "record_quiet_option_strategy_comparison",
+            None,
+        )
+        if (
+            not callable(comparison_sink)
+            or short_put_path is None
+            or bull_put_path is None
+        ):
+            return
+        comparison_sink(
+            metadata,
+            observation_id=observation_id,
+            dte_bucket=bucket.value,
+            horizon_label=horizon_label,
+            horizon_minutes=horizon_minutes,
+            report=build_strategy_comparison_report(
+                underlying_long=underlying_path,
+                short_put=short_put_path,
+                bull_put_spread=bull_put_path,
+            ),
+        )
+
     def _record_quiet_bucket_outcomes(
         self,
         metadata: EvidenceMetadata,
@@ -1422,6 +1758,26 @@ class BoundedOptionRecorder:
                     ),
                     quality_flags=tuple(sorted(flags)),
                 )
+            put_spread = next(
+                structure
+                for structure in structures
+                if structure.structure_type is StructureType.PUT_CREDIT_SPREAD
+            )
+            self._record_quiet_risk_accounting(
+                metadata,
+                observation_id=observation_id,
+                symbol=symbol,
+                bucket=bucket,
+                horizon_label=horizon_label,
+                horizon_minutes=minutes,
+                entry_timestamp=entry_timestamp,
+                target_timestamp=target,
+                atm_call=atm_call,
+                atm_put=atm_put,
+                put_spread=put_spread,
+                quotes=quotes,
+                subscription_gap_spans_horizon=subscription_gap_spans_horizon,
+            )
 
     def finalise_episode(
         self,

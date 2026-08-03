@@ -1995,6 +1995,7 @@ def build_frozen_prospective_application(
         stream_unregistration_sink=normalizer.unregister,
         request_pacer=pace_request,
         underlying_path_provider=live.underlying_price_path,
+        underlying_quote_provider=live.underlying_quote_path,
         underlying_halt_provider=live.underlying_halted_in_window,
     )
     live.option_quote_sink = option_recorder.record_quote

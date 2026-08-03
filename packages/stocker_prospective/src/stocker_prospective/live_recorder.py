@@ -941,6 +941,38 @@ class FrozenM1CLiveRecorder:
         points.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
         return tuple(point[3] for point in points)
 
+    def underlying_quote_path(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[UnderlyingLevel1QuoteEvent, ...]:
+        """Return retained executable-side Level-I observations in event order."""
+
+        if (
+            start.tzinfo is None
+            or start.utcoffset() is None
+            or end.tzinfo is None
+            or end.utcoffset() is None
+        ):
+            raise ValueError("underlying quote path timestamps must be timezone-aware")
+        if end < start:
+            raise ValueError("underlying quote path cannot end before it starts")
+        return tuple(
+            sorted(
+                (
+                    quote
+                    for quote in self._quotes.get(symbol, ())
+                    if start <= quote.ordering_timestamp <= end
+                ),
+                key=lambda item: (
+                    item.ordering_timestamp,
+                    item.source_sequence,
+                    item.event_id,
+                ),
+            )
+        )
+
     def underlying_halted_in_window(
         self,
         symbol: str,

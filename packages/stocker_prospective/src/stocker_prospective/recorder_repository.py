@@ -58,6 +58,11 @@ from stocker_prospective.option_ledger import (
     OptionContractPlan,
     ShadowOptionOutcome,
 )
+from stocker_prospective.option_risk_accounting import (
+    OptionRiskAccountingRecord,
+    StrategyComparisonReport,
+    UnderlyingRiskAccountingRecord,
+)
 from stocker_prospective.partition_store import PartitionWriteResult, sha256_path
 from stocker_prospective.quality_report import SessionQualityReport
 from stocker_prospective.quiet_state import (
@@ -3487,6 +3492,143 @@ class FrozenRecorderRepository:
                     encoded,
                     cohort_phase,
                     int(scientific_option_evidence),
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_quiet_option_risk_observation(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        dte_bucket: str,
+        horizon_label: str,
+        record: OptionRiskAccountingRecord | UnderlyingRiskAccountingRecord,
+    ) -> int:
+        """Append one record-only capital/Greek observation outside policy admission."""
+
+        self._validate(metadata)
+        if dte_bucket not in {"0DTE", "1DTE", "3_TO_5_DTE"}:
+            raise ValueError("option risk observation DTE bucket is invalid")
+        if horizon_label not in {"5m", "10m", "15m", "30m", "60m", "session_end"}:
+            raise ValueError("option risk observation horizon is not frozen")
+        payload = record.model_dump(mode="json")
+        encoded = _json(payload)
+        strategy_type = str(record.strategy_type)
+        with self.repository._connect() as connection:
+            parent = connection.execute(
+                """
+                SELECT 1 FROM quiet_state_observation_v0
+                WHERE run_id = ? AND observation_id = ?
+                """,
+                (metadata.run_id, observation_id),
+            ).fetchone()
+            if parent is None:
+                raise ValueError("quiet option risk observation parent is unavailable")
+            existing = connection.execute(
+                """
+                SELECT id, payload_json FROM quiet_option_risk_observation_v0
+                WHERE observation_id = ? AND candidate_id = ?
+                  AND dte_bucket = ? AND horizon_label = ?
+                  AND observed_at_utc = ?
+                """,
+                (
+                    observation_id,
+                    record.strategy_id,
+                    dte_bucket,
+                    horizon_label,
+                    record.observed_at.isoformat(),
+                ),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["payload_json"]) != encoded:
+                    raise ValueError("immutable quiet option risk observation differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_option_risk_observation_v0(
+                    envelope_id, run_id, observation_id, candidate_id,
+                    strategy_type, dte_bucket, horizon_label, observed_at_utc,
+                    payload_json, executable_pnl_primary, policy_gate,
+                    can_authorize_trade, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    record.strategy_id,
+                    strategy_type,
+                    dte_bucket,
+                    horizon_label,
+                    record.observed_at.isoformat(),
+                    encoded,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_quiet_option_strategy_comparison(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        dte_bucket: str,
+        horizon_label: str,
+        horizon_minutes: int | None,
+        report: StrategyComparisonReport,
+    ) -> int:
+        """Persist the read-only underlying/short-put/bull-put comparison."""
+
+        self._validate(metadata)
+        if dte_bucket not in {"0DTE", "1DTE", "3_TO_5_DTE"}:
+            raise ValueError("option comparison DTE bucket is invalid")
+        if horizon_label not in {"5m", "10m", "15m", "30m", "60m", "session_end"}:
+            raise ValueError("option comparison horizon is not frozen")
+        encoded = _json(report.model_dump(mode="json"))
+        with self.repository._connect() as connection:
+            parent = connection.execute(
+                """
+                SELECT 1 FROM quiet_state_observation_v0
+                WHERE run_id = ? AND observation_id = ?
+                """,
+                (metadata.run_id, observation_id),
+            ).fetchone()
+            if parent is None:
+                raise ValueError("quiet option comparison parent is unavailable")
+            existing = connection.execute(
+                """
+                SELECT id, payload_json FROM quiet_option_strategy_comparison_v0
+                WHERE observation_id = ? AND dte_bucket = ? AND horizon_label = ?
+                """,
+                (observation_id, dte_bucket, horizon_label),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["payload_json"]) != encoded:
+                    raise ValueError("immutable quiet option strategy comparison differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_option_strategy_comparison_v0(
+                    envelope_id, run_id, observation_id, dte_bucket,
+                    horizon_label, horizon_minutes, payload_json,
+                    executable_pnl_primary, greek_attribution_diagnostic_only,
+                    policy_gate, can_authorize_trade, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 0, 0, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    dte_bucket,
+                    horizon_label,
+                    horizon_minutes,
+                    encoded,
                     self.claims_json,
                 ),
             )

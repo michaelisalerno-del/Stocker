@@ -238,7 +238,7 @@ class OptionQuoteEvent(RawMarketEvent):
     open_interest: float | None = None
     option_computation_by_source: dict[
         str,
-        dict[str, float | None],
+        dict[str, float | str | None],
     ] = Field(default_factory=dict)
     quote_attributes: dict[str, bool | int | float | str | None] = Field(default_factory=dict)
 

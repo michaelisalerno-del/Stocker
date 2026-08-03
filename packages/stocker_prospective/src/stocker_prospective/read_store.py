@@ -1991,6 +1991,22 @@ class ProspectiveReadStore:
                 """,
                 (run_id, observation_id),
             ).fetchall()
+            risk_observations = connection.execute(
+                """
+                SELECT * FROM quiet_option_risk_observation_v0
+                WHERE run_id = ? AND observation_id = ?
+                ORDER BY dte_bucket, horizon_label, candidate_id, observed_at_utc
+                """,
+                (run_id, observation_id),
+            ).fetchall()
+            strategy_comparisons = connection.execute(
+                """
+                SELECT * FROM quiet_option_strategy_comparison_v0
+                WHERE run_id = ? AND observation_id = ?
+                ORDER BY dte_bucket, horizon_minutes
+                """,
+                (run_id, observation_id),
+            ).fetchall()
         return {
             "episode": self._decoded(observation),
             "frozen_thresholds": {
@@ -2002,6 +2018,8 @@ class ProspectiveReadStore:
             "underlying_path": [self._decoded(row) for row in underlying_path],
             "microstructure": [self._decoded(row) for row in microstructure],
             "shadow_structures": [self._decoded(row) for row in shadows],
+            "risk_observations": [self._decoded(row) for row in risk_observations],
+            "strategy_comparisons": [self._decoded(row) for row in strategy_comparisons],
         }
 
     def quiet_state_episode_options_v0(

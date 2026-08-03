@@ -63,6 +63,10 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
     assert "SuccessExitStatus=143" in unit
+    # IBKR transfers its authenticated auto-restart session to a child process.
+    # The service must remain alive for that child instead of killing its cgroup.
+    assert "ExitType=cgroup" in unit
+    assert "ExitType=main" not in unit
     assert "Restart=always" in unit
     assert "RestartSec=1" in unit
     assert "RestartSec=20" not in unit
@@ -544,6 +548,8 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "manual IBKR username, password, and 2FA" in runbook
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
+    assert "ExitType=cgroup" in runbook
+    assert "authenticated handoff child" in runbook
     assert "ufw default deny incoming" in runbook
     assert 'case "$IBKR_GATEWAY_PORT" in' in runbook
     assert "sudo ufw insert 1 deny in" in runbook

@@ -186,3 +186,13 @@ def test_capability_requests_are_market_data_only() -> None:
         ("current_time", ()),
         ("depth_exchanges", ()),
     ]
+
+
+def test_disconnected_server_version_is_absent_instead_of_crashing() -> None:
+    class DisconnectedClient:
+        def serverVersion(self) -> None:  # noqa: N802
+            return None
+
+    adapter = adapter_with(DisconnectedClient())
+
+    assert adapter.server_version() is None

@@ -553,11 +553,13 @@ database, commands, or logs. Choose the paper session. In Gateway API settings:
 5. Configure **Auto restart** for 23:45 UTC. Plan for manual authentication
    again after the weekly reset.
 
-The systemd unit uses `Restart=always` because Gateway reports its scheduled
-daily auto-restart as a successful process exit. This lets systemd relaunch the
-official application after `RestartSec=1`, while its broker-managed restart
-session is still resumable. Do not increase that delay: the restart credential
-is short-lived. An operator-issued `systemctl stop` does not trigger a restart.
+The systemd unit uses `ExitType=cgroup` because Gateway's scheduled restart
+passes its short-lived broker session to an authenticated handoff child before
+the original Java process exits. Tracking the whole cgroup keeps the unit active
+and prevents systemd's control-group cleanup from killing that child. The unit's
+`Restart=always` and `RestartSec=1` remain a fallback only when the entire cgroup
+exits without a surviving handoff process. An operator-issued `systemctl stop`
+does not trigger a restart.
 The read-only readiness timer checks the authenticated upstream port at 23:46
 UTC, retrying for up to two minutes without starting, stopping, or restarting
 Gateway. A weekly broker reset may still require manual authentication.
@@ -1558,7 +1560,7 @@ evidence without its own audit.
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
-| Gateway process restarted but API port is absent | The Java process and loopback proxy are not proof of an authenticated API session. Inspect `stocker-ibgateway-daily-readiness.service` and confirm the configured upstream port is listening. Confirm the unit still has `Restart=always` and `RestartSec=1`; a longer delay can outlive the short broker restart credential. Authenticate only in the official Gateway window, keep Read-Only API and localhost-only enabled, and confirm `AutoRestart=1`. A broker weekly reset can still require manual credentials and 2FA; never store them in Stocker. |
+| Gateway process restarted but API port is absent | The Java process and loopback proxy are not proof of an authenticated API session. Inspect `stocker-ibgateway-daily-readiness.service` and confirm the configured upstream port is listening. Confirm the unit still has `ExitType=cgroup`, `Restart=always`, and `RestartSec=1`; default main-process exit semantics kill the authenticated handoff child. Authenticate only in the official Gateway window, keep Read-Only API and localhost-only enabled, and confirm `AutoRestart=1`. A broker weekly reset can still require manual credentials and 2FA; never store them in Stocker. |
 | Recorder exits at after-session capture with `prospective run identity mismatch` | Preserve the immutable first-activation `prospective_run` row. After-session source capture must obtain metadata from the frozen application's activation metadata factory; the current release SHA belongs in generation artifact receipts, not a replacement run identity. Do not edit the existing run row to match a deployment. |
 | Universe Tape has symbols and bars but no probabilities | Confirm a frozen checkpoint (6, 8, …, 34) completed with the prior-session activity baseline and Group-O package available. A pending bar-compatibility receipt should show an engineering score marked `scientific_recording_not_authorized`; it must not suppress that score. Bid/ask remains intentionally blank until the bounded promotion scheduler arms Level I for a low/high candidate. |
 | Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation and bounded contract plan. The quiet capture table may show current persisted bid/ask before a structure closes; a finalized row additionally requires complete immutable per-leg entry/exit quotes. Inspect the wait/invalid reason and never manufacture a position from configuration, a latest quote, or a partial leg. |

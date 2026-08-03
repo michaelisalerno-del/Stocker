@@ -7,11 +7,19 @@ from typing import Any, cast
 
 import pytest
 
+from stocker_prospective.config import IBKRConfig
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.event_ingest import IBKRCallbackNormalizer, StreamKind, StreamOwner
 from stocker_prospective.events import OptionQuoteEvent, UnderlyingLevel1QuoteEvent
 from stocker_prospective.frozen_m1c import FrozenM1CScore
 from stocker_prospective.market_data import MarketDataType
+from stocker_prospective.opening_leader_continuation_v0 import (
+    CANONICAL_COHORT_HASH_V0,
+    CANONICAL_COHORT_V0,
+    CausalCheckpointBarV0,
+    checkpoint_timestamp_v0,
+    rank_opening_leader_v0,
+)
 from stocker_prospective.option_ledger import OptionContract
 from stocker_prospective.option_recorder import BoundedOptionRecorder
 from stocker_prospective.option_risk_accounting import (
@@ -459,6 +467,102 @@ def test_bull_put_spread_uses_each_executable_side_and_defined_risk_capital() ->
     assert result.midpoint_pnl == pytest.approx(85.0)
     assert result.bid_ask_cost == pytest.approx(25.0)
     assert result.capital_hours_employed == pytest.approx(705.60)
+
+
+def test_generic_defined_risk_candidate_uses_expiry_payoff_maximum_loss() -> None:
+    strategy = OptionStrategy(
+        strategy_id="iron-condor",
+        strategy_type=StrategyType.DEFINED_RISK_OPTION,
+        structure_name="DELTA_IRON_CONDOR",
+        legs=(
+            OptionLeg(
+                leg_id="long-put",
+                con_id=1,
+                right="P",
+                strike=90.0,
+                multiplier=100,
+                signed_contract_quantity=1,
+            ),
+            OptionLeg(
+                leg_id="short-put",
+                con_id=2,
+                right="P",
+                strike=95.0,
+                multiplier=100,
+                signed_contract_quantity=-1,
+            ),
+            OptionLeg(
+                leg_id="short-call",
+                con_id=3,
+                right="C",
+                strike=105.0,
+                multiplier=100,
+                signed_contract_quantity=-1,
+            ),
+            OptionLeg(
+                leg_id="long-call",
+                con_id=4,
+                right="C",
+                strike=110.0,
+                multiplier=100,
+                signed_contract_quantity=1,
+            ),
+        ),
+        costs=TransactionCosts(commissions=4.0),
+    )
+
+    def snapshot(
+        observed_at: datetime,
+        *,
+        short_bid: float,
+        short_ask: float,
+        long_bid: float,
+        long_ask: float,
+    ) -> OptionStrategySnapshot:
+        return OptionStrategySnapshot(
+            observed_at=observed_at,
+            legs=tuple(
+                OptionLegQuote(
+                    leg_id=leg.leg_id,
+                    quote_timestamp=observed_at,
+                    bid=(long_bid if leg.signed_contract_quantity > 0 else short_bid),
+                    ask=(long_ask if leg.signed_contract_quantity > 0 else short_ask),
+                    last=None,
+                    market_data_status="live",
+                )
+                for leg in strategy.legs
+            ),
+        )
+
+    result = calculate_option_strategy_path(
+        strategy=strategy,
+        snapshots=(
+            snapshot(
+                ENTRY,
+                short_bid=2.00,
+                short_ask=2.10,
+                long_bid=0.40,
+                long_ask=0.50,
+            ),
+            snapshot(
+                ENTRY + timedelta(hours=1),
+                short_bid=0.90,
+                short_ask=1.00,
+                long_bid=0.25,
+                long_ask=0.35,
+            ),
+        ),
+        maximum_attribution_gap=timedelta(hours=2),
+    )[-1]
+
+    assert result.structure_name == "DELTA_IRON_CONDOR"
+    assert result.gross_entry_credit == pytest.approx(300.0)
+    assert result.theoretical_maximum_loss == pytest.approx(204.0)
+    assert result.defined_risk_capital == pytest.approx(204.0)
+    assert result.spread_max_loss is None
+    assert result.net_option_pnl == pytest.approx(146.0)
+    assert result.defined_risk_roi == pytest.approx(146.0 / 204.0)
+    assert {leg.con_id for leg in result.legs} == {1, 2, 3, 4}
 
 
 def test_short_put_uses_reliable_entry_and_peak_initial_margin_for_distinct_rois() -> None:
@@ -1331,8 +1435,23 @@ def test_bounded_recorder_emits_record_only_paths_and_three_strategy_comparison(
         "LONG_OPTION",
         "SHORT_PUT",
         "BULL_PUT_SPREAD",
+        "DEFINED_RISK_OPTION",
     }
-    assert len(repository.risk_records) == 10
+    option_structure_names = {
+        row["record"].structure_name
+        for row in repository.risk_records
+        if isinstance(row["record"], OptionRiskAccountingRecord)
+    }
+    assert option_structure_names == {
+        "LONG_CALL",
+        "LONG_PUT",
+        "ATM_STRADDLE",
+        "SHORT_PUT",
+        "ATM_IRON_BUTTERFLY",
+        "CALL_CREDIT_SPREAD",
+        "PUT_CREDIT_SPREAD",
+    }
+    assert len(repository.risk_records) == 16
     assert len(repository.comparisons) == 1
     report = repository.comparisons[0]["report"]
     assert report.can_authorize_trade is False
@@ -1378,6 +1497,7 @@ def test_bounded_recorder_waits_for_the_first_executable_entry_side() -> None:
         legs=(
             OptionLeg(
                 leg_id="conid:77",
+                con_id=77,
                 right="C",
                 strike=100.0,
                 multiplier=100,
@@ -1391,6 +1511,11 @@ def test_bounded_recorder_waits_for_the_first_executable_entry_side() -> None:
         repository=cast(Any, object()),
         raw_store=cast(Any, object()),
         maximum_quote_age=timedelta(seconds=5),
+        reliable_margin_estimate_provider=lambda _strategy, _observed_at: MarginEstimate(
+            initial_margin=1_000.0,
+            maintenance_margin=800.0,
+            reliable=True,
+        ),
     )
 
     snapshots = recorder._accounting_snapshots(
@@ -1403,9 +1528,110 @@ def test_bounded_recorder_waits_for_the_first_executable_entry_side() -> None:
 
     assert snapshots[0].observed_at == ENTRY + timedelta(seconds=2)
     assert snapshots[0].legs[0].ask == pytest.approx(1.20)
+    assert snapshots[0].margin_estimate == MarginEstimate(
+        initial_margin=1_000.0,
+        maintenance_margin=800.0,
+        reliable=True,
+    )
+
+
+def test_option_fee_components_are_runtime_configurable() -> None:
+    config = IBKRConfig(
+        option_commission_per_contract=0.70,
+        option_regulatory_fee_per_contract=0.02,
+        option_exchange_fee_per_contract=0.03,
+    )
+    recorder = BoundedOptionRecorder(
+        adapter=cast(Any, object()),
+        subscriptions=cast(Any, object()),
+        repository=cast(Any, object()),
+        raw_store=cast(Any, object()),
+        maximum_quote_age=timedelta(seconds=5),
+        configured_commission_per_contract=config.option_commission_per_contract,
+        configured_regulatory_fee_per_contract=(config.option_regulatory_fee_per_contract),
+        configured_exchange_fee_per_contract=config.option_exchange_fee_per_contract,
+    )
+
+    costs = recorder._option_transaction_costs(2)
+
+    assert costs.commissions == pytest.approx(2.80)
+    assert costs.regulatory_fees == pytest.approx(0.08)
+    assert costs.exchange_fees == pytest.approx(0.12)
 
 
 def test_option_accounting_has_no_dependency_on_opening_leader_selection() -> None:
+    signal_at = checkpoint_timestamp_v0(ENTRY.date(), 6)
+    evaluated_at = signal_at + timedelta(seconds=2)
+    bars = tuple(
+        CausalCheckpointBarV0(
+            symbol=symbol,
+            session=ENTRY.date(),
+            checkpoint=6,
+            bar_start_utc=signal_at - timedelta(minutes=5),
+            bar_end_utc=signal_at,
+            available_at_utc=signal_at + timedelta(seconds=1),
+            regular_session_open=100.0,
+            checkpoint_open=100.0,
+            checkpoint_high=104.1 if symbol == "AAL" else 100.1,
+            checkpoint_low=99.9,
+            checkpoint_close=104.0 if symbol == "AAL" else 100.0,
+            session_open_source_id=f"open:{symbol}",
+            checkpoint_source_id=f"bar:{symbol}",
+            source_timestamp_utc=signal_at,
+            received_timestamp_utc=signal_at + timedelta(seconds=1),
+            source_completeness="complete",
+            duplicate_resolution="unique",
+        )
+        for symbol in CANONICAL_COHORT_V0
+    )
+
+    def select_leader(*, accounting_enabled: bool) -> object:
+        if accounting_enabled:
+            calculate_option_strategy_path(
+                strategy=OptionStrategy(
+                    strategy_id="record-only-side-effect-check",
+                    strategy_type=StrategyType.LONG_OPTION,
+                    legs=(
+                        OptionLeg(
+                            leg_id="call",
+                            right="C",
+                            strike=100.0,
+                            multiplier=100,
+                            signed_contract_quantity=1,
+                        ),
+                    ),
+                ),
+                snapshots=(
+                    OptionStrategySnapshot(
+                        observed_at=ENTRY,
+                        legs=(
+                            OptionLegQuote(
+                                leg_id="call",
+                                quote_timestamp=ENTRY,
+                                bid=1.90,
+                                ask=2.00,
+                                last=1.95,
+                                market_data_status="live",
+                            ),
+                        ),
+                    ),
+                ),
+                maximum_attribution_gap=timedelta(minutes=5),
+            )
+        return rank_opening_leader_v0(
+            session=ENTRY.date(),
+            checkpoint=6,
+            bars=bars,
+            m1c_context_by_symbol=None,
+            cohort_hash=CANONICAL_COHORT_HASH_V0,
+            evaluated_at_utc=evaluated_at,
+        )
+
+    baseline = select_leader(accounting_enabled=False)
+    with_accounting = select_leader(accounting_enabled=True)
+
+    assert baseline == with_accounting
+
     package = Path(__file__).parents[1] / "packages/stocker_prospective/src/stocker_prospective"
     accounting_tree = ast.parse((package / "option_risk_accounting.py").read_text(encoding="utf-8"))
     leader_tree = ast.parse(

@@ -29,7 +29,9 @@ from stocker_prospective.option_ledger import (
     straddle_outcome,
 )
 from stocker_prospective.option_risk_accounting import (
+    MarginEstimate,
     OptionLeg,
+    OptionRiskAccountingRecord,
     OptionStrategy,
     OptionStrategySnapshot,
     StrategyType,
@@ -255,6 +257,9 @@ class BoundedOptionRecorder:
             ]
             | None
         ) = None,
+        reliable_margin_estimate_provider: (
+            Callable[[OptionStrategy, datetime], MarginEstimate | None] | None
+        ) = None,
         underlying_halt_provider: Callable[[str, datetime, datetime], bool] | None = None,
         eviction_sink: Callable[[str, str, datetime], bool] | None = None,
         configured_commission_per_contract: float = 0.65,
@@ -289,6 +294,7 @@ class BoundedOptionRecorder:
         self.request_pacer = request_pacer
         self.underlying_path_provider = underlying_path_provider
         self.underlying_quote_provider = underlying_quote_provider
+        self.reliable_margin_estimate_provider = reliable_margin_estimate_provider
         self.underlying_halt_provider = underlying_halt_provider
         self.eviction_sink = eviction_sink
         self.configured_commission_per_contract = configured_commission_per_contract
@@ -1136,10 +1142,9 @@ class BoundedOptionRecorder:
         target_timestamp: datetime,
         subscription_gap_spans_horizon: bool,
     ) -> tuple[OptionStrategySnapshot, ...]:
-        con_id_by_leg = {
-            leg.leg_id: int(leg.leg_id.removeprefix("conid:"))
-            for leg in strategy.legs
-        }
+        if any(leg.con_id is None for leg in strategy.legs):
+            raise ValueError("live accounting strategy requires exact IBKR contract IDs")
+        con_id_by_leg = {leg.leg_id: cast(int, leg.con_id) for leg in strategy.legs}
         leg_by_con_id = {
             con_id_by_leg[leg.leg_id]: leg for leg in strategy.legs
         }
@@ -1177,6 +1182,14 @@ class BoundedOptionRecorder:
                     )
                     for leg in strategy.legs
                 ),
+                margin_estimate=(
+                    None
+                    if self.reliable_margin_estimate_provider is None
+                    else self.reliable_margin_estimate_provider(
+                        strategy,
+                        entry_observed_at,
+                    )
+                ),
                 unexplained_quote_gap=subscription_gap_spans_horizon,
             )
         }
@@ -1201,6 +1214,11 @@ class BoundedOptionRecorder:
                     )
                     for leg in strategy.legs
                 ),
+                margin_estimate=(
+                    None
+                    if self.reliable_margin_estimate_provider is None
+                    else self.reliable_margin_estimate_provider(strategy, observed_at)
+                ),
                 unexplained_quote_gap=subscription_gap_spans_horizon,
             )
         return tuple(snapshots[timestamp] for timestamp in sorted(snapshots))
@@ -1218,7 +1236,7 @@ class BoundedOptionRecorder:
         target_timestamp: datetime,
         atm_call: OptionContract | None,
         atm_put: OptionContract | None,
-        put_spread: DefinedRiskStructure,
+        defined_risk_structures: tuple[DefinedRiskStructure, ...],
         quotes: tuple[OptionQuoteEvent, ...],
         subscription_gap_spans_horizon: bool,
     ) -> None:
@@ -1240,9 +1258,11 @@ class BoundedOptionRecorder:
                         f"{observation_id}:{bucket.value}:{horizon_label}:{label}"
                     ),
                     strategy_type=StrategyType.LONG_OPTION,
+                    structure_name=label.upper().replace("-", "_"),
                     legs=(
                         OptionLeg(
                             leg_id=f"conid:{contract.con_id}",
+                            con_id=contract.con_id,
                             right=contract.right,
                             strike=contract.strike,
                             multiplier=contract.multiplier,
@@ -1252,6 +1272,33 @@ class BoundedOptionRecorder:
                     costs=self._option_transaction_costs(1),
                 )
             )
+        if (
+            atm_call is not None
+            and atm_call.con_id is not None
+            and atm_put is not None
+            and atm_put.con_id is not None
+        ):
+            strategies.append(
+                OptionStrategy(
+                    strategy_id=(
+                        f"{observation_id}:{bucket.value}:{horizon_label}:atm-straddle"
+                    ),
+                    strategy_type=StrategyType.LONG_OPTION,
+                    structure_name="ATM_STRADDLE",
+                    legs=tuple(
+                        OptionLeg(
+                            leg_id=f"conid:{contract.con_id}",
+                            con_id=contract.con_id,
+                            right=contract.right,
+                            strike=contract.strike,
+                            multiplier=contract.multiplier,
+                            signed_contract_quantity=1,
+                        )
+                        for contract in (atm_call, atm_put)
+                    ),
+                    costs=self._option_transaction_costs(2),
+                )
+            )
         if atm_put is not None and atm_put.con_id is not None:
             strategies.append(
                 OptionStrategy(
@@ -1259,9 +1306,11 @@ class BoundedOptionRecorder:
                         f"{observation_id}:{bucket.value}:{horizon_label}:short-put"
                     ),
                     strategy_type=StrategyType.SHORT_PUT,
+                    structure_name="SHORT_PUT",
                     legs=(
                         OptionLeg(
                             leg_id=f"conid:{atm_put.con_id}",
+                            con_id=atm_put.con_id,
                             right="P",
                             strike=atm_put.strike,
                             multiplier=atm_put.multiplier,
@@ -1271,30 +1320,40 @@ class BoundedOptionRecorder:
                     costs=self._option_transaction_costs(1),
                 )
             )
-        if put_spread.available:
+        for structure in defined_risk_structures:
+            if not structure.available:
+                continue
+            is_bull_put = structure.structure_type is StructureType.PUT_CREDIT_SPREAD
+            slug = structure.structure_type.value.lower().replace("_", "-")
             strategies.append(
                 OptionStrategy(
                     strategy_id=(
-                        f"{observation_id}:{bucket.value}:{horizon_label}:bull-put-spread"
+                        f"{observation_id}:{bucket.value}:{horizon_label}:{slug}"
                     ),
-                    strategy_type=StrategyType.BULL_PUT_SPREAD,
+                    strategy_type=(
+                        StrategyType.BULL_PUT_SPREAD
+                        if is_bull_put
+                        else StrategyType.DEFINED_RISK_OPTION
+                    ),
+                    structure_name=structure.structure_type.value,
                     legs=tuple(
                         OptionLeg(
-                            leg_id=f"conid:{int(leg.contract.con_id or 0)}",
-                            right="P",
+                            leg_id=f"conid:{cast(int, leg.contract.con_id)}",
+                            con_id=cast(int, leg.contract.con_id),
+                            right=leg.contract.right,
                             strike=leg.contract.strike,
                             multiplier=leg.contract.multiplier,
                             signed_contract_quantity=(-1 if leg.side == "short" else 1),
                         )
-                        for leg in put_spread.legs
+                        for leg in structure.legs
                     ),
-                    costs=self._option_transaction_costs(len(put_spread.legs)),
+                    costs=self._option_transaction_costs(len(structure.legs)),
                 )
             )
 
         calculated_paths: dict[
             StrategyType,
-            tuple[Any, ...],
+            tuple[OptionRiskAccountingRecord, ...],
         ] = {}
         for strategy in strategies:
             snapshots = self._accounting_snapshots(
@@ -1311,7 +1370,11 @@ class BoundedOptionRecorder:
                 snapshots=snapshots,
                 maximum_attribution_gap=self.maximum_greek_attribution_gap,
             )
-            calculated_paths[strategy.strategy_type] = path
+            if strategy.strategy_type in {
+                StrategyType.SHORT_PUT,
+                StrategyType.BULL_PUT_SPREAD,
+            }:
+                calculated_paths[strategy.strategy_type] = path
             for record in path:
                 risk_sink(
                     metadata,
@@ -1758,11 +1821,6 @@ class BoundedOptionRecorder:
                     ),
                     quality_flags=tuple(sorted(flags)),
                 )
-            put_spread = next(
-                structure
-                for structure in structures
-                if structure.structure_type is StructureType.PUT_CREDIT_SPREAD
-            )
             self._record_quiet_risk_accounting(
                 metadata,
                 observation_id=observation_id,
@@ -1774,7 +1832,7 @@ class BoundedOptionRecorder:
                 target_timestamp=target,
                 atm_call=atm_call,
                 atm_put=atm_put,
-                put_spread=put_spread,
+                defined_risk_structures=structures,
                 quotes=quotes,
                 subscription_gap_spans_horizon=subscription_gap_spans_horizon,
             )

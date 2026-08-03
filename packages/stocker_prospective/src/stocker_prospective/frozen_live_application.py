@@ -1997,6 +1997,15 @@ def build_frozen_prospective_application(
         underlying_path_provider=live.underlying_price_path,
         underlying_quote_provider=live.underlying_quote_path,
         underlying_halt_provider=live.underlying_halted_in_window,
+        configured_commission_per_contract=(
+            config.ibkr.option_commission_per_contract
+        ),
+        configured_regulatory_fee_per_contract=(
+            config.ibkr.option_regulatory_fee_per_contract
+        ),
+        configured_exchange_fee_per_contract=(
+            config.ibkr.option_exchange_fee_per_contract
+        ),
     )
     live.option_quote_sink = option_recorder.record_quote
 

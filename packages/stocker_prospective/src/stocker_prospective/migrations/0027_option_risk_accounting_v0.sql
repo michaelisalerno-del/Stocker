@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS quiet_option_risk_observation_v0 (
             'UNDERLYING_LONG',
             'LONG_OPTION',
             'SHORT_PUT',
-            'BULL_PUT_SPREAD'
+            'BULL_PUT_SPREAD',
+            'DEFINED_RISK_OPTION'
         )
     ),
     dte_bucket TEXT NOT NULL CHECK (

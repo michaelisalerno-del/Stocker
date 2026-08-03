@@ -21,6 +21,7 @@ type GreekSource = Literal["bid", "ask", "last", "model"]
 
 class StrategyType(StrEnum):
     BULL_PUT_SPREAD = "BULL_PUT_SPREAD"
+    DEFINED_RISK_OPTION = "DEFINED_RISK_OPTION"
     LONG_OPTION = "LONG_OPTION"
     SHORT_PUT = "SHORT_PUT"
 
@@ -82,6 +83,7 @@ class OptionLeg(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     leg_id: str = Field(min_length=1)
+    con_id: int | None = Field(default=None, gt=0)
     right: Literal["C", "P"]
     strike: float = Field(gt=0.0)
     multiplier: int = Field(gt=0)
@@ -160,6 +162,7 @@ class OptionStrategy(BaseModel):
 
     strategy_id: str = Field(min_length=1)
     strategy_type: StrategyType
+    structure_name: str | None = Field(default=None, min_length=1)
     legs: tuple[OptionLeg, ...]
     costs: TransactionCosts = Field(default_factory=TransactionCosts)
 
@@ -174,9 +177,9 @@ class OptionStrategy(BaseModel):
         ):
             raise ValueError("short put requires one negative-quantity put leg")
         if self.strategy_type is StrategyType.LONG_OPTION and not (
-            len(self.legs) == 1 and self.legs[0].signed_contract_quantity > 0
+            self.legs and all(leg.signed_contract_quantity > 0 for leg in self.legs)
         ):
-            raise ValueError("long option requires one positive-quantity option leg")
+            raise ValueError("long option structure requires only positive-quantity legs")
         if self.strategy_type is StrategyType.BULL_PUT_SPREAD:
             short_legs = tuple(leg for leg in self.legs if leg.signed_contract_quantity < 0)
             long_legs = tuple(leg for leg in self.legs if leg.signed_contract_quantity > 0)
@@ -192,6 +195,12 @@ class OptionStrategy(BaseModel):
                 raise ValueError(
                     "bull put spread requires equal short-higher and long-lower put legs"
                 )
+        if self.strategy_type is StrategyType.DEFINED_RISK_OPTION and not (
+            len(self.legs) >= 2
+            and any(leg.signed_contract_quantity < 0 for leg in self.legs)
+            and any(leg.signed_contract_quantity > 0 for leg in self.legs)
+        ):
+            raise ValueError("defined-risk option structure requires short and long legs")
         return self
 
 
@@ -297,6 +306,8 @@ class OptionRiskAccountingRecord(BaseModel):
 
     strategy_id: str
     strategy_type: StrategyType
+    structure_name: str
+    legs: tuple[OptionLeg, ...]
     observed_at: datetime
     option_multiplier: int
     gross_entry_credit: float
@@ -515,6 +526,33 @@ def _reliable_margin(
     return estimate.initial_margin, estimate.maintenance_margin
 
 
+def _expiry_maximum_loss(
+    strategy: OptionStrategy,
+    *,
+    entry_cash_flow: float,
+) -> float | None:
+    """Return bounded expiry loss from the exact signed multi-leg payoff."""
+
+    high_price_slope = sum(
+        leg.multiplier * leg.signed_contract_quantity for leg in strategy.legs if leg.right == "C"
+    )
+    if high_price_slope < 0:
+        return None
+    candidate_underlying_prices = (0.0, *(leg.strike for leg in strategy.legs))
+    expiry_pnls: list[float] = []
+    for underlying_price in candidate_underlying_prices:
+        intrinsic_value = 0.0
+        for leg in strategy.legs:
+            intrinsic_per_share = (
+                max(underlying_price - leg.strike, 0.0)
+                if leg.right == "C"
+                else max(leg.strike - underlying_price, 0.0)
+            )
+            intrinsic_value += intrinsic_per_share * leg.multiplier * leg.signed_contract_quantity
+        expiry_pnls.append(entry_cash_flow + intrinsic_value - strategy.costs.total)
+    return max(0.0, -min(expiry_pnls))
+
+
 def _position_greeks(
     strategy: OptionStrategy,
     quotes: dict[str, OptionLegQuote],
@@ -555,12 +593,7 @@ def _delta_equivalent_underlying_exposure(
             or reference <= 0.0
         ):
             return None
-        exposure += (
-            delta
-            * leg.multiplier
-            * leg.signed_contract_quantity
-            * reference
-        )
+        exposure += delta * leg.multiplier * leg.signed_contract_quantity * reference
     return exposure
 
 
@@ -749,6 +782,19 @@ def calculate_option_strategy_path(
         maximum_loss = spread_max_loss
         defined_risk_capital = spread_max_loss
         reserved_capital = defined_risk_capital
+    elif strategy.strategy_type is StrategyType.DEFINED_RISK_OPTION:
+        cash_secured_capital = None
+        total_premium_paid = None
+        generic_maximum_loss = _expiry_maximum_loss(
+            strategy,
+            entry_cash_flow=entry_cash_flow,
+        )
+        if generic_maximum_loss is None:
+            raise ValueError("defined-risk option structure has unbounded expiry loss")
+        maximum_loss = generic_maximum_loss
+        spread_max_loss = None
+        defined_risk_capital = maximum_loss
+        reserved_capital = defined_risk_capital
     else:
         cash_secured_capital = None
         total_premium_paid = gross_debit
@@ -797,7 +843,6 @@ def calculate_option_strategy_path(
         )
         position_greeks = _position_greeks(strategy, quotes)
         model_greeks = position_greeks.get("model")
-        net_delta = None if model_greeks is None else model_greeks.delta
         delta_equivalent_exposure = _delta_equivalent_underlying_exposure(
             strategy,
             quotes,
@@ -868,6 +913,8 @@ def calculate_option_strategy_path(
             OptionRiskAccountingRecord(
                 strategy_id=strategy.strategy_id,
                 strategy_type=strategy.strategy_type,
+                structure_name=strategy.structure_name or strategy.strategy_type.value,
+                legs=strategy.legs,
                 observed_at=snapshot.observed_at,
                 option_multiplier=multiplier,
                 gross_entry_credit=gross_credit,
@@ -909,7 +956,11 @@ def calculate_option_strategy_path(
                 ),
                 defined_risk_roi=(
                     None
-                    if strategy.strategy_type is not StrategyType.BULL_PUT_SPREAD
+                    if strategy.strategy_type
+                    not in {
+                        StrategyType.BULL_PUT_SPREAD,
+                        StrategyType.DEFINED_RISK_OPTION,
+                    }
                     else _safe_ratio(net_pnl, defined_risk_capital)
                 ),
                 entry_margin_roi=(
@@ -930,6 +981,7 @@ def calculate_option_strategy_path(
                     not in {
                         StrategyType.SHORT_PUT,
                         StrategyType.BULL_PUT_SPREAD,
+                        StrategyType.DEFINED_RISK_OPTION,
                     }
                     else _safe_ratio(gross_credit, reserved_capital)
                 ),
@@ -939,6 +991,7 @@ def calculate_option_strategy_path(
                     not in {
                         StrategyType.SHORT_PUT,
                         StrategyType.BULL_PUT_SPREAD,
+                        StrategyType.DEFINED_RISK_OPTION,
                     }
                     else _safe_ratio(gross_credit - costs, reserved_capital)
                 ),
@@ -954,9 +1007,7 @@ def calculate_option_strategy_path(
                         for item in strategy.legs
                     )
                 ),
-                delta_equivalent_underlying_exposure=(
-                    delta_equivalent_exposure
-                ),
+                delta_equivalent_underlying_exposure=(delta_equivalent_exposure),
                 quote_timestamps_by_leg={
                     leg_id: quote.quote_timestamp for leg_id, quote in quotes.items()
                 },

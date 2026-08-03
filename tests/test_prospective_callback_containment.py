@@ -351,9 +351,41 @@ def test_callback_reader_reuses_sqlite_connection_and_keeps_up_with_stream_rate(
     callback_rate_hz = len(request_ids) / elapsed_seconds
     required_stream_rate_hz = 28 / 5
     assert callback_rate_hz >= required_stream_rate_hz
-    assert connection_count == setup_connection_count
+    assert connection_count - setup_connection_count <= 1
     assert value.fatal_callback_code is None
     assert scientific_callback_count(inbox) == len(request_ids)
+
+
+def test_cached_inbox_connection_is_owned_by_callback_thread(tmp_path: Path) -> None:
+    value, inbox = adapter(tmp_path)
+    activate(value)
+    payload = {
+        "date": "20260803 14:00:00",
+        "open": 10.0,
+        "high": 10.1,
+        "low": 9.9,
+        "close": 10.05,
+        "volume": 1_000,
+    }
+
+    callback_thread = threading.Thread(
+        target=lambda: value.contain_official_callback(
+            "historical_data_update",
+            7,
+            lambda: value.on_historical_bar(7, payload, update=True),
+            provider_arguments=(7, payload),
+        )
+    )
+    callback_thread.start()
+    callback_thread.join(timeout=1)
+
+    assert not callback_thread.is_alive()
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == 1
+    accounting = inbox.accounting()
+    assert accounting.admitted == 2
+    assert accounting.pending == 1
+    assert accounting.diagnostic == 1
 
 
 @pytest.mark.parametrize(

@@ -50,7 +50,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
-    OpeningLeaderDeploymentRefreezeReceiptV5,
+    OpeningLeaderDeploymentRefreezeReceiptV6,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
@@ -1269,10 +1269,11 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
             "deployment_freeze_receipt.json",
             "deployment_freeze_receipt_v1.json",
             "deployment_freeze_receipt_v2.json",
-                "deployment_freeze_receipt_v3.json",
-                "deployment_freeze_receipt_v4.json",
-                "deployment_freeze_receipt_v5.json",
-            ),
+            "deployment_freeze_receipt_v3.json",
+            "deployment_freeze_receipt_v4.json",
+            "deployment_freeze_receipt_v5.json",
+            "deployment_freeze_receipt_v6.json",
+        ),
     )
     source = tmp_path / "opening_leader_source.py"
     source.write_text("ORDER_ROUTING_ENABLED = False\n", encoding="utf-8")
@@ -1346,13 +1347,13 @@ def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
     )
-    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV5)
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV6)
     assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
     assert receipt.supersedes_receipt_sha256 == (
-        "41ff9b33faffc8dcb4d5ac98b0f644a94a8d692d139aebe90a9ec544ad38daf3"
+        "e5cb5d2b40d4853476d284987518cbc7dacf862f1230d5f9a7c25939c858db3d"
     )
-    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-313451d9522a40a7369ad8ff")
-    assert receipt.refreeze_reason == "official_ibkr_dependency_maintenance_source_update"
+    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-4efb16325f5a0b2dd923daca")
+    assert receipt.refreeze_reason == "record_only_accounting_activation_compatibility"
     assert receipt.frozen_semantics_changed is False
     assert receipt.order_routing_disabled is True
     assert receipt.protected_historical_outcomes_accessed is False

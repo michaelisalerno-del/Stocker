@@ -1273,7 +1273,11 @@ manifest verify the maintained runtime versions. Startup reconstructs the old
 configuration hash with only the baseline Gateway identity; every signal,
 capacity, cohort, threshold, artifact, and safety field must still match. The
 current API and Gateway identities are recorded separately in capability
-evidence. Missing or unverified current identities remain fail-closed.
+evidence. For activations created before mandatory option accounting, startup
+also reconstructs the legacy shape without the three output-only commission,
+regulatory-fee, and exchange-fee fields; their current configured values are
+still recorded with each observation and cannot affect leader admission.
+Missing or unverified current identities remain fail-closed.
 
 A graceful process stop is not allowed to hide an incomplete streaming option
 episode behind `STOPPED_CLEANLY`: shutdown records the same scientific gap and

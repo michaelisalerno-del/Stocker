@@ -627,6 +627,21 @@ def test_existing_activation_accepts_verified_api_and_gateway_maintenance(
         (tmp_path / "activation.json").read_text(encoding="utf-8")
     )
     application.shutdown(now=datetime.now(UTC))
+    legacy_payload = config.model_dump(mode="json")
+    for field_name in (
+        "option_commission_per_contract",
+        "option_regulatory_fee_per_contract",
+        "option_exchange_fee_per_contract",
+    ):
+        legacy_payload["ibkr"].pop(field_name)
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            legacy_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    legacy_activation = activation.model_copy(update={"configuration_hash": legacy_hash})
     maintained_config = config.model_copy(
         update={
             "runtime": config.runtime.model_copy(update={"git_commit": "b" * 40}),
@@ -637,14 +652,14 @@ def test_existing_activation_accepts_verified_api_and_gateway_maintenance(
     )
 
     _require_compatible_existing_activation(
-        activation=activation,
+        activation=legacy_activation,
         config=maintained_config,
-        artifact_hashes=activation.model_artifact_hashes,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
         ibkr_api_version="10.49.1",
         tws_or_gateway_version="10491c-latest-ae1600e7c3a1",
     )
-    assert activation.ibkr_api_version != "10.49.1"
-    assert activation.tws_or_gateway_version != "10491c-latest-ae1600e7c3a1"
+    assert legacy_activation.ibkr_api_version != "10.49.1"
+    assert legacy_activation.tws_or_gateway_version != "10491c-latest-ae1600e7c3a1"
 
 
 def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(

@@ -90,6 +90,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
     OpeningLeaderDeploymentRefreezeReceiptV5,
+    OpeningLeaderDeploymentRefreezeReceiptV6,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -166,6 +167,13 @@ _HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
         "callback_inbox_oldest_healthy_seconds",
     }
 )
+_POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS = frozenset(
+    {
+        "option_commission_per_contract",
+        "option_regulatory_fee_per_contract",
+        "option_exchange_fee_per_contract",
+    }
+)
 
 
 def _operationally_promotable(checkpoint: RecorderCheckpointResult) -> bool:
@@ -190,6 +198,7 @@ def _configuration_hash(
     run_id: str | None = None,
     tws_or_gateway_version: str | None = None,
     omitted_runtime_fields: frozenset[str] = frozenset(),
+    omitted_ibkr_fields: frozenset[str] = frozenset(),
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
     runtime_payload = cast(dict[str, Any], payload["runtime"])
@@ -204,6 +213,8 @@ def _configuration_hash(
         ibkr_payload["tws_or_gateway_version"] = tws_or_gateway_version
     for field_name in omitted_runtime_fields:
         runtime_payload.pop(field_name)
+    for field_name in omitted_ibkr_fields:
+        ibkr_payload.pop(field_name)
     return hashlib.sha256(
         json.dumps(
             payload,
@@ -229,25 +240,31 @@ def _activation_configuration_hash_candidates(
     # reconstructs the exact original configuration hash. This makes run_id an
     # operational lineage boundary while every scientific input remains bound.
     for historical_run_id in (None, *sorted(set(historical_run_ids))):
-        candidates.update(
-            {
-                _configuration_hash(
-                    config,
-                    git_commit=activation_git_commit,
-                    app_version=activation_app_version,
-                    run_id=historical_run_id,
-                    tws_or_gateway_version=activation_tws_or_gateway_version,
-                ),
-                _configuration_hash(
-                    config,
-                    git_commit=activation_git_commit,
-                    app_version=activation_app_version,
-                    run_id=historical_run_id,
-                    tws_or_gateway_version=activation_tws_or_gateway_version,
-                    omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
-                ),
-            }
-        )
+        for omitted_ibkr_fields in (
+            frozenset(),
+            _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS,
+        ):
+            candidates.update(
+                {
+                    _configuration_hash(
+                        config,
+                        git_commit=activation_git_commit,
+                        app_version=activation_app_version,
+                        run_id=historical_run_id,
+                        tws_or_gateway_version=activation_tws_or_gateway_version,
+                        omitted_ibkr_fields=omitted_ibkr_fields,
+                    ),
+                    _configuration_hash(
+                        config,
+                        git_commit=activation_git_commit,
+                        app_version=activation_app_version,
+                        run_id=historical_run_id,
+                        tws_or_gateway_version=activation_tws_or_gateway_version,
+                        omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
+                        omitted_ibkr_fields=omitted_ibkr_fields,
+                    ),
+                }
+            )
     return frozenset(candidates)
 
 
@@ -1279,6 +1296,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV3
         | OpeningLeaderDeploymentRefreezeReceiptV4
         | OpeningLeaderDeploymentRefreezeReceiptV5
+        | OpeningLeaderDeploymentRefreezeReceiptV6
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

@@ -2317,8 +2317,7 @@ class ProspectiveReadStore:
                 ).fetchall()
             )
             support_rows = connection.execute(
-                "SELECT * FROM opening_leader_evidence_v0 "
-                "WHERE run_id = ? ORDER BY id",
+                "SELECT * FROM opening_leader_evidence_v0 WHERE run_id = ? ORDER BY id",
                 (run_id,),
             ).fetchall()
         support_evidence = [self._decoded(row) for row in support_rows]
@@ -2355,9 +2354,7 @@ class ProspectiveReadStore:
                     for row in matching
                 }
                 e0_payload = evidence_by_name.get("E0", {}).get("payload") or {}
-                final_payload = evidence_by_name.get("FINAL_CONTINUOUS", {}).get(
-                    "payload"
-                ) or {}
+                final_payload = evidence_by_name.get("FINAL_CONTINUOUS", {}).get("payload") or {}
                 e0_quote = e0_payload.get("quote") or {}
                 final_quote = final_payload.get("quote") or {}
                 identities_match = all(
@@ -2494,9 +2491,7 @@ class ProspectiveReadStore:
                     "signal_receipt": None if failure is None else failure["stable_id"],
                     "support": support_projection,
                     "data_quality_warnings": (
-                        []
-                        if failure is None
-                        else list(failure.get("data_quality_flags", ()))
+                        [] if failure is None else list(failure.get("data_quality_flags", ()))
                     ),
                 }
             )
@@ -2508,8 +2503,7 @@ class ProspectiveReadStore:
             row for row in original if row["record_type"] == "underlying_observation"
         ]
         observation_rows = [
-            linked_by_original.get(str(row["stable_id"]), row)
-            for row in original_observation_rows
+            linked_by_original.get(str(row["stable_id"]), row) for row in original_observation_rows
         ]
         observations = {
             str(row["observation_name"]): row.get("payload") for row in observation_rows
@@ -2558,10 +2552,7 @@ class ProspectiveReadStore:
             ).get("payload")
         )
         warning_values = [
-            str(flag)
-            for row in rows
-            for flag in row.get("data_quality_flags", ())
-            if flag
+            str(flag) for row in rows for flag in row.get("data_quality_flags", ()) if flag
         ]
         warning_values.extend(
             f"linked_{row['record_type']}:{row['stable_id']}"
@@ -2576,9 +2567,7 @@ class ProspectiveReadStore:
                 "slate_size": ranking.get("slate_size"),
                 "rank_1": rank_1.get("symbol"),
                 "rank_2": rank_2.get("symbol"),
-                "rank_1_return_from_open_bps": rank_1.get(
-                    "open_to_checkpoint_return_bps"
-                ),
+                "rank_1_return_from_open_bps": rank_1.get("open_to_checkpoint_return_bps"),
                 "leader_separation_bps": ranking.get("rank_1_minus_rank_2_bps"),
                 "signal_receipt": signal["stable_id"],
                 "source_feed_status": latest_quote.get("market_data_status"),

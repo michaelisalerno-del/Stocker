@@ -637,9 +637,7 @@ class FrozenM1CLiveRecorder:
                 current.low,
                 current.close,
             )
-            if any(
-                not math.isfinite(value) or value <= 0.0 for value in causal_prices
-            ):
+            if any(not math.isfinite(value) or value <= 0.0 for value in causal_prices):
                 continue
             causal_bars = tuple(bars[index] for index in sorted(required.intersection(bars)))
             complete = required.issubset(bars) and all(
@@ -811,9 +809,7 @@ class FrozenM1CLiveRecorder:
                 opening = bars[1]
                 current = bars[candidate_checkpoint]
                 candidate_prices[candidate] = current.close
-                candidate_returns[candidate] = (
-                    10_000.0 * (current.close / opening.open - 1.0)
-                )
+                candidate_returns[candidate] = 10_000.0 * (current.close / opening.open - 1.0)
             if symbol in candidate_returns and len(candidate_returns) >= 15:
                 selected_checkpoint = candidate_checkpoint
                 returns = candidate_returns
@@ -1509,9 +1505,9 @@ class FrozenM1CLiveRecorder:
         )
         for completed in completed_updates:
             for bar in self._bar_adapter.add(completed):
-                self._bar_finalised_at[
-                    (bar.symbol, bar.session, bar.checkpoint)
-                ] = update.received_timestamp_utc
+                self._bar_finalised_at[(bar.symbol, bar.session, bar.checkpoint)] = (
+                    update.received_timestamp_utc
+                )
                 sequence, monotonic = self._bar_order[
                     (completed.request_id, completed.bar_start_utc)
                 ]

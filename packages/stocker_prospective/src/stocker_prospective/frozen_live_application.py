@@ -88,6 +88,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV1,
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
+    OpeningLeaderDeploymentRefreezeReceiptV4,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -697,14 +698,10 @@ class FrozenProspectiveApplication:
                 {},
             )[symbol] = M1CContextV0(
                 probability=checkpoint.score.probability,
-                high_low_state=(
-                    "HIGH" if checkpoint.score.threshold_passed else "LOW"
-                ),
+                high_low_state=("HIGH" if checkpoint.score.threshold_passed else "LOW"),
                 tail_phase=str(checkpoint.tail_phase_v1.m1c_tail_phase_v1),
                 qualified_fresh_event_status=fresh_status,
-                movement_consumed=(
-                    checkpoint.movement_consumed_state_v1.movement_consumed_v1
-                ),
+                movement_consumed=(checkpoint.movement_consumed_state_v1.movement_consumed_v1),
                 source_completeness=(
                     "complete"
                     if checkpoint.score.missing_feature_count == 0
@@ -780,9 +777,7 @@ class FrozenProspectiveApplication:
             self.opening_leader_recorder is not None
             and observed >= self.opening_leader_recorder.boundary_utc
         ):
-            for recovery_session in self.opening_leader_recorder.outstanding_sessions(
-                now=observed
-            ):
+            for recovery_session in self.opening_leader_recorder.outstanding_sessions(now=observed):
                 if recovery_session == observed_session:
                     continue
                 self.opening_leader_recorder.poll(
@@ -1268,6 +1263,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV1
         | OpeningLeaderDeploymentRefreezeReceiptV2
         | OpeningLeaderDeploymentRefreezeReceiptV3
+        | OpeningLeaderDeploymentRefreezeReceiptV4
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -2006,15 +2002,9 @@ def build_frozen_prospective_application(
         underlying_path_provider=live.underlying_price_path,
         underlying_quote_provider=live.underlying_quote_path,
         underlying_halt_provider=live.underlying_halted_in_window,
-        configured_commission_per_contract=(
-            config.ibkr.option_commission_per_contract
-        ),
-        configured_regulatory_fee_per_contract=(
-            config.ibkr.option_regulatory_fee_per_contract
-        ),
-        configured_exchange_fee_per_contract=(
-            config.ibkr.option_exchange_fee_per_contract
-        ),
+        configured_commission_per_contract=(config.ibkr.option_commission_per_contract),
+        configured_regulatory_fee_per_contract=(config.ibkr.option_regulatory_fee_per_contract),
+        configured_exchange_fee_per_contract=(config.ibkr.option_exchange_fee_per_contract),
     )
     live.option_quote_sink = option_recorder.record_quote
 
@@ -2184,9 +2174,7 @@ def build_frozen_prospective_application(
         )
         opening_leader_option_snapshotter = OpeningLeaderIBKROptionSnapshotterV0(
             adapter=adapter,
-            underlying_contracts={
-                item.symbol: item for item in qualified if not item.market_proxy
-            },
+            underlying_contracts={item.symbol: item for item in qualified if not item.market_proxy},
             contract_factory=lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
                 option_contract_factory(
                     symbol,

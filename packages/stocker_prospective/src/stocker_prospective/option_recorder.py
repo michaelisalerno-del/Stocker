@@ -298,9 +298,7 @@ class BoundedOptionRecorder:
         self.underlying_halt_provider = underlying_halt_provider
         self.eviction_sink = eviction_sink
         self.configured_commission_per_contract = configured_commission_per_contract
-        self.configured_regulatory_fee_per_contract = (
-            configured_regulatory_fee_per_contract
-        )
+        self.configured_regulatory_fee_per_contract = configured_regulatory_fee_per_contract
         self.configured_exchange_fee_per_contract = configured_exchange_fee_per_contract
         self.underlying_transaction_costs = (
             TransactionCosts()
@@ -1127,9 +1125,7 @@ class BoundedOptionRecorder:
         round_trip_legs = leg_count * 2
         return TransactionCosts(
             commissions=self.configured_commission_per_contract * round_trip_legs,
-            regulatory_fees=(
-                self.configured_regulatory_fee_per_contract * round_trip_legs
-            ),
+            regulatory_fees=(self.configured_regulatory_fee_per_contract * round_trip_legs),
             exchange_fees=self.configured_exchange_fee_per_contract * round_trip_legs,
         )
 
@@ -1145,12 +1141,8 @@ class BoundedOptionRecorder:
         if any(leg.con_id is None for leg in strategy.legs):
             raise ValueError("live accounting strategy requires exact IBKR contract IDs")
         con_id_by_leg = {leg.leg_id: cast(int, leg.con_id) for leg in strategy.legs}
-        leg_by_con_id = {
-            con_id_by_leg[leg.leg_id]: leg for leg in strategy.legs
-        }
-        relevant = tuple(
-            quote for quote in quotes if quote.con_id in leg_by_con_id
-        )
+        leg_by_con_id = {con_id_by_leg[leg.leg_id]: leg for leg in strategy.legs}
+        relevant = tuple(quote for quote in quotes if quote.con_id in leg_by_con_id)
 
         def entry_price(quote: OptionQuoteEvent) -> float | None:
             leg = leg_by_con_id[quote.con_id]
@@ -1159,9 +1151,7 @@ class BoundedOptionRecorder:
         entry_eligible = tuple(
             quote
             for quote in relevant
-            if (price := entry_price(quote)) is not None
-            and math.isfinite(price)
-            and price >= 0.0
+            if (price := entry_price(quote)) is not None and math.isfinite(price) and price >= 0.0
         )
         entry_surface = self._surface_at(
             entry_eligible,
@@ -1254,9 +1244,7 @@ class BoundedOptionRecorder:
                 continue
             strategies.append(
                 OptionStrategy(
-                    strategy_id=(
-                        f"{observation_id}:{bucket.value}:{horizon_label}:{label}"
-                    ),
+                    strategy_id=(f"{observation_id}:{bucket.value}:{horizon_label}:{label}"),
                     strategy_type=StrategyType.LONG_OPTION,
                     structure_name=label.upper().replace("-", "_"),
                     legs=(
@@ -1280,9 +1268,7 @@ class BoundedOptionRecorder:
         ):
             strategies.append(
                 OptionStrategy(
-                    strategy_id=(
-                        f"{observation_id}:{bucket.value}:{horizon_label}:atm-straddle"
-                    ),
+                    strategy_id=(f"{observation_id}:{bucket.value}:{horizon_label}:atm-straddle"),
                     strategy_type=StrategyType.LONG_OPTION,
                     structure_name="ATM_STRADDLE",
                     legs=tuple(
@@ -1302,9 +1288,7 @@ class BoundedOptionRecorder:
         if atm_put is not None and atm_put.con_id is not None:
             strategies.append(
                 OptionStrategy(
-                    strategy_id=(
-                        f"{observation_id}:{bucket.value}:{horizon_label}:short-put"
-                    ),
+                    strategy_id=(f"{observation_id}:{bucket.value}:{horizon_label}:short-put"),
                     strategy_type=StrategyType.SHORT_PUT,
                     structure_name="SHORT_PUT",
                     legs=(
@@ -1327,9 +1311,7 @@ class BoundedOptionRecorder:
             slug = structure.structure_type.value.lower().replace("_", "-")
             strategies.append(
                 OptionStrategy(
-                    strategy_id=(
-                        f"{observation_id}:{bucket.value}:{horizon_label}:{slug}"
-                    ),
+                    strategy_id=(f"{observation_id}:{bucket.value}:{horizon_label}:{slug}"),
                     strategy_type=(
                         StrategyType.BULL_PUT_SPREAD
                         if is_bull_put
@@ -1393,8 +1375,7 @@ class BoundedOptionRecorder:
                 entry_timestamp,
                 target_timestamp,
             )
-            if entry_timestamp <= quote.ordering_timestamp <= target_timestamp
-            and quote.quote_valid
+            if entry_timestamp <= quote.ordering_timestamp <= target_timestamp and quote.quote_valid
         )
         underlying_snapshots = tuple(
             UnderlyingQuoteSnapshot(
@@ -1425,9 +1406,7 @@ class BoundedOptionRecorder:
         )
         underlying_path = calculate_underlying_strategy_path(
             strategy=UnderlyingStrategy(
-                strategy_id=(
-                    f"{observation_id}:{bucket.value}:{horizon_label}:underlying-long"
-                ),
+                strategy_id=(f"{observation_id}:{bucket.value}:{horizon_label}:underlying-long"),
                 quantity=reference_multiplier,
                 costs=self.underlying_transaction_costs,
             ),
@@ -1448,11 +1427,7 @@ class BoundedOptionRecorder:
             "record_quiet_option_strategy_comparison",
             None,
         )
-        if (
-            not callable(comparison_sink)
-            or short_put_path is None
-            or bull_put_path is None
-        ):
+        if not callable(comparison_sink) or short_put_path is None or bull_put_path is None:
             return
         comparison_sink(
             metadata,

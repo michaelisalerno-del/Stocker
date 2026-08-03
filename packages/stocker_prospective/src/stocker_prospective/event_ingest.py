@@ -488,9 +488,7 @@ class IBKRCallbackNormalizer:
                     state.get("market_data_type"),
                 )
                 snapshot["market_data_status"] = (
-                    None
-                    if source_market_data_type is None
-                    else str(source_market_data_type)
+                    None if source_market_data_type is None else str(source_market_data_type)
                 )
                 source_values[source] = snapshot
         elif field == "market_data_type":

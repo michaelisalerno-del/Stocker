@@ -2371,6 +2371,12 @@ class FrozenM1CLiveRecorder:
             and self.recorder_generation is not None
             and self.lease_owner is not None
         ):
+            # A durable batch can take long enough for the processing heartbeat
+            # to advance beyond ``observed_now``.  Operational freshness must
+            # be evaluated at completion time; using the poll-start timestamp
+            # makes those fresh heartbeats appear to come from the future and
+            # incorrectly persists STALE_HEARTBEAT.
+            operational_now = datetime.now(UTC)
             try:
                 session_open, session_close = xnys_session_bounds(
                     observed_now.astimezone(NEW_YORK).date()
@@ -2388,7 +2394,7 @@ class FrozenM1CLiveRecorder:
                 run_id=self.run_id,
                 recorder_generation=self.recorder_generation,
                 owner_id=self.lease_owner,
-                now=observed_now,
+                now=operational_now,
                 market_session_open=market_session_open,
                 callbacks_expected=market_session_open and bool(self.normalizer.owners),
                 ibkr_connection_state=health.state.value,
@@ -2411,7 +2417,7 @@ class FrozenM1CLiveRecorder:
                 run_id=self.run_id,
                 recorder_generation=self.recorder_generation,
                 owner_id=self.lease_owner,
-                now=observed_now,
+                now=operational_now,
                 prospective_start_utc=self.raw_store.prospective_collection_start,
                 thresholds=self.operational_thresholds,
             )

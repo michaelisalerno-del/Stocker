@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 
+import stocker_prospective.live_recorder as live_recorder_module
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.durable_inbox import (
     CallbackClassification,
@@ -609,6 +610,51 @@ def test_large_durable_batch_refreshes_processing_heartbeat(
     # partition compression/fsync/rename sequence.
     assert pulses == list(range(33))
     assert inbox.accounting().pending == 1
+
+
+def test_operational_projection_uses_post_processing_time_not_poll_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = setup_database(tmp_path)
+    inbox = DurableCallbackInbox(database.database_path)
+    recorder, adapter = build_recorder(
+        tmp_path,
+        database,
+        generation=1,
+        owner="one",
+        inbox=inbox,
+    )
+    projected_at: list[datetime] = []
+
+    def capture_projection(**arguments: object) -> None:
+        projected_at.append(cast(datetime, arguments["now"]))
+
+    assert recorder.operational_repository is not None
+    monkeypatch.setattr(
+        recorder.operational_repository,
+        "refresh_projection",
+        capture_projection,
+    )
+    post_processing_time = NOW + timedelta(seconds=45)
+
+    class PostProcessingDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            if tz is None:
+                return post_processing_time.replace(tzinfo=None)
+            return post_processing_time
+
+    monkeypatch.setattr(live_recorder_module, "datetime", PostProcessingDateTime)
+    emit(adapter)
+
+    result = recorder.poll(now=NOW + timedelta(seconds=1))
+    recorder.finalize_durable_poll(
+        result,
+        acknowledged_at=post_processing_time,
+    )
+
+    assert projected_at == [post_processing_time]
 
 
 def test_crash_after_lease_is_reclaimed_without_loss(tmp_path: Path) -> None:

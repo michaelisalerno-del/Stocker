@@ -31,11 +31,14 @@ from stocker_prospective.opening_leader_continuation_v0 import (
     OpeningLeaderContinuationRecorderV0,
     OpeningLeaderEvidenceStoreV0,
     OpeningLeaderFreezeIdentityV0,
+    OpeningLeaderSelectionPromotionV0,
     OptionQuoteV0,
     OptionSnapshotCaptureV0,
     ProspectiveBoundaryErrorV0,
     RankPersistenceV0,
+    UnderlyingQuoteV0,
     build_observation_schedule_v0,
+    calculate_opening_leader_option_accounting_v0,
     calculate_rank_persistence_v0,
     calculate_underlying_shadow_return_v0,
     checkpoint_timestamp_v0,
@@ -50,7 +53,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
-    OpeningLeaderDeploymentRefreezeReceiptV9,
+    OpeningLeaderDeploymentRefreezeReceiptV10,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
@@ -84,6 +87,7 @@ def _bar(
     checkpoint: int = 6,
     session_open: float = 100.0,
     checkpoint_close: float = 100.0,
+    available_delay_seconds: float = 1.0,
 ) -> CausalCheckpointBarV0:
     signal_at = checkpoint_timestamp_v0(session, checkpoint)
     return CausalCheckpointBarV0(
@@ -92,7 +96,7 @@ def _bar(
         checkpoint=checkpoint,
         bar_start_utc=signal_at - timedelta(minutes=5),
         bar_end_utc=signal_at,
-        available_at_utc=signal_at + timedelta(seconds=1),
+        available_at_utc=signal_at + timedelta(seconds=available_delay_seconds),
         regular_session_open=session_open,
         checkpoint_open=min(session_open, checkpoint_close),
         checkpoint_high=max(session_open, checkpoint_close) + 0.1,
@@ -101,7 +105,7 @@ def _bar(
         session_open_source_id=f"open:{symbol}:{session.isoformat()}",
         checkpoint_source_id=f"bar:{symbol}:{checkpoint}",
         source_timestamp_utc=signal_at,
-        received_timestamp_utc=signal_at + timedelta(seconds=1),
+        received_timestamp_utc=signal_at + timedelta(seconds=available_delay_seconds),
         source_completeness="complete",
         duplicate_resolution="unique",
     )
@@ -546,6 +550,114 @@ def test_option_chain_and_diagnostics_are_bounded_deterministic_and_unavailable_
     assert unavailable["BPS20"].long_con_id is None
 
 
+def test_opening_leader_option_accounting_uses_e0_sides_without_greeks_or_margin() -> None:
+    entry_at = checkpoint_timestamp_v0(SESSION, 6) + timedelta(seconds=10)
+    exit_at = entry_at + timedelta(hours=1)
+
+    def quote(
+        *,
+        captured_at: datetime,
+        con_id: int,
+        strike: float,
+        delta: float,
+        bid: float,
+        ask: float,
+    ) -> OptionQuoteV0:
+        return OptionQuoteV0.from_snapshot(
+            snapshot_id=f"snapshot-{captured_at.timestamp()}",
+            underlying="AAL",
+            con_id=con_id,
+            right="P",
+            strike=strike,
+            expiry=SESSION + timedelta(days=4),
+            multiplier=100,
+            trading_class="AAL",
+            exchange="SMART",
+            captured_at_utc=captured_at,
+            provider_timestamp_utc=captured_at,
+            values={
+                "bid": bid,
+                "ask": ask,
+                "last": (bid + ask) / 2.0,
+                "delta": delta,
+                "market_data_type": "live",
+                "option_computation_by_source": {},
+            },
+            maximum_quote_age_seconds=2.0,
+        )
+
+    entry = OptionSnapshotCaptureV0(
+        snapshot_id="entry",
+        observation_name="E0",
+        captured_at_utc=entry_at,
+        status="AVAILABLE",
+        reason=None,
+        selection=None,
+        quotes=(
+            quote(captured_at=entry_at, con_id=201, strike=95.0, delta=-0.10, bid=0.4, ask=0.5),
+            quote(captured_at=entry_at, con_id=202, strike=97.0, delta=-0.20, bid=1.5, ask=1.6),
+            quote(captured_at=entry_at, con_id=203, strike=98.0, delta=-0.30, bid=2.0, ask=2.1),
+        ),
+    )
+    current = OptionSnapshotCaptureV0(
+        snapshot_id="exit",
+        observation_name="H60",
+        captured_at_utc=exit_at,
+        status="AVAILABLE",
+        reason=None,
+        selection=None,
+        quotes=(
+            quote(captured_at=exit_at, con_id=201, strike=95.0, delta=-0.10, bid=0.1, ask=0.2),
+            quote(captured_at=exit_at, con_id=202, strike=97.0, delta=-0.20, bid=0.7, ask=0.8),
+            quote(captured_at=exit_at, con_id=203, strike=98.0, delta=-0.30, bid=1.0, ask=1.1),
+        ),
+    )
+
+    accounting = calculate_opening_leader_option_accounting_v0(
+        strategy_identity_prefix="opening-leader:2026-08-03:C6",
+        entry_snapshot=entry,
+        snapshots=(entry, current),
+        commission_per_contract=0.65,
+        regulatory_fee_per_contract=0.05,
+        exchange_fee_per_contract=0.10,
+    )
+
+    p20 = accounting["P20"]
+    assert p20.status == "AVAILABLE"
+    assert p20.accounting is not None
+    assert p20.accounting.executable_entry_prices_by_leg == {"short:202": 1.5}
+    assert p20.accounting.executable_exit_prices_by_leg == {"short:202": 0.8}
+    assert p20.accounting.gross_executable_pnl == pytest.approx(70.0)
+    assert p20.accounting.net_option_pnl == pytest.approx(68.4)
+    assert p20.accounting.primary_capital_basis == "cash_secured_capital"
+    assert p20.accounting.primary_capital_amount == pytest.approx(9_550.0)
+    assert p20.accounting.primary_roi == pytest.approx(68.4 / 9_550.0)
+    assert p20.accounting.entry_margin_roi is None
+    assert p20.accounting.peak_margin_roi is None
+    assert p20.accounting.greek_attribution_performed is False
+    assert p20.accounting.theta_attribution_status == "THETA_ATTRIBUTION_INCOMPLETE"
+
+    spread = accounting["BPS20"]
+    assert spread.status == "AVAILABLE"
+    assert spread.accounting is not None
+    assert spread.accounting.executable_entry_prices_by_leg == {
+        "short:202": 1.5,
+        "long:201": 0.5,
+    }
+    assert spread.accounting.executable_exit_prices_by_leg == {
+        "short:202": 0.8,
+        "long:201": 0.1,
+    }
+    assert spread.accounting.gross_executable_pnl == pytest.approx(30.0)
+    assert spread.accounting.net_option_pnl == pytest.approx(26.8)
+    assert spread.accounting.primary_capital_basis == "maximum_defined_risk"
+    assert spread.accounting.primary_capital_amount == pytest.approx(103.2)
+    assert spread.accounting.primary_roi == pytest.approx(26.8 / 103.2)
+    assert spread.accounting.market_data_source == "ibkr"
+    assert spread.accounting.order_routing == "disabled"
+    assert {item.con_id for item in spread.contract_identities} == {201, 202}
+
+
 def _metadata(recorded_at: datetime) -> EvidenceMetadata:
     return EvidenceMetadata(
         run_id="opening-leader-test-run",
@@ -947,6 +1059,7 @@ def test_synthetic_recorder_creates_independent_receipts_and_recovers_due_observ
         observation_name: str,
         _spot: float,
         now: datetime,
+        _exact_contracts: tuple[OptionQuoteV0, ...] | None,
     ) -> OptionSnapshotCaptureV0:
         return OptionSnapshotCaptureV0(
             snapshot_id=f"options-{observation_name}-{now.timestamp()}",
@@ -1032,6 +1145,16 @@ def test_synthetic_recorder_creates_independent_receipts_and_recovers_due_observ
         for record in records
         if record.record_type == "underlying_observation"
     } == {"SIGNAL", "E0", "E1"}
+    option_accounting = [
+        record for record in records if record.record_type == "option_strategy_accounting"
+    ]
+    assert len(option_accounting) == 3
+    assert {record.observation_name for record in option_accounting} == {
+        "E0:P20",
+        "E0:P30",
+        "E0:BPS20",
+    }
+    assert all(record.payload["status"] == "UNAVAILABLE" for record in option_accounting)
 
     c12_signal = checkpoint_timestamp_v0(SESSION, 12)
     c12 = build_recorder().poll(
@@ -1058,8 +1181,24 @@ def test_synthetic_recorder_creates_independent_receipts_and_recovers_due_observ
     assert projection["sample_status"] == "PROSPECTIVE SAMPLE INCOMPLETE"
     assert projection["checkpoints"]["C6"]["rank_1"] == "AAL"
     assert projection["checkpoints"]["C12"]["role"] == "secondary"
+    assert (
+        projection["checkpoints"]["C6"]["option_strategy_accounting"]["E0"]["P20"]["status"]
+        == "UNAVAILABLE"
+    )
     assert projection["checkpoint_pooling_allowed"] is False
     assert projection["option_policy_authorized"] is False
+    accounting_ledger = ProspectiveReadStore(
+        repository.database_path,
+        run_id="opening-leader-test-run",
+    ).opening_leader_option_accounting_v0(limit=10)
+    assert len(accounting_ledger) == 3
+    assert {item["strategy_name"] for item in accounting_ledger} == {
+        "P20",
+        "P30",
+        "BPS20",
+    }
+    assert all(item["market_data_source"] == "ibkr" for item in accounting_ledger)
+    assert all(item["order_routing"] == "disabled" for item in accounting_ledger)
 
     _, market_close = xnys_session_bounds(SESSION)
     before_close = build_recorder().poll(
@@ -1276,6 +1415,7 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
             "deployment_freeze_receipt_v7.json",
             "deployment_freeze_receipt_v8.json",
             "deployment_freeze_receipt_v9.json",
+            "deployment_freeze_receipt_v10.json",
         ),
     )
     source = tmp_path / "opening_leader_source.py"
@@ -1350,14 +1490,20 @@ def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
     )
-    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV9)
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV10)
     assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
-    assert receipt.supersedes_receipt_sha256 == (
-        "ac7acef8a4c2d38c364328d9e69fd30223616d1e81be5dad4edede7b2c035e11"
+    assert (
+        receipt.supersedes_receipt_sha256
+        == hashlib.sha256((package / "deployment_freeze_receipt_v9.json").read_bytes()).hexdigest()
     )
-    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-dad891935994f59e6ae65946")
-    assert receipt.refreeze_reason == "restart_safe_web_subscription_projection"
-    assert receipt.frozen_semantics_changed is False
+    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-a45e95bb05bd0cdbb6b5582a")
+    assert receipt.refreeze_reason == ("post_selection_quote_and_executable_option_accounting")
+    assert receipt.frozen_semantics_changed is True
+    assert {
+        "recorder_engine",
+        "episode_safety",
+        "option_risk_accounting",
+    }.issubset(receipt.source_hashes)
     assert receipt.order_routing_disabled is True
     assert receipt.protected_historical_outcomes_accessed is False
 
@@ -1411,6 +1557,190 @@ def test_opening_leader_refreeze_cannot_move_freeze_boundary_backward(
             package,
             source_files=opening_leader_runtime_source_files_v0(),
         )
+
+
+def test_restart_recovers_timely_c6_inputs_after_processing_deadline_and_enters_after_receipt(
+    tmp_path: Path,
+) -> None:
+    repository = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    repository.migrate()
+    start = datetime(2026, 8, 1, 19, 30, tzinfo=UTC)
+    repository.create_run(_metadata(start), mode="record_only")
+    store = OpeningLeaderEvidenceStoreV0(
+        repository,
+        deployment_receipt_id="olc-deployment-test",
+        contract_hash="b" * 64,
+        code_hash="c" * 64,
+        cohort_hash=CANONICAL_COHORT_HASH_V0,
+    )
+    freeze = OpeningLeaderFreezeIdentityV0(
+        deployment_receipt_id="olc-deployment-test",
+        freeze_completed_at_utc=start,
+        contract_hash="b" * 64,
+        code_hash="c" * 64,
+        cohort_hash=CANONICAL_COHORT_HASH_V0,
+        source_hashes_signed=True,
+        order_routing_disabled=True,
+        protected_historical_outcomes_accessed=False,
+    )
+    contexts = {
+        symbol: M1CContextV0(
+            probability=None,
+            high_low_state="UNKNOWN_INCOMPLETE",
+            tail_phase="UNKNOWN_INCOMPLETE",
+            qualified_fresh_event_status="UNKNOWN_INCOMPLETE",
+            movement_consumed=None,
+            source_completeness="context_only",
+        )
+        for symbol in CANONICAL_COHORT_V0
+    }
+    signal = checkpoint_timestamp_v0(SESSION, 6)
+    promotions: list[tuple[str, date, int, datetime]] = []
+    signal_quote_attempts = 0
+
+    def promote(
+        symbol: str,
+        session: date,
+        checkpoint: int,
+        observed: datetime,
+    ) -> OpeningLeaderSelectionPromotionV0:
+        promotions.append((symbol, session, checkpoint, observed))
+        return OpeningLeaderSelectionPromotionV0(
+            selection_id=f"{session.isoformat()}:C{checkpoint}",
+            symbol=symbol,
+            level1_started=True,
+            approved_keys=(f"level1:{symbol}",),
+            denied_keys=(),
+            budget_state="budget_healthy",
+        )
+
+    def quote_for(
+        symbol: str,
+        _checkpoint: int,
+        observation_name: str,
+        target: datetime,
+        _observed: datetime,
+    ) -> UnderlyingQuoteV0 | None:
+        nonlocal signal_quote_attempts
+        if observation_name == "SIGNAL":
+            signal_quote_attempts += 1
+            if signal_quote_attempts == 1:
+                return None
+            actual = signal + timedelta(seconds=419)
+        else:
+            actual = target + timedelta(milliseconds=100)
+        return normalize_underlying_quote_v0(
+            quote_id=f"{observation_name}-{signal_quote_attempts}",
+            symbol=symbol,
+            target_timestamp_utc=target,
+            captured_at_utc=actual,
+            provider_timestamp_utc=actual,
+            values={
+                "bid": 100.0,
+                "ask": 100.2,
+                "last": 100.1,
+                "market_data_type": "live",
+                "halted": False,
+            },
+            source="synthetic_ibkr_level1",
+            maximum_quote_age_seconds=2.0,
+        )
+
+    def build_recorder(
+        *,
+        available_delay_seconds: float = 1.0,
+    ) -> OpeningLeaderContinuationRecorderV0:
+        return OpeningLeaderContinuationRecorderV0(
+            store=store,
+            freeze_identity=freeze,
+            prospective_start_utc=start,
+            metadata_factory=lambda observed, _sources: _metadata(observed),
+            bar_provider=lambda session, checkpoint: tuple(
+                _bar(
+                    symbol,
+                    session=session,
+                    checkpoint=checkpoint,
+                    checkpoint_close=(102.0 if symbol == "AAL" else 100.0),
+                    available_delay_seconds=available_delay_seconds,
+                )
+                for symbol in CANONICAL_COHORT_V0
+            ),
+            underlying_quote_provider=quote_for,
+            option_snapshot_provider=lambda symbol, checkpoint, name, spot, now, exact: (
+                OptionSnapshotCaptureV0(
+                    snapshot_id=f"{symbol}-{checkpoint}-{name}",
+                    observation_name=name,
+                    captured_at_utc=now,
+                    status="UNAVAILABLE",
+                    reason="fixture_no_option_chain",
+                    selection=None,
+                    quotes=(),
+                )
+            ),
+            rank_persistence_provider=lambda *_args: None,
+            official_close_provider=lambda *_args: None,
+            selection_promotion_sink=promote,
+        )
+
+    before_deadline = build_recorder().poll(
+        session=SESSION,
+        now=signal + timedelta(seconds=410),
+        m1c_context_by_checkpoint={6: contexts},
+    )
+    assert before_deadline.created_signal_receipts == ()
+    assert before_deadline.created_failures == ()
+    assert promotions[-1][:3] == ("AAL", SESSION, 6)
+
+    recovered = build_recorder().poll(
+        session=SESSION,
+        now=signal + timedelta(seconds=480),
+        m1c_context_by_checkpoint={6: contexts},
+    )
+    assert recovered.created_signal_receipts == ("C6",)
+    assert recovered.created_failures == ()
+    receipt = next(
+        record
+        for record in store.records_for_run("opening-leader-test-run")
+        if record.record_type == "signal_receipt"
+    )
+    assert "signal_processing_recovered_after_deadline" in receipt.data_quality_flags
+    assert (
+        receipt.payload["maximum_rank_input_available_at_utc"]
+        == (signal + timedelta(seconds=1)).isoformat()
+    )
+    assert receipt.payload["selection_promotion"]["level1_started"] is True
+
+    after_restart = build_recorder().poll(
+        session=SESSION,
+        now=signal + timedelta(seconds=481),
+        m1c_context_by_checkpoint={6: contexts},
+    )
+    assert after_restart.created_observations == ("C6:E0",)
+    e0 = next(
+        record
+        for record in store.records_for_run("opening-leader-test-run")
+        if record.record_type == "underlying_observation" and record.observation_name == "E0"
+    )
+    assert datetime.fromisoformat(e0.payload["quote"]["actual_quote_timestamp_utc"]) > (
+        receipt.observed_at_utc
+    )
+    assert len(promotions) == 3
+
+    late_session = date(2026, 8, 4)
+    late_signal = checkpoint_timestamp_v0(late_session, 6)
+    late_inputs = build_recorder(available_delay_seconds=421.0).poll(
+        session=late_session,
+        now=late_signal + timedelta(seconds=480),
+        m1c_context_by_checkpoint={6: contexts},
+    )
+    assert late_inputs.created_signal_receipts == ()
+    assert late_inputs.created_failures == ("C6",)
+    late_failure = next(
+        record
+        for record in store.records_for_run("opening-leader-test-run")
+        if record.session == late_session and record.record_type == "signal_failure"
+    )
+    assert late_failure.data_quality_flags == ("causal_rank_inputs_after_nominal_deadline",)
 
 
 def test_opening_leader_v2_refreeze_cannot_move_freeze_boundary_backward(
@@ -1709,4 +2039,25 @@ def test_option_snapshotter_uses_two_expiries_twenty_exact_contracts_and_pacing(
         for quote in capture.quotes
     )
     assert len(pacing) == 41
+
+    frozen_contracts = (capture.quotes[2], capture.quotes[11])
+    shifted = snapshotter(
+        "AAL",
+        6,
+        "H60",
+        150.0,
+        now,
+        exact_contracts=frozen_contracts,
+    )
+    assert shifted.status == "AVAILABLE", shifted.reason
+    assert shifted.selection is not None
+    assert shifted.selection.selection_basis == "e0_frozen_exact_contracts"
+    assert len(shifted.selection.requests) == len(frozen_contracts)
+    assert {quote.con_id for quote in shifted.quotes} == {
+        quote.con_id for quote in frozen_contracts
+    }
+    assert {
+        (request.expiry, request.strike, request.right) for request in shifted.selection.requests
+    } == {(quote.expiry, quote.strike, quote.right) for quote in frozen_contracts}
+    assert len(pacing) == 45
     assert_no_broker_mutation_surface(snapshotter)

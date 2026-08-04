@@ -1434,6 +1434,7 @@ class FrozenRecorderRepository:
         eligible: bool,
         feature_freshness: str,
         rejection_reasons: tuple[str, ...],
+        diagnostic_quality_flags: tuple[str, ...] = (),
         model_version: str = "frozen-m1c-v0",
         tail_phase_v1: TailPhaseStateV1 | None = None,
         movement_consumed_v1: MovementConsumedStateV1 | None = None,
@@ -1480,17 +1481,33 @@ class FrozenRecorderRepository:
                        movement_consumed_denominator_v1,
                        movement_consumed_complete_v1,
                        movement_consumed_missing_reason_v1,
-                       movement_consumed_bucket_v1, tail_phase_source_v1_json
+                       movement_consumed_bucket_v1, tail_phase_source_v1_json,
+                       rejection_reasons_json, diagnostic_quality_flags_json
                 FROM m1c_checkpoint_v0
                 WHERE run_id = ? AND symbol = ? AND session_date = ? AND checkpoint = ?
                 """,
                 (metadata.run_id, symbol, session.isoformat(), checkpoint),
             ).fetchone()
             if existing is not None:
+                persisted_diagnostic_quality_flags = tuple(
+                    json.loads(str(existing["diagnostic_quality_flags_json"]))
+                )
+                persisted_rejection_reasons = tuple(
+                    json.loads(str(existing["rejection_reasons_json"]))
+                )
+                legacy_stale_quote_diagnostic = (
+                    not persisted_diagnostic_quality_flags
+                    and diagnostic_quality_flags == ("underlying_quote_stale",)
+                    and "underlying_quote_stale" in persisted_rejection_reasons
+                )
                 if (
                     str(existing["feature_hash"]) != score.feature_hash
                     or float(existing["probability"]) != score.probability
                     or float(existing["threshold"]) != score.threshold
+                    or (
+                        persisted_diagnostic_quality_flags != diagnostic_quality_flags
+                        and not legacy_stale_quote_diagnostic
+                    )
                 ):
                     raise ValueError("immutable M1C checkpoint differs")
                 if tail_phase_v1 is not None:
@@ -1566,9 +1583,10 @@ class FrozenRecorderRepository:
                     model_id, model_version, model_hash, feature_hash,
                     session_context_hash, feature_values_json, probability,
                     threshold, threshold_passed, eligible, feature_freshness,
-                    missing_feature_count, rejection_reasons_json, claims_json,
+                    missing_feature_count, rejection_reasons_json,
+                    diagnostic_quality_flags_json, claims_json,
                     bar_identity, configuration_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'M1C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'M1C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           ?, ?)
                 """,
                 (
@@ -1592,6 +1610,7 @@ class FrozenRecorderRepository:
                     feature_freshness,
                     score.missing_feature_count,
                     _json(rejection_reasons),
+                    _json(diagnostic_quality_flags),
                     self.claims_json,
                     (
                         f"IBKR|{symbol}|{session.isoformat()}|"

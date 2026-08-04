@@ -442,6 +442,20 @@ is `MARGIN_UNAVAILABLE` unless a reliable observed IBKR estimate exists. Raw
 IBKR Greeks remain separated by bid, ask, last, and model source; one source is
 never filled from another. Taylor-path attribution and model-price residuals
 are diagnostic-only post-processing and are not required for finalization.
+
+Opening Leader runtime V10 applies the same small accounting core to its P20,
+P30, and BPS20 records. Exact leg identities are frozen from E0 and may not be
+substituted at later marks; later captures explicitly request the E0-frozen
+conIds even if the underlying moves. The derived rows are append-only and appear in a
+separate research ledger; they do not create account, position, execution, or
+order state. A single post-selection Level I subscription supplies the chosen
+underlying quote. Because the symbol cannot be known before causal ranking,
+underlying quote freshness is an outcome/readiness check rather than an input
+to signal eligibility. Timely callback admission remains required; only the
+old 420-second wall-clock processing cutoff becomes a latency diagnostic.
+Actual E0 remains strictly after the immutable signal receipt, so callback
+recovery cannot backdate an entry or rewrite an earlier failure.
+
 Migration `0005` records current active/pending/cancelling lines, request rate,
 waiting/rejected signals, and reserved capacity for the separate web process.
 Migration `0011` adds nullable M1C Tail Phase V1 checkpoint and episode fields
@@ -468,6 +482,9 @@ changing any source evidence row. Migration `0020` separates V1.1 capture
 eligibility from scientific eligibility. It permits an engineering-shadow
 episode to record only the same primary 1DTE call/put pair while the strict
 scientific projection additionally requires a scientifically valid parent.
+Migration `0029` separates nonblocking checkpoint diagnostics from scientific
+rejection reasons. A pre-selection stale underlying quote remains persisted
+and visible without contradicting an otherwise eligible bar-derived signal.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

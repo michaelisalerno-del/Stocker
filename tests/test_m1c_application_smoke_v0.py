@@ -356,10 +356,12 @@ def test_first_ibkr_session_is_authorized_without_transfer_history(
     aal = next(item for item in universe if item["symbol"] == "AAL")
     assert aal["m1c_probability"] is not None
     assert aal["m1c_threshold"] == 0.488333710794033
-    # The fixture is independently rejected for a stale underlying quote, but
-    # it is no longer rejected for absent cross-vendor history.
-    assert aal["m1c_scientific_eligible"] is False
+    # The bar-derived signal is usable immediately.  Its pre-selection quote
+    # quality remains visible but is enforced later for executable outcomes.
+    assert aal["m1c_scientific_eligible"] is True
     assert "scientific_recording_not_authorized" not in aal["m1c_rejection_reasons"]
+    assert "underlying_quote_stale" not in aal["m1c_rejection_reasons"]
+    assert aal["m1c_diagnostic_quality_flags"] == ["underlying_quote_stale"]
     assert ("level1", "AAL") in adapter.active_subscriptions.values()
     with sqlite3.connect(config.paths.database) as connection:
         checkpoint_eligibility = connection.execute(
@@ -378,7 +380,7 @@ def test_first_ibkr_session_is_authorized_without_transfer_history(
             """,
             (config.runtime.run_id,),
         ).fetchone()
-    assert checkpoint_eligibility == (0,)
+    assert checkpoint_eligibility == (1,)
     assert scientific_option_rows == (0,)
 
     application.shutdown(now=observed + timedelta(seconds=1))

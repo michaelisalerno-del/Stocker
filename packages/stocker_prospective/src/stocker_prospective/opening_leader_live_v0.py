@@ -18,6 +18,8 @@ from stocker_prospective.opening_leader_continuation_v0 import (
     CANONICAL_COHORT_V0,
     RECORDER_VERSION_V0,
     OpeningLeaderFreezeIdentityV0,
+    OptionChainSelectionV0,
+    OptionContractRequestV0,
     OptionQuoteV0,
     OptionSnapshotCaptureV0,
     select_option_chain_requests_v0,
@@ -53,6 +55,9 @@ PACKAGE_REFREEZE_SCHEMA_V8: Literal["opening-leader-continuation-deployment-refr
 )
 PACKAGE_REFREEZE_SCHEMA_V9: Literal["opening-leader-continuation-deployment-refreeze-v9"] = (
     "opening-leader-continuation-deployment-refreeze-v9"
+)
+PACKAGE_REFREEZE_SCHEMA_V10: Literal["opening-leader-continuation-deployment-refreeze-v10"] = (
+    "opening-leader-continuation-deployment-refreeze-v10"
 )
 SIGNATURE_SCHEME_V0: Literal["sha256-canonical-self-binding-v0"] = (
     "sha256-canonical-self-binding-v0"
@@ -396,6 +401,34 @@ class OpeningLeaderDeploymentRefreezeReceiptV9(OpeningLeaderFreezeIdentityV0):
         return value
 
 
+class OpeningLeaderDeploymentRefreezeReceiptV10(OpeningLeaderFreezeIdentityV0):
+    """Append-only semantic supersession for causal L1 and option accounting."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v10"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[True]
+    refreeze_reason: Literal["post_selection_quote_and_executable_option_accounting"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
 def _validate_package_contract(package_root: Path) -> None:
     contract = json.loads((package_root / "contract.json").read_text(encoding="utf-8"))
     cohort = json.loads((package_root / "cohort_manifest.json").read_text(encoding="utf-8"))
@@ -440,6 +473,7 @@ def _signature_payload(
         | OpeningLeaderDeploymentRefreezeReceiptV7
         | OpeningLeaderDeploymentRefreezeReceiptV8
         | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
     ),
 ) -> dict[str, object]:
     return receipt.model_dump(mode="json", exclude={"signature_sha256"})
@@ -457,6 +491,7 @@ def _deployment_id_payload(
         | OpeningLeaderDeploymentRefreezeReceiptV7
         | OpeningLeaderDeploymentRefreezeReceiptV8
         | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
     ),
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -479,6 +514,7 @@ def _deployment_id_payload(
             OpeningLeaderDeploymentRefreezeReceiptV7,
             OpeningLeaderDeploymentRefreezeReceiptV8,
             OpeningLeaderDeploymentRefreezeReceiptV9,
+            OpeningLeaderDeploymentRefreezeReceiptV10,
         ),
     ):
         payload.update(
@@ -499,6 +535,7 @@ def _deployment_id_payload(
             OpeningLeaderDeploymentRefreezeReceiptV7,
             OpeningLeaderDeploymentRefreezeReceiptV8,
             OpeningLeaderDeploymentRefreezeReceiptV9,
+            OpeningLeaderDeploymentRefreezeReceiptV10,
         ),
     ):
         payload["supersedes_deployment_receipt_id"] = receipt.supersedes_deployment_receipt_id
@@ -517,6 +554,7 @@ def _expected_deployment_receipt_id(
         | OpeningLeaderDeploymentRefreezeReceiptV7
         | OpeningLeaderDeploymentRefreezeReceiptV8
         | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
     ),
 ) -> str:
     digest = _sha256_bytes(_canonical_json(_deployment_id_payload(receipt)).encode("utf-8"))
@@ -601,6 +639,7 @@ def load_opening_leader_package_v0(
     | OpeningLeaderDeploymentRefreezeReceiptV7
     | OpeningLeaderDeploymentRefreezeReceiptV8
     | OpeningLeaderDeploymentRefreezeReceiptV9
+    | OpeningLeaderDeploymentRefreezeReceiptV10
 ):
     """Fail closed on any artifact, source, safety, or time-boundary drift."""
 
@@ -656,6 +695,7 @@ def load_opening_leader_package_v0(
             | OpeningLeaderDeploymentRefreezeReceiptV7
             | OpeningLeaderDeploymentRefreezeReceiptV8
             | OpeningLeaderDeploymentRefreezeReceiptV9
+            | OpeningLeaderDeploymentRefreezeReceiptV10
         ) = refreeze
     else:
         receipt = original_receipt
@@ -875,6 +915,33 @@ def load_opening_leader_package_v0(
         ):
             raise ValueError("opening-leader V9 deployment refreeze signature mismatch")
         receipt = refreeze_v9
+    refreeze_v10_path = root / "deployment_freeze_receipt_v10.json"
+    if refreeze_v10_path.exists():
+        if not refreeze_v9_path.is_file() or refreeze_v9_path.is_symlink():
+            raise ValueError("opening-leader V10 refreeze requires the immutable V9 receipt")
+        if not refreeze_v10_path.is_file() or refreeze_v10_path.is_symlink():
+            raise ValueError("opening-leader V10 deployment refreeze receipt is invalid")
+        refreeze_v10 = OpeningLeaderDeploymentRefreezeReceiptV10.model_validate_json(
+            refreeze_v10_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV9):
+            raise ValueError("opening-leader V10 refreeze requires the verified V9 receipt")
+        if (
+            refreeze_v10.supersedes_receipt_sha256 != _sha256_path(refreeze_v9_path)
+            or refreeze_v10.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v10.frozen_semantics_changed is not True
+            or refreeze_v10.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V10 deployment refreeze lineage mismatch")
+        refreeze_v10_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v10)).encode("utf-8")
+        )
+        if (
+            refreeze_v10_signature != refreeze_v10.signature_sha256
+            or refreeze_v10.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v10)
+        ):
+            raise ValueError("opening-leader V10 deployment refreeze signature mismatch")
+        receipt = refreeze_v10
     start = (
         receipt.freeze_completed_at_utc
         if prospective_start_utc is None
@@ -949,12 +1016,17 @@ def opening_leader_runtime_source_files_v0() -> dict[str, Path]:
         "market_data": package / "market_data.py",
         "migration_0026": package / "migrations" / "0026_opening_leader_continuation_v0.sql",
         "migration_0028": package / "migrations" / "0028_web_latest_subscription_state_v0.sql",
+        "migration_0029": package / "migrations" / "0029_m1c_diagnostic_quality_flags_v0.sql",
         "opening_leader_contract": package / "opening_leader_continuation_v0.py",
         "opening_leader_live": package / "opening_leader_live_v0.py",
+        "option_risk_accounting": package / "option_risk_accounting.py",
         "option_discovery": package / "option_discovery.py",
         "partition_store": package / "partition_store.py",
         "project_configuration": repository_root / "pyproject.toml",
         "read_store": package / "read_store.py",
+        "recorder_engine": package / "recorder_v0.py",
+        "recorder_repository": package / "recorder_repository.py",
+        "episode_safety": package / "safety.py",
         "static_app": package / "web_static" / "app.js",
         "static_index": package / "web_static" / "index.html",
         "static_polling": package / "web_static" / "polling.mjs",
@@ -1200,6 +1272,7 @@ class OpeningLeaderIBKROptionSnapshotterV0:
         observation_name: str,
         spot: float,
         observed_at: datetime,
+        exact_contracts: tuple[OptionQuoteV0, ...] | None = None,
     ) -> OptionSnapshotCaptureV0:
         observed = _aware(observed_at, label="option observation timestamp")
         snapshot_id = (
@@ -1221,21 +1294,62 @@ class OpeningLeaderIBKROptionSnapshotterV0:
             )
         session = observed.astimezone(NEW_YORK).date()
         try:
-            expiries, strikes, exchange, trading_class = self._metadata(
-                symbol=symbol,
-                session=session,
-                underlying=underlying,
-            )
-            selection = select_option_chain_requests_v0(
-                underlying=symbol,
-                underlying_con_id=underlying.con_id,
-                session=session,
-                spot=spot,
-                available_expiries=expiries,
-                available_strikes=strikes,
-                exchange=exchange,
-                trading_class=trading_class,
-            )
+            if exact_contracts is not None:
+                if len({quote.con_id for quote in exact_contracts}) != len(exact_contracts) or any(
+                    quote.underlying != symbol for quote in exact_contracts
+                ):
+                    raise ValueError("E0-frozen option contract identities are inconsistent")
+                requests = tuple(
+                    OptionContractRequestV0(
+                        underlying=symbol,
+                        underlying_con_id=underlying.con_id,
+                        expiry=quote.expiry,
+                        strike=quote.strike,
+                        right=quote.right,
+                        multiplier=quote.multiplier,
+                        exchange=quote.exchange,
+                        trading_class=quote.trading_class,
+                    )
+                    for quote in exact_contracts
+                )
+                selected_expiries = tuple(sorted({quote.expiry for quote in exact_contracts}))
+                selection = OptionChainSelectionV0(
+                    status="AVAILABLE" if requests else "UNAVAILABLE",
+                    reason=None if requests else "e0_strategy_contracts_unavailable",
+                    underlying=symbol,
+                    spot=spot,
+                    selected_expiries=selected_expiries,
+                    selected_strikes_by_expiry={
+                        expiry.isoformat(): tuple(
+                            sorted(
+                                {
+                                    quote.strike
+                                    for quote in exact_contracts
+                                    if quote.expiry == expiry
+                                }
+                            )
+                        )
+                        for expiry in selected_expiries
+                    },
+                    requests=requests,
+                    selection_basis="e0_frozen_exact_contracts",
+                )
+            else:
+                expiries, strikes, exchange, trading_class = self._metadata(
+                    symbol=symbol,
+                    session=session,
+                    underlying=underlying,
+                )
+                selection = select_option_chain_requests_v0(
+                    underlying=symbol,
+                    underlying_con_id=underlying.con_id,
+                    session=session,
+                    spot=spot,
+                    available_expiries=expiries,
+                    available_strikes=strikes,
+                    exchange=exchange,
+                    trading_class=trading_class,
+                )
         except (AttributeError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
             return OptionSnapshotCaptureV0(
                 snapshot_id=snapshot_id,
@@ -1258,6 +1372,10 @@ class OpeningLeaderIBKROptionSnapshotterV0:
             )
         quotes: list[OptionQuoteV0] = []
         failures: list[str] = []
+        expected_con_ids = {
+            (quote.expiry, quote.strike, quote.right): quote.con_id
+            for quote in exact_contracts or ()
+        }
         for request in selection.requests:
             try:
                 upstream = self.contract_factory(
@@ -1284,6 +1402,16 @@ class OpeningLeaderIBKROptionSnapshotterV0:
                         f"{request.expiry}:{request.right}:{request.strike}:qualification_unavailable"
                     )
                     continue
+                expected_con_id = expected_con_ids.get(
+                    (request.expiry, request.strike, request.right)
+                )
+                qualified_con_id = int(_attribute(qualified, "conId", "con_id") or 0)
+                if expected_con_id is not None and qualified_con_id != expected_con_id:
+                    failures.append(
+                        f"{request.expiry}:{request.right}:{request.strike}:"
+                        "frozen_contract_identity_mismatch"
+                    )
+                    continue
                 capture = self.adapter.capture_temporary_quote
                 result = capture(contract=qualified)
                 self._paced()
@@ -1300,7 +1428,7 @@ class OpeningLeaderIBKROptionSnapshotterV0:
                     OptionQuoteV0.from_snapshot(
                         snapshot_id=snapshot_id,
                         underlying=symbol,
-                        con_id=int(_attribute(qualified, "conId", "con_id") or 0),
+                        con_id=qualified_con_id,
                         right=request.right,
                         strike=request.strike,
                         expiry=request.expiry,
@@ -1359,6 +1487,7 @@ __all__ = [
     "OpeningLeaderDeploymentRefreezeReceiptV7",
     "OpeningLeaderDeploymentRefreezeReceiptV8",
     "OpeningLeaderDeploymentRefreezeReceiptV9",
+    "OpeningLeaderDeploymentRefreezeReceiptV10",
     "OpeningLeaderDeploymentReceiptV0",
     "OpeningLeaderIBKROptionSnapshotterV0",
     "assert_opening_leader_runtime_configuration_v0",

@@ -407,6 +407,59 @@ class LiveSubscriptionController:
                     depth_rows=self.depth_rows,
                 )
 
+    def promote_opening_leader_underlying(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        symbol: str,
+        selection_id: str,
+    ) -> UnderlyingPromotionResult:
+        """Keep one replaceable, record-only L1 stream for the selected leader."""
+
+        contract = self._contracts[symbol]
+        owner_id = "research:opening-leader-continuation-v0"
+        level1_key = canonical_subscription_key(
+            SubscriptionKind.LEVEL1,
+            con_id=contract.con_id,
+        )
+        for key, record in tuple(self.budget.records.items()):
+            if record.active and owner_id in record.owners and key != level1_key:
+                self._release_owner(
+                    metadata,
+                    key,
+                    owner_id=owner_id,
+                    reason=f"opening_leader_replaced_by:{selection_id}",
+                )
+        level1 = self._allocate(
+            metadata,
+            key=level1_key,
+            contract=contract,
+            budget_kind=SubscriptionKind.LEVEL1,
+            stream_kind=StreamKind.UNDERLYING_LEVEL1,
+            priority=SubscriptionPriority.ACTIVE_EPISODE,
+            subscription_class=SubscriptionClass.ACTIVE_EPISODE,
+            owner_id=owner_id,
+            owner_episode=selection_id,
+            protected=True,
+        )
+        if level1 is None:
+            return UnderlyingPromotionResult(
+                symbol=symbol,
+                episode_id=selection_id,
+                level1_started=False,
+                approved_keys=(),
+                denied_keys=(level1_key,),
+                budget_state=BudgetState.OPTION_EPISODE_QUEUED,
+            )
+        return UnderlyingPromotionResult(
+            symbol=symbol,
+            episode_id=selection_id,
+            level1_started=True,
+            approved_keys=(level1_key,),
+            denied_keys=(),
+            budget_state=BudgetState.BUDGET_HEALTHY,
+        )
+
     def promote_active_episode(
         self,
         metadata: EvidenceMetadata,

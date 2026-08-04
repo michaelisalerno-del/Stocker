@@ -973,6 +973,69 @@ def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_de
     assert all(budget.get(f"BAR|{con_id}|5m|RTH") is not None for con_id in (1, 2, 3))
 
 
+def test_opening_leader_promotion_keeps_exactly_one_level1_and_no_optional_streams() -> None:
+    adapter = _SubscriptionAdapter()
+    budget = SubscriptionBudgetManager(
+        limits={
+            SubscriptionKind.BAR: 2,
+            SubscriptionKind.LEVEL1: 1,
+            SubscriptionKind.TICK_BY_TICK: 2,
+            SubscriptionKind.DEPTH: 1,
+        },
+        request_rate_limit=100,
+        total_line_limit=20,
+        future_trading_reserve_lines=12,
+        safety_margin_lines=2,
+    )
+    controller = LiveSubscriptionController(
+        adapter=adapter,  # type: ignore[arg-type]
+        budget=budget,
+        normalizer=_Normalizer(),  # type: ignore[arg-type]
+        repository=_SubscriptionRepository(),  # type: ignore[arg-type]
+        depth_rows=5,
+        enable_depth=True,
+    )
+    contracts = tuple(
+        QualifiedUnderlying(
+            symbol=symbol,
+            con_id=con_id,
+            upstream_contract=SimpleNamespace(conId=con_id, symbol=symbol),
+            exchange="SMART",
+        )
+        for symbol, con_id in (("AAL", 1), ("AAOI", 2))
+    )
+    controller.start_always_on(_metadata(), contracts)
+
+    first = controller.promote_opening_leader_underlying(
+        _metadata(),
+        symbol="AAL",
+        selection_id="opening-leader-2026-07-27-c6",
+    )
+    retry = controller.promote_opening_leader_underlying(
+        _metadata(),
+        symbol="AAL",
+        selection_id="opening-leader-2026-07-27-c6",
+    )
+    replacement = controller.promote_opening_leader_underlying(
+        _metadata(),
+        symbol="AAOI",
+        selection_id="opening-leader-2026-07-27-c12",
+    )
+
+    assert first.level1_started is True
+    assert retry.level1_started is True
+    assert replacement.level1_started is True
+    assert adapter.requests == [
+        ("bar", 1),
+        ("bar", 2),
+        ("level1", 1),
+        ("level1", 2),
+    ]
+    assert adapter.cancelled == [("level1", 3)]
+    assert not any(kind.startswith("tick") or kind == "depth" for kind, _ in adapter.requests)
+    assert budget.snapshot()["active"]["level1"] == 1  # type: ignore[index]
+
+
 def test_level2_is_not_admitted_during_engineering_transfer_phase() -> None:
     adapter = _SubscriptionAdapter()
     budget = SubscriptionBudgetManager(

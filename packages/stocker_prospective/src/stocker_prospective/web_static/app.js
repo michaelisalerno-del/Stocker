@@ -16,6 +16,7 @@ const state = {
   shadow: [],
   virtualLedgers: {
     opening_reversal: { items: [] },
+    opening_leader: { items: [] },
     quiet_state: { items: [] },
   },
   audit: [],
@@ -378,6 +379,10 @@ function renderUniverse() {
       { label: "Gate", value: "m1c_threshold" },
       { label: "Distance", value: "distance_from_threshold" },
       { label: "Evidence status", value: m1cEvidenceStatus },
+      {
+        label: "Quote diagnostics",
+        value: (row) => (row.m1c_diagnostic_quality_flags || []).join(", ") || "clear",
+      },
       { label: "Fresh episode", value: "fresh_episode" },
       { label: "A1", value: "a1_classification" },
       { label: "C1", value: "c1_classification" },
@@ -690,6 +695,11 @@ function renderShadow() {
 
 function renderVirtualLedgers() {
   const opening = state.virtualLedgers.opening_reversal?.items || [];
+  const openingLeader = (state.virtualLedgers.opening_leader?.items || []).map((item) => ({
+    ...item,
+    ...(item.accounting || {}),
+    accounting_status: item.status,
+  }));
   const quietCaptures = state.virtualLedgers.quiet_state?.capture_items || [];
   const quiet = state.virtualLedgers.quiet_state?.items || [];
   const quietCaptureRows = quietCaptures.flatMap((capture) => {
@@ -728,6 +738,27 @@ function renderVirtualLedgers() {
       { label: "Blocker / wait", value: "status_reason" },
     ],
     opening,
+  ));
+  replace("opening-leader-option-ledger", table(
+    [
+      { label: "Session", value: "session_date" },
+      { label: "Checkpoint", value: "checkpoint" },
+      { label: "Symbol", value: "selected_symbol" },
+      { label: "Observation", value: "observation_name" },
+      { label: "Strategy", value: "strategy_name" },
+      { label: "Status", value: "accounting_status" },
+      { label: "Gross executable P&L", value: "gross_executable_pnl" },
+      { label: "Net executable P&L", value: "net_option_pnl" },
+      { label: "Primary capital basis", value: "primary_capital_basis" },
+      { label: "Primary capital", value: "primary_capital_amount" },
+      { label: "Primary ROI", value: "primary_roi", format: percent },
+      { label: "Margin ROI", value: "entry_margin_roi", format: percent },
+      { label: "MAE", value: "maximum_adverse_excursion" },
+      { label: "Max drawdown", value: "maximum_drawdown" },
+      { label: "Greek status", value: "theta_attribution_status" },
+      { label: "Reason", value: "reason" },
+    ],
+    openingLeader,
   ));
   replace("quiet-state-capture-ledger", table(
     [
@@ -1152,6 +1183,22 @@ function openingLeaderCheckpointPanel(checkpoint) {
   const support = checkpoint.support || {};
   const shadow = checkpoint.latest_hypothetical_underlying_return || {};
   const optionSnapshots = Object.values(checkpoint.option_snapshots || {});
+  const optionAccountingRows = Object.entries(checkpoint.option_strategy_accounting || {})
+    .flatMap(([observation, strategies]) => Object.values(strategies || {}).map((mark) => {
+      const accounting = mark.accounting || {};
+      return {
+        observation,
+        strategy: mark.strategy_name,
+        status: mark.status,
+        gross_pnl: accounting.gross_executable_pnl,
+        net_pnl: accounting.net_option_pnl,
+        capital_basis: accounting.primary_capital_basis,
+        capital_amount: accounting.primary_capital_amount,
+        primary_roi: accounting.primary_roi,
+        margin_roi: accounting.entry_margin_roi,
+        greek_status: accounting.theta_attribution_status,
+      };
+    }));
   wrapper.append(
     kvGrid([
       ["Eligibility", checkpoint.eligibility],
@@ -1172,6 +1219,21 @@ function openingLeaderCheckpointPanel(checkpoint) {
       ["Complete", support.complete],
     ])),
     subsection("Rank persistence (diagnostic only)", jsonBlock(checkpoint.rank_persistence)),
+    subsection("Executable option accounting", table(
+      [
+        { label: "Observation", value: "observation" },
+        { label: "Strategy", value: "strategy" },
+        { label: "Status", value: "status" },
+        { label: "Gross P&L", value: "gross_pnl" },
+        { label: "Net P&L", value: "net_pnl" },
+        { label: "Primary basis", value: "capital_basis" },
+        { label: "Capital", value: "capital_amount" },
+        { label: "Primary ROI", value: "primary_roi", format: percent },
+        { label: "Margin ROI", value: "margin_roi", format: percent },
+        { label: "Greek status", value: "greek_status" },
+      ],
+      optionAccountingRows,
+    )),
     subsection("M1C context only", jsonBlock(checkpoint.m1c_context)),
   );
   return wrapper;

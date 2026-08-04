@@ -907,6 +907,33 @@ Opening Leader Continuation V0 treats M1C as context only and continues to obey
 its independently signed rank-selection contract. None of these files enables
 orders or changes the record-only runtime mode.
 
+### Opening Leader runtime V10 supersession
+
+Runtime V10 supersedes two operational assumptions recorded in the original
+Opening Leader package documentation. The 420-second signal-capture deadline is
+now a processing-latency diagnostic, not a scientific failure boundary, and the
+selected rank-1 symbol receives exactly one replaceable post-selection Level I
+subscription. The original package and every earlier receipt remain immutable;
+V10 records this semantic change in a new append-only deployment receipt.
+
+Selection still uses only completed causal bars admitted by the nominal
+deadline. A delayed callback worker or restart may project those timely inputs
+and complete the receipt later, but genuinely late causal rank inputs fail.
+The receipt records processing delay and E0 must be a strictly later quote than
+the immutable receipt time. There is no reconstructed or backfilled entry.
+Inputs or a quote that remain unresolved at end-of-session reconciliation fail
+explicitly. A failure already recorded by an earlier runtime, including a
+prior C6 deadline failure, is never rewritten or promoted after the fact.
+
+Opening Leader option evidence freezes the exact P20, P30, and BPS20 leg
+identities at E0, requests those same conIds at later observations, and never
+substitutes a new spot-band contract. Its
+segregated ledger uses executable bid/ask P&L after configured costs as the
+primary result. Missing Greeks remain diagnostic, and absent reliable observed
+margin leaves margin ROI unavailable while cash-secured or defined-risk ROI
+remains available. This path is research-only: it has no account, position,
+execution, order, buy, or sell surface and cannot route an order.
+
 Before the first recorder start, create the immutable frozen activity baseline:
 
 ```bash

@@ -877,6 +877,13 @@ def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> N
         payload["quiet_state"]["fill_convention"]
         == "open_short_bid_long_ask_close_short_ask_long_bid"
     )
+    assert payload["opening_leader"]["ledger_scope"] == (
+        "opening_leader_option_strategy_accounting_v0"
+    )
+    assert payload["opening_leader"]["items"] == []
+    assert payload["opening_leader"]["entry_observation"] == "E0"
+    assert payload["opening_leader"]["executable_pnl_is_primary"] is True
+    assert payload["opening_leader"]["greek_attribution_is_diagnostic_only"] is True
     assert payload["ledgers_combined_for_analysis"] is False
     assert payload["execution_claimed"] is False
     assert payload["broker_positions_claimed"] is False
@@ -888,10 +895,12 @@ def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> N
             "opening_limit": 1,
             "quiet_limit": 1,
             "quiet_capture_limit": 1,
+            "opening_leader_limit": 1,
         },
     )
     assert bounded.status_code == 200
     assert bounded.json()["quiet_state"]["capture_item_limit"] == 1
+    assert bounded.json()["opening_leader"]["item_limit"] == 1
     assert (
         client.get(
             "/api/virtual-ledgers",

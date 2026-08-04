@@ -339,6 +339,7 @@ class RecorderCheckpointResult(BaseModel):
     directional_classifications: dict[str, DirectionClassification]
     direction_display_allowed: bool
     rejection_reasons: tuple[str, ...]
+    diagnostic_quality_flags: tuple[str, ...] = ()
 
 
 class FrozenM1CRecorderEngine:
@@ -959,6 +960,9 @@ class FrozenM1CRecorderEngine:
         missing_group_o_features = self.m1c_runtime.missing_group_o_features(
             item.group_o_context.features
         )
+        diagnostic_quality_flags = (
+            () if item.underlying_quote_fresh else ("underlying_quote_stale",)
+        )
         rejection_reasons = tuple(
             dict.fromkeys(
                 (
@@ -984,7 +988,6 @@ class FrozenM1CRecorderEngine:
                         if item.clock_drift_within_tolerance
                         else ("clock_drift_outside_tolerance",)
                     ),
-                    *(() if item.underlying_quote_fresh else ("underlying_quote_stale",)),
                     *(() if trigger.finalised else ("trigger_bar_incomplete",)),
                     *(() if not item.unresolved_bar_gap else ("unresolved_bar_gap",)),
                     *(
@@ -995,6 +998,10 @@ class FrozenM1CRecorderEngine:
                 )
             )
         )
+        # L1 is promoted only after a bar-derived selection.  A pre-selection
+        # quote therefore cannot be a prerequisite for the frozen signal; its
+        # staleness remains persisted as a quality flag and the later
+        # executable outcome gate still requires valid, fresh bid/ask quotes.
         signal_inputs_eligible = (
             item.capability_preflight_passed
             and item.m1c_parity_passed
@@ -1002,7 +1009,6 @@ class FrozenM1CRecorderEngine:
             and not missing_group_o_features
             and item.market_data_type is MarketDataType.LIVE
             and item.clock_drift_within_tolerance
-            and item.underlying_quote_fresh
             and trigger.finalised
             and not item.unresolved_bar_gap
             and item.raw_event_storage_writable
@@ -1097,6 +1103,7 @@ class FrozenM1CRecorderEngine:
             eligible=scientific_inputs_eligible,
             feature_freshness=item.feature_freshness,
             rejection_reasons=scientific_rejection_reasons,
+            diagnostic_quality_flags=diagnostic_quality_flags,
             tail_phase_v1=tail_phase_v1,
             movement_consumed_v1=movement_consumed_state_v1,
             movement_consumed_bucket_v1=movement_consumed_bucket_v1,
@@ -1214,7 +1221,13 @@ class FrozenM1CRecorderEngine:
                 decision=episode,
                 scientific_recording_valid=safety.scientific_recording_valid,
                 data_quality_flags=tuple(
-                    dict.fromkeys((*rejection_reasons, *safety.rejection_reasons))
+                    dict.fromkeys(
+                        (
+                            *diagnostic_quality_flags,
+                            *rejection_reasons,
+                            *safety.rejection_reasons,
+                        )
+                    )
                 ),
             )
             if item.direction_parity_passed and item.market_data_type is MarketDataType.LIVE:
@@ -1351,6 +1364,7 @@ class FrozenM1CRecorderEngine:
             directional_classifications=classifications,
             direction_display_allowed=display_allowed,
             rejection_reasons=all_reasons,
+            diagnostic_quality_flags=diagnostic_quality_flags,
         )
 
 

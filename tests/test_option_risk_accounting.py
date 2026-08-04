@@ -1693,7 +1693,7 @@ def test_option_fee_components_are_runtime_configurable() -> None:
     assert costs.exchange_fees == pytest.approx(0.12)
 
 
-def test_option_accounting_has_no_dependency_on_opening_leader_selection() -> None:
+def test_opening_leader_selection_is_unchanged_by_one_way_accounting_dependency() -> None:
     signal_at = checkpoint_timestamp_v0(ENTRY.date(), 6)
     evaluated_at = signal_at + timedelta(seconds=2)
     bars = tuple(
@@ -1783,7 +1783,7 @@ def test_option_accounting_has_no_dependency_on_opening_leader_selection() -> No
         return modules
 
     assert not any("opening_leader" in name for name in imported_modules(accounting_tree))
-    assert not any("option_risk_accounting" in name for name in imported_modules(leader_tree))
+    assert any("option_risk_accounting" in name for name in imported_modules(leader_tree))
 
 
 def test_option_accounting_has_no_reachable_order_or_account_path() -> None:

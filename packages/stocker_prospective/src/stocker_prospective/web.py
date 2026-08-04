@@ -1224,6 +1224,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     def _virtual_ledgers_projection(
         *,
         opening_limit: int,
+        opening_leader_limit: int,
         quiet_limit: int,
         quiet_capture_limit: int,
     ) -> dict[str, Any]:
@@ -1257,6 +1258,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "controls_included": False,
                 "long_option_candidates_included": False,
             },
+            "opening_leader": {
+                "ledger_scope": "opening_leader_option_strategy_accounting_v0",
+                "items": store.opening_leader_option_accounting_v0(
+                    limit=opening_leader_limit,
+                ),
+                "item_limit": opening_leader_limit,
+                "entry_observation": "E0",
+                "strategies": ["P20", "P30", "BPS20"],
+                "fill_convention": ("open_short_bid_long_ask_close_short_ask_long_bid"),
+                "executable_pnl_is_primary": True,
+                "greek_attribution_is_diagnostic_only": True,
+                "margin_is_observed_only": True,
+            },
             "ledgers_combined_for_analysis": False,
             "execution_claimed": False,
             "broker_positions_claimed": False,
@@ -1266,16 +1280,23 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     @app.get("/api/virtual-ledgers")
     def virtual_ledgers(
         opening_limit: int = 200,
+        opening_leader_limit: int = 500,
         quiet_limit: int = 500,
         quiet_capture_limit: int = 50,
     ) -> dict[str, Any]:
         """Expose bounded segregated evidence ledgers without broker semantics."""
 
-        requested_limits = (opening_limit, quiet_limit, quiet_capture_limit)
+        requested_limits = (
+            opening_limit,
+            opening_leader_limit,
+            quiet_limit,
+            quiet_capture_limit,
+        )
         if any(limit < 1 or limit > 1000 for limit in requested_limits):
             raise HTTPException(status_code=422, detail="virtual_ledger_limit_out_of_range")
         return _virtual_ledgers_projection(
             opening_limit=opening_limit,
+            opening_leader_limit=opening_leader_limit,
             quiet_limit=quiet_limit,
             quiet_capture_limit=quiet_capture_limit,
         )
@@ -1408,6 +1429,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "shadow": shadow_outcomes,
             "virtual_ledgers": lambda: _virtual_ledgers_projection(
                 opening_limit=25,
+                opening_leader_limit=50,
                 quiet_limit=50,
                 quiet_capture_limit=25,
             ),

@@ -1009,6 +1009,8 @@ class ProspectiveReadStore:
                        c.threshold_passed,
                        c.eligible AS m1c_scientific_eligible,
                        c.rejection_reasons_json AS m1c_rejection_reasons_json,
+                       c.diagnostic_quality_flags_json
+                         AS m1c_diagnostic_quality_flags_json,
                        c.checkpoint AS latest_completed_checkpoint,
                        c.bar_end_utc AS latest_completed_checkpoint_utc,
                        e.episode_id AS latest_episode_id,
@@ -1114,14 +1116,27 @@ class ProspectiveReadStore:
                 "m1c_rejection_reasons_json",
                 None,
             )
+            diagnostic_quality_flags_json = item.pop(
+                "m1c_diagnostic_quality_flags_json",
+                None,
+            )
             item["m1c_scientific_eligible"] = (
                 None if probability is None else bool(item.get("m1c_scientific_eligible"))
             )
-            item["m1c_rejection_reasons"] = (
+            rejection_reasons = (
                 []
                 if rejection_reasons_json is None
                 else list(json.loads(str(rejection_reasons_json)))
             )
+            diagnostic_quality_flags = (
+                []
+                if diagnostic_quality_flags_json is None
+                else list(json.loads(str(diagnostic_quality_flags_json)))
+            )
+            if not diagnostic_quality_flags and "underlying_quote_stale" in rejection_reasons:
+                diagnostic_quality_flags.append("underlying_quote_stale")
+            item["m1c_rejection_reasons"] = rejection_reasons
+            item["m1c_diagnostic_quality_flags"] = diagnostic_quality_flags
             item["distance_from_threshold"] = (
                 None
                 if probability is None or threshold is None
@@ -1559,6 +1574,53 @@ class ProspectiveReadStore:
             )
             item = OpeningReversalVirtualPositionV1.model_validate(raw)
             items.append(item.model_dump(mode="json"))
+        return items
+
+    def opening_leader_option_accounting_v0(
+        self,
+        *,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Return bounded executable option marks from the segregated leader ledger."""
+
+        if limit <= 0:
+            raise ValueError("opening-leader option accounting limit must be positive")
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT stable_id, session_date, checkpoint, selected_symbol,
+                       observation_name, observed_at_utc,
+                       data_quality_flags_json, payload_json
+                FROM opening_leader_evidence_v0
+                WHERE run_id = ?
+                  AND record_type = 'option_strategy_accounting'
+                  AND original_stable_id IS NULL
+                ORDER BY session_date DESC, checkpoint,
+                         observed_at_utc DESC, id DESC
+                LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(json.loads(str(row["payload_json"])))
+            items.append(
+                {
+                    "evidence_id": str(row["stable_id"]),
+                    "session_date": str(row["session_date"]),
+                    "checkpoint": f"C{int(row['checkpoint'])}",
+                    "selected_symbol": row["selected_symbol"],
+                    "recorded_observation_name": str(row["observation_name"]),
+                    "observed_at_utc": str(row["observed_at_utc"]),
+                    "evidence_quality_flags": tuple(
+                        json.loads(str(row["data_quality_flags_json"]))
+                    ),
+                    **payload,
+                }
+            )
         return items
 
     def quiet_state_virtual_positions_v1(
@@ -2620,6 +2682,7 @@ class ProspectiveReadStore:
             "rank_persistence": None,
             "m1c_context": None,
             "option_snapshots": {},
+            "option_strategy_accounting": {},
             "pre_close_observations": {},
             "final_continuous_observation": None,
             "official_close_reference": None,
@@ -2724,6 +2787,14 @@ class ProspectiveReadStore:
             for row in original
             if row["record_type"] == "option_snapshot"
         }
+        option_strategy_accounting: dict[str, dict[str, Any]] = {}
+        for row in original:
+            if row["record_type"] != "option_strategy_accounting":
+                continue
+            payload = row.get("payload") or {}
+            observation_name = str(payload.get("observation_name") or "UNKNOWN")
+            strategy_name = str(payload.get("strategy_name") or "UNKNOWN")
+            option_strategy_accounting.setdefault(observation_name, {})[strategy_name] = payload
         original_official = next(
             (row for row in original if row["record_type"] == "official_close_reference"),
             None,
@@ -2763,6 +2834,7 @@ class ProspectiveReadStore:
                 "rank_persistence": latest_persistence,
                 "m1c_context": rank_1.get("m1c_context"),
                 "option_snapshots": option_snapshots,
+                "option_strategy_accounting": option_strategy_accounting,
                 "pre_close_observations": {
                     name: observations.get(name)
                     for name in ("PRE_CLOSE_30", "PRE_CLOSE_15", "PRE_CLOSE_5", "PRE_CLOSE_1")

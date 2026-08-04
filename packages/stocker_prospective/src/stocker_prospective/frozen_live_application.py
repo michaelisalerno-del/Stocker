@@ -82,6 +82,8 @@ from stocker_prospective.opening_leader_continuation_v0 import (
     M1CContextV0,
     OpeningLeaderContinuationRecorderV0,
     OpeningLeaderEvidenceStoreV0,
+    OpeningLeaderSelectionPromotionV0,
+    checkpoint_timestamp_v0,
 )
 from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentReceiptV0,
@@ -94,6 +96,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV7,
     OpeningLeaderDeploymentRefreezeReceiptV8,
     OpeningLeaderDeploymentRefreezeReceiptV9,
+    OpeningLeaderDeploymentRefreezeReceiptV10,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1334,6 +1337,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV7
         | OpeningLeaderDeploymentRefreezeReceiptV8
         | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -2259,6 +2263,31 @@ def build_frozen_prospective_application(
             request_heartbeat=pace_request,
             maximum_quote_age_seconds=config.ibkr.maximum_quote_age_seconds,
         )
+
+        def promote_opening_leader_underlying(
+            symbol: str,
+            session: date,
+            checkpoint: int,
+            observed: datetime,
+        ) -> OpeningLeaderSelectionPromotionV0:
+            selection_id = f"opening-leader-continuation-v0:{session.isoformat()}:C{checkpoint}"
+            result = controller.promote_opening_leader_underlying(
+                metadata_factory(
+                    observed,
+                    (checkpoint_timestamp_v0(session, checkpoint),),
+                ),
+                symbol=symbol,
+                selection_id=selection_id,
+            )
+            return OpeningLeaderSelectionPromotionV0(
+                selection_id=selection_id,
+                symbol=result.symbol,
+                level1_started=result.level1_started,
+                approved_keys=result.approved_keys,
+                denied_keys=result.denied_keys,
+                budget_state=result.budget_state.value,
+            )
+
         opening_leader_recorder = OpeningLeaderContinuationRecorderV0(
             store=opening_leader_store,
             freeze_identity=opening_leader_receipt,
@@ -2269,6 +2298,10 @@ def build_frozen_prospective_application(
             option_snapshot_provider=opening_leader_option_snapshotter,
             rank_persistence_provider=live.opening_leader_rank_persistence,
             official_close_provider=live.opening_leader_official_close,
+            selection_promotion_sink=promote_opening_leader_underlying,
+            option_commission_per_contract=config.ibkr.option_commission_per_contract,
+            option_regulatory_fee_per_contract=(config.ibkr.option_regulatory_fee_per_contract),
+            option_exchange_fee_per_contract=config.ibkr.option_exchange_fee_per_contract,
         )
     application = FrozenProspectiveApplication(
         config=config,

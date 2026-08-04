@@ -98,6 +98,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV9,
     OpeningLeaderDeploymentRefreezeReceiptV10,
     OpeningLeaderDeploymentRefreezeReceiptV11,
+    OpeningLeaderDeploymentRefreezeReceiptV12,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1340,6 +1341,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV9
         | OpeningLeaderDeploymentRefreezeReceiptV10
         | OpeningLeaderDeploymentRefreezeReceiptV11
+        | OpeningLeaderDeploymentRefreezeReceiptV12
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -2061,6 +2063,50 @@ def build_frozen_prospective_application(
         symbols=identity.symbols,
         operational_status_by_symbol=statuses,
     )
+    if operational_repository is not None:
+        assert recorder_generation is not None
+        activation_receipt_identity = _activation_receipt_identity(activation)
+        loaded_at = datetime.now(UTC)
+        for artifact_name, artifact_path in sorted(artifact_files.items()):
+            expected_hash = activation.model_artifact_hashes[artifact_name]
+            observed_hash = _sha256(artifact_path)
+            verified = observed_hash == expected_hash
+            operational_repository.record_artifact_verification(
+                RuntimeArtifactVerification(
+                    verification_id=stable_artifact_verification_id(
+                        run_id=config.runtime.run_id,
+                        recorder_generation=recorder_generation,
+                        artifact_name=artifact_name,
+                        expected_hash=expected_hash,
+                    ),
+                    run_id=config.runtime.run_id,
+                    recorder_generation=recorder_generation,
+                    artifact_bundle_id=m1c_runtime.model_hash,
+                    artifact_name=artifact_name,
+                    expected_hash=expected_hash,
+                    observed_hash=observed_hash,
+                    feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
+                    activation_receipt_identity=activation_receipt_identity,
+                    found=True,
+                    loaded=True,
+                    schema_validated=True,
+                    hash_verified=verified,
+                    contract_compatible=True,
+                    used_by_active_generation=True,
+                    load_timestamp_utc=loaded_at,
+                    verification_result="verified" if verified else "blocked",
+                    blocker=(None if verified else "blocked_frozen_artifact_hash_mismatch"),
+                    details={
+                        "expected_hash_source": "immutable_activation_receipt",
+                        "application_wiring_completed": False,
+                        "static_verification_completed_before_subscription_start": True,
+                        "activation_git_commit": activation.git_sha,
+                        "runtime_git_commit": config.runtime.git_commit,
+                        "activation_app_version": first_activation_app_version,
+                        "runtime_app_version": config.runtime.app_version,
+                    },
+                )
+            )
     controller.start_always_on(
         initial_metadata,
         tuple(qualified),
@@ -2337,49 +2383,6 @@ def build_frozen_prospective_application(
         session_context_preflight=session_context_preflight,
         opening_leader_recorder=opening_leader_recorder,
     )
-    if operational_repository is not None:
-        assert recorder_generation is not None
-        activation_receipt_identity = _activation_receipt_identity(activation)
-        loaded_at = datetime.now(UTC)
-        for artifact_name, artifact_path in sorted(artifact_files.items()):
-            expected_hash = activation.model_artifact_hashes[artifact_name]
-            observed_hash = _sha256(artifact_path)
-            verified = observed_hash == expected_hash
-            operational_repository.record_artifact_verification(
-                RuntimeArtifactVerification(
-                    verification_id=stable_artifact_verification_id(
-                        run_id=config.runtime.run_id,
-                        recorder_generation=recorder_generation,
-                        artifact_name=artifact_name,
-                        expected_hash=expected_hash,
-                    ),
-                    run_id=config.runtime.run_id,
-                    recorder_generation=recorder_generation,
-                    artifact_bundle_id=m1c_runtime.model_hash,
-                    artifact_name=artifact_name,
-                    expected_hash=expected_hash,
-                    observed_hash=observed_hash,
-                    feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
-                    activation_receipt_identity=activation_receipt_identity,
-                    found=True,
-                    loaded=True,
-                    schema_validated=True,
-                    hash_verified=verified,
-                    contract_compatible=True,
-                    used_by_active_generation=True,
-                    load_timestamp_utc=loaded_at,
-                    verification_result="verified" if verified else "blocked",
-                    blocker=(None if verified else "blocked_frozen_artifact_hash_mismatch"),
-                    details={
-                        "expected_hash_source": "immutable_activation_receipt",
-                        "application_wiring_completed": True,
-                        "activation_git_commit": activation.git_sha,
-                        "runtime_git_commit": config.runtime.git_commit,
-                        "activation_app_version": first_activation_app_version,
-                        "runtime_app_version": config.runtime.app_version,
-                    },
-                )
-            )
     return application
 
 

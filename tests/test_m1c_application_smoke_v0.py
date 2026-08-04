@@ -29,6 +29,8 @@ from stocker_prospective.group_o import (
     build_group_o_context,
 )
 from stocker_prospective.live_bars import xnys_session_bounds
+from stocker_prospective.live_subscriptions import LiveSubscriptionController
+from stocker_prospective.operational_state import RecorderOperationalRepository
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder import RecorderDeploymentIdentity
 
@@ -1036,6 +1038,53 @@ def test_release_upgrade_preserves_first_activation_and_run_identity(
     assert receipt_details["runtime_app_version"] == "0.2.0"
 
     second_application.shutdown(now=datetime.now(UTC))
+
+
+def test_static_artifact_verification_precedes_live_subscription_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_order: list[str] = []
+    original_record = RecorderOperationalRepository.record_artifact_verification
+    original_start = LiveSubscriptionController.start_always_on
+
+    def record_artifact_verification(
+        repository: RecorderOperationalRepository,
+        verification: object,
+    ) -> None:
+        call_order.append("artifact")
+        original_record(repository, verification)  # type: ignore[arg-type]
+
+    def start_always_on(
+        controller: LiveSubscriptionController,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        call_order.append("subscriptions")
+        assert call_order[:-1]
+        assert set(call_order[:-1]) == {"artifact"}
+        original_start(controller, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        RecorderOperationalRepository,
+        "record_artifact_verification",
+        record_artifact_verification,
+    )
+    monkeypatch.setattr(
+        LiveSubscriptionController,
+        "start_always_on",
+        start_always_on,
+    )
+
+    application, _config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        recorder_generation=1,
+    )
+
+    assert call_order[-1] == "subscriptions"
+    assert call_order.count("artifact") > 0
+    application.shutdown(now=datetime.now(UTC))
 
 
 def test_pre_hardening_activation_accepts_added_operational_fields(

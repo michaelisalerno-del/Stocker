@@ -766,8 +766,9 @@ class ProspectiveReadStore:
             subscriptions = connection.execute(
                 """
                 SELECT subscription_kind, COUNT(*) AS used
-                FROM subscription_lifecycle_v0
-                WHERE run_id = ? AND cancelled_at_utc IS NULL
+                FROM web_latest_subscription_state_v0
+                WHERE run_id = ?
+                  AND status IN ('pending', 'active', 'cancellation_requested')
                 GROUP BY subscription_kind
                 """,
                 (run_id,),
@@ -933,8 +934,9 @@ class ProspectiveReadStore:
             subscriptions = connection.execute(
                 """
                 SELECT subscription_kind, COUNT(*) AS used
-                FROM subscription_lifecycle_v0
-                WHERE run_id = ? AND cancelled_at_utc IS NULL
+                FROM web_latest_subscription_state_v0
+                WHERE run_id = ?
+                  AND status IN ('pending', 'active', 'cancellation_requested')
                 GROUP BY subscription_kind
                 """,
                 (run_id,),

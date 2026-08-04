@@ -180,6 +180,7 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
         "idx_data_health_event_web_active",
         "idx_web_active_runtime_blocker",
         "idx_subscription_lifecycle_web_active",
+        "idx_web_latest_subscription_active_v0",
         "idx_m1c_checkpoint_web_latest",
         "idx_m1c_checkpoint_web_latest_global",
         "idx_m1c_episode_web_latest_exact",
@@ -196,8 +197,9 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
                 """
                 EXPLAIN QUERY PLAN
                 SELECT subscription_kind, COUNT(*) AS used
-                FROM subscription_lifecycle_v0
-                WHERE run_id = ? AND cancelled_at_utc IS NULL
+                FROM web_latest_subscription_state_v0
+                WHERE run_id = ?
+                  AND status IN ('pending', 'active', 'cancellation_requested')
                 GROUP BY subscription_kind
                 """,
                 ("synthetic",),
@@ -239,11 +241,91 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
 
     assert expected_indexes <= indexes.keys()
     assert "WHERE cancelled_at_utc IS NULL" in str(indexes["idx_subscription_lifecycle_web_active"])
-    assert "idx_subscription_lifecycle_web_active" in active_subscription_plan
+    assert "idx_web_latest_subscription_active_v0" in active_subscription_plan
     assert "idx_m1c_checkpoint_web_latest_global" in latest_checkpoint_plan
     assert "idx_m1c_episode_live" in latest_episode_plan
     assert "USE TEMP B-TREE" not in latest_episode_plan
     assert "idx_ibkr_connection_event_web_any_latest" in latest_connection_plan
+
+
+def test_latest_subscription_projection_backfills_existing_restart_events(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "subscription-backfill.sqlite3"
+    repository = ProspectiveRepository(database)
+    repository.migrate()
+    migration = "0028_web_latest_subscription_state_v0.sql"
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TRIGGER web_latest_subscription_state_insert_v0")
+        connection.execute("DROP TABLE web_latest_subscription_state_v0")
+        connection.execute("DELETE FROM schema_migrations WHERE version = ?", (migration,))
+        connection.execute(
+            """
+            INSERT INTO prospective_run(
+                run_id, prospective_start_utc, app_version, git_commit,
+                model_artifact_id, universe_id, cohort, created_at_utc,
+                mode, status, scientific_classification
+            ) VALUES (
+                'restart-run', '2026-08-01T00:00:00+00:00', 'test', 'deadbeef',
+                'model', 'universe', 'cohort', '2026-08-01T00:00:00+00:00',
+                'record_only', 'active', 'test'
+            )
+            """
+        )
+        envelope_id = int(
+            connection.execute(
+                """
+                INSERT INTO evidence_envelope(
+                    run_id, prospective_start_utc, app_version, git_commit,
+                    model_artifact_id, universe_id, cohort,
+                    source_timestamps_json, recorded_at_utc
+                ) VALUES (
+                    'restart-run', '2026-08-01T00:00:00+00:00', 'test',
+                    'deadbeef', 'model', 'universe', 'cohort', '[]',
+                    '2026-08-01T00:00:00+00:00'
+                )
+                """
+            ).lastrowid
+        )
+        for request_id, status, generation in (
+            (7, "active", 1),
+            (7, "cancelled", 1),
+            (8, "active", 2),
+        ):
+            connection.execute(
+                """
+                INSERT INTO subscription_lifecycle_event_v0(
+                    envelope_id, run_id, occurred_at_utc, subscription_key,
+                    request_id, subscription_kind, subscription_class, symbol,
+                    con_id, status, owner_ids_json, owner_count, generation,
+                    reason, payload_json, claims_json
+                ) VALUES (?, 'restart-run', '2026-08-01T00:00:00+00:00',
+                          'BAR|123|5m|RTH', ?, 'bar', 0, 'AAL', 123, ?,
+                          '["system:AAL"]', 1, ?, NULL, '{}', '{}')
+                """,
+                (envelope_id, request_id, status, generation),
+            )
+
+    repository.migrate()
+
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            """
+            SELECT event_id, subscription_kind, status
+            FROM web_latest_subscription_state_v0
+            WHERE run_id = 'restart-run' AND subscription_key = 'BAR|123|5m|RTH'
+            """
+        ).fetchone()
+        latest_event_id = connection.execute(
+            """
+            SELECT MAX(id)
+            FROM subscription_lifecycle_event_v0
+            WHERE run_id = 'restart-run'
+            """
+        ).fetchone()[0]
+
+    assert row == (latest_event_id, "bar", "active")
 
 
 def test_fresh_and_upgrade_migrations_produce_equivalent_schema(tmp_path: Path) -> None:

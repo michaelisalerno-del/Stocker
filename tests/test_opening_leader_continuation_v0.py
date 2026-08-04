@@ -50,7 +50,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
-    OpeningLeaderDeploymentRefreezeReceiptV8,
+    OpeningLeaderDeploymentRefreezeReceiptV9,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
@@ -1275,6 +1275,7 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
             "deployment_freeze_receipt_v6.json",
             "deployment_freeze_receipt_v7.json",
             "deployment_freeze_receipt_v8.json",
+            "deployment_freeze_receipt_v9.json",
         ),
     )
     source = tmp_path / "opening_leader_source.py"
@@ -1349,13 +1350,13 @@ def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
     )
-    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV8)
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV9)
     assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
     assert receipt.supersedes_receipt_sha256 == (
-        "1615233b67f98db2066bd5dbb7671561ec4db8e378abfe05dffd0b153ad0529d"
+        "ac7acef8a4c2d38c364328d9e69fd30223616d1e81be5dad4edede7b2c035e11"
     )
-    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-18f1739058ae38abf25c5c7e")
-    assert receipt.refreeze_reason == "legacy_activation_claims_boundary_compatibility"
+    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-dad891935994f59e6ae65946")
+    assert receipt.refreeze_reason == "restart_safe_web_subscription_projection"
     assert receipt.frozen_semantics_changed is False
     assert receipt.order_routing_disabled is True
     assert receipt.protected_historical_outcomes_accessed is False

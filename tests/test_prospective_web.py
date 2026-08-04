@@ -729,6 +729,70 @@ def test_dashboard_summary_is_compact_consistent_and_never_reads_parquet(
     assert response.headers["x-request-id"]
 
 
+def test_dashboard_summary_tracks_latest_subscription_event_after_restart(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    database_path = config(tmp_path).paths.database
+
+    def record_transition(*, status: str, request_id: int, generation: int) -> None:
+        with sqlite3.connect(database_path) as connection:
+            envelope_id = int(
+                connection.execute(
+                    "SELECT id FROM evidence_envelope ORDER BY id LIMIT 1"
+                ).fetchone()[0]
+            )
+            connection.execute(
+                """
+                INSERT INTO subscription_lifecycle_event_v0(
+                    envelope_id, run_id, occurred_at_utc, subscription_key,
+                    request_id, subscription_kind, subscription_class, symbol,
+                    con_id, status, owner_ids_json, owner_count, generation,
+                    reason, payload_json, claims_json
+                ) VALUES (?, 'replay-run-001', ?, 'BAR|123|5m|RTH', ?,
+                          'bar', 0, 'AAL', 123, ?, '["system:AAL"]', 1, ?,
+                          NULL, '{}', '{}')
+                """,
+                (
+                    envelope_id,
+                    datetime.now(UTC).isoformat(),
+                    request_id,
+                    status,
+                    generation,
+                ),
+            )
+
+    record_transition(status="pending", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+    record_transition(status="active", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+    record_transition(status="cancellation_requested", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+    record_transition(status="cancelled", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {},
+        "total": 0,
+    }
+
+    record_transition(status="active", request_id=8, generation=2)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+
 def test_dashboard_summary_reuses_startup_static_safety_verification(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

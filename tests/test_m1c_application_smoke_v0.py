@@ -17,6 +17,7 @@ from stocker_prospective.contract import SECTOR_PROXY_BY_SYMBOL
 from stocker_prospective.database import ProspectiveRepository
 from stocker_prospective.fake_ibkr import FakeIBKRAdapter, FakeIBKREvent
 from stocker_prospective.frozen_live_application import (
+    _configuration_hash,
     _require_compatible_existing_activation,
     build_frozen_prospective_application,
 )
@@ -618,6 +619,65 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
         ibkr_api_version=legacy_activation.ibkr_api_version,
         tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
     )
+
+
+def test_existing_activation_accepts_only_exact_superseded_diagnostic_claims(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        git_commit="a" * 40,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+
+    legacy_claims = dict(activation.claims_boundary)
+    for field_name in (
+        "market_data_source",
+        "historical_research_source",
+        "cross_vendor_validation_diagnostic_only",
+        "cross_vendor_validation_required_for_science",
+        "prospective_evidence_description",
+    ):
+        legacy_claims.pop(field_name)
+    legacy_claims["engineering_phase_sessions"] = legacy_claims.pop(
+        "historical_engineering_phase_sessions"
+    )
+    legacy_activation = activation.model_copy(
+        update={
+            "claims_boundary": legacy_claims,
+            "configuration_hash": _configuration_hash(
+                config,
+                git_commit=activation.git_sha,
+                web_projection_cache_seconds=60.0,
+            ),
+        }
+    )
+    upgraded_config = config.model_copy(
+        update={"runtime": config.runtime.model_copy(update={"git_commit": "b" * 40})}
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=upgraded_config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version=legacy_activation.ibkr_api_version,
+        tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+    )
+
+    unsafe_claims = dict(legacy_claims)
+    unsafe_claims["paper_orders_allowed"] = True
+    with pytest.raises(ValueError, match="blocked_existing_activation_claims_boundary_mismatch"):
+        _require_compatible_existing_activation(
+            activation=legacy_activation.model_copy(update={"claims_boundary": unsafe_claims}),
+            config=upgraded_config,
+            artifact_hashes=legacy_activation.model_artifact_hashes,
+            ibkr_api_version=legacy_activation.ibkr_api_version,
+            tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+        )
 
 
 def test_existing_activation_accepts_verified_api_and_gateway_maintenance(

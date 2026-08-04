@@ -92,6 +92,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV5,
     OpeningLeaderDeploymentRefreezeReceiptV6,
     OpeningLeaderDeploymentRefreezeReceiptV7,
+    OpeningLeaderDeploymentRefreezeReceiptV8,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -175,6 +176,16 @@ _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS = frozenset(
         "option_exchange_fee_per_contract",
     }
 )
+_POST_ACTIVATION_CROSS_VENDOR_CLAIMS = frozenset(
+    {
+        "market_data_source",
+        "historical_research_source",
+        "cross_vendor_validation_diagnostic_only",
+        "cross_vendor_validation_required_for_science",
+        "prospective_evidence_description",
+    }
+)
+_LEGACY_WEB_PROJECTION_CACHE_SECONDS = 60.0
 
 
 def _operationally_promotable(checkpoint: RecorderCheckpointResult) -> bool:
@@ -200,10 +211,12 @@ def _configuration_hash(
     tws_or_gateway_version: str | None = None,
     omitted_runtime_fields: frozenset[str] = frozenset(),
     omitted_ibkr_fields: frozenset[str] = frozenset(),
+    web_projection_cache_seconds: float | None = None,
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
     runtime_payload = cast(dict[str, Any], payload["runtime"])
     ibkr_payload = cast(dict[str, Any], payload["ibkr"])
+    web_payload = cast(dict[str, Any], payload["web"])
     if git_commit is not None:
         runtime_payload["git_commit"] = git_commit
     if app_version is not None:
@@ -216,6 +229,8 @@ def _configuration_hash(
         runtime_payload.pop(field_name)
     for field_name in omitted_ibkr_fields:
         ibkr_payload.pop(field_name)
+    if web_projection_cache_seconds is not None:
+        web_payload["operational_projection_cache_seconds"] = web_projection_cache_seconds
     return hashlib.sha256(
         json.dumps(
             payload,
@@ -241,32 +256,46 @@ def _activation_configuration_hash_candidates(
     # reconstructs the exact original configuration hash. This makes run_id an
     # operational lineage boundary while every scientific input remains bound.
     for historical_run_id in (None, *sorted(set(historical_run_ids))):
-        for omitted_ibkr_fields in (
-            frozenset(),
-            _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS,
-        ):
-            candidates.update(
-                {
-                    _configuration_hash(
-                        config,
-                        git_commit=activation_git_commit,
-                        app_version=activation_app_version,
-                        run_id=historical_run_id,
-                        tws_or_gateway_version=activation_tws_or_gateway_version,
-                        omitted_ibkr_fields=omitted_ibkr_fields,
-                    ),
-                    _configuration_hash(
-                        config,
-                        git_commit=activation_git_commit,
-                        app_version=activation_app_version,
-                        run_id=historical_run_id,
-                        tws_or_gateway_version=activation_tws_or_gateway_version,
-                        omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
-                        omitted_ibkr_fields=omitted_ibkr_fields,
-                    ),
-                }
-            )
+        for web_projection_cache_seconds in (None, _LEGACY_WEB_PROJECTION_CACHE_SECONDS):
+            for omitted_ibkr_fields in (
+                frozenset(),
+                _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS,
+            ):
+                candidates.update(
+                    {
+                        _configuration_hash(
+                            config,
+                            git_commit=activation_git_commit,
+                            app_version=activation_app_version,
+                            run_id=historical_run_id,
+                            tws_or_gateway_version=activation_tws_or_gateway_version,
+                            omitted_ibkr_fields=omitted_ibkr_fields,
+                            web_projection_cache_seconds=web_projection_cache_seconds,
+                        ),
+                        _configuration_hash(
+                            config,
+                            git_commit=activation_git_commit,
+                            app_version=activation_app_version,
+                            run_id=historical_run_id,
+                            tws_or_gateway_version=activation_tws_or_gateway_version,
+                            omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
+                            omitted_ibkr_fields=omitted_ibkr_fields,
+                            web_projection_cache_seconds=web_projection_cache_seconds,
+                        ),
+                    }
+                )
     return frozenset(candidates)
+
+
+def _activation_claims_boundary_candidates() -> tuple[Mapping[str, object], ...]:
+    """Return exact current and superseded non-trading activation claim shapes."""
+
+    current = claims_boundary()
+    legacy = dict(current)
+    for field_name in _POST_ACTIVATION_CROSS_VENDOR_CLAIMS:
+        legacy.pop(field_name)
+    legacy["engineering_phase_sessions"] = legacy.pop("historical_engineering_phase_sessions")
+    return current, legacy
 
 
 def _require_compatible_existing_activation(
@@ -283,7 +312,10 @@ def _require_compatible_existing_activation(
 
     if activation.contract_version != CONTRACT_VERSION:
         raise ValueError("blocked_existing_activation_contract_version_mismatch")
-    if activation.claims_boundary != claims_boundary():
+    if all(
+        activation.claims_boundary != candidate
+        for candidate in _activation_claims_boundary_candidates()
+    ):
         raise ValueError("blocked_existing_activation_claims_boundary_mismatch")
     if activation.model_artifact_hashes != dict(sorted(artifact_hashes.items())):
         raise ValueError("blocked_existing_activation_artifact_hash_mismatch")
@@ -1299,6 +1331,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV5
         | OpeningLeaderDeploymentRefreezeReceiptV6
         | OpeningLeaderDeploymentRefreezeReceiptV7
+        | OpeningLeaderDeploymentRefreezeReceiptV8
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

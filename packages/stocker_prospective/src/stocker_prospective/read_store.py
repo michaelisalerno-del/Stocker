@@ -2111,6 +2111,10 @@ class ProspectiveReadStore:
                        q.previous_m1c_probability, q.bottom_5, q.bottom_10,
                        q.bottom_20, q.high_tail, q.distance_from_bottom_10,
                        q.data_quality_status, q.data_quality_flags_json,
+                       q.selected_underlying_quote_event_id,
+                       q.selected_underlying_quote_timestamp_utc,
+                       q.selected_underlying_quote_age_seconds,
+                       q.underlying_quote_selection_policy,
                        o.observation_id, o.observation_kind,
                        o.session_date AS observation_session_date,
                        o.trigger_checkpoint AS observation_trigger_checkpoint,
@@ -2183,7 +2187,11 @@ class ProspectiveReadStore:
             observation = connection.execute(
                 """
                 SELECT o.*, q.model_hash, q.feature_hash,
-                       q.data_quality_status AS checkpoint_data_quality_status
+                       q.data_quality_status AS checkpoint_data_quality_status,
+                       q.selected_underlying_quote_event_id,
+                       q.selected_underlying_quote_timestamp_utc,
+                       q.selected_underlying_quote_age_seconds,
+                       q.underlying_quote_selection_policy
                 FROM quiet_state_observation_v0 o
                 JOIN quiet_state_checkpoint_v0 q ON q.id = o.quiet_checkpoint_id
                 WHERE o.run_id = ? AND o.observation_id = ?

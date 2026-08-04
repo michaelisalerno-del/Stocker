@@ -30,13 +30,7 @@ class EpisodeSafetyDecision:
 
 
 def evaluate_episode_safety(inputs: EpisodeSafetyInputs) -> EpisodeSafetyDecision:
-    """Validate causal signal evidence independently of later quote execution.
-
-    ``underlying_quote_fresh`` remains part of the captured inputs so callers can
-    retain the contemporaneous quality flag.  It is deliberately not a signal
-    validity gate: the promoted L1 subscription starts only after selection, and
-    executable outcomes have their own fail-closed quote checks below.
-    """
+    """Validate causal signal evidence against the frozen safety contract."""
 
     checks = (
         (inputs.capability_preflight_passed, "ibkr_capability_preflight_failed"),
@@ -46,6 +40,7 @@ def evaluate_episode_safety(inputs: EpisodeSafetyInputs) -> EpisodeSafetyDecisio
         (inputs.previous_close_group_o_valid, "previous_close_group_o_invalid"),
         (inputs.trigger_bar_complete, "trigger_bar_incomplete"),
         (inputs.clock_drift_within_tolerance, "clock_drift_outside_tolerance"),
+        (inputs.underlying_quote_fresh, "underlying_quote_stale"),
         (not inputs.unresolved_bar_gap, "unresolved_bar_gap"),
         (inputs.deterministic_episode_identity, "episode_identity_not_deterministic"),
         (inputs.raw_event_storage_writable, "raw_event_storage_not_writable"),

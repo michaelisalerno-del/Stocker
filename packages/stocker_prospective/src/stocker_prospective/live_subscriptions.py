@@ -257,12 +257,79 @@ class LiveSubscriptionController:
         self,
         metadata: EvidenceMetadata,
         contracts: tuple[QualifiedUnderlying, ...],
+        *,
+        required_level1_symbols: frozenset[str] | None = None,
     ) -> None:
         if len({item.symbol for item in contracts}) != len(contracts):
             raise ValueError("qualified underlying symbols are not unique")
+        contract_symbols = frozenset(item.symbol for item in contracts)
+        required_level1 = (
+            contract_symbols if required_level1_symbols is None else required_level1_symbols
+        )
+        if not required_level1.issubset(contract_symbols):
+            missing = ",".join(sorted(required_level1 - contract_symbols))
+            raise ValueError("required Level-I contract is absent:" + missing)
+        ordered_contracts = tuple(sorted(contracts, key=lambda item: item.symbol))
+        missing_level1 = tuple(
+            contract
+            for contract in ordered_contracts
+            if contract.symbol in required_level1
+            and self.budget.get(
+                canonical_subscription_key(
+                    SubscriptionKind.LEVEL1,
+                    con_id=contract.con_id,
+                )
+            )
+            is None
+        )
+        missing_bars = tuple(
+            contract
+            for contract in ordered_contracts
+            if self.budget.get(
+                canonical_subscription_key(
+                    SubscriptionKind.BAR,
+                    con_id=contract.con_id,
+                    bar_size="5m",
+                    use_rth=True,
+                )
+            )
+            is None
+        )
+        budget_snapshot = self.budget.snapshot()
+        active_by_kind = budget_snapshot["active"]
+        limits_by_kind = budget_snapshot["limits"]
+        assert isinstance(active_by_kind, dict)
+        assert isinstance(limits_by_kind, dict)
+        level1_slots = int(limits_by_kind[SubscriptionKind.LEVEL1.value]) - int(
+            active_by_kind[SubscriptionKind.LEVEL1.value]
+        )
+        if len(missing_level1) > level1_slots:
+            unavailable = missing_level1[max(0, level1_slots) :]
+            raise RuntimeError(
+                "critical_budget_unavailable:required_underlying_level1:"
+                + ",".join(contract.symbol for contract in unavailable)
+            )
+        bar_slots = int(limits_by_kind[SubscriptionKind.BAR.value]) - int(
+            active_by_kind[SubscriptionKind.BAR.value]
+        )
+        if len(missing_bars) > bar_slots:
+            unavailable = missing_bars[max(0, bar_slots) :]
+            raise RuntimeError(
+                "critical_budget_unavailable:required_five_minute_bars:"
+                + ",".join(contract.symbol for contract in unavailable)
+            )
+        required_new_lines = len(missing_level1) + len(missing_bars)
+        available_lines = budget_snapshot["available_research_lines"]
+        assert isinstance(available_lines, int)
+        if required_new_lines > available_lines:
+            raise RuntimeError(
+                "critical_budget_unavailable:required_baseline_market_data_lines:"
+                f"needed={required_new_lines}:available={available_lines}"
+            )
         self._contracts.update({item.symbol: item for item in contracts})
+        failed_level1: list[str] = []
         failed_bars: list[str] = []
-        for contract in sorted(contracts, key=lambda item: item.symbol):
+        for contract in ordered_contracts:
             priority = (
                 SubscriptionPriority.MARKET_PROXY
                 if contract.market_proxy
@@ -273,6 +340,28 @@ class LiveSubscriptionController:
                 if contract.market_proxy
                 else SubscriptionClass.FROZEN_UNIVERSE_SIGNAL
             )
+            if contract.symbol in required_level1:
+                level1 = self._allocate(
+                    metadata,
+                    key=canonical_subscription_key(
+                        SubscriptionKind.LEVEL1,
+                        con_id=contract.con_id,
+                    ),
+                    contract=contract,
+                    budget_kind=SubscriptionKind.LEVEL1,
+                    stream_kind=StreamKind.UNDERLYING_LEVEL1,
+                    priority=priority,
+                    subscription_class=subscription_class,
+                    owner_id=(
+                        f"system:market_proxy:{contract.symbol}"
+                        if contract.market_proxy
+                        else f"universe:{contract.symbol}"
+                    ),
+                    owner_episode=None,
+                    protected=True,
+                )
+                if level1 is None:
+                    failed_level1.append(contract.symbol)
             bar = self._allocate(
                 metadata,
                 key=canonical_subscription_key(
@@ -296,6 +385,11 @@ class LiveSubscriptionController:
             )
             if bar is None:
                 failed_bars.append(contract.symbol)
+        if failed_level1:
+            raise RuntimeError(
+                "critical_budget_unavailable:required_underlying_level1:"
+                + ",".join(sorted(failed_level1))
+            )
         if failed_bars:
             raise RuntimeError(
                 "critical_budget_unavailable:required_five_minute_bars:"
@@ -414,7 +508,7 @@ class LiveSubscriptionController:
         symbol: str,
         selection_id: str,
     ) -> UnderlyingPromotionResult:
-        """Keep one replaceable, record-only L1 stream for the selected leader."""
+        """Keep one replaceable research owner on protected record-only L1."""
 
         contract = self._contracts[symbol]
         owner_id = "research:opening-leader-continuation-v0"

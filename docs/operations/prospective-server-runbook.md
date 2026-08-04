@@ -934,6 +934,66 @@ margin leaves margin ROI unavailable while cash-secured or defined-risk ROI
 remains available. This path is research-only: it has no account, position,
 execution, order, buy, or sell surface and cannot route an order.
 
+### Quiet Options runtime V11 supersession
+
+Runtime V11 supersedes V10's post-selection Level-I assumption for Quiet
+Options. Before bars are started, recorder preflight must be able to protect
+one live Level-I stream for every frozen stock plus VTI and one completed
+five-minute-bar stream for every stock and proxy. Sector proxies remain
+bar-only. If either the per-kind limits or the total research-line budget is
+insufficient, startup exits with `critical_budget_unavailable` instead of
+running a permanently ineligible recorder. Do not work around that failure by
+raising `maximum_quote_age_seconds`, reducing the frozen universe, or removing
+reserved/safety capacity.
+
+At a quiet checkpoint, the recorder selects the latest valid quote at or before
+`trigger_end` from its bounded per-symbol history. Freshness remains two
+seconds and is calculated against `trigger_end`; processing time is irrelevant.
+A T+9 quote therefore cannot overwrite a valid T-1 boundary quote when the
+worker completes at T+10. Missing, invalid, stale, or non-primary market data
+still rejects the checkpoint. Each new quiet checkpoint persists the selected
+event ID, timestamp, age, and
+`latest_valid_at_or_before_checkpoint_boundary_v0` policy.
+
+Migration `0030` never updates a pre-existing prospective checkpoint. It
+snapshots affected pre-fix stale classifications into the separate
+`quiet_quote_instrumentation_defect_*_v0` audit dataset with recomputation and
+observation creation disabled. The originally reported 320 rows, plus any
+additional pre-migration classifications exposed to the same defect, remain
+exactly as first recorded; do not relabel them or use the audit dataset as
+prospective evidence.
+Verify the snapshot after migration with read-only SQL:
+
+```sql
+SELECT affected_checkpoint_count, dataset_scope,
+       original_evidence_modified, recomputation_authorized,
+       may_create_quiet_observation
+FROM quiet_quote_instrumentation_defect_v0;
+
+SELECT COUNT(*)
+FROM quiet_quote_instrumentation_defect_checkpoint_v0;
+```
+
+For a new checkpoint, inspect the causal selection without consulting the
+mutable current quote:
+
+```sql
+SELECT symbol, session_date, checkpoint, eligible,
+       selected_underlying_quote_timestamp_utc,
+       selected_underlying_quote_age_seconds,
+       underlying_quote_selection_policy,
+       data_quality_flags_json
+FROM quiet_state_checkpoint_v0
+ORDER BY id DESC
+LIMIT 20;
+```
+
+The bottom-10 threshold remains `0.135896965695626`. A probability above it,
+including IREN at `0.157624`, is not a trigger and must not be forced. A valid
+crossing creates the immutable quiet observation and schedules bounded shadow
+option capture. The system remains research/shadow-only, read-only at IBKR,
+and has no order-capable API surface.
+
 Before the first recorder start, create the immutable frozen activity baseline:
 
 ```bash

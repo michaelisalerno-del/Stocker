@@ -81,6 +81,8 @@ from stocker_prospective.tail_phase_v1 import (
     calculate_movement_consumed_v1,
 )
 
+CHECKPOINT_QUOTE_SELECTION_POLICY_V0 = "latest_valid_at_or_before_checkpoint_boundary_v0"
+
 
 def _comparison_sign(value: float | None) -> int | None:
     if value is None:
@@ -309,6 +311,10 @@ class RecorderCheckpointInput:
     opening_reversal_receipt_created_at_utc_v1_1: datetime | None = None
     opening_reversal_first_buffered_event_received_at_utc_v1_1: datetime | None = None
     opening_reversal_entry_data_admitted_before_receipt_v1_1: bool = False
+    selected_underlying_quote_event_id: str | None = None
+    selected_underlying_quote_timestamp_utc: datetime | None = None
+    selected_underlying_quote_age_seconds: float | None = None
+    underlying_quote_selection_policy: str | None = None
 
 
 class RecorderCheckpointResult(BaseModel):
@@ -988,6 +994,7 @@ class FrozenM1CRecorderEngine:
                         if item.clock_drift_within_tolerance
                         else ("clock_drift_outside_tolerance",)
                     ),
+                    *(() if item.underlying_quote_fresh else ("underlying_quote_stale",)),
                     *(() if trigger.finalised else ("trigger_bar_incomplete",)),
                     *(() if not item.unresolved_bar_gap else ("unresolved_bar_gap",)),
                     *(
@@ -998,10 +1005,9 @@ class FrozenM1CRecorderEngine:
                 )
             )
         )
-        # L1 is promoted only after a bar-derived selection.  A pre-selection
-        # quote therefore cannot be a prerequisite for the frozen signal; its
-        # staleness remains persisted as a quality flag and the later
-        # executable outcome gate still requires valid, fresh bid/ask quotes.
+        # The frozen safety contract requires a fresh protected Level-I quote
+        # at the completed-bar boundary. Selection is deterministic as-of the
+        # boundary, never against the mutable latest quote at processing time.
         signal_inputs_eligible = (
             item.capability_preflight_passed
             and item.m1c_parity_passed
@@ -1009,6 +1015,7 @@ class FrozenM1CRecorderEngine:
             and not missing_group_o_features
             and item.market_data_type is MarketDataType.LIVE
             and item.clock_drift_within_tolerance
+            and item.underlying_quote_fresh
             and trigger.finalised
             and not item.unresolved_bar_gap
             and item.raw_event_storage_writable
@@ -1142,6 +1149,10 @@ class FrozenM1CRecorderEngine:
             checkpoint=checkpoint,
             snapshot=quiet_state,
             eligible=scientific_inputs_eligible,
+            selected_underlying_quote_event_id=(item.selected_underlying_quote_event_id),
+            selected_underlying_quote_timestamp_utc=(item.selected_underlying_quote_timestamp_utc),
+            selected_underlying_quote_age_seconds=(item.selected_underlying_quote_age_seconds),
+            underlying_quote_selection_policy=(item.underlying_quote_selection_policy),
         )
         quiet_observation_id: str | None = None
         if quiet_episode.fresh_episode:
@@ -1369,6 +1380,7 @@ class FrozenM1CRecorderEngine:
 
 
 __all__ = [
+    "CHECKPOINT_QUOTE_SELECTION_POLICY_V0",
     "FrozenM1CRecorderEngine",
     "RecorderCheckpointInput",
     "RecorderCheckpointResult",

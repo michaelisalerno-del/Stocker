@@ -53,7 +53,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
-    OpeningLeaderDeploymentRefreezeReceiptV10,
+    OpeningLeaderDeploymentRefreezeReceiptV11,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
@@ -1416,6 +1416,7 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
             "deployment_freeze_receipt_v8.json",
             "deployment_freeze_receipt_v9.json",
             "deployment_freeze_receipt_v10.json",
+            "deployment_freeze_receipt_v11.json",
         ),
     )
     source = tmp_path / "opening_leader_source.py"
@@ -1490,19 +1491,20 @@ def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
     )
-    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV10)
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV11)
     assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
     assert (
         receipt.supersedes_receipt_sha256
-        == hashlib.sha256((package / "deployment_freeze_receipt_v9.json").read_bytes()).hexdigest()
+        == hashlib.sha256((package / "deployment_freeze_receipt_v10.json").read_bytes()).hexdigest()
     )
-    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-a45e95bb05bd0cdbb6b5582a")
-    assert receipt.refreeze_reason == ("post_selection_quote_and_executable_option_accounting")
+    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-1315af35c940bfe0da184a96")
+    assert receipt.refreeze_reason == ("deterministic_boundary_quote_and_protected_level1")
     assert receipt.frozen_semantics_changed is True
     assert {
         "recorder_engine",
         "episode_safety",
         "option_risk_accounting",
+        "migration_0030",
     }.issubset(receipt.source_hashes)
     assert receipt.order_routing_disabled is True
     assert receipt.protected_historical_outcomes_accessed is False

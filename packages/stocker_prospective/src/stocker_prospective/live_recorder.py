@@ -98,6 +98,7 @@ from stocker_prospective.order_book import DepthBook
 from stocker_prospective.partition_store import PartitionedEventStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.recorder_v0 import (
+    CHECKPOINT_QUOTE_SELECTION_POLICY_V0,
     FrozenM1CRecorderEngine,
     RecorderCheckpointInput,
     RecorderCheckpointResult,
@@ -110,6 +111,7 @@ OptionQuoteSink = Callable[[EvidenceMetadata, OptionQuoteEvent], None]
 EpisodeCallback = Callable[[RecorderCheckpointResult], None]
 NEW_YORK = ZoneInfo("America/New_York")
 PROCESSING_HEARTBEAT_CALLBACK_INTERVAL = 8
+MAX_RETAINED_LEVEL1_QUOTES_PER_SYMBOL = 4_096
 
 
 @dataclass(frozen=True)
@@ -604,6 +606,29 @@ class FrozenM1CLiveRecorder:
         )
         return min(
             candidates,
+            key=lambda item: (
+                item.ordering_timestamp,
+                item.received_monotonic_ns,
+                item.source_sequence,
+                item.event_id,
+            ),
+            default=None,
+        )
+
+    def checkpoint_quote_as_of(
+        self,
+        symbol: str,
+        checkpoint_boundary: datetime,
+    ) -> UnderlyingLevel1QuoteEvent | None:
+        """Select the latest valid causal quote at or before a bar boundary."""
+
+        boundary = checkpoint_boundary.astimezone(UTC)
+        return max(
+            (
+                event
+                for event in self._quotes.get(symbol, ())
+                if event.ordering_timestamp <= boundary and event.quote_valid
+            ),
             key=lambda item: (
                 item.ordering_timestamp,
                 item.received_monotonic_ns,
@@ -1372,7 +1397,10 @@ class FrozenM1CLiveRecorder:
     def _retain(self, event: RawEvent) -> UnderlyingDepthSnapshotEvent | None:
         if isinstance(event, UnderlyingLevel1QuoteEvent):
             self._latest_quotes[event.symbol] = event
-            self._quotes.setdefault(event.symbol, deque()).append(event)
+            self._quotes.setdefault(
+                event.symbol,
+                deque(maxlen=MAX_RETAINED_LEVEL1_QUOTES_PER_SYMBOL),
+            ).append(event)
         elif isinstance(event, UnderlyingTickBidAskEvent):
             synthetic = UnderlyingLevel1QuoteEvent(
                 **event.model_dump(
@@ -1400,7 +1428,10 @@ class FrozenM1CLiveRecorder:
                 },
                 halted=None,
             )
-            self._quotes.setdefault(event.symbol, deque()).append(synthetic)
+            self._quotes.setdefault(
+                event.symbol,
+                deque(maxlen=MAX_RETAINED_LEVEL1_QUOTES_PER_SYMBOL),
+            ).append(synthetic)
         elif isinstance(event, UnderlyingTickTradeEvent):
             self._trades.setdefault(event.symbol, deque()).append(event)
         elif isinstance(event, UnderlyingDepthEvent):
@@ -2673,14 +2704,21 @@ class FrozenM1CLiveRecorder:
                             feature_bars=feature_bars,
                         )
                         context = self.group_o_provider(symbol, session)
-                        latest = self._latest_quotes.get(symbol)
                         trigger_end = feature_bars[-1].bar_complete_timestamp
+                        checkpoint_quote = self.checkpoint_quote_as_of(
+                            symbol,
+                            trigger_end,
+                        )
+                        quote_age = (
+                            None
+                            if checkpoint_quote is None
+                            else (trigger_end - checkpoint_quote.ordering_timestamp).total_seconds()
+                        )
                         quote_fresh = (
-                            latest is not None
-                            and latest.quote_valid
-                            and latest.market_data_type.primary_eligible
-                            and abs((latest.ordering_timestamp - trigger_end).total_seconds())
-                            <= self.maximum_quote_age.total_seconds()
+                            checkpoint_quote is not None
+                            and checkpoint_quote.market_data_type.primary_eligible
+                            and quote_age is not None
+                            and 0.0 <= quote_age <= self.maximum_quote_age.total_seconds()
                         )
                         v1_1_checkpoint = (
                             checkpoint == 6
@@ -2694,8 +2732,8 @@ class FrozenM1CLiveRecorder:
                             ),
                             (
                                 feature_bars[-1].bar_complete_timestamp,
-                                latest.ordering_timestamp
-                                if latest is not None
+                                checkpoint_quote.ordering_timestamp
+                                if checkpoint_quote is not None
                                 else feature_bars[-1].bar_complete_timestamp,
                             ),
                         )
@@ -2713,8 +2751,8 @@ class FrozenM1CLiveRecorder:
                                 completed_direction_bars=direction_bars,
                                 group_o_context=context,
                                 market_data_type=(
-                                    latest.market_data_type
-                                    if latest is not None
+                                    checkpoint_quote.market_data_type
+                                    if checkpoint_quote is not None
                                     else (
                                         self.adapter.connection.health().market_data_type
                                         or MarketDataType.UNKNOWN
@@ -2772,6 +2810,18 @@ class FrozenM1CLiveRecorder:
                                     )
                                 ),
                                 scientific_recording_authorized=(self._scientific_scoring_enabled),
+                                selected_underlying_quote_event_id=(
+                                    None if checkpoint_quote is None else checkpoint_quote.event_id
+                                ),
+                                selected_underlying_quote_timestamp_utc=(
+                                    None
+                                    if checkpoint_quote is None
+                                    else checkpoint_quote.ordering_timestamp
+                                ),
+                                selected_underlying_quote_age_seconds=quote_age,
+                                underlying_quote_selection_policy=(
+                                    CHECKPOINT_QUOTE_SELECTION_POLICY_V0
+                                ),
                             )
                         )
                     except (KeyError, ValueError) as exc:
@@ -2896,6 +2946,12 @@ class FrozenM1CLiveRecorder:
         for observation_id in identities:
             self._quiet_observation_ids.add(observation_id)
             for name, (start, end) in windows.items():
+                # Quiet observations enter at the checkpoint boundary, so the
+                # generic T-to-entry interval is exactly zero.  It contains no
+                # evidence and must not be sent to the positive-width window
+                # summariser.
+                if end <= start:
+                    continue
                 self._episode_windows[(observation_id, name)] = (
                     decision.symbol,
                     start,

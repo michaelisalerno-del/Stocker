@@ -97,6 +97,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV8,
     OpeningLeaderDeploymentRefreezeReceiptV9,
     OpeningLeaderDeploymentRefreezeReceiptV10,
+    OpeningLeaderDeploymentRefreezeReceiptV11,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1338,6 +1339,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV8
         | OpeningLeaderDeploymentRefreezeReceiptV9
         | OpeningLeaderDeploymentRefreezeReceiptV10
+        | OpeningLeaderDeploymentRefreezeReceiptV11
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -1940,7 +1942,7 @@ def build_frozen_prospective_application(
     )
     controller_budget = SubscriptionBudgetManager(
         limits={
-            SubscriptionKind.LEVEL1: config.ibkr.max_high_resolution_underlyings,
+            SubscriptionKind.LEVEL1: len(identity.symbols) + 1,
             SubscriptionKind.BAR: len(identity.symbols) + len(proxy_symbols),
             SubscriptionKind.TICK_BY_TICK: min(
                 runtime_capacity.available_tick_by_tick,
@@ -2059,7 +2061,11 @@ def build_frozen_prospective_application(
         symbols=identity.symbols,
         operational_status_by_symbol=statuses,
     )
-    controller.start_always_on(initial_metadata, tuple(qualified))
+    controller.start_always_on(
+        initial_metadata,
+        tuple(qualified),
+        required_level1_symbols=frozenset((*identity.symbols, MARKET_PROXY)),
+    )
     # These callbacks are prospective evidence and must be requested only after
     # the immutable activation boundary and callback normalizer exist.
     adapter.request_current_time()

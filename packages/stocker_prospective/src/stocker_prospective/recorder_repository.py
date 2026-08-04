@@ -930,10 +930,35 @@ class FrozenRecorderRepository:
         checkpoint: int,
         snapshot: QuietStateSnapshot,
         eligible: bool,
+        selected_underlying_quote_event_id: str | None = None,
+        selected_underlying_quote_timestamp_utc: datetime | None = None,
+        selected_underlying_quote_age_seconds: float | None = None,
+        underlying_quote_selection_policy: str | None = None,
     ) -> int:
         """Persist every frozen quiet-tail membership beside the original score."""
 
         self._validate(metadata)
+        selected_quote_identity = (
+            selected_underlying_quote_event_id,
+            selected_underlying_quote_timestamp_utc,
+            selected_underlying_quote_age_seconds,
+        )
+        if any(value is not None for value in selected_quote_identity) and not all(
+            value is not None for value in selected_quote_identity
+        ):
+            raise ValueError("selected quiet checkpoint quote audit is incomplete")
+        if (
+            selected_underlying_quote_age_seconds is not None
+            and selected_underlying_quote_age_seconds < 0.0
+        ):
+            raise ValueError("selected quiet checkpoint quote age is negative")
+        if underlying_quote_selection_policy is None:
+            if any(value is not None for value in selected_quote_identity):
+                raise ValueError("selected quiet checkpoint quote policy is absent")
+        elif (
+            underlying_quote_selection_policy != "latest_valid_at_or_before_checkpoint_boundary_v0"
+        ):
+            raise ValueError("quiet checkpoint quote selection policy differs")
         with self.repository._connect() as connection:
             source = connection.execute(
                 """
@@ -967,13 +992,18 @@ class FrozenRecorderRepository:
             existing = connection.execute(
                 """
                 SELECT id, m1c_probability, previous_m1c_probability,
-                       data_quality_flags_json
+                       data_quality_flags_json,
+                       selected_underlying_quote_event_id,
+                       selected_underlying_quote_timestamp_utc,
+                       selected_underlying_quote_age_seconds,
+                       underlying_quote_selection_policy
                 FROM quiet_state_checkpoint_v0 WHERE checkpoint_id = ?
                 """,
                 (checkpoint_id,),
             ).fetchone()
             encoded_flags = _json(snapshot.data_quality_flags)
             if existing is not None:
+                persisted_quote_policy = existing["underlying_quote_selection_policy"]
                 if (
                     float(existing["m1c_probability"]) != snapshot.probability
                     or (
@@ -983,6 +1013,24 @@ class FrozenRecorderRepository:
                     )
                     != snapshot.previous_probability
                     or str(existing["data_quality_flags_json"]) != encoded_flags
+                    or (
+                        persisted_quote_policy is not None
+                        and (
+                            existing["selected_underlying_quote_event_id"]
+                            != selected_underlying_quote_event_id
+                            or existing["selected_underlying_quote_timestamp_utc"]
+                            != (
+                                None
+                                if selected_underlying_quote_timestamp_utc is None
+                                else selected_underlying_quote_timestamp_utc.astimezone(
+                                    UTC
+                                ).isoformat()
+                            )
+                            or existing["selected_underlying_quote_age_seconds"]
+                            != selected_underlying_quote_age_seconds
+                            or persisted_quote_policy != underlying_quote_selection_policy
+                        )
+                    )
                 ):
                     raise ValueError("immutable quiet checkpoint differs")
                 return int(existing["id"])
@@ -994,8 +1042,12 @@ class FrozenRecorderRepository:
                     checkpoint, m1c_probability, previous_m1c_probability,
                     bottom_5, bottom_10, bottom_20, high_tail,
                     distance_from_bottom_10, model_hash, feature_hash, eligible,
-                    data_quality_status, data_quality_flags_json, claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    data_quality_status, data_quality_flags_json,
+                    selected_underlying_quote_event_id,
+                    selected_underlying_quote_timestamp_utc,
+                    selected_underlying_quote_age_seconds,
+                    underlying_quote_selection_policy, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     envelope_id,
@@ -1016,6 +1068,14 @@ class FrozenRecorderRepository:
                     int(eligible),
                     snapshot.data_quality_status,
                     encoded_flags,
+                    selected_underlying_quote_event_id,
+                    (
+                        None
+                        if selected_underlying_quote_timestamp_utc is None
+                        else selected_underlying_quote_timestamp_utc.astimezone(UTC).isoformat()
+                    ),
+                    selected_underlying_quote_age_seconds,
+                    underlying_quote_selection_policy,
                     self.claims_json,
                 ),
             )

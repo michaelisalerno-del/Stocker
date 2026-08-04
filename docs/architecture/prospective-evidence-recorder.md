@@ -395,6 +395,23 @@ fills; a finalized outcome freezes the exact per-leg entry and exit bid/ask,
 timestamps, conservative quote side, expiry, strike, DTE, and multiplier used
 to calculate its virtual P&L.
 
+Quiet checkpoint eligibility uses the latest valid primary IBKR Level-I quote
+at or before the completed five-minute boundary. The lookup is deterministic
+over a bounded per-symbol history; a later callback cannot replace the causal
+boundary quote merely because checkpoint processing is delayed. The unchanged
+two-second freshness limit is measured from the selected quote to the boundary,
+not to processing time. The selected event ID, quote timestamp, age, and policy
+are persisted with the checkpoint. Missing, invalid, delayed/non-primary, or
+out-of-window evidence remains fail-closed.
+
+The frozen stock universe plus VTI has protected always-on Level-I as well as
+completed-bar subscriptions; sector proxies remain bar-only. Startup checks
+the whole baseline against per-kind and total line budgets before making any
+request and fails clearly if it cannot protect every required stream. Quiet
+entry at the checkpoint boundary has no positive-width `T_to_entry` interval,
+so that empty diagnostic window is omitted while all real pre-entry and
+post-entry windows remain recorded.
+
 The API returns these as separate, bounded collections and publishes no
 combined total. The main dashboard snapshot uses smaller limits than the
 on-demand ledger route so polling cannot repeatedly render the full history.
@@ -443,15 +460,17 @@ IBKR Greeks remain separated by bid, ask, last, and model source; one source is
 never filled from another. Taylor-path attribution and model-price residuals
 are diagnostic-only post-processing and are not required for finalization.
 
-Opening Leader runtime V10 applies the same small accounting core to its P20,
+Opening Leader runtime V10 (superseded by V11) applied the same small accounting core to its P20,
 P30, and BPS20 records. Exact leg identities are frozen from E0 and may not be
 substituted at later marks; later captures explicitly request the E0-frozen
 conIds even if the underlying moves. The derived rows are append-only and appear in a
 separate research ledger; they do not create account, position, execution, or
-order state. A single post-selection Level I subscription supplies the chosen
+order state. A single post-selection Level I subscription supplied the chosen
 underlying quote. Because the symbol cannot be known before causal ranking,
-underlying quote freshness is an outcome/readiness check rather than an input
-to signal eligibility. Timely callback admission remains required; only the
+underlying quote freshness was treated as an outcome/readiness check rather than an input
+to signal eligibility. V11 supersedes that assumption for quiet-state evidence:
+the contractually required universe Level-I streams are protected at startup,
+and a fresh causal boundary quote is again an eligibility input. Timely callback admission remains required; only the
 old 420-second wall-clock processing cutoff becomes a latency diagnostic.
 Actual E0 remains strictly after the immutable signal receipt, so callback
 recovery cannot backdate an entry or rewrite an earlier failure.
@@ -482,9 +501,14 @@ changing any source evidence row. Migration `0020` separates V1.1 capture
 eligibility from scientific eligibility. It permits an engineering-shadow
 episode to record only the same primary 1DTE call/put pair while the strict
 scientific projection additionally requires a scientifically valid parent.
-Migration `0029` separates nonblocking checkpoint diagnostics from scientific
-rejection reasons. A pre-selection stale underlying quote remains persisted
-and visible without contradicting an otherwise eligible bar-derived signal.
+Migration `0029` separated nonblocking checkpoint diagnostics from scientific
+rejection reasons under the now-superseded post-selection-feed assumption.
+Migration `0030` adds causal boundary-quote event/timestamp/age/policy audit
+columns and restores fail-closed quote eligibility. It does not update any
+existing checkpoint. Instead, a separate
+`non_prospective_derived_instrumentation_audit` table records pre-migration
+stale classifications affected by the mutable-latest-quote defect; those rows
+cannot create observations or authorize recomputation.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have

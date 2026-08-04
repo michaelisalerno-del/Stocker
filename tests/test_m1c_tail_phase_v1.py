@@ -711,7 +711,7 @@ def test_checkpoint_replay_accepts_legacy_stale_quote_rejection_as_diagnostic(
     assert json.loads(str(row["diagnostic_quality_flags_json"])) == []
 
 
-def test_live_engine_logs_tail_phase_without_changing_episode_eligibility(
+def test_live_engine_logs_tail_phase_but_stale_quote_blocks_episode(
     tmp_path: Path,
 ) -> None:
     class FakeFeatureBuilder:
@@ -822,27 +822,31 @@ def test_live_engine_logs_tail_phase_without_changing_episode_eligibility(
         )
     )
 
-    assert result.episode_decision.fresh_episode is True
-    assert "underlying_quote_stale" not in result.rejection_reasons
+    assert result.episode_decision.fresh_episode is False
+    assert "underlying_quote_stale" in result.rejection_reasons
     assert "underlying_quote_stale" in result.diagnostic_quality_flags
-    assert result.episode_safety is not None
-    assert "underlying_quote_stale" not in result.episode_safety.rejection_reasons
-    assert result.tail_phase_v1.m1c_tail_phase_v1 == "FIRST_ENTRY"
+    assert result.episode_safety is None
+    assert result.tail_phase_v1.m1c_tail_phase_v1 == "UNKNOWN_INCOMPLETE"
     assert result.movement_consumed_state_v1.movement_consumed_complete_v1
     assert result.movement_consumed_bucket_v1 == "LOW_OR_EQUAL"
     with database._connect() as connection:
         checkpoint = connection.execute(
             """
-            SELECT m1c_tail_phase_v1, movement_consumed_bucket_v1,
+            SELECT eligible, rejection_reasons_json, m1c_tail_phase_v1,
+                   phase_missing_reason_v1, movement_consumed_bucket_v1,
                    tail_phase_source_v1_json
             FROM m1c_checkpoint_v0
             """
         ).fetchone()
         episode = connection.execute("SELECT phase_at_trigger_v1 FROM m1c_episode_v0").fetchone()
     assert checkpoint is not None
-    assert episode is not None
-    assert checkpoint["m1c_tail_phase_v1"] == "FIRST_ENTRY"
-    assert episode["phase_at_trigger_v1"] == "FIRST_ENTRY"
+    assert episode is None
+    assert checkpoint["eligible"] == 0
+    assert json.loads(str(checkpoint["rejection_reasons_json"])) == ["underlying_quote_stale"]
+    assert checkpoint["m1c_tail_phase_v1"] == "UNKNOWN_INCOMPLETE"
+    assert checkpoint["phase_missing_reason_v1"] == (
+        "current_checkpoint_invalid:underlying_quote_stale"
+    )
     source = json.loads(str(checkpoint["tail_phase_source_v1_json"]))
     assert source["tail_phase_activation_status_v1"] == "available"
     assert source["previous_close_implied_movement_15m_status"] == "available"

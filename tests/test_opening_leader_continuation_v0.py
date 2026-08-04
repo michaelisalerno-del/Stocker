@@ -50,7 +50,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
-    OpeningLeaderDeploymentRefreezeReceiptV6,
+    OpeningLeaderDeploymentRefreezeReceiptV7,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
@@ -1273,6 +1273,7 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
             "deployment_freeze_receipt_v4.json",
             "deployment_freeze_receipt_v5.json",
             "deployment_freeze_receipt_v6.json",
+            "deployment_freeze_receipt_v7.json",
         ),
     )
     source = tmp_path / "opening_leader_source.py"
@@ -1347,13 +1348,15 @@ def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
     )
-    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV6)
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV7)
     assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
     assert receipt.supersedes_receipt_sha256 == (
-        "e5cb5d2b40d4853476d284987518cbc7dacf862f1230d5f9a7c25939c858db3d"
+        "364d9cbd5cf764466eb4a499767a8986856bbf9e0dce30667116ea4ae59f451b"
     )
-    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-4efb16325f5a0b2dd923daca")
-    assert receipt.refreeze_reason == "record_only_accounting_activation_compatibility"
+    assert receipt.supersedes_deployment_receipt_id == ("olc-deploy-edb9b269da217f5a31c938e9")
+    assert (
+        receipt.refreeze_reason == "record_only_ibkr_evidence_dashboard_accounting_simplification"
+    )
     assert receipt.frozen_semantics_changed is False
     assert receipt.order_routing_disabled is True
     assert receipt.protected_historical_outcomes_accessed is False

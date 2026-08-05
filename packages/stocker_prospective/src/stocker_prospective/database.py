@@ -16,6 +16,7 @@ from stocker_prospective.bars import CompletedBar
 from stocker_prospective.bundle import SCIENTIFIC_CLASSIFICATION
 from stocker_prospective.market_data import MarketDataBudgetSnapshot
 from stocker_prospective.migration_order import migration_plan
+from stocker_prospective.sqlite_coordination import CoordinatedSQLiteConnection
 
 RECORDER_SQLITE_BUSY_TIMEOUT_MS = 30_000
 
@@ -171,6 +172,7 @@ class ProspectiveRepository:
         connection = sqlite3.connect(
             self.database_path,
             timeout=self.busy_timeout_ms / 1_000,
+            factory=CoordinatedSQLiteConnection,
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")

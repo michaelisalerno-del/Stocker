@@ -410,6 +410,96 @@ def test_raw_materialisation_is_not_starved_by_in_process_callback_writer(
     assert inbox.raw_materialization(leased) is not None
 
 
+def test_recorder_repository_write_waits_for_in_process_callback_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = migrated_database(tmp_path)
+    inbox = durable_inbox(path, busy_timeout_ms=10)
+    repository = ProspectiveRepository(path, busy_timeout_ms=10)
+    writer_started = threading.Event()
+    release_writer = threading.Event()
+    writer_errors: list[BaseException] = []
+    original_update = inbox._update_callback_heartbeats
+
+    def pause_inside_callback_transaction(
+        connection: sqlite3.Connection,
+        *,
+        received_at: datetime,
+        admitted_at: datetime | None,
+    ) -> None:
+        writer_started.set()
+        assert release_writer.wait(timeout=1)
+        original_update(
+            connection,
+            received_at=received_at,
+            admitted_at=admitted_at,
+        )
+
+    monkeypatch.setattr(inbox, "_update_callback_heartbeats", pause_inside_callback_transaction)
+
+    def admit_callback() -> None:
+        try:
+            admit(inbox, event_id="concurrent-repository-callback")
+        except BaseException as error:
+            writer_errors.append(error)
+
+    writer = threading.Thread(target=admit_callback)
+    writer.start()
+    assert writer_started.wait(timeout=1)
+    release_timer = threading.Timer(0.25, release_writer.set)
+    release_timer.start()
+    try:
+        event_id = repository.record_data_health_event(
+            EvidenceMetadata(
+                run_id=RUN_ID,
+                prospective_start_utc=NOW - timedelta(days=1),
+                app_version="test",
+                git_commit="a" * 40,
+                model_artifact_id="frozen-m1c",
+                universe_id="anchor-frozen-20",
+                cohort="anchor_frozen_20",
+                source_timestamps=[NOW.isoformat()],
+                recorded_at_utc=NOW,
+            ),
+            severity="info",
+            blocker_code=None,
+            component="sqlite_writer_coordination",
+            message="repository write was serialized",
+            details={},
+        )
+    finally:
+        release_writer.set()
+        release_timer.cancel()
+        writer.join(timeout=1)
+
+    assert event_id > 0
+    assert not writer.is_alive()
+    assert writer_errors == []
+
+
+def test_steady_state_callback_admission_does_not_recount_the_inbox(
+    tmp_path: Path,
+) -> None:
+    inbox = durable_inbox(migrated_database(tmp_path))
+    admit(inbox, event_id="initial-accounting-snapshot")
+    statements: list[str] = []
+    with inbox._connect() as connection:
+        connection.set_trace_callback(statements.append)
+    try:
+        admit(inbox, event_id="steady-state-admission")
+    finally:
+        with inbox._connect() as connection:
+            connection.set_trace_callback(None)
+
+    callback_counts = [
+        statement
+        for statement in statements
+        if "COUNT(*)" in statement.upper() and "CALLBACK_INBOX_V1" in statement.upper()
+    ]
+    assert callback_counts == []
+
+
 def test_expired_batch_membership_excludes_newly_arrived_callback(
     tmp_path: Path,
 ) -> None:

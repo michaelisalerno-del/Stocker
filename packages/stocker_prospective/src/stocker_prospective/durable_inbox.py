@@ -8,14 +8,15 @@ import math
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from stocker_prospective.sqlite_coordination import CoordinatedSQLiteConnection
 
 _TRANSIENT_WRITER_RETRY_DELAYS_SECONDS = (0.005, 0.01, 0.025, 0.05)
 
@@ -265,13 +266,9 @@ class DurableCallbackInbox:
         self.recorder_generation = recorder_generation
         self.owner_id = owner_id
         self._connection_local = threading.local()
-        # SQLite serializes writers but does not coordinate admission between
-        # this object's callback and recorder threads.  Without an in-process
-        # gate, a callback transaction can repeatedly win the writer race until
-        # raw materialisation exhausts its bounded busy retry and falsely
-        # latches storage-fatal.  Keep the gate local to one inbox/database;
-        # durable callback admission remains synchronous and fail-closed.
-        self._connection_gate = threading.RLock()
+        self._active_count_run_id: str | None = None
+        self._active_count: int | None = None
+        self._oldest_active_received_at: datetime | None = None
 
     def configure_recorder(
         self,
@@ -285,30 +282,31 @@ class DurableCallbackInbox:
         self.run_id = run_id
         self.recorder_generation = recorder_generation
         self.owner_id = owner_id
+        self._active_count_run_id = None
+        self._active_count = None
+        self._oldest_active_received_at = None
 
-    @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        """Yield one thread-local connection behind a serialized process boundary."""
+    def _connect(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = getattr(
+            self._connection_local,
+            "connection",
+            None,
+        )
+        if connection is not None:
+            return connection
 
-        with self._connection_gate:
-            connection: sqlite3.Connection | None = getattr(
-                self._connection_local,
-                "connection",
-                None,
-            )
-            if connection is None:
-                connection = sqlite3.connect(
-                    self.database_path,
-                    timeout=self.busy_timeout_ms / 1_000,
-                )
-                connection.row_factory = sqlite3.Row
-                connection.execute("PRAGMA foreign_keys = ON")
-                connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
-                connection.execute("PRAGMA journal_mode = WAL")
-                connection.execute("PRAGMA synchronous = FULL")
-                self._connection_local.connection = connection
-            with connection:
-                yield connection
+        connection = sqlite3.connect(
+            self.database_path,
+            timeout=self.busy_timeout_ms / 1_000,
+            factory=CoordinatedSQLiteConnection,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = FULL")
+        self._connection_local.connection = connection
+        return connection
 
     @staticmethod
     def _is_transient_writer_contention(error: sqlite3.OperationalError) -> bool:
@@ -332,6 +330,42 @@ class DurableCallbackInbox:
                 if delay_seconds is None or not self._is_transient_writer_contention(error):
                     raise
                 time.sleep(delay_seconds)
+
+    def _ensure_active_accounting(self, connection: sqlite3.Connection) -> None:
+        if self._active_count is not None and self._active_count_run_id == self.run_id:
+            return
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS backlog, MIN(received_utc) AS oldest
+            FROM callback_inbox_v1
+            WHERE admission_run_id IS ?
+              AND status IN (
+                  'provider_pending', 'pending', 'leased', 'quarantined'
+              )
+            """,
+            (self.run_id,),
+        ).fetchone()
+        assert row is not None
+        self._active_count_run_id = self.run_id
+        self._active_count = int(row["backlog"])
+        self._oldest_active_received_at = (
+            None if row["oldest"] is None else datetime.fromisoformat(str(row["oldest"]))
+        )
+
+    def _increment_active_accounting(self, *, received_at: datetime) -> None:
+        assert self._active_count is not None
+        self._active_count += 1
+        if (
+            self._oldest_active_received_at is None
+            or received_at < self._oldest_active_received_at
+        ):
+            self._oldest_active_received_at = received_at
+
+    def _decrement_active_accounting(self) -> None:
+        assert self._active_count is not None and self._active_count > 0
+        self._active_count -= 1
+        if self._active_count == 0:
+            self._oldest_active_received_at = None
 
     @staticmethod
     def _event(row: sqlite3.Row) -> CallbackInboxEvent:
@@ -490,6 +524,7 @@ class DurableCallbackInbox:
         acknowledgement = received_encoded if initial_status is InboxStatus.DIAGNOSTIC else None
         with self._connect() as connection:
             self._begin_immediate(connection)
+            self._ensure_active_accounting(connection)
             existing = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
                 (event_id,),
@@ -526,24 +561,21 @@ class DurableCallbackInbox:
                     )
                 connection.commit()
                 return InboxAdmissionResult(event=self._event(existing), duplicate=True)
-            unacknowledged = int(
-                connection.execute(
+            referenced_provider_active = (
+                provider_envelope_event_id is not None
+                and connection.execute(
                     """
-                    SELECT COUNT(*)
+                    SELECT 1
                     FROM callback_inbox_v1
-                    WHERE admission_run_id IS ?
-                      AND status IN (
-                          'provider_pending', 'pending', 'leased', 'quarantined'
-                      )
-                      AND (? IS NULL OR inbox_event_id <> ?)
+                    WHERE inbox_event_id = ? AND admission_run_id IS ?
+                      AND status = 'provider_pending'
                     """,
-                    (
-                        self.run_id,
-                        provider_envelope_event_id,
-                        provider_envelope_event_id,
-                    ),
-                ).fetchone()[0]
+                    (provider_envelope_event_id, self.run_id),
+                ).fetchone()
+                is not None
             )
+            assert self._active_count is not None
+            unacknowledged = self._active_count - int(referenced_provider_active)
             if unacknowledged >= self.max_unacknowledged:
                 connection.rollback()
                 raise CallbackInboxOverflow("CALLBACK_OVERFLOW")
@@ -594,6 +626,13 @@ class DurableCallbackInbox:
                     canonical_event_id=event_id,
                     completed_at=received,
                 )
+            if initial_status in {
+                InboxStatus.PROVIDER_PENDING,
+                InboxStatus.PENDING,
+                InboxStatus.LEASED,
+                InboxStatus.QUARANTINED,
+            }:
+                self._increment_active_accounting(received_at=received)
             self._update_callback_heartbeats(
                 connection,
                 received_at=received,
@@ -684,6 +723,7 @@ class DurableCallbackInbox:
     ) -> None:
         """Atomically bind the original provider delivery to its canonical row."""
 
+        self._ensure_active_accounting(connection)
         provider = connection.execute(
             """
             SELECT callback_kind, admission_run_id, status
@@ -727,6 +767,7 @@ class DurableCallbackInbox:
         )
         if cursor.rowcount != 1:
             raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_TRANSITION_CHANGED")
+        self._decrement_active_accounting()
 
     def complete_provider_envelope(
         self,
@@ -830,17 +871,8 @@ class DurableCallbackInbox:
     ) -> None:
         if self.run_id is None or self.recorder_generation is None:
             return
-        accounting = connection.execute(
-            """
-            SELECT COUNT(*) AS backlog, MIN(received_utc) AS oldest
-            FROM callback_inbox_v1
-            WHERE admission_run_id IS ?
-              AND status IN (
-                  'provider_pending', 'pending', 'leased', 'quarantined'
-              )
-            """,
-            (self.run_id,),
-        ).fetchone()
+        self._ensure_active_accounting(connection)
+        assert self._active_count is not None
         connection.execute(
             """
             UPDATE recorder_operational_state_v1
@@ -855,8 +887,12 @@ class DurableCallbackInbox:
             (
                 received_at.isoformat(),
                 None if admitted_at is None else admitted_at.isoformat(),
-                int(accounting["backlog"]),
-                accounting["oldest"],
+                self._active_count,
+                (
+                    None
+                    if self._oldest_active_received_at is None
+                    else self._oldest_active_received_at.isoformat()
+                ),
                 received_at.isoformat(),
                 self.run_id,
                 self.recorder_generation,
@@ -1372,6 +1408,8 @@ class DurableCallbackInbox:
                 ),
             )
             connection.commit()
+            self._active_count = None
+            self._oldest_active_received_at = None
 
     def resolve_fatal_latch(
         self,
@@ -1596,6 +1634,14 @@ class DurableCallbackInbox:
                 """,
                 (self.run_id,),
             ).fetchone()
+            assert accounting is not None
+            self._active_count_run_id = self.run_id
+            self._active_count = int(accounting["backlog"])
+            self._oldest_active_received_at = (
+                None
+                if accounting["oldest"] is None
+                else datetime.fromisoformat(str(accounting["oldest"]))
+            )
             if self.run_id is not None and self.recorder_generation is not None:
                 connection.execute(
                     """

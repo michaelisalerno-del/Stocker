@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from stocker_prospective.database import RECORDER_SQLITE_BUSY_TIMEOUT_MS
+from stocker_prospective.sqlite_coordination import CoordinatedSQLiteConnection
 
 
 class RecorderOperationalState(StrEnum):
@@ -578,6 +579,7 @@ class RecorderOperationalRepository:
         connection = sqlite3.connect(
             self.database_path,
             timeout=self.busy_timeout_ms / 1_000,
+            factory=CoordinatedSQLiteConnection,
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")

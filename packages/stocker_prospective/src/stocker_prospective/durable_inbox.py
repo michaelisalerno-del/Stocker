@@ -8,7 +8,8 @@ import math
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum, StrEnum
 from pathlib import Path
@@ -264,6 +265,13 @@ class DurableCallbackInbox:
         self.recorder_generation = recorder_generation
         self.owner_id = owner_id
         self._connection_local = threading.local()
+        # SQLite serializes writers but does not coordinate admission between
+        # this object's callback and recorder threads.  Without an in-process
+        # gate, a callback transaction can repeatedly win the writer race until
+        # raw materialisation exhausts its bounded busy retry and falsely
+        # latches storage-fatal.  Keep the gate local to one inbox/database;
+        # durable callback admission remains synchronous and fail-closed.
+        self._connection_gate = threading.RLock()
 
     def configure_recorder(
         self,
@@ -278,26 +286,29 @@ class DurableCallbackInbox:
         self.recorder_generation = recorder_generation
         self.owner_id = owner_id
 
-    def _connect(self) -> sqlite3.Connection:
-        connection: sqlite3.Connection | None = getattr(
-            self._connection_local,
-            "connection",
-            None,
-        )
-        if connection is not None:
-            return connection
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield one thread-local connection behind a serialized process boundary."""
 
-        connection = sqlite3.connect(
-            self.database_path,
-            timeout=self.busy_timeout_ms / 1_000,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA synchronous = FULL")
-        self._connection_local.connection = connection
-        return connection
+        with self._connection_gate:
+            connection: sqlite3.Connection | None = getattr(
+                self._connection_local,
+                "connection",
+                None,
+            )
+            if connection is None:
+                connection = sqlite3.connect(
+                    self.database_path,
+                    timeout=self.busy_timeout_ms / 1_000,
+                )
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys = ON")
+                connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("PRAGMA synchronous = FULL")
+                self._connection_local.connection = connection
+            with connection:
+                yield connection
 
     @staticmethod
     def _is_transient_writer_contention(error: sqlite3.OperationalError) -> bool:

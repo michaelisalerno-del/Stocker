@@ -109,6 +109,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV20,
     OpeningLeaderDeploymentRefreezeReceiptV21,
     OpeningLeaderDeploymentRefreezeReceiptV22,
+    OpeningLeaderDeploymentRefreezeReceiptV23,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1382,6 +1383,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV20
         | OpeningLeaderDeploymentRefreezeReceiptV21
         | OpeningLeaderDeploymentRefreezeReceiptV22
+        | OpeningLeaderDeploymentRefreezeReceiptV23
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -2147,15 +2149,18 @@ def build_frozen_prospective_application(
                     },
                 )
             )
+    # These callbacks are prospective evidence and must be requested only after
+    # the immutable activation boundary and callback normalizer exist. Request
+    # low-rate control evidence before high-volume subscriptions so IBKR's
+    # single callback decoder cannot leave clock preflight behind a market-data
+    # burst.
+    adapter.request_current_time()
+    adapter.request_depth_exchanges()
     controller.start_always_on(
         initial_metadata,
         tuple(qualified),
         required_level1_symbols=frozenset((*identity.symbols, MARKET_PROXY)),
     )
-    # These callbacks are prospective evidence and must be requested only after
-    # the immutable activation boundary and callback normalizer exist.
-    adapter.request_current_time()
-    adapter.request_depth_exchanges()
     option_recorder = BoundedOptionRecorder(
         adapter=adapter,
         subscriptions=controller_budget,

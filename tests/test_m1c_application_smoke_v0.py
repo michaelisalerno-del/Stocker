@@ -1186,6 +1186,43 @@ def test_static_artifact_verification_precedes_live_subscription_start(
     application.shutdown(now=datetime.now(UTC))
 
 
+def test_clock_probe_precedes_high_volume_live_subscription_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_order: list[str] = []
+    original_probe = FakeIBKRAdapter.request_current_time
+    original_start = LiveSubscriptionController.start_always_on
+
+    def request_current_time(adapter: FakeIBKRAdapter) -> int:
+        call_order.append("clock")
+        return original_probe(adapter)
+
+    def start_always_on(
+        controller: LiveSubscriptionController,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        call_order.append("subscriptions")
+        original_start(controller, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(FakeIBKRAdapter, "request_current_time", request_current_time)
+    monkeypatch.setattr(
+        LiveSubscriptionController,
+        "start_always_on",
+        start_always_on,
+    )
+
+    application, _config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        recorder_generation=1,
+    )
+
+    assert call_order.index("clock") < call_order.index("subscriptions")
+    application.shutdown(now=datetime.now(UTC))
+
+
 def test_application_rebuilds_actual_subscriptions_after_not_connected_loss(
     tmp_path: Path,
 ) -> None:

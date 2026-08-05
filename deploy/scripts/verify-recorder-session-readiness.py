@@ -65,8 +65,8 @@ def verify(
                 (run_id,),
             ).fetchall()
         }
-        level1_count = counts.get("underlying_level1", 0)
-        bar_count = counts.get("underlying_bar", 0)
+        level1_count = counts.get("level1", 0)
+        bar_count = counts.get("bar", 0)
         if level1_count != expected_level1:
             raise ValueError(
                 f"required_level1_subscriptions_missing:{level1_count}/{expected_level1}"

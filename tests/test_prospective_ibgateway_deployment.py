@@ -217,14 +217,8 @@ def _session_readiness_database(
         )
         connection.executemany(
             "INSERT INTO web_latest_subscription_state_v0 VALUES (?, ?, ?, ?)",
-            [
-                ("run-ready", f"level1:{index}", "underlying_level1", "active")
-                for index in range(level1_count)
-            ]
-            + [
-                ("run-ready", f"bar:{index}", "underlying_bar", "active")
-                for index in range(bar_count)
-            ],
+            [("run-ready", f"level1:{index}", "level1", "active") for index in range(level1_count)]
+            + [("run-ready", f"bar:{index}", "bar", "active") for index in range(bar_count)],
         )
         connection.execute(
             "INSERT INTO underlying_live_state_v0 VALUES (?, ?, ?, ?, ?)",

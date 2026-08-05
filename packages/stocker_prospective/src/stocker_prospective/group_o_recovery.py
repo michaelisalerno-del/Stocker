@@ -40,11 +40,17 @@ RECOVERY_PACKAGE_RELATIVE_V2: Final[Path] = Path(
 RECOVERY_RUNTIME_COMPATIBILITY_RECEIPT_V1: Final[Path] = (
     RECOVERY_PACKAGE_RELATIVE_V2 / "runtime_compatibility_receipt_v1.json"
 )
+RECOVERY_RUNTIME_COMPATIBILITY_RECEIPT_V2: Final[Path] = (
+    RECOVERY_PACKAGE_RELATIVE_V2 / "runtime_compatibility_receipt_v2.json"
+)
 OPENING_LEADER_PACKAGE_RELATIVE_V0: Final[Path] = Path(
     "prospective/opening-leader-continuation/20260801-opening-leader-continuation-recorder-v0"
 )
 RUNTIME_COMPATIBLE_SOURCE_NAMES_V1: Final[frozenset[str]] = frozenset(
     {"group_o_recovery", "opening_leader_cohort_contract"}
+)
+RUNTIME_COMPATIBLE_SOURCE_NAMES_V2: Final[frozenset[str]] = frozenset(
+    {"group_o", "group_o_recovery", "scientific_inputs"}
 )
 FAILED_V1_PACKAGE_RELATIVE: Final[Path] = Path(
     "prospective/m1c-group-o-recovery/20260802-m1c-group-o-late-revision-v1"
@@ -419,7 +425,7 @@ def _runtime_compatible_source_hashes_v1(
     original_receipt_path: Path,
     observed_source_hashes: Mapping[str, str],
 ) -> dict[str, str]:
-    """Authorize only the signed post-recovery runtime source refreeze."""
+    """Authorize only the contiguous signed post-recovery runtime refreezes."""
 
     compatibility_path = release / RECOVERY_RUNTIME_COMPATIBILITY_RECEIPT_V1
     if not compatibility_path.exists():
@@ -473,7 +479,6 @@ def _runtime_compatible_source_hashes_v1(
             or any(character not in "0123456789abcdef" for character in value)
             for value in allowed.values()
         )
-        or any(observed_source_hashes.get(name) != value for name, value in allowed.items())
     ):
         raise GroupORecoveryIntegrityError("Group O runtime compatibility source hashes differ")
 
@@ -537,7 +542,145 @@ def _runtime_compatible_source_hashes_v1(
         raise GroupORecoveryIntegrityError(
             "Group O runtime compatibility receipt signature differs"
         )
-    return {name: str(value) for name, value in allowed.items()}
+    compatible = {name: str(value) for name, value in allowed.items()}
+    compatibility_v2_path = release / RECOVERY_RUNTIME_COMPATIBILITY_RECEIPT_V2
+    if not compatibility_v2_path.exists():
+        mismatched_v1_sources = tuple(
+            name for name, value in compatible.items() if observed_source_hashes.get(name) != value
+        )
+        if mismatched_v1_sources:
+            raise GroupORecoveryIntegrityError(
+                "Group O runtime compatibility source hashes differ: "
+                + ",".join(mismatched_v1_sources)
+            )
+        return compatible
+    if not compatibility_v2_path.is_file() or compatibility_v2_path.is_symlink():
+        raise GroupORecoveryIntegrityError("Group O V2 runtime compatibility receipt is invalid")
+    try:
+        compatibility_v2 = json.loads(compatibility_v2_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GroupORecoveryIntegrityError(
+            "Group O V2 runtime compatibility receipt is invalid"
+        ) from exc
+    expected_v2_keys = {
+        "schema_version",
+        "recovery_version",
+        "supersedes_runtime_compatibility_receipt_sha256",
+        "authorization_basis",
+        "opening_leader_deployment_receipt_id",
+        "opening_leader_refreeze_receipt_sha256",
+        "allowed_source_hashes",
+        "completed_recovery_only",
+        "original_recovery_evidence_modified",
+        "protected_outcomes_accessed",
+        "order_placement_disabled",
+        "signature_scheme",
+        "compatibility_receipt_id",
+        "signature_sha256",
+    }
+    if not isinstance(compatibility_v2, dict) or set(compatibility_v2) != expected_v2_keys:
+        raise GroupORecoveryIntegrityError(
+            "Group O V2 runtime compatibility receipt identity differs"
+        )
+    required_v2_identity = {
+        "schema_version": "m1c-group-o-recovery-runtime-compatibility-v2",
+        "recovery_version": RECOVERY_VERSION_V2,
+        "supersedes_runtime_compatibility_receipt_sha256": _sha256_path(compatibility_path),
+        "authorization_basis": "opening-leader-continuation-deployment-refreeze-v15",
+        "completed_recovery_only": True,
+        "original_recovery_evidence_modified": False,
+        "protected_outcomes_accessed": False,
+        "order_placement_disabled": True,
+        "signature_scheme": "sha256-canonical-self-binding-v0",
+    }
+    if any(compatibility_v2.get(key) != value for key, value in required_v2_identity.items()):
+        raise GroupORecoveryIntegrityError(
+            "Group O V2 runtime compatibility receipt identity differs"
+        )
+    allowed_v2 = compatibility_v2.get("allowed_source_hashes")
+    if (
+        not isinstance(allowed_v2, dict)
+        or set(allowed_v2) != RUNTIME_COMPATIBLE_SOURCE_NAMES_V2
+        or any(
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            for value in allowed_v2.values()
+        )
+    ):
+        raise GroupORecoveryIntegrityError("Group O V2 runtime compatibility source hashes differ")
+    opening_leader_v15_path = (
+        release / OPENING_LEADER_PACKAGE_RELATIVE_V0 / "deployment_freeze_receipt_v15.json"
+    )
+    opening_leader_v14_path = (
+        release / OPENING_LEADER_PACKAGE_RELATIVE_V0 / "deployment_freeze_receipt_v14.json"
+    )
+    if (
+        not opening_leader_v15_path.is_file()
+        or opening_leader_v15_path.is_symlink()
+        or not opening_leader_v14_path.is_file()
+        or opening_leader_v14_path.is_symlink()
+        or compatibility_v2.get("opening_leader_refreeze_receipt_sha256")
+        != _sha256_path(opening_leader_v15_path)
+    ):
+        raise GroupORecoveryIntegrityError("Group O V2 opening-leader refreeze lineage differs")
+    try:
+        opening_leader_v15 = json.loads(opening_leader_v15_path.read_text(encoding="utf-8"))
+        opening_leader_v14 = json.loads(opening_leader_v14_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GroupORecoveryIntegrityError(
+            "Group O V2 opening-leader refreeze lineage differs"
+        ) from exc
+    if not isinstance(opening_leader_v15, dict) or not isinstance(opening_leader_v14, dict):
+        raise GroupORecoveryIntegrityError("Group O V2 opening-leader refreeze lineage differs")
+    opening_leader_v15_unsigned = dict(opening_leader_v15)
+    opening_leader_v15_signature = opening_leader_v15_unsigned.pop("signature_sha256", None)
+    opening_leader_v15_sources = opening_leader_v15.get("source_hashes")
+    if (
+        opening_leader_v15.get("schema_version")
+        != "opening-leader-continuation-deployment-refreeze-v15"
+        or opening_leader_v15.get("refreeze_reason")
+        != "quiet_pipeline_source_handoff_and_connection_recovery"
+        or opening_leader_v15.get("frozen_semantics_changed") is not True
+        or opening_leader_v15.get("order_routing_disabled") is not True
+        or opening_leader_v15.get("protected_historical_outcomes_accessed") is not False
+        or opening_leader_v15.get("deployment_receipt_id")
+        != compatibility_v2.get("opening_leader_deployment_receipt_id")
+        or opening_leader_v15.get("supersedes_receipt_sha256")
+        != _sha256_path(opening_leader_v14_path)
+        or opening_leader_v15.get("supersedes_deployment_receipt_id")
+        != opening_leader_v14.get("deployment_receipt_id")
+        or not isinstance(opening_leader_v15_sources, dict)
+        or any(opening_leader_v15_sources.get(name) != value for name, value in allowed_v2.items())
+        or opening_leader_v15_signature
+        != hashlib.sha256(_canonical_json(opening_leader_v15_unsigned).encode("utf-8")).hexdigest()
+    ):
+        raise GroupORecoveryIntegrityError("Group O V2 opening-leader refreeze lineage differs")
+    compatibility_v2_unsigned = dict(compatibility_v2)
+    compatibility_v2_signature = compatibility_v2_unsigned.pop("signature_sha256", None)
+    compatibility_v2_identity = dict(compatibility_v2_unsigned)
+    compatibility_v2_id = compatibility_v2_identity.pop("compatibility_receipt_id", None)
+    compatibility_v2_identity_hash = hashlib.sha256(
+        _canonical_json(compatibility_v2_identity).encode("utf-8")
+    ).hexdigest()
+    if (
+        compatibility_v2_id != f"group-o-runtime-compat-{compatibility_v2_identity_hash[:24]}"
+        or compatibility_v2_signature
+        != hashlib.sha256(_canonical_json(compatibility_v2_unsigned).encode("utf-8")).hexdigest()
+    ):
+        raise GroupORecoveryIntegrityError(
+            "Group O V2 runtime compatibility receipt signature differs"
+        )
+    compatible.update({name: str(value) for name, value in allowed_v2.items()})
+    mismatched_v2_sources = tuple(
+        name for name, value in compatible.items() if observed_source_hashes.get(name) != value
+    )
+    if mismatched_v2_sources:
+        raise GroupORecoveryIntegrityError(
+            "Group O V2 runtime compatibility source hashes differ: "
+            + ",".join(mismatched_v2_sources)
+        )
+    return compatible
 
 
 def verify_group_o_recovery_freeze_v2(release_directory: str | Path) -> dict[str, Any]:

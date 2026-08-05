@@ -2922,6 +2922,11 @@ class FrozenM1CLiveRecorder:
             trigger_timestamp=decision.trigger_bar_end,
             entry_timestamp=decision.prospective_entry_timestamp,
         ).items():
+            # Entry is currently the checkpoint boundary for these record-only
+            # episodes.  The resulting T-to-entry interval contains no evidence
+            # and must not reach the positive-width window summariser.
+            if end <= start:
+                continue
             self._episode_windows[(decision.episode_id, name)] = (
                 decision.symbol,
                 start,

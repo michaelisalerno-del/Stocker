@@ -30,6 +30,7 @@ from stocker_prospective.group_o import (
 )
 from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_prospective.live_subscriptions import LiveSubscriptionController
+from stocker_prospective.market_data import ConnectionState
 from stocker_prospective.operational_state import RecorderOperationalRepository
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder import RecorderDeploymentIdentity
@@ -738,6 +739,7 @@ def test_valid_bottom_10_crossing_begins_quiet_shadow_option_capture(
         bar_compatibility_passed=True,
         events=events,
         run_id="quiet-valid-bottom-10-crossing-v0",
+        include_opening_reversal=True,
     )
     _write_valid_group_o_package(
         config=config,
@@ -800,6 +802,9 @@ def test_valid_bottom_10_crossing_begins_quiet_shadow_option_capture(
         )
         observation_id = checkpoint.quiet_observation_id
         assert observation_id is not None
+        assert checkpoint.opening_reversal_prediction_v1 is not None
+        assert checkpoint.opening_reversal_prediction_v1.eligibility_v1 is False
+        assert checkpoint.opening_reversal_prediction_v1.prediction_v1 == "ABSTAIN"
         assert checkpoint.quiet_state.bottom_10 is True
         assert checkpoint.quiet_episode_decision.fresh_episode is True
         assert checkpoint.diagnostic_quality_flags == ()
@@ -842,6 +847,100 @@ def test_valid_bottom_10_crossing_begins_quiet_shadow_option_capture(
         )
         assert option_contract_count is not None and option_contract_count[0] > 0
         assert application.subscriptions.budget.snapshot()["active"]["option"] > 0  # type: ignore[index,operator]
+    finally:
+        application.shutdown(now=observed + timedelta(seconds=3))
+
+
+def test_ineligible_opening_reversal_receipt_does_not_suppress_generic_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, observed, trigger_end = _delayed_quiet_checkpoint_events()
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        bar_compatibility_passed=True,
+        events=events,
+        run_id="ineligible-opening-generic-capture-v0",
+        include_opening_reversal=True,
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+    _install_independent_bar_timestamps(adapter, monkeypatch)
+
+    def current_option_chain_metadata(**kwargs: object) -> FakeRequestResult:
+        symbol = str(kwargs["underlying_symbol"])
+        con_id = int(str(kwargs["underlying_contract_id"]))
+        expiries = {
+            (trigger_end.date() + timedelta(days=days)).strftime("%Y%m%d") for days in (1, 3)
+        }
+        return FakeRequestResult(
+            adapter.request_ids.next(),
+            (
+                SimpleNamespace(
+                    underlyingConId=con_id,
+                    exchange="SMART",
+                    tradingClass=symbol,
+                    expirations=expiries,
+                    strikes={float(value) for value in range(90, 111)},
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        adapter,
+        "request_option_chain_metadata",
+        current_option_chain_metadata,
+    )
+    runtime = application.live_recorder.engine.m1c_runtime
+    original_score = runtime.score
+
+    def score_high_tail(**kwargs: object):
+        score = original_score(**kwargs)
+        if kwargs["symbol"] != "HIMS":
+            return score
+        probability = 0.9
+        return score.model_copy(
+            update={
+                "probability": probability,
+                "threshold_passed": probability >= score.threshold,
+            }
+        )
+
+    monkeypatch.setattr(runtime, "score", score_high_tail)
+
+    try:
+        results = tuple(
+            application.poll(now=observed + timedelta(seconds=offset)) for offset in range(3)
+        )
+        checkpoint = next(
+            item
+            for result in results
+            for item in result.checkpoint_results
+            if item.episode_decision.symbol == "HIMS" and item.episode_decision.checkpoint == 6
+        )
+        opening_receipt = checkpoint.opening_reversal_prediction_v1
+        assert opening_receipt is not None
+        assert opening_receipt.eligibility_v1 is False
+        assert opening_receipt.prediction_v1 == "ABSTAIN"
+        assert checkpoint.episode_decision.fresh_episode is True
+        episode_id = checkpoint.episode_decision.episode_id
+        assert episode_id is not None
+        assert application.option_discovery.pending_symbol(episode_id) == "HIMS"
+        with sqlite3.connect(config.paths.database) as connection:
+            schedule = connection.execute(
+                """
+                SELECT symbol, episode_kind, status
+                FROM option_episode_schedule_v0
+                WHERE episode_id = ?
+                """,
+                (episode_id,),
+            ).fetchone()
+        assert schedule == ("HIMS", "high_tail", "streaming")
     finally:
         application.shutdown(now=observed + timedelta(seconds=3))
 
@@ -1085,6 +1184,33 @@ def test_static_artifact_verification_precedes_live_subscription_start(
     assert call_order[-1] == "subscriptions"
     assert call_order.count("artifact") > 0
     application.shutdown(now=datetime.now(UTC))
+
+
+def test_application_rebuilds_actual_subscriptions_after_not_connected_loss(
+    tmp_path: Path,
+) -> None:
+    application, _config, adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        events=(),
+        run_id="not-connected-subscription-rebuild-v0",
+    )
+    original_ids = set(adapter.active_subscriptions)
+    original_streams = sorted(adapter.active_subscriptions.values())
+    assert original_ids
+
+    adapter.connection.connection_lost(code=504, message="Not connected")
+    adapter.active_subscriptions.clear()
+    recovered_at = datetime.now(UTC)
+
+    application._recover_if_required(recovered_at)
+
+    health = adapter.connection.health()
+    assert health.state is ConnectionState.CONNECTED
+    assert health.subscriptions_require_rebuild is False
+    assert sorted(adapter.active_subscriptions.values()) == original_streams
+    assert set(adapter.active_subscriptions).isdisjoint(original_ids)
+    application.shutdown(now=recovered_at + timedelta(seconds=1))
 
 
 def test_pre_hardening_activation_accepts_added_operational_fields(

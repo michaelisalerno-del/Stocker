@@ -769,10 +769,13 @@ Replace the example values with the account/TWS allowances actually observed
 at deployment. Never reduce the 12-line future-trading reserve to admit
 neutral controls, alternate DTEs, outer strikes, tick-by-tick, or depth. On
 startup inspect `ibkr_runtime_capacity_manifest.json`; the always-on target is
-20 stock bar streams plus only required proxies. Level II remains optional and
-disabled by default; enabling it does not change scientific eligibility. The
-recorder enforces the resolved historical-bar request allowance as a rolling
-window during startup and reconnect restoration.
+the frozen stock bar streams plus only required proxies, together with the
+protected Level-I streams required by the frozen quiet contract (the stock
+universe plus VTI). Startup fails preflight rather than silently omitting a
+required Level-I line. Level II remains optional and disabled by default;
+enabling it does not change scientific eligibility. The recorder enforces the
+resolved historical-bar request allowance as a rolling window during startup
+and reconnect restoration.
 
 IBKR is the prospective live-data source. An otherwise valid, complete IBKR
 session is usable from the first session as **prospective evaluation of the
@@ -854,6 +857,17 @@ signal session, and exact D-1 observation identity cannot change. The loader
 rejects a revision created at or after the exact XNYS signal-session open. This
 permits delayed D-1 publication before a future signal while prohibiting
 same-session or retrospective eligibility changes.
+
+New Group-O packages also derive
+`previous_close_implied_movement_15m` from the exact prior-session ATM IV using
+the frozen 15-minute expected-absolute-move formula. If an otherwise valid
+pre-existing package omitted only that derived value, preparation may append a
+separately labelled `missing_implied_movement_source_correction` before the
+signal-session open. It retains every frozen context field and all earlier
+source receipts, self-binds the exact ATM IV used by the frozen formula, and
+never edits the base package or any already-open session. An ineligible or
+`ABSTAIN` opening-reversal receipt remains visible for audit but does not
+suppress C6 quiet/generic capture.
 
 For the audited Friday 2026-07-31 source-publication recovery targeting Monday
 2026-08-03, stop the recorder and run the dedicated pre-adapter command from
@@ -1706,7 +1720,7 @@ evidence without its own audit.
 | Growing unacknowledged backlog | Compare callback, raw-commit, and ack heartbeats. Inspect leased attempts and storage incidents. A processing-committed batch may be acknowledged after lease recovery; a poison or interrupted `provider_pending` row is quarantined and fatal. |
 | Valid Parquet but missing manifest | Preserve the sidecar and restart under controlled conditions. Reconciliation verifies the hash and registers the manifest idempotently before inbox acknowledgement. |
 | Manifest points to missing file | Treat as `STORAGE_FATAL`; restore the exact hash-matching immutable file from the paired recovery set or retain the run as invalid. |
-| IBKR reconnect | `RECONNECTING` is expected while ownership is rebuilt. Lost-data reconnect creates one connection gap and rebuilt request generation. The socket reconnect never clears a prior fatal latch. |
+| IBKR reconnect | `RECONNECTING` is expected while ownership is rebuilt. Lost-data reconnect creates one connection gap and rebuilt request generation. IBKR error `504` (`Not connected`) is treated as lost connectivity, clears stale request ownership, and enters the same reconnect/subscription-rebuild path; it must not remain stranded as merely `DEGRADED`. The socket reconnect never clears a prior fatal latch. |
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |

@@ -13,7 +13,11 @@ import pytest
 from stocker_prospective import group_o_recovery as recovery
 from stocker_prospective import scientific_inputs
 from stocker_prospective.group_o import (
+    GROUP_O_FEATURE_MANIFEST_SHA256,
+    GROUP_O_REGIME_MAPPING_SHA256,
+    FrozenGroupOSessionPackage,
     append_group_o_session_revision,
+    build_group_o_context,
     load_group_o_session_package,
 )
 from stocker_prospective.scientific_inputs import (
@@ -31,6 +35,7 @@ from stocker_research.eodhd_options_downloader_v0 import (
     RequestManifestRow,
     canonicalize_response_records,
 )
+from stocker_research.m1c_low_movement_v0 import iv_expected_absolute
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONT_OPTIONS_ROOT = (
@@ -84,9 +89,7 @@ def test_v2_provider_dte_policy_recomputes_from_exact_eod_identity() -> None:
         provider_dte_policy="recompute_from_eod_identity",
     )
 
-    assert [item.reason_code for item in strict.rejections] == [
-        "contract_date_dte_inconsistency"
-    ]
+    assert [item.reason_code for item in strict.rejections] == ["contract_date_dte_inconsistency"]
     assert recomputed.rejections == []
     assert recomputed.records[0]["trade_date"] == date(2026, 7, 31)
     assert recomputed.records[0]["dte"] == 42
@@ -174,16 +177,15 @@ def test_v2_acquisition_persists_provider_dte_as_separate_diagnostic_evidence(
     attempt_root = cache_root / observation.isoformat() / "attempts/0001"
     diagnostics_path = attempt_root / "provider_dte_diagnostics.json"
     diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
-    receipt = scientific_inputs.load_group_o_attempt_receipt(
-        attempt_root / "attempt_receipt.json"
-    )
+    receipt = scientific_inputs.load_group_o_attempt_receipt(attempt_root / "attempt_receipt.json")
     assert diagnostics["provider_dte_used_for_admission"] is False
     assert diagnostics["status_counts"] == {"invalid": 1}
     assert diagnostics["rows"] == [diagnostic.to_dict()]
     assert receipt["provider_dte_diagnostics_path"] == str(diagnostics_path)
-    assert receipt["provider_dte_diagnostics_file_sha256"] == hashlib.sha256(
-        diagnostics_path.read_bytes()
-    ).hexdigest()
+    assert (
+        receipt["provider_dte_diagnostics_file_sha256"]
+        == hashlib.sha256(diagnostics_path.read_bytes()).hexdigest()
+    )
 
 
 def test_historical_activity_builder_keeps_one_regular_session_stream_per_symbol(
@@ -472,6 +474,7 @@ def test_group_o_builder_applies_frozen_dimensions_and_regime_without_outcomes(
     assert context.front_expiry == expiration
     assert context.dte == 7
     assert context.atm_strike == 100.0
+    assert context.previous_close_implied_movement_15m == pytest.approx(0.007984323703839152)
     assert set(context.features) == {
         "front_options_implied_tension",
         "front_options_premium_richness",
@@ -782,6 +785,215 @@ def test_group_o_revision_cannot_change_an_already_resolved_context(tmp_path: Pa
     assert not (context_root / "group-o" / "revisions").exists()
 
 
+def test_group_o_revision_can_fill_only_missing_implied_movement(tmp_path: Path) -> None:
+    signal_session = date(2026, 8, 3)
+    observation = date(2026, 7, 31)
+    context_root = tmp_path / "context"
+    base_path = context_root / "group-o" / f"{signal_session}.json"
+    base_path.parent.mkdir(parents=True)
+    context_fields = {
+        "symbol": "AAL",
+        "signal_session": signal_session,
+        "actual_option_observation_session": observation,
+        "front_expiry": date(2026, 8, 14),
+        "dte": 14,
+        "atm_strike": 12.0,
+        "features": {"front_options_implied_tension": 0.0},
+        "missing_indicators": {},
+        "quality_status": "valid",
+        "source_receipt_hashes": ("a" * 64,),
+    }
+    base = FrozenGroupOSessionPackage(
+        contract_version="frozen-m1c-microstructure-recorder-v0/group-o-session-v0",
+        signal_session=signal_session,
+        generated_from_authorised_cache=True,
+        feature_manifest_hash=GROUP_O_FEATURE_MANIFEST_SHA256,
+        regime_mapping_hash=GROUP_O_REGIME_MAPPING_SHA256,
+        contexts=(build_group_o_context(**context_fields),),
+    )
+    base_path.write_text(base.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    original_bytes = base_path.read_bytes()
+    atm_iv = 0.81
+    revised = FrozenGroupOSessionPackage(
+        **{
+            **base.model_dump(mode="python"),
+            "contexts": (
+                build_group_o_context(
+                    **{
+                        **context_fields,
+                        "previous_close_implied_movement_15m": iv_expected_absolute(atm_iv, 15),
+                        "source_receipt_hashes": ("a" * 64,),
+                    }
+                ),
+            ),
+        }
+    )
+    wrong_pair = FrozenGroupOSessionPackage(
+        **{
+            **revised.model_dump(mode="python"),
+            "contexts": (
+                build_group_o_context(
+                    **{
+                        **context_fields,
+                        "atm_strike": 13.0,
+                        "previous_close_implied_movement_15m": (iv_expected_absolute(atm_iv, 15)),
+                        "source_receipt_hashes": ("a" * 64,),
+                    }
+                ),
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="exact ATM pair identity differs"):
+        scientific_inputs._preserve_resolved_group_o_contexts(
+            previous=base,
+            candidate=wrong_pair,
+            include_implied_movement_corrections=True,
+        )
+
+    with pytest.raises(ValueError, match="ATM IV source"):
+        append_group_o_session_revision(
+            context_root=context_root,
+            revised_package=revised,
+            clock=lambda: datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
+        )
+
+    revision = append_group_o_session_revision(
+        context_root=context_root,
+        revised_package=revised,
+        implied_movement_atm_iv_by_symbol={"AAL": atm_iv},
+        clock=lambda: datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
+    )
+
+    assert revision.reason == "missing_implied_movement_source_correction"
+    assert revision.implied_movement_atm_iv_by_symbol == {"AAL": atm_iv}
+    assert revision.package == revised
+    assert base_path.read_bytes() == original_bytes
+    assert (
+        load_group_o_session_package(
+            context_root=context_root,
+            signal_session=signal_session,
+        )
+        == revised
+    )
+    revision_path = (
+        context_root / "group-o" / "revisions" / signal_session.isoformat() / "0001.json"
+    )
+    persisted_revision = json.loads(revision_path.read_text(encoding="utf-8"))
+    assert persisted_revision["implied_movement_atm_iv_by_symbol"] == {"AAL": atm_iv}
+    persisted_revision["implied_movement_atm_iv_by_symbol"]["AAL"] = 0.82
+    revision_path.write_text(json.dumps(persisted_revision) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="revision is invalid"):
+        load_group_o_session_package(
+            context_root=context_root,
+            signal_session=signal_session,
+        )
+
+
+def test_group_o_exact_chain_revision_cannot_hide_implied_movement_correction(
+    tmp_path: Path,
+) -> None:
+    signal_session = date(2026, 8, 3)
+    observation = date(2026, 7, 31)
+    context_root = tmp_path / "context"
+    base_path = context_root / "group-o" / f"{signal_session}.json"
+    base_path.parent.mkdir(parents=True)
+    valid_fields = {
+        "signal_session": signal_session,
+        "actual_option_observation_session": observation,
+        "front_expiry": date(2026, 8, 14),
+        "dte": 14,
+        "atm_strike": 12.0,
+        "features": {"front_options_implied_tension": 0.0},
+        "missing_indicators": {},
+        "quality_status": "valid",
+    }
+    aal_before = build_group_o_context(
+        symbol="AAL",
+        source_receipt_hashes=("a" * 64,),
+        **valid_fields,
+    )
+    aaoi_before = build_group_o_context(
+        symbol="AAOI",
+        signal_session=signal_session,
+        actual_option_observation_session=None,
+        front_expiry=None,
+        dte=None,
+        atm_strike=None,
+        features={},
+        missing_indicators={},
+        quality_status="missing_exact_chain",
+        source_receipt_hashes=("b" * 64,),
+    )
+    base = FrozenGroupOSessionPackage(
+        contract_version="frozen-m1c-microstructure-recorder-v0/group-o-session-v0",
+        signal_session=signal_session,
+        generated_from_authorised_cache=True,
+        feature_manifest_hash=GROUP_O_FEATURE_MANIFEST_SHA256,
+        regime_mapping_hash=GROUP_O_REGIME_MAPPING_SHA256,
+        contexts=(aal_before, aaoi_before),
+    )
+    base_path.write_text(base.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    aal_atm_iv = 0.81
+    mixed_candidate = FrozenGroupOSessionPackage(
+        **{
+            **base.model_dump(mode="python"),
+            "contexts": (
+                build_group_o_context(
+                    symbol="AAL",
+                    source_receipt_hashes=("a" * 64, "c" * 64),
+                    previous_close_implied_movement_15m=iv_expected_absolute(aal_atm_iv, 15),
+                    **valid_fields,
+                ),
+                build_group_o_context(
+                    symbol="AAOI",
+                    source_receipt_hashes=("d" * 64,),
+                    previous_close_implied_movement_15m=0.009,
+                    **valid_fields,
+                ),
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="separate signed revision"):
+        append_group_o_session_revision(
+            context_root=context_root,
+            revised_package=mixed_candidate,
+            clock=lambda: datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
+        )
+
+    assert not (context_root / "group-o" / "revisions").exists()
+    exact_chain_candidate = FrozenGroupOSessionPackage(
+        **{
+            **mixed_candidate.model_dump(mode="python"),
+            "contexts": (aal_before, mixed_candidate.for_symbol("AAOI")),
+        }
+    )
+    exact_revision = append_group_o_session_revision(
+        context_root=context_root,
+        revised_package=exact_chain_candidate,
+        clock=lambda: datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
+    )
+    movement_revision = append_group_o_session_revision(
+        context_root=context_root,
+        revised_package=mixed_candidate,
+        implied_movement_atm_iv_by_symbol={"AAL": aal_atm_iv},
+        clock=lambda: datetime(2026, 8, 2, 12, 1, tzinfo=UTC),
+    )
+
+    assert exact_revision.reason == "late_exact_chain_source_correction"
+    assert exact_revision.package.for_symbol("AAL") == aal_before
+    assert movement_revision.reason == "missing_implied_movement_source_correction"
+    assert movement_revision.revision_number == 2
+    assert (
+        load_group_o_session_package(
+            context_root=context_root,
+            signal_session=signal_session,
+        )
+        == mixed_candidate
+    )
+
+
 def test_group_o_recovery_reconciles_crash_after_revision_before_completion_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -802,11 +1014,7 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
         output_path=base_path,
     )
     attempts_root = (
-        context_root
-        / "source-cache"
-        / "eodhd-group-o"
-        / observation.isoformat()
-        / "attempts"
+        context_root / "source-cache" / "eodhd-group-o" / observation.isoformat() / "attempts"
     )
     failed_v1_attempt_path = attempts_root / "0001"
     failed_v1_attempt_path.mkdir(parents=True)
@@ -958,9 +1166,10 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
     assert payload["published_revision_id"].startswith("group-o-revision-")
     assert len(payload["attempt_receipt_sha256"]) == 64
     assert payload["provider_dte_diagnostics_path"] == str(diagnostics_path)
-    assert payload["provider_dte_diagnostics_file_sha256"] == hashlib.sha256(
-        diagnostics_bytes
-    ).hexdigest()
+    assert (
+        payload["provider_dte_diagnostics_file_sha256"]
+        == hashlib.sha256(diagnostics_bytes).hexdigest()
+    )
     assert payload["provider_dte_diagnostic_counts"] == {"mismatch": 1}
     linked_path = attempt_path / "recovery_completion_receipt.json"
     linked = json.loads(linked_path.read_text(encoding="utf-8"))
@@ -968,9 +1177,9 @@ def test_group_o_recovery_reconciles_crash_after_revision_before_completion_rece
     assert linked["start_receipt_identity_sha256"]
     assert linked["base_package_sha256"] == freeze["audited_failed_base_sha256"]
     assert linked["revision_identity_sha256"]
-    assert linked["acquisition_attempt_receipt_identity_sha256"] == payload[
-        "attempt_receipt_sha256"
-    ]
+    assert (
+        linked["acquisition_attempt_receipt_identity_sha256"] == payload["attempt_receipt_sha256"]
+    )
     assert len(linked["completion_receipt_sha256"]) == 64
 
     diagnostics_path.write_text("{}\n", encoding="utf-8")
@@ -1295,8 +1504,7 @@ def test_group_o_preparation_restart_honours_persisted_retry_after(
 ) -> None:
     observation = date(2026, 7, 31)
     attempt_path = (
-        tmp_path / "cache" / observation.isoformat() / "attempts" / "0001"
-        / "attempt_receipt.json"
+        tmp_path / "cache" / observation.isoformat() / "attempts" / "0001" / "attempt_receipt.json"
     )
     attempt_path.parent.mkdir(parents=True)
     payload: dict[str, object] = {
@@ -1347,8 +1555,7 @@ def test_group_o_persisted_retry_rejects_a_signed_five_minute_interval(
 ) -> None:
     observation = date(2026, 7, 31)
     attempt_path = (
-        tmp_path / "cache" / observation.isoformat() / "attempts" / "0001"
-        / "attempt_receipt.json"
+        tmp_path / "cache" / observation.isoformat() / "attempts" / "0001" / "attempt_receipt.json"
     )
     attempt_path.parent.mkdir(parents=True)
     payload: dict[str, object] = {
@@ -1433,6 +1640,76 @@ def test_group_o_preparation_retries_an_incomplete_immutable_package(
         assert started.wait(timeout=1)
         assert observed_kwargs["supersedes_path"] == base_path
         assert observed_kwargs["cache_attempt_id"] == "0002"
+    finally:
+        release.set()
+        service.shutdown()
+
+
+def test_group_o_preparation_revises_valid_package_missing_implied_movement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal_session = date(2026, 8, 3)
+    observation = date(2026, 7, 31)
+    context_root = tmp_path / "context"
+    base_path = context_root / "group-o" / f"{signal_session}.json"
+    base_path.parent.mkdir(parents=True)
+    package = FrozenGroupOSessionPackage(
+        contract_version="frozen-m1c-microstructure-recorder-v0/group-o-session-v0",
+        signal_session=signal_session,
+        generated_from_authorised_cache=True,
+        feature_manifest_hash=GROUP_O_FEATURE_MANIFEST_SHA256,
+        regime_mapping_hash=GROUP_O_REGIME_MAPPING_SHA256,
+        contexts=(
+            build_group_o_context(
+                symbol="AAL",
+                signal_session=signal_session,
+                actual_option_observation_session=observation,
+                front_expiry=date(2026, 8, 14),
+                dte=14,
+                atm_strike=12.0,
+                features={"front_options_implied_tension": 0.0},
+                missing_indicators={},
+                quality_status="valid",
+                source_receipt_hashes=("a" * 64,),
+            ),
+        ),
+    )
+    base_path.write_text(package.model_dump_json(indent=2), encoding="utf-8")
+    started = Event()
+    release = Event()
+    observed_kwargs: dict[str, object] = {}
+
+    def recovery_acquisition(**kwargs: object) -> GroupOAcquisitionResult:
+        observed_kwargs.update(kwargs)
+        started.set()
+        assert release.wait(timeout=5)
+        return GroupOAcquisitionResult(
+            output_path=Path(str(kwargs["output_path"])),
+            signal_session=signal_session,
+            observation_session=observation,
+            symbol_count=1,
+            canonical_option_rows=2,
+            rejected_option_rows=0,
+        )
+
+    monkeypatch.setattr(
+        scientific_inputs,
+        "acquire_eodhd_group_o_session_package",
+        recovery_acquisition,
+    )
+    service = EODHDGroupOPreparationService(
+        symbols=("AAL",),
+        context_root=context_root,
+        cache_root=tmp_path / "cache",
+        feature_manifest_path=FRONT_OPTIONS_ROOT / "front_options_feature_manifest.json",
+        regime_mapping_path=FRONT_OPTIONS_ROOT / "front_options_regime_mapping.json",
+        capture_delay_seconds=7_200,
+    )
+    try:
+        assert service.poll(now=datetime(2026, 8, 2, 12, 0, tzinfo=UTC)) is None
+        assert started.wait(timeout=1)
+        assert observed_kwargs["supersedes_path"] == base_path
     finally:
         release.set()
         service.shutdown()

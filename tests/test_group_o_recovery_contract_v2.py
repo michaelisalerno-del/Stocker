@@ -69,48 +69,6 @@ def _copy_recovery_release(tmp_path: Path) -> Path:
     return release
 
 
-def _write_runtime_compatibility_receipt(release: Path) -> None:
-    recovery_package = release / group_o_recovery.RECOVERY_PACKAGE_RELATIVE_V2
-    original_receipt = recovery_package / "deployment_freeze_receipt.json"
-    opening_leader_receipt = (
-        release / OPENING_LEADER_PACKAGE_RELATIVE / "deployment_freeze_receipt_v11.json"
-    )
-    opening_leader_payload = json.loads(opening_leader_receipt.read_text(encoding="utf-8"))
-    source_hashes = {
-        name: hashlib.sha256((release / relative).read_bytes()).hexdigest()
-        for name, relative in group_o_recovery.RECOVERY_SOURCE_FILES_V2.items()
-        if name in {"group_o_recovery", "opening_leader_cohort_contract"}
-    }
-    identity: dict[str, object] = {
-        "schema_version": "m1c-group-o-recovery-runtime-compatibility-v1",
-        "recovery_version": group_o_recovery.RECOVERY_VERSION_V2,
-        "supersedes_deployment_receipt_sha256": hashlib.sha256(
-            original_receipt.read_bytes()
-        ).hexdigest(),
-        "authorization_basis": "opening-leader-continuation-deployment-refreeze-v11",
-        "opening_leader_deployment_receipt_id": opening_leader_payload["deployment_receipt_id"],
-        "opening_leader_refreeze_receipt_sha256": hashlib.sha256(
-            opening_leader_receipt.read_bytes()
-        ).hexdigest(),
-        "allowed_source_hashes": source_hashes,
-        "completed_recovery_only": True,
-        "original_recovery_evidence_modified": False,
-        "protected_outcomes_accessed": False,
-        "order_placement_disabled": True,
-        "signature_scheme": "sha256-canonical-self-binding-v0",
-    }
-    identity_hash = hashlib.sha256(_canonical_json(identity).encode("utf-8")).hexdigest()
-    signed = {
-        **identity,
-        "compatibility_receipt_id": f"group-o-runtime-compat-{identity_hash[:24]}",
-    }
-    signed["signature_sha256"] = hashlib.sha256(_canonical_json(signed).encode("utf-8")).hexdigest()
-    (recovery_package / "runtime_compatibility_receipt_v1.json").write_text(
-        json.dumps(signed, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
 def test_group_o_recovery_contract_is_causal_append_only_and_record_only() -> None:
     contract = json.loads((PACKAGE / "contract.json").read_text(encoding="utf-8"))
     protected = json.loads((PACKAGE / "protected_boundary_audit.json").read_text(encoding="utf-8"))
@@ -190,7 +148,6 @@ def test_completed_group_o_recovery_accepts_only_signed_runtime_compatibility(
     tmp_path: Path,
 ) -> None:
     release = _copy_recovery_release(tmp_path)
-    _write_runtime_compatibility_receipt(release)
 
     receipt = verify_group_o_recovery_freeze_v2(release)
 
@@ -201,6 +158,20 @@ def test_completed_group_o_recovery_accepts_only_signed_runtime_compatibility(
         encoding="utf-8",
     )
     with pytest.raises(GroupORecoveryIntegrityError, match="scientific_inputs"):
+        verify_group_o_recovery_freeze_v2(release)
+
+
+def test_latest_runtime_compatibility_rejects_unsigned_group_o_drift(
+    tmp_path: Path,
+) -> None:
+    release = _copy_recovery_release(tmp_path)
+    group_o_source = release / group_o_recovery.RECOVERY_SOURCE_FILES_V2["group_o"]
+    group_o_source.write_text(
+        group_o_source.read_text(encoding="utf-8") + "\n# unsigned drift\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GroupORecoveryIntegrityError, match="group_o"):
         verify_group_o_recovery_freeze_v2(release)
 
 

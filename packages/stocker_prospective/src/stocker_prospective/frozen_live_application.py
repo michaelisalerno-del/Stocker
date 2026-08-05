@@ -101,6 +101,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV12,
     OpeningLeaderDeploymentRefreezeReceiptV13,
     OpeningLeaderDeploymentRefreezeReceiptV14,
+    OpeningLeaderDeploymentRefreezeReceiptV15,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -781,6 +782,11 @@ class FrozenProspectiveApplication:
                 ),
             )
             opening_receipt = checkpoint.opening_reversal_prediction_v1
+            opening_reversal_candidate = bool(
+                opening_receipt is not None
+                and opening_receipt.eligibility_v1
+                and opening_receipt.prediction_v1 != "ABSTAIN"
+            )
             if opening_receipt is not None:
                 opening_reversal_seen = True
                 group_key = (
@@ -795,7 +801,7 @@ class FrozenProspectiveApplication:
                 self._eligible_symbols.add(symbol)
             else:
                 self._eligible_symbols.discard(symbol)
-            if checkpoint.episode_decision.fresh_episode and opening_receipt is None:
+            if checkpoint.episode_decision.fresh_episode and not opening_reversal_candidate:
                 episode_id = checkpoint.episode_decision.episode_id
                 assert episode_id is not None
                 self._episode_results[episode_id] = checkpoint
@@ -813,7 +819,7 @@ class FrozenProspectiveApplication:
                     symbol,
                     checkpoint.episode_decision.prospective_entry_timestamp + timedelta(minutes=60),
                 )
-            if opening_receipt is None:
+            if not opening_reversal_candidate:
                 self.option_discovery.schedule_quiet_state(checkpoint)
             quiet_observations: tuple[
                 tuple[str | None, QuietObservationKind],
@@ -823,7 +829,9 @@ class FrozenProspectiveApplication:
                 (checkpoint.neutral_control_id, "neutral_control"),
                 (checkpoint.high_tail_control_id, "high_tail_control"),
             )
-            for observation_id, kind in quiet_observations if opening_receipt is None else ():
+            for observation_id, kind in (
+                quiet_observations if not opening_reversal_candidate else ()
+            ):
                 if observation_id is None:
                     continue
                 self._quiet_observation_results[observation_id] = (checkpoint, kind)
@@ -842,7 +850,7 @@ class FrozenProspectiveApplication:
                     checkpoint.quiet_episode_decision.prospective_entry_timestamp
                     + timedelta(minutes=60),
                 )
-            if opening_receipt is None:
+            if not opening_reversal_candidate:
                 self.option_discovery.persist_checkpoint_schedules(checkpoint)
             checkpoints_to_complete.append(checkpoint)
         if (
@@ -1346,6 +1354,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV12
         | OpeningLeaderDeploymentRefreezeReceiptV13
         | OpeningLeaderDeploymentRefreezeReceiptV14
+        | OpeningLeaderDeploymentRefreezeReceiptV15
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

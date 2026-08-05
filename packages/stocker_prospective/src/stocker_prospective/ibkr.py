@@ -1683,6 +1683,14 @@ class IBKRMarketDataAdapter:
             self.connection.socket_port_reset(self.config.port)
             self._clear_lost_subscriptions()
             return
+        if code == 504:
+            self._connected.clear()
+            self.connection.connection_lost(
+                code=code,
+                message=f"{classify_ibkr_error(code)}:{message}",
+            )
+            self._clear_lost_subscriptions()
+            return
         if code == 317:
             self.on_depth_reset(request_id, "ibkr_market_depth_reset")
             return

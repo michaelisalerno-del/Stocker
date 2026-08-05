@@ -130,6 +130,16 @@ auditable `UNKNOWN_INCOMPLETE` consumed bucket and never make Group O or the
 M1C universe ineligible. Optional cross-vendor sessions may diagnose this
 producer handoff, but they do not authorize the IBKR observation.
 
+The producer derives this value while building every new package. A valid
+pre-existing package that omitted only this derived value may receive a
+strictly pre-open, hash-linked
+`missing_implied_movement_source_correction` revision. The base package stays
+byte-for-byte unchanged, all prior context fields and receipt provenance are
+retained, and the revision self-binds each corrected value to its exact ATM IV
+source and the frozen derivation formula. It cannot change the cohort, features,
+chronology, or eligibility. Packages and revisions at or after signal-session
+open remain immutable evidence and are not retrospectively relabelled.
+
 Historical first-20 `engineering_transfer` rows may still verify session reset,
 checkpoint chronology, missing-checkpoint handling, threshold equality,
 prior-close denominator identity, timestamps, episode linkage, and feed gaps;
@@ -381,6 +391,10 @@ is incomplete. It becomes `CLOSED` only when both same-strike primary outcomes
 are complete; its virtual entry is the first valid live ask and its frozen
 15-minute exit is the first valid live bid at or after the horizon. Missing
 or invalid evidence produces `INVALID`, never a synthetic zero or fill.
+An ineligible or `ABSTAIN` opening-reversal receipt remains durable audit
+evidence but does not reserve the C6 checkpoint or suppress the separate quiet
+and generic capture paths. Only an eligible, non-abstaining opening-reversal
+candidate receives that checkpoint priority.
 
 The quiet-state ledger is a different projection with a different identity.
 It contains only `quiet_bottom_10` observations and the frozen short-premium

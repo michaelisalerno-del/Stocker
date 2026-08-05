@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -174,6 +175,41 @@ def test_canonical_event_preserves_external_callback_boundary_timestamps(
         1_000_000_000,
         1_000_000_000,
     )
+
+
+def test_current_time_request_boundary_is_durably_admitted(tmp_path: Path) -> None:
+    value, inbox = adapter(tmp_path)
+
+    class ClockClient:
+        def reqCurrentTime(self) -> None:  # noqa: N802
+            return None
+
+    value._client = ClockClient()
+    value.request_current_time()
+    provider_at = datetime.now(UTC).replace(microsecond=0)
+    value.contain_official_callback(
+        "current_time",
+        -1,
+        lambda: value.on_current_time(provider_at),
+        provider_arguments=(int(provider_at.timestamp()),),
+    )
+
+    with inbox._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT original_payload_json, received_utc
+            FROM callback_inbox_v1
+            WHERE callback_kind = 'current_time'
+            """
+        ).fetchone()
+
+    assert row is not None
+    payload = json.loads(str(row["original_payload_json"]))
+    assert payload["provider_timestamp_utc"] == provider_at.isoformat()
+    assert datetime.fromisoformat(payload["clock_probe_requested_at_utc"]) <= (
+        datetime.fromisoformat(str(row["received_utc"]))
+    )
+    assert payload["clock_probe_requested_monotonic_ns"] > 0
 
 
 def test_unknown_request_is_quarantined_and_never_escapes_boundary(

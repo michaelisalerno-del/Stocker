@@ -244,6 +244,8 @@ class FakeIBKRAdapter:
                 "kind": "current_time",
                 "request_id": request_id,
                 "provider_timestamp_utc": observed.isoformat(),
+                "clock_probe_requested_at_utc": observed.isoformat(),
+                "clock_probe_requested_monotonic_ns": 0,
                 "received_timestamp_utc": observed.isoformat(),
                 "received_monotonic_ns": 0,
                 "source_sequence": 0,

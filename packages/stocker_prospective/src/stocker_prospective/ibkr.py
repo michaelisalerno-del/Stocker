@@ -54,6 +54,7 @@ IBKR_DEPENDENCY_BLOCKER = "blocked_official_ibkr_api_not_installed"
 IBKR_PROVENANCE_BLOCKER = "blocked_unverified_official_ibkr_api"
 IBKR_API_UPDATE_MAX_AGE = timedelta(days=14)
 IBKR_INFORMATIONAL_NOTIFICATION_CODES = frozenset({2104, 2106, 2107, 2108, 2119, 2158})
+MAX_PENDING_CLOCK_PROBES = 8
 FORBIDDEN_BROKER_SURFACE = frozenset(
     {
         "placeOrder",
@@ -81,6 +82,13 @@ FORBIDDEN_BROKER_SURFACE = frozenset(
         "request_executions",
     }
 )
+
+
+@dataclass(frozen=True)
+class _ClockProbeRequest:
+    requested_at_utc: datetime
+    requested_monotonic_ns: int
+    connection_generation: int
 
 
 def _serialisable_provider_value(
@@ -393,6 +401,8 @@ class IBKRMarketDataAdapter:
         self._latest_durably_admitted_sequence: int | None = None
         self._pending_callback_failure: dict[str, Any] | None = None
         self._callback_failure_lock = threading.RLock()
+        self._clock_probe_requests: deque[_ClockProbeRequest] = deque()
+        self._clock_probe_lock = threading.RLock()
         self._official_callback_context = threading.local()
         self._loop_thread: threading.Thread | None = None
         self._client: Any | None = None
@@ -830,7 +840,22 @@ class IBKRMarketDataAdapter:
         method = getattr(self._client, "reqCurrentTime", None)
         if not callable(method):
             raise RuntimeError("blocked_ibkr_capability_preflight")
-        method()
+        request = _ClockProbeRequest(
+            requested_at_utc=datetime.now(UTC),
+            requested_monotonic_ns=time.monotonic_ns(),
+            connection_generation=self._connection_generation,
+        )
+        with self._clock_probe_lock:
+            if len(self._clock_probe_requests) >= MAX_PENDING_CLOCK_PROBES:
+                raise RuntimeError("clock_probe_request_capacity_exceeded")
+            self._clock_probe_requests.append(request)
+        try:
+            method()
+        except Exception:
+            with self._clock_probe_lock:
+                if request in self._clock_probe_requests:
+                    self._clock_probe_requests.remove(request)
+            raise
 
     def request_depth_exchanges(self) -> None:
         if self._client is None:
@@ -1496,10 +1521,34 @@ class IBKRMarketDataAdapter:
         )
 
     def on_current_time(self, provider_timestamp_utc: datetime) -> None:
+        request: _ClockProbeRequest | None = None
+        with self._clock_probe_lock:
+            while (
+                self._clock_probe_requests
+                and self._clock_probe_requests[0].connection_generation
+                < self._connection_generation
+            ):
+                self._clock_probe_requests.popleft()
+            if (
+                self._clock_probe_requests
+                and self._clock_probe_requests[0].connection_generation
+                == self._connection_generation
+            ):
+                request = self._clock_probe_requests.popleft()
+        payload: dict[str, Any] = {
+            "provider_timestamp_utc": provider_timestamp_utc.astimezone(UTC).isoformat()
+        }
+        if request is not None:
+            payload.update(
+                {
+                    "clock_probe_requested_at_utc": request.requested_at_utc.isoformat(),
+                    "clock_probe_requested_monotonic_ns": (request.requested_monotonic_ns),
+                }
+            )
         self._append_stream_event(
             "current_time",
             -1,
-            {"provider_timestamp_utc": provider_timestamp_utc.astimezone(UTC).isoformat()},
+            payload,
         )
 
     def on_depth_exchanges(self, exchanges: tuple[dict[str, Any], ...]) -> None:

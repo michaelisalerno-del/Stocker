@@ -188,6 +188,22 @@ def test_capability_requests_are_market_data_only() -> None:
     ]
 
 
+def test_current_time_callback_preserves_its_request_boundary() -> None:
+    adapter = adapter_with(HighResolutionClient())
+    provider_at = datetime.now(UTC).replace(microsecond=0)
+
+    adapter.request_current_time()
+    adapter.on_current_time(provider_at)
+
+    event = adapter.drain_stream_events()[0]
+    assert event["kind"] == "current_time"
+    assert event["provider_timestamp_utc"] == provider_at.isoformat()
+    assert datetime.fromisoformat(event["clock_probe_requested_at_utc"]) <= datetime.fromisoformat(
+        event["received_timestamp_utc"]
+    )
+    assert event["clock_probe_requested_monotonic_ns"] <= event["received_monotonic_ns"]
+
+
 def test_disconnected_server_version_is_absent_instead_of_crashing() -> None:
     class DisconnectedClient:
         def serverVersion(self) -> None:  # noqa: N802

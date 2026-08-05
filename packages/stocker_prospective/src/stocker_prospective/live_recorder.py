@@ -2194,9 +2194,11 @@ class FrozenM1CLiveRecorder:
             elif normalized.control_kind == "current_time":
                 control = normalized.control_payload or {}
                 provider = control.get("provider_timestamp_utc")
-                if isinstance(provider, str):
+                requested = control.get("clock_probe_requested_at_utc")
+                if isinstance(provider, str) and isinstance(requested, str):
                     try:
                         parsed = datetime.fromisoformat(provider.replace("Z", "+00:00"))
+                        request_started = datetime.fromisoformat(requested.replace("Z", "+00:00"))
                         received = datetime.fromisoformat(
                             str(control["received_timestamp_utc"]).replace("Z", "+00:00")
                         )
@@ -2206,14 +2208,32 @@ class FrozenM1CLiveRecorder:
                         if (
                             parsed.tzinfo is None
                             or parsed.utcoffset() is None
+                            or request_started.tzinfo is None
+                            or request_started.utcoffset() is None
                             or received.tzinfo is None
                             or received.utcoffset() is None
+                            or received < request_started
                         ):
                             self._clock_drift_seconds = None
                         else:
+                            # IBKR currentTime is whole-second Unix time.  The
+                            # old receive-minus-provider subtraction treated
+                            # response latency and up to one second of provider
+                            # quantisation as local clock drift.  Use the
+                            # standard request/response midpoint and the centre
+                            # of the provider's one-second precision interval.
+                            local_midpoint = (
+                                request_started.astimezone(UTC)
+                                + (received.astimezone(UTC) - request_started.astimezone(UTC)) / 2
+                            )
+                            provider_midpoint = parsed.astimezone(UTC) + timedelta(milliseconds=500)
                             self._clock_drift_seconds = (
-                                received.astimezone(UTC) - parsed.astimezone(UTC)
+                                local_midpoint - provider_midpoint
                             ).total_seconds()
+                else:
+                    # A response without its durable request boundary cannot
+                    # distinguish clock offset from transport delay.
+                    self._clock_drift_seconds = None
             elif normalized.control_kind == "depth_exchanges":
                 control = normalized.control_payload or {}
                 exchanges = control.get("exchanges", ())

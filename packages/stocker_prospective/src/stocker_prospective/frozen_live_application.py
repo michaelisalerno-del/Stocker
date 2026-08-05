@@ -110,6 +110,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV21,
     OpeningLeaderDeploymentRefreezeReceiptV22,
     OpeningLeaderDeploymentRefreezeReceiptV23,
+    OpeningLeaderDeploymentRefreezeReceiptV24,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1384,6 +1385,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV21
         | OpeningLeaderDeploymentRefreezeReceiptV22
         | OpeningLeaderDeploymentRefreezeReceiptV23
+        | OpeningLeaderDeploymentRefreezeReceiptV24
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -2056,6 +2058,7 @@ def build_frozen_prospective_application(
         ),
         maximum_quote_age=timedelta(seconds=config.ibkr.maximum_quote_age_seconds),
         maximum_clock_drift_seconds=config.ibkr.maximum_clock_drift_seconds,
+        maximum_clock_probe_round_trip_seconds=config.ibkr.request_timeout_seconds,
         depth_rows=config.ibkr.level2_rows,
         durable_inbox=durable_inbox,
         recorder_generation=recorder_generation,

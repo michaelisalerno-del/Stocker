@@ -602,6 +602,47 @@ def test_clock_probe_still_detects_real_clock_offset(tmp_path: Path) -> None:
     assert abs(recorder.clock_drift_seconds) > 2.0
 
 
+def test_late_clock_probe_cannot_overwrite_last_correlated_measurement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder, market_adapter = _clock_test_recorder(tmp_path)
+    monotonic_times = iter((1_200_000_000, 40_000_000_000))
+    monkeypatch.setattr(
+        "stocker_prospective.ibkr.time.monotonic_ns",
+        lambda: next(monotonic_times),
+    )
+    market_adapter._append_stream_event(
+        "current_time",
+        -1,
+        {
+            "provider_timestamp_utc": START.isoformat(),
+            "clock_probe_requested_at_utc": (
+                START + timedelta(milliseconds=100)
+            ).isoformat(),
+            "clock_probe_requested_monotonic_ns": 1_000_000_000,
+            "receive_timestamp_utc": (START + timedelta(milliseconds=300)).isoformat(),
+        },
+    )
+    recorder.poll(now=START + timedelta(seconds=1))
+    correlated_drift = recorder.clock_drift_seconds
+
+    market_adapter._append_stream_event(
+        "current_time",
+        -1,
+        {
+            "provider_timestamp_utc": START.isoformat(),
+            "clock_probe_requested_at_utc": (START + timedelta(seconds=10)).isoformat(),
+            "clock_probe_requested_monotonic_ns": 10_000_000_000,
+            "receive_timestamp_utc": (START + timedelta(seconds=40)).isoformat(),
+        },
+    )
+    recorder.poll(now=START + timedelta(seconds=41))
+
+    assert correlated_drift == pytest.approx(-0.3)
+    assert recorder.clock_drift_seconds == correlated_drift
+
+
 def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
     tmp_path: Path,
 ) -> None:

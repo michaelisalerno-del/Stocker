@@ -226,7 +226,9 @@ def test_current_time_probe_retries_after_single_flight_times_out(
 ) -> None:
     client = HighResolutionClient()
     adapter = adapter_with(client)
-    monotonic_times = iter((1_000_000_000, 1_500_000_000, 2_000_000_001))
+    monotonic_times = iter(
+        (1_000_000_000, 1_500_000_000, 2_000_000_001, 3_000_000_002)
+    )
     monkeypatch.setattr(
         "stocker_prospective.ibkr.time.monotonic_ns",
         lambda: next(monotonic_times),
@@ -235,8 +237,39 @@ def test_current_time_probe_retries_after_single_flight_times_out(
     adapter.request_current_time()
     adapter.request_current_time()
     adapter.request_current_time()
+    adapter.request_current_time()
 
     assert client.requests == [("current_time", ()), ("current_time", ())]
+
+
+def test_late_current_time_response_keeps_original_request_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = HighResolutionClient()
+    adapter = adapter_with(client)
+    first_request_monotonic = 1_000_000_000
+    retry_request_monotonic = 2_000_000_001
+    monotonic_times = iter(
+        (
+            first_request_monotonic,
+            retry_request_monotonic,
+            3_000_000_000,
+            3_100_000_000,
+        )
+    )
+    monkeypatch.setattr(
+        "stocker_prospective.ibkr.time.monotonic_ns",
+        lambda: next(monotonic_times),
+    )
+
+    adapter.request_current_time()
+    adapter.request_current_time()
+    adapter.on_current_time(datetime.now(UTC).replace(microsecond=0))
+    adapter.on_current_time(datetime.now(UTC).replace(microsecond=0))
+
+    first, retry = adapter.drain_stream_events()
+    assert first["clock_probe_requested_monotonic_ns"] == first_request_monotonic
+    assert retry["clock_probe_requested_monotonic_ns"] == retry_request_monotonic
 
 
 def test_disconnected_server_version_is_absent_instead_of_crashing() -> None:

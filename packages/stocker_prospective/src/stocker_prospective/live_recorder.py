@@ -242,6 +242,7 @@ class FrozenM1CLiveRecorder:
         readiness: ScientificReadiness,
         maximum_quote_age: timedelta,
         maximum_clock_drift_seconds: float = 2.0,
+        maximum_clock_probe_round_trip_seconds: float = 10.0,
         minimum_trade_classification_valid_fraction: float = 0.5,
         depth_rows: int = 5,
         depth_snapshot_interval: timedelta = timedelta(seconds=1),
@@ -270,6 +271,8 @@ class FrozenM1CLiveRecorder:
             raise ValueError("maximum quote age must be positive")
         if maximum_clock_drift_seconds <= 0.0:
             raise ValueError("maximum clock drift must be positive")
+        if maximum_clock_probe_round_trip_seconds <= 0.0:
+            raise ValueError("maximum clock probe round trip must be positive")
         if not 0.0 <= minimum_trade_classification_valid_fraction <= 1.0:
             raise ValueError("trade-classification quality threshold is invalid")
         if depth_rows <= 0:
@@ -298,6 +301,9 @@ class FrozenM1CLiveRecorder:
         self.readiness = readiness
         self.maximum_quote_age = maximum_quote_age
         self.maximum_clock_drift_seconds = maximum_clock_drift_seconds
+        self.maximum_clock_probe_round_trip_seconds = (
+            maximum_clock_probe_round_trip_seconds
+        )
         self.minimum_trade_classification_valid_fraction = (
             minimum_trade_classification_valid_fraction
         )
@@ -2215,6 +2221,16 @@ class FrozenM1CLiveRecorder:
                             or received < request_started
                         ):
                             self._clock_drift_seconds = None
+                        elif (
+                            received.astimezone(UTC) - request_started.astimezone(UTC)
+                        ).total_seconds() > self.maximum_clock_probe_round_trip_seconds:
+                            # IBKR currentTime carries no request identifier.
+                            # A response arriving outside the request timeout
+                            # cannot be safely correlated after a retry.  Its
+                            # immutable callback remains diagnostic evidence,
+                            # but it must not overwrite the last bounded clock
+                            # measurement with transport/decoder queue delay.
+                            pass
                         else:
                             # IBKR currentTime is whole-second Unix time.  The
                             # old receive-minus-provider subtraction treated

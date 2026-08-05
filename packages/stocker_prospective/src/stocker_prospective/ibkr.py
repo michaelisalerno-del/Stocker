@@ -845,8 +845,14 @@ class IBKRMarketDataAdapter:
             connection_generation=self._connection_generation,
         )
         with self._clock_probe_lock:
+            while (
+                self._clock_probe_requests
+                and self._clock_probe_requests[0].connection_generation
+                < self._connection_generation
+            ):
+                self._clock_probe_requests.popleft()
             if self._clock_probe_requests:
-                outstanding = self._clock_probe_requests[0]
+                outstanding = self._clock_probe_requests[-1]
                 elapsed_ns = request.requested_monotonic_ns - outstanding.requested_monotonic_ns
                 timeout_ns = int(self.config.request_timeout_seconds * 1_000_000_000)
                 if (
@@ -855,10 +861,12 @@ class IBKRMarketDataAdapter:
                 ):
                     return
                 # ``currentTime`` has no request identifier. Keep one request
-                # in flight, but permit a bounded retry when IBKR loses a
-                # response; otherwise one missing startup callback blocks
-                # capability preflight for the lifetime of the process.
-                self._clock_probe_requests.clear()
+                # in flight, but permit exactly one bounded retry when IBKR
+                # loses a response.  Preserve the original request boundary:
+                # callbacks are ordered but untagged, so discarding it lets a
+                # late first response steal the retry's timestamp.
+                if len(self._clock_probe_requests) >= 2:
+                    return
             self._clock_probe_requests.append(request)
         try:
             method()

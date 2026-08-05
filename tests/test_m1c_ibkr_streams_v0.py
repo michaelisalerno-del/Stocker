@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+
 from stocker_prospective.ibkr import IBKRConnectionConfig, IBKRMarketDataAdapter
 from stocker_prospective.market_data import MarketDataBudget, MarketDataType
 
@@ -214,6 +216,24 @@ def test_current_time_probe_is_single_flight_until_ibkr_responds() -> None:
     assert client.requests == [("current_time", ())]
 
     adapter.on_current_time(datetime.now(UTC).replace(microsecond=0))
+    adapter.request_current_time()
+
+    assert client.requests == [("current_time", ()), ("current_time", ())]
+
+
+def test_current_time_probe_retries_after_single_flight_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = HighResolutionClient()
+    adapter = adapter_with(client)
+    monotonic_times = iter((1_000_000_000, 1_500_000_000, 2_000_000_001))
+    monkeypatch.setattr(
+        "stocker_prospective.ibkr.time.monotonic_ns",
+        lambda: next(monotonic_times),
+    )
+
+    adapter.request_current_time()
+    adapter.request_current_time()
     adapter.request_current_time()
 
     assert client.requests == [("current_time", ()), ("current_time", ())]

@@ -483,6 +483,28 @@ def metadata_factory(
     )
 
 
+class _ProjectionCountingRepository(FrozenRecorderRepository):
+    def __init__(self, repository: ProspectiveRepository) -> None:
+        super().__init__(repository)
+        self.underlying_projection_sequences: list[int] = []
+
+    def update_underlying_live_projection(
+        self,
+        metadata: EvidenceMetadata,
+        event: UnderlyingLevel1QuoteEvent,
+        *,
+        tick_by_tick_status: str,
+        depth_status: str,
+    ) -> None:
+        self.underlying_projection_sequences.append(event.source_sequence)
+        super().update_underlying_live_projection(
+            metadata,
+            event,
+            tick_by_tick_status=tick_by_tick_status,
+            depth_status=depth_status,
+        )
+
+
 def _clock_test_recorder(
     tmp_path: Path,
 ) -> tuple[FrozenM1CLiveRecorder, IBKRMarketDataAdapter]:
@@ -586,7 +608,7 @@ def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
     database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
     database.migrate()
     database.create_run(metadata_factory(START, (START,)))
-    repository = FrozenRecorderRepository(database)
+    repository = _ProjectionCountingRepository(database)
     market_adapter = adapter()
     normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
     recorder = FrozenM1CLiveRecorder(
@@ -651,6 +673,7 @@ def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
 
     assert result.raw_event_count == 4
     assert len(result.partition_hashes) == 1
+    assert repository.underlying_projection_sequences == [4]
     assert list((tmp_path / "raw").rglob("*.parquet"))
     with database._connect() as connection:
         projection = connection.execute(

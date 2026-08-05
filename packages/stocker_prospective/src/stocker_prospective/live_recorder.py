@@ -2356,11 +2356,25 @@ class FrozenM1CLiveRecorder:
             sorted(expected_raw_event_ids)
         ):
             raise CallbackInboxError("CALLBACK_RAW_EVENT_IDENTITY_DIFFERS")
+        # ``underlying_live_state_v0`` is an overwrite-only UI projection, not
+        # evidence.  Persist every Level-1 change in the immutable raw batch
+        # and retain every quote in memory for deterministic as-of selection,
+        # but write only the newest quote per symbol to the bounded projection.
+        # A busy protected universe otherwise opens and commits thousands of
+        # redundant SQLite transactions before the next inbox acknowledgement.
+        latest_level1_by_symbol: dict[str, UnderlyingLevel1QuoteEvent] = {}
         for event in (
             *admitted_decision_events,
             *released_decision_events,
         ):
+            if isinstance(event, UnderlyingLevel1QuoteEvent):
+                current = latest_level1_by_symbol.get(event.symbol)
+                if current is None or event.source_sequence > current.source_sequence:
+                    latest_level1_by_symbol[event.symbol] = event
+                continue
             self._project_decision_event(metadata, event)
+        for symbol in sorted(latest_level1_by_symbol):
+            self._project_decision_event(metadata, latest_level1_by_symbol[symbol])
         for symbol, started_at in deferred_control_gaps:
             self.mark_gap(symbol, started_at=started_at)
         barrier_passed_sessions = {

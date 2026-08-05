@@ -106,6 +106,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV17,
     OpeningLeaderDeploymentRefreezeReceiptV18,
     OpeningLeaderDeploymentRefreezeReceiptV19,
+    OpeningLeaderDeploymentRefreezeReceiptV20,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -226,6 +227,7 @@ def _configuration_hash(
     omitted_ibkr_fields: frozenset[str] = frozenset(),
     web_projection_cache_seconds: float | None = None,
     parallel_validation_enabled: bool | None = None,
+    callback_inbox_batch_limit: int | None = None,
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
     runtime_payload = cast(dict[str, Any], payload["runtime"])
@@ -238,6 +240,8 @@ def _configuration_hash(
         runtime_payload["app_version"] = app_version
     if run_id is not None:
         runtime_payload["run_id"] = run_id
+    if callback_inbox_batch_limit is not None:
+        runtime_payload["callback_inbox_batch_limit"] = callback_inbox_batch_limit
     if tws_or_gateway_version is not None:
         ibkr_payload["tws_or_gateway_version"] = tws_or_gateway_version
     for field_name in omitted_runtime_fields:
@@ -279,31 +283,34 @@ def _activation_configuration_hash_candidates(
                 _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS,
             ):
                 for parallel_validation_enabled in (None, False, True):
-                    candidates.update(
-                        {
-                            _configuration_hash(
-                                config,
-                                git_commit=activation_git_commit,
-                                app_version=activation_app_version,
-                                run_id=historical_run_id,
-                                tws_or_gateway_version=activation_tws_or_gateway_version,
-                                omitted_ibkr_fields=omitted_ibkr_fields,
-                                web_projection_cache_seconds=web_projection_cache_seconds,
-                                parallel_validation_enabled=parallel_validation_enabled,
-                            ),
-                            _configuration_hash(
-                                config,
-                                git_commit=activation_git_commit,
-                                app_version=activation_app_version,
-                                run_id=historical_run_id,
-                                tws_or_gateway_version=activation_tws_or_gateway_version,
-                                omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
-                                omitted_ibkr_fields=omitted_ibkr_fields,
-                                web_projection_cache_seconds=web_projection_cache_seconds,
-                                parallel_validation_enabled=parallel_validation_enabled,
-                            ),
-                        }
-                    )
+                    for callback_inbox_batch_limit in (None, 256):
+                        candidates.update(
+                            {
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                            }
+                        )
     return frozenset(candidates)
 
 
@@ -1370,6 +1377,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV17
         | OpeningLeaderDeploymentRefreezeReceiptV18
         | OpeningLeaderDeploymentRefreezeReceiptV19
+        | OpeningLeaderDeploymentRefreezeReceiptV20
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

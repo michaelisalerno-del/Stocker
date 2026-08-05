@@ -1401,6 +1401,42 @@ def test_existing_activation_accepts_disabling_optional_cross_vendor_diagnostic(
     )
 
 
+def test_existing_activation_accepts_legacy_bounded_inbox_batch_capacity(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+    legacy_config = config.model_copy(
+        update={
+            "runtime": config.runtime.model_copy(
+                update={"callback_inbox_batch_limit": 256}
+            )
+        }
+    )
+    legacy_activation = activation.model_copy(
+        update={
+            "configuration_hash": _configuration_hash(
+                legacy_config,
+                git_commit=activation.git_sha,
+            )
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version=legacy_activation.ibkr_api_version,
+        tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+    )
+
+
 def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(
     tmp_path: Path,
 ) -> None:

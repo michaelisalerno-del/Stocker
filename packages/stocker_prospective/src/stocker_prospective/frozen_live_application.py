@@ -103,6 +103,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV14,
     OpeningLeaderDeploymentRefreezeReceiptV15,
     OpeningLeaderDeploymentRefreezeReceiptV16,
+    OpeningLeaderDeploymentRefreezeReceiptV17,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1357,6 +1358,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV14
         | OpeningLeaderDeploymentRefreezeReceiptV15
         | OpeningLeaderDeploymentRefreezeReceiptV16
+        | OpeningLeaderDeploymentRefreezeReceiptV17
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

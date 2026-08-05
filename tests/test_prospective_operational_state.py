@@ -112,6 +112,7 @@ def set_signals(
     callback_at: datetime | None = NOW,
     raw_at: datetime | None = NOW,
     ack_at: datetime | None = NOW,
+    completed_bar_at: datetime | None = NOW,
     market_open: bool = True,
     callbacks_expected: bool = True,
 ) -> None:
@@ -124,6 +125,7 @@ def set_signals(
                 latest_callback_durably_admitted_at_utc = ?,
                 latest_raw_partition_committed_at_utc = ?,
                 latest_inbox_acknowledgement_at_utc = ?,
+                latest_completed_five_minute_bar_at_utc = ?,
                 market_session_open = ?,
                 callbacks_expected = ?,
                 ibkr_connection_state = 'connected',
@@ -141,6 +143,7 @@ def set_signals(
                 None if callback_at is None else callback_at.isoformat(),
                 None if raw_at is None else raw_at.isoformat(),
                 None if ack_at is None else ack_at.isoformat(),
+                None if completed_bar_at is None else completed_bar_at.isoformat(),
                 int(market_open),
                 int(callbacks_expected),
                 NOW.isoformat(),
@@ -196,6 +199,28 @@ def test_fresh_lease_and_heartbeats_are_recording_healthy(tmp_path: Path) -> Non
     assert observed.state is RecorderOperationalState.RECORDING_HEALTHY
     assert observed.healthy
     assert observed.conditions["fresh_recorder_lease"] is True
+
+
+def test_fresh_inbox_is_degraded_when_provider_bars_are_two_hours_behind(
+    tmp_path: Path,
+) -> None:
+    value, _ = active_repository(tmp_path)
+    set_signals(value)
+    with value._connect() as connection:
+        connection.execute(
+            """
+            UPDATE recorder_operational_state_v1
+            SET latest_completed_five_minute_bar_at_utc = ?
+            WHERE run_id = ?
+            """,
+            ((NOW - timedelta(hours=2)).isoformat(), RUN_ID),
+        )
+
+    observed = projection(value)
+
+    assert observed.state is RecorderOperationalState.RECORDING_DEGRADED
+    assert observed.reason_code == "PROVIDER_BAR_PROGRESS_STALE"
+    assert observed.conditions["provider_bar_progress_fresh"] is False
 
 
 @pytest.mark.parametrize(

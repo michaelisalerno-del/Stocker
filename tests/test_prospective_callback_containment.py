@@ -212,6 +212,40 @@ def test_current_time_request_boundary_is_durably_admitted(tmp_path: Path) -> No
     assert payload["clock_probe_requested_monotonic_ns"] > 0
 
 
+def test_hot_callback_is_durable_before_normalization_or_cache_update(
+    tmp_path: Path,
+) -> None:
+    value, inbox = adapter(tmp_path)
+    activate(value)
+
+    def normalize_after_durable_admission() -> None:
+        with inbox._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT callback_kind, status
+                FROM callback_inbox_v1
+                ORDER BY source_sequence DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        assert row is not None
+        assert row["callback_kind"] == "official_provider_tick_price"
+        assert row["status"] == "provider_pending"
+        assert value.stream_quotes.snapshot(7) == ()
+        value.on_quote_update(7, {"field": "bid", "value": 10.0})
+
+    value.contain_official_callback(
+        "tick_price",
+        7,
+        normalize_after_durable_admission,
+        provider_arguments=(7, 1, 10.0, {}),
+    )
+
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == 1
+    assert value.stream_quotes.snapshot(7) == ({"field": "bid", "value": 10.0},)
+
+
 def test_unknown_request_is_quarantined_and_never_escapes_boundary(
     tmp_path: Path,
 ) -> None:
@@ -304,7 +338,7 @@ def test_durable_inbox_exhaustion_latches_fatal_without_silent_drop(
     assert value.fatal_callback_code == "CALLBACK_OVERFLOW"
     assert inbox.has_active_fatal("ingestion")
     accounting = inbox.accounting()
-    assert accounting.admitted == 2
+    assert accounting.admitted == 1
     assert accounting.pending == 1
 
 
@@ -336,9 +370,9 @@ def test_transient_sqlite_writer_contention_does_not_latch_callback_loss(
     assert value.fatal_callback_code is None
     assert value.scientific_recording_valid
     accounting = inbox.accounting()
-    assert accounting.admitted == 2
+    assert accounting.admitted == 1
     assert accounting.pending == 1
-    assert accounting.diagnostic == 1
+    assert accounting.diagnostic == 0
     assert not inbox.has_active_fatal("ingestion")
 
 
@@ -419,9 +453,9 @@ def test_cached_inbox_connection_is_owned_by_callback_thread(tmp_path: Path) -> 
     assert value.fatal_callback_code is None
     assert scientific_callback_count(inbox) == 1
     accounting = inbox.accounting()
-    assert accounting.admitted == 2
+    assert accounting.admitted == 1
     assert accounting.pending == 1
-    assert accounting.diagnostic == 1
+    assert accounting.diagnostic == 0
 
 
 @pytest.mark.parametrize(
@@ -628,10 +662,15 @@ def test_official_provider_envelope_is_not_depth_or_collection_truncated(
             """
             SELECT original_payload_json
             FROM callback_inbox_v1
-            WHERE callback_kind = 'official_provider_tick_price'
+            WHERE callback_kind = 'level1_quote_update'
             """
         ).fetchone()
-    encoded = str(row["original_payload_json"])
+    assert row is not None
+    payload = json.loads(str(row["original_payload_json"]))
+    encoded = json.dumps(
+        payload["original_provider_callback"],
+        separators=(",", ":"),
+    )
     assert "__truncated_type__" not in encoded
     assert '"five":"complete"' in encoded
     assert '"items":[0,1,2' in encoded

@@ -111,6 +111,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV22,
     OpeningLeaderDeploymentRefreezeReceiptV23,
     OpeningLeaderDeploymentRefreezeReceiptV24,
+    OpeningLeaderDeploymentRefreezeReceiptV25,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -1386,6 +1387,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV22
         | OpeningLeaderDeploymentRefreezeReceiptV23
         | OpeningLeaderDeploymentRefreezeReceiptV24
+        | OpeningLeaderDeploymentRefreezeReceiptV25
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -2068,6 +2070,12 @@ def build_frozen_prospective_application(
         operational_repository=operational_repository,
         operational_thresholds=operational_thresholds(config),
         processing_heartbeat=heartbeat,
+        inbox_retention_enabled=config.runtime.callback_inbox_retention_enabled,
+        inbox_retention_period=timedelta(seconds=config.runtime.callback_inbox_retention_seconds),
+        inbox_compaction_interval=timedelta(
+            seconds=config.runtime.callback_inbox_compaction_interval_seconds
+        ),
+        inbox_compaction_batch_limit=(config.runtime.callback_inbox_compaction_batch_limit),
     )
 
     controller = LiveSubscriptionController(

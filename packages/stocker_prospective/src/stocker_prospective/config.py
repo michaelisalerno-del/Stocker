@@ -76,6 +76,10 @@ class RuntimeConfig(BaseModel):
     callback_acknowledgement_stale_seconds: int = Field(default=30, ge=5)
     callback_inbox_healthy_backlog: int = Field(default=5_000, ge=0)
     callback_inbox_oldest_healthy_seconds: int = Field(default=60, ge=1)
+    callback_inbox_retention_enabled: bool = False
+    callback_inbox_retention_seconds: int = Field(default=900, ge=60)
+    callback_inbox_compaction_interval_seconds: int = Field(default=60, ge=10)
+    callback_inbox_compaction_batch_limit: int = Field(default=4_096, ge=1, le=65_536)
 
     @field_validator("prospective_start_utc")
     @classmethod

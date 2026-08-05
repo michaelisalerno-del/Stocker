@@ -19,6 +19,7 @@ BOUNDARY_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-loopback-boundary.sh"
 INSTALL_BOUNDARY_SCRIPT = ROOT / "deploy/scripts/install-ibgateway-loopback-boundary.sh"
 NFT_JSON_VERIFIER = ROOT / "deploy/scripts/verify-ibgateway-nft-boundary-json.py"
 READINESS_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-daily-readiness.sh"
+SESSION_READINESS_VERIFIER = ROOT / "deploy/scripts/verify-recorder-session-readiness.py"
 RUNBOOK = ROOT / "docs/operations/prospective-server-runbook.md"
 SERVER_CONFIG = ROOT / "configs/prospective/server.example.yaml"
 
@@ -97,6 +98,21 @@ def test_gateway_daily_restart_readiness_is_observed_without_mutating_gateway() 
     assert '"$systemctl_bin" stop' not in verifier
 
 
+def test_market_session_readiness_requires_two_advancing_boundaries() -> None:
+    service = _unit("stocker-recorder-session-readiness.service")
+    timer = _unit("stocker-recorder-session-readiness.timer")
+
+    assert "User=stocker" in service
+    assert "verify-recorder-session-readiness.py" in service
+    assert "--expected-level1 21" in service
+    assert "--expected-bars 28" in service
+    assert "--required-distinct-boundaries 2" in service
+    assert "--maximum-quote-age-seconds 2" in service
+    assert "ReadOnlyPaths=/var/lib/stocker" in service
+    assert "OnCalendar=Mon..Fri *-*-* 09:34:00 America/New_York" in timer
+    assert "Unit=stocker-recorder-session-readiness.service" in timer
+
+
 def test_gateway_daily_restart_readiness_accepts_authenticated_api_port(
     tmp_path: Path,
 ) -> None:
@@ -154,6 +170,131 @@ def test_gateway_daily_restart_readiness_fails_when_api_port_stays_absent(
 
     assert rejected.returncode == 1
     assert "ibgateway_daily_restart:api_port_not_ready:4002" in rejected.stderr
+
+
+def _session_readiness_database(
+    path: Path,
+    *,
+    quote_at: str,
+    bar_at: str,
+    level1_count: int = 21,
+    bar_count: int = 28,
+) -> Path:
+    import sqlite3
+
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE recorder_operational_state_v1(
+                run_id TEXT,
+                recorder_generation INTEGER,
+                state TEXT,
+                updated_at_utc TEXT
+            );
+            CREATE TABLE web_latest_subscription_state_v0(
+                run_id TEXT,
+                subscription_key TEXT,
+                subscription_kind TEXT,
+                status TEXT
+            );
+            CREATE TABLE underlying_live_state_v0(
+                run_id TEXT,
+                symbol TEXT,
+                received_timestamp_utc TEXT,
+                market_data_type TEXT,
+                quote_valid INTEGER
+            );
+            CREATE TABLE completed_bar_state_v0(
+                run_id TEXT,
+                symbol TEXT,
+                bar_end_utc TEXT
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO recorder_operational_state_v1 VALUES (?, ?, ?, ?)",
+            ("run-ready", 1, "RECORDING_HEALTHY", quote_at),
+        )
+        connection.executemany(
+            "INSERT INTO web_latest_subscription_state_v0 VALUES (?, ?, ?, ?)",
+            [
+                ("run-ready", f"level1:{index}", "underlying_level1", "active")
+                for index in range(level1_count)
+            ]
+            + [
+                ("run-ready", f"bar:{index}", "underlying_bar", "active")
+                for index in range(bar_count)
+            ],
+        )
+        connection.execute(
+            "INSERT INTO underlying_live_state_v0 VALUES (?, ?, ?, ?, ?)",
+            ("run-ready", "AAL", quote_at, "live", 1),
+        )
+        connection.executemany(
+            "INSERT INTO completed_bar_state_v0 VALUES (?, ?, ?)",
+            [("run-ready", f"B{index:02d}", bar_at) for index in range(bar_count)],
+        )
+    return path
+
+
+def test_session_readiness_verifies_counts_current_quote_and_slowest_bar(
+    tmp_path: Path,
+) -> None:
+    now = "2026-08-05T14:40:00+00:00"
+    database = _session_readiness_database(
+        tmp_path / "readiness.sqlite3",
+        quote_at="2026-08-05T14:39:59+00:00",
+        bar_at="2026-08-05T14:35:00+00:00",
+    )
+
+    verified = subprocess.run(
+        [
+            sys.executable,
+            str(SESSION_READINESS_VERIFIER),
+            "--database",
+            str(database),
+            "--now",
+            now,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert verified.returncode == 0, verified.stderr
+    payload = json.loads(verified.stdout)
+    assert payload["level1_subscription_count"] == 21
+    assert payload["bar_subscription_count"] == 28
+    assert payload["latest_live_quote_at_utc"] == "2026-08-05T14:39:59+00:00"
+    assert payload["slowest_bar_boundary_utc"] == "2026-08-05T14:35:00+00:00"
+
+
+def test_session_readiness_rejects_port_adjacent_state_without_all_bar_streams(
+    tmp_path: Path,
+) -> None:
+    database = _session_readiness_database(
+        tmp_path / "readiness.sqlite3",
+        quote_at="2026-08-05T14:39:59+00:00",
+        bar_at="2026-08-05T14:35:00+00:00",
+        bar_count=27,
+    )
+
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(SESSION_READINESS_VERIFIER),
+            "--database",
+            str(database),
+            "--now",
+            "2026-08-05T14:40:00+00:00",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert rejected.returncode == 1
+    assert "required_bar_subscriptions_missing:27/28" in rejected.stderr
 
 
 def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:

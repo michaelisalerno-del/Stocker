@@ -493,6 +493,9 @@ sudo install -o root -g root -m 0755 \
 sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/verify-ibgateway-daily-readiness.sh \
   /usr/local/libexec/stocker-verify-ibgateway-daily-readiness
+sudo install -o root -g root -m 0644 \
+  /opt/stocker/current/deploy/scripts/verify-recorder-session-readiness.py \
+  /usr/local/libexec/stocker-verify-recorder-session-readiness.py
 sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/run-ibgateway-loopback-proxy.sh \
   /usr/local/libexec/stocker-ibgateway-loopback-proxy
@@ -505,6 +508,8 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.timer \
+  /opt/stocker/current/deploy/systemd/stocker-recorder-session-readiness.service \
+  /opt/stocker/current/deploy/systemd/stocker-recorder-session-readiness.timer \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -512,6 +517,7 @@ sudo /usr/local/libexec/stocker-install-ibgateway-loopback-boundary
 sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo systemctl enable stocker-ibgateway-loopback-proxy.socket
 sudo systemctl enable --now stocker-ibgateway-daily-readiness.timer
+sudo systemctl enable --now stocker-recorder-session-readiness.timer
 sudo systemctl enable --now stocker-ibgateway.service
 ```
 
@@ -564,6 +570,13 @@ does not trigger a restart.
 The read-only readiness timer checks the authenticated upstream port at 23:46
 UTC, retrying for up to two minutes without starting, stopping, or restarting
 Gateway. A weekly broker reset may still require manual authentication.
+That post-restart probe proves only socket availability. A separate weekday
+market-session readiness timer starts at 09:34 America/New_York and fails unless
+the recorder has exactly 21 active required Level-1 subscriptions, 28 active
+required bar subscriptions, a valid live quote no older than two seconds, and
+two advancing slowest-required five-minute boundaries. It opens SQLite in
+read-only/query-only mode and never contacts an order, account, or position
+surface.
 
 Verify that the upstream port is firewall-restricted, the Stocker endpoint is
 loopback-only, and VNC remains private:

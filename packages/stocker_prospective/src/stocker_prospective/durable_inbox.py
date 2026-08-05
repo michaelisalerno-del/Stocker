@@ -112,6 +112,13 @@ class CallbackInboxEvent(BaseModel):
             "received_monotonic_ns": self.received_monotonic_ns,
             "source_sequence": self.source_sequence,
             "persisted_stream_owner": self.stream_owner,
+            "inbox_event_id": self.inbox_event_id,
+            "callback_classification": self.callback_classification.value,
+            "connection_generation": self.connection_generation,
+            "subscription_owner": self.subscription_owner,
+            "subscription_symbol": self.symbol,
+            "admission_run_id": self.admission_run_id,
+            "admission_recorder_generation": self.admission_recorder_generation,
         }
 
 
@@ -355,10 +362,7 @@ class DurableCallbackInbox:
     def _increment_active_accounting(self, *, received_at: datetime) -> None:
         assert self._active_count is not None
         self._active_count += 1
-        if (
-            self._oldest_active_received_at is None
-            or received_at < self._oldest_active_received_at
-        ):
+        if self._oldest_active_received_at is None or received_at < self._oldest_active_received_at:
             self._oldest_active_received_at = received_at
 
     def _decrement_active_accounting(self) -> None:
@@ -712,6 +716,81 @@ class DurableCallbackInbox:
             )
             connection.commit()
             return cursor.rowcount
+
+    def materialize_provider_envelope(
+        self,
+        *,
+        provider_envelope_event_id: str,
+        callback_kind: str,
+        request_id: int,
+        payload: Mapping[str, object],
+        materialized_at: datetime,
+    ) -> CallbackInboxEvent:
+        """Transition one pre-admitted provider delivery into its canonical row."""
+
+        kind = callback_kind.strip()
+        if not kind:
+            raise ValueError("callback kind is required")
+        observed = _utc(materialized_at, label="provider envelope materialization timestamp")
+        payload_json = _encoded(dict(payload))
+        provider = next(
+            (
+                parsed
+                for key in (
+                    "provider_timestamp_utc",
+                    "source_timestamp_utc",
+                    "bar_timestamp_utc",
+                    "timestamp_utc",
+                )
+                if (parsed := _parsed_timestamp(payload.get(key))) is not None
+            ),
+            None,
+        )
+        with self._connect() as connection:
+            self._begin_immediate(connection)
+            row = connection.execute(
+                "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
+                (provider_envelope_event_id,),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_MISSING")
+            if (
+                not str(row["callback_kind"]).startswith("official_provider_")
+                or int(row["request_id"]) != request_id
+                or row["admission_run_id"] != self.run_id
+                or InboxStatus(str(row["status"])) is not InboxStatus.PROVIDER_PENDING
+            ):
+                connection.rollback()
+                raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_IDENTITY_INVALID")
+            cursor = connection.execute(
+                """
+                UPDATE callback_inbox_v1
+                SET callback_kind = ?, provider_timestamp_utc = ?,
+                    original_payload_json = ?, status = 'pending',
+                    updated_at_utc = ?
+                WHERE inbox_event_id = ? AND status = 'provider_pending'
+                  AND admission_run_id IS ?
+                """,
+                (
+                    kind,
+                    None if provider is None else provider.isoformat(),
+                    payload_json,
+                    observed.isoformat(),
+                    provider_envelope_event_id,
+                    self.run_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_TRANSITION_CHANGED")
+            connection.commit()
+            materialized = connection.execute(
+                "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
+                (provider_envelope_event_id,),
+            ).fetchone()
+        assert materialized is not None
+        return self._event(materialized)
 
     def _complete_provider_envelope_in_transaction(
         self,
@@ -1722,23 +1801,34 @@ class DurableCallbackInbox:
         *,
         before: datetime,
         retention_policy_enabled: bool,
+        limit: int = 4_096,
     ) -> int:
         """Compact terminal payloads while retaining identity and classification."""
 
         if not retention_policy_enabled:
             raise ValueError("callback inbox compaction requires an explicit retention policy")
+        if limit <= 0:
+            raise ValueError("callback inbox compaction limit must be positive")
         cutoff = _utc(before, label="callback retention cutoff")
         with self._connect() as connection:
             self._begin_immediate(connection)
             rows = connection.execute(
                 """
-                SELECT inbox_event_id, original_payload_json
-                FROM callback_inbox_v1
-                WHERE admission_run_id IS ?
-                  AND status IN ('acknowledged', 'diagnostic')
-                  AND acknowledgement_timestamp_utc < ?
+                SELECT inbox.inbox_event_id, inbox.original_payload_json
+                FROM callback_inbox_v1 AS inbox
+                JOIN callback_raw_materialization_v1 AS materialization
+                  ON materialization.inbox_event_id = inbox.inbox_event_id
+                JOIN callback_processing_commit_v1 AS processing
+                  ON processing.inbox_event_id = inbox.inbox_event_id
+                 AND processing.raw_partition_hashes_json =
+                     materialization.raw_partition_hashes_json
+                WHERE inbox.admission_run_id IS ?
+                  AND inbox.status = 'acknowledged'
+                  AND inbox.acknowledgement_timestamp_utc < ?
+                ORDER BY inbox.source_sequence
+                LIMIT ?
                 """,
-                (self.run_id, cutoff.isoformat()),
+                (self.run_id, cutoff.isoformat(), limit),
             ).fetchall()
             compacted_at = datetime.now(UTC).isoformat()
             compacted_count = 0
@@ -1758,7 +1848,7 @@ class DurableCallbackInbox:
                     SET original_payload_json = ?,
                         updated_at_utc = ?
                     WHERE inbox_event_id = ?
-                      AND status IN ('acknowledged', 'diagnostic')
+                      AND status = 'acknowledged'
                     """,
                     (
                         _encoded({"__retention_compacted_sha256__": payload_hash}),

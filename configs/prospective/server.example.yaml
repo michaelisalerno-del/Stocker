@@ -42,6 +42,12 @@ runtime:
   recorder_lease_stale_seconds: 60
   heartbeat_seconds: 10
   callback_inbox_batch_limit: 4096
+  # Enable only as an explicit retention policy. Compaction is limited to
+  # acknowledged callbacks with matching immutable raw/processing hashes.
+  callback_inbox_retention_enabled: true
+  callback_inbox_retention_seconds: 900
+  callback_inbox_compaction_interval_seconds: 60
+  callback_inbox_compaction_batch_limit: 4096
 
 risk:
   trading_enabled: false

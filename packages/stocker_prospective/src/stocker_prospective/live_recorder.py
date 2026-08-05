@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import secrets
 import sqlite3
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -257,6 +259,10 @@ class FrozenM1CLiveRecorder:
         operational_repository: RecorderOperationalRepository | None = None,
         operational_thresholds: OperationalThresholds | None = None,
         processing_heartbeat: Callable[[], object] | None = None,
+        inbox_retention_enabled: bool = False,
+        inbox_retention_period: timedelta = timedelta(minutes=15),
+        inbox_compaction_interval: timedelta = timedelta(minutes=1),
+        inbox_compaction_batch_limit: int = 4_096,
     ) -> None:
         if len(universe_symbols) != 20 or len(set(universe_symbols)) != 20:
             raise ValueError("frozen M1C live recorder requires the exact 20-stock cohort")
@@ -285,6 +291,10 @@ class FrozenM1CLiveRecorder:
             raise ValueError("durable callback lease identity is required")
         if inbox_lease_timeout <= timedelta(0) or inbox_batch_limit <= 0:
             raise ValueError("durable callback lease bounds must be positive")
+        if inbox_retention_period <= timedelta(0):
+            raise ValueError("callback inbox retention period must be positive")
+        if inbox_compaction_interval <= timedelta(0) or inbox_compaction_batch_limit <= 0:
+            raise ValueError("callback inbox compaction bounds must be positive")
         self.adapter = adapter
         self.normalizer = normalizer
         self.raw_store = raw_store
@@ -301,9 +311,7 @@ class FrozenM1CLiveRecorder:
         self.readiness = readiness
         self.maximum_quote_age = maximum_quote_age
         self.maximum_clock_drift_seconds = maximum_clock_drift_seconds
-        self.maximum_clock_probe_round_trip_seconds = (
-            maximum_clock_probe_round_trip_seconds
-        )
+        self.maximum_clock_probe_round_trip_seconds = maximum_clock_probe_round_trip_seconds
         self.minimum_trade_classification_valid_fraction = (
             minimum_trade_classification_valid_fraction
         )
@@ -320,6 +328,11 @@ class FrozenM1CLiveRecorder:
         self.operational_repository = operational_repository
         self.operational_thresholds = operational_thresholds or OperationalThresholds()
         self.processing_heartbeat = processing_heartbeat
+        self.inbox_retention_enabled = inbox_retention_enabled
+        self.inbox_retention_period = inbox_retention_period
+        self.inbox_compaction_interval = inbox_compaction_interval
+        self.inbox_compaction_batch_limit = inbox_compaction_batch_limit
+        self._last_inbox_compaction_at: datetime | None = None
         self._inflight_durable_events: tuple[CallbackInboxEvent, ...] = ()
         self._finalizer = KeepUpToDateBarFinalizer(
             prospective_collection_start=normalizer.prospective_collection_start
@@ -336,6 +349,7 @@ class FrozenM1CLiveRecorder:
         self._last_depth_validity: dict[str, bool] = {}
         self._bar_order: dict[tuple[int, datetime], tuple[int, int]] = {}
         self._bar_finalised_at: dict[tuple[str, date, int], datetime] = {}
+        self._latest_required_bar_boundary_by_symbol: dict[str, datetime] = {}
         self._opening_leader_quote_retention: dict[
             str,
             tuple[datetime, datetime],
@@ -1138,6 +1152,96 @@ class FrozenM1CLiveRecorder:
             recovery_disposition="scientifically_blocked_raw_only",
         )
 
+    @staticmethod
+    def _original_provider_callback_event(
+        payload: dict[str, Any],
+    ) -> RawCallbackEnvelopeEvent | None:
+        original = payload.get("original_provider_callback")
+        original_kind = payload.get("original_provider_callback_kind")
+        original_hash = payload.get("original_provider_callback_sha256")
+        if original is None and original_kind is None and original_hash is None:
+            return None
+        if not isinstance(original, dict) or not isinstance(original_kind, str):
+            raise ValueError("ORIGINAL_PROVIDER_CALLBACK_IDENTITY_INVALID")
+        encoded = json.dumps(
+            original,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=True,
+        )
+        if not isinstance(original_hash, str) or not secrets.compare_digest(
+            original_hash,
+            hashlib.sha256(encoded.encode()).hexdigest(),
+        ):
+            raise ValueError("ORIGINAL_PROVIDER_CALLBACK_HASH_INVALID")
+        received = datetime.fromisoformat(
+            str(payload["received_timestamp_utc"]).replace("Z", "+00:00")
+        ).astimezone(UTC)
+        provider: datetime | None = None
+        for key in (
+            "provider_timestamp_utc",
+            "source_timestamp_utc",
+            "bar_start_utc",
+            "timestamp_utc",
+        ):
+            value = payload.get(key)
+            if value is None:
+                continue
+            candidate = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if candidate.tzinfo is None or candidate.utcoffset() is None:
+                raise ValueError("ORIGINAL_PROVIDER_CALLBACK_TIMESTAMP_INVALID")
+            provider = candidate.astimezone(UTC)
+            break
+        stream_owner = payload.get("persisted_stream_owner")
+        if stream_owner is not None and not isinstance(stream_owner, dict):
+            raise ValueError("ORIGINAL_PROVIDER_CALLBACK_OWNER_INVALID")
+        raw_con_id = None if stream_owner is None else stream_owner.get("con_id")
+        con_id = raw_con_id if isinstance(raw_con_id, int) else -1
+        request_id = int(payload["request_id"])
+        source_sequence = int(payload["source_sequence"])
+        monotonic = payload.get("received_monotonic_ns")
+        received_monotonic_ns = source_sequence if monotonic is None else int(monotonic)
+        symbol = payload.get("subscription_symbol")
+        routing_symbol = str(symbol or ("__CONTROL__" if request_id < 0 else "__UNRESOLVED__"))
+        inbox_event_id = str(payload["inbox_event_id"])
+        return RawCallbackEnvelopeEvent(
+            event_id=hashlib.sha256(
+                f"original_provider_callback|{inbox_event_id}".encode()
+            ).hexdigest(),
+            inbox_event_id=inbox_event_id,
+            received_timestamp_utc=received,
+            received_monotonic_ns=received_monotonic_ns,
+            original_received_monotonic_ns=(None if monotonic is None else int(monotonic)),
+            provider_timestamp_utc=provider,
+            source_sequence=source_sequence,
+            session=(provider or received).astimezone(NEW_YORK).date(),
+            symbol=routing_symbol,
+            subscription_symbol=None if symbol is None else str(symbol),
+            con_id=con_id,
+            request_id=request_id,
+            callback_kind=original_kind,
+            connection_generation=int(payload["connection_generation"]),
+            callback_classification=str(payload["callback_classification"]),
+            subscription_owner=(
+                None
+                if payload.get("subscription_owner") is None
+                else str(payload["subscription_owner"])
+            ),
+            stream_owner=stream_owner,
+            original_payload=original,
+            admission_run_id=(
+                None
+                if payload.get("admission_run_id") is None
+                else str(payload["admission_run_id"])
+            ),
+            admission_recorder_generation=(
+                None
+                if payload.get("admission_recorder_generation") is None
+                else int(payload["admission_recorder_generation"])
+            ),
+            recovery_disposition="original_provider_callback",
+        )
+
     def _poll_scientifically_blocked_batch(
         self,
         *,
@@ -1556,6 +1660,7 @@ class FrozenM1CLiveRecorder:
                 ).model_copy(update={"con_id": completed.con_id})
                 raw_events.append(event)
                 finalised_bars.append(bar)
+                self._latest_required_bar_boundary_by_symbol[bar.symbol] = bar.bar_end_utc
                 if (
                     self._route_decision_event_v1_1(
                         event,
@@ -2031,6 +2136,28 @@ class FrozenM1CLiveRecorder:
         self._reconcile_retired_quote_state(inbox)
         self._failure_checkpoint("after_callback_acknowledgement")
         self._inflight_durable_events = ()
+        if self.inbox_retention_enabled and (
+            self._last_inbox_compaction_at is None
+            or observed - self._last_inbox_compaction_at >= self.inbox_compaction_interval
+        ):
+            try:
+                inbox.compact_acknowledged(
+                    before=observed - self.inbox_retention_period,
+                    retention_policy_enabled=True,
+                    limit=self.inbox_compaction_batch_limit,
+                )
+            except sqlite3.Error as exc:
+                inbox.record_incident(
+                    stable_error_code="CALLBACK_RETENTION_COMPACTION_DEFERRED",
+                    component="durable_callback_inbox",
+                    severity="degraded",
+                    occurred_at=observed,
+                    error_class=type(exc).__name__,
+                    evidence_loss_possible=False,
+                    connection_generation=self.adapter.connection_generation,
+                )
+            else:
+                self._last_inbox_compaction_at = observed
 
     def fail_inflight_durable_poll(
         self,
@@ -2141,20 +2268,25 @@ class FrozenM1CLiveRecorder:
         depth_reset_symbols: set[str] = set()
         ibkr_errors: list[tuple[int, int]] = []
         deferred_control_gaps: list[tuple[str, datetime]] = []
-        normalized_callbacks: list[tuple[dict[str, Any], NormalizedCallback | None]] = []
+        normalized_callbacks: list[
+            tuple[dict[str, Any], NormalizedCallback | None, RawCallbackEnvelopeEvent | None]
+        ] = []
         # The inbox has already made expected-late callbacks diagnostic. These
         # are accepted-active events whose admission owners can outlive mutable
         # request registration until the whole ordered lease is normalised.
         for callback_index, payload in enumerate(callbacks):
             try:
+                provider_callback = self._original_provider_callback_event(payload)
                 normalized = self.normalizer.normalize(payload)
             except Exception as exc:
                 raise CallbackNormalizationFatal(callback_index) from exc
-            normalized_callbacks.append((payload, normalized))
+            normalized_callbacks.append((payload, normalized, provider_callback))
         # No raw/derived side effect begins until the entire lease is known to
         # be normalisable. A poison callback therefore cannot partially apply
         # an earlier callback from the same batch.
-        for callback_index, (payload, normalized) in enumerate(normalized_callbacks):
+        for callback_index, (payload, normalized, provider_callback) in enumerate(
+            normalized_callbacks
+        ):
             # Initial historical backfills can make one bounded batch costly.
             # Refresh ownership before stateful projection so the generation's
             # lease cannot appear abandoned while its inbox lease is active.
@@ -2165,6 +2297,8 @@ class FrozenM1CLiveRecorder:
                 self.processing_heartbeat()
             if normalized is None:
                 continue
+            if provider_callback is not None:
+                raw_events.append(provider_callback)
             raw_disposition: Literal["admit", "buffer"] = "admit"
             if normalized.raw_event is not None:
                 raw_events.append(normalized.raw_event)
@@ -2435,10 +2569,19 @@ class FrozenM1CLiveRecorder:
             except ValueError:
                 market_session_open = False
             health = self.adapter.connection.health()
-            completed_bar_times = tuple(
-                event.bar_end_utc
-                for event in raw_events
-                if isinstance(event, FiveMinuteBarEvent) and event.finalised
+            required_bar_symbols = {
+                owner.symbol
+                for owner in self.normalizer.owners
+                if owner.kind is StreamKind.UNDERLYING_BAR
+            }
+            slowest_required_bar_boundary = (
+                min(
+                    self._latest_required_bar_boundary_by_symbol[symbol]
+                    for symbol in required_bar_symbols
+                )
+                if required_bar_symbols
+                and required_bar_symbols.issubset(self._latest_required_bar_boundary_by_symbol)
+                else None
             )
             self.operational_repository.touch(
                 run_id=self.run_id,
@@ -2457,9 +2600,7 @@ class FrozenM1CLiveRecorder:
                     and self._session_context_ready
                     and self.adapter.scientific_recording_valid
                 ),
-                latest_completed_five_minute_bar_at_utc=(
-                    None if not completed_bar_times else max(completed_bar_times)
-                ),
+                latest_completed_five_minute_bar_at_utc=(slowest_required_bar_boundary),
                 latest_successful_checkpoint_at_utc=(None if not results else observed_now),
                 broker_state_mutation_count=0,
             )

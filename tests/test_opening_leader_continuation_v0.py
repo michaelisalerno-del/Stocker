@@ -53,7 +53,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
     OpeningLeaderDeploymentRefreezeReceiptV4,
-    OpeningLeaderDeploymentRefreezeReceiptV24,
+    OpeningLeaderDeploymentRefreezeReceiptV25,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     freeze_opening_leader_package_v0,
@@ -1428,9 +1428,10 @@ def test_deployment_freeze_receipt_binds_artifacts_sources_and_boundary(
             "deployment_freeze_receipt_v20.json",
             "deployment_freeze_receipt_v21.json",
             "deployment_freeze_receipt_v22.json",
-            "deployment_freeze_receipt_v23.json",
-            "deployment_freeze_receipt_v24.json",
-        ),
+                "deployment_freeze_receipt_v23.json",
+                "deployment_freeze_receipt_v24.json",
+                "deployment_freeze_receipt_v25.json",
+            ),
     )
     source = tmp_path / "opening_leader_source.py"
     source.write_text("ORDER_ROUTING_ENABLED = False\n", encoding="utf-8")
@@ -1504,17 +1505,17 @@ def test_committed_opening_leader_refreeze_preserves_original_and_binds_current_
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         "22c205fe043d7ce3a9f427d0de997de2a0170be2022ec39db3ae661d7534ef7d"
     )
-    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV24)
+    assert isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV25)
     assert receipt.recorder_version == "opening-leader-continuation-recorder-v0"
     assert (
         receipt.supersedes_receipt_sha256
-        == hashlib.sha256((package / "deployment_freeze_receipt_v23.json").read_bytes()).hexdigest()
+        == hashlib.sha256((package / "deployment_freeze_receipt_v24.json").read_bytes()).hexdigest()
     )
     previous = json.loads(
-        (package / "deployment_freeze_receipt_v23.json").read_text(encoding="utf-8")
+        (package / "deployment_freeze_receipt_v24.json").read_text(encoding="utf-8")
     )
     assert receipt.supersedes_deployment_receipt_id == previous["deployment_receipt_id"]
-    assert receipt.refreeze_reason == "bounded_clock_probe_reply_correlation"
+    assert receipt.refreeze_reason == "callback_throughput_and_provider_progress_health"
     assert receipt.frozen_semantics_changed is False
     assert {
         "recorder_engine",

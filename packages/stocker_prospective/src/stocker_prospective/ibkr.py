@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import ipaddress
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -102,6 +103,10 @@ def _serialisable_provider_value(
     provider delivery was durably replayable.
     """
 
+    if isinstance(value, float) and not math.isfinite(value):
+        return {
+            "__non_finite_float__": "nan" if math.isnan(value) else "inf" if value > 0 else "-inf"
+        }
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, datetime):
@@ -1063,6 +1068,16 @@ class IBKRMarketDataAdapter:
                     )
                 ).encode()
             ).hexdigest()
+            single_row_hot_path = (
+                classification is CallbackClassification.ACCEPTED_ACTIVE
+                and callback_kind
+                in {
+                    "tick_price",
+                    "tick_size",
+                    "historical_data",
+                    "historical_data_update",
+                }
+            )
             if self._durable_inbox is not None:
                 owner = self._request_owners.get(request_id)
                 admission = self._durable_inbox.admit(
@@ -1109,8 +1124,37 @@ class IBKRMarketDataAdapter:
             self._official_callback_context.provider_event_id = provider_event_id
             self._official_callback_context.received_at_utc = received_at
             self._official_callback_context.received_monotonic_ns = received_monotonic_ns
+            self._official_callback_context.capture_single_row = single_row_hot_path
+            self._official_callback_context.captured_stream_event = None
             callback()
-            if self._durable_inbox is not None:
+            captured = self._official_callback_context.captured_stream_event
+            if self._durable_inbox is not None and single_row_hot_path and captured is not None:
+                captured_kind, captured_request_id, captured_payload = captured
+                provider_json = json.dumps(
+                    provider_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=True,
+                )
+                durable_payload = {
+                    **captured_payload,
+                    "original_provider_callback_kind": callback_kind,
+                    "original_provider_callback": provider_payload,
+                    "original_provider_callback_sha256": hashlib.sha256(
+                        provider_json.encode()
+                    ).hexdigest(),
+                }
+                materialized = self._durable_inbox.materialize_provider_envelope(
+                    provider_envelope_event_id=provider_event_id,
+                    callback_kind=captured_kind,
+                    request_id=captured_request_id,
+                    payload=durable_payload,
+                    materialized_at=datetime.now(UTC),
+                )
+                self._latest_durably_admitted_sequence = materialized.source_sequence
+                if captured_kind == "level1_quote_update":
+                    self.stream_quotes.add(captured_request_id, captured_payload)
+            elif self._durable_inbox is not None:
                 self._durable_inbox.complete_provider_envelope(
                     provider_envelope_event_id=provider_event_id,
                     completed_at=datetime.now(UTC),
@@ -1146,6 +1190,8 @@ class IBKRMarketDataAdapter:
             self._official_callback_context.provider_event_id = None
             self._official_callback_context.received_at_utc = None
             self._official_callback_context.received_monotonic_ns = None
+            self._official_callback_context.capture_single_row = False
+            self._official_callback_context.captured_stream_event = None
 
     @staticmethod
     def _stable_callback_error_code(error: Exception) -> str:
@@ -1595,6 +1641,17 @@ class IBKRMarketDataAdapter:
             if boundary_received_monotonic_ns is None
             else boundary_received_monotonic_ns
         )
+        if self._durable_inbox is not None and bool(
+            getattr(self._official_callback_context, "capture_single_row", False)
+        ):
+            if getattr(self._official_callback_context, "captured_stream_event", None) is not None:
+                raise RuntimeError("official callback emitted multiple canonical stream events")
+            self._official_callback_context.captured_stream_event = (
+                kind,
+                request_id,
+                dict(payload),
+            )
+            return False
         if self._durable_inbox is not None:
             classification = self._classify_callback(request_id, now=received_at)
             identity_payload = {

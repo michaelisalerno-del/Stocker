@@ -228,6 +228,14 @@ def test_duplicate_delivery_and_retry_after_ack_do_not_duplicate_event(
         lease_timeout=timedelta(seconds=5),
         limit=5,
     )
+    inbox.commit_raw_materialization(
+        events,
+        run_id="run-hardening",
+        recorder_generation=1,
+        raw_partition_hashes=("hash-1",),
+        raw_event_ids=("raw-event-1",),
+        materialized_at=NOW,
+    )
     inbox.commit_processing(
         events,
         run_id="run-hardening",
@@ -260,6 +268,48 @@ def test_duplicate_delivery_and_retry_after_ack_do_not_duplicate_event(
         )
         == ()
     )
+
+
+def test_retention_never_compacts_acknowledged_unmaterialized_callback(
+    tmp_path: Path,
+) -> None:
+    path = migrated_database(tmp_path)
+    inbox = durable_inbox(path)
+    admit(inbox, event_id="unmaterialized")
+    events = inbox.lease(
+        lease_owner="recorder",
+        lease_generation=1,
+        now=NOW,
+        lease_timeout=timedelta(seconds=5),
+        limit=5,
+    )
+    inbox.commit_processing(
+        events,
+        run_id="run-hardening",
+        recorder_generation=1,
+        raw_partition_hashes=("hash-1",),
+        committed_at=NOW,
+    )
+    inbox.acknowledge(
+        events,
+        lease_owner="recorder",
+        lease_generation=1,
+        raw_partition_hashes=("hash-1",),
+        acknowledged_at=NOW,
+    )
+
+    assert (
+        inbox.compact_acknowledged(
+            before=NOW + timedelta(seconds=1),
+            retention_policy_enabled=True,
+        )
+        == 0
+    )
+    with inbox._connect() as connection:
+        payload = connection.execute(
+            "SELECT original_payload_json FROM callback_inbox_v1"
+        ).fetchone()[0]
+    assert "__retention_compacted_sha256__" not in str(payload)
 
 
 def test_poison_event_is_quarantined_without_acknowledgement(tmp_path: Path) -> None:

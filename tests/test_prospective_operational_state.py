@@ -6,7 +6,11 @@ from typing import Literal
 
 import pytest
 
-from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
+from stocker_prospective.database import (
+    RECORDER_SQLITE_BUSY_TIMEOUT_MS,
+    EvidenceMetadata,
+    ProspectiveRepository,
+)
 from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.operational_state import (
     GapIncident,
@@ -50,6 +54,33 @@ def repository(tmp_path: Path) -> ProspectiveRepository:
     value.migrate()
     value.create_run(metadata())
     return value
+
+
+def test_recorder_writer_connections_use_extended_busy_timeout(tmp_path: Path) -> None:
+    database_path = tmp_path / "writer-contention.sqlite3"
+    repository = ProspectiveRepository(database_path)
+    operational = RecorderOperationalRepository(database_path)
+
+    with repository._connect() as connection:
+        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == (
+            RECORDER_SQLITE_BUSY_TIMEOUT_MS
+        )
+    with operational._connect() as connection:
+        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == (
+            RECORDER_SQLITE_BUSY_TIMEOUT_MS
+        )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    (ProspectiveRepository, RecorderOperationalRepository),
+)
+def test_recorder_writer_busy_timeout_must_be_positive(
+    tmp_path: Path,
+    factory: type[ProspectiveRepository] | type[RecorderOperationalRepository],
+) -> None:
+    with pytest.raises(ValueError, match="busy timeout must be positive"):
+        factory(tmp_path / "invalid.sqlite3", busy_timeout_ms=0)
 
 
 def active_repository(

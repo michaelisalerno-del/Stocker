@@ -12,6 +12,8 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from stocker_prospective.database import RECORDER_SQLITE_BUSY_TIMEOUT_MS
+
 
 class RecorderOperationalState(StrEnum):
     INACTIVE = "INACTIVE"
@@ -561,14 +563,25 @@ def _iso(value: datetime | None) -> str | None:
 class RecorderOperationalRepository:
     """Generation-fenced writes for recorder health, gaps, and artifacts."""
 
-    def __init__(self, database_path: str | Path) -> None:
+    def __init__(
+        self,
+        database_path: str | Path,
+        *,
+        busy_timeout_ms: int = RECORDER_SQLITE_BUSY_TIMEOUT_MS,
+    ) -> None:
+        if busy_timeout_ms <= 0:
+            raise ValueError("SQLite busy timeout must be positive")
         self.database_path = Path(database_path)
+        self.busy_timeout_ms = busy_timeout_ms
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path, timeout=5.0)
+        connection = sqlite3.connect(
+            self.database_path,
+            timeout=self.busy_timeout_ms / 1_000,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         connection.execute("PRAGMA journal_mode = WAL")
         return connection
 

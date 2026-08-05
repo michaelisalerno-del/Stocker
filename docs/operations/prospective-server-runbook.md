@@ -1341,9 +1341,12 @@ for it. This is distinct from a callback classified after cancellation:
 `expected_late_callback_after_cancellation` is diagnostic, already
 acknowledged, and cannot update the live quote or option projection.
 
-The default lease batch is bounded at 256 callbacks. This amortizes immutable
-partition and checkpoint overhead across the 28 required bar streams while
-leaving excess callbacks pending and recoverable. Processing refreshes
+The default lease batch is bounded at 4,096 callbacks. This amortizes immutable
+partition and checkpoint overhead across the 28 required bar streams and 21
+protected Level-I streams while leaving excess callbacks pending and
+recoverable. The earlier 256-callback default was superseded after measured
+admission from the protected Level-I surface exceeded its materialization rate
+on the deployment host. Processing refreshes
 generation ownership every eight projected callbacks and between each grouped
 immutable partition write, before compression, hashing, fsync, and atomic
 rename work begins. The batch is acknowledged only after all partition

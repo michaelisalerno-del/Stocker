@@ -54,7 +54,6 @@ IBKR_DEPENDENCY_BLOCKER = "blocked_official_ibkr_api_not_installed"
 IBKR_PROVENANCE_BLOCKER = "blocked_unverified_official_ibkr_api"
 IBKR_API_UPDATE_MAX_AGE = timedelta(days=14)
 IBKR_INFORMATIONAL_NOTIFICATION_CODES = frozenset({2104, 2106, 2107, 2108, 2119, 2158})
-MAX_PENDING_CLOCK_PROBES = 8
 FORBIDDEN_BROKER_SURFACE = frozenset(
     {
         "placeOrder",
@@ -846,8 +845,8 @@ class IBKRMarketDataAdapter:
             connection_generation=self._connection_generation,
         )
         with self._clock_probe_lock:
-            if len(self._clock_probe_requests) >= MAX_PENDING_CLOCK_PROBES:
-                raise RuntimeError("clock_probe_request_capacity_exceeded")
+            if self._clock_probe_requests:
+                return
             self._clock_probe_requests.append(request)
         try:
             method()

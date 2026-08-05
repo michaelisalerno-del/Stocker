@@ -981,7 +981,7 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
     result = application.poll(now=polled_at)
 
     assert result.checkpoint_results == ()
-    assert config.runtime.callback_inbox_batch_limit == 256
+    assert config.runtime.callback_inbox_batch_limit == 4_096
     assert config.runtime.raw_storage_heartbeat_stale_seconds == 360
     assert operational_thresholds(config).raw_storage_heartbeat_stale_after == timedelta(minutes=6)
     assert (tmp_path / "activation.json").is_file()

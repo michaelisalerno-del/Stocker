@@ -204,6 +204,21 @@ def test_current_time_callback_preserves_its_request_boundary() -> None:
     assert event["clock_probe_requested_monotonic_ns"] <= event["received_monotonic_ns"]
 
 
+def test_current_time_probe_is_single_flight_until_ibkr_responds() -> None:
+    client = HighResolutionClient()
+    adapter = adapter_with(client)
+
+    adapter.request_current_time()
+    adapter.request_current_time()
+
+    assert client.requests == [("current_time", ())]
+
+    adapter.on_current_time(datetime.now(UTC).replace(microsecond=0))
+    adapter.request_current_time()
+
+    assert client.requests == [("current_time", ()), ("current_time", ())]
+
+
 def test_disconnected_server_version_is_absent_instead_of_crashing() -> None:
     class DisconnectedClient:
         def serverVersion(self) -> None:  # noqa: N802

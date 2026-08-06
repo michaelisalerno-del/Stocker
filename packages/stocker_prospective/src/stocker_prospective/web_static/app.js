@@ -16,6 +16,7 @@ const state = {
   shadow: [],
   virtualLedgers: {
     opening_reversal: { items: [] },
+    opening_leader: { items: [] },
     quiet_state: { items: [] },
   },
   audit: [],
@@ -177,7 +178,8 @@ function showScreen(screenId) {
 
 function subscriptionCapacity(kind) {
   const capacity = state.status.capacity?.[kind] || {};
-  return `${capacity.used ?? 0} / ${capacity.available ?? 0}`;
+  const used = state.status.subscriptions?.[kind] ?? capacity.used ?? 0;
+  return `${used} / ${capacity.available ?? "—"}`;
 }
 
 function renderStatus() {
@@ -309,8 +311,11 @@ function renderBudgetTransfer() {
   const tails = aggregate.tail_metrics || {};
   const episodes = aggregate.episode_metrics || {};
   replace("transfer-panel", kvGrid([
-    ["Decision", transfer.decision || "blocked_insufficient_valid_sessions"],
+    ["Diagnostic status", transfer.cross_vendor_validation_status || "not_configured"],
+    ["Diagnostic decision", transfer.decision],
     ["Valid sessions", transfer.valid_session_count || 0],
+    ["Recorder blocking", transfer.recorder_blocking === true],
+    ["Diagnostic only", transfer.cross_vendor_validation_diagnostic_only !== false],
     ["Exact vendor equality required", false],
     ["Pearson / Spearman", `${clean(probability.pearson)} / ${clean(probability.spearman)}`],
     ["Mean probability bias", probability.mean_signed_bias],
@@ -374,6 +379,10 @@ function renderUniverse() {
       { label: "Gate", value: "m1c_threshold" },
       { label: "Distance", value: "distance_from_threshold" },
       { label: "Evidence status", value: m1cEvidenceStatus },
+      {
+        label: "Quote diagnostics",
+        value: (row) => (row.m1c_diagnostic_quality_flags || []).join(", ") || "clear",
+      },
       { label: "Fresh episode", value: "fresh_episode" },
       { label: "A1", value: "a1_classification" },
       { label: "C1", value: "c1_classification" },
@@ -686,6 +695,11 @@ function renderShadow() {
 
 function renderVirtualLedgers() {
   const opening = state.virtualLedgers.opening_reversal?.items || [];
+  const openingLeader = (state.virtualLedgers.opening_leader?.items || []).map((item) => ({
+    ...item,
+    ...(item.accounting || {}),
+    accounting_status: item.status,
+  }));
   const quietCaptures = state.virtualLedgers.quiet_state?.capture_items || [];
   const quiet = state.virtualLedgers.quiet_state?.items || [];
   const quietCaptureRows = quietCaptures.flatMap((capture) => {
@@ -724,6 +738,27 @@ function renderVirtualLedgers() {
       { label: "Blocker / wait", value: "status_reason" },
     ],
     opening,
+  ));
+  replace("opening-leader-option-ledger", table(
+    [
+      { label: "Session", value: "session_date" },
+      { label: "Checkpoint", value: "checkpoint" },
+      { label: "Symbol", value: "selected_symbol" },
+      { label: "Observation", value: "observation_name" },
+      { label: "Strategy", value: "strategy_name" },
+      { label: "Status", value: "accounting_status" },
+      { label: "Gross executable P&L", value: "gross_executable_pnl" },
+      { label: "Net executable P&L", value: "net_option_pnl" },
+      { label: "Primary capital basis", value: "primary_capital_basis" },
+      { label: "Primary capital", value: "primary_capital_amount" },
+      { label: "Primary ROI", value: "primary_roi", format: percent },
+      { label: "Margin ROI", value: "entry_margin_roi", format: percent },
+      { label: "MAE", value: "maximum_adverse_excursion" },
+      { label: "Max drawdown", value: "maximum_drawdown" },
+      { label: "Greek status", value: "theta_attribution_status" },
+      { label: "Reason", value: "reason" },
+    ],
+    openingLeader,
   ));
   replace("quiet-state-capture-ledger", table(
     [
@@ -1148,6 +1183,22 @@ function openingLeaderCheckpointPanel(checkpoint) {
   const support = checkpoint.support || {};
   const shadow = checkpoint.latest_hypothetical_underlying_return || {};
   const optionSnapshots = Object.values(checkpoint.option_snapshots || {});
+  const optionAccountingRows = Object.entries(checkpoint.option_strategy_accounting || {})
+    .flatMap(([observation, strategies]) => Object.values(strategies || {}).map((mark) => {
+      const accounting = mark.accounting || {};
+      return {
+        observation,
+        strategy: mark.strategy_name,
+        status: mark.status,
+        gross_pnl: accounting.gross_executable_pnl,
+        net_pnl: accounting.net_option_pnl,
+        capital_basis: accounting.primary_capital_basis,
+        capital_amount: accounting.primary_capital_amount,
+        primary_roi: accounting.primary_roi,
+        margin_roi: accounting.entry_margin_roi,
+        greek_status: accounting.theta_attribution_status,
+      };
+    }));
   wrapper.append(
     kvGrid([
       ["Eligibility", checkpoint.eligibility],
@@ -1168,6 +1219,21 @@ function openingLeaderCheckpointPanel(checkpoint) {
       ["Complete", support.complete],
     ])),
     subsection("Rank persistence (diagnostic only)", jsonBlock(checkpoint.rank_persistence)),
+    subsection("Executable option accounting", table(
+      [
+        { label: "Observation", value: "observation" },
+        { label: "Strategy", value: "strategy" },
+        { label: "Status", value: "status" },
+        { label: "Gross P&L", value: "gross_pnl" },
+        { label: "Net P&L", value: "net_pnl" },
+        { label: "Primary basis", value: "capital_basis" },
+        { label: "Capital", value: "capital_amount" },
+        { label: "Primary ROI", value: "primary_roi", format: percent },
+        { label: "Margin ROI", value: "margin_roi", format: percent },
+        { label: "Greek status", value: "greek_status" },
+      ],
+      optionAccountingRows,
+    )),
     subsection("M1C context only", jsonBlock(checkpoint.m1c_context)),
   );
   return wrapper;
@@ -1252,17 +1318,60 @@ function sectionErrorKey(path) {
 }
 
 function applySummary(summary) {
-  state.health = summary.health;
-  state.status = summary.recorder;
-  state.universe = summary.current_universe?.items || [];
+  const recorder = summary.recorder || {};
+  const previousStatus = state.status || {};
+  const previousTimestamps = previousStatus.operational?.timestamps || {};
+  const completedBar = recorder.latest_completed_five_minute_bar || null;
+  const checkpoint = recorder.latest_successful_checkpoint || null;
+  state.health = {
+    blockers: (summary.alerts || []).map((item) => item.code),
+    no_order_checks: summary.no_order || {},
+  };
+  state.status = {
+    ...previousStatus,
+    run_id: summary.run_id,
+    state: recorder.state,
+    operational: {
+      ...(previousStatus.operational || {}),
+      reason_code: recorder.reason_code,
+      timestamps: {
+        ...previousTimestamps,
+        process_heartbeat_at_utc: recorder.heartbeat_at_utc,
+        latest_callback_received_at_utc: recorder.latest_callback_received_at_utc,
+        latest_callback_durably_admitted_at_utc:
+          recorder.latest_callback_durably_admitted_at_utc,
+        latest_inbox_acknowledgement_at_utc:
+          recorder.latest_inbox_acknowledgement_at_utc,
+        latest_completed_five_minute_bar_at_utc: completedBar?.bar_end_utc || null,
+        latest_successful_checkpoint_at_utc: checkpoint?.bar_end_utc || null,
+      },
+      inbox: recorder.callback_inbox || {},
+    },
+    latest_checkpoint: checkpoint,
+    latest_completed_bar: completedBar,
+    latest_episode: recorder.latest_episode || null,
+    ibkr_connection: summary.ibkr?.connection || null,
+    subscriptions: summary.ibkr?.subscriptions?.by_kind || {},
+    replay: summary.replay,
+  };
   state.lastSnapshotAt = summary.summary_at_utc || null;
   delete state.sectionErrors.dashboard_summary;
 }
 
 function applyEndpoint(path, payload) {
   const endpoint = path.split("?", 1)[0];
-  if (endpoint === "/api/recorder/capabilities") state.capabilities = payload;
+  if (endpoint === "/api/recorder/status") {
+    state.status = {
+      ...(state.status || {}),
+      ...payload,
+      operational: {
+        ...(state.status?.operational || {}),
+        ...(payload.operational || {}),
+      },
+    };
+  } else if (endpoint === "/api/recorder/capabilities") state.capabilities = payload;
   else if (endpoint === "/api/market-data-budget") state.budget = payload;
+  else if (endpoint === "/api/universe/live") state.universe = payload.items || [];
   else if (endpoint === "/api/episodes") state.episodes = payload.items || [];
   else if (endpoint === "/api/shadow-outcomes") state.shadow = payload.items || [];
   else if (endpoint === "/api/virtual-ledgers") state.virtualLedgers = payload;
@@ -1346,8 +1455,14 @@ async function performRefresh({
     button.textContent = "Reading…";
   }
   try {
+    if (tier === "fast" || refreshDetails) {
+      await refreshFast(signal);
+      if (!state.health || !state.status) {
+        throw new Error("dashboard_core_sections_unavailable");
+      }
+      renderDashboard();
+    }
     const tasks = [];
-    if (tier === "fast" || tier === "manual") tasks.push(refreshFast(signal));
     if (tier === "slow" || tier === "manual") {
       tasks.push(refreshScreenTier("slow", screenId, signal));
     }
@@ -1491,7 +1606,9 @@ document.getElementById("option-episode").addEventListener("change", (event) => 
 });
 document.getElementById("replay-start").addEventListener("click", () => controlReplay("start"));
 document.getElementById("replay-stop").addEventListener("click", () => controlReplay("stop"));
-refreshAll({ tier: "manual", supersede: true });
+void refreshAll({ tier: "fast", supersede: true }).then(() => {
+  refreshAll({ tier: "manual" });
+});
 setInterval(() => {
   if (document.visibilityState === "visible") refreshAll({ tier: "fast" });
 }, POLLING_POLICY.fastIntervalMs);

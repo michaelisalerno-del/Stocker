@@ -60,6 +60,8 @@ from stocker_prospective.transfer import (
     M1CTransferMonitor,
     ProviderM1CObservation,
     TransferBar,
+    TransferDecision,
+    classify_cross_vendor_validation_status,
     create_ibkr_calibration_candidate,
 )
 
@@ -69,6 +71,37 @@ BUDGET_FAKE_FIXTURE = (
     / "packages/stocker_prospective/src/stocker_prospective/fixtures"
     / "ibkr-budget-aware-shadow-v0.json"
 )
+
+
+def test_cross_vendor_status_is_diagnostic_and_never_a_science_gate() -> None:
+    assert (
+        classify_cross_vendor_validation_status(
+            enabled=True,
+            credential_configured=True,
+            valid_session_count=3,
+            decision=TransferDecision.BLOCKED_INSUFFICIENT_VALID_SESSIONS,
+        )
+        == "insufficient_sessions"
+    )
+    assert (
+        classify_cross_vendor_validation_status(
+            enabled=True,
+            credential_configured=True,
+            valid_session_count=20,
+            decision=TransferDecision.NOT_SUPPORTED,
+        )
+        == "warning"
+    )
+    assert (
+        classify_cross_vendor_validation_status(
+            enabled=True,
+            credential_configured=True,
+            valid_session_count=0,
+            decision=None,
+            latest_diagnostic_status="failed_diagnostic",
+        )
+        == "failed_diagnostic"
+    )
 
 
 def test_runtime_capacity_prefers_discovery_and_preserves_future_trading_reserve(
@@ -277,7 +310,11 @@ def test_binding_claims_include_transfer_budget_and_no_order_boundary() -> None:
         "source_transfer_monitoring": True,
         "exact_vendor_bar_equality_required": False,
         "option_shadow_outcomes_only": True,
-        "engineering_phase_sessions": 20,
+        "historical_engineering_phase_sessions": 20,
+        "market_data_source": "ibkr",
+        "historical_research_source": "eodhd",
+        "cross_vendor_validation_diagnostic_only": True,
+        "cross_vendor_validation_required_for_science": False,
         "market_data_budget_enforced": True,
         "market_data_limits_runtime_discovered": True,
         "full_option_chain_streaming_allowed": False,
@@ -338,11 +375,11 @@ def test_twenty_valid_sessions_open_option_development_without_outcomes(
         session=date(2026, 6, 21),
     )
     assert phase == ("option_development", True)
-    engineering = frozen.prospective_phase_for_session(
+    first_ibkr_session = frozen.prospective_phase_for_session(
         run_id=metadata.run_id,
         session=date(2026, 6, 20),
     )
-    assert engineering == ("engineering_transfer", False)
+    assert first_ibkr_session == ("option_development", True)
 
 
 def test_skipped_recording_idempotency_preserves_distinct_subscription_payloads(
@@ -433,8 +470,11 @@ def test_daily_report_package_contains_exact_required_files(tmp_path) -> None:
     with zipfile.ZipFile(package.archive_path) as archive:
         assert tuple(archive.namelist()) == DAILY_REPORT_FILENAMES
         summary = json.loads(archive.read("session_summary.json"))
-    assert summary["cohort_phase"] == "engineering_transfer"
+    assert summary["cohort_phase"] == "option_development"
     assert summary["scientific_option_evidence"] is False
+    assert summary["scientific_option_evidence_allowed"] is True
+    assert summary["cross_vendor_validation_status"] == "not_configured"
+    assert summary["cross_vendor_validation_diagnostic_only"] is True
     assert summary["claims_boundary"] == claims_boundary()
 
 
@@ -866,13 +906,13 @@ def _metadata() -> EvidenceMetadata:
     )
 
 
-def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_degrades() -> None:
+def test_live_controller_protects_baseline_feeds_and_optional_promotion_degrades() -> None:
     adapter = _SubscriptionAdapter(fail_tick_budget=True)
     historical_request_observations: list[int] = []
     budget = SubscriptionBudgetManager(
         limits={
             SubscriptionKind.BAR: 3,
-            SubscriptionKind.LEVEL1: 1,
+            SubscriptionKind.LEVEL1: 3,
             SubscriptionKind.TICK_BY_TICK: 2,
             SubscriptionKind.DEPTH: 0,
         },
@@ -905,22 +945,31 @@ def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_de
 
     controller.start_always_on(_metadata(), contracts)
     controller.start_always_on(_metadata(), contracts)
-    assert adapter.requests == [("bar", 1), ("bar", 2), ("bar", 3)]
-    assert historical_request_observations == [0, 1, 2]
+    assert set(adapter.requests) == {
+        ("bar", 1),
+        ("bar", 2),
+        ("bar", 3),
+        ("level1", 1),
+        ("level1", 2),
+        ("level1", 3),
+    }
+    assert historical_request_observations == [1, 3, 5]
     assert budget.snapshot()["active"]["bar"] == 3  # type: ignore[index]
-    assert budget.snapshot()["active"]["level1"] == 0  # type: ignore[index]
+    assert budget.snapshot()["active"]["level1"] == 3  # type: ignore[index]
 
     controller.rebuild_after_data_loss(_metadata())
-    assert adapter.requests == [
+    for request in {
         ("bar", 1),
         ("bar", 2),
         ("bar", 3),
-        ("bar", 3),
-        ("bar", 1),
-        ("bar", 2),
-    ]
-    assert historical_request_observations == [0, 1, 2, 3, 4, 5]
+        ("level1", 1),
+        ("level1", 2),
+        ("level1", 3),
+    }:
+        assert adapter.requests.count(request) == 2
+    assert len(historical_request_observations) == 6
     assert budget.snapshot()["active"]["bar"] == 3  # type: ignore[index]
+    assert budget.snapshot()["active"]["level1"] == 3  # type: ignore[index]
 
     promotion = controller.promote_active_episode(
         _metadata(),
@@ -929,8 +978,187 @@ def test_live_controller_uses_one_always_on_bar_stream_and_optional_promotion_de
     )
     assert promotion.level1_started is True
     assert promotion.budget_state is BudgetState.OPTIONAL_FEEDS_DEGRADED
-    assert adapter.requests.count(("level1", 1)) == 1
+    assert adapter.requests.count(("level1", 1)) == 2
+    protected_level1 = budget.get("LEVEL1|1")
+    assert protected_level1 is not None
+    assert protected_level1.protected is True
+    assert "universe:AAL" in protected_level1.owners
+    assert "episode:quiet-1" in protected_level1.owners
     assert all(budget.get(f"BAR|{con_id}|5m|RTH") is not None for con_id in (1, 2, 3))
+
+
+def test_startup_protects_required_underlying_level1_within_line_budget() -> None:
+    adapter = _SubscriptionAdapter()
+    budget = SubscriptionBudgetManager(
+        limits={
+            SubscriptionKind.BAR: 3,
+            SubscriptionKind.LEVEL1: 3,
+            SubscriptionKind.TICK_BY_TICK: 0,
+            SubscriptionKind.DEPTH: 0,
+            SubscriptionKind.OPTION: 0,
+        },
+        request_rate_limit=100,
+        total_line_limit=20,
+        future_trading_reserve_lines=12,
+        safety_margin_lines=2,
+    )
+    controller = LiveSubscriptionController(
+        adapter=adapter,  # type: ignore[arg-type]
+        budget=budget,
+        normalizer=_Normalizer(),  # type: ignore[arg-type]
+        repository=_SubscriptionRepository(),  # type: ignore[arg-type]
+        depth_rows=5,
+        enable_depth=False,
+    )
+    contracts = tuple(
+        QualifiedUnderlying(
+            symbol=symbol,
+            con_id=con_id,
+            upstream_contract=SimpleNamespace(conId=con_id, symbol=symbol),
+            exchange="SMART",
+            market_proxy=symbol == "VTI",
+        )
+        for symbol, con_id in (("AAL", 1), ("HIMS", 2), ("VTI", 3))
+    )
+
+    controller.start_always_on(_metadata(), contracts)
+    controller.start_always_on(_metadata(), contracts)
+
+    assert set(adapter.requests) == {
+        ("bar", 1),
+        ("bar", 2),
+        ("bar", 3),
+        ("level1", 1),
+        ("level1", 2),
+        ("level1", 3),
+    }
+    assert len(adapter.requests) == 6
+    assert budget.snapshot()["active"] == {
+        "bar": 3,
+        "depth": 0,
+        "level1": 3,
+        "market_proxy": 0,
+        "option": 0,
+        "tick_by_tick": 0,
+    }
+    for con_id in (1, 2, 3):
+        level1 = budget.get(f"LEVEL1|{con_id}")
+        assert level1 is not None
+        assert level1.protected is True
+        assert level1.subscription_class <= SubscriptionClass.FROZEN_UNIVERSE_SIGNAL
+    assert budget.usable_research_lines == 6
+
+
+def test_startup_fails_preflight_when_required_level1_capacity_is_missing() -> None:
+    adapter = _SubscriptionAdapter()
+    budget = SubscriptionBudgetManager(
+        limits={
+            SubscriptionKind.BAR: 3,
+            SubscriptionKind.LEVEL1: 2,
+            SubscriptionKind.TICK_BY_TICK: 0,
+            SubscriptionKind.DEPTH: 0,
+            SubscriptionKind.OPTION: 0,
+        },
+        request_rate_limit=100,
+        total_line_limit=20,
+        future_trading_reserve_lines=12,
+        safety_margin_lines=2,
+    )
+    controller = LiveSubscriptionController(
+        adapter=adapter,  # type: ignore[arg-type]
+        budget=budget,
+        normalizer=_Normalizer(),  # type: ignore[arg-type]
+        repository=_SubscriptionRepository(),  # type: ignore[arg-type]
+        depth_rows=5,
+        enable_depth=False,
+    )
+    contracts = tuple(
+        QualifiedUnderlying(
+            symbol=symbol,
+            con_id=con_id,
+            upstream_contract=SimpleNamespace(conId=con_id, symbol=symbol),
+            exchange="SMART",
+        )
+        for symbol, con_id in (("AAL", 1), ("HIMS", 2), ("VTI", 3))
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="critical_budget_unavailable:required_underlying_level1:VTI",
+    ):
+        controller.start_always_on(_metadata(), contracts)
+
+    assert adapter.requests == []
+    assert budget.snapshot()["active"]["level1"] == 0  # type: ignore[index]
+    assert budget.snapshot()["active"]["bar"] == 0  # type: ignore[index]
+
+
+def test_opening_leader_promotion_reuses_protected_level1_and_no_optional_streams() -> None:
+    adapter = _SubscriptionAdapter()
+    budget = SubscriptionBudgetManager(
+        limits={
+            SubscriptionKind.BAR: 2,
+            SubscriptionKind.LEVEL1: 2,
+            SubscriptionKind.TICK_BY_TICK: 2,
+            SubscriptionKind.DEPTH: 1,
+        },
+        request_rate_limit=100,
+        total_line_limit=20,
+        future_trading_reserve_lines=12,
+        safety_margin_lines=2,
+    )
+    controller = LiveSubscriptionController(
+        adapter=adapter,  # type: ignore[arg-type]
+        budget=budget,
+        normalizer=_Normalizer(),  # type: ignore[arg-type]
+        repository=_SubscriptionRepository(),  # type: ignore[arg-type]
+        depth_rows=5,
+        enable_depth=True,
+    )
+    contracts = tuple(
+        QualifiedUnderlying(
+            symbol=symbol,
+            con_id=con_id,
+            upstream_contract=SimpleNamespace(conId=con_id, symbol=symbol),
+            exchange="SMART",
+        )
+        for symbol, con_id in (("AAL", 1), ("AAOI", 2))
+    )
+    controller.start_always_on(_metadata(), contracts)
+
+    first = controller.promote_opening_leader_underlying(
+        _metadata(),
+        symbol="AAL",
+        selection_id="opening-leader-2026-07-27-c6",
+    )
+    retry = controller.promote_opening_leader_underlying(
+        _metadata(),
+        symbol="AAL",
+        selection_id="opening-leader-2026-07-27-c6",
+    )
+    replacement = controller.promote_opening_leader_underlying(
+        _metadata(),
+        symbol="AAOI",
+        selection_id="opening-leader-2026-07-27-c12",
+    )
+
+    assert first.level1_started is True
+    assert retry.level1_started is True
+    assert replacement.level1_started is True
+    assert set(adapter.requests) == {
+        ("bar", 1),
+        ("bar", 2),
+        ("level1", 1),
+        ("level1", 2),
+    }
+    assert adapter.cancelled == []
+    assert not any(kind.startswith("tick") or kind == "depth" for kind, _ in adapter.requests)
+    assert budget.snapshot()["active"]["level1"] == 2  # type: ignore[index]
+    aal_level1 = budget.get("LEVEL1|1")
+    aaoi_level1 = budget.get("LEVEL1|2")
+    assert aal_level1 is not None and aaoi_level1 is not None
+    assert "research:opening-leader-continuation-v0" not in aal_level1.owners
+    assert "research:opening-leader-continuation-v0" in aaoi_level1.owners
 
 
 def test_level2_is_not_admitted_during_engineering_transfer_phase() -> None:

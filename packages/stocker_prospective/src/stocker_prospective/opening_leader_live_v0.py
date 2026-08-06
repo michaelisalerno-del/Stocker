@@ -18,6 +18,8 @@ from stocker_prospective.opening_leader_continuation_v0 import (
     CANONICAL_COHORT_V0,
     RECORDER_VERSION_V0,
     OpeningLeaderFreezeIdentityV0,
+    OptionChainSelectionV0,
+    OptionContractRequestV0,
     OptionQuoteV0,
     OptionSnapshotCaptureV0,
     select_option_chain_requests_v0,
@@ -27,15 +29,45 @@ NEW_YORK = ZoneInfo("America/New_York")
 PACKAGE_SCHEMA_V0: Literal["opening-leader-continuation-deployment-freeze-v0"] = (
     "opening-leader-continuation-deployment-freeze-v0"
 )
-PACKAGE_REFREEZE_SCHEMA_V1: Literal[
+PACKAGE_REFREEZE_SCHEMA_V1: Literal["opening-leader-continuation-deployment-refreeze-v1"] = (
     "opening-leader-continuation-deployment-refreeze-v1"
-] = "opening-leader-continuation-deployment-refreeze-v1"
-PACKAGE_REFREEZE_SCHEMA_V2: Literal[
+)
+PACKAGE_REFREEZE_SCHEMA_V2: Literal["opening-leader-continuation-deployment-refreeze-v2"] = (
     "opening-leader-continuation-deployment-refreeze-v2"
-] = "opening-leader-continuation-deployment-refreeze-v2"
-PACKAGE_REFREEZE_SCHEMA_V3: Literal[
+)
+PACKAGE_REFREEZE_SCHEMA_V3: Literal["opening-leader-continuation-deployment-refreeze-v3"] = (
     "opening-leader-continuation-deployment-refreeze-v3"
-] = "opening-leader-continuation-deployment-refreeze-v3"
+)
+PACKAGE_REFREEZE_SCHEMA_V4: Literal["opening-leader-continuation-deployment-refreeze-v4"] = (
+    "opening-leader-continuation-deployment-refreeze-v4"
+)
+PACKAGE_REFREEZE_SCHEMA_V5: Literal["opening-leader-continuation-deployment-refreeze-v5"] = (
+    "opening-leader-continuation-deployment-refreeze-v5"
+)
+PACKAGE_REFREEZE_SCHEMA_V6: Literal["opening-leader-continuation-deployment-refreeze-v6"] = (
+    "opening-leader-continuation-deployment-refreeze-v6"
+)
+PACKAGE_REFREEZE_SCHEMA_V7: Literal["opening-leader-continuation-deployment-refreeze-v7"] = (
+    "opening-leader-continuation-deployment-refreeze-v7"
+)
+PACKAGE_REFREEZE_SCHEMA_V8: Literal["opening-leader-continuation-deployment-refreeze-v8"] = (
+    "opening-leader-continuation-deployment-refreeze-v8"
+)
+PACKAGE_REFREEZE_SCHEMA_V9: Literal["opening-leader-continuation-deployment-refreeze-v9"] = (
+    "opening-leader-continuation-deployment-refreeze-v9"
+)
+PACKAGE_REFREEZE_SCHEMA_V10: Literal["opening-leader-continuation-deployment-refreeze-v10"] = (
+    "opening-leader-continuation-deployment-refreeze-v10"
+)
+PACKAGE_REFREEZE_SCHEMA_V11: Literal["opening-leader-continuation-deployment-refreeze-v11"] = (
+    "opening-leader-continuation-deployment-refreeze-v11"
+)
+PACKAGE_REFREEZE_SCHEMA_V12: Literal["opening-leader-continuation-deployment-refreeze-v12"] = (
+    "opening-leader-continuation-deployment-refreeze-v12"
+)
+PACKAGE_REFREEZE_SCHEMA_V13: Literal["opening-leader-continuation-deployment-refreeze-v13"] = (
+    "opening-leader-continuation-deployment-refreeze-v13"
+)
 SIGNATURE_SCHEME_V0: Literal["sha256-canonical-self-binding-v0"] = (
     "sha256-canonical-self-binding-v0"
 )
@@ -147,8 +179,7 @@ class OpeningLeaderDeploymentRefreezeReceiptV1(OpeningLeaderFreezeIdentityV0):
     @classmethod
     def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
         if not value or any(
-            len(digest) != 64
-            or any(character not in "0123456789abcdef" for character in digest)
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
             for digest in value.values()
         ):
             raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
@@ -176,8 +207,7 @@ class OpeningLeaderDeploymentRefreezeReceiptV2(OpeningLeaderFreezeIdentityV0):
     @classmethod
     def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
         if not value or any(
-            len(digest) != 64
-            or any(character not in "0123456789abcdef" for character in digest)
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
             for digest in value.values()
         ):
             raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
@@ -205,8 +235,791 @@ class OpeningLeaderDeploymentRefreezeReceiptV3(OpeningLeaderFreezeIdentityV0):
     @classmethod
     def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
         if not value or any(
-            len(digest) != 64
-            or any(character not in "0123456789abcdef" for character in digest)
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV4(OpeningLeaderFreezeIdentityV0):
+    """Append-only re-freeze for record-only option-risk accounting."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v4"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["record_only_option_risk_accounting_source_update"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV5(OpeningLeaderFreezeIdentityV0):
+    """Append-only re-freeze for official IBKR dependency maintenance."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v5"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["official_ibkr_dependency_maintenance_source_update"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV6(OpeningLeaderFreezeIdentityV0):
+    """Append-only re-freeze for legacy activation shape compatibility."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v6"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["record_only_accounting_activation_compatibility"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV7(OpeningLeaderFreezeIdentityV0):
+    """Append-only re-freeze for record-only IBKR evaluation simplification."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v7"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["record_only_ibkr_evidence_dashboard_accounting_simplification"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV8(OpeningLeaderFreezeIdentityV0):
+    """Append-only re-freeze for immutable activation-shape compatibility."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v8"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["legacy_activation_claims_boundary_compatibility"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV9(OpeningLeaderFreezeIdentityV0):
+    """Append-only re-freeze for the restart-safe web subscription projection."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v9"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["restart_safe_web_subscription_projection"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV10(OpeningLeaderFreezeIdentityV0):
+    """Append-only semantic supersession for causal L1 and option accounting."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v10"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[True]
+    refreeze_reason: Literal["post_selection_quote_and_executable_option_accounting"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV11(OpeningLeaderFreezeIdentityV0):
+    """Append-only supersession for causal quote lookup and protected L1."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v11"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[True]
+    refreeze_reason: Literal["deterministic_boundary_quote_and_protected_level1"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV12(OpeningLeaderFreezeIdentityV0):
+    """Append-only operational supersession for contention-free startup."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v12"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["static_artifact_verification_before_subscription_start"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV13(OpeningLeaderFreezeIdentityV0):
+    """Append-only operational supersession for post-processing health time."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v13"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["post_processing_operational_freshness_evaluation"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV14(OpeningLeaderFreezeIdentityV0):
+    """Append-only operational supersession for bounded SQLite contention."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v14"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["bounded_sqlite_writer_contention_wait"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV15(OpeningLeaderFreezeIdentityV0):
+    """Append-only supersession for quiet-pipeline source and connection recovery."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v15"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[True]
+    refreeze_reason: Literal["quiet_pipeline_source_handoff_and_connection_recovery"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV16(OpeningLeaderFreezeIdentityV0):
+    """Append-only supersession for request/response-bounded clock drift."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v16"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[True]
+    refreeze_reason: Literal["request_response_bounded_clock_drift_measurement"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV17(OpeningLeaderFreezeIdentityV0):
+    """Append-only operational supersession for fair SQLite writer coordination."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v17"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["fair_sqlite_writer_coordination_and_bounded_inbox_accounting"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV18(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for bounded inbox drain and clock probes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v18"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["single_flight_clock_probe_and_bounded_inbox_drain_capacity"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV19(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for optional cross-vendor activation parity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v19"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["optional_cross_vendor_activation_compatibility"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV20(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for legacy bounded inbox capacity parity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v20"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["legacy_bounded_inbox_batch_activation_compatibility"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV21(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for bounded Level-1 UI projection writes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v21"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["bounded_level1_projection_write_coalescing"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV22(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for bounded recovery of a lost clock response."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v22"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["bounded_clock_probe_retry_after_missing_response"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV23(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for clock evidence before the market-data burst."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v23"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["clock_probe_before_high_volume_subscription_start"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV24(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for correlating untagged clock-probe replies."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v24"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["bounded_clock_probe_reply_correlation"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV25(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for callback throughput and provider-progress health."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v25"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["callback_throughput_and_provider_progress_health"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV26(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for retention-compatible activation identity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v26"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["operational_retention_activation_compatibility"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV27(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for legacy batch and retention compatibility."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v27"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["operational_retention_legacy_batch_compatibility"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV28(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for durable callback transaction batching."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v28"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["operational_durable_callback_transaction_batching"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV29(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession preserving bounded request/response callbacks."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v29"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["operational_bounded_callback_batch_exclusion"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV30(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for bounded raw-materialization storage."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v30"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["operational_bounded_raw_materialization_storage"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
+class OpeningLeaderDeploymentRefreezeReceiptV31(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for bounded batch-hash storage."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v31"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["operational_bounded_batch_partition_hash_storage"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
             for digest in value.values()
         ):
             raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
@@ -251,6 +1064,34 @@ def _signature_payload(
         | OpeningLeaderDeploymentRefreezeReceiptV1
         | OpeningLeaderDeploymentRefreezeReceiptV2
         | OpeningLeaderDeploymentRefreezeReceiptV3
+        | OpeningLeaderDeploymentRefreezeReceiptV4
+        | OpeningLeaderDeploymentRefreezeReceiptV5
+        | OpeningLeaderDeploymentRefreezeReceiptV6
+        | OpeningLeaderDeploymentRefreezeReceiptV7
+        | OpeningLeaderDeploymentRefreezeReceiptV8
+        | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
+        | OpeningLeaderDeploymentRefreezeReceiptV11
+        | OpeningLeaderDeploymentRefreezeReceiptV12
+        | OpeningLeaderDeploymentRefreezeReceiptV13
+        | OpeningLeaderDeploymentRefreezeReceiptV14
+        | OpeningLeaderDeploymentRefreezeReceiptV15
+        | OpeningLeaderDeploymentRefreezeReceiptV16
+        | OpeningLeaderDeploymentRefreezeReceiptV17
+        | OpeningLeaderDeploymentRefreezeReceiptV18
+        | OpeningLeaderDeploymentRefreezeReceiptV19
+        | OpeningLeaderDeploymentRefreezeReceiptV20
+        | OpeningLeaderDeploymentRefreezeReceiptV21
+        | OpeningLeaderDeploymentRefreezeReceiptV22
+        | OpeningLeaderDeploymentRefreezeReceiptV23
+        | OpeningLeaderDeploymentRefreezeReceiptV24
+        | OpeningLeaderDeploymentRefreezeReceiptV25
+        | OpeningLeaderDeploymentRefreezeReceiptV26
+        | OpeningLeaderDeploymentRefreezeReceiptV27
+        | OpeningLeaderDeploymentRefreezeReceiptV28
+        | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
+        | OpeningLeaderDeploymentRefreezeReceiptV31
     ),
 ) -> dict[str, object]:
     return receipt.model_dump(mode="json", exclude={"signature_sha256"})
@@ -262,6 +1103,34 @@ def _deployment_id_payload(
         | OpeningLeaderDeploymentRefreezeReceiptV1
         | OpeningLeaderDeploymentRefreezeReceiptV2
         | OpeningLeaderDeploymentRefreezeReceiptV3
+        | OpeningLeaderDeploymentRefreezeReceiptV4
+        | OpeningLeaderDeploymentRefreezeReceiptV5
+        | OpeningLeaderDeploymentRefreezeReceiptV6
+        | OpeningLeaderDeploymentRefreezeReceiptV7
+        | OpeningLeaderDeploymentRefreezeReceiptV8
+        | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
+        | OpeningLeaderDeploymentRefreezeReceiptV11
+        | OpeningLeaderDeploymentRefreezeReceiptV12
+        | OpeningLeaderDeploymentRefreezeReceiptV13
+        | OpeningLeaderDeploymentRefreezeReceiptV14
+        | OpeningLeaderDeploymentRefreezeReceiptV15
+        | OpeningLeaderDeploymentRefreezeReceiptV16
+        | OpeningLeaderDeploymentRefreezeReceiptV17
+        | OpeningLeaderDeploymentRefreezeReceiptV18
+        | OpeningLeaderDeploymentRefreezeReceiptV19
+        | OpeningLeaderDeploymentRefreezeReceiptV20
+        | OpeningLeaderDeploymentRefreezeReceiptV21
+        | OpeningLeaderDeploymentRefreezeReceiptV22
+        | OpeningLeaderDeploymentRefreezeReceiptV23
+        | OpeningLeaderDeploymentRefreezeReceiptV24
+        | OpeningLeaderDeploymentRefreezeReceiptV25
+        | OpeningLeaderDeploymentRefreezeReceiptV26
+        | OpeningLeaderDeploymentRefreezeReceiptV27
+        | OpeningLeaderDeploymentRefreezeReceiptV28
+        | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
+        | OpeningLeaderDeploymentRefreezeReceiptV31
     ),
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -278,6 +1147,34 @@ def _deployment_id_payload(
             OpeningLeaderDeploymentRefreezeReceiptV1,
             OpeningLeaderDeploymentRefreezeReceiptV2,
             OpeningLeaderDeploymentRefreezeReceiptV3,
+            OpeningLeaderDeploymentRefreezeReceiptV4,
+            OpeningLeaderDeploymentRefreezeReceiptV5,
+            OpeningLeaderDeploymentRefreezeReceiptV6,
+            OpeningLeaderDeploymentRefreezeReceiptV7,
+            OpeningLeaderDeploymentRefreezeReceiptV8,
+            OpeningLeaderDeploymentRefreezeReceiptV9,
+            OpeningLeaderDeploymentRefreezeReceiptV10,
+            OpeningLeaderDeploymentRefreezeReceiptV11,
+            OpeningLeaderDeploymentRefreezeReceiptV12,
+            OpeningLeaderDeploymentRefreezeReceiptV13,
+            OpeningLeaderDeploymentRefreezeReceiptV14,
+            OpeningLeaderDeploymentRefreezeReceiptV15,
+            OpeningLeaderDeploymentRefreezeReceiptV16,
+            OpeningLeaderDeploymentRefreezeReceiptV17,
+            OpeningLeaderDeploymentRefreezeReceiptV18,
+            OpeningLeaderDeploymentRefreezeReceiptV19,
+            OpeningLeaderDeploymentRefreezeReceiptV20,
+            OpeningLeaderDeploymentRefreezeReceiptV21,
+            OpeningLeaderDeploymentRefreezeReceiptV22,
+            OpeningLeaderDeploymentRefreezeReceiptV23,
+            OpeningLeaderDeploymentRefreezeReceiptV24,
+            OpeningLeaderDeploymentRefreezeReceiptV25,
+            OpeningLeaderDeploymentRefreezeReceiptV26,
+            OpeningLeaderDeploymentRefreezeReceiptV27,
+            OpeningLeaderDeploymentRefreezeReceiptV28,
+            OpeningLeaderDeploymentRefreezeReceiptV29,
+            OpeningLeaderDeploymentRefreezeReceiptV30,
+            OpeningLeaderDeploymentRefreezeReceiptV31,
         ),
     ):
         payload.update(
@@ -289,11 +1186,40 @@ def _deployment_id_payload(
         )
     if isinstance(
         receipt,
-        (OpeningLeaderDeploymentRefreezeReceiptV2, OpeningLeaderDeploymentRefreezeReceiptV3),
+        (
+            OpeningLeaderDeploymentRefreezeReceiptV2,
+            OpeningLeaderDeploymentRefreezeReceiptV3,
+            OpeningLeaderDeploymentRefreezeReceiptV4,
+            OpeningLeaderDeploymentRefreezeReceiptV5,
+            OpeningLeaderDeploymentRefreezeReceiptV6,
+            OpeningLeaderDeploymentRefreezeReceiptV7,
+            OpeningLeaderDeploymentRefreezeReceiptV8,
+            OpeningLeaderDeploymentRefreezeReceiptV9,
+            OpeningLeaderDeploymentRefreezeReceiptV10,
+            OpeningLeaderDeploymentRefreezeReceiptV11,
+            OpeningLeaderDeploymentRefreezeReceiptV12,
+            OpeningLeaderDeploymentRefreezeReceiptV13,
+            OpeningLeaderDeploymentRefreezeReceiptV14,
+            OpeningLeaderDeploymentRefreezeReceiptV15,
+            OpeningLeaderDeploymentRefreezeReceiptV16,
+            OpeningLeaderDeploymentRefreezeReceiptV17,
+            OpeningLeaderDeploymentRefreezeReceiptV18,
+            OpeningLeaderDeploymentRefreezeReceiptV19,
+            OpeningLeaderDeploymentRefreezeReceiptV20,
+            OpeningLeaderDeploymentRefreezeReceiptV21,
+            OpeningLeaderDeploymentRefreezeReceiptV22,
+            OpeningLeaderDeploymentRefreezeReceiptV23,
+            OpeningLeaderDeploymentRefreezeReceiptV24,
+            OpeningLeaderDeploymentRefreezeReceiptV25,
+            OpeningLeaderDeploymentRefreezeReceiptV26,
+            OpeningLeaderDeploymentRefreezeReceiptV27,
+            OpeningLeaderDeploymentRefreezeReceiptV28,
+            OpeningLeaderDeploymentRefreezeReceiptV29,
+            OpeningLeaderDeploymentRefreezeReceiptV30,
+            OpeningLeaderDeploymentRefreezeReceiptV31,
+        ),
     ):
-        payload["supersedes_deployment_receipt_id"] = (
-            receipt.supersedes_deployment_receipt_id
-        )
+        payload["supersedes_deployment_receipt_id"] = receipt.supersedes_deployment_receipt_id
     return payload
 
 
@@ -303,6 +1229,34 @@ def _expected_deployment_receipt_id(
         | OpeningLeaderDeploymentRefreezeReceiptV1
         | OpeningLeaderDeploymentRefreezeReceiptV2
         | OpeningLeaderDeploymentRefreezeReceiptV3
+        | OpeningLeaderDeploymentRefreezeReceiptV4
+        | OpeningLeaderDeploymentRefreezeReceiptV5
+        | OpeningLeaderDeploymentRefreezeReceiptV6
+        | OpeningLeaderDeploymentRefreezeReceiptV7
+        | OpeningLeaderDeploymentRefreezeReceiptV8
+        | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
+        | OpeningLeaderDeploymentRefreezeReceiptV11
+        | OpeningLeaderDeploymentRefreezeReceiptV12
+        | OpeningLeaderDeploymentRefreezeReceiptV13
+        | OpeningLeaderDeploymentRefreezeReceiptV14
+        | OpeningLeaderDeploymentRefreezeReceiptV15
+        | OpeningLeaderDeploymentRefreezeReceiptV16
+        | OpeningLeaderDeploymentRefreezeReceiptV17
+        | OpeningLeaderDeploymentRefreezeReceiptV18
+        | OpeningLeaderDeploymentRefreezeReceiptV19
+        | OpeningLeaderDeploymentRefreezeReceiptV20
+        | OpeningLeaderDeploymentRefreezeReceiptV21
+        | OpeningLeaderDeploymentRefreezeReceiptV22
+        | OpeningLeaderDeploymentRefreezeReceiptV23
+        | OpeningLeaderDeploymentRefreezeReceiptV24
+        | OpeningLeaderDeploymentRefreezeReceiptV25
+        | OpeningLeaderDeploymentRefreezeReceiptV26
+        | OpeningLeaderDeploymentRefreezeReceiptV27
+        | OpeningLeaderDeploymentRefreezeReceiptV28
+        | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
+        | OpeningLeaderDeploymentRefreezeReceiptV31
     ),
 ) -> str:
     digest = _sha256_bytes(_canonical_json(_deployment_id_payload(receipt)).encode("utf-8"))
@@ -381,6 +1335,34 @@ def load_opening_leader_package_v0(
     | OpeningLeaderDeploymentRefreezeReceiptV1
     | OpeningLeaderDeploymentRefreezeReceiptV2
     | OpeningLeaderDeploymentRefreezeReceiptV3
+    | OpeningLeaderDeploymentRefreezeReceiptV4
+    | OpeningLeaderDeploymentRefreezeReceiptV5
+    | OpeningLeaderDeploymentRefreezeReceiptV6
+    | OpeningLeaderDeploymentRefreezeReceiptV7
+    | OpeningLeaderDeploymentRefreezeReceiptV8
+    | OpeningLeaderDeploymentRefreezeReceiptV9
+    | OpeningLeaderDeploymentRefreezeReceiptV10
+    | OpeningLeaderDeploymentRefreezeReceiptV11
+    | OpeningLeaderDeploymentRefreezeReceiptV12
+    | OpeningLeaderDeploymentRefreezeReceiptV13
+    | OpeningLeaderDeploymentRefreezeReceiptV14
+    | OpeningLeaderDeploymentRefreezeReceiptV15
+    | OpeningLeaderDeploymentRefreezeReceiptV16
+    | OpeningLeaderDeploymentRefreezeReceiptV17
+    | OpeningLeaderDeploymentRefreezeReceiptV18
+    | OpeningLeaderDeploymentRefreezeReceiptV19
+    | OpeningLeaderDeploymentRefreezeReceiptV20
+    | OpeningLeaderDeploymentRefreezeReceiptV21
+    | OpeningLeaderDeploymentRefreezeReceiptV22
+    | OpeningLeaderDeploymentRefreezeReceiptV23
+    | OpeningLeaderDeploymentRefreezeReceiptV24
+    | OpeningLeaderDeploymentRefreezeReceiptV25
+    | OpeningLeaderDeploymentRefreezeReceiptV26
+    | OpeningLeaderDeploymentRefreezeReceiptV27
+    | OpeningLeaderDeploymentRefreezeReceiptV28
+    | OpeningLeaderDeploymentRefreezeReceiptV29
+    | OpeningLeaderDeploymentRefreezeReceiptV30
+    | OpeningLeaderDeploymentRefreezeReceiptV31
 ):
     """Fail closed on any artifact, source, safety, or time-boundary drift."""
 
@@ -414,8 +1396,7 @@ def load_opening_leader_package_v0(
         if (
             refreeze.supersedes_receipt_sha256 != _sha256_path(receipt_path)
             or refreeze.frozen_semantics_changed is not False
-            or refreeze.freeze_completed_at_utc
-            <= original_receipt.freeze_completed_at_utc
+            or refreeze.freeze_completed_at_utc <= original_receipt.freeze_completed_at_utc
         ):
             raise ValueError("opening-leader deployment refreeze lineage mismatch")
         refreeze_signature = _sha256_bytes(
@@ -423,8 +1404,7 @@ def load_opening_leader_package_v0(
         )
         if (
             refreeze_signature != refreeze.signature_sha256
-            or refreeze.deployment_receipt_id
-            != _expected_deployment_receipt_id(refreeze)
+            or refreeze.deployment_receipt_id != _expected_deployment_receipt_id(refreeze)
         ):
             raise ValueError("opening-leader deployment refreeze receipt signature mismatch")
         receipt: (
@@ -432,6 +1412,34 @@ def load_opening_leader_package_v0(
             | OpeningLeaderDeploymentRefreezeReceiptV1
             | OpeningLeaderDeploymentRefreezeReceiptV2
             | OpeningLeaderDeploymentRefreezeReceiptV3
+            | OpeningLeaderDeploymentRefreezeReceiptV4
+            | OpeningLeaderDeploymentRefreezeReceiptV5
+            | OpeningLeaderDeploymentRefreezeReceiptV6
+            | OpeningLeaderDeploymentRefreezeReceiptV7
+            | OpeningLeaderDeploymentRefreezeReceiptV8
+            | OpeningLeaderDeploymentRefreezeReceiptV9
+            | OpeningLeaderDeploymentRefreezeReceiptV10
+            | OpeningLeaderDeploymentRefreezeReceiptV11
+            | OpeningLeaderDeploymentRefreezeReceiptV12
+            | OpeningLeaderDeploymentRefreezeReceiptV13
+            | OpeningLeaderDeploymentRefreezeReceiptV14
+            | OpeningLeaderDeploymentRefreezeReceiptV15
+            | OpeningLeaderDeploymentRefreezeReceiptV16
+            | OpeningLeaderDeploymentRefreezeReceiptV17
+            | OpeningLeaderDeploymentRefreezeReceiptV18
+            | OpeningLeaderDeploymentRefreezeReceiptV19
+            | OpeningLeaderDeploymentRefreezeReceiptV20
+            | OpeningLeaderDeploymentRefreezeReceiptV21
+            | OpeningLeaderDeploymentRefreezeReceiptV22
+            | OpeningLeaderDeploymentRefreezeReceiptV23
+            | OpeningLeaderDeploymentRefreezeReceiptV24
+            | OpeningLeaderDeploymentRefreezeReceiptV25
+            | OpeningLeaderDeploymentRefreezeReceiptV26
+            | OpeningLeaderDeploymentRefreezeReceiptV27
+            | OpeningLeaderDeploymentRefreezeReceiptV28
+            | OpeningLeaderDeploymentRefreezeReceiptV29
+            | OpeningLeaderDeploymentRefreezeReceiptV30
+            | OpeningLeaderDeploymentRefreezeReceiptV31
         ) = refreeze
     else:
         receipt = original_receipt
@@ -448,8 +1456,7 @@ def load_opening_leader_package_v0(
             raise ValueError("opening-leader V2 refreeze requires the verified V1 receipt")
         if (
             refreeze_v2.supersedes_receipt_sha256 != _sha256_path(refreeze_path)
-            or refreeze_v2.supersedes_deployment_receipt_id
-            != receipt.deployment_receipt_id
+            or refreeze_v2.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
             or refreeze_v2.frozen_semantics_changed is not False
             or refreeze_v2.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
         ):
@@ -459,8 +1466,7 @@ def load_opening_leader_package_v0(
         )
         if (
             refreeze_v2_signature != refreeze_v2.signature_sha256
-            or refreeze_v2.deployment_receipt_id
-            != _expected_deployment_receipt_id(refreeze_v2)
+            or refreeze_v2.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v2)
         ):
             raise ValueError("opening-leader V2 deployment refreeze signature mismatch")
         receipt = refreeze_v2
@@ -477,8 +1483,7 @@ def load_opening_leader_package_v0(
             raise ValueError("opening-leader V3 refreeze requires the verified V2 receipt")
         if (
             refreeze_v3.supersedes_receipt_sha256 != _sha256_path(refreeze_v2_path)
-            or refreeze_v3.supersedes_deployment_receipt_id
-            != receipt.deployment_receipt_id
+            or refreeze_v3.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
             or refreeze_v3.frozen_semantics_changed is not False
             or refreeze_v3.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
         ):
@@ -488,11 +1493,766 @@ def load_opening_leader_package_v0(
         )
         if (
             refreeze_v3_signature != refreeze_v3.signature_sha256
-            or refreeze_v3.deployment_receipt_id
-            != _expected_deployment_receipt_id(refreeze_v3)
+            or refreeze_v3.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v3)
         ):
             raise ValueError("opening-leader V3 deployment refreeze signature mismatch")
         receipt = refreeze_v3
+    refreeze_v4_path = root / "deployment_freeze_receipt_v4.json"
+    if refreeze_v4_path.exists():
+        if not refreeze_v3_path.is_file() or refreeze_v3_path.is_symlink():
+            raise ValueError("opening-leader V4 refreeze requires the immutable V3 receipt")
+        if not refreeze_v4_path.is_file() or refreeze_v4_path.is_symlink():
+            raise ValueError("opening-leader V4 deployment refreeze receipt is invalid")
+        refreeze_v4 = OpeningLeaderDeploymentRefreezeReceiptV4.model_validate_json(
+            refreeze_v4_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV3):
+            raise ValueError("opening-leader V4 refreeze requires the verified V3 receipt")
+        if (
+            refreeze_v4.supersedes_receipt_sha256 != _sha256_path(refreeze_v3_path)
+            or refreeze_v4.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v4.frozen_semantics_changed is not False
+            or refreeze_v4.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V4 deployment refreeze lineage mismatch")
+        refreeze_v4_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v4)).encode("utf-8")
+        )
+        if (
+            refreeze_v4_signature != refreeze_v4.signature_sha256
+            or refreeze_v4.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v4)
+        ):
+            raise ValueError("opening-leader V4 deployment refreeze signature mismatch")
+        receipt = refreeze_v4
+    refreeze_v5_path = root / "deployment_freeze_receipt_v5.json"
+    if refreeze_v5_path.exists():
+        if not refreeze_v4_path.is_file() or refreeze_v4_path.is_symlink():
+            raise ValueError("opening-leader V5 refreeze requires the immutable V4 receipt")
+        if not refreeze_v5_path.is_file() or refreeze_v5_path.is_symlink():
+            raise ValueError("opening-leader V5 deployment refreeze receipt is invalid")
+        refreeze_v5 = OpeningLeaderDeploymentRefreezeReceiptV5.model_validate_json(
+            refreeze_v5_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV4):
+            raise ValueError("opening-leader V5 refreeze requires the verified V4 receipt")
+        if (
+            refreeze_v5.supersedes_receipt_sha256 != _sha256_path(refreeze_v4_path)
+            or refreeze_v5.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v5.frozen_semantics_changed is not False
+            or refreeze_v5.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V5 deployment refreeze lineage mismatch")
+        refreeze_v5_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v5)).encode("utf-8")
+        )
+        if (
+            refreeze_v5_signature != refreeze_v5.signature_sha256
+            or refreeze_v5.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v5)
+        ):
+            raise ValueError("opening-leader V5 deployment refreeze signature mismatch")
+        receipt = refreeze_v5
+    refreeze_v6_path = root / "deployment_freeze_receipt_v6.json"
+    if refreeze_v6_path.exists():
+        if not refreeze_v5_path.is_file() or refreeze_v5_path.is_symlink():
+            raise ValueError("opening-leader V6 refreeze requires the immutable V5 receipt")
+        if not refreeze_v6_path.is_file() or refreeze_v6_path.is_symlink():
+            raise ValueError("opening-leader V6 deployment refreeze receipt is invalid")
+        refreeze_v6 = OpeningLeaderDeploymentRefreezeReceiptV6.model_validate_json(
+            refreeze_v6_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV5):
+            raise ValueError("opening-leader V6 refreeze requires the verified V5 receipt")
+        if (
+            refreeze_v6.supersedes_receipt_sha256 != _sha256_path(refreeze_v5_path)
+            or refreeze_v6.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v6.frozen_semantics_changed is not False
+            or refreeze_v6.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V6 deployment refreeze lineage mismatch")
+        refreeze_v6_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v6)).encode("utf-8")
+        )
+        if (
+            refreeze_v6_signature != refreeze_v6.signature_sha256
+            or refreeze_v6.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v6)
+        ):
+            raise ValueError("opening-leader V6 deployment refreeze signature mismatch")
+        receipt = refreeze_v6
+    refreeze_v7_path = root / "deployment_freeze_receipt_v7.json"
+    if refreeze_v7_path.exists():
+        if not refreeze_v6_path.is_file() or refreeze_v6_path.is_symlink():
+            raise ValueError("opening-leader V7 refreeze requires the immutable V6 receipt")
+        if not refreeze_v7_path.is_file() or refreeze_v7_path.is_symlink():
+            raise ValueError("opening-leader V7 deployment refreeze receipt is invalid")
+        refreeze_v7 = OpeningLeaderDeploymentRefreezeReceiptV7.model_validate_json(
+            refreeze_v7_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV6):
+            raise ValueError("opening-leader V7 refreeze requires the verified V6 receipt")
+        if (
+            refreeze_v7.supersedes_receipt_sha256 != _sha256_path(refreeze_v6_path)
+            or refreeze_v7.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v7.frozen_semantics_changed is not False
+            or refreeze_v7.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V7 deployment refreeze lineage mismatch")
+        refreeze_v7_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v7)).encode("utf-8")
+        )
+        if (
+            refreeze_v7_signature != refreeze_v7.signature_sha256
+            or refreeze_v7.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v7)
+        ):
+            raise ValueError("opening-leader V7 deployment refreeze signature mismatch")
+        receipt = refreeze_v7
+    refreeze_v8_path = root / "deployment_freeze_receipt_v8.json"
+    if refreeze_v8_path.exists():
+        if not refreeze_v7_path.is_file() or refreeze_v7_path.is_symlink():
+            raise ValueError("opening-leader V8 refreeze requires the immutable V7 receipt")
+        if not refreeze_v8_path.is_file() or refreeze_v8_path.is_symlink():
+            raise ValueError("opening-leader V8 deployment refreeze receipt is invalid")
+        refreeze_v8 = OpeningLeaderDeploymentRefreezeReceiptV8.model_validate_json(
+            refreeze_v8_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV7):
+            raise ValueError("opening-leader V8 refreeze requires the verified V7 receipt")
+        if (
+            refreeze_v8.supersedes_receipt_sha256 != _sha256_path(refreeze_v7_path)
+            or refreeze_v8.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v8.frozen_semantics_changed is not False
+            or refreeze_v8.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V8 deployment refreeze lineage mismatch")
+        refreeze_v8_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v8)).encode("utf-8")
+        )
+        if (
+            refreeze_v8_signature != refreeze_v8.signature_sha256
+            or refreeze_v8.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v8)
+        ):
+            raise ValueError("opening-leader V8 deployment refreeze signature mismatch")
+        receipt = refreeze_v8
+    refreeze_v9_path = root / "deployment_freeze_receipt_v9.json"
+    if refreeze_v9_path.exists():
+        if not refreeze_v8_path.is_file() or refreeze_v8_path.is_symlink():
+            raise ValueError("opening-leader V9 refreeze requires the immutable V8 receipt")
+        if not refreeze_v9_path.is_file() or refreeze_v9_path.is_symlink():
+            raise ValueError("opening-leader V9 deployment refreeze receipt is invalid")
+        refreeze_v9 = OpeningLeaderDeploymentRefreezeReceiptV9.model_validate_json(
+            refreeze_v9_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV8):
+            raise ValueError("opening-leader V9 refreeze requires the verified V8 receipt")
+        if (
+            refreeze_v9.supersedes_receipt_sha256 != _sha256_path(refreeze_v8_path)
+            or refreeze_v9.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v9.frozen_semantics_changed is not False
+            or refreeze_v9.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V9 deployment refreeze lineage mismatch")
+        refreeze_v9_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v9)).encode("utf-8")
+        )
+        if (
+            refreeze_v9_signature != refreeze_v9.signature_sha256
+            or refreeze_v9.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v9)
+        ):
+            raise ValueError("opening-leader V9 deployment refreeze signature mismatch")
+        receipt = refreeze_v9
+    refreeze_v10_path = root / "deployment_freeze_receipt_v10.json"
+    if refreeze_v10_path.exists():
+        if not refreeze_v9_path.is_file() or refreeze_v9_path.is_symlink():
+            raise ValueError("opening-leader V10 refreeze requires the immutable V9 receipt")
+        if not refreeze_v10_path.is_file() or refreeze_v10_path.is_symlink():
+            raise ValueError("opening-leader V10 deployment refreeze receipt is invalid")
+        refreeze_v10 = OpeningLeaderDeploymentRefreezeReceiptV10.model_validate_json(
+            refreeze_v10_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV9):
+            raise ValueError("opening-leader V10 refreeze requires the verified V9 receipt")
+        if (
+            refreeze_v10.supersedes_receipt_sha256 != _sha256_path(refreeze_v9_path)
+            or refreeze_v10.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v10.frozen_semantics_changed is not True
+            or refreeze_v10.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V10 deployment refreeze lineage mismatch")
+        refreeze_v10_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v10)).encode("utf-8")
+        )
+        if (
+            refreeze_v10_signature != refreeze_v10.signature_sha256
+            or refreeze_v10.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v10)
+        ):
+            raise ValueError("opening-leader V10 deployment refreeze signature mismatch")
+        receipt = refreeze_v10
+    refreeze_v11_path = root / "deployment_freeze_receipt_v11.json"
+    if refreeze_v11_path.exists():
+        if not refreeze_v10_path.is_file() or refreeze_v10_path.is_symlink():
+            raise ValueError("opening-leader V11 refreeze requires the immutable V10 receipt")
+        if not refreeze_v11_path.is_file() or refreeze_v11_path.is_symlink():
+            raise ValueError("opening-leader V11 deployment refreeze receipt is invalid")
+        refreeze_v11 = OpeningLeaderDeploymentRefreezeReceiptV11.model_validate_json(
+            refreeze_v11_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV10):
+            raise ValueError("opening-leader V11 refreeze requires the verified V10 receipt")
+        if (
+            refreeze_v11.supersedes_receipt_sha256 != _sha256_path(refreeze_v10_path)
+            or refreeze_v11.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v11.frozen_semantics_changed is not True
+            or refreeze_v11.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V11 deployment refreeze lineage mismatch")
+        refreeze_v11_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v11)).encode("utf-8")
+        )
+        if (
+            refreeze_v11_signature != refreeze_v11.signature_sha256
+            or refreeze_v11.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v11)
+        ):
+            raise ValueError("opening-leader V11 deployment refreeze signature mismatch")
+        receipt = refreeze_v11
+    refreeze_v12_path = root / "deployment_freeze_receipt_v12.json"
+    if refreeze_v12_path.exists():
+        if not refreeze_v11_path.is_file() or refreeze_v11_path.is_symlink():
+            raise ValueError("opening-leader V12 refreeze requires the immutable V11 receipt")
+        if not refreeze_v12_path.is_file() or refreeze_v12_path.is_symlink():
+            raise ValueError("opening-leader V12 deployment refreeze receipt is invalid")
+        refreeze_v12 = OpeningLeaderDeploymentRefreezeReceiptV12.model_validate_json(
+            refreeze_v12_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV11):
+            raise ValueError("opening-leader V12 refreeze requires the verified V11 receipt")
+        if (
+            refreeze_v12.supersedes_receipt_sha256 != _sha256_path(refreeze_v11_path)
+            or refreeze_v12.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v12.frozen_semantics_changed is not False
+            or refreeze_v12.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V12 deployment refreeze lineage mismatch")
+        refreeze_v12_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v12)).encode("utf-8")
+        )
+        if (
+            refreeze_v12_signature != refreeze_v12.signature_sha256
+            or refreeze_v12.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v12)
+        ):
+            raise ValueError("opening-leader V12 deployment refreeze signature mismatch")
+        receipt = refreeze_v12
+    refreeze_v13_path = root / "deployment_freeze_receipt_v13.json"
+    if refreeze_v13_path.exists():
+        if not refreeze_v12_path.is_file() or refreeze_v12_path.is_symlink():
+            raise ValueError("opening-leader V13 refreeze requires the immutable V12 receipt")
+        if not refreeze_v13_path.is_file() or refreeze_v13_path.is_symlink():
+            raise ValueError("opening-leader V13 deployment refreeze receipt is invalid")
+        refreeze_v13 = OpeningLeaderDeploymentRefreezeReceiptV13.model_validate_json(
+            refreeze_v13_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV12):
+            raise ValueError("opening-leader V13 refreeze requires the verified V12 receipt")
+        if (
+            refreeze_v13.supersedes_receipt_sha256 != _sha256_path(refreeze_v12_path)
+            or refreeze_v13.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v13.frozen_semantics_changed is not False
+            or refreeze_v13.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V13 deployment refreeze lineage mismatch")
+        refreeze_v13_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v13)).encode("utf-8")
+        )
+        if (
+            refreeze_v13_signature != refreeze_v13.signature_sha256
+            or refreeze_v13.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v13)
+        ):
+            raise ValueError("opening-leader V13 deployment refreeze signature mismatch")
+        receipt = refreeze_v13
+    refreeze_v14_path = root / "deployment_freeze_receipt_v14.json"
+    if refreeze_v14_path.exists():
+        if not refreeze_v13_path.is_file() or refreeze_v13_path.is_symlink():
+            raise ValueError("opening-leader V14 refreeze requires the immutable V13 receipt")
+        if not refreeze_v14_path.is_file() or refreeze_v14_path.is_symlink():
+            raise ValueError("opening-leader V14 deployment refreeze receipt is invalid")
+        refreeze_v14 = OpeningLeaderDeploymentRefreezeReceiptV14.model_validate_json(
+            refreeze_v14_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV13):
+            raise ValueError("opening-leader V14 refreeze requires the verified V13 receipt")
+        if (
+            refreeze_v14.supersedes_receipt_sha256 != _sha256_path(refreeze_v13_path)
+            or refreeze_v14.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v14.frozen_semantics_changed is not False
+            or refreeze_v14.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V14 deployment refreeze lineage mismatch")
+        refreeze_v14_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v14)).encode("utf-8")
+        )
+        if (
+            refreeze_v14_signature != refreeze_v14.signature_sha256
+            or refreeze_v14.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v14)
+        ):
+            raise ValueError("opening-leader V14 deployment refreeze signature mismatch")
+        receipt = refreeze_v14
+    refreeze_v15_path = root / "deployment_freeze_receipt_v15.json"
+    if refreeze_v15_path.exists():
+        if not refreeze_v14_path.is_file() or refreeze_v14_path.is_symlink():
+            raise ValueError("opening-leader V15 refreeze requires the immutable V14 receipt")
+        if not refreeze_v15_path.is_file() or refreeze_v15_path.is_symlink():
+            raise ValueError("opening-leader V15 deployment refreeze receipt is invalid")
+        refreeze_v15 = OpeningLeaderDeploymentRefreezeReceiptV15.model_validate_json(
+            refreeze_v15_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV14):
+            raise ValueError("opening-leader V15 refreeze requires the verified V14 receipt")
+        if (
+            refreeze_v15.supersedes_receipt_sha256 != _sha256_path(refreeze_v14_path)
+            or refreeze_v15.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v15.frozen_semantics_changed is not True
+            or refreeze_v15.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V15 deployment refreeze lineage mismatch")
+        refreeze_v15_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v15)).encode("utf-8")
+        )
+        if (
+            refreeze_v15_signature != refreeze_v15.signature_sha256
+            or refreeze_v15.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v15)
+        ):
+            raise ValueError("opening-leader V15 deployment refreeze signature mismatch")
+        receipt = refreeze_v15
+    refreeze_v16_path = root / "deployment_freeze_receipt_v16.json"
+    if refreeze_v16_path.exists():
+        if not refreeze_v15_path.is_file() or refreeze_v15_path.is_symlink():
+            raise ValueError("opening-leader V16 refreeze requires the immutable V15 receipt")
+        if not refreeze_v16_path.is_file() or refreeze_v16_path.is_symlink():
+            raise ValueError("opening-leader V16 deployment refreeze receipt is invalid")
+        refreeze_v16 = OpeningLeaderDeploymentRefreezeReceiptV16.model_validate_json(
+            refreeze_v16_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV15):
+            raise ValueError("opening-leader V16 refreeze requires the verified V15 receipt")
+        if (
+            refreeze_v16.supersedes_receipt_sha256 != _sha256_path(refreeze_v15_path)
+            or refreeze_v16.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v16.frozen_semantics_changed is not True
+            or refreeze_v16.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V16 deployment refreeze lineage mismatch")
+        refreeze_v16_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v16)).encode("utf-8")
+        )
+        if (
+            refreeze_v16_signature != refreeze_v16.signature_sha256
+            or refreeze_v16.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v16)
+        ):
+            raise ValueError("opening-leader V16 deployment refreeze signature mismatch")
+        receipt = refreeze_v16
+    refreeze_v17_path = root / "deployment_freeze_receipt_v17.json"
+    if refreeze_v17_path.exists():
+        if not refreeze_v16_path.is_file() or refreeze_v16_path.is_symlink():
+            raise ValueError("opening-leader V17 refreeze requires the immutable V16 receipt")
+        if not refreeze_v17_path.is_file() or refreeze_v17_path.is_symlink():
+            raise ValueError("opening-leader V17 deployment refreeze receipt is invalid")
+        refreeze_v17 = OpeningLeaderDeploymentRefreezeReceiptV17.model_validate_json(
+            refreeze_v17_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV16):
+            raise ValueError("opening-leader V17 refreeze requires the verified V16 receipt")
+        if (
+            refreeze_v17.supersedes_receipt_sha256 != _sha256_path(refreeze_v16_path)
+            or refreeze_v17.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v17.frozen_semantics_changed is not False
+            or refreeze_v17.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V17 deployment refreeze lineage mismatch")
+        refreeze_v17_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v17)).encode("utf-8")
+        )
+        if (
+            refreeze_v17_signature != refreeze_v17.signature_sha256
+            or refreeze_v17.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v17)
+        ):
+            raise ValueError("opening-leader V17 deployment refreeze signature mismatch")
+        receipt = refreeze_v17
+    refreeze_v18_path = root / "deployment_freeze_receipt_v18.json"
+    if refreeze_v18_path.exists():
+        if not refreeze_v17_path.is_file() or refreeze_v17_path.is_symlink():
+            raise ValueError("opening-leader V18 refreeze requires the immutable V17 receipt")
+        if not refreeze_v18_path.is_file() or refreeze_v18_path.is_symlink():
+            raise ValueError("opening-leader V18 deployment refreeze receipt is invalid")
+        refreeze_v18 = OpeningLeaderDeploymentRefreezeReceiptV18.model_validate_json(
+            refreeze_v18_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV17):
+            raise ValueError("opening-leader V18 refreeze requires the verified V17 receipt")
+        if (
+            refreeze_v18.supersedes_receipt_sha256 != _sha256_path(refreeze_v17_path)
+            or refreeze_v18.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v18.frozen_semantics_changed is not False
+            or refreeze_v18.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V18 deployment refreeze lineage mismatch")
+        refreeze_v18_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v18)).encode("utf-8")
+        )
+        if (
+            refreeze_v18_signature != refreeze_v18.signature_sha256
+            or refreeze_v18.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v18)
+        ):
+            raise ValueError("opening-leader V18 deployment refreeze signature mismatch")
+        receipt = refreeze_v18
+    refreeze_v19_path = root / "deployment_freeze_receipt_v19.json"
+    if refreeze_v19_path.exists():
+        if not refreeze_v18_path.is_file() or refreeze_v18_path.is_symlink():
+            raise ValueError("opening-leader V19 refreeze requires the immutable V18 receipt")
+        if not refreeze_v19_path.is_file() or refreeze_v19_path.is_symlink():
+            raise ValueError("opening-leader V19 deployment refreeze receipt is invalid")
+        refreeze_v19 = OpeningLeaderDeploymentRefreezeReceiptV19.model_validate_json(
+            refreeze_v19_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV18):
+            raise ValueError("opening-leader V19 refreeze requires the verified V18 receipt")
+        if (
+            refreeze_v19.supersedes_receipt_sha256 != _sha256_path(refreeze_v18_path)
+            or refreeze_v19.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v19.frozen_semantics_changed is not False
+            or refreeze_v19.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V19 deployment refreeze lineage mismatch")
+        refreeze_v19_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v19)).encode("utf-8")
+        )
+        if (
+            refreeze_v19_signature != refreeze_v19.signature_sha256
+            or refreeze_v19.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v19)
+        ):
+            raise ValueError("opening-leader V19 deployment refreeze signature mismatch")
+        receipt = refreeze_v19
+    refreeze_v20_path = root / "deployment_freeze_receipt_v20.json"
+    if refreeze_v20_path.exists():
+        if not refreeze_v19_path.is_file() or refreeze_v19_path.is_symlink():
+            raise ValueError("opening-leader V20 refreeze requires the immutable V19 receipt")
+        if not refreeze_v20_path.is_file() or refreeze_v20_path.is_symlink():
+            raise ValueError("opening-leader V20 deployment refreeze receipt is invalid")
+        refreeze_v20 = OpeningLeaderDeploymentRefreezeReceiptV20.model_validate_json(
+            refreeze_v20_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV19):
+            raise ValueError("opening-leader V20 refreeze requires the verified V19 receipt")
+        if (
+            refreeze_v20.supersedes_receipt_sha256 != _sha256_path(refreeze_v19_path)
+            or refreeze_v20.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v20.frozen_semantics_changed is not False
+            or refreeze_v20.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V20 deployment refreeze lineage mismatch")
+        refreeze_v20_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v20)).encode("utf-8")
+        )
+        if (
+            refreeze_v20_signature != refreeze_v20.signature_sha256
+            or refreeze_v20.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v20)
+        ):
+            raise ValueError("opening-leader V20 deployment refreeze signature mismatch")
+        receipt = refreeze_v20
+    refreeze_v21_path = root / "deployment_freeze_receipt_v21.json"
+    if refreeze_v21_path.exists():
+        if not refreeze_v20_path.is_file() or refreeze_v20_path.is_symlink():
+            raise ValueError("opening-leader V21 refreeze requires the immutable V20 receipt")
+        if not refreeze_v21_path.is_file() or refreeze_v21_path.is_symlink():
+            raise ValueError("opening-leader V21 deployment refreeze receipt is invalid")
+        refreeze_v21 = OpeningLeaderDeploymentRefreezeReceiptV21.model_validate_json(
+            refreeze_v21_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV20):
+            raise ValueError("opening-leader V21 refreeze requires the verified V20 receipt")
+        if (
+            refreeze_v21.supersedes_receipt_sha256 != _sha256_path(refreeze_v20_path)
+            or refreeze_v21.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v21.frozen_semantics_changed is not False
+            or refreeze_v21.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V21 deployment refreeze lineage mismatch")
+        refreeze_v21_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v21)).encode("utf-8")
+        )
+        if (
+            refreeze_v21_signature != refreeze_v21.signature_sha256
+            or refreeze_v21.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v21)
+        ):
+            raise ValueError("opening-leader V21 deployment refreeze signature mismatch")
+        receipt = refreeze_v21
+    refreeze_v22_path = root / "deployment_freeze_receipt_v22.json"
+    if refreeze_v22_path.exists():
+        if not refreeze_v21_path.is_file() or refreeze_v21_path.is_symlink():
+            raise ValueError("opening-leader V22 refreeze requires the immutable V21 receipt")
+        if not refreeze_v22_path.is_file() or refreeze_v22_path.is_symlink():
+            raise ValueError("opening-leader V22 deployment refreeze receipt is invalid")
+        refreeze_v22 = OpeningLeaderDeploymentRefreezeReceiptV22.model_validate_json(
+            refreeze_v22_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV21):
+            raise ValueError("opening-leader V22 refreeze requires the verified V21 receipt")
+        if (
+            refreeze_v22.supersedes_receipt_sha256 != _sha256_path(refreeze_v21_path)
+            or refreeze_v22.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v22.frozen_semantics_changed is not False
+            or refreeze_v22.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V22 deployment refreeze lineage mismatch")
+        refreeze_v22_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v22)).encode("utf-8")
+        )
+        if (
+            refreeze_v22_signature != refreeze_v22.signature_sha256
+            or refreeze_v22.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v22)
+        ):
+            raise ValueError("opening-leader V22 deployment refreeze signature mismatch")
+        receipt = refreeze_v22
+    refreeze_v23_path = root / "deployment_freeze_receipt_v23.json"
+    if refreeze_v23_path.exists():
+        if not refreeze_v22_path.is_file() or refreeze_v22_path.is_symlink():
+            raise ValueError("opening-leader V23 refreeze requires the immutable V22 receipt")
+        if not refreeze_v23_path.is_file() or refreeze_v23_path.is_symlink():
+            raise ValueError("opening-leader V23 deployment refreeze receipt is invalid")
+        refreeze_v23 = OpeningLeaderDeploymentRefreezeReceiptV23.model_validate_json(
+            refreeze_v23_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV22):
+            raise ValueError("opening-leader V23 refreeze requires the verified V22 receipt")
+        if (
+            refreeze_v23.supersedes_receipt_sha256 != _sha256_path(refreeze_v22_path)
+            or refreeze_v23.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v23.frozen_semantics_changed is not False
+            or refreeze_v23.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V23 deployment refreeze lineage mismatch")
+        refreeze_v23_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v23)).encode("utf-8")
+        )
+        if (
+            refreeze_v23_signature != refreeze_v23.signature_sha256
+            or refreeze_v23.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v23)
+        ):
+            raise ValueError("opening-leader V23 deployment refreeze signature mismatch")
+        receipt = refreeze_v23
+    refreeze_v24_path = root / "deployment_freeze_receipt_v24.json"
+    if refreeze_v24_path.exists():
+        if not refreeze_v23_path.is_file() or refreeze_v23_path.is_symlink():
+            raise ValueError("opening-leader V24 refreeze requires the immutable V23 receipt")
+        if not refreeze_v24_path.is_file() or refreeze_v24_path.is_symlink():
+            raise ValueError("opening-leader V24 deployment refreeze receipt is invalid")
+        refreeze_v24 = OpeningLeaderDeploymentRefreezeReceiptV24.model_validate_json(
+            refreeze_v24_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV23):
+            raise ValueError("opening-leader V24 refreeze requires the verified V23 receipt")
+        if (
+            refreeze_v24.supersedes_receipt_sha256 != _sha256_path(refreeze_v23_path)
+            or refreeze_v24.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v24.frozen_semantics_changed is not False
+            or refreeze_v24.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V24 deployment refreeze lineage mismatch")
+        refreeze_v24_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v24)).encode("utf-8")
+        )
+        if (
+            refreeze_v24_signature != refreeze_v24.signature_sha256
+            or refreeze_v24.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v24)
+        ):
+            raise ValueError("opening-leader V24 deployment refreeze signature mismatch")
+        receipt = refreeze_v24
+    refreeze_v25_path = root / "deployment_freeze_receipt_v25.json"
+    if refreeze_v25_path.exists():
+        if not refreeze_v24_path.is_file() or refreeze_v24_path.is_symlink():
+            raise ValueError("opening-leader V25 refreeze requires the immutable V24 receipt")
+        if not refreeze_v25_path.is_file() or refreeze_v25_path.is_symlink():
+            raise ValueError("opening-leader V25 deployment refreeze receipt is invalid")
+        refreeze_v25 = OpeningLeaderDeploymentRefreezeReceiptV25.model_validate_json(
+            refreeze_v25_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV24):
+            raise ValueError("opening-leader V25 refreeze requires the verified V24 receipt")
+        if (
+            refreeze_v25.supersedes_receipt_sha256 != _sha256_path(refreeze_v24_path)
+            or refreeze_v25.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v25.frozen_semantics_changed is not False
+            or refreeze_v25.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V25 deployment refreeze lineage mismatch")
+        refreeze_v25_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v25)).encode("utf-8")
+        )
+        if (
+            refreeze_v25_signature != refreeze_v25.signature_sha256
+            or refreeze_v25.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v25)
+        ):
+            raise ValueError("opening-leader V25 deployment refreeze signature mismatch")
+        receipt = refreeze_v25
+    refreeze_v26_path = root / "deployment_freeze_receipt_v26.json"
+    if refreeze_v26_path.exists():
+        if not refreeze_v25_path.is_file() or refreeze_v25_path.is_symlink():
+            raise ValueError("opening-leader V26 refreeze requires the immutable V25 receipt")
+        if not refreeze_v26_path.is_file() or refreeze_v26_path.is_symlink():
+            raise ValueError("opening-leader V26 deployment refreeze receipt is invalid")
+        refreeze_v26 = OpeningLeaderDeploymentRefreezeReceiptV26.model_validate_json(
+            refreeze_v26_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV25):
+            raise ValueError("opening-leader V26 refreeze requires the verified V25 receipt")
+        if (
+            refreeze_v26.supersedes_receipt_sha256 != _sha256_path(refreeze_v25_path)
+            or refreeze_v26.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v26.frozen_semantics_changed is not False
+            or refreeze_v26.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V26 deployment refreeze lineage mismatch")
+        refreeze_v26_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v26)).encode("utf-8")
+        )
+        if (
+            refreeze_v26_signature != refreeze_v26.signature_sha256
+            or refreeze_v26.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v26)
+        ):
+            raise ValueError("opening-leader V26 deployment refreeze signature mismatch")
+        receipt = refreeze_v26
+    refreeze_v27_path = root / "deployment_freeze_receipt_v27.json"
+    if refreeze_v27_path.exists():
+        if not refreeze_v26_path.is_file() or refreeze_v26_path.is_symlink():
+            raise ValueError("opening-leader V27 refreeze requires the immutable V26 receipt")
+        if not refreeze_v27_path.is_file() or refreeze_v27_path.is_symlink():
+            raise ValueError("opening-leader V27 deployment refreeze receipt is invalid")
+        refreeze_v27 = OpeningLeaderDeploymentRefreezeReceiptV27.model_validate_json(
+            refreeze_v27_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV26):
+            raise ValueError("opening-leader V27 refreeze requires the verified V26 receipt")
+        if (
+            refreeze_v27.supersedes_receipt_sha256 != _sha256_path(refreeze_v26_path)
+            or refreeze_v27.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v27.frozen_semantics_changed is not False
+            or refreeze_v27.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V27 deployment refreeze lineage mismatch")
+        refreeze_v27_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v27)).encode("utf-8")
+        )
+        if (
+            refreeze_v27_signature != refreeze_v27.signature_sha256
+            or refreeze_v27.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v27)
+        ):
+            raise ValueError("opening-leader V27 deployment refreeze signature mismatch")
+        receipt = refreeze_v27
+    refreeze_v28_path = root / "deployment_freeze_receipt_v28.json"
+    if refreeze_v28_path.exists():
+        if not refreeze_v27_path.is_file() or refreeze_v27_path.is_symlink():
+            raise ValueError("opening-leader V28 refreeze requires the immutable V27 receipt")
+        if not refreeze_v28_path.is_file() or refreeze_v28_path.is_symlink():
+            raise ValueError("opening-leader V28 deployment refreeze receipt is invalid")
+        refreeze_v28 = OpeningLeaderDeploymentRefreezeReceiptV28.model_validate_json(
+            refreeze_v28_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV27):
+            raise ValueError("opening-leader V28 refreeze requires the verified V27 receipt")
+        if (
+            refreeze_v28.supersedes_receipt_sha256 != _sha256_path(refreeze_v27_path)
+            or refreeze_v28.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v28.frozen_semantics_changed is not False
+            or refreeze_v28.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V28 deployment refreeze lineage mismatch")
+        refreeze_v28_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v28)).encode("utf-8")
+        )
+        if (
+            refreeze_v28_signature != refreeze_v28.signature_sha256
+            or refreeze_v28.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v28)
+        ):
+            raise ValueError("opening-leader V28 deployment refreeze signature mismatch")
+        receipt = refreeze_v28
+    refreeze_v29_path = root / "deployment_freeze_receipt_v29.json"
+    if refreeze_v29_path.exists():
+        if not refreeze_v28_path.is_file() or refreeze_v28_path.is_symlink():
+            raise ValueError("opening-leader V29 refreeze requires the immutable V28 receipt")
+        if not refreeze_v29_path.is_file() or refreeze_v29_path.is_symlink():
+            raise ValueError("opening-leader V29 deployment refreeze receipt is invalid")
+        refreeze_v29 = OpeningLeaderDeploymentRefreezeReceiptV29.model_validate_json(
+            refreeze_v29_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV28):
+            raise ValueError("opening-leader V29 refreeze requires the verified V28 receipt")
+        if (
+            refreeze_v29.supersedes_receipt_sha256 != _sha256_path(refreeze_v28_path)
+            or refreeze_v29.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v29.frozen_semantics_changed is not False
+            or refreeze_v29.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V29 deployment refreeze lineage mismatch")
+        refreeze_v29_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v29)).encode("utf-8")
+        )
+        if (
+            refreeze_v29_signature != refreeze_v29.signature_sha256
+            or refreeze_v29.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v29)
+        ):
+            raise ValueError("opening-leader V29 deployment refreeze signature mismatch")
+        receipt = refreeze_v29
+    refreeze_v30_path = root / "deployment_freeze_receipt_v30.json"
+    if refreeze_v30_path.exists():
+        if not refreeze_v29_path.is_file() or refreeze_v29_path.is_symlink():
+            raise ValueError("opening-leader V30 refreeze requires the immutable V29 receipt")
+        if not refreeze_v30_path.is_file() or refreeze_v30_path.is_symlink():
+            raise ValueError("opening-leader V30 deployment refreeze receipt is invalid")
+        refreeze_v30 = OpeningLeaderDeploymentRefreezeReceiptV30.model_validate_json(
+            refreeze_v30_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV29):
+            raise ValueError("opening-leader V30 refreeze requires the verified V29 receipt")
+        if (
+            refreeze_v30.supersedes_receipt_sha256 != _sha256_path(refreeze_v29_path)
+            or refreeze_v30.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v30.frozen_semantics_changed is not False
+            or refreeze_v30.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V30 deployment refreeze lineage mismatch")
+        refreeze_v30_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v30)).encode("utf-8")
+        )
+        if (
+            refreeze_v30_signature != refreeze_v30.signature_sha256
+            or refreeze_v30.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v30)
+        ):
+            raise ValueError("opening-leader V30 deployment refreeze signature mismatch")
+        receipt = refreeze_v30
+    refreeze_v31_path = root / "deployment_freeze_receipt_v31.json"
+    if refreeze_v31_path.exists():
+        if not refreeze_v30_path.is_file() or refreeze_v30_path.is_symlink():
+            raise ValueError("opening-leader V31 refreeze requires the immutable V30 receipt")
+        if not refreeze_v31_path.is_file() or refreeze_v31_path.is_symlink():
+            raise ValueError("opening-leader V31 deployment refreeze receipt is invalid")
+        refreeze_v31 = OpeningLeaderDeploymentRefreezeReceiptV31.model_validate_json(
+            refreeze_v31_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV30):
+            raise ValueError("opening-leader V31 refreeze requires the verified V30 receipt")
+        if (
+            refreeze_v31.supersedes_receipt_sha256 != _sha256_path(refreeze_v30_path)
+            or refreeze_v31.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v31.frozen_semantics_changed is not False
+            or refreeze_v31.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V31 deployment refreeze lineage mismatch")
+        refreeze_v31_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v31)).encode("utf-8")
+        )
+        if (
+            refreeze_v31_signature != refreeze_v31.signature_sha256
+            or refreeze_v31.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v31)
+        ):
+            raise ValueError("opening-leader V31 deployment refreeze signature mismatch")
+        receipt = refreeze_v31
     start = (
         receipt.freeze_completed_at_utc
         if prospective_start_utc is None
@@ -556,9 +2316,12 @@ def opening_leader_runtime_source_files_v0() -> dict[str, Path]:
         "config": package / "config.py",
         "contract_safety": package / "contract.py",
         "database": package / "database.py",
+        "durable_inbox": package / "durable_inbox.py",
         "event_ingest": package / "event_ingest.py",
         "events": package / "events.py",
         "frozen_live_application": package / "frozen_live_application.py",
+        "group_o": package / "group_o.py",
+        "group_o_recovery": package / "group_o_recovery.py",
         "ibkr": package / "ibkr.py",
         "ibkr_official": package / "ibkr_official.py",
         "live_bars": package / "live_bars.py",
@@ -566,12 +2329,22 @@ def opening_leader_runtime_source_files_v0() -> dict[str, Path]:
         "live_subscriptions": package / "live_subscriptions.py",
         "market_data": package / "market_data.py",
         "migration_0026": package / "migrations" / "0026_opening_leader_continuation_v0.sql",
+        "migration_0028": package / "migrations" / "0028_web_latest_subscription_state_v0.sql",
+        "migration_0029": package / "migrations" / "0029_m1c_diagnostic_quality_flags_v0.sql",
+        "migration_0030": package / "migrations" / "0030_quiet_checkpoint_quote_audit_v0.sql",
         "opening_leader_contract": package / "opening_leader_continuation_v0.py",
         "opening_leader_live": package / "opening_leader_live_v0.py",
+        "option_risk_accounting": package / "option_risk_accounting.py",
         "option_discovery": package / "option_discovery.py",
+        "operational_state": package / "operational_state.py",
         "partition_store": package / "partition_store.py",
         "project_configuration": repository_root / "pyproject.toml",
         "read_store": package / "read_store.py",
+        "recorder_engine": package / "recorder_v0.py",
+        "recorder_repository": package / "recorder_repository.py",
+        "scientific_inputs": package / "scientific_inputs.py",
+        "sqlite_coordination": package / "sqlite_coordination.py",
+        "episode_safety": package / "safety.py",
         "static_app": package / "web_static" / "app.js",
         "static_index": package / "web_static" / "index.html",
         "static_polling": package / "web_static" / "polling.mjs",
@@ -817,6 +2590,7 @@ class OpeningLeaderIBKROptionSnapshotterV0:
         observation_name: str,
         spot: float,
         observed_at: datetime,
+        exact_contracts: tuple[OptionQuoteV0, ...] | None = None,
     ) -> OptionSnapshotCaptureV0:
         observed = _aware(observed_at, label="option observation timestamp")
         snapshot_id = (
@@ -838,21 +2612,62 @@ class OpeningLeaderIBKROptionSnapshotterV0:
             )
         session = observed.astimezone(NEW_YORK).date()
         try:
-            expiries, strikes, exchange, trading_class = self._metadata(
-                symbol=symbol,
-                session=session,
-                underlying=underlying,
-            )
-            selection = select_option_chain_requests_v0(
-                underlying=symbol,
-                underlying_con_id=underlying.con_id,
-                session=session,
-                spot=spot,
-                available_expiries=expiries,
-                available_strikes=strikes,
-                exchange=exchange,
-                trading_class=trading_class,
-            )
+            if exact_contracts is not None:
+                if len({quote.con_id for quote in exact_contracts}) != len(exact_contracts) or any(
+                    quote.underlying != symbol for quote in exact_contracts
+                ):
+                    raise ValueError("E0-frozen option contract identities are inconsistent")
+                requests = tuple(
+                    OptionContractRequestV0(
+                        underlying=symbol,
+                        underlying_con_id=underlying.con_id,
+                        expiry=quote.expiry,
+                        strike=quote.strike,
+                        right=quote.right,
+                        multiplier=quote.multiplier,
+                        exchange=quote.exchange,
+                        trading_class=quote.trading_class,
+                    )
+                    for quote in exact_contracts
+                )
+                selected_expiries = tuple(sorted({quote.expiry for quote in exact_contracts}))
+                selection = OptionChainSelectionV0(
+                    status="AVAILABLE" if requests else "UNAVAILABLE",
+                    reason=None if requests else "e0_strategy_contracts_unavailable",
+                    underlying=symbol,
+                    spot=spot,
+                    selected_expiries=selected_expiries,
+                    selected_strikes_by_expiry={
+                        expiry.isoformat(): tuple(
+                            sorted(
+                                {
+                                    quote.strike
+                                    for quote in exact_contracts
+                                    if quote.expiry == expiry
+                                }
+                            )
+                        )
+                        for expiry in selected_expiries
+                    },
+                    requests=requests,
+                    selection_basis="e0_frozen_exact_contracts",
+                )
+            else:
+                expiries, strikes, exchange, trading_class = self._metadata(
+                    symbol=symbol,
+                    session=session,
+                    underlying=underlying,
+                )
+                selection = select_option_chain_requests_v0(
+                    underlying=symbol,
+                    underlying_con_id=underlying.con_id,
+                    session=session,
+                    spot=spot,
+                    available_expiries=expiries,
+                    available_strikes=strikes,
+                    exchange=exchange,
+                    trading_class=trading_class,
+                )
         except (AttributeError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
             return OptionSnapshotCaptureV0(
                 snapshot_id=snapshot_id,
@@ -875,6 +2690,10 @@ class OpeningLeaderIBKROptionSnapshotterV0:
             )
         quotes: list[OptionQuoteV0] = []
         failures: list[str] = []
+        expected_con_ids = {
+            (quote.expiry, quote.strike, quote.right): quote.con_id
+            for quote in exact_contracts or ()
+        }
         for request in selection.requests:
             try:
                 upstream = self.contract_factory(
@@ -901,6 +2720,16 @@ class OpeningLeaderIBKROptionSnapshotterV0:
                         f"{request.expiry}:{request.right}:{request.strike}:qualification_unavailable"
                     )
                     continue
+                expected_con_id = expected_con_ids.get(
+                    (request.expiry, request.strike, request.right)
+                )
+                qualified_con_id = int(_attribute(qualified, "conId", "con_id") or 0)
+                if expected_con_id is not None and qualified_con_id != expected_con_id:
+                    failures.append(
+                        f"{request.expiry}:{request.right}:{request.strike}:"
+                        "frozen_contract_identity_mismatch"
+                    )
+                    continue
                 capture = self.adapter.capture_temporary_quote
                 result = capture(contract=qualified)
                 self._paced()
@@ -917,7 +2746,7 @@ class OpeningLeaderIBKROptionSnapshotterV0:
                     OptionQuoteV0.from_snapshot(
                         snapshot_id=snapshot_id,
                         underlying=symbol,
-                        con_id=int(_attribute(qualified, "conId", "con_id") or 0),
+                        con_id=qualified_con_id,
                         right=request.right,
                         strike=request.strike,
                         expiry=request.expiry,
@@ -970,6 +2799,34 @@ __all__ = [
     "OpeningLeaderDeploymentRefreezeReceiptV1",
     "OpeningLeaderDeploymentRefreezeReceiptV2",
     "OpeningLeaderDeploymentRefreezeReceiptV3",
+    "OpeningLeaderDeploymentRefreezeReceiptV4",
+    "OpeningLeaderDeploymentRefreezeReceiptV5",
+    "OpeningLeaderDeploymentRefreezeReceiptV6",
+    "OpeningLeaderDeploymentRefreezeReceiptV7",
+    "OpeningLeaderDeploymentRefreezeReceiptV8",
+    "OpeningLeaderDeploymentRefreezeReceiptV9",
+    "OpeningLeaderDeploymentRefreezeReceiptV10",
+    "OpeningLeaderDeploymentRefreezeReceiptV11",
+    "OpeningLeaderDeploymentRefreezeReceiptV12",
+    "OpeningLeaderDeploymentRefreezeReceiptV13",
+    "OpeningLeaderDeploymentRefreezeReceiptV14",
+    "OpeningLeaderDeploymentRefreezeReceiptV15",
+    "OpeningLeaderDeploymentRefreezeReceiptV16",
+    "OpeningLeaderDeploymentRefreezeReceiptV17",
+    "OpeningLeaderDeploymentRefreezeReceiptV18",
+    "OpeningLeaderDeploymentRefreezeReceiptV19",
+    "OpeningLeaderDeploymentRefreezeReceiptV20",
+    "OpeningLeaderDeploymentRefreezeReceiptV21",
+    "OpeningLeaderDeploymentRefreezeReceiptV22",
+    "OpeningLeaderDeploymentRefreezeReceiptV23",
+    "OpeningLeaderDeploymentRefreezeReceiptV24",
+    "OpeningLeaderDeploymentRefreezeReceiptV25",
+    "OpeningLeaderDeploymentRefreezeReceiptV26",
+    "OpeningLeaderDeploymentRefreezeReceiptV27",
+    "OpeningLeaderDeploymentRefreezeReceiptV28",
+    "OpeningLeaderDeploymentRefreezeReceiptV29",
+    "OpeningLeaderDeploymentRefreezeReceiptV30",
+    "OpeningLeaderDeploymentRefreezeReceiptV31",
     "OpeningLeaderDeploymentReceiptV0",
     "OpeningLeaderIBKROptionSnapshotterV0",
     "assert_opening_leader_runtime_configuration_v0",

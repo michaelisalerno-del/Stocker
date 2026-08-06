@@ -58,6 +58,11 @@ from stocker_prospective.option_ledger import (
     OptionContractPlan,
     ShadowOptionOutcome,
 )
+from stocker_prospective.option_risk_accounting import (
+    OptionRiskAccountingRecord,
+    StrategyComparisonReport,
+    UnderlyingRiskAccountingRecord,
+)
 from stocker_prospective.partition_store import PartitionWriteResult, sha256_path
 from stocker_prospective.quality_report import SessionQualityReport
 from stocker_prospective.quiet_state import (
@@ -83,12 +88,6 @@ from stocker_prospective.tail_phase_v1 import (
     assign_movement_consumed_bucket_v1,
 )
 
-TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT = frozenset(
-    {
-        "ibkr_transfer_supported_without_recalibration",
-        "ibkr_ranking_supported_probability_scale_shifted",
-    }
-)
 SIGNED_MARKET_SHOCK_COLUMNS_V1: Final[tuple[str, ...]] = (
     "canonical_market_proxy_v1",
     "market_return_w0_v1",
@@ -147,6 +146,16 @@ def _json(value: object) -> str:
         allow_nan=False,
         default=str,
     )
+
+
+def _is_legacy_accounting_payload(encoded: str) -> bool:
+    """Recognise immutable pre-version accounting JSON during idempotent replay."""
+
+    try:
+        payload = json.loads(encoded)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, dict) and "accounting_payload_version" not in payload
 
 
 def _content_hash(value: object) -> str:
@@ -537,26 +546,16 @@ class FrozenRecorderRepository:
         session: date,
         connection: sqlite3.Connection | None = None,
     ) -> tuple[str, bool]:
-        """Resolve the immutable cohort phase without consulting any outcome value."""
+        """Resolve the outcome-blind IBKR evidence phase.
+
+        Cross-vendor observations remain immutable diagnostics, but they do not
+        authorize prospective evidence.  The first otherwise-valid IBKR session
+        therefore enters option development immediately.
+        """
 
         owns_connection = connection is None
         active_connection = self.repository._connect() if connection is None else connection
         try:
-            transfer_rows = active_connection.execute(
-                """
-                SELECT session_date, decision
-                FROM source_transfer_session_v0
-                WHERE run_id = ? AND valid = 1 AND session_date < ?
-                ORDER BY session_date
-                """,
-                (run_id, session.isoformat()),
-            ).fetchall()
-            if (
-                len(transfer_rows) < 20
-                or str(transfer_rows[-1]["decision"])
-                not in TRANSFER_DECISIONS_PERMITTING_OPTION_DEVELOPMENT
-            ):
-                return "engineering_transfer", False
             completed_development = int(
                 active_connection.execute(
                     """
@@ -595,21 +594,41 @@ class FrozenRecorderRepository:
             raise ValueError("unsupported prospective phase parent")
         row = connection.execute(
             f"""
-            SELECT session_date, scientific_recording_valid FROM {parent_table}
+            SELECT phase, scientific_recording_valid, session_date FROM {parent_table}
             WHERE run_id = ? AND {parent_id_column} = ?
             """,
             (run_id, parent_id),
         ).fetchone()
         if row is None:
             raise KeyError(parent_id)
-        phase, phase_allows_scientific_evidence = self.prospective_phase_for_session(
-            run_id=run_id,
-            session=date.fromisoformat(str(row["session_date"])),
-            connection=connection,
-        )
+        phase = str(row["phase"])
+        if phase not in {
+            "engineering_transfer",
+            "option_development",
+            "untouched_confirmation",
+        }:
+            persisted_phase = connection.execute(
+                """
+                SELECT phase
+                FROM prospective_session_phase_v0
+                WHERE run_id = ? AND session_date = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id, str(row["session_date"])),
+            ).fetchone()
+            phase = (
+                str(persisted_phase["phase"])
+                if persisted_phase is not None
+                else self.prospective_phase_for_session(
+                    run_id=run_id,
+                    session=date.fromisoformat(str(row["session_date"])),
+                    connection=connection,
+                )[0]
+            )
         return (
             phase,
-            phase_allows_scientific_evidence and bool(row["scientific_recording_valid"]),
+            phase != "engineering_transfer" and bool(row["scientific_recording_valid"]),
         )
 
     @staticmethod
@@ -911,10 +930,35 @@ class FrozenRecorderRepository:
         checkpoint: int,
         snapshot: QuietStateSnapshot,
         eligible: bool,
+        selected_underlying_quote_event_id: str | None = None,
+        selected_underlying_quote_timestamp_utc: datetime | None = None,
+        selected_underlying_quote_age_seconds: float | None = None,
+        underlying_quote_selection_policy: str | None = None,
     ) -> int:
         """Persist every frozen quiet-tail membership beside the original score."""
 
         self._validate(metadata)
+        selected_quote_identity = (
+            selected_underlying_quote_event_id,
+            selected_underlying_quote_timestamp_utc,
+            selected_underlying_quote_age_seconds,
+        )
+        if any(value is not None for value in selected_quote_identity) and not all(
+            value is not None for value in selected_quote_identity
+        ):
+            raise ValueError("selected quiet checkpoint quote audit is incomplete")
+        if (
+            selected_underlying_quote_age_seconds is not None
+            and selected_underlying_quote_age_seconds < 0.0
+        ):
+            raise ValueError("selected quiet checkpoint quote age is negative")
+        if underlying_quote_selection_policy is None:
+            if any(value is not None for value in selected_quote_identity):
+                raise ValueError("selected quiet checkpoint quote policy is absent")
+        elif (
+            underlying_quote_selection_policy != "latest_valid_at_or_before_checkpoint_boundary_v0"
+        ):
+            raise ValueError("quiet checkpoint quote selection policy differs")
         with self.repository._connect() as connection:
             source = connection.execute(
                 """
@@ -948,13 +992,18 @@ class FrozenRecorderRepository:
             existing = connection.execute(
                 """
                 SELECT id, m1c_probability, previous_m1c_probability,
-                       data_quality_flags_json
+                       data_quality_flags_json,
+                       selected_underlying_quote_event_id,
+                       selected_underlying_quote_timestamp_utc,
+                       selected_underlying_quote_age_seconds,
+                       underlying_quote_selection_policy
                 FROM quiet_state_checkpoint_v0 WHERE checkpoint_id = ?
                 """,
                 (checkpoint_id,),
             ).fetchone()
             encoded_flags = _json(snapshot.data_quality_flags)
             if existing is not None:
+                persisted_quote_policy = existing["underlying_quote_selection_policy"]
                 if (
                     float(existing["m1c_probability"]) != snapshot.probability
                     or (
@@ -964,6 +1013,24 @@ class FrozenRecorderRepository:
                     )
                     != snapshot.previous_probability
                     or str(existing["data_quality_flags_json"]) != encoded_flags
+                    or (
+                        persisted_quote_policy is not None
+                        and (
+                            existing["selected_underlying_quote_event_id"]
+                            != selected_underlying_quote_event_id
+                            or existing["selected_underlying_quote_timestamp_utc"]
+                            != (
+                                None
+                                if selected_underlying_quote_timestamp_utc is None
+                                else selected_underlying_quote_timestamp_utc.astimezone(
+                                    UTC
+                                ).isoformat()
+                            )
+                            or existing["selected_underlying_quote_age_seconds"]
+                            != selected_underlying_quote_age_seconds
+                            or persisted_quote_policy != underlying_quote_selection_policy
+                        )
+                    )
                 ):
                     raise ValueError("immutable quiet checkpoint differs")
                 return int(existing["id"])
@@ -975,8 +1042,12 @@ class FrozenRecorderRepository:
                     checkpoint, m1c_probability, previous_m1c_probability,
                     bottom_5, bottom_10, bottom_20, high_tail,
                     distance_from_bottom_10, model_hash, feature_hash, eligible,
-                    data_quality_status, data_quality_flags_json, claims_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    data_quality_status, data_quality_flags_json,
+                    selected_underlying_quote_event_id,
+                    selected_underlying_quote_timestamp_utc,
+                    selected_underlying_quote_age_seconds,
+                    underlying_quote_selection_policy, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     envelope_id,
@@ -997,6 +1068,14 @@ class FrozenRecorderRepository:
                     int(eligible),
                     snapshot.data_quality_status,
                     encoded_flags,
+                    selected_underlying_quote_event_id,
+                    (
+                        None
+                        if selected_underlying_quote_timestamp_utc is None
+                        else selected_underlying_quote_timestamp_utc.astimezone(UTC).isoformat()
+                    ),
+                    selected_underlying_quote_age_seconds,
+                    underlying_quote_selection_policy,
                     self.claims_json,
                 ),
             )
@@ -1415,6 +1494,7 @@ class FrozenRecorderRepository:
         eligible: bool,
         feature_freshness: str,
         rejection_reasons: tuple[str, ...],
+        diagnostic_quality_flags: tuple[str, ...] = (),
         model_version: str = "frozen-m1c-v0",
         tail_phase_v1: TailPhaseStateV1 | None = None,
         movement_consumed_v1: MovementConsumedStateV1 | None = None,
@@ -1461,17 +1541,33 @@ class FrozenRecorderRepository:
                        movement_consumed_denominator_v1,
                        movement_consumed_complete_v1,
                        movement_consumed_missing_reason_v1,
-                       movement_consumed_bucket_v1, tail_phase_source_v1_json
+                       movement_consumed_bucket_v1, tail_phase_source_v1_json,
+                       rejection_reasons_json, diagnostic_quality_flags_json
                 FROM m1c_checkpoint_v0
                 WHERE run_id = ? AND symbol = ? AND session_date = ? AND checkpoint = ?
                 """,
                 (metadata.run_id, symbol, session.isoformat(), checkpoint),
             ).fetchone()
             if existing is not None:
+                persisted_diagnostic_quality_flags = tuple(
+                    json.loads(str(existing["diagnostic_quality_flags_json"]))
+                )
+                persisted_rejection_reasons = tuple(
+                    json.loads(str(existing["rejection_reasons_json"]))
+                )
+                legacy_stale_quote_diagnostic = (
+                    not persisted_diagnostic_quality_flags
+                    and diagnostic_quality_flags == ("underlying_quote_stale",)
+                    and "underlying_quote_stale" in persisted_rejection_reasons
+                )
                 if (
                     str(existing["feature_hash"]) != score.feature_hash
                     or float(existing["probability"]) != score.probability
                     or float(existing["threshold"]) != score.threshold
+                    or (
+                        persisted_diagnostic_quality_flags != diagnostic_quality_flags
+                        and not legacy_stale_quote_diagnostic
+                    )
                 ):
                     raise ValueError("immutable M1C checkpoint differs")
                 if tail_phase_v1 is not None:
@@ -1547,9 +1643,10 @@ class FrozenRecorderRepository:
                     model_id, model_version, model_hash, feature_hash,
                     session_context_hash, feature_values_json, probability,
                     threshold, threshold_passed, eligible, feature_freshness,
-                    missing_feature_count, rejection_reasons_json, claims_json,
+                    missing_feature_count, rejection_reasons_json,
+                    diagnostic_quality_flags_json, claims_json,
                     bar_identity, configuration_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'M1C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'M1C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           ?, ?)
                 """,
                 (
@@ -1573,6 +1670,7 @@ class FrozenRecorderRepository:
                     feature_freshness,
                     score.missing_feature_count,
                     _json(rejection_reasons),
+                    _json(diagnostic_quality_flags),
                     self.claims_json,
                     (
                         f"IBKR|{symbol}|{session.isoformat()}|"
@@ -3493,6 +3591,149 @@ class FrozenRecorderRepository:
             assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
 
+    def record_quiet_option_risk_observation(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        dte_bucket: str,
+        horizon_label: str,
+        record: OptionRiskAccountingRecord | UnderlyingRiskAccountingRecord,
+    ) -> int:
+        """Append one record-only capital/Greek observation outside policy admission."""
+
+        self._validate(metadata)
+        if dte_bucket not in {"0DTE", "1DTE", "3_TO_5_DTE"}:
+            raise ValueError("option risk observation DTE bucket is invalid")
+        if horizon_label not in {"5m", "10m", "15m", "30m", "60m", "session_end"}:
+            raise ValueError("option risk observation horizon is not frozen")
+        payload = record.model_dump(mode="json")
+        encoded = _json(payload)
+        strategy_type = str(record.strategy_type)
+        with self.repository._connect() as connection:
+            parent = connection.execute(
+                """
+                SELECT 1 FROM quiet_state_observation_v0
+                WHERE run_id = ? AND observation_id = ?
+                """,
+                (metadata.run_id, observation_id),
+            ).fetchone()
+            if parent is None:
+                raise ValueError("quiet option risk observation parent is unavailable")
+            existing = connection.execute(
+                """
+                SELECT id, payload_json FROM quiet_option_risk_observation_v0
+                WHERE observation_id = ? AND candidate_id = ?
+                  AND dte_bucket = ? AND horizon_label = ?
+                  AND observed_at_utc = ?
+                """,
+                (
+                    observation_id,
+                    record.strategy_id,
+                    dte_bucket,
+                    horizon_label,
+                    record.observed_at.isoformat(),
+                ),
+            ).fetchone()
+            if existing is not None:
+                existing_payload = str(existing["payload_json"])
+                if existing_payload != encoded and not _is_legacy_accounting_payload(
+                    existing_payload
+                ):
+                    raise ValueError("immutable quiet option risk observation differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_option_risk_observation_v0(
+                    envelope_id, run_id, observation_id, candidate_id,
+                    strategy_type, dte_bucket, horizon_label, observed_at_utc,
+                    payload_json, executable_pnl_primary, policy_gate,
+                    can_authorize_trade, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    record.strategy_id,
+                    strategy_type,
+                    dte_bucket,
+                    horizon_label,
+                    record.observed_at.isoformat(),
+                    encoded,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
+    def record_quiet_option_strategy_comparison(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        observation_id: str,
+        dte_bucket: str,
+        horizon_label: str,
+        horizon_minutes: int | None,
+        report: StrategyComparisonReport,
+    ) -> int:
+        """Persist the read-only underlying/short-put/bull-put comparison."""
+
+        self._validate(metadata)
+        if dte_bucket not in {"0DTE", "1DTE", "3_TO_5_DTE"}:
+            raise ValueError("option comparison DTE bucket is invalid")
+        if horizon_label not in {"5m", "10m", "15m", "30m", "60m", "session_end"}:
+            raise ValueError("option comparison horizon is not frozen")
+        encoded = _json(report.model_dump(mode="json"))
+        with self.repository._connect() as connection:
+            parent = connection.execute(
+                """
+                SELECT 1 FROM quiet_state_observation_v0
+                WHERE run_id = ? AND observation_id = ?
+                """,
+                (metadata.run_id, observation_id),
+            ).fetchone()
+            if parent is None:
+                raise ValueError("quiet option comparison parent is unavailable")
+            existing = connection.execute(
+                """
+                SELECT id, payload_json FROM quiet_option_strategy_comparison_v0
+                WHERE observation_id = ? AND dte_bucket = ? AND horizon_label = ?
+                """,
+                (observation_id, dte_bucket, horizon_label),
+            ).fetchone()
+            if existing is not None:
+                existing_payload = str(existing["payload_json"])
+                if existing_payload != encoded and not _is_legacy_accounting_payload(
+                    existing_payload
+                ):
+                    raise ValueError("immutable quiet option strategy comparison differs")
+                return int(existing["id"])
+            envelope_id = self.repository._insert_envelope(connection, metadata)
+            cursor = connection.execute(
+                """
+                INSERT INTO quiet_option_strategy_comparison_v0(
+                    envelope_id, run_id, observation_id, dte_bucket,
+                    horizon_label, horizon_minutes, payload_json,
+                    executable_pnl_primary, greek_attribution_diagnostic_only,
+                    policy_gate, can_authorize_trade, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 0, 0, ?)
+                """,
+                (
+                    envelope_id,
+                    metadata.run_id,
+                    observation_id,
+                    dte_bucket,
+                    horizon_label,
+                    horizon_minutes,
+                    encoded,
+                    self.claims_json,
+                ),
+            )
+            assert cursor.lastrowid is not None
+            return int(cursor.lastrowid)
+
     def finalise_quiet_observation(
         self,
         *,
@@ -3991,7 +4232,7 @@ class FrozenRecorderRepository:
         ],
         str,
     ]:
-        """Resolve V1 phase only from immutable aggregate boundary receipts."""
+        """Resolve V1 phase without making cross-vendor receipts an evidence gate."""
 
         with self.repository._connect() as connection:
             decisions = connection.execute(
@@ -4004,17 +4245,13 @@ class FrozenRecorderRepository:
             ).fetchall()
         by_kind = {str(row["receipt_kind"]): row for row in decisions}
         transfer = by_kind.get("transfer")
-        if transfer is None:
-            return "engineering_transfer", "engineering_transfer_pending"
-        transfer_decision = str(transfer["decision"])
-        transfer_last = transfer["cohort_last_session"]
-        if transfer_last is None or str(transfer_last) >= session.isoformat():
-            return "engineering_transfer", "engineering_transfer_pending"
-        if transfer_decision not in {
-            "opening_transfer_supported_without_recalibration",
-            "opening_transfer_supported_with_predictor_only_mapping",
-        }:
-            return "engineering_transfer", transfer_decision
+        transfer_decision = "cross_vendor_validation_not_configured"
+        if (
+            transfer is not None
+            and transfer["cohort_last_session"] is not None
+            and str(transfer["cohort_last_session"]) < session.isoformat()
+        ):
+            transfer_decision = str(transfer["decision"])
         development = by_kind.get("development")
         confirmation = by_kind.get("confirmation_start")
         if (
@@ -4762,8 +4999,8 @@ class FrozenRecorderRepository:
             )
             if prior_experiment_rows:
                 raise ValueError(
-                    "opening reversal V1.1 requires a fresh run so the "
-                    "20-session engineering transfer restarts"
+                    "opening reversal V1.1 requires a fresh run so its "
+                    "prospective experiment boundary remains distinct"
                 )
             return self._record_opening_reversal_activation_binding_v1(
                 connection,

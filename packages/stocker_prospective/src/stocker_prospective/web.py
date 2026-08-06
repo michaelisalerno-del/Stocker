@@ -48,6 +48,7 @@ from stocker_prospective.operational_logging import (
 from stocker_prospective.parity import FeatureParityError, load_feature_parity_report
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.replay_control import ReplayController, ReplayStartRequest
+from stocker_prospective.transfer import classify_cross_vendor_validation_status
 
 LOGGER = logging.getLogger("uvicorn.error.stocker_prospective.web")
 
@@ -96,14 +97,18 @@ def _parity_projection(config: ProspectiveConfig) -> dict[str, Any]:
             counts[item.parity_status] += 1
         return {
             "scoring_allowed": report.overall_scoring_allowed,
-            "blocker": report.overall_blocker,
+            "blocker": None,
+            "diagnostic_warning": report.overall_blocker,
+            "diagnostic_only": True,
             "counts": dict(counts),
             "report": report.model_dump(mode="json"),
         }
     except FeatureParityError as exc:
         return {
             "scoring_allowed": False,
-            "blocker": str(exc).split(":", 1)[0],
+            "blocker": None,
+            "diagnostic_warning": str(exc).split(":", 1)[0],
+            "diagnostic_only": True,
             "counts": {},
             "report": None,
         }
@@ -291,6 +296,9 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     validate_runtime_safety(config, object())
     store = ProspectiveReadStore(config.paths.database, run_id=config.runtime.run_id)
     operational_projection_cache = _OperationalProjectionCache(
+        ttl_seconds=config.web.operational_projection_cache_seconds
+    )
+    static_no_order_projection_cache = _OperationalProjectionCache(
         ttl_seconds=config.web.operational_projection_cache_seconds
     )
 
@@ -538,53 +546,64 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         response.headers.update(security_headers(request_id))
         return response
 
-    def no_order_safety_projection() -> dict[str, Any]:
-        forbidden_methods = set(FORBIDDEN_BROKER_SURFACE)
-        adapter_methods = set(dir(IBKRMarketDataAdapter))
-        route_safety = all(
-            not _path_exposes_forbidden_broker_resource(str(getattr(route, "path", "")))
-            and (
-                set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
-                or (
-                    str(getattr(route, "path", "")) in replay_control_paths
-                    and set(getattr(route, "methods", set()) or set()) == {"POST"}
+    def static_no_order_safety_projection() -> dict[str, Any]:
+        def load() -> dict[str, Any]:
+            forbidden_methods = set(FORBIDDEN_BROKER_SURFACE)
+            adapter_methods = set(dir(IBKRMarketDataAdapter))
+            route_safety = all(
+                not _path_exposes_forbidden_broker_resource(str(getattr(route, "path", "")))
+                and (
+                    set(getattr(route, "methods", set()) or set()) <= {"GET", "HEAD", "OPTIONS"}
+                    or (
+                        str(getattr(route, "path", "")) in replay_control_paths
+                        and set(getattr(route, "methods", set()) or set()) == {"POST"}
+                    )
                 )
+                for route in app.routes
+                if str(getattr(route, "path", "")).startswith("/api/")
             )
-            for route in app.routes
-            if str(getattr(route, "path", "")).startswith("/api/")
-        )
-        read_only = store.read_only_verification()
-        operational = store.recorder_operational_state(
-            now=datetime.now(UTC),
-            prospective_start_utc=config.runtime.prospective_start_utc,
-            thresholds=operational_thresholds(config),
-        )
+            read_only = store.read_only_verification()
+            checks = {
+                "risk_trading_enabled_false": config.risk.trading_enabled is False,
+                "web_has_no_broker_reference": not any(
+                    hasattr(app.state, name)
+                    for name in ("broker", "recorder", "adapter", "execution_client")
+                ),
+                "web_database_opened_read_only": bool(read_only["verified"]),
+                "http_order_routes_absent": route_safety,
+                "adapter_order_methods_absent": not bool(
+                    forbidden_methods.intersection(adapter_methods)
+                ),
+                "ibkr_read_only_configured": config.ibkr.read_only
+                and config.ibkr.expected_environment in {"read_only", "live_read_only", "paper"},
+                "ibkr_socket_loopback_only": ipaddress.ip_address(config.ibkr.host).is_loopback,
+                "runtime_order_surface_absent": route_safety
+                and not bool(forbidden_methods.intersection(adapter_methods)),
+            }
+            return {"checks": checks, "database": read_only}
+
+        return static_no_order_projection_cache.get(load)
+
+    def no_order_safety_projection(
+        *,
+        broker_state_mutation_count_zero: bool | None = None,
+    ) -> dict[str, Any]:
+        static = static_no_order_safety_projection()
+        if broker_state_mutation_count_zero is None:
+            operational = store.recorder_operational_state(
+                now=datetime.now(UTC),
+                prospective_start_utc=config.runtime.prospective_start_utc,
+                thresholds=operational_thresholds(config),
+            )
+            broker_state_mutation_count_zero = (
+                operational.conditions["broker_state_mutation_count_zero"] is True
+                if operational.run_id is not None
+                else config.runtime.source == "replay"
+                and replay_controller.status().broker_state_mutated is False
+            )
         checks = {
-            "risk_trading_enabled_false": config.risk.trading_enabled is False,
-            "web_has_no_broker_reference": not any(
-                hasattr(app.state, name)
-                for name in ("broker", "recorder", "adapter", "execution_client")
-            ),
-            "web_database_opened_read_only": bool(read_only["verified"]),
-            "http_order_routes_absent": route_safety,
-            "adapter_order_methods_absent": not bool(
-                forbidden_methods.intersection(adapter_methods)
-            ),
-            "ibkr_read_only_configured": config.ibkr.read_only
-            and config.ibkr.expected_environment in {"read_only", "live_read_only", "paper"},
-            "ibkr_socket_loopback_only": ipaddress.ip_address(config.ibkr.host).is_loopback,
-            "runtime_order_surface_absent": route_safety
-            and not bool(forbidden_methods.intersection(adapter_methods)),
-            "broker_state_mutation_count_zero": (
-                (
-                    operational.run_id is not None
-                    and operational.conditions["broker_state_mutation_count_zero"] is True
-                )
-                or (
-                    config.runtime.source == "replay"
-                    and replay_controller.status().broker_state_mutated is False
-                )
-            ),
+            **static["checks"],
+            "broker_state_mutation_count_zero": broker_state_mutation_count_zero,
         }
         return {
             **checks,
@@ -597,7 +616,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 ],
                 "external_ibkr_environment_verification": "not_externally_verifiable",
             },
-            "database": read_only,
+            "database": static["database"],
         }
 
     def operational_alerts(
@@ -646,18 +665,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
         parallel_credential_configured = bool(
             os.environ.get(config.parallel_validation.credential_status_env) == "1"
         )
-        parallel_blocker = (
-            "blocked_missing_eodhd_server_token"
-            if config.parallel_validation.enabled and not parallel_credential_configured
-            else None
+        transfer_projection = store.source_transfer_status_v0()
+        cross_vendor_validation_status = classify_cross_vendor_validation_status(
+            enabled=config.parallel_validation.enabled,
+            credential_configured=parallel_credential_configured,
+            valid_session_count=transfer_projection["valid_session_count"],
+            decision=transfer_projection["decision"],
+            latest_diagnostic_status=transfer_projection["latest_diagnostic_status"],
         )
         blocker_candidates = [
             *(item["blocker_code"] for item in runtime["blockers"]),
             *bundle["blockers"],
             *runtime_artifacts["blockers"],
-            parity["blocker"],
             ibkr_api["blocker"] if config.runtime.source == "ibkr" else None,
-            parallel_blocker,
             (None if operational.scientific_recording_valid else operational.reason_code),
         ]
         blockers = list(dict.fromkeys(str(blocker) for blocker in blocker_candidates if blocker))
@@ -696,6 +716,8 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "scope": "legacy_m1_diagnostic_not_frozen_m1c_runtime_gate",
                 "scoring_allowed": parity["scoring_allowed"],
                 "blocker": parity["blocker"],
+                "diagnostic_warning": parity["diagnostic_warning"],
+                "diagnostic_only": True,
                 "counts": parity["counts"],
             },
             "parallel_validation": {
@@ -704,8 +726,10 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "credential_configured": parallel_credential_configured,
                 "capture_delay_seconds": (config.parallel_validation.capture_delay_seconds),
                 "latest_capture": runtime["parallel_source_capture"],
-                "scoring_allowed": False,
-                "blocker": parallel_blocker,
+                "cross_vendor_validation_status": cross_vendor_validation_status,
+                "diagnostic_only": True,
+                "prospective_ibkr_evidence_allowed": True,
+                "blocker": None,
             },
             "previous_session_context": runtime["previous_session_context"],
             "last_completed_bar": runtime["last_completed_bar"],
@@ -886,78 +910,125 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     def dashboard_summary() -> dict[str, Any]:
         """Return only bounded, frequently changing primary-view projections."""
 
+        observed = datetime.now(UTC)
         with store.snapshot_transaction():
-            status = recorder_status_projection(include_gap_details=False)
-            runtime = store.runtime_projection()
-            universe_projection = universe_live()
+            status = store.dashboard_summary_v0(
+                now=observed,
+                prospective_start_utc=config.runtime.prospective_start_utc,
+                thresholds=operational_thresholds(config),
+            )
 
         artifacts = operational_artifacts()
         operational = status["operational"]
-        alert_codes = [item["stable_error_code"] for item in operational_alerts(operational)]
-        parallel_blocker = (
-            "blocked_missing_eodhd_server_token"
-            if config.parallel_validation.enabled
-            and os.environ.get(config.parallel_validation.credential_status_env) != "1"
-            else None
+        replay_status = replay_controller.status()
+        mutation_count_zero = bool(
+            operational.conditions["broker_state_mutation_count_zero"] is True
+            if operational.run_id is not None
+            else config.runtime.source == "replay" and replay_status.broker_state_mutated is False
         )
-        blocker_candidates = [
-            *(item["blocker_code"] for item in runtime["blockers"]),
+        no_order = no_order_safety_projection(broker_state_mutation_count_zero=mutation_count_zero)
+        static_alert_codes = [
             *artifacts["bundle"]["blockers"],
-            *status["runtime_artifact_verification"]["blockers"],
             artifacts["parity"]["blocker"],
             (artifacts["ibkr_api"]["blocker"] if config.runtime.source == "ibkr" else None),
-            parallel_blocker,
-            *alert_codes,
-            (
-                None
-                if status["no_order_checks"]["aggregate_no_order_verdict"]
-                else "NO_ORDER_INVARIANT_FAILED"
-            ),
         ]
-        blockers = list(dict.fromkeys(str(item) for item in blocker_candidates if item))
-        recorder_state = str(status["state"])
-        health_status = (
-            "blocked"
-            if blockers
-            else "healthy"
-            if recorder_state == "RECORDING_HEALTHY"
-            else "waiting"
-            if recorder_state in {"MARKET_CLOSED", "WAITING_FOR_PROSPECTIVE_START"}
-            else "degraded"
-        )
-        health_projection = {
-            "status": health_status,
-            "research_only": True,
-            "trading_status": "LIVE TRADING DISABLED",
-            "recorder": {
-                "mode": config.runtime.mode,
-                "run_id": status["run_id"],
-                "operational_status": recorder_state,
-                "operational": operational,
-            },
-            "blockers": blockers,
-            "no_order_path_verified": status["no_order_checks"]["aggregate_no_order_verdict"],
-            "no_order_checks": status["no_order_checks"],
+        alerts_by_code = {
+            str(item["blocker_code"]): {
+                "code": str(item["blocker_code"]),
+                "severity": str(item["severity"]),
+                "message": str(item["message"]),
+                "source": "recorder_projection",
+            }
+            for item in status["alerts"]
         }
+        for code in static_alert_codes:
+            if code:
+                alerts_by_code.setdefault(
+                    str(code),
+                    {
+                        "code": str(code),
+                        "severity": "warning",
+                        "message": str(code),
+                        "source": "startup_verification",
+                    },
+                )
+        for item in operational_alerts(operational):
+            code = str(item["stable_error_code"])
+            alerts_by_code.setdefault(
+                code,
+                {
+                    "code": code,
+                    "severity": str(item["severity"]),
+                    "message": code,
+                    "source": "operational_state",
+                },
+            )
+        if not no_order["aggregate_no_order_verdict"]:
+            alerts_by_code["NO_ORDER_INVARIANT_FAILED"] = {
+                "code": "NO_ORDER_INVARIANT_FAILED",
+                "severity": "fatal",
+                "message": "NO_ORDER_INVARIANT_FAILED",
+                "source": "no_order_verification",
+            }
+        timestamps = operational.timestamps
+        subscriptions = status["subscriptions"]
         return {
-            "summary_at_utc": datetime.now(UTC).isoformat(),
-            "health": health_projection,
-            "recorder": status,
-            "latest_checkpoints": {
-                "m1c": status["latest_checkpoint"],
-                "completed_bar": status["latest_completed_bar"],
-                "episode": status["latest_episode"],
+            "summary_at_utc": observed.isoformat(),
+            "run_id": status["run_id"],
+            "recorder": {
+                "state": operational.state.value,
+                "reason_code": operational.reason_code,
+                "heartbeat_at_utc": timestamps["process_heartbeat_at_utc"],
+                "latest_callback_received_at_utc": timestamps["latest_callback_received_at_utc"],
+                "latest_callback_durably_admitted_at_utc": timestamps[
+                    "latest_callback_durably_admitted_at_utc"
+                ],
+                "latest_inbox_acknowledgement_at_utc": timestamps[
+                    "latest_inbox_acknowledgement_at_utc"
+                ],
+                "callback_inbox": {
+                    "pending": status["pending_inbox_count"],
+                    "leased": status["leased_inbox_count"],
+                    "backlog": operational.inbox["backlog"],
+                },
+                "latest_completed_five_minute_bar": status["completed_bar"],
+                "latest_successful_checkpoint": status["checkpoint"],
+                "latest_episode": status["episode"],
             },
-            "current_universe": universe_projection,
-            "capacity": status["capacity"],
-            "current_budget": {
-                "current_usage": status["subscriptions"],
-                "current_recorder_usage": sum(status["subscriptions"].values()),
-                "detail_refresh_tier": "slow",
+            "ibkr": {
+                "connection_state": (
+                    None if status["connection"] is None else status["connection"]["state"]
+                ),
+                "connection": status["connection"],
+                "subscriptions": {
+                    "by_kind": subscriptions,
+                    "total": sum(subscriptions.values()),
+                },
             },
-            "replay": status["replay"],
-            "current_blockers": blockers,
-            "claims_boundary": claims_boundary(),
+            "alerts": list(alerts_by_code.values()),
+            "no_order": {
+                "aggregate_no_order_verdict": no_order["aggregate_no_order_verdict"],
+                "static_surface_verified": all(
+                    bool(value)
+                    for name, value in no_order.items()
+                    if name
+                    in {
+                        "risk_trading_enabled_false",
+                        "web_has_no_broker_reference",
+                        "web_database_opened_read_only",
+                        "http_order_routes_absent",
+                        "adapter_order_methods_absent",
+                        "ibkr_read_only_configured",
+                        "ibkr_socket_loopback_only",
+                        "runtime_order_surface_absent",
+                    }
+                ),
+                "broker_state_mutation_count_zero": no_order["broker_state_mutation_count_zero"],
+                "research_only": True,
+                "execution_enabled": False,
+                "order_routing": "disabled",
+            },
+            "replay": replay_status.model_dump(mode="json"),
         }
 
     @app.get("/api/opening-leader-continuation-v0")
@@ -977,9 +1048,31 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     @app.get("/api/source-transfer")
     def source_transfer() -> dict[str, Any]:
         aggregate = _json_artifact(config.paths.aggregate_transfer_report)
+        projection = store.source_transfer_status_v0()
+        credential_configured = bool(
+            os.environ.get(config.parallel_validation.credential_status_env) == "1"
+        )
+        validation_status = classify_cross_vendor_validation_status(
+            enabled=config.parallel_validation.enabled,
+            credential_configured=credential_configured,
+            valid_session_count=projection["valid_session_count"],
+            decision=projection["decision"],
+            latest_diagnostic_status=projection["latest_diagnostic_status"],
+        )
         return {
-            **store.source_transfer_status_v0(),
+            **projection,
             "aggregate": aggregate,
+            "market_data_source": "ibkr",
+            "historical_research_source": "eodhd",
+            "cross_vendor_validation_status": validation_status,
+            "cross_vendor_validation_status_code": (
+                "cross_vendor_validation_not_configured"
+                if validation_status == "not_configured"
+                else f"cross_vendor_validation_{validation_status}"
+            ),
+            "cross_vendor_validation_diagnostic_only": True,
+            "prospective_ibkr_evidence_allowed": True,
+            "recorder_blocking": False,
             "exact_vendor_bar_equality_required": False,
             "historical_decision": "blocked_insufficient_low_tail_support",
             "strategy_profitability_decision_allowed": False,
@@ -1131,6 +1224,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     def _virtual_ledgers_projection(
         *,
         opening_limit: int,
+        opening_leader_limit: int,
         quiet_limit: int,
         quiet_capture_limit: int,
     ) -> dict[str, Any]:
@@ -1164,6 +1258,19 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
                 "controls_included": False,
                 "long_option_candidates_included": False,
             },
+            "opening_leader": {
+                "ledger_scope": "opening_leader_option_strategy_accounting_v0",
+                "items": store.opening_leader_option_accounting_v0(
+                    limit=opening_leader_limit,
+                ),
+                "item_limit": opening_leader_limit,
+                "entry_observation": "E0",
+                "strategies": ["P20", "P30", "BPS20"],
+                "fill_convention": ("open_short_bid_long_ask_close_short_ask_long_bid"),
+                "executable_pnl_is_primary": True,
+                "greek_attribution_is_diagnostic_only": True,
+                "margin_is_observed_only": True,
+            },
             "ledgers_combined_for_analysis": False,
             "execution_claimed": False,
             "broker_positions_claimed": False,
@@ -1173,16 +1280,23 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
     @app.get("/api/virtual-ledgers")
     def virtual_ledgers(
         opening_limit: int = 200,
+        opening_leader_limit: int = 500,
         quiet_limit: int = 500,
         quiet_capture_limit: int = 50,
     ) -> dict[str, Any]:
         """Expose bounded segregated evidence ledgers without broker semantics."""
 
-        requested_limits = (opening_limit, quiet_limit, quiet_capture_limit)
+        requested_limits = (
+            opening_limit,
+            opening_leader_limit,
+            quiet_limit,
+            quiet_capture_limit,
+        )
         if any(limit < 1 or limit > 1000 for limit in requested_limits):
             raise HTTPException(status_code=422, detail="virtual_ledger_limit_out_of_range")
         return _virtual_ledgers_projection(
             opening_limit=opening_limit,
+            opening_leader_limit=opening_leader_limit,
             quiet_limit=quiet_limit,
             quiet_capture_limit=quiet_capture_limit,
         )
@@ -1315,6 +1429,7 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "shadow": shadow_outcomes,
             "virtual_ledgers": lambda: _virtual_ledgers_projection(
                 opening_limit=25,
+                opening_leader_limit=50,
                 quiet_limit=50,
                 quiet_capture_limit=25,
             ),
@@ -1404,5 +1519,11 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "ibkr_connections_attempted": 0,
             "claims_boundary": claims_boundary(),
         }
+
+    # Warm nearly-static verification only after every route is registered.
+    # Configuration or release changes recreate the application; otherwise the
+    # small caches refresh on the configured TTL.
+    operational_artifacts()
+    static_no_order_safety_projection()
 
     return app

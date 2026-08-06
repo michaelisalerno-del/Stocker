@@ -90,20 +90,25 @@ GET routes only.
 
 The frozen M1C mode loads and hash-verifies the causal feature manifest,
 preprocessing, coefficients, intercept, stock/checkpoint levels, and frozen
-thresholds. Runtime parity, causal inputs, and completed-bar compatibility
-fail closed for scientific evidence. A pending completed-bar compatibility
-receipt does not suppress the engineering shadow projection: when the other
-causal inputs are present, the recorder may persist the frozen score, arm
-bounded Level I acquisition, and mimic option observations, while recording
-`scientific_recording_not_authorized` and forcing all descendant option
-evidence to non-scientific. The first 20 valid sessions remain
-`engineering_transfer` evidence only; they are a source-transfer gate, not a
-ban on shadow capture. The later EODHD reconstruction monitors ranking,
-threshold meaning, signal frequency, and episode identity without requiring
-exact vendor OHLC equality. Optional capacity exhaustion degrades, queues,
-reduces, or records a skip and does not stop Class 0–1 M1C streams. Only
-`critical_budget_unavailable` blocks signal capture. The historical decision
-remains `blocked_insufficient_low_tail_support`.
+thresholds. Runtime parity, causal inputs, completeness, and freshness still
+fail closed for scientific evidence. IBKR is the prospective live-data source;
+an otherwise valid observation is usable from the first complete session as
+**prospective evaluation of the frozen implementation using IBKR market
+data**. This makes no claim that IBKR bars are identical to historical EODHD
+bars, and source identity remains explicit on records and reports.
+
+The earlier first-20-session `engineering_transfer` authorization gate is
+superseded for new evidence. Its immutable historical rows and receipts remain
+readable and retain their original non-scientific labels. EODHD reconstruction
+is now an optional, non-blocking cross-vendor diagnostic for timestamp/missing
+bar incidence, return and probability correlation/bias, tail membership, and
+episode timing; exact vendor OHLCV equality is not required. A missing token,
+too few sessions, mismatch, or failed diagnostic cannot block IBKR recording,
+episode creation, option capture, outcomes, ledgers, or performance reporting.
+Optional capacity exhaustion degrades, queues, reduces, or records a skip and
+does not stop Class 0–1 M1C streams. Only `critical_budget_unavailable` blocks
+signal capture. The historical decision remains
+`blocked_insufficient_low_tail_support`.
 
 M1C Tail Phase V1 is an additional logging-only projection at each frozen
 checkpoint. It records strict stock-session `FIRST_ENTRY`, `PERSISTENT`,
@@ -122,16 +127,27 @@ The external Group-O session-package producer must populate
 observation session and receipt hashes already carried by Group O. This field
 is optional for recorder continuity: absent or invalid values produce an
 auditable `UNKNOWN_INCOMPLETE` consumed bucket and never make Group O or the
-M1C universe ineligible. The first transfer sessions must verify this external
-producer handoff before treating prospective consumed buckets as complete.
+M1C universe ineligible. Optional cross-vendor sessions may diagnose this
+producer handoff, but they do not authorize the IBKR observation.
 
-During the first 20 `engineering_transfer` sessions, Tail Phase logging may
-verify session reset, checkpoint chronology, missing-checkpoint handling,
-threshold equality, prior-close denominator identity, timestamps, episode
-linkage, and feed gaps. Those sessions may not optimise phase, consumption,
-direction, microstructure, or option-selection rules. Optional Tail Phase
-input exhaustion records `UNKNOWN_INCOMPLETE` and never stops the universe
-recorder.
+The producer derives this value while building every new package. A valid
+pre-existing package that omitted only this derived value may receive a
+strictly pre-open, hash-linked
+`missing_implied_movement_source_correction` revision. The base package stays
+byte-for-byte unchanged, all prior context fields and receipt provenance are
+retained, and the revision self-binds each corrected value to its exact ATM IV
+source and the frozen derivation formula. It cannot change the cohort, features,
+chronology, or eligibility. Packages and revisions at or after signal-session
+open remain immutable evidence and are not retrospectively relabelled.
+
+Historical first-20 `engineering_transfer` rows may still verify session reset,
+checkpoint chronology, missing-checkpoint handling, threshold equality,
+prior-close denominator identity, timestamps, episode linkage, and feed gaps;
+their original labels are not rewritten. New IBKR observations use the normal
+prospective phase immediately. No prospective session may optimise phase,
+consumption, direction, microstructure, or option-selection rules. Optional
+Tail Phase input exhaustion records `UNKNOWN_INCOMPLETE` and never stops the
+universe recorder.
 
 The official `ibapi` dependency remains absent from the repository and
 immutable model bundle. A server release may install it only from an
@@ -160,7 +176,8 @@ it never downloads or installs broker code.
   - `GET /api/config/public`
   - `GET /api/recorder/status`
   - `GET /api/recorder/capabilities`
-  - `GET /api/dashboard-snapshot`
+  - `GET /api/dashboard/summary`
+  - `GET /api/dashboard-snapshot` (legacy/manual full snapshot)
   - `GET /api/recorder/session-reports`
   - `GET /api/market-data-budget`
   - `GET /api/source-transfer`
@@ -263,27 +280,29 @@ in exact model order:
 
 | Status | Count | Runtime consequence |
 | --- | ---: | --- |
-| `incompatible` | 3 | IBKR volume cannot replace the EODHD historical activity proxy |
-| `missing` | 32 | Live completed-bar H0/loop feature construction is not yet authorized |
-| `requires_parallel_validation` | 22 | IBKR versus EODHD bar construction is not yet verified |
-| `exact` / `verified_equivalent` | 0 | No real scoring permission exists yet |
+| `incompatible` | 3 | Legacy M1 source-semantics diagnostic only |
+| `missing` | 32 | Legacy M1 feature-availability diagnostic only |
+| `requires_parallel_validation` | 22 | Optional cross-vendor diagnostic remains incomplete |
+| `exact` / `verified_equivalent` | 0 | No claim of exact vendor equivalence |
 
-Overall real-scoring blocker:
+Superseded legacy diagnostic warning:
 `blocked_feature_source_semantics_mismatch`.
 
-The server may record source-labelled IBKR bars and quotes once a verified
-bundle/universe and official client are installed, but it may not label an
-altered reconstruction as frozen M1.
+This artifact cannot block the frozen M1C prospective recorder. The server may
+record source-labelled IBKR bars and quotes once the independent M1C runtime,
+bundle/universe, quality, and official-client checks pass, but it may not label
+an altered reconstruction as frozen M1 or claim vendor equality.
 
 The append-only EODHD parallel path retrieves the latest due XNYS session after
 a fixed two-hour delay, records every returned five-minute bar as
 `parallel_validation_only`, and never exposes those rows to the scorer. The
-pre-observation gate is
-`configs/prospective/parallel-feature-validation-v1.json`: 20 complete
-sessions, all 20 anchor symbols, no outcome fields, no automatic promotion, and
-an independent signed parity audit before any future run can use a revised
-parity report. EODHD is an API request source, not a daemon that must remain
-running.
+historical diagnostic contract is
+`configs/prospective/parallel-feature-validation-v1.json`: its 20-session
+aggregate may still be generated for comparison, with all 20 anchor symbols
+and no outcome fields. It is no longer a pre-observation gate, creates no live
+calibration candidate, performs no automatic promotion, and cannot authorize
+or invalidate IBKR evidence. EODHD is an optional API request source, not a
+daemon that must remain running.
 
 ## Dynamic previous-session context
 
@@ -364,14 +383,18 @@ prediction receipt and its causal-barrier, activation, promotion, and strict
 primary-pair evidence. It projects quantity one of the predicted 1DTE leg.
 Engineering-shadow rows are labelled `scientific_eligible=false`; the
 separate scientific-eligible view additionally requires a scientifically
-valid parent episode. Thus the recorder can mimic the frozen protocol during
-the transfer gate without admitting those outcomes to scientific analysis.
+valid parent episode. Historical transfer-gate rows retain those labels; new
+otherwise-valid IBKR episodes do not wait for cross-vendor authorization.
 The opposite leg remains control evidence. A row stays `SCHEDULED` before
 contract discovery and `CAPTURING` while the exact two-line call/put evidence
 is incomplete. It becomes `CLOSED` only when both same-strike primary outcomes
 are complete; its virtual entry is the first valid live ask and its frozen
 15-minute exit is the first valid live bid at or after the horizon. Missing
 or invalid evidence produces `INVALID`, never a synthetic zero or fill.
+An ineligible or `ABSTAIN` opening-reversal receipt remains durable audit
+evidence but does not reserve the C6 checkpoint or suppress the separate quiet
+and generic capture paths. Only an eligible, non-abstaining opening-reversal
+candidate receives that checkpoint priority.
 
 The quiet-state ledger is a different projection with a different identity.
 It contains only `quiet_bottom_10` observations and the frozen short-premium
@@ -385,6 +408,23 @@ latest durably persisted bid and ask. Those latest quotes are diagnostics, not
 fills; a finalized outcome freezes the exact per-leg entry and exit bid/ask,
 timestamps, conservative quote side, expiry, strike, DTE, and multiplier used
 to calculate its virtual P&L.
+
+Quiet checkpoint eligibility uses the latest valid primary IBKR Level-I quote
+at or before the completed five-minute boundary. The lookup is deterministic
+over a bounded per-symbol history; a later callback cannot replace the causal
+boundary quote merely because checkpoint processing is delayed. The unchanged
+two-second freshness limit is measured from the selected quote to the boundary,
+not to processing time. The selected event ID, quote timestamp, age, and policy
+are persisted with the checkpoint. Missing, invalid, delayed/non-primary, or
+out-of-window evidence remains fail-closed.
+
+The frozen stock universe plus VTI has protected always-on Level-I as well as
+completed-bar subscriptions; sector proxies remain bar-only. Startup checks
+the whole baseline against per-kind and total line budgets before making any
+request and fails clearly if it cannot protect every required stream. Quiet
+entry at the checkpoint boundary has no positive-width `T_to_entry` interval,
+so that empty diagnostic window is omitted while all real pre-entry and
+post-entry windows remain recorded.
 
 The API returns these as separate, bounded collections and publishes no
 combined total. The main dashboard snapshot uses smaller limits than the
@@ -421,6 +461,34 @@ columns remain only for migration compatibility and are not written by this
 runtime. Migration `0004` adds symbol/permanent-contract identity to underlying
 quotes. Migration application and its registry insert are one SQLite
 transaction.
+
+Option strategy finalization has a small executable-accounting core. It records
+exact leg identities and quantities, ask-side buys/bid-side sells at entry,
+bid-side sells/ask-side buys at exit, multiplier, commissions and configured
+fees, gross and net executable P&L, quote times/ages/status/gaps, maximum
+adverse excursion/drawdown, and research-only/no-order labels. It chooses one
+primary denominator: premium paid for a long option, cash-secured capital for a
+short put, or maximum defined risk for a spread. Margin ROI is secondary and
+is `MARGIN_UNAVAILABLE` unless a reliable observed IBKR estimate exists. Raw
+IBKR Greeks remain separated by bid, ask, last, and model source; one source is
+never filled from another. Taylor-path attribution and model-price residuals
+are diagnostic-only post-processing and are not required for finalization.
+
+Opening Leader runtime V10 (superseded by V11) applied the same small accounting core to its P20,
+P30, and BPS20 records. Exact leg identities are frozen from E0 and may not be
+substituted at later marks; later captures explicitly request the E0-frozen
+conIds even if the underlying moves. The derived rows are append-only and appear in a
+separate research ledger; they do not create account, position, execution, or
+order state. A single post-selection Level I subscription supplied the chosen
+underlying quote. Because the symbol cannot be known before causal ranking,
+underlying quote freshness was treated as an outcome/readiness check rather than an input
+to signal eligibility. V11 supersedes that assumption for quiet-state evidence:
+the contractually required universe Level-I streams are protected at startup,
+and a fresh causal boundary quote is again an eligibility input. Timely callback admission remains required; only the
+old 420-second wall-clock processing cutoff becomes a latency diagnostic.
+Actual E0 remains strictly after the immutable signal receipt, so callback
+recovery cannot backdate an entry or rewrite an earlier failure.
+
 Migration `0005` records current active/pending/cancelling lines, request rate,
 waiting/rejected signals, and reserved capacity for the separate web process.
 Migration `0011` adds nullable M1C Tail Phase V1 checkpoint and episode fields
@@ -447,6 +515,14 @@ changing any source evidence row. Migration `0020` separates V1.1 capture
 eligibility from scientific eligibility. It permits an engineering-shadow
 episode to record only the same primary 1DTE call/put pair while the strict
 scientific projection additionally requires a scientifically valid parent.
+Migration `0029` separated nonblocking checkpoint diagnostics from scientific
+rejection reasons under the now-superseded post-selection-feed assumption.
+Migration `0030` adds causal boundary-quote event/timestamp/age/policy audit
+columns and restores fail-closed quote eligibility. It does not update any
+existing checkpoint. Instead, a separate
+`non_prospective_derived_instrumentation_audit` table records pre-migration
+stale classifications affected by the mutable-latest-quote defect; those rows
+cannot create observations or authorize recomputation.
 
 Online backups use SQLite's backup API, run `quick_check`, hash the resulting
 file, and write an adjacent manifest. Prospective observations and backups have
@@ -646,20 +722,28 @@ remain broker-isolated with zero IBKR connections and no broker mutation.
 Browser refreshes are split into explicit tiers:
 
 - fast, every 15 seconds: one `GET /api/dashboard/summary` request containing
-  operational health, recorder status, latest checkpoints, current universe,
-  compact capacity, replay status, and blockers;
+  only summary/run identity, recorder state and heartbeat, callback
+  receive/admit/acknowledge times, pending/leased inbox counts, latest completed
+  bar/checkpoint/episode, IBKR connection and subscription counts, one compact
+  alert list, lightweight no-order state, and replay state;
 - slow, every 90 seconds and only for the visible screen: recent episode
-  indexes, quiet-state summaries, budget details, capabilities, or
-  session-quality summaries;
+  indexes, current universe, quiet-state summaries, budget details,
+  capabilities, or session-quality summaries;
 - manual/very slow, every 300 seconds, on screen activation, or on explicit
   refresh: audit history, reports, concentration/source-transfer history,
   virtual ledgers, and completed shadow outcomes.
 
-The scheduler permits only one refresh generation at a time. An explicit
-refresh aborts and supersedes older work, hidden tabs pause, and episode
-detail loads only on the relevant screen, selection, or explicit refresh.
-The busiest scheduled screen is 6.34 requests per minute per visible tab;
-two tabs are approximately 12.67 requests per minute, below the example
+The fast route performs no Parquet reads, report-directory enumeration,
+source-transfer history parsing, full universe materialization, runtime
+artifact reconstruction, or per-request route/adapter introspection. Static
+safety, bundle, parity, and provenance checks are warmed at application startup
+and retained in an explicit five-minute TTL cache; dynamic recorder state is
+not cached. The scheduler permits only one refresh generation at a time. An
+explicit refresh aborts and supersedes older work, hidden tabs pause, the fast
+summary paints before detail requests, and episode detail loads only on the
+relevant screen, selection, or explicit refresh.
+The busiest scheduled screen is 7.00 requests per minute per visible tab;
+two tabs are approximately 14.00 requests per minute, below the example
 240-request limit. The legacy full snapshot route is not scheduled.
 
 `fresh_episode` is not shorthand for an episode ID. The current run, current

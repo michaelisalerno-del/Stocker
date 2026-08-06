@@ -172,18 +172,18 @@ enter the virtual environment.
 Recheck the official download page at install time:
 <https://interactivebrokers.github.io/>.
 
-Do not run `pip install ibapi` from a package registry. On 2026-07-25, Python
-was provided in the official **Latest** Mac/Unix archive. The first verified
-server archive is `twsapi_macunix.1048.01.zip`, which contains
-`API_Version=10.48.01` and installs `ibapi==10.48.1`. Its expected SHA-256 is
-`0446c403cdfd3a059685c5e11814b32e0b811fdf5e1f68564f8e08b655e49547`.
+Do not run `pip install ibapi` from a package registry. On 2026-08-03, Python
+was provided in the official **Latest** Mac/Unix archive. The current verified
+server archive is `twsapi_macunix.1049.01.zip`, which contains
+`API_Version=10.49.01` and installs `ibapi==10.49.1`. Its expected SHA-256 is
+`f5d31e05f63be0d0fddc13ea8267c3a1625b0783baa17a44832e9151f8402b27`.
 
 The operator must accept IBKR's licence and download the archive manually.
 Copy it directly into restricted server staging:
 
 ```bash
-scp /path/to/twsapi_macunix.1048.01.zip \
-  root@SERVER:/var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+scp /path/to/twsapi_macunix.1049.01.zip \
+  root@SERVER:/var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
 ```
 
 Then verify it and install it into the **staged release** before that release is
@@ -191,18 +191,19 @@ made immutable or promoted:
 
 ```bash
 sudo chown root:stocker \
-  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
 sudo chmod 0640 \
-  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
-sha256sum /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
+sha256sum /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip
 IBKR_EXTRACT_DIR="$(
-  sudo -u stocker mktemp -d /var/lib/stocker/ibkr-api-extract.XXXXXX
+  sudo -u stocker mktemp -d \
+    /var/lib/stocker/secure-transfer/ibkr-api-extract.XXXXXX
 )"
 sudo -u stocker python3.12 -m zipfile -e \
-  /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip \
+  /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip \
   "$IBKR_EXTRACT_DIR"
 cat "$IBKR_EXTRACT_DIR/IBJts/API_VersionNum.txt"
-sudo -u stocker uv pip install \
+sudo -u stocker uv --no-config pip install \
   --python /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/python \
   "$IBKR_EXTRACT_DIR/IBJts/source/pythonclient"
 sudo -u stocker rm -rf -- "$IBKR_EXTRACT_DIR"
@@ -222,14 +223,14 @@ IBKR_PACKAGE_ROOT="$(
 )"
 sudo /opt/stocker/releases/REPLACE_WITH_GIT_COMMIT/.venv/bin/stocker-prospective \
   ibkr-api register \
-  --archive /var/lib/stocker/secure-transfer/twsapi_macunix.1048.01.zip \
+  --archive /var/lib/stocker/secure-transfer/twsapi_macunix.1049.01.zip \
   --installed-package-root "$IBKR_PACKAGE_ROOT" \
-  --provenance /var/lib/stocker/ibkr-api/provenance/10.48.1.json \
+  --provenance /var/lib/stocker/ibkr-api/provenance/10.49.1.json \
   --operator REPLACE_WITH_OPERATOR_ID
 sudo chown root:stocker-readers \
-  /var/lib/stocker/ibkr-api/provenance/10.48.1.json
-sudo chmod 0640 /var/lib/stocker/ibkr-api/provenance/10.48.1.json
-sudo ln -s provenance/10.48.1.json \
+  /var/lib/stocker/ibkr-api/provenance/10.49.1.json
+sudo chmod 0640 /var/lib/stocker/ibkr-api/provenance/10.49.1.json
+sudo ln -s provenance/10.49.1.json \
   /var/lib/stocker/ibkr-api/active-provenance.json.next
 sudo mv -Tf /var/lib/stocker/ibkr-api/active-provenance.json.next \
   /var/lib/stocker/ibkr-api/active-provenance.json
@@ -492,6 +493,9 @@ sudo install -o root -g root -m 0755 \
 sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/verify-ibgateway-daily-readiness.sh \
   /usr/local/libexec/stocker-verify-ibgateway-daily-readiness
+sudo install -o root -g root -m 0644 \
+  /opt/stocker/current/deploy/scripts/verify-recorder-session-readiness.py \
+  /usr/local/libexec/stocker-verify-recorder-session-readiness.py
 sudo install -o root -g root -m 0755 \
   /opt/stocker/current/deploy/scripts/run-ibgateway-loopback-proxy.sh \
   /usr/local/libexec/stocker-ibgateway-loopback-proxy
@@ -504,6 +508,8 @@ sudo install -o root -g root -m 0644 \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-loopback-proxy.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.service \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway-daily-readiness.timer \
+  /opt/stocker/current/deploy/systemd/stocker-recorder-session-readiness.service \
+  /opt/stocker/current/deploy/systemd/stocker-recorder-session-readiness.timer \
   /opt/stocker/current/deploy/systemd/stocker-ibgateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -511,6 +517,7 @@ sudo /usr/local/libexec/stocker-install-ibgateway-loopback-boundary
 sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo systemctl enable stocker-ibgateway-loopback-proxy.socket
 sudo systemctl enable --now stocker-ibgateway-daily-readiness.timer
+sudo systemctl enable --now stocker-recorder-session-readiness.timer
 sudo systemctl enable --now stocker-ibgateway.service
 ```
 
@@ -563,6 +570,13 @@ does not trigger a restart.
 The read-only readiness timer checks the authenticated upstream port at 23:46
 UTC, retrying for up to two minutes without starting, stopping, or restarting
 Gateway. A weekly broker reset may still require manual authentication.
+That post-restart probe proves only socket availability. A separate weekday
+market-session readiness timer starts at 09:34 America/New_York and fails unless
+the recorder has exactly 21 active required Level-1 subscriptions, 28 active
+required bar subscriptions, a valid live quote no older than two seconds, and
+two advancing slowest-required five-minute boundaries. It opens SQLite in
+read-only/query-only mode and never contacts an order, account, or position
+surface.
 
 Verify that the upstream port is firewall-restricted, the Stocker endpoint is
 loopback-only, and VNC remains private:
@@ -733,9 +747,9 @@ Before first prospective start, set:
 - measured or API-observed market-data capacity, externally consumed lines,
   a protected future-trading reserve, and a request rate no greater than half
   the configured line budget;
-- context-signing secret in the environment file; and
-- `parallel_validation.enabled: true` for the required first-20-session EODHD
-  source-transfer comparison; and
+- context-signing secret in the environment file;
+- leave `parallel_validation.enabled: false` unless the optional EODHD
+  cross-vendor diagnostic is intentionally operated; and
 - optional web auth token only when `authentication_enabled: true`.
 
 Keep these server paths in both `/etc/stocker/stocker.env` and the
@@ -768,27 +782,30 @@ Replace the example values with the account/TWS allowances actually observed
 at deployment. Never reduce the 12-line future-trading reserve to admit
 neutral controls, alternate DTEs, outer strikes, tick-by-tick, or depth. On
 startup inspect `ibkr_runtime_capacity_manifest.json`; the always-on target is
-20 stock bar streams plus only required proxies. Level II is disabled during
-the 20-session engineering-transfer phase and remains optional afterward. The
-recorder enforces the resolved historical-bar request allowance as a rolling
-window during startup and reconnect restoration.
+the frozen stock bar streams plus only required proxies, together with the
+protected Level-I streams required by the frozen quiet contract (the stock
+universe plus VTI). Startup fails preflight rather than silently omitting a
+required Level-I line. Level II remains optional and disabled by default;
+enabling it does not change scientific eligibility. The recorder enforces the
+resolved historical-bar request allowance as a rolling window during startup
+and reconnect restoration.
 
-The 20-session gate controls whether an observation may be scientific
-evidence; it does not disable engineering shadow capture. During
-`engineering_transfer`, completed frozen checkpoints may populate Universe
-Tape and arm bounded Level I for low/high arming candidates. The checkpoint,
-quiet observation, option allocation, outcome, and virtual-ledger descendants
-must remain explicitly non-scientific until both the source-transfer phase and
-all runtime scientific prerequisites pass. Never clear
-`scientific_recording_not_authorized` by editing the database or a receipt.
+IBKR is the prospective live-data source. An otherwise valid, complete IBKR
+session is usable from the first session as **prospective evaluation of the
+frozen implementation using IBKR market data**. This does not claim that IBKR
+bars are identical to historical EODHD bars. Source identity remains explicit
+on evidence and reports. The earlier mandatory 20-session
+`engineering_transfer` authorization gate is superseded; its existing rows and
+receipts remain immutable historical records. Runtime parity, completeness,
+freshness, gap, artifact, and no-order checks still fail closed on their own
+merits.
 
 Put the token only in `/etc/stocker/stocker.env`:
 
 ```dotenv
-# Required for the frozen activity baseline, D-1 Group O preparation, and
-# source-transfer capture. Set the value with
-# sudoedit; never put a real token in this runbook or a shell command.
-EODHD_API_TOKEN=REPLACE_IN_EDITOR
+# Optional: set only when parallel_validation.enabled is true for the
+# diagnostic. Never put a real token in this runbook or a shell command.
+EODHD_API_TOKEN=
 ```
 
 Put only its non-secret status projection in
@@ -800,20 +817,33 @@ STOCKER_EODHD_TOKEN_CONFIGURED=0
 
 Put the context-signing secret only in `stocker.env`; never expose it to the web
 process. Put an optional built-in web-auth token only in `stocker-web.env`.
-Put the EODHD token only in `stocker.env`; the web process receives only a
-boolean `credential_configured` projection. Set
+If the optional diagnostic is enabled, put the EODHD token only in
+`stocker.env`; the web process receives only a boolean
+`credential_configured` projection. Set
 `STOCKER_EODHD_TOKEN_CONFIGURED=1` in `stocker-web.env` only after the token is
-present in `stocker.env`; otherwise leave it `0`. EODHD does not run as a
-separate service. The recorder makes bounded requests after the session and
-stores source-labelled evidence that is permanently ineligible for scoring.
+present in `stocker.env`; otherwise leave it `0`. A value of `0` projects the
+neutral `cross_vendor_validation_not_configured` diagnostic and is not a
+recorder blocker. EODHD does not run as a separate service. When enabled, the
+recorder makes bounded requests after the session and stores source-labelled
+diagnostic evidence that is permanently ineligible for scoring.
 Never put IBKR username, password, or 2FA material in any Stocker file. Stocker
 has no fields for them.
 
 ### Group O exact-chain publication and pre-signal recovery
 
+Group O is a separately frozen previous-session context input, not the
+IBKR-versus-EODHD transfer diagnostic. Prepare its signed exact-chain package
+before recorder startup and let the pre-adapter verifier fail closed if it is
+absent or invalid. The dedicated
+`scientific-inputs recover-group-o-exact-chain-v2` workflow may use EODHD only
+for that protected context recovery. A missing EODHD credential during later
+best-effort preparation is recorded as a preparation error and does not turn
+cross-vendor comparison into a scientific authorization gate.
+
 An EODHD HTTP 200 response is not sufficient to finalize Group O context. Every
 frozen cohort symbol must have at least one canonical exact-session option row.
-If any symbol has zero canonical rows, the recorder writes an immutable
+If any symbol has zero canonical rows, the separate preparation workflow
+writes an immutable
 `pending_exact_chain` attempt receipt under:
 
 ```text
@@ -840,6 +870,17 @@ signal session, and exact D-1 observation identity cannot change. The loader
 rejects a revision created at or after the exact XNYS signal-session open. This
 permits delayed D-1 publication before a future signal while prohibiting
 same-session or retrospective eligibility changes.
+
+New Group-O packages also derive
+`previous_close_implied_movement_15m` from the exact prior-session ATM IV using
+the frozen 15-minute expected-absolute-move formula. If an otherwise valid
+pre-existing package omitted only that derived value, preparation may append a
+separately labelled `missing_implied_movement_source_correction` before the
+signal-session open. It retains every frozen context field and all earlier
+source receipts, self-binds the exact ATM IV used by the frozen formula, and
+never edits the base package or any already-open session. An ineligible or
+`ABSTAIN` opening-reversal receipt remains visible for audit but does not
+suppress C6 quiet/generic capture.
 
 For the audited Friday 2026-07-31 source-publication recovery targeting Monday
 2026-08-03, stop the recorder and run the dedicated pre-adapter command from
@@ -892,6 +933,93 @@ receipt, or a revision. A missing or invalid chain remains fail-closed for M1C.
 Opening Leader Continuation V0 treats M1C as context only and continues to obey
 its independently signed rank-selection contract. None of these files enables
 orders or changes the record-only runtime mode.
+
+### Opening Leader runtime V10 supersession
+
+Runtime V10 supersedes two operational assumptions recorded in the original
+Opening Leader package documentation. The 420-second signal-capture deadline is
+now a processing-latency diagnostic, not a scientific failure boundary, and the
+selected rank-1 symbol receives exactly one replaceable post-selection Level I
+subscription. The original package and every earlier receipt remain immutable;
+V10 records this semantic change in a new append-only deployment receipt.
+
+Selection still uses only completed causal bars admitted by the nominal
+deadline. A delayed callback worker or restart may project those timely inputs
+and complete the receipt later, but genuinely late causal rank inputs fail.
+The receipt records processing delay and E0 must be a strictly later quote than
+the immutable receipt time. There is no reconstructed or backfilled entry.
+Inputs or a quote that remain unresolved at end-of-session reconciliation fail
+explicitly. A failure already recorded by an earlier runtime, including a
+prior C6 deadline failure, is never rewritten or promoted after the fact.
+
+Opening Leader option evidence freezes the exact P20, P30, and BPS20 leg
+identities at E0, requests those same conIds at later observations, and never
+substitutes a new spot-band contract. Its
+segregated ledger uses executable bid/ask P&L after configured costs as the
+primary result. Missing Greeks remain diagnostic, and absent reliable observed
+margin leaves margin ROI unavailable while cash-secured or defined-risk ROI
+remains available. This path is research-only: it has no account, position,
+execution, order, buy, or sell surface and cannot route an order.
+
+### Quiet Options runtime V11 supersession
+
+Runtime V11 supersedes V10's post-selection Level-I assumption for Quiet
+Options. Before bars are started, recorder preflight must be able to protect
+one live Level-I stream for every frozen stock plus VTI and one completed
+five-minute-bar stream for every stock and proxy. Sector proxies remain
+bar-only. If either the per-kind limits or the total research-line budget is
+insufficient, startup exits with `critical_budget_unavailable` instead of
+running a permanently ineligible recorder. Do not work around that failure by
+raising `maximum_quote_age_seconds`, reducing the frozen universe, or removing
+reserved/safety capacity.
+
+At a quiet checkpoint, the recorder selects the latest valid quote at or before
+`trigger_end` from its bounded per-symbol history. Freshness remains two
+seconds and is calculated against `trigger_end`; processing time is irrelevant.
+A T+9 quote therefore cannot overwrite a valid T-1 boundary quote when the
+worker completes at T+10. Missing, invalid, stale, or non-primary market data
+still rejects the checkpoint. Each new quiet checkpoint persists the selected
+event ID, timestamp, age, and
+`latest_valid_at_or_before_checkpoint_boundary_v0` policy.
+
+Migration `0030` never updates a pre-existing prospective checkpoint. It
+snapshots affected pre-fix stale classifications into the separate
+`quiet_quote_instrumentation_defect_*_v0` audit dataset with recomputation and
+observation creation disabled. The originally reported 320 rows, plus any
+additional pre-migration classifications exposed to the same defect, remain
+exactly as first recorded; do not relabel them or use the audit dataset as
+prospective evidence.
+Verify the snapshot after migration with read-only SQL:
+
+```sql
+SELECT affected_checkpoint_count, dataset_scope,
+       original_evidence_modified, recomputation_authorized,
+       may_create_quiet_observation
+FROM quiet_quote_instrumentation_defect_v0;
+
+SELECT COUNT(*)
+FROM quiet_quote_instrumentation_defect_checkpoint_v0;
+```
+
+For a new checkpoint, inspect the causal selection without consulting the
+mutable current quote:
+
+```sql
+SELECT symbol, session_date, checkpoint, eligible,
+       selected_underlying_quote_timestamp_utc,
+       selected_underlying_quote_age_seconds,
+       underlying_quote_selection_policy,
+       data_quality_flags_json
+FROM quiet_state_checkpoint_v0
+ORDER BY id DESC
+LIMIT 20;
+```
+
+The bottom-10 threshold remains `0.135896965695626`. A probability above it,
+including IREN at `0.157624`, is not a trigger and must not be forced. A valid
+crossing creates the immutable quiet observation and schedules bounded shadow
+option capture. The system remains research/shadow-only, read-only at IBKR,
+and has no order-capable API surface.
 
 Before the first recorder start, create the immutable frozen activity baseline:
 
@@ -977,10 +1105,11 @@ recorder generations, and operational incidents in the same checked SQLite
 backup boundary. Startup fails closed if the database contains a migration
 newer than the installed application supports.
 
-Migration `0020_opening_reversal_shadow_capture_v1` keeps the 20-session and
-runtime-verification gates scientific: engineering-shadow V1.1 episodes may
-capture the frozen primary 1DTE call/put pair, but their ledger rows remain
-`scientific_eligible=false` and cannot enter the strict scientific view.
+Migration `0020_opening_reversal_shadow_capture_v1` historically encoded the
+then-current 20-session authorization gate. That gate is superseded for new
+IBKR prospective observations; existing engineering-shadow rows remain
+unchanged. Runtime verification and per-observation quality checks continue to
+control eligibility.
 
 Migration `0021_opening_reversal_activation_run_binding_v1` separates
 operational run lineage from immutable V1/V1.1 activation identity. It
@@ -1049,7 +1178,8 @@ From the server:
 
 ```bash
 curl --fail --silent http://127.0.0.1:8765/api/health | jq .
-curl --fail --silent http://127.0.0.1:8765/api/dashboard-snapshot | jq .
+curl --fail --silent http://127.0.0.1:8765/api/dashboard/summary | jq .
+curl --fail --silent http://127.0.0.1:8765/api/recorder/status | jq .
 curl --fail --silent http://127.0.0.1:8765/api/virtual-ledgers | jq .
 curl --fail --silent http://127.0.0.1:8765/api/config/public | jq .
 curl --fail --silent http://127.0.0.1:8765/openapi.json | jq '.paths | keys'
@@ -1064,10 +1194,13 @@ current. A YAML `read_only` value is only configured evidence: local adapter
 surface enforcement is a separate check, and the Gateway/TWS environment is
 reported as not externally verifiable.
 
-The dashboard snapshot includes the authoritative recorder state, each
-heartbeat, gap counts, persisted artifact receipts, operational alerts, and
-the last database observation time in one read transaction. An old historical
-run without a current fresh lease must show `INACTIVE`, `STOPPED_CLEANLY`, or
+The fast dashboard summary deliberately includes only recorder state and
+heartbeats, callback admission/acknowledgement and inbox counts, the latest
+completed bar/checkpoint/episode, IBKR connection and subscription counts, one
+compact alert list, dynamic no-order state, and replay state. Use
+`/api/recorder/status` or explicit screen refreshes for gap detail, persisted
+artifact receipts, history, audits, reports, and ledgers. An old historical run
+without a current fresh lease must show `INACTIVE`, `STOPPED_CLEANLY`, or
 `STALE_HEARTBEAT`; it must never show recording merely because rows exist.
 
 The virtual-ledger response contains separate `opening_reversal` and
@@ -1118,9 +1251,20 @@ Install the units only after the gates for the selected mode are satisfied:
 When `parallel_validation.enabled` is true, the recorder also makes one bounded
 five-minute-history request per anchor symbol after the configured
 `capture_delay_seconds`. It does not backfill those rows into a score. The
-fixed acceptance contract requires at least 20 complete prospective sessions
-and an independent audit; collecting data does not automatically change
-`feature-parity-m1.json`.
+comparison may report timestamp agreement, missing bars, return/probability
+correlation and bias, tail membership, and episode timing. Its states are
+diagnostic (`pending`, `insufficient_sessions`, `available`, `warning`, or
+`failed_diagnostic`); none authorizes trading or invalidates otherwise sound
+IBKR evidence. Exact OHLCV equality is not required.
+
+Executable bid/ask P&L after commissions and configured fees is the primary
+option-performance measure. Each strategy exposes one primary capital basis:
+premium paid for long options, cash-secured capital for a naked short put, or
+maximum defined risk for a defined-risk spread. Reliable observed IBKR margin
+may be shown as a secondary diagnostic; absent reliable margin leaves margin
+ROI unavailable and does not suppress the applicable primary ROI. Raw IBKR
+Greeks remain source-separated. Taylor/Greek attribution is diagnostic only,
+may be generated after finalization, and missing Greeks do not block P&L.
 
 ```bash
 sudo install -o root -g root -m 0644 \
@@ -1210,9 +1354,12 @@ for it. This is distinct from a callback classified after cancellation:
 `expected_late_callback_after_cancellation` is diagnostic, already
 acknowledged, and cannot update the live quote or option projection.
 
-The default lease batch is bounded at 256 callbacks. This amortizes immutable
-partition and checkpoint overhead across the 28 required bar streams while
-leaving excess callbacks pending and recoverable. Processing refreshes
+The default lease batch is bounded at 4,096 callbacks. This amortizes immutable
+partition and checkpoint overhead across the 28 required bar streams and 21
+protected Level-I streams while leaving excess callbacks pending and
+recoverable. The earlier 256-callback default was superseded after measured
+admission from the protected Level-I surface exceeded its materialization rate
+on the deployment host. Processing refreshes
 generation ownership every eight projected callbacks and between each grouped
 immutable partition write, before compression, hashing, fsync, and atomic
 rename work begins. The batch is acknowledged only after all partition
@@ -1264,6 +1411,19 @@ V1.1 receipts for the replacement run as byte-identical, hash-identical
 bindings to each original activation row. Database triggers reject a binding
 whose timestamps, hashes, frozen rules, receipt JSON, reserved-line count, or
 no-order flag differs, and reject every later update or delete.
+
+Official IBKR dependency maintenance does not rewrite that activation. The
+activation's API and Gateway values remain the immutable first-collection
+baseline, while the active official-archive provenance and Gateway release
+manifest verify the maintained runtime versions. Startup reconstructs the old
+configuration hash with only the baseline Gateway identity; every signal,
+capacity, cohort, threshold, artifact, and safety field must still match. The
+current API and Gateway identities are recorded separately in capability
+evidence. For activations created before mandatory option accounting, startup
+also reconstructs the legacy shape without the three output-only commission,
+regulatory-fee, and exchange-fee fields; their current configured values are
+still recorded with each observation and cannot affect leader admission.
+Missing or unverified current identities remain fail-closed.
 
 A graceful process stop is not allowed to hide an incomplete streaming option
 episode behind `STOPPED_CLEANLY`: shutdown records the same scientific gap and
@@ -1483,14 +1643,20 @@ The browser polling budget is:
 
 | Tier | Interval | Requests |
 | --- | --- | --- |
-| Fast | 15 seconds | One `/api/dashboard/summary`; no Parquet or historical tables. |
+| Fast | 15 seconds | One compact `/api/dashboard/summary`; no Parquet, report enumeration, transfer history, universe history, or static audit reconstruction. |
 | Slow | 90 seconds | Only lightweight endpoints associated with the visible screen. |
 | Manual/very slow | 300 seconds, screen activation, or explicit refresh | Audit, reports, concentration/source-transfer history, virtual ledgers, and completed shadow outcomes for that screen only. |
 
 The busiest scheduled screen is approximately 6.34 requests/minute for one
 visible tab and 12.67 for two tabs. The scheduler never overlaps refresh
 generations, explicit refresh cancels/supersedes prior work, and hidden tabs
-pause. The legacy full snapshot route is not automatically polled.
+pause. Opening the application paints the fast summary before detailed screen
+requests; changing screens does not re-fetch the fast summary. The legacy full
+snapshot route is not automatically polled. Static route/adapter, bundle,
+parity, provenance, and read-only checks are warmed at application creation and
+held in the explicit five-minute cache. Recorder heartbeat, inbox, bar,
+checkpoint, episode, connection, and subscription state is never held in that
+cache.
 
 Audit pages are capped by `audit_page_maximum_items` and use the opaque
 `next_cursor` from `/api/audit/events`; do not construct cursors manually.
@@ -1526,13 +1692,27 @@ adding 10,000 synthetic manifest/audit-projection rows, the median was
 This measures application projection cost on the test host, not network or
 production-host latency.
 
+On 2026-08-03, the target-branch baseline measured before this refactor was
+6.021 ms median / 6.804 ms p95 / 7.154 ms maximum end-to-end in `TestClient`,
+with a 29,343-byte response. A representative warmed server request performed
+33 SQLite operations (2.536 ms SQLite time) and took 4.333 ms server time. The
+same script after the refactor measured 3.373 ms median / 3.863 ms p95 / 4.058
+ms maximum end-to-end and a 1,981-byte response. Structured request metrics
+measured 2.548 ms median / 2.926 ms p95 / 3.085 ms maximum server time, exactly
+14 SQLite operations per request, 1.776 ms median SQLite time, zero Parquet
+files, and zero Parquet input rows. Adding 10,000 historical manifest rows left
+the revised route at 3.299 ms median / 3.673 ms p95 / 3.857 ms maximum
+end-to-end and the same 1,981-byte response. These synthetic local results
+enforce route shape and show headroom; they are not a production-host latency
+guarantee.
+
 The enlarged quote fixture contains 1,000 rows in ten row groups, including a
 100-row episode window and an unprojected 2 KiB payload column. The test reads
 one row group and seven required columns, examines 100 input rows, returns 100
 valid rows, and deterministically emits ten chart points with the first and
 last retained. The raw-tail fixture contains 2,000 rows in 40 row groups; a
 five-row request reads one 50-row group. Oversized row groups fail before the
-scanner runs. Static polling tests calculate 6.333 scheduled requests per
+scanner runs. Static polling tests calculate 7.000 scheduled requests per
 minute on the busiest visible screen and verify that the fast function
 contains no audit, report, transfer, shadow-history, concentration, or episode
 detail path.
@@ -1556,13 +1736,13 @@ evidence without its own audit.
 | Growing unacknowledged backlog | Compare callback, raw-commit, and ack heartbeats. Inspect leased attempts and storage incidents. A processing-committed batch may be acknowledged after lease recovery; a poison or interrupted `provider_pending` row is quarantined and fatal. |
 | Valid Parquet but missing manifest | Preserve the sidecar and restart under controlled conditions. Reconciliation verifies the hash and registers the manifest idempotently before inbox acknowledgement. |
 | Manifest points to missing file | Treat as `STORAGE_FATAL`; restore the exact hash-matching immutable file from the paired recovery set or retain the run as invalid. |
-| IBKR reconnect | `RECONNECTING` is expected while ownership is rebuilt. Lost-data reconnect creates one connection gap and rebuilt request generation. The socket reconnect never clears a prior fatal latch. |
+| IBKR reconnect | `RECONNECTING` is expected while ownership is rebuilt. Lost-data reconnect creates one connection gap and rebuilt request generation. IBKR error `504` (`Not connected`) is treated as lost connectivity, clears stale request ownership, and enters the same reconnect/subscription-rebuild path; it must not remain stranded as merely `DEGRADED`. The socket reconnect never clears a prior fatal latch. |
 | Late callback | Expected post-cancel callbacks remain diagnostic through the expiring tombstone and cannot mutate the active stream. Unknown or previous-generation behavior is visible in incidents. |
 | Invalid artifact hash | Compare expected/observed hashes and activation receipt in runtime verification. Replace neither in place; activate the correct immutable bundle and begin the appropriate generation/run. |
 | Replay worker will not stop | Keep the controller in the explicit failed-stop state, do not start a replacement worker, collect its termination reason, and repair the isolated fixture/worker first. |
 | Gateway process restarted but API port is absent | The Java process and loopback proxy are not proof of an authenticated API session. Inspect `stocker-ibgateway-daily-readiness.service` and confirm the configured upstream port is listening. Confirm the unit still has `ExitType=cgroup`, `Restart=always`, and `RestartSec=1`; default main-process exit semantics kill the authenticated handoff child. Authenticate only in the official Gateway window, keep Read-Only API and localhost-only enabled, and confirm `AutoRestart=1`. A broker weekly reset can still require manual credentials and 2FA; never store them in Stocker. |
 | Recorder exits at after-session capture with `prospective run identity mismatch` | Preserve the immutable first-activation `prospective_run` row. After-session source capture must obtain metadata from the frozen application's activation metadata factory; the current release SHA belongs in generation artifact receipts, not a replacement run identity. Do not edit the existing run row to match a deployment. |
-| Universe Tape has symbols and bars but no probabilities | Confirm a frozen checkpoint (6, 8, …, 34) completed with the prior-session activity baseline and Group-O package available. A pending bar-compatibility receipt should show an engineering score marked `scientific_recording_not_authorized`; it must not suppress that score. Bid/ask remains intentionally blank until the bounded promotion scheduler arms Level I for a low/high candidate. |
+| Universe Tape has symbols and bars but no probabilities | Confirm a frozen checkpoint (6, 8, …, 34) completed with the prior-session activity baseline and Group-O package available. A pending cross-vendor bar diagnostic does not suppress or de-authorize an otherwise valid IBKR score. Bid/ask remains intentionally blank until the bounded promotion scheduler arms Level I for a low/high candidate. |
 | Virtual ledger is empty | Confirm the selected run has an eligible receipt/observation and bounded contract plan. The quiet capture table may show current persisted bid/ask before a structure closes; a finalized row additionally requires complete immutable per-leg entry/exit quotes. Inspect the wait/invalid reason and never manufacture a position from configuration, a latest quote, or a partial leg. |
 
 ## Secure browser access

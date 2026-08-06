@@ -25,6 +25,9 @@ from stocker_prospective.scientific_inputs import (
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "prospective" / "m1c-group-o-recovery" / "20260802-m1c-group-o-late-revision-v2"
+OPENING_LEADER_PACKAGE_RELATIVE = Path(
+    "prospective/opening-leader-continuation/20260801-opening-leader-continuation-recorder-v0"
+)
 
 
 def _canonical_json(value: object) -> str:
@@ -60,6 +63,7 @@ def _copy_recovery_release(tmp_path: Path) -> Path:
     for relative in (
         group_o_recovery.FAILED_V1_PACKAGE_RELATIVE,
         group_o_recovery.RECOVERY_PACKAGE_RELATIVE_V2,
+        OPENING_LEADER_PACKAGE_RELATIVE,
     ):
         shutil.copytree(ROOT / relative, release / relative)
     return release
@@ -140,12 +144,41 @@ def test_group_o_recovery_deployment_freeze_receipt_verifies() -> None:
     }
 
 
+def test_completed_group_o_recovery_accepts_only_signed_runtime_compatibility(
+    tmp_path: Path,
+) -> None:
+    release = _copy_recovery_release(tmp_path)
+
+    receipt = verify_group_o_recovery_freeze_v2(release)
+
+    assert receipt["order_placement_disabled"] is True
+    unrelated_source = release / group_o_recovery.RECOVERY_SOURCE_FILES_V2["scientific_inputs"]
+    unrelated_source.write_text(
+        unrelated_source.read_text(encoding="utf-8") + "\n# unsigned drift\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(GroupORecoveryIntegrityError, match="scientific_inputs"):
+        verify_group_o_recovery_freeze_v2(release)
+
+
+def test_latest_runtime_compatibility_rejects_unsigned_group_o_drift(
+    tmp_path: Path,
+) -> None:
+    release = _copy_recovery_release(tmp_path)
+    group_o_source = release / group_o_recovery.RECOVERY_SOURCE_FILES_V2["group_o"]
+    group_o_source.write_text(
+        group_o_source.read_text(encoding="utf-8") + "\n# unsigned drift\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GroupORecoveryIntegrityError, match="group_o"):
+        verify_group_o_recovery_freeze_v2(release)
+
+
 def test_v2_deployment_freeze_must_follow_the_signed_v1_failure(tmp_path: Path) -> None:
     release = _copy_recovery_release(tmp_path)
     receipt_path = (
-        release
-        / group_o_recovery.RECOVERY_PACKAGE_RELATIVE_V2
-        / "deployment_freeze_receipt.json"
+        release / group_o_recovery.RECOVERY_PACKAGE_RELATIVE_V2 / "deployment_freeze_receipt.json"
     )
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     receipt["freeze_completed_at_utc"] = "2026-08-02T16:00:00Z"
@@ -156,7 +189,6 @@ def test_v2_deployment_freeze_must_follow_the_signed_v1_failure(tmp_path: Path) 
 
     with pytest.raises(GroupORecoveryIntegrityError, match="freeze chronology"):
         verify_group_o_recovery_freeze_v2(release)
-
 
 
 def test_group_o_recovery_blocks_before_adapter_while_exact_chain_is_missing(
@@ -201,10 +233,7 @@ def test_v2_requires_exact_signed_failed_v1_start_and_attempt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    attempt = (
-        tmp_path
-        / "source-cache/eodhd-group-o/2026-07-31/attempts/0001/attempt_receipt.json"
-    )
+    attempt = tmp_path / "source-cache/eodhd-group-o/2026-07-31/attempts/0001/attempt_receipt.json"
     start_identity: dict[str, object] = {
         "schema_version": "m1c-group-o-recovery-start-v1",
         "recovery_version": "m1c-group-o-late-revision-v1",
@@ -218,9 +247,7 @@ def test_v2_requires_exact_signed_failed_v1_start_and_attempt(
         "signal_open_utc": "2026-08-03T13:30:00+00:00",
         "started_at_utc": "2026-08-02T16:35:01.899928+00:00",
         "base_package_path": str(tmp_path / "group-o" / "2026-08-03.json"),
-        "base_package_sha256": (
-            "b8ba77cfcb6ff82c7fd1f205e5b2cbcd562ea2a09d7e3e1afa703fb0cc77d75c"
-        ),
+        "base_package_sha256": ("b8ba77cfcb6ff82c7fd1f205e5b2cbcd562ea2a09d7e3e1afa703fb0cc77d75c"),
         "ibkr_adapter_opened": False,
         "monday_market_data_consumed": False,
         "order_construction_allowed": False,
@@ -282,10 +309,7 @@ def test_v2_requires_exact_signed_failed_v1_start_and_attempt(
         "freeze_completed_at_utc": "2026-08-02T16:49:09.064117+00:00",
     }
 
-    assert (
-        group_o_recovery._require_failed_v1_attempt(tmp_path, freeze_receipt=freeze)
-        == attempt
-    )
+    assert group_o_recovery._require_failed_v1_attempt(tmp_path, freeze_receipt=freeze) == attempt
 
     start.write_text("{}\n", encoding="utf-8")
     with pytest.raises(GroupORecoveryIntegrityError, match="failed V1 start"):
@@ -307,16 +331,11 @@ def test_v2_recovery_start_must_follow_its_signed_deployment_freeze(
     base_path.write_text("frozen-base\n", encoding="utf-8")
     release = tmp_path / "release"
     deployment_receipt = (
-        release
-        / group_o_recovery.RECOVERY_PACKAGE_RELATIVE_V2
-        / "deployment_freeze_receipt.json"
+        release / group_o_recovery.RECOVERY_PACKAGE_RELATIVE_V2 / "deployment_freeze_receipt.json"
     )
     deployment_receipt.parent.mkdir(parents=True)
     deployment_receipt.write_text("{}\n", encoding="utf-8")
-    attempt_path = (
-        context_root
-        / "source-cache/eodhd-group-o/2026-07-31/attempts/0002"
-    )
+    attempt_path = context_root / "source-cache/eodhd-group-o/2026-07-31/attempts/0002"
     attempt_path.mkdir(parents=True)
     freeze = {
         "deployment_receipt_id": "group-o-recovery-deploy-" + "e" * 24,
@@ -370,12 +389,7 @@ def test_v2_recovery_start_must_follow_its_signed_deployment_freeze(
 
 def test_recorder_invokes_recovery_gate_before_constructing_ibkr_adapter() -> None:
     source = (
-        ROOT
-        / "packages"
-        / "stocker_prospective"
-        / "src"
-        / "stocker_prospective"
-        / "cli.py"
+        ROOT / "packages" / "stocker_prospective" / "src" / "stocker_prospective" / "cli.py"
     ).read_text(encoding="utf-8")
     recorder = source[source.index("def recorder_run(") :]
 

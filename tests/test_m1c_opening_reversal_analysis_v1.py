@@ -181,6 +181,24 @@ def test_insufficient_support_blocks_without_relaxing_gates() -> None:
     assert "unique_severe_opening_events_below_40" in result.decision_reasons
 
 
+def test_cross_vendor_failure_is_diagnostic_not_a_direction_decision_gate() -> None:
+    rows = (_episode(ordinal=0),)
+
+    baseline = analyze_direction_cohort_v1(
+        rows,
+        phase="prospective_development",
+    )
+    with_diagnostic_failure = analyze_direction_cohort_v1(
+        rows,
+        phase="prospective_development",
+        transfer_failure=True,
+    )
+
+    assert with_diagnostic_failure.transfer_failure is True
+    assert with_diagnostic_failure.decision == baseline.decision
+    assert with_diagnostic_failure.decision_reasons == baseline.decision_reasons
+
+
 def test_direction_decision_receipt_recomputes_full_frozen_analysis() -> None:
     rows = _supported()
     result = analyze_direction_cohort_v1(
@@ -197,6 +215,29 @@ def test_direction_decision_receipt_recomputes_full_frozen_analysis() -> None:
             episodes=rows,
             boundary_timestamp_utc=datetime(2027, 1, 1, tzinfo=UTC),
         )
+
+
+def test_direction_decision_receipt_accepts_immutable_legacy_transfer_gate() -> None:
+    rows = _supported()
+    current = analyze_direction_cohort_v1(
+        rows,
+        phase="prospective_development",
+        transfer_failure=True,
+    )
+    legacy = current.model_copy(
+        update={
+            "decision": "blocked_opening_transfer",
+            "decision_reasons": ("opening_transfer_not_supported",),
+        }
+    )
+
+    receipt = build_opening_reversal_direction_decision_receipt_v1(
+        result=legacy,
+        episodes=rows,
+        boundary_timestamp_utc=datetime(2027, 1, 1, tzinfo=UTC),
+    )
+
+    assert receipt.decision == "blocked_opening_transfer"
 
 
 def test_analysis_rejects_cross_cohort_and_non_reversal_rows() -> None:

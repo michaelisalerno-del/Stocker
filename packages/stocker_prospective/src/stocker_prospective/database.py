@@ -16,6 +16,9 @@ from stocker_prospective.bars import CompletedBar
 from stocker_prospective.bundle import SCIENTIFIC_CLASSIFICATION
 from stocker_prospective.market_data import MarketDataBudgetSnapshot
 from stocker_prospective.migration_order import migration_plan
+from stocker_prospective.sqlite_coordination import CoordinatedSQLiteConnection
+
+RECORDER_SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 
 class RecorderLeaseHeld(RuntimeError):
@@ -152,16 +155,28 @@ class SourceBarObservationInput(BaseModel):
 class ProspectiveRepository:
     """Single-writer SQLite repository with explicit migrations."""
 
-    def __init__(self, database_path: str | Path) -> None:
+    def __init__(
+        self,
+        database_path: str | Path,
+        *,
+        busy_timeout_ms: int = RECORDER_SQLITE_BUSY_TIMEOUT_MS,
+    ) -> None:
+        if busy_timeout_ms <= 0:
+            raise ValueError("SQLite busy timeout must be positive")
         self.database_path = Path(database_path)
+        self.busy_timeout_ms = busy_timeout_ms
         self._anchor: sqlite3.Connection | None = None
 
     def _connect(self) -> sqlite3.Connection:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.database_path, timeout=5.0)
+        connection = sqlite3.connect(
+            self.database_path,
+            timeout=self.busy_timeout_ms / 1_000,
+            factory=CoordinatedSQLiteConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = FULL")
         return connection

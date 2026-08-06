@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import secrets
 import sqlite3
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -98,6 +100,7 @@ from stocker_prospective.order_book import DepthBook
 from stocker_prospective.partition_store import PartitionedEventStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.recorder_v0 import (
+    CHECKPOINT_QUOTE_SELECTION_POLICY_V0,
     FrozenM1CRecorderEngine,
     RecorderCheckpointInput,
     RecorderCheckpointResult,
@@ -110,6 +113,7 @@ OptionQuoteSink = Callable[[EvidenceMetadata, OptionQuoteEvent], None]
 EpisodeCallback = Callable[[RecorderCheckpointResult], None]
 NEW_YORK = ZoneInfo("America/New_York")
 PROCESSING_HEARTBEAT_CALLBACK_INTERVAL = 8
+MAX_RETAINED_LEVEL1_QUOTES_PER_SYMBOL = 4_096
 
 
 @dataclass(frozen=True)
@@ -240,6 +244,7 @@ class FrozenM1CLiveRecorder:
         readiness: ScientificReadiness,
         maximum_quote_age: timedelta,
         maximum_clock_drift_seconds: float = 2.0,
+        maximum_clock_probe_round_trip_seconds: float = 10.0,
         minimum_trade_classification_valid_fraction: float = 0.5,
         depth_rows: int = 5,
         depth_snapshot_interval: timedelta = timedelta(seconds=1),
@@ -254,6 +259,10 @@ class FrozenM1CLiveRecorder:
         operational_repository: RecorderOperationalRepository | None = None,
         operational_thresholds: OperationalThresholds | None = None,
         processing_heartbeat: Callable[[], object] | None = None,
+        inbox_retention_enabled: bool = False,
+        inbox_retention_period: timedelta = timedelta(minutes=15),
+        inbox_compaction_interval: timedelta = timedelta(minutes=1),
+        inbox_compaction_batch_limit: int = 4_096,
     ) -> None:
         if len(universe_symbols) != 20 or len(set(universe_symbols)) != 20:
             raise ValueError("frozen M1C live recorder requires the exact 20-stock cohort")
@@ -268,6 +277,8 @@ class FrozenM1CLiveRecorder:
             raise ValueError("maximum quote age must be positive")
         if maximum_clock_drift_seconds <= 0.0:
             raise ValueError("maximum clock drift must be positive")
+        if maximum_clock_probe_round_trip_seconds <= 0.0:
+            raise ValueError("maximum clock probe round trip must be positive")
         if not 0.0 <= minimum_trade_classification_valid_fraction <= 1.0:
             raise ValueError("trade-classification quality threshold is invalid")
         if depth_rows <= 0:
@@ -280,6 +291,10 @@ class FrozenM1CLiveRecorder:
             raise ValueError("durable callback lease identity is required")
         if inbox_lease_timeout <= timedelta(0) or inbox_batch_limit <= 0:
             raise ValueError("durable callback lease bounds must be positive")
+        if inbox_retention_period <= timedelta(0):
+            raise ValueError("callback inbox retention period must be positive")
+        if inbox_compaction_interval <= timedelta(0) or inbox_compaction_batch_limit <= 0:
+            raise ValueError("callback inbox compaction bounds must be positive")
         self.adapter = adapter
         self.normalizer = normalizer
         self.raw_store = raw_store
@@ -296,6 +311,7 @@ class FrozenM1CLiveRecorder:
         self.readiness = readiness
         self.maximum_quote_age = maximum_quote_age
         self.maximum_clock_drift_seconds = maximum_clock_drift_seconds
+        self.maximum_clock_probe_round_trip_seconds = maximum_clock_probe_round_trip_seconds
         self.minimum_trade_classification_valid_fraction = (
             minimum_trade_classification_valid_fraction
         )
@@ -312,6 +328,11 @@ class FrozenM1CLiveRecorder:
         self.operational_repository = operational_repository
         self.operational_thresholds = operational_thresholds or OperationalThresholds()
         self.processing_heartbeat = processing_heartbeat
+        self.inbox_retention_enabled = inbox_retention_enabled
+        self.inbox_retention_period = inbox_retention_period
+        self.inbox_compaction_interval = inbox_compaction_interval
+        self.inbox_compaction_batch_limit = inbox_compaction_batch_limit
+        self._last_inbox_compaction_at: datetime | None = None
         self._inflight_durable_events: tuple[CallbackInboxEvent, ...] = ()
         self._finalizer = KeepUpToDateBarFinalizer(
             prospective_collection_start=normalizer.prospective_collection_start
@@ -328,6 +349,7 @@ class FrozenM1CLiveRecorder:
         self._last_depth_validity: dict[str, bool] = {}
         self._bar_order: dict[tuple[int, datetime], tuple[int, int]] = {}
         self._bar_finalised_at: dict[tuple[str, date, int], datetime] = {}
+        self._latest_required_bar_boundary_by_symbol: dict[str, datetime] = {}
         self._opening_leader_quote_retention: dict[
             str,
             tuple[datetime, datetime],
@@ -374,9 +396,9 @@ class FrozenM1CLiveRecorder:
             and readiness.historical_activity_baseline_available
             and readiness.clock_drift_within_tolerance
         )
-        self._scientific_prerequisites_passed = (
-            self._shadow_prerequisites_passed and readiness.bar_compatibility_passed
-        )
+        # Cross-vendor bar compatibility is retained as a diagnostic.  It does
+        # not authorize otherwise-valid IBKR prospective evidence.
+        self._scientific_prerequisites_passed = self._shadow_prerequisites_passed
         self._scientific_block_latched = (
             durable_inbox is not None and durable_inbox.has_active_fatal()
         )
@@ -613,6 +635,29 @@ class FrozenM1CLiveRecorder:
             default=None,
         )
 
+    def checkpoint_quote_as_of(
+        self,
+        symbol: str,
+        checkpoint_boundary: datetime,
+    ) -> UnderlyingLevel1QuoteEvent | None:
+        """Select the latest valid causal quote at or before a bar boundary."""
+
+        boundary = checkpoint_boundary.astimezone(UTC)
+        return max(
+            (
+                event
+                for event in self._quotes.get(symbol, ())
+                if event.ordering_timestamp <= boundary and event.quote_valid
+            ),
+            key=lambda item: (
+                item.ordering_timestamp,
+                item.received_monotonic_ns,
+                item.source_sequence,
+                item.event_id,
+            ),
+            default=None,
+        )
+
     def opening_leader_checkpoint_bars(
         self,
         session: date,
@@ -637,9 +682,7 @@ class FrozenM1CLiveRecorder:
                 current.low,
                 current.close,
             )
-            if any(
-                not math.isfinite(value) or value <= 0.0 for value in causal_prices
-            ):
+            if any(not math.isfinite(value) or value <= 0.0 for value in causal_prices):
                 continue
             causal_bars = tuple(bars[index] for index in sorted(required.intersection(bars)))
             complete = required.issubset(bars) and all(
@@ -811,9 +854,7 @@ class FrozenM1CLiveRecorder:
                 opening = bars[1]
                 current = bars[candidate_checkpoint]
                 candidate_prices[candidate] = current.close
-                candidate_returns[candidate] = (
-                    10_000.0 * (current.close / opening.open - 1.0)
-                )
+                candidate_returns[candidate] = 10_000.0 * (current.close / opening.open - 1.0)
             if symbol in candidate_returns and len(candidate_returns) >= 15:
                 selected_checkpoint = candidate_checkpoint
                 returns = candidate_returns
@@ -940,6 +981,38 @@ class FrozenM1CLiveRecorder:
                 )
         points.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
         return tuple(point[3] for point in points)
+
+    def underlying_quote_path(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[UnderlyingLevel1QuoteEvent, ...]:
+        """Return retained executable-side Level-I observations in event order."""
+
+        if (
+            start.tzinfo is None
+            or start.utcoffset() is None
+            or end.tzinfo is None
+            or end.utcoffset() is None
+        ):
+            raise ValueError("underlying quote path timestamps must be timezone-aware")
+        if end < start:
+            raise ValueError("underlying quote path cannot end before it starts")
+        return tuple(
+            sorted(
+                (
+                    quote
+                    for quote in self._quotes.get(symbol, ())
+                    if start <= quote.ordering_timestamp <= end
+                ),
+                key=lambda item: (
+                    item.ordering_timestamp,
+                    item.source_sequence,
+                    item.event_id,
+                ),
+            )
+        )
 
     def underlying_halted_in_window(
         self,
@@ -1077,6 +1150,96 @@ class FrozenM1CLiveRecorder:
             admission_run_id=event.admission_run_id,
             admission_recorder_generation=event.admission_recorder_generation,
             recovery_disposition="scientifically_blocked_raw_only",
+        )
+
+    @staticmethod
+    def _original_provider_callback_event(
+        payload: dict[str, Any],
+    ) -> RawCallbackEnvelopeEvent | None:
+        original = payload.get("original_provider_callback")
+        original_kind = payload.get("original_provider_callback_kind")
+        original_hash = payload.get("original_provider_callback_sha256")
+        if original is None and original_kind is None and original_hash is None:
+            return None
+        if not isinstance(original, dict) or not isinstance(original_kind, str):
+            raise ValueError("ORIGINAL_PROVIDER_CALLBACK_IDENTITY_INVALID")
+        encoded = json.dumps(
+            original,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=True,
+        )
+        if not isinstance(original_hash, str) or not secrets.compare_digest(
+            original_hash,
+            hashlib.sha256(encoded.encode()).hexdigest(),
+        ):
+            raise ValueError("ORIGINAL_PROVIDER_CALLBACK_HASH_INVALID")
+        received = datetime.fromisoformat(
+            str(payload["received_timestamp_utc"]).replace("Z", "+00:00")
+        ).astimezone(UTC)
+        provider: datetime | None = None
+        for key in (
+            "provider_timestamp_utc",
+            "source_timestamp_utc",
+            "bar_start_utc",
+            "timestamp_utc",
+        ):
+            value = payload.get(key)
+            if value is None:
+                continue
+            candidate = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if candidate.tzinfo is None or candidate.utcoffset() is None:
+                raise ValueError("ORIGINAL_PROVIDER_CALLBACK_TIMESTAMP_INVALID")
+            provider = candidate.astimezone(UTC)
+            break
+        stream_owner = payload.get("persisted_stream_owner")
+        if stream_owner is not None and not isinstance(stream_owner, dict):
+            raise ValueError("ORIGINAL_PROVIDER_CALLBACK_OWNER_INVALID")
+        raw_con_id = None if stream_owner is None else stream_owner.get("con_id")
+        con_id = raw_con_id if isinstance(raw_con_id, int) else -1
+        request_id = int(payload["request_id"])
+        source_sequence = int(payload["source_sequence"])
+        monotonic = payload.get("received_monotonic_ns")
+        received_monotonic_ns = source_sequence if monotonic is None else int(monotonic)
+        symbol = payload.get("subscription_symbol")
+        routing_symbol = str(symbol or ("__CONTROL__" if request_id < 0 else "__UNRESOLVED__"))
+        inbox_event_id = str(payload["inbox_event_id"])
+        return RawCallbackEnvelopeEvent(
+            event_id=hashlib.sha256(
+                f"original_provider_callback|{inbox_event_id}".encode()
+            ).hexdigest(),
+            inbox_event_id=inbox_event_id,
+            received_timestamp_utc=received,
+            received_monotonic_ns=received_monotonic_ns,
+            original_received_monotonic_ns=(None if monotonic is None else int(monotonic)),
+            provider_timestamp_utc=provider,
+            source_sequence=source_sequence,
+            session=(provider or received).astimezone(NEW_YORK).date(),
+            symbol=routing_symbol,
+            subscription_symbol=None if symbol is None else str(symbol),
+            con_id=con_id,
+            request_id=request_id,
+            callback_kind=original_kind,
+            connection_generation=int(payload["connection_generation"]),
+            callback_classification=str(payload["callback_classification"]),
+            subscription_owner=(
+                None
+                if payload.get("subscription_owner") is None
+                else str(payload["subscription_owner"])
+            ),
+            stream_owner=stream_owner,
+            original_payload=original,
+            admission_run_id=(
+                None
+                if payload.get("admission_run_id") is None
+                else str(payload["admission_run_id"])
+            ),
+            admission_recorder_generation=(
+                None
+                if payload.get("admission_recorder_generation") is None
+                else int(payload["admission_recorder_generation"])
+            ),
+            recovery_disposition="original_provider_callback",
         )
 
     def _poll_scientifically_blocked_batch(
@@ -1344,7 +1507,10 @@ class FrozenM1CLiveRecorder:
     def _retain(self, event: RawEvent) -> UnderlyingDepthSnapshotEvent | None:
         if isinstance(event, UnderlyingLevel1QuoteEvent):
             self._latest_quotes[event.symbol] = event
-            self._quotes.setdefault(event.symbol, deque()).append(event)
+            self._quotes.setdefault(
+                event.symbol,
+                deque(maxlen=MAX_RETAINED_LEVEL1_QUOTES_PER_SYMBOL),
+            ).append(event)
         elif isinstance(event, UnderlyingTickBidAskEvent):
             synthetic = UnderlyingLevel1QuoteEvent(
                 **event.model_dump(
@@ -1372,7 +1538,10 @@ class FrozenM1CLiveRecorder:
                 },
                 halted=None,
             )
-            self._quotes.setdefault(event.symbol, deque()).append(synthetic)
+            self._quotes.setdefault(
+                event.symbol,
+                deque(maxlen=MAX_RETAINED_LEVEL1_QUOTES_PER_SYMBOL),
+            ).append(synthetic)
         elif isinstance(event, UnderlyingTickTradeEvent):
             self._trades.setdefault(event.symbol, deque()).append(event)
         elif isinstance(event, UnderlyingDepthEvent):
@@ -1477,9 +1646,9 @@ class FrozenM1CLiveRecorder:
         )
         for completed in completed_updates:
             for bar in self._bar_adapter.add(completed):
-                self._bar_finalised_at[
-                    (bar.symbol, bar.session, bar.checkpoint)
-                ] = update.received_timestamp_utc
+                self._bar_finalised_at[(bar.symbol, bar.session, bar.checkpoint)] = (
+                    update.received_timestamp_utc
+                )
                 sequence, monotonic = self._bar_order[
                     (completed.request_id, completed.bar_start_utc)
                 ]
@@ -1491,6 +1660,7 @@ class FrozenM1CLiveRecorder:
                 ).model_copy(update={"con_id": completed.con_id})
                 raw_events.append(event)
                 finalised_bars.append(bar)
+                self._latest_required_bar_boundary_by_symbol[bar.symbol] = bar.bar_end_utc
                 if (
                     self._route_decision_event_v1_1(
                         event,
@@ -1966,6 +2136,28 @@ class FrozenM1CLiveRecorder:
         self._reconcile_retired_quote_state(inbox)
         self._failure_checkpoint("after_callback_acknowledgement")
         self._inflight_durable_events = ()
+        if self.inbox_retention_enabled and (
+            self._last_inbox_compaction_at is None
+            or observed - self._last_inbox_compaction_at >= self.inbox_compaction_interval
+        ):
+            try:
+                inbox.compact_acknowledged(
+                    before=observed - self.inbox_retention_period,
+                    retention_policy_enabled=True,
+                    limit=self.inbox_compaction_batch_limit,
+                )
+            except sqlite3.Error as exc:
+                inbox.record_incident(
+                    stable_error_code="CALLBACK_RETENTION_COMPACTION_DEFERRED",
+                    component="durable_callback_inbox",
+                    severity="degraded",
+                    occurred_at=observed,
+                    error_class=type(exc).__name__,
+                    evidence_loss_possible=False,
+                    connection_generation=self.adapter.connection_generation,
+                )
+            else:
+                self._last_inbox_compaction_at = observed
 
     def fail_inflight_durable_poll(
         self,
@@ -2076,20 +2268,25 @@ class FrozenM1CLiveRecorder:
         depth_reset_symbols: set[str] = set()
         ibkr_errors: list[tuple[int, int]] = []
         deferred_control_gaps: list[tuple[str, datetime]] = []
-        normalized_callbacks: list[tuple[dict[str, Any], NormalizedCallback | None]] = []
+        normalized_callbacks: list[
+            tuple[dict[str, Any], NormalizedCallback | None, RawCallbackEnvelopeEvent | None]
+        ] = []
         # The inbox has already made expected-late callbacks diagnostic. These
         # are accepted-active events whose admission owners can outlive mutable
         # request registration until the whole ordered lease is normalised.
         for callback_index, payload in enumerate(callbacks):
             try:
+                provider_callback = self._original_provider_callback_event(payload)
                 normalized = self.normalizer.normalize(payload)
             except Exception as exc:
                 raise CallbackNormalizationFatal(callback_index) from exc
-            normalized_callbacks.append((payload, normalized))
+            normalized_callbacks.append((payload, normalized, provider_callback))
         # No raw/derived side effect begins until the entire lease is known to
         # be normalisable. A poison callback therefore cannot partially apply
         # an earlier callback from the same batch.
-        for callback_index, (payload, normalized) in enumerate(normalized_callbacks):
+        for callback_index, (payload, normalized, provider_callback) in enumerate(
+            normalized_callbacks
+        ):
             # Initial historical backfills can make one bounded batch costly.
             # Refresh ownership before stateful projection so the generation's
             # lease cannot appear abandoned while its inbox lease is active.
@@ -2100,6 +2297,8 @@ class FrozenM1CLiveRecorder:
                 self.processing_heartbeat()
             if normalized is None:
                 continue
+            if provider_callback is not None:
+                raw_events.append(provider_callback)
             raw_disposition: Literal["admit", "buffer"] = "admit"
             if normalized.raw_event is not None:
                 raw_events.append(normalized.raw_event)
@@ -2135,9 +2334,11 @@ class FrozenM1CLiveRecorder:
             elif normalized.control_kind == "current_time":
                 control = normalized.control_payload or {}
                 provider = control.get("provider_timestamp_utc")
-                if isinstance(provider, str):
+                requested = control.get("clock_probe_requested_at_utc")
+                if isinstance(provider, str) and isinstance(requested, str):
                     try:
                         parsed = datetime.fromisoformat(provider.replace("Z", "+00:00"))
+                        request_started = datetime.fromisoformat(requested.replace("Z", "+00:00"))
                         received = datetime.fromisoformat(
                             str(control["received_timestamp_utc"]).replace("Z", "+00:00")
                         )
@@ -2147,14 +2348,42 @@ class FrozenM1CLiveRecorder:
                         if (
                             parsed.tzinfo is None
                             or parsed.utcoffset() is None
+                            or request_started.tzinfo is None
+                            or request_started.utcoffset() is None
                             or received.tzinfo is None
                             or received.utcoffset() is None
+                            or received < request_started
                         ):
                             self._clock_drift_seconds = None
+                        elif (
+                            received.astimezone(UTC) - request_started.astimezone(UTC)
+                        ).total_seconds() > self.maximum_clock_probe_round_trip_seconds:
+                            # IBKR currentTime carries no request identifier.
+                            # A response arriving outside the request timeout
+                            # cannot be safely correlated after a retry.  Its
+                            # immutable callback remains diagnostic evidence,
+                            # but it must not overwrite the last bounded clock
+                            # measurement with transport/decoder queue delay.
+                            pass
                         else:
+                            # IBKR currentTime is whole-second Unix time.  The
+                            # old receive-minus-provider subtraction treated
+                            # response latency and up to one second of provider
+                            # quantisation as local clock drift.  Use the
+                            # standard request/response midpoint and the centre
+                            # of the provider's one-second precision interval.
+                            local_midpoint = (
+                                request_started.astimezone(UTC)
+                                + (received.astimezone(UTC) - request_started.astimezone(UTC)) / 2
+                            )
+                            provider_midpoint = parsed.astimezone(UTC) + timedelta(milliseconds=500)
                             self._clock_drift_seconds = (
-                                received.astimezone(UTC) - parsed.astimezone(UTC)
+                                local_midpoint - provider_midpoint
                             ).total_seconds()
+                else:
+                    # A response without its durable request boundary cannot
+                    # distinguish clock offset from transport delay.
+                    self._clock_drift_seconds = None
             elif normalized.control_kind == "depth_exchanges":
                 control = normalized.control_payload or {}
                 exchanges = control.get("exchanges", ())
@@ -2277,11 +2506,25 @@ class FrozenM1CLiveRecorder:
             sorted(expected_raw_event_ids)
         ):
             raise CallbackInboxError("CALLBACK_RAW_EVENT_IDENTITY_DIFFERS")
+        # ``underlying_live_state_v0`` is an overwrite-only UI projection, not
+        # evidence.  Persist every Level-1 change in the immutable raw batch
+        # and retain every quote in memory for deterministic as-of selection,
+        # but write only the newest quote per symbol to the bounded projection.
+        # A busy protected universe otherwise opens and commits thousands of
+        # redundant SQLite transactions before the next inbox acknowledgement.
+        latest_level1_by_symbol: dict[str, UnderlyingLevel1QuoteEvent] = {}
         for event in (
             *admitted_decision_events,
             *released_decision_events,
         ):
+            if isinstance(event, UnderlyingLevel1QuoteEvent):
+                current = latest_level1_by_symbol.get(event.symbol)
+                if current is None or event.source_sequence > current.source_sequence:
+                    latest_level1_by_symbol[event.symbol] = event
+                continue
             self._project_decision_event(metadata, event)
+        for symbol in sorted(latest_level1_by_symbol):
+            self._project_decision_event(metadata, latest_level1_by_symbol[symbol])
         for symbol, started_at in deferred_control_gaps:
             self.mark_gap(symbol, started_at=started_at)
         barrier_passed_sessions = {
@@ -2312,6 +2555,12 @@ class FrozenM1CLiveRecorder:
             and self.recorder_generation is not None
             and self.lease_owner is not None
         ):
+            # A durable batch can take long enough for the processing heartbeat
+            # to advance beyond ``observed_now``.  Operational freshness must
+            # be evaluated at completion time; using the poll-start timestamp
+            # makes those fresh heartbeats appear to come from the future and
+            # incorrectly persists STALE_HEARTBEAT.
+            operational_now = datetime.now(UTC)
             try:
                 session_open, session_close = xnys_session_bounds(
                     observed_now.astimezone(NEW_YORK).date()
@@ -2320,16 +2569,25 @@ class FrozenM1CLiveRecorder:
             except ValueError:
                 market_session_open = False
             health = self.adapter.connection.health()
-            completed_bar_times = tuple(
-                event.bar_end_utc
-                for event in raw_events
-                if isinstance(event, FiveMinuteBarEvent) and event.finalised
+            required_bar_symbols = {
+                owner.symbol
+                for owner in self.normalizer.owners
+                if owner.kind is StreamKind.UNDERLYING_BAR
+            }
+            slowest_required_bar_boundary = (
+                min(
+                    self._latest_required_bar_boundary_by_symbol[symbol]
+                    for symbol in required_bar_symbols
+                )
+                if required_bar_symbols
+                and required_bar_symbols.issubset(self._latest_required_bar_boundary_by_symbol)
+                else None
             )
             self.operational_repository.touch(
                 run_id=self.run_id,
                 recorder_generation=self.recorder_generation,
                 owner_id=self.lease_owner,
-                now=observed_now,
+                now=operational_now,
                 market_session_open=market_session_open,
                 callbacks_expected=market_session_open and bool(self.normalizer.owners),
                 ibkr_connection_state=health.state.value,
@@ -2342,9 +2600,7 @@ class FrozenM1CLiveRecorder:
                     and self._session_context_ready
                     and self.adapter.scientific_recording_valid
                 ),
-                latest_completed_five_minute_bar_at_utc=(
-                    None if not completed_bar_times else max(completed_bar_times)
-                ),
+                latest_completed_five_minute_bar_at_utc=(slowest_required_bar_boundary),
                 latest_successful_checkpoint_at_utc=(None if not results else observed_now),
                 broker_state_mutation_count=0,
             )
@@ -2352,7 +2608,7 @@ class FrozenM1CLiveRecorder:
                 run_id=self.run_id,
                 recorder_generation=self.recorder_generation,
                 owner_id=self.lease_owner,
-                now=observed_now,
+                now=operational_now,
                 prospective_start_utc=self.raw_store.prospective_collection_start,
                 thresholds=self.operational_thresholds,
             )
@@ -2645,14 +2901,21 @@ class FrozenM1CLiveRecorder:
                             feature_bars=feature_bars,
                         )
                         context = self.group_o_provider(symbol, session)
-                        latest = self._latest_quotes.get(symbol)
                         trigger_end = feature_bars[-1].bar_complete_timestamp
+                        checkpoint_quote = self.checkpoint_quote_as_of(
+                            symbol,
+                            trigger_end,
+                        )
+                        quote_age = (
+                            None
+                            if checkpoint_quote is None
+                            else (trigger_end - checkpoint_quote.ordering_timestamp).total_seconds()
+                        )
                         quote_fresh = (
-                            latest is not None
-                            and latest.quote_valid
-                            and latest.market_data_type.primary_eligible
-                            and abs((latest.ordering_timestamp - trigger_end).total_seconds())
-                            <= self.maximum_quote_age.total_seconds()
+                            checkpoint_quote is not None
+                            and checkpoint_quote.market_data_type.primary_eligible
+                            and quote_age is not None
+                            and 0.0 <= quote_age <= self.maximum_quote_age.total_seconds()
                         )
                         v1_1_checkpoint = (
                             checkpoint == 6
@@ -2666,8 +2929,8 @@ class FrozenM1CLiveRecorder:
                             ),
                             (
                                 feature_bars[-1].bar_complete_timestamp,
-                                latest.ordering_timestamp
-                                if latest is not None
+                                checkpoint_quote.ordering_timestamp
+                                if checkpoint_quote is not None
                                 else feature_bars[-1].bar_complete_timestamp,
                             ),
                         )
@@ -2685,8 +2948,8 @@ class FrozenM1CLiveRecorder:
                                 completed_direction_bars=direction_bars,
                                 group_o_context=context,
                                 market_data_type=(
-                                    latest.market_data_type
-                                    if latest is not None
+                                    checkpoint_quote.market_data_type
+                                    if checkpoint_quote is not None
                                     else (
                                         self.adapter.connection.health().market_data_type
                                         or MarketDataType.UNKNOWN
@@ -2744,6 +3007,18 @@ class FrozenM1CLiveRecorder:
                                     )
                                 ),
                                 scientific_recording_authorized=(self._scientific_scoring_enabled),
+                                selected_underlying_quote_event_id=(
+                                    None if checkpoint_quote is None else checkpoint_quote.event_id
+                                ),
+                                selected_underlying_quote_timestamp_utc=(
+                                    None
+                                    if checkpoint_quote is None
+                                    else checkpoint_quote.ordering_timestamp
+                                ),
+                                selected_underlying_quote_age_seconds=quote_age,
+                                underlying_quote_selection_policy=(
+                                    CHECKPOINT_QUOTE_SELECTION_POLICY_V0
+                                ),
                             )
                         )
                     except (KeyError, ValueError) as exc:
@@ -2838,6 +3113,11 @@ class FrozenM1CLiveRecorder:
             trigger_timestamp=decision.trigger_bar_end,
             entry_timestamp=decision.prospective_entry_timestamp,
         ).items():
+            # Entry is currently the checkpoint boundary for these record-only
+            # episodes.  The resulting T-to-entry interval contains no evidence
+            # and must not reach the positive-width window summariser.
+            if end <= start:
+                continue
             self._episode_windows[(decision.episode_id, name)] = (
                 decision.symbol,
                 start,
@@ -2868,6 +3148,12 @@ class FrozenM1CLiveRecorder:
         for observation_id in identities:
             self._quiet_observation_ids.add(observation_id)
             for name, (start, end) in windows.items():
+                # Quiet observations enter at the checkpoint boundary, so the
+                # generic T-to-entry interval is exactly zero.  It contains no
+                # evidence and must not be sent to the positive-width window
+                # summariser.
+                if end <= start:
+                    continue
                 self._episode_windows[(observation_id, name)] = (
                     decision.symbol,
                     start,

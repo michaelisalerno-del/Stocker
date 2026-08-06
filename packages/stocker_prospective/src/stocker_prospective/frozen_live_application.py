@@ -82,12 +82,42 @@ from stocker_prospective.opening_leader_continuation_v0 import (
     M1CContextV0,
     OpeningLeaderContinuationRecorderV0,
     OpeningLeaderEvidenceStoreV0,
+    OpeningLeaderSelectionPromotionV0,
+    checkpoint_timestamp_v0,
 )
 from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentReceiptV0,
     OpeningLeaderDeploymentRefreezeReceiptV1,
     OpeningLeaderDeploymentRefreezeReceiptV2,
     OpeningLeaderDeploymentRefreezeReceiptV3,
+    OpeningLeaderDeploymentRefreezeReceiptV4,
+    OpeningLeaderDeploymentRefreezeReceiptV5,
+    OpeningLeaderDeploymentRefreezeReceiptV6,
+    OpeningLeaderDeploymentRefreezeReceiptV7,
+    OpeningLeaderDeploymentRefreezeReceiptV8,
+    OpeningLeaderDeploymentRefreezeReceiptV9,
+    OpeningLeaderDeploymentRefreezeReceiptV10,
+    OpeningLeaderDeploymentRefreezeReceiptV11,
+    OpeningLeaderDeploymentRefreezeReceiptV12,
+    OpeningLeaderDeploymentRefreezeReceiptV13,
+    OpeningLeaderDeploymentRefreezeReceiptV14,
+    OpeningLeaderDeploymentRefreezeReceiptV15,
+    OpeningLeaderDeploymentRefreezeReceiptV16,
+    OpeningLeaderDeploymentRefreezeReceiptV17,
+    OpeningLeaderDeploymentRefreezeReceiptV18,
+    OpeningLeaderDeploymentRefreezeReceiptV19,
+    OpeningLeaderDeploymentRefreezeReceiptV20,
+    OpeningLeaderDeploymentRefreezeReceiptV21,
+    OpeningLeaderDeploymentRefreezeReceiptV22,
+    OpeningLeaderDeploymentRefreezeReceiptV23,
+    OpeningLeaderDeploymentRefreezeReceiptV24,
+    OpeningLeaderDeploymentRefreezeReceiptV25,
+    OpeningLeaderDeploymentRefreezeReceiptV26,
+    OpeningLeaderDeploymentRefreezeReceiptV27,
+    OpeningLeaderDeploymentRefreezeReceiptV28,
+    OpeningLeaderDeploymentRefreezeReceiptV29,
+    OpeningLeaderDeploymentRefreezeReceiptV30,
+    OpeningLeaderDeploymentRefreezeReceiptV31,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -152,18 +182,46 @@ _PROMOTION_RECOVERABLE_REJECTIONS = frozenset(
         "underlying_quote_stale",
     }
 )
-_HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
+_RETENTION_OPERATIONAL_RUNTIME_FIELDS = frozenset(
     {
-        "callback_inbox_max_unacknowledged",
-        "callback_inbox_batch_limit",
-        "callback_inbox_lease_seconds",
-        "callback_heartbeat_stale_seconds",
-        "raw_storage_heartbeat_stale_seconds",
-        "callback_acknowledgement_stale_seconds",
-        "callback_inbox_healthy_backlog",
-        "callback_inbox_oldest_healthy_seconds",
+        "callback_inbox_retention_enabled",
+        "callback_inbox_retention_seconds",
+        "callback_inbox_compaction_interval_seconds",
+        "callback_inbox_compaction_batch_limit",
     }
 )
+_HARDENING_OPERATIONAL_RUNTIME_FIELDS = (
+    frozenset(
+        {
+            "callback_inbox_max_unacknowledged",
+            "callback_inbox_batch_limit",
+            "callback_inbox_lease_seconds",
+            "callback_heartbeat_stale_seconds",
+            "raw_storage_heartbeat_stale_seconds",
+            "callback_acknowledgement_stale_seconds",
+            "callback_inbox_healthy_backlog",
+            "callback_inbox_oldest_healthy_seconds",
+        }
+    )
+    | _RETENTION_OPERATIONAL_RUNTIME_FIELDS
+)
+_POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS = frozenset(
+    {
+        "option_commission_per_contract",
+        "option_regulatory_fee_per_contract",
+        "option_exchange_fee_per_contract",
+    }
+)
+_POST_ACTIVATION_CROSS_VENDOR_CLAIMS = frozenset(
+    {
+        "market_data_source",
+        "historical_research_source",
+        "cross_vendor_validation_diagnostic_only",
+        "cross_vendor_validation_required_for_science",
+        "prospective_evidence_description",
+    }
+)
+_LEGACY_WEB_PROJECTION_CACHE_SECONDS = 60.0
 
 
 def _operationally_promotable(checkpoint: RecorderCheckpointResult) -> bool:
@@ -186,18 +244,36 @@ def _configuration_hash(
     git_commit: str | None = None,
     app_version: str | None = None,
     run_id: str | None = None,
+    tws_or_gateway_version: str | None = None,
     omitted_runtime_fields: frozenset[str] = frozenset(),
+    omitted_ibkr_fields: frozenset[str] = frozenset(),
+    web_projection_cache_seconds: float | None = None,
+    parallel_validation_enabled: bool | None = None,
+    callback_inbox_batch_limit: int | None = None,
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
     runtime_payload = cast(dict[str, Any], payload["runtime"])
+    ibkr_payload = cast(dict[str, Any], payload["ibkr"])
+    web_payload = cast(dict[str, Any], payload["web"])
+    parallel_validation_payload = cast(dict[str, Any], payload["parallel_validation"])
     if git_commit is not None:
         runtime_payload["git_commit"] = git_commit
     if app_version is not None:
         runtime_payload["app_version"] = app_version
     if run_id is not None:
         runtime_payload["run_id"] = run_id
+    if callback_inbox_batch_limit is not None:
+        runtime_payload["callback_inbox_batch_limit"] = callback_inbox_batch_limit
+    if tws_or_gateway_version is not None:
+        ibkr_payload["tws_or_gateway_version"] = tws_or_gateway_version
     for field_name in omitted_runtime_fields:
         runtime_payload.pop(field_name)
+    for field_name in omitted_ibkr_fields:
+        ibkr_payload.pop(field_name)
+    if web_projection_cache_seconds is not None:
+        web_payload["operational_projection_cache_seconds"] = web_projection_cache_seconds
+    if parallel_validation_enabled is not None:
+        parallel_validation_payload["enabled"] = parallel_validation_enabled
     return hashlib.sha256(
         json.dumps(
             payload,
@@ -212,6 +288,7 @@ def _activation_configuration_hash_candidates(
     *,
     activation_git_commit: str,
     activation_app_version: str | None = None,
+    activation_tws_or_gateway_version: str | None = None,
     historical_run_ids: tuple[str, ...] = (),
 ) -> frozenset[str]:
     """Reconstruct supported activation shapes without weakening scientific fields."""
@@ -222,24 +299,64 @@ def _activation_configuration_hash_candidates(
     # reconstructs the exact original configuration hash. This makes run_id an
     # operational lineage boundary while every scientific input remains bound.
     for historical_run_id in (None, *sorted(set(historical_run_ids))):
-        candidates.update(
-            {
-                _configuration_hash(
-                    config,
-                    git_commit=activation_git_commit,
-                    app_version=activation_app_version,
-                    run_id=historical_run_id,
-                ),
-                _configuration_hash(
-                    config,
-                    git_commit=activation_git_commit,
-                    app_version=activation_app_version,
-                    run_id=historical_run_id,
-                    omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
-                ),
-            }
-        )
+        for web_projection_cache_seconds in (None, _LEGACY_WEB_PROJECTION_CACHE_SECONDS):
+            for omitted_ibkr_fields in (
+                frozenset(),
+                _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS,
+            ):
+                for parallel_validation_enabled in (None, False, True):
+                    for callback_inbox_batch_limit in (None, 256):
+                        candidates.update(
+                            {
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_runtime_fields=(_RETENTION_OPERATIONAL_RUNTIME_FIELDS),
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                            }
+                        )
     return frozenset(candidates)
+
+
+def _activation_claims_boundary_candidates() -> tuple[Mapping[str, object], ...]:
+    """Return exact current and superseded non-trading activation claim shapes."""
+
+    current = claims_boundary()
+    legacy = dict(current)
+    for field_name in _POST_ACTIVATION_CROSS_VENDOR_CLAIMS:
+        legacy.pop(field_name)
+    legacy["engineering_phase_sessions"] = legacy.pop("historical_engineering_phase_sessions")
+    return current, legacy
 
 
 def _require_compatible_existing_activation(
@@ -256,18 +373,27 @@ def _require_compatible_existing_activation(
 
     if activation.contract_version != CONTRACT_VERSION:
         raise ValueError("blocked_existing_activation_contract_version_mismatch")
-    if activation.claims_boundary != claims_boundary():
+    if all(
+        activation.claims_boundary != candidate
+        for candidate in _activation_claims_boundary_candidates()
+    ):
         raise ValueError("blocked_existing_activation_claims_boundary_mismatch")
     if activation.model_artifact_hashes != dict(sorted(artifact_hashes.items())):
         raise ValueError("blocked_existing_activation_artifact_hash_mismatch")
-    if activation.ibkr_api_version != ibkr_api_version:
-        raise ValueError("blocked_existing_activation_ibkr_api_version_mismatch")
-    if activation.tws_or_gateway_version != tws_or_gateway_version:
-        raise ValueError("blocked_existing_activation_gateway_version_mismatch")
+    # The activation records the dependency baseline used at first collection.
+    # Later official API/Gateway maintenance is operational: current versions
+    # are independently verified and written to capability evidence. Rebuild
+    # the old configuration hash with the baseline Gateway identity so only
+    # that dependency field may roll without changing scientific admission.
+    if not ibkr_api_version or ibkr_api_version == "unknown":
+        raise ValueError("blocked_existing_activation_ibkr_api_version_unavailable")
+    if not tws_or_gateway_version:
+        raise ValueError("blocked_existing_activation_gateway_version_unavailable")
     if activation.configuration_hash not in _activation_configuration_hash_candidates(
         config,
         activation_git_commit=activation.git_sha,
         activation_app_version=activation_app_version,
+        activation_tws_or_gateway_version=activation.tws_or_gateway_version,
         historical_run_ids=historical_run_ids,
     ):
         raise ValueError("blocked_existing_activation_configuration_mismatch")
@@ -697,14 +823,10 @@ class FrozenProspectiveApplication:
                 {},
             )[symbol] = M1CContextV0(
                 probability=checkpoint.score.probability,
-                high_low_state=(
-                    "HIGH" if checkpoint.score.threshold_passed else "LOW"
-                ),
+                high_low_state=("HIGH" if checkpoint.score.threshold_passed else "LOW"),
                 tail_phase=str(checkpoint.tail_phase_v1.m1c_tail_phase_v1),
                 qualified_fresh_event_status=fresh_status,
-                movement_consumed=(
-                    checkpoint.movement_consumed_state_v1.movement_consumed_v1
-                ),
+                movement_consumed=(checkpoint.movement_consumed_state_v1.movement_consumed_v1),
                 source_completeness=(
                     "complete"
                     if checkpoint.score.missing_feature_count == 0
@@ -712,6 +834,11 @@ class FrozenProspectiveApplication:
                 ),
             )
             opening_receipt = checkpoint.opening_reversal_prediction_v1
+            opening_reversal_candidate = bool(
+                opening_receipt is not None
+                and opening_receipt.eligibility_v1
+                and opening_receipt.prediction_v1 != "ABSTAIN"
+            )
             if opening_receipt is not None:
                 opening_reversal_seen = True
                 group_key = (
@@ -726,7 +853,7 @@ class FrozenProspectiveApplication:
                 self._eligible_symbols.add(symbol)
             else:
                 self._eligible_symbols.discard(symbol)
-            if checkpoint.episode_decision.fresh_episode and opening_receipt is None:
+            if checkpoint.episode_decision.fresh_episode and not opening_reversal_candidate:
                 episode_id = checkpoint.episode_decision.episode_id
                 assert episode_id is not None
                 self._episode_results[episode_id] = checkpoint
@@ -744,7 +871,7 @@ class FrozenProspectiveApplication:
                     symbol,
                     checkpoint.episode_decision.prospective_entry_timestamp + timedelta(minutes=60),
                 )
-            if opening_receipt is None:
+            if not opening_reversal_candidate:
                 self.option_discovery.schedule_quiet_state(checkpoint)
             quiet_observations: tuple[
                 tuple[str | None, QuietObservationKind],
@@ -754,7 +881,9 @@ class FrozenProspectiveApplication:
                 (checkpoint.neutral_control_id, "neutral_control"),
                 (checkpoint.high_tail_control_id, "high_tail_control"),
             )
-            for observation_id, kind in quiet_observations if opening_receipt is None else ():
+            for observation_id, kind in (
+                quiet_observations if not opening_reversal_candidate else ()
+            ):
                 if observation_id is None:
                     continue
                 self._quiet_observation_results[observation_id] = (checkpoint, kind)
@@ -773,16 +902,14 @@ class FrozenProspectiveApplication:
                     checkpoint.quiet_episode_decision.prospective_entry_timestamp
                     + timedelta(minutes=60),
                 )
-            if opening_receipt is None:
+            if not opening_reversal_candidate:
                 self.option_discovery.persist_checkpoint_schedules(checkpoint)
             checkpoints_to_complete.append(checkpoint)
         if (
             self.opening_leader_recorder is not None
             and observed >= self.opening_leader_recorder.boundary_utc
         ):
-            for recovery_session in self.opening_leader_recorder.outstanding_sessions(
-                now=observed
-            ):
+            for recovery_session in self.opening_leader_recorder.outstanding_sessions(now=observed):
                 if recovery_session == observed_session:
                     continue
                 self.opening_leader_recorder.poll(
@@ -1268,6 +1395,34 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV1
         | OpeningLeaderDeploymentRefreezeReceiptV2
         | OpeningLeaderDeploymentRefreezeReceiptV3
+        | OpeningLeaderDeploymentRefreezeReceiptV4
+        | OpeningLeaderDeploymentRefreezeReceiptV5
+        | OpeningLeaderDeploymentRefreezeReceiptV6
+        | OpeningLeaderDeploymentRefreezeReceiptV7
+        | OpeningLeaderDeploymentRefreezeReceiptV8
+        | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
+        | OpeningLeaderDeploymentRefreezeReceiptV11
+        | OpeningLeaderDeploymentRefreezeReceiptV12
+        | OpeningLeaderDeploymentRefreezeReceiptV13
+        | OpeningLeaderDeploymentRefreezeReceiptV14
+        | OpeningLeaderDeploymentRefreezeReceiptV15
+        | OpeningLeaderDeploymentRefreezeReceiptV16
+        | OpeningLeaderDeploymentRefreezeReceiptV17
+        | OpeningLeaderDeploymentRefreezeReceiptV18
+        | OpeningLeaderDeploymentRefreezeReceiptV19
+        | OpeningLeaderDeploymentRefreezeReceiptV20
+        | OpeningLeaderDeploymentRefreezeReceiptV21
+        | OpeningLeaderDeploymentRefreezeReceiptV22
+        | OpeningLeaderDeploymentRefreezeReceiptV23
+        | OpeningLeaderDeploymentRefreezeReceiptV24
+        | OpeningLeaderDeploymentRefreezeReceiptV25
+        | OpeningLeaderDeploymentRefreezeReceiptV26
+        | OpeningLeaderDeploymentRefreezeReceiptV27
+        | OpeningLeaderDeploymentRefreezeReceiptV28
+        | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
+        | OpeningLeaderDeploymentRefreezeReceiptV31
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:
@@ -1737,7 +1892,7 @@ def build_frozen_prospective_application(
         )
 
     static_scientific_prerequisites_passed = (
-        m1c_parity and direction_parity and bar_compatibility and historical_activity_available
+        m1c_parity and direction_parity and historical_activity_available
     )
 
     def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:
@@ -1870,7 +2025,7 @@ def build_frozen_prospective_application(
     )
     controller_budget = SubscriptionBudgetManager(
         limits={
-            SubscriptionKind.LEVEL1: config.ibkr.max_high_resolution_underlyings,
+            SubscriptionKind.LEVEL1: len(identity.symbols) + 1,
             SubscriptionKind.BAR: len(identity.symbols) + len(proxy_symbols),
             SubscriptionKind.TICK_BY_TICK: min(
                 runtime_capacity.available_tick_by_tick,
@@ -1940,6 +2095,7 @@ def build_frozen_prospective_application(
         ),
         maximum_quote_age=timedelta(seconds=config.ibkr.maximum_quote_age_seconds),
         maximum_clock_drift_seconds=config.ibkr.maximum_clock_drift_seconds,
+        maximum_clock_probe_round_trip_seconds=config.ibkr.request_timeout_seconds,
         depth_rows=config.ibkr.level2_rows,
         durable_inbox=durable_inbox,
         recorder_generation=recorder_generation,
@@ -1949,6 +2105,12 @@ def build_frozen_prospective_application(
         operational_repository=operational_repository,
         operational_thresholds=operational_thresholds(config),
         processing_heartbeat=heartbeat,
+        inbox_retention_enabled=config.runtime.callback_inbox_retention_enabled,
+        inbox_retention_period=timedelta(seconds=config.runtime.callback_inbox_retention_seconds),
+        inbox_compaction_interval=timedelta(
+            seconds=config.runtime.callback_inbox_compaction_interval_seconds
+        ),
+        inbox_compaction_batch_limit=(config.runtime.callback_inbox_compaction_batch_limit),
     )
 
     controller = LiveSubscriptionController(
@@ -1989,11 +2151,62 @@ def build_frozen_prospective_application(
         symbols=identity.symbols,
         operational_status_by_symbol=statuses,
     )
-    controller.start_always_on(initial_metadata, tuple(qualified))
+    if operational_repository is not None:
+        assert recorder_generation is not None
+        activation_receipt_identity = _activation_receipt_identity(activation)
+        loaded_at = datetime.now(UTC)
+        for artifact_name, artifact_path in sorted(artifact_files.items()):
+            expected_hash = activation.model_artifact_hashes[artifact_name]
+            observed_hash = _sha256(artifact_path)
+            verified = observed_hash == expected_hash
+            operational_repository.record_artifact_verification(
+                RuntimeArtifactVerification(
+                    verification_id=stable_artifact_verification_id(
+                        run_id=config.runtime.run_id,
+                        recorder_generation=recorder_generation,
+                        artifact_name=artifact_name,
+                        expected_hash=expected_hash,
+                    ),
+                    run_id=config.runtime.run_id,
+                    recorder_generation=recorder_generation,
+                    artifact_bundle_id=m1c_runtime.model_hash,
+                    artifact_name=artifact_name,
+                    expected_hash=expected_hash,
+                    observed_hash=observed_hash,
+                    feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
+                    activation_receipt_identity=activation_receipt_identity,
+                    found=True,
+                    loaded=True,
+                    schema_validated=True,
+                    hash_verified=verified,
+                    contract_compatible=True,
+                    used_by_active_generation=True,
+                    load_timestamp_utc=loaded_at,
+                    verification_result="verified" if verified else "blocked",
+                    blocker=(None if verified else "blocked_frozen_artifact_hash_mismatch"),
+                    details={
+                        "expected_hash_source": "immutable_activation_receipt",
+                        "application_wiring_completed": False,
+                        "static_verification_completed_before_subscription_start": True,
+                        "activation_git_commit": activation.git_sha,
+                        "runtime_git_commit": config.runtime.git_commit,
+                        "activation_app_version": first_activation_app_version,
+                        "runtime_app_version": config.runtime.app_version,
+                    },
+                )
+            )
     # These callbacks are prospective evidence and must be requested only after
-    # the immutable activation boundary and callback normalizer exist.
+    # the immutable activation boundary and callback normalizer exist. Request
+    # low-rate control evidence before high-volume subscriptions so IBKR's
+    # single callback decoder cannot leave clock preflight behind a market-data
+    # burst.
     adapter.request_current_time()
     adapter.request_depth_exchanges()
+    controller.start_always_on(
+        initial_metadata,
+        tuple(qualified),
+        required_level1_symbols=frozenset((*identity.symbols, MARKET_PROXY)),
+    )
     option_recorder = BoundedOptionRecorder(
         adapter=adapter,
         subscriptions=controller_budget,
@@ -2004,7 +2217,11 @@ def build_frozen_prospective_application(
         stream_unregistration_sink=normalizer.unregister,
         request_pacer=pace_request,
         underlying_path_provider=live.underlying_price_path,
+        underlying_quote_provider=live.underlying_quote_path,
         underlying_halt_provider=live.underlying_halted_in_window,
+        configured_commission_per_contract=(config.ibkr.option_commission_per_contract),
+        configured_regulatory_fee_per_contract=(config.ibkr.option_regulatory_fee_per_contract),
+        configured_exchange_fee_per_contract=(config.ibkr.option_exchange_fee_per_contract),
     )
     live.option_quote_sink = option_recorder.record_quote
 
@@ -2174,9 +2391,7 @@ def build_frozen_prospective_application(
         )
         opening_leader_option_snapshotter = OpeningLeaderIBKROptionSnapshotterV0(
             adapter=adapter,
-            underlying_contracts={
-                item.symbol: item for item in qualified if not item.market_proxy
-            },
+            underlying_contracts={item.symbol: item for item in qualified if not item.market_proxy},
             contract_factory=lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
                 option_contract_factory(
                     symbol,
@@ -2191,6 +2406,31 @@ def build_frozen_prospective_application(
             request_heartbeat=pace_request,
             maximum_quote_age_seconds=config.ibkr.maximum_quote_age_seconds,
         )
+
+        def promote_opening_leader_underlying(
+            symbol: str,
+            session: date,
+            checkpoint: int,
+            observed: datetime,
+        ) -> OpeningLeaderSelectionPromotionV0:
+            selection_id = f"opening-leader-continuation-v0:{session.isoformat()}:C{checkpoint}"
+            result = controller.promote_opening_leader_underlying(
+                metadata_factory(
+                    observed,
+                    (checkpoint_timestamp_v0(session, checkpoint),),
+                ),
+                symbol=symbol,
+                selection_id=selection_id,
+            )
+            return OpeningLeaderSelectionPromotionV0(
+                selection_id=selection_id,
+                symbol=result.symbol,
+                level1_started=result.level1_started,
+                approved_keys=result.approved_keys,
+                denied_keys=result.denied_keys,
+                budget_state=result.budget_state.value,
+            )
+
         opening_leader_recorder = OpeningLeaderContinuationRecorderV0(
             store=opening_leader_store,
             freeze_identity=opening_leader_receipt,
@@ -2201,6 +2441,10 @@ def build_frozen_prospective_application(
             option_snapshot_provider=opening_leader_option_snapshotter,
             rank_persistence_provider=live.opening_leader_rank_persistence,
             official_close_provider=live.opening_leader_official_close,
+            selection_promotion_sink=promote_opening_leader_underlying,
+            option_commission_per_contract=config.ibkr.option_commission_per_contract,
+            option_regulatory_fee_per_contract=(config.ibkr.option_regulatory_fee_per_contract),
+            option_exchange_fee_per_contract=config.ibkr.option_exchange_fee_per_contract,
         )
     application = FrozenProspectiveApplication(
         config=config,
@@ -2230,49 +2474,6 @@ def build_frozen_prospective_application(
         session_context_preflight=session_context_preflight,
         opening_leader_recorder=opening_leader_recorder,
     )
-    if operational_repository is not None:
-        assert recorder_generation is not None
-        activation_receipt_identity = _activation_receipt_identity(activation)
-        loaded_at = datetime.now(UTC)
-        for artifact_name, artifact_path in sorted(artifact_files.items()):
-            expected_hash = activation.model_artifact_hashes[artifact_name]
-            observed_hash = _sha256(artifact_path)
-            verified = observed_hash == expected_hash
-            operational_repository.record_artifact_verification(
-                RuntimeArtifactVerification(
-                    verification_id=stable_artifact_verification_id(
-                        run_id=config.runtime.run_id,
-                        recorder_generation=recorder_generation,
-                        artifact_name=artifact_name,
-                        expected_hash=expected_hash,
-                    ),
-                    run_id=config.runtime.run_id,
-                    recorder_generation=recorder_generation,
-                    artifact_bundle_id=m1c_runtime.model_hash,
-                    artifact_name=artifact_name,
-                    expected_hash=expected_hash,
-                    observed_hash=observed_hash,
-                    feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
-                    activation_receipt_identity=activation_receipt_identity,
-                    found=True,
-                    loaded=True,
-                    schema_validated=True,
-                    hash_verified=verified,
-                    contract_compatible=True,
-                    used_by_active_generation=True,
-                    load_timestamp_utc=loaded_at,
-                    verification_result="verified" if verified else "blocked",
-                    blocker=(None if verified else "blocked_frozen_artifact_hash_mismatch"),
-                    details={
-                        "expected_hash_source": "immutable_activation_receipt",
-                        "application_wiring_completed": True,
-                        "activation_git_commit": activation.git_sha,
-                        "runtime_git_commit": config.runtime.git_commit,
-                        "activation_app_version": first_activation_app_version,
-                        "runtime_app_version": config.runtime.app_version,
-                    },
-                )
-            )
     return application
 
 

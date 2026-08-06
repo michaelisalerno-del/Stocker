@@ -1,0 +1,10 @@
+[Unit]
+Description=Verify Stocker recorder live evidence after the market opens
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09:34:00 America/New_York
+Persistent=true
+Unit=stocker-recorder-session-readiness.service
+
+[Install]
+WantedBy=timers.target

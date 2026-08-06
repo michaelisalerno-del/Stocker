@@ -15,7 +15,10 @@ from stocker_prospective.contract import (
     ORIGINAL_LOW_MOVEMENT_DECISION,
     claims_boundary,
 )
-from stocker_prospective.transfer import TransferReport
+from stocker_prospective.transfer import (
+    TransferReport,
+    classify_cross_vendor_validation_status,
+)
 
 DAILY_REPORT_FILENAMES = (
     "session_summary.json",
@@ -190,6 +193,16 @@ class BudgetAwareDailyReportWriter:
                 """,
                 (self.run_id, session.isoformat()),
             )
+            phase_row = connection.execute(
+                """
+                SELECT phase
+                FROM prospective_session_phase_v0
+                WHERE run_id = ? AND session_date = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (self.run_id, session.isoformat()),
+            ).fetchone()
         prediction_rows = [
             {
                 "symbol": row["symbol"],
@@ -229,7 +242,7 @@ class BudgetAwareDailyReportWriter:
         probability_comparison: list[dict[str, object]] = []
         tail_comparison: list[dict[str, object]] = []
         episode_comparison: list[dict[str, object]] = []
-        transfer_decision = "blocked_insufficient_valid_sessions"
+        transfer_decision = "cross_vendor_validation_not_configured"
         valid_sessions = 0
         if transfer_report is not None:
             transfer_decision = transfer_report.decision
@@ -265,13 +278,28 @@ class BudgetAwareDailyReportWriter:
                     "session": session.isoformat(),
                 }
             ]
+        cohort_phase = "option_development" if phase_row is None else str(phase_row["phase"])
+        cross_vendor_status = classify_cross_vendor_validation_status(
+            enabled=transfer_report is not None,
+            credential_configured=transfer_report is not None,
+            valid_session_count=valid_sessions,
+            decision=transfer_decision,
+        )
+        scientific_option_evidence = any(
+            bool(row.get("scientific_option_evidence")) for row in option_quality
+        )
         summary = {
             "session": session.isoformat(),
             "generated_at_utc": generated.isoformat(),
-            "cohort_phase": "engineering_transfer",
-            "scientific_option_evidence": False,
+            "cohort_phase": cohort_phase,
+            "scientific_option_evidence": scientific_option_evidence,
+            "scientific_option_evidence_allowed": cohort_phase != "engineering_transfer",
             "valid_transfer_sessions": valid_sessions,
             "source_transfer_decision": transfer_decision,
+            "cross_vendor_validation_status": cross_vendor_status,
+            "cross_vendor_validation_diagnostic_only": True,
+            "market_data_source": "ibkr",
+            "historical_research_source": "eodhd",
             "m1c_prediction_count": len(prediction_rows),
             "queued_episode_transition_count": sum(
                 row.get("state") == "EPISODE_QUEUED" for row in option_quality
@@ -364,13 +392,17 @@ class BudgetAwareDailyReportWriter:
                 "",
                 f"- Session: {summary['session']}",
                 f"- Cohort phase: {summary['cohort_phase']}",
-                f"- Source-transfer decision: {summary['source_transfer_decision']}",
+                "- Cross-vendor diagnostic status (non-blocking): "
+                f"{summary['cross_vendor_validation_status']}",
+                "- Cross-vendor diagnostic decision (legacy vocabulary; non-blocking): "
+                f"{summary['source_transfer_decision']}",
                 f"- Frozen M1C predictions: {summary['m1c_prediction_count']}",
                 f"- Queued episode transitions: {summary['queued_episode_transition_count']}",
                 f"- Degraded episode transitions: {summary['degraded_episode_transition_count']}",
                 f"- Historical decision: `{ORIGINAL_LOW_MOVEMENT_DECISION}`",
                 "- Exact vendor bar equality required: false",
-                "- Option records are engineering-only scientific evidence: false",
+                "- Prospective IBKR scientific option evidence recorded: "
+                f"{str(summary['scientific_option_evidence']).lower()}",
                 "- Strategy profitability decision allowed: false",
                 "",
                 "## Capacity",

@@ -30,6 +30,8 @@ class EpisodeSafetyDecision:
 
 
 def evaluate_episode_safety(inputs: EpisodeSafetyInputs) -> EpisodeSafetyDecision:
+    """Validate causal signal evidence against the frozen safety contract."""
+
     checks = (
         (inputs.capability_preflight_passed, "ibkr_capability_preflight_failed"),
         (inputs.m1c_parity_passed, "m1c_parity_failed"),

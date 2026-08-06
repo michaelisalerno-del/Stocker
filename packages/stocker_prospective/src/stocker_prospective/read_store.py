@@ -318,7 +318,7 @@ class ProspectiveReadStore:
                 """
                 SELECT blocker_code, component, message, severity
                 FROM web_active_runtime_blocker_v0
-                WHERE run_id = ?
+                WHERE run_id = ? AND component <> 'parallel_feature_validation'
                 ORDER BY event_id
                 """,
                 (run_id,),
@@ -766,8 +766,9 @@ class ProspectiveReadStore:
             subscriptions = connection.execute(
                 """
                 SELECT subscription_kind, COUNT(*) AS used
-                FROM subscription_lifecycle_v0
-                WHERE run_id = ? AND cancelled_at_utc IS NULL
+                FROM web_latest_subscription_state_v0
+                WHERE run_id = ?
+                  AND status IN ('pending', 'active', 'cancellation_requested')
                 GROUP BY subscription_kind
                 """,
                 (run_id,),
@@ -819,6 +820,164 @@ class ProspectiveReadStore:
             "order_routing": "disabled",
         }
 
+    def dashboard_summary_v0(
+        self,
+        *,
+        now: datetime,
+        prospective_start_utc: datetime | None = None,
+        thresholds: OperationalThresholds | None = None,
+    ) -> dict[str, Any]:
+        """Load the bounded state needed by the frequent dashboard poll.
+
+        The caller may wrap this projection in :meth:`snapshot_transaction` so
+        every row comes from one read-only WAL snapshot.  Deliberately keep this
+        projection independent of filesystem artifacts, Parquet, reports,
+        transfer history, universe history, and expanded gap details.
+        """
+
+        observed = now.astimezone(UTC)
+        with self._connection() as connection:
+            if self.run_id is None:
+                run = connection.execute(
+                    """
+                    SELECT run_id, prospective_start_utc
+                    FROM prospective_run
+                    ORDER BY created_at_utc DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+            else:
+                run = connection.execute(
+                    """
+                    SELECT run_id, prospective_start_utc
+                    FROM prospective_run
+                    WHERE run_id = ?
+                    """,
+                    (self.run_id,),
+                ).fetchone()
+            if run is None:
+                operational = inactive_operational_projection(now=observed)
+                return {
+                    "run_id": None,
+                    "operational": operational,
+                    "checkpoint": None,
+                    "completed_bar": None,
+                    "episode": None,
+                    "connection": None,
+                    "subscriptions": {},
+                    "pending_inbox_count": 0,
+                    "leased_inbox_count": 0,
+                    "alerts": [],
+                }
+
+            run_id = str(run["run_id"])
+            start = (
+                prospective_start_utc.astimezone(UTC)
+                if prospective_start_utc is not None
+                else datetime.fromisoformat(str(run["prospective_start_utc"])).astimezone(UTC)
+            )
+            operational = project_operational_state_from_database(
+                connection,
+                run_id=run_id,
+                now=observed,
+                prospective_start_utc=start,
+                thresholds=thresholds or OperationalThresholds(),
+            )
+            checkpoint = connection.execute(
+                """
+                SELECT model_id, symbol, checkpoint, bar_end_utc, probability,
+                       threshold, threshold_passed, eligible, feature_freshness,
+                       missing_feature_count
+                FROM m1c_checkpoint_v0
+                WHERE run_id = ?
+                ORDER BY bar_end_utc DESC, id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            completed_bar = connection.execute(
+                """
+                SELECT symbol, session_date, bar_start_utc, bar_end_utc,
+                       checkpoint, source, source_completeness,
+                       received_timestamp_utc
+                FROM completed_bar_state_v0
+                WHERE run_id = ?
+                ORDER BY bar_end_utc DESC, symbol
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            episode = connection.execute(
+                """
+                SELECT episode_id, symbol, session_date, trigger_checkpoint,
+                       trigger_bar_end_utc, prospective_entry_timestamp_utc,
+                       m1c_probability, scientific_recording_valid, phase,
+                       completion_status, completed_at_utc
+                FROM m1c_episode_v0
+                WHERE run_id = ?
+                ORDER BY trigger_bar_end_utc DESC, episode_id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            connection_event = connection.execute(
+                """
+                SELECT id, state, error_code, message, data_maintained,
+                       reconnect_attempt
+                FROM ibkr_connection_event
+                WHERE run_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+            subscriptions = connection.execute(
+                """
+                SELECT subscription_kind, COUNT(*) AS used
+                FROM web_latest_subscription_state_v0
+                WHERE run_id = ?
+                  AND status IN ('pending', 'active', 'cancellation_requested')
+                GROUP BY subscription_kind
+                """,
+                (run_id,),
+            ).fetchall()
+            inbox_counts = connection.execute(
+                """
+                SELECT status, COUNT(*) AS event_count
+                FROM callback_inbox_v1
+                WHERE admission_run_id = ? AND status IN ('pending', 'leased')
+                GROUP BY status
+                """,
+                (run_id,),
+            ).fetchall()
+            alert_rows = connection.execute(
+                """
+                SELECT blocker_code, message, severity
+                FROM web_active_runtime_blocker_v0
+                WHERE run_id = ?
+                  AND component NOT IN ('parallel_feature_validation', 'feature_parity')
+                ORDER BY event_id
+                LIMIT 25
+                """,
+                (run_id,),
+            ).fetchall()
+
+        counts = {str(row["status"]): int(row["event_count"]) for row in inbox_counts}
+        return {
+            "run_id": run_id,
+            "operational": operational,
+            "checkpoint": self._dict(checkpoint),
+            "completed_bar": self._dict(completed_bar),
+            "episode": self._dict(episode),
+            "connection": self._dict(connection_event),
+            "subscriptions": {
+                str(row["subscription_kind"]): int(row["used"]) for row in subscriptions
+            },
+            "pending_inbox_count": counts.get("pending", 0),
+            "leased_inbox_count": counts.get("leased", 0),
+            "alerts": [dict(row) for row in alert_rows],
+        }
+
     def universe_live_v0(self) -> list[dict[str, Any]]:
         run_id = self._selected_run_id()
         if run_id is None:
@@ -850,6 +1009,8 @@ class ProspectiveReadStore:
                        c.threshold_passed,
                        c.eligible AS m1c_scientific_eligible,
                        c.rejection_reasons_json AS m1c_rejection_reasons_json,
+                       c.diagnostic_quality_flags_json
+                         AS m1c_diagnostic_quality_flags_json,
                        c.checkpoint AS latest_completed_checkpoint,
                        c.bar_end_utc AS latest_completed_checkpoint_utc,
                        e.episode_id AS latest_episode_id,
@@ -955,14 +1116,27 @@ class ProspectiveReadStore:
                 "m1c_rejection_reasons_json",
                 None,
             )
+            diagnostic_quality_flags_json = item.pop(
+                "m1c_diagnostic_quality_flags_json",
+                None,
+            )
             item["m1c_scientific_eligible"] = (
                 None if probability is None else bool(item.get("m1c_scientific_eligible"))
             )
-            item["m1c_rejection_reasons"] = (
+            rejection_reasons = (
                 []
                 if rejection_reasons_json is None
                 else list(json.loads(str(rejection_reasons_json)))
             )
+            diagnostic_quality_flags = (
+                []
+                if diagnostic_quality_flags_json is None
+                else list(json.loads(str(diagnostic_quality_flags_json)))
+            )
+            if not diagnostic_quality_flags and "underlying_quote_stale" in rejection_reasons:
+                diagnostic_quality_flags.append("underlying_quote_stale")
+            item["m1c_rejection_reasons"] = rejection_reasons
+            item["m1c_diagnostic_quality_flags"] = diagnostic_quality_flags
             item["distance_from_threshold"] = (
                 None
                 if probability is None or threshold is None
@@ -1400,6 +1574,53 @@ class ProspectiveReadStore:
             )
             item = OpeningReversalVirtualPositionV1.model_validate(raw)
             items.append(item.model_dump(mode="json"))
+        return items
+
+    def opening_leader_option_accounting_v0(
+        self,
+        *,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Return bounded executable option marks from the segregated leader ledger."""
+
+        if limit <= 0:
+            raise ValueError("opening-leader option accounting limit must be positive")
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT stable_id, session_date, checkpoint, selected_symbol,
+                       observation_name, observed_at_utc,
+                       data_quality_flags_json, payload_json
+                FROM opening_leader_evidence_v0
+                WHERE run_id = ?
+                  AND record_type = 'option_strategy_accounting'
+                  AND original_stable_id IS NULL
+                ORDER BY session_date DESC, checkpoint,
+                         observed_at_utc DESC, id DESC
+                LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(json.loads(str(row["payload_json"])))
+            items.append(
+                {
+                    "evidence_id": str(row["stable_id"]),
+                    "session_date": str(row["session_date"]),
+                    "checkpoint": f"C{int(row['checkpoint'])}",
+                    "selected_symbol": row["selected_symbol"],
+                    "recorded_observation_name": str(row["observation_name"]),
+                    "observed_at_utc": str(row["observed_at_utc"]),
+                    "evidence_quality_flags": tuple(
+                        json.loads(str(row["data_quality_flags_json"]))
+                    ),
+                    **payload,
+                }
+            )
         return items
 
     def quiet_state_virtual_positions_v1(
@@ -1843,10 +2064,14 @@ class ProspectiveReadStore:
                 "salt_sha256": hashlib.sha256(NEUTRAL_CONTROL_SALT.encode()).hexdigest(),
             },
             "phase_boundaries": {
-                "engineering_transfer_valid_sessions": 20,
+                "prospective_ibkr_evidence_from_first_valid_session": True,
+                "cross_vendor_diagnostic_target_sessions": 20,
                 "option_development_complete_quiet_episodes": 150,
                 "untouched_confirmation_complete_quiet_episodes": 150,
             },
+            "market_data_source": "ibkr",
+            "historical_research_source": "eodhd",
+            "cross_vendor_validation_diagnostic_only": True,
             "record_only": True,
             "order_path": "absent",
             "original_decision": "blocked_insufficient_low_tail_support",
@@ -1886,6 +2111,10 @@ class ProspectiveReadStore:
                        q.previous_m1c_probability, q.bottom_5, q.bottom_10,
                        q.bottom_20, q.high_tail, q.distance_from_bottom_10,
                        q.data_quality_status, q.data_quality_flags_json,
+                       q.selected_underlying_quote_event_id,
+                       q.selected_underlying_quote_timestamp_utc,
+                       q.selected_underlying_quote_age_seconds,
+                       q.underlying_quote_selection_policy,
                        o.observation_id, o.observation_kind,
                        o.session_date AS observation_session_date,
                        o.trigger_checkpoint AS observation_trigger_checkpoint,
@@ -1958,7 +2187,11 @@ class ProspectiveReadStore:
             observation = connection.execute(
                 """
                 SELECT o.*, q.model_hash, q.feature_hash,
-                       q.data_quality_status AS checkpoint_data_quality_status
+                       q.data_quality_status AS checkpoint_data_quality_status,
+                       q.selected_underlying_quote_event_id,
+                       q.selected_underlying_quote_timestamp_utc,
+                       q.selected_underlying_quote_age_seconds,
+                       q.underlying_quote_selection_policy
                 FROM quiet_state_observation_v0 o
                 JOIN quiet_state_checkpoint_v0 q ON q.id = o.quiet_checkpoint_id
                 WHERE o.run_id = ? AND o.observation_id = ?
@@ -1991,6 +2224,22 @@ class ProspectiveReadStore:
                 """,
                 (run_id, observation_id),
             ).fetchall()
+            risk_observations = connection.execute(
+                """
+                SELECT * FROM quiet_option_risk_observation_v0
+                WHERE run_id = ? AND observation_id = ?
+                ORDER BY dte_bucket, horizon_label, candidate_id, observed_at_utc
+                """,
+                (run_id, observation_id),
+            ).fetchall()
+            strategy_comparisons = connection.execute(
+                """
+                SELECT * FROM quiet_option_strategy_comparison_v0
+                WHERE run_id = ? AND observation_id = ?
+                ORDER BY dte_bucket, horizon_minutes
+                """,
+                (run_id, observation_id),
+            ).fetchall()
         return {
             "episode": self._decoded(observation),
             "frozen_thresholds": {
@@ -2002,6 +2251,8 @@ class ProspectiveReadStore:
             "underlying_path": [self._decoded(row) for row in underlying_path],
             "microstructure": [self._decoded(row) for row in microstructure],
             "shadow_structures": [self._decoded(row) for row in shadows],
+            "risk_observations": [self._decoded(row) for row in risk_observations],
+            "strategy_comparisons": [self._decoded(row) for row in strategy_comparisons],
         }
 
     def quiet_state_episode_options_v0(
@@ -2233,7 +2484,12 @@ class ProspectiveReadStore:
     def source_transfer_status_v0(self) -> dict[str, Any]:
         run_id = self._selected_run_id()
         if run_id is None:
-            return {"sessions": [], "valid_session_count": 0, "decision": None}
+            return {
+                "sessions": [],
+                "valid_session_count": 0,
+                "decision": None,
+                "latest_diagnostic_status": None,
+            }
         with self._connection() as connection:
             rows = connection.execute(
                 """
@@ -2242,12 +2498,29 @@ class ProspectiveReadStore:
                 """,
                 (run_id,),
             ).fetchall()
+            health = connection.execute(
+                """
+                SELECT details_json
+                FROM data_health_event
+                WHERE run_id = ? AND component = 'parallel_feature_validation'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
         sessions = [self._decoded(row) for row in rows]
         latest = None if not sessions else sessions[-1]
+        latest_health = None if health is None else self._decoded(health)
+        health_details = None if latest_health is None else latest_health.get("details")
         return {
             "sessions": sessions,
             "valid_session_count": sum(bool(row.get("valid")) for row in sessions),
             "decision": None if latest is None else latest.get("decision"),
+            "latest_diagnostic_status": (
+                health_details.get("cross_vendor_validation_status")
+                if isinstance(health_details, dict)
+                else None
+            ),
         }
 
     def opening_leader_continuation_v0(self) -> dict[str, Any]:
@@ -2299,8 +2572,7 @@ class ProspectiveReadStore:
                 ).fetchall()
             )
             support_rows = connection.execute(
-                "SELECT * FROM opening_leader_evidence_v0 "
-                "WHERE run_id = ? ORDER BY id",
+                "SELECT * FROM opening_leader_evidence_v0 WHERE run_id = ? ORDER BY id",
                 (run_id,),
             ).fetchall()
         support_evidence = [self._decoded(row) for row in support_rows]
@@ -2337,9 +2609,7 @@ class ProspectiveReadStore:
                     for row in matching
                 }
                 e0_payload = evidence_by_name.get("E0", {}).get("payload") or {}
-                final_payload = evidence_by_name.get("FINAL_CONTINUOUS", {}).get(
-                    "payload"
-                ) or {}
+                final_payload = evidence_by_name.get("FINAL_CONTINUOUS", {}).get("payload") or {}
                 e0_quote = e0_payload.get("quote") or {}
                 final_quote = final_payload.get("quote") or {}
                 identities_match = all(
@@ -2420,6 +2690,7 @@ class ProspectiveReadStore:
             "rank_persistence": None,
             "m1c_context": None,
             "option_snapshots": {},
+            "option_strategy_accounting": {},
             "pre_close_observations": {},
             "final_continuous_observation": None,
             "official_close_reference": None,
@@ -2476,9 +2747,7 @@ class ProspectiveReadStore:
                     "signal_receipt": None if failure is None else failure["stable_id"],
                     "support": support_projection,
                     "data_quality_warnings": (
-                        []
-                        if failure is None
-                        else list(failure.get("data_quality_flags", ()))
+                        [] if failure is None else list(failure.get("data_quality_flags", ()))
                     ),
                 }
             )
@@ -2490,8 +2759,7 @@ class ProspectiveReadStore:
             row for row in original if row["record_type"] == "underlying_observation"
         ]
         observation_rows = [
-            linked_by_original.get(str(row["stable_id"]), row)
-            for row in original_observation_rows
+            linked_by_original.get(str(row["stable_id"]), row) for row in original_observation_rows
         ]
         observations = {
             str(row["observation_name"]): row.get("payload") for row in observation_rows
@@ -2527,6 +2795,14 @@ class ProspectiveReadStore:
             for row in original
             if row["record_type"] == "option_snapshot"
         }
+        option_strategy_accounting: dict[str, dict[str, Any]] = {}
+        for row in original:
+            if row["record_type"] != "option_strategy_accounting":
+                continue
+            payload = row.get("payload") or {}
+            observation_name = str(payload.get("observation_name") or "UNKNOWN")
+            strategy_name = str(payload.get("strategy_name") or "UNKNOWN")
+            option_strategy_accounting.setdefault(observation_name, {})[strategy_name] = payload
         original_official = next(
             (row for row in original if row["record_type"] == "official_close_reference"),
             None,
@@ -2540,10 +2816,7 @@ class ProspectiveReadStore:
             ).get("payload")
         )
         warning_values = [
-            str(flag)
-            for row in rows
-            for flag in row.get("data_quality_flags", ())
-            if flag
+            str(flag) for row in rows for flag in row.get("data_quality_flags", ()) if flag
         ]
         warning_values.extend(
             f"linked_{row['record_type']}:{row['stable_id']}"
@@ -2558,9 +2831,7 @@ class ProspectiveReadStore:
                 "slate_size": ranking.get("slate_size"),
                 "rank_1": rank_1.get("symbol"),
                 "rank_2": rank_2.get("symbol"),
-                "rank_1_return_from_open_bps": rank_1.get(
-                    "open_to_checkpoint_return_bps"
-                ),
+                "rank_1_return_from_open_bps": rank_1.get("open_to_checkpoint_return_bps"),
                 "leader_separation_bps": ranking.get("rank_1_minus_rank_2_bps"),
                 "signal_receipt": signal["stable_id"],
                 "source_feed_status": latest_quote.get("market_data_status"),
@@ -2571,6 +2842,7 @@ class ProspectiveReadStore:
                 "rank_persistence": latest_persistence,
                 "m1c_context": rank_1.get("m1c_context"),
                 "option_snapshots": option_snapshots,
+                "option_strategy_accounting": option_strategy_accounting,
                 "pre_close_observations": {
                     name: observations.get(name)
                     for name in ("PRE_CLOSE_30", "PRE_CLOSE_15", "PRE_CLOSE_5", "PRE_CLOSE_1")

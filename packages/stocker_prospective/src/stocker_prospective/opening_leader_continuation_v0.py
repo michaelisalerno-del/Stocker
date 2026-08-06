@@ -19,6 +19,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.live_bars import xnys_session_bounds
+from stocker_prospective.option_risk_accounting import (
+    GreekSourceSnapshot,
+    OptionLeg,
+    OptionLegQuote,
+    OptionRiskAccountingRecord,
+    OptionStrategy,
+    OptionStrategySnapshot,
+    StrategyType,
+    TransactionCosts,
+    calculate_option_strategy_path,
+)
 
 RECORDER_VERSION_V0: Final[Literal["opening-leader-continuation-recorder-v0"]] = (
     "opening-leader-continuation-recorder-v0"
@@ -59,6 +70,13 @@ FROZEN_SIGNAL_CHECKPOINTS_V0: Final[dict[int, Literal["primary", "secondary"]]] 
     12: "secondary",
 }
 MINIMUM_COMPLETE_SLATE_V0: Final[int] = 15
+OPTION_ACCOUNTING_OBSERVATIONS_V0: Final[tuple[str, ...]] = (
+    "E0",
+    "H60",
+    "H120",
+    "PRE_CLOSE_30",
+    "FINAL_CONTINUOUS",
+)
 
 
 def _canonical_json(value: object) -> str:
@@ -316,6 +334,7 @@ class OptionChainSelectionV0(BaseModel):
     selected_expiries: tuple[date, ...]
     selected_strikes_by_expiry: dict[str, tuple[float, ...]]
     requests: tuple[OptionContractRequestV0, ...]
+    selection_basis: Literal["spot_band", "e0_frozen_exact_contracts"] = "spot_band"
     maximum_expiries: Literal[2] = 2
     maximum_strikes_per_expiry: Literal[5] = 5
     spot_band_fraction: float = Field(default=0.15, ge=0.15, le=0.15)
@@ -508,6 +527,53 @@ class OptionDiagnosticV0(BaseModel):
     order_authorized: Literal[False] = False
 
 
+class OpeningLeaderOptionContractIdentityV0(BaseModel):
+    """Exact immutable contract identity for one recorded strategy leg."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    leg_id: str = Field(min_length=1)
+    con_id: int = Field(gt=0)
+    right: Literal["C", "P"]
+    strike: float = Field(gt=0.0)
+    expiry: date
+    multiplier: int = Field(gt=0)
+    signed_contract_quantity: int
+    trading_class: str = Field(min_length=1)
+    exchange: str = Field(min_length=1)
+
+
+class OpeningLeaderOptionAccountingV0(BaseModel):
+    """One core executable accounting mark derived from immutable snapshots."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    strategy_name: Literal["P20", "P30", "BPS20"]
+    status: Literal["AVAILABLE", "UNAVAILABLE"]
+    reason: str | None
+    entry_observation: Literal["E0"] = "E0"
+    observation_name: str = Field(min_length=1)
+    strategy_id: str = Field(min_length=1)
+    contract_identities: tuple[OpeningLeaderOptionContractIdentityV0, ...]
+    accounting: OptionRiskAccountingRecord | None
+    data_quality_flags: tuple[str, ...] = ()
+    executable_pnl_is_primary: Literal[True] = True
+    greek_attribution_is_diagnostic_only: Literal[True] = True
+    margin_is_observed_only: Literal[True] = True
+    market_data_source: Literal["ibkr"] = "ibkr"
+    research_only: Literal[True] = True
+    can_authorize_trade: Literal[False] = False
+    order_routing: Literal["disabled"] = "disabled"
+
+    @model_validator(mode="after")
+    def _availability_matches_accounting(self) -> OpeningLeaderOptionAccountingV0:
+        if self.status == "AVAILABLE" and self.accounting is None:
+            raise ValueError("available option accounting requires a core record")
+        if self.status == "UNAVAILABLE" and self.reason is None:
+            raise ValueError("unavailable option accounting requires a reason")
+        return self
+
+
 class OpeningLeaderEvidenceRecordV0(BaseModel):
     """One immutable row in the existing prospective evidence database."""
 
@@ -599,6 +665,19 @@ class OpeningLeaderPollResultV0(BaseModel):
     created_option_snapshots: tuple[str, ...]
 
 
+class OpeningLeaderSelectionPromotionV0(BaseModel):
+    """Typed result of the one allowed post-selection Level I promotion."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    selection_id: str = Field(min_length=1)
+    symbol: str = Field(min_length=1)
+    level1_started: bool
+    approved_keys: tuple[str, ...]
+    denied_keys: tuple[str, ...]
+    budget_state: str = Field(min_length=1)
+
+
 class ProspectiveBoundaryErrorV0(RuntimeError):
     """The recorder was asked to use pre-freeze or historical input."""
 
@@ -610,7 +689,7 @@ UnderlyingQuoteProviderV0 = Callable[
     UnderlyingQuoteV0 | None,
 ]
 OptionSnapshotProviderV0 = Callable[
-    [str, int, str, float, datetime],
+    [str, int, str, float, datetime, tuple[OptionQuoteV0, ...] | None],
     OptionSnapshotCaptureV0,
 ]
 RankPersistenceProviderV0 = Callable[
@@ -620,6 +699,10 @@ RankPersistenceProviderV0 = Callable[
 OfficialCloseProviderV0 = Callable[
     [str, date, datetime],
     tuple[float, str, datetime] | None,
+]
+SelectionPromotionSinkV0 = Callable[
+    [str, date, int, datetime],
+    OpeningLeaderSelectionPromotionV0 | None,
 ]
 
 
@@ -638,6 +721,10 @@ class OpeningLeaderContinuationRecorderV0:
         option_snapshot_provider: OptionSnapshotProviderV0,
         rank_persistence_provider: RankPersistenceProviderV0,
         official_close_provider: OfficialCloseProviderV0,
+        selection_promotion_sink: SelectionPromotionSinkV0 | None = None,
+        option_commission_per_contract: float = 0.0,
+        option_regulatory_fee_per_contract: float = 0.0,
+        option_exchange_fee_per_contract: float = 0.0,
     ) -> None:
         prospective_start = _aware_utc(
             prospective_start_utc,
@@ -664,6 +751,20 @@ class OpeningLeaderContinuationRecorderV0:
         self.option_snapshot_provider = option_snapshot_provider
         self.rank_persistence_provider = rank_persistence_provider
         self.official_close_provider = official_close_provider
+        self.selection_promotion_sink = selection_promotion_sink
+        option_cost_rates = (
+            option_commission_per_contract,
+            option_regulatory_fee_per_contract,
+            option_exchange_fee_per_contract,
+        )
+        if any(not math.isfinite(value) or value < 0.0 for value in option_cost_rates):
+            raise ValueError("opening-leader option cost rates must be finite and nonnegative")
+        self.option_commission_per_contract = option_commission_per_contract
+        self.option_regulatory_fee_per_contract = option_regulatory_fee_per_contract
+        self.option_exchange_fee_per_contract = option_exchange_fee_per_contract
+        self._option_accounting_reconciled: set[tuple[str, date, int]] = set()
+        self._entry_option_contracts: dict[tuple[date, int], tuple[OptionQuoteV0, ...]] = {}
+        self._restored_signal_promotions: set[tuple[date, int, str]] = set()
 
     def _metadata(self, observed: datetime, *sources: datetime) -> EvidenceMetadata:
         source_values = sources or (observed,)
@@ -746,24 +847,45 @@ class OpeningLeaderContinuationRecorderV0:
                 quotes=(),
             )
         else:
-            try:
-                capture = self.option_snapshot_provider(
-                    symbol,
-                    checkpoint,
-                    observation_name,
-                    reference,
-                    observed,
-                )
-            except (RuntimeError, TimeoutError, ValueError) as exc:
+            frozen_contracts = (
+                None
+                if observation_name in {"SIGNAL", "E0"}
+                else self._entry_option_contracts.get((session, checkpoint))
+            )
+            if observation_name not in {"SIGNAL", "E0"} and frozen_contracts is None:
                 capture = OptionSnapshotCaptureV0(
                     snapshot_id=f"unavailable-{checkpoint}-{observation_name}",
                     observation_name=observation_name,
                     captured_at_utc=observed,
                     status="UNAVAILABLE",
-                    reason=f"{type(exc).__name__}:{exc}",
+                    reason="e0_option_contract_identity_unavailable",
                     selection=None,
                     quotes=(),
                 )
+            else:
+                try:
+                    capture = self.option_snapshot_provider(
+                        symbol,
+                        checkpoint,
+                        observation_name,
+                        reference,
+                        observed,
+                        frozen_contracts,
+                    )
+                except (RuntimeError, TimeoutError, ValueError) as exc:
+                    capture = OptionSnapshotCaptureV0(
+                        snapshot_id=f"unavailable-{checkpoint}-{observation_name}",
+                        observation_name=observation_name,
+                        captured_at_utc=observed,
+                        status="UNAVAILABLE",
+                        reason=f"{type(exc).__name__}:{exc}",
+                        selection=None,
+                        quotes=(),
+                    )
+        if observation_name == "E0":
+            self._entry_option_contracts[(session, checkpoint)] = (
+                select_option_accounting_contracts_v0(capture)
+            )
         recorded_at = max(observed, capture.captured_at_utc)
         self._append(
             observed=recorded_at,
@@ -823,6 +945,101 @@ class OpeningLeaderContinuationRecorderV0:
             flags=(reason,),
             source_timestamps=(observed,),
         )
+
+    def _reconcile_option_accounting(
+        self,
+        *,
+        observed: datetime,
+        session: date,
+        checkpoint: int,
+        symbol: str,
+    ) -> None:
+        """Append missing derived marks without mutating their raw snapshots."""
+
+        run_id = self._metadata(observed).run_id
+        records = self.store.records_for_session_checkpoint(
+            run_id=run_id,
+            session=session,
+            checkpoint=checkpoint,
+        )
+        existing = {
+            record.observation_name
+            for record in records
+            if record.record_type == "option_strategy_accounting"
+            and record.original_stable_id is None
+        }
+        snapshots_by_name = {
+            record.observation_name: OptionSnapshotCaptureV0.model_validate(record.payload)
+            for record in records
+            if record.record_type == "option_snapshot" and record.original_stable_id is None
+        }
+        entry = snapshots_by_name.get("E0")
+        if entry is None:
+            return
+        ordered_captures = tuple(
+            sorted(
+                (
+                    capture
+                    for name in OPTION_ACCOUNTING_OBSERVATIONS_V0
+                    if (capture := snapshots_by_name.get(name)) is not None
+                ),
+                key=lambda capture: capture.captured_at_utc,
+            )
+        )
+        for current_index, current in enumerate(ordered_captures):
+            if current.captured_at_utc < entry.captured_at_utc:
+                continue
+            expected_names = {
+                f"{current.observation_name}:{strategy_name}"
+                for strategy_name in ("P20", "P30", "BPS20")
+            }
+            if expected_names.issubset(existing):
+                continue
+            path = tuple(
+                capture
+                for capture in ordered_captures[: current_index + 1]
+                if capture.captured_at_utc >= entry.captured_at_utc
+            )
+            if not path or path[0].snapshot_id != entry.snapshot_id:
+                continue
+            marks = calculate_opening_leader_option_accounting_v0(
+                strategy_identity_prefix=(
+                    f"opening-leader:{session.isoformat()}:C{checkpoint}:{symbol}"
+                ),
+                entry_snapshot=entry,
+                snapshots=path,
+                commission_per_contract=self.option_commission_per_contract,
+                regulatory_fee_per_contract=self.option_regulatory_fee_per_contract,
+                exchange_fee_per_contract=self.option_exchange_fee_per_contract,
+            )
+            source_timestamps = tuple(
+                dict.fromkeys(
+                    (
+                        *(capture.captured_at_utc for capture in path),
+                        *(
+                            quote.quote_timestamp_utc
+                            for capture in path
+                            for quote in capture.quotes
+                        ),
+                    )
+                )
+            )
+            for strategy_name, mark in marks.items():
+                observation_name = f"{current.observation_name}:{strategy_name}"
+                if observation_name in existing:
+                    continue
+                self._append(
+                    observed=max(observed, current.captured_at_utc),
+                    session=session,
+                    checkpoint=checkpoint,
+                    selected_symbol=symbol,
+                    record_type="option_strategy_accounting",
+                    observation_name=observation_name,
+                    payload=mark.model_dump(mode="json"),
+                    flags=mark.data_quality_flags,
+                    source_timestamps=source_timestamps,
+                )
+                existing.add(observation_name)
 
     def _record_quote_observation(
         self,
@@ -1154,6 +1371,23 @@ class OpeningLeaderContinuationRecorderV0:
             record for record in self.store.records_for_run(run_id) if record.session == session
         )
         index = self._index(records)
+        selected_signal_symbols: dict[int, str] = {
+            record.checkpoint: record.selected_symbol
+            for record in records
+            if record.record_type == "signal_receipt" and record.selected_symbol is not None
+        }
+        for record in records:
+            if (
+                record.record_type == "option_snapshot"
+                and record.observation_name == "E0"
+                and record.original_stable_id is None
+            ):
+                self._entry_option_contracts.setdefault(
+                    (session, record.checkpoint),
+                    select_option_accounting_contracts_v0(
+                        OptionSnapshotCaptureV0.model_validate(record.payload)
+                    ),
+                )
         linked_by_original = {
             record.original_stable_id: record
             for record in records
@@ -1214,7 +1448,11 @@ class OpeningLeaderContinuationRecorderV0:
             )
             deadline = signal_timestamp + timedelta(seconds=420)
             if not ranking.eligible:
-                if observed < deadline:
+                # A busy callback worker or restart must not turn bars that are
+                # still being durably projected into an irreversible C6/C12
+                # failure.  Missing causal inputs become terminal only at the
+                # existing end-of-session reconciliation boundary.
+                if observed < market_close + timedelta(minutes=30):
                     continue
                 self._append(
                     observed=observed,
@@ -1228,20 +1466,55 @@ class OpeningLeaderContinuationRecorderV0:
                 )
                 created_failures.append(label)
                 continue
-            if observed > deadline:
+            assert ranking.rank_1 is not None
+            maximum_rank_input_available = max(
+                item.causal_input.available_at_utc for item in ranking.ranking
+            )
+            if maximum_rank_input_available > deadline:
                 self._append(
                     observed=observed,
                     session=session,
                     checkpoint=checkpoint,
-                    selected_symbol=None,
+                    selected_symbol=ranking.rank_1.symbol,
                     record_type="signal_failure",
                     observation_name="SIGNAL",
-                    payload={"ranking": ranking.model_dump(mode="json")},
-                    flags=("signal_capture_deadline_missed",),
+                    payload={
+                        "ranking": ranking.model_dump(mode="json"),
+                        "maximum_rank_input_available_at_utc": (
+                            maximum_rank_input_available.isoformat()
+                        ),
+                        "nominal_signal_capture_deadline_utc": deadline.isoformat(),
+                    },
+                    flags=("causal_rank_inputs_after_nominal_deadline",),
                 )
                 created_failures.append(label)
                 continue
-            assert ranking.rank_1 is not None
+            promotion: OpeningLeaderSelectionPromotionV0 | None = None
+            if self.selection_promotion_sink is not None:
+                promotion = self.selection_promotion_sink(
+                    ranking.rank_1.symbol,
+                    session,
+                    checkpoint,
+                    observed,
+                )
+                if promotion is not None and not promotion.level1_started:
+                    if observed < market_close + timedelta(minutes=30):
+                        continue
+                    self._append(
+                        observed=observed,
+                        session=session,
+                        checkpoint=checkpoint,
+                        selected_symbol=ranking.rank_1.symbol,
+                        record_type="signal_failure",
+                        observation_name="SIGNAL",
+                        payload={
+                            "ranking": ranking.model_dump(mode="json"),
+                            "selection_promotion": promotion.model_dump(mode="json"),
+                        },
+                        flags=("selected_underlying_level1_promotion_denied",),
+                    )
+                    created_failures.append(label)
+                    continue
             quote = self.underlying_quote_provider(
                 ranking.rank_1.symbol,
                 checkpoint,
@@ -1251,7 +1524,7 @@ class OpeningLeaderContinuationRecorderV0:
             )
             self._assert_quote_after_boundary(quote)
             if quote is None or not quote.valid_for_signal:
-                if observed < deadline:
+                if observed < market_close + timedelta(minutes=30):
                     continue
                 flags = ("signal_quote_unavailable",) if quote is None else quote.data_quality_flags
                 self._append(
@@ -1269,6 +1542,20 @@ class OpeningLeaderContinuationRecorderV0:
                 )
                 created_failures.append(label)
                 continue
+            timing_flags = tuple(
+                flag
+                for applies, flag in (
+                    (
+                        observed > deadline,
+                        "signal_processing_recovered_after_deadline",
+                    ),
+                    (
+                        quote.received_timestamp_utc > deadline,
+                        "signal_quote_after_nominal_deadline",
+                    ),
+                )
+                if applies
+            )
             self._append(
                 observed=observed,
                 session=session,
@@ -1283,12 +1570,19 @@ class OpeningLeaderContinuationRecorderV0:
                     "ranking": ranking.model_dump(mode="json"),
                     "signal_quote": quote.model_dump(mode="json"),
                     "causal_signal_available_at_utc": observed.isoformat(),
-                    "maximum_rank_input_available_at_utc": max(
-                        item.causal_input.available_at_utc for item in ranking.ranking
-                    ).isoformat(),
+                    "maximum_rank_input_available_at_utc": (
+                        maximum_rank_input_available.isoformat()
+                    ),
+                    "nominal_signal_capture_deadline_utc": deadline.isoformat(),
+                    "signal_deadline_role": "diagnostic_only",
+                    "receipt_processing_lag_seconds": (observed - signal_timestamp).total_seconds(),
+                    "selection_promotion": (
+                        None if promotion is None else promotion.model_dump(mode="json")
+                    ),
                     "m1c_context_role": "context_only",
                     "order_routing_enabled": False,
                 },
+                flags=timing_flags,
                 source_timestamps=(
                     quote.actual_quote_timestamp_utc,
                     *(
@@ -1320,6 +1614,8 @@ class OpeningLeaderContinuationRecorderV0:
                 observation_name="SIGNAL",
                 quote=quote,
             )
+            selected_signal_symbols[checkpoint] = ranking.rank_1.symbol
+            self._restored_signal_promotions.add((session, checkpoint, ranking.rank_1.symbol))
             created_receipts.append(label)
             created_observations.append(f"{label}:SIGNAL")
             created_options.append(f"{label}:SIGNAL")
@@ -1333,6 +1629,21 @@ class OpeningLeaderContinuationRecorderV0:
             raw_signal_quote = record.payload.get("signal_quote")
             if selected_symbol is None or not isinstance(raw_signal_quote, dict):
                 continue
+            promotion_key = (session, checkpoint, selected_symbol)
+            if (
+                self.selection_promotion_sink is not None
+                and market_open <= observed < market_close
+                and promotion_key not in self._restored_signal_promotions
+            ):
+                restored_promotion = self.selection_promotion_sink(
+                    selected_symbol,
+                    session,
+                    checkpoint,
+                    observed,
+                )
+                if restored_promotion is not None and not restored_promotion.level1_started:
+                    continue
+                self._restored_signal_promotions.add(promotion_key)
             signal_quote = UnderlyingQuoteV0.model_validate(raw_signal_quote)
             signal_key = (checkpoint, "underlying_observation", "SIGNAL")
             signal_observation = index.get(signal_key)
@@ -1659,6 +1970,19 @@ class OpeningLeaderContinuationRecorderV0:
                 linked_by_original=linked_by_original,
             ):
                 created_observations.append(f"{label}:OFFICIAL_CLOSE")
+        for checkpoint, symbol in selected_signal_symbols.items():
+            reconciliation_key = (run_id, session, checkpoint)
+            if reconciliation_key in self._option_accounting_reconciled and not any(
+                created.startswith(f"C{checkpoint}:") for created in created_options
+            ):
+                continue
+            self._reconcile_option_accounting(
+                observed=observed,
+                session=session,
+                checkpoint=checkpoint,
+                symbol=symbol,
+            )
+            self._option_accounting_reconciled.add(reconciliation_key)
         return OpeningLeaderPollResultV0(
             created_signal_receipts=tuple(created_receipts),
             created_failures=tuple(created_failures),
@@ -1937,6 +2261,26 @@ class OpeningLeaderEvidenceStoreV0:
             ).fetchall()
         return tuple(self._from_row(row) for row in rows)
 
+    def records_for_session_checkpoint(
+        self,
+        *,
+        run_id: str,
+        session: date,
+        checkpoint: int,
+    ) -> tuple[OpeningLeaderEvidenceRecordV0, ...]:
+        if checkpoint not in FROZEN_SIGNAL_CHECKPOINTS_V0:
+            raise ValueError("opening-leader evidence permits only C6 and C12")
+        with self.repository._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM opening_leader_evidence_v0
+                WHERE run_id = ? AND session_date = ? AND checkpoint = ?
+                ORDER BY id
+                """,
+                (run_id, session.isoformat(), checkpoint),
+            ).fetchall()
+        return tuple(self._from_row(row) for row in rows)
+
     def recorded_identities(self, run_id: str) -> set[str]:
         return {record.stable_id for record in self.records_for_run(run_id)}
 
@@ -2129,6 +2473,263 @@ def select_option_diagnostics_v0(
         entry_long_mark=None if lower is None else lower.ask,
         entry_credit=credit,
     )
+    return output
+
+
+def select_option_accounting_contracts_v0(
+    entry_snapshot: OptionSnapshotCaptureV0,
+) -> tuple[OptionQuoteV0, ...]:
+    """Return the unique E0 contracts that later executable marks must retain."""
+
+    diagnostics = select_option_diagnostics_v0(entry_snapshot.quotes)
+    selected_ids: list[int] = []
+    for strategy_name in ("P20", "P30", "BPS20"):
+        diagnostic = diagnostics[strategy_name]
+        for con_id in (diagnostic.short_con_id, diagnostic.long_con_id):
+            if con_id is not None and con_id not in selected_ids:
+                selected_ids.append(con_id)
+    quotes_by_con_id = {quote.con_id: quote for quote in entry_snapshot.quotes}
+    return tuple(
+        quote
+        for con_id in selected_ids
+        if (quote := quotes_by_con_id.get(con_id)) is not None and quote.available
+    )
+
+
+def _option_leg_quote_v0(
+    quote: OptionQuoteV0,
+    *,
+    leg_id: str,
+) -> OptionLegQuote:
+    sources: dict[str, GreekSourceSnapshot] = {}
+    for source in ("bid", "ask", "last", "model"):
+        raw = quote.option_computation_by_source.get(source)
+        if raw is None:
+            continue
+        sources[source] = GreekSourceSnapshot(
+            implied_volatility=_finite_optional(raw.get("implied_volatility")),
+            delta=_finite_optional(raw.get("delta")),
+            gamma=_finite_optional(raw.get("gamma")),
+            theta=_finite_optional(raw.get("theta")),
+            vega=_finite_optional(raw.get("vega")),
+            option_model_price=_finite_optional(raw.get("option_price")),
+            underlying_model_reference_price=_finite_optional(
+                raw.get("underlying_reference_price")
+            ),
+            greek_timestamp=quote.quote_timestamp_utc,
+            market_data_status=quote.market_data_status,
+        )
+    return OptionLegQuote(
+        leg_id=leg_id,
+        quote_timestamp=quote.quote_timestamp_utc,
+        bid=quote.bid,
+        ask=quote.ask,
+        last=quote.last,
+        market_data_status=quote.market_data_status,
+        greeks_by_source=cast(Any, sources),
+    )
+
+
+def calculate_opening_leader_option_accounting_v0(
+    *,
+    strategy_identity_prefix: str,
+    entry_snapshot: OptionSnapshotCaptureV0,
+    snapshots: tuple[OptionSnapshotCaptureV0, ...],
+    commission_per_contract: float,
+    regulatory_fee_per_contract: float,
+    exchange_fee_per_contract: float,
+) -> dict[str, OpeningLeaderOptionAccountingV0]:
+    """Mark P20, P30, and BPS20 from E0 using executable quote sides.
+
+    Contract identity is selected once from E0.  Later snapshots may mark only
+    those exact contracts; a missing leg is reported instead of substituted.
+    Greeks remain source-separated and attribution is intentionally disabled in
+    this live critical path.
+    """
+
+    if not strategy_identity_prefix:
+        raise ValueError("opening-leader strategy identity prefix is required")
+    if entry_snapshot.observation_name != "E0":
+        raise ValueError("opening-leader option accounting entry must be E0")
+    if not snapshots or snapshots[0].snapshot_id != entry_snapshot.snapshot_id:
+        raise ValueError("opening-leader option accounting path must start at E0")
+    if tuple(sorted(snapshots, key=lambda item: item.captured_at_utc)) != snapshots:
+        raise ValueError("opening-leader option snapshots must be chronologically ordered")
+    rates = (
+        commission_per_contract,
+        regulatory_fee_per_contract,
+        exchange_fee_per_contract,
+    )
+    if any(not math.isfinite(value) or value < 0.0 for value in rates):
+        raise ValueError("option cost rates must be finite and nonnegative")
+
+    diagnostics = select_option_diagnostics_v0(entry_snapshot.quotes)
+    entry_by_con_id = {quote.con_id: quote for quote in entry_snapshot.quotes}
+    current = snapshots[-1]
+    output: dict[str, OpeningLeaderOptionAccountingV0] = {}
+    for name in ("P20", "P30", "BPS20"):
+        diagnostic = diagnostics[name]
+        strategy_id = f"{strategy_identity_prefix}:{name}"
+        selected: tuple[tuple[str, int, int], ...] = (
+            ()
+            if diagnostic.short_con_id is None
+            else (
+                ("short", diagnostic.short_con_id, -1),
+                *(() if diagnostic.long_con_id is None else (("long", diagnostic.long_con_id, 1),)),
+            )
+        )
+        if diagnostic.status != "AVAILABLE" or not selected:
+            output[name] = OpeningLeaderOptionAccountingV0(
+                strategy_name=cast(Any, name),
+                status="UNAVAILABLE",
+                reason=diagnostic.reason or "entry_strategy_unavailable",
+                observation_name=current.observation_name,
+                strategy_id=strategy_id,
+                contract_identities=(),
+                accounting=None,
+                data_quality_flags=(diagnostic.reason or "entry_strategy_unavailable",),
+            )
+            continue
+
+        selected_entry_quotes = tuple(
+            (side, entry_by_con_id.get(con_id), quantity) for side, con_id, quantity in selected
+        )
+        if any(quote is None for _, quote, _ in selected_entry_quotes):
+            output[name] = OpeningLeaderOptionAccountingV0(
+                strategy_name=cast(Any, name),
+                status="UNAVAILABLE",
+                reason="selected_entry_contract_missing",
+                observation_name=current.observation_name,
+                strategy_id=strategy_id,
+                contract_identities=(),
+                accounting=None,
+                data_quality_flags=("selected_entry_contract_missing",),
+            )
+            continue
+        exact_entry_quotes = tuple(
+            (side, cast(OptionQuoteV0, quote), quantity)
+            for side, quote, quantity in selected_entry_quotes
+        )
+        legs = tuple(
+            OptionLeg(
+                leg_id=f"{side}:{quote.con_id}",
+                con_id=quote.con_id,
+                right=quote.right,
+                strike=quote.strike,
+                multiplier=quote.multiplier,
+                signed_contract_quantity=quantity,
+            )
+            for side, quote, quantity in exact_entry_quotes
+        )
+        identities = tuple(
+            OpeningLeaderOptionContractIdentityV0(
+                leg_id=leg.leg_id,
+                con_id=quote.con_id,
+                right=quote.right,
+                strike=quote.strike,
+                expiry=quote.expiry,
+                multiplier=quote.multiplier,
+                signed_contract_quantity=quantity,
+                trading_class=quote.trading_class,
+                exchange=quote.exchange,
+            )
+            for leg, (_, quote, quantity) in zip(legs, exact_entry_quotes, strict=True)
+        )
+        contract_sides = 2 * sum(abs(leg.signed_contract_quantity) for leg in legs)
+        strategy = OptionStrategy(
+            strategy_id=strategy_id,
+            strategy_type=(
+                StrategyType.BULL_PUT_SPREAD if name == "BPS20" else StrategyType.SHORT_PUT
+            ),
+            structure_name=name,
+            legs=legs,
+            costs=TransactionCosts(
+                commissions=commission_per_contract * contract_sides,
+                regulatory_fees=regulatory_fee_per_contract * contract_sides,
+                exchange_fees=exchange_fee_per_contract * contract_sides,
+            ),
+        )
+        exact_by_con_id = {identity.con_id: identity for identity in identities}
+        path: list[OptionStrategySnapshot] = []
+        missing_observations: list[str] = []
+        raw_flags: list[str] = []
+        current_complete = False
+        for capture in snapshots:
+            capture_by_con_id = {quote.con_id: quote for quote in capture.quotes}
+            compatible_quotes: list[OptionLegQuote] = []
+            compatible = capture.status == "AVAILABLE"
+            for leg in legs:
+                assert leg.con_id is not None
+                quote = capture_by_con_id.get(leg.con_id)
+                identity = exact_by_con_id[leg.con_id]
+                compatible = bool(
+                    compatible
+                    and quote is not None
+                    and quote.available
+                    and quote.right == identity.right
+                    and quote.strike == identity.strike
+                    and quote.expiry == identity.expiry
+                    and quote.multiplier == identity.multiplier
+                    and quote.trading_class == identity.trading_class
+                    and quote.exchange == identity.exchange
+                )
+                if not compatible or quote is None:
+                    break
+                compatible_quotes.append(_option_leg_quote_v0(quote, leg_id=leg.leg_id))
+                raw_flags.extend(quote.data_quality_flags)
+            if not compatible or len(compatible_quotes) != len(legs):
+                missing_observations.append(capture.observation_name)
+                continue
+            path.append(
+                OptionStrategySnapshot(
+                    observed_at=capture.captured_at_utc,
+                    legs=tuple(compatible_quotes),
+                    margin_estimate=None,
+                    unexplained_quote_gap=bool(missing_observations),
+                )
+            )
+            if capture.snapshot_id == current.snapshot_id:
+                current_complete = True
+
+        if not current_complete:
+            reason = f"exact_contract_quotes_unavailable:{current.observation_name}"
+            output[name] = OpeningLeaderOptionAccountingV0(
+                strategy_name=cast(Any, name),
+                status="UNAVAILABLE",
+                reason=reason,
+                observation_name=current.observation_name,
+                strategy_id=strategy_id,
+                contract_identities=identities,
+                accounting=None,
+                data_quality_flags=tuple(dict.fromkeys((*raw_flags, reason))),
+            )
+            continue
+        records = calculate_option_strategy_path(
+            strategy=strategy,
+            snapshots=tuple(path),
+            maximum_attribution_gap=timedelta(days=1),
+            include_greek_attribution=False,
+        )
+        accounting = records[-1]
+        flags = tuple(
+            dict.fromkeys(
+                (
+                    *raw_flags,
+                    *(f"option_snapshot_gap:{item}" for item in missing_observations),
+                    *accounting.quote_quality_flags,
+                )
+            )
+        )
+        output[name] = OpeningLeaderOptionAccountingV0(
+            strategy_name=cast(Any, name),
+            status="AVAILABLE",
+            reason=None,
+            observation_name=current.observation_name,
+            strategy_id=strategy_id,
+            contract_identities=identities,
+            accounting=accounting,
+            data_quality_flags=flags,
+        )
     return output
 
 
@@ -2573,16 +3174,20 @@ __all__ = [
     "ObservationScheduleV0",
     "ObservationTargetV0",
     "OpeningLeaderContinuationRecorderV0",
+    "OpeningLeaderOptionAccountingV0",
+    "OpeningLeaderOptionContractIdentityV0",
     "OpeningLeaderRankingV0",
     "OpeningLeaderEvidenceRecordV0",
     "OpeningLeaderEvidenceStoreV0",
     "OpeningLeaderFreezeIdentityV0",
     "OpeningLeaderPollResultV0",
+    "OpeningLeaderSelectionPromotionV0",
     "OptionSnapshotCaptureV0",
     "ProspectiveBoundaryErrorV0",
     "UnderlyingQuoteV0",
     "UnderlyingShadowReturnV0",
     "build_observation_schedule_v0",
+    "calculate_opening_leader_option_accounting_v0",
     "calculate_underlying_shadow_return_v0",
     "calculate_rank_persistence_v0",
     "checkpoint_timestamp_v0",
@@ -2590,6 +3195,7 @@ __all__ = [
     "rank_opening_leader_v0",
     "RankPersistenceV0",
     "select_option_chain_requests_v0",
+    "select_option_accounting_contracts_v0",
     "select_option_diagnostics_v0",
     "stable_evidence_id_v0",
 ]

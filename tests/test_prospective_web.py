@@ -6,13 +6,15 @@ import logging
 import os
 import sqlite3
 import threading
-from datetime import UTC, datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+import stocker_prospective.web as prospective_web
 from stocker_prospective.budget_reports import BudgetAwareDailyReportWriter
 from stocker_prospective.config import ProspectiveConfig
 from stocker_prospective.contract import claims_boundary
@@ -26,6 +28,7 @@ from stocker_prospective.operational_state import (
     RuntimeArtifactVerification,
 )
 from stocker_prospective.read_store import ProspectiveReadStore
+from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.replay import ReplaySettings, run_deterministic_replay
 from stocker_prospective.web import create_web_app
 
@@ -247,7 +250,12 @@ def test_read_only_api_and_all_four_screens_smoke(tmp_path: Path) -> None:
         assert api_response.json()["claims_boundary"] == claims_boundary()
     health = client.get("/api/health").json()
     assert None not in health["blockers"]
-    assert health["feature_parity"]["blocker"] == "blocked_feature_source_semantics_mismatch"
+    assert health["feature_parity"]["blocker"] is None
+    assert health["feature_parity"]["diagnostic_warning"] == (
+        "blocked_feature_source_semantics_mismatch"
+    )
+    assert health["feature_parity"]["diagnostic_only"] is True
+    assert "blocked_feature_source_semantics_mismatch" not in health["blockers"]
     assert health["no_order_path_verified"] is True
     opening_leader = client.get("/api/opening-leader-continuation-v0").json()
     assert opening_leader["banner"] == "RECORD ONLY — ORDERS DISABLED"
@@ -375,7 +383,10 @@ def test_configured_artifact_path_does_not_suppress_runtime_verification_blocker
 
     health = TestClient(create_web_app(cfg)).get("/api/health").json()
 
-    assert health["feature_parity"]["blocker"] == "blocked_feature_source_semantics_mismatch"
+    assert health["feature_parity"]["blocker"] is None
+    assert health["feature_parity"]["diagnostic_warning"] == (
+        "blocked_feature_source_semantics_mismatch"
+    )
     assert "blocked_missing_verified_frozen_bundle" in health["blockers"]
     assert health["runtime_artifact_verification"]["verified"] is False
 
@@ -669,27 +680,177 @@ def test_dashboard_summary_is_compact_consistent_and_never_reads_parquet(
         "stocker_prospective.read_store.read_parquet_tail",
         forbidden_parquet_read,
     )
+    monkeypatch.setattr(
+        prospective_web,
+        "_daily_report_packages",
+        forbidden_parquet_read,
+    )
+    for method_name in (
+        "recorder_status_v0",
+        "runtime_projection",
+        "runtime_artifact_verification",
+        "universe_live_v0",
+        "source_transfer_status_v0",
+    ):
+        monkeypatch.setattr(
+            ProspectiveReadStore,
+            method_name,
+            forbidden_parquet_read,
+        )
 
     response = client.get("/api/dashboard/summary")
 
     assert response.status_code == 200
     payload = response.json()
-    assert {
-        "health",
+    assert set(payload) == {
+        "summary_at_utc",
+        "run_id",
         "recorder",
-        "latest_checkpoints",
-        "current_universe",
-        "capacity",
-        "current_budget",
+        "ibkr",
+        "alerts",
+        "no_order",
         "replay",
-        "current_blockers",
-    } <= payload.keys()
-    assert payload["recorder"]["state"] == payload["health"]["recorder"]["operational_status"]
-    assert payload["recorder"]["gap_details_included"] is False
-    assert "audit" not in payload
-    assert "report_packages" not in payload
-    assert "shadow" not in payload
+    }
+    assert {
+        "state",
+        "heartbeat_at_utc",
+        "latest_callback_received_at_utc",
+        "latest_callback_durably_admitted_at_utc",
+        "latest_inbox_acknowledgement_at_utc",
+        "callback_inbox",
+        "latest_completed_five_minute_bar",
+        "latest_successful_checkpoint",
+        "latest_episode",
+    } <= payload["recorder"].keys()
+    assert payload["no_order"]["research_only"] is True
+    assert payload["no_order"]["execution_enabled"] is False
+    assert payload["no_order"]["order_routing"] == "disabled"
+    assert len(response.content) < 100_000
     assert response.headers["x-request-id"]
+
+
+def test_dashboard_summary_tracks_latest_subscription_event_after_restart(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    database_path = config(tmp_path).paths.database
+
+    def record_transition(*, status: str, request_id: int, generation: int) -> None:
+        with sqlite3.connect(database_path) as connection:
+            envelope_id = int(
+                connection.execute(
+                    "SELECT id FROM evidence_envelope ORDER BY id LIMIT 1"
+                ).fetchone()[0]
+            )
+            connection.execute(
+                """
+                INSERT INTO subscription_lifecycle_event_v0(
+                    envelope_id, run_id, occurred_at_utc, subscription_key,
+                    request_id, subscription_kind, subscription_class, symbol,
+                    con_id, status, owner_ids_json, owner_count, generation,
+                    reason, payload_json, claims_json
+                ) VALUES (?, 'replay-run-001', ?, 'BAR|123|5m|RTH', ?,
+                          'bar', 0, 'AAL', 123, ?, '["system:AAL"]', 1, ?,
+                          NULL, '{}', '{}')
+                """,
+                (
+                    envelope_id,
+                    datetime.now(UTC).isoformat(),
+                    request_id,
+                    status,
+                    generation,
+                ),
+            )
+
+    record_transition(status="pending", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+    record_transition(status="active", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+    record_transition(status="cancellation_requested", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+    record_transition(status="cancelled", request_id=7, generation=1)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {},
+        "total": 0,
+    }
+
+    record_transition(status="active", request_id=8, generation=2)
+    assert client.get("/api/dashboard/summary").json()["ibkr"]["subscriptions"] == {
+        "by_kind": {"bar": 1},
+        "total": 1,
+    }
+
+
+def test_dashboard_summary_reuses_startup_static_safety_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route_inspections = 0
+    original = prospective_web._path_exposes_forbidden_broker_resource
+
+    def counted_route_inspection(path: str) -> bool:
+        nonlocal route_inspections
+        route_inspections += 1
+        return original(path)
+
+    monkeypatch.setattr(
+        prospective_web,
+        "_path_exposes_forbidden_broker_resource",
+        counted_route_inspection,
+    )
+    client = seeded_app(tmp_path)
+    startup_inspections = route_inspections
+
+    assert startup_inspections > 0
+    assert client.get("/api/dashboard/summary").status_code == 200
+    assert client.get("/api/dashboard/summary").status_code == 200
+    assert route_inspections == startup_inspections
+
+
+def test_dashboard_summary_repeated_and_concurrent_clients_remain_bounded(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first_client = seeded_app(tmp_path)
+    second_client = TestClient(first_client.app)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="uvicorn.error.stocker_prospective.web",
+    ):
+        repeated = [first_client.get("/api/dashboard/summary") for _ in range(12)]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent = tuple(
+                pool.map(
+                    lambda client: client.get("/api/dashboard/summary"),
+                    (first_client, second_client),
+                )
+            )
+
+    responses = (*repeated, *concurrent)
+    assert all(response.status_code == 200 for response in responses)
+    assert max(len(response.content) for response in responses) < 100_000
+    completed = [
+        json.loads(record.message)
+        for record in caplog.records
+        if '"event":"request_completed"' in record.message
+        and '"route":"/api/dashboard/summary"' in record.message
+    ]
+    assert len(completed) == len(responses)
+    assert max(item["sqlite_operations"] for item in completed) <= 18
+    assert all(item["parquet_files_examined"] == 0 for item in completed)
 
 
 def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> None:
@@ -716,6 +877,13 @@ def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> N
         payload["quiet_state"]["fill_convention"]
         == "open_short_bid_long_ask_close_short_ask_long_bid"
     )
+    assert payload["opening_leader"]["ledger_scope"] == (
+        "opening_leader_option_strategy_accounting_v0"
+    )
+    assert payload["opening_leader"]["items"] == []
+    assert payload["opening_leader"]["entry_observation"] == "E0"
+    assert payload["opening_leader"]["executable_pnl_is_primary"] is True
+    assert payload["opening_leader"]["greek_attribution_is_diagnostic_only"] is True
     assert payload["ledgers_combined_for_analysis"] is False
     assert payload["execution_claimed"] is False
     assert payload["broker_positions_claimed"] is False
@@ -727,10 +895,12 @@ def test_virtual_ledgers_are_separate_read_only_projections(tmp_path: Path) -> N
             "opening_limit": 1,
             "quiet_limit": 1,
             "quiet_capture_limit": 1,
+            "opening_leader_limit": 1,
         },
     )
     assert bounded.status_code == 200
     assert bounded.json()["quiet_state"]["capture_item_limit"] == 1
+    assert bounded.json()["opening_leader"]["item_limit"] == 1
     assert (
         client.get(
             "/api/virtual-ledgers",
@@ -873,6 +1043,33 @@ def test_no_order_verdict_is_derived_from_named_checks(tmp_path: Path) -> None:
     )
 
 
+def test_dynamic_no_order_mutation_violation_is_visible_on_fast_summary(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    client = seeded_app(tmp_path, app_config=cfg)
+    record_runtime_artifact_verification(
+        cfg,
+        observed_hash="a" * 64,
+        verified=True,
+    )
+    with sqlite3.connect(cfg.paths.database) as connection:
+        connection.execute(
+            """
+            UPDATE recorder_operational_state_v1
+            SET broker_state_mutation_count = 1
+            WHERE run_id = ?
+            """,
+            (cfg.runtime.run_id,),
+        )
+
+    summary = client.get("/api/dashboard/summary").json()
+
+    assert summary["no_order"]["broker_state_mutation_count_zero"] is False
+    assert summary["no_order"]["aggregate_no_order_verdict"] is False
+    assert "NO_ORDER_INVARIANT_FAILED" in {item["code"] for item in summary["alerts"]}
+
+
 def test_production_errors_have_correlation_ids_and_generic_browser_payloads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -938,6 +1135,9 @@ def test_successful_requests_emit_structured_uvicorn_operational_logs(
     assert "elapsed_ms" in completed
     assert "sqlite_duration_ms" in completed
     assert "parquet_files_examined" in completed
+    assert completed["sqlite_operations"] <= 18
+    assert completed["parquet_files_examined"] == 0
+    assert completed["parquet_input_rows"] == 0
     assert "replay_execution_id" in completed
 
 
@@ -1249,7 +1449,7 @@ def test_public_config_is_redacted_and_reports_no_order_path(tmp_path: Path) -> 
     assert "password" not in serialized.lower()
 
 
-def test_parallel_vendor_credential_blocker_is_boolean_only(
+def test_missing_parallel_vendor_credential_is_neutral_diagnostic_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1272,9 +1472,17 @@ def test_parallel_vendor_credential_blocker_is_boolean_only(
 
     health = client.get("/api/health").json()
     public = client.get("/api/config/public").json()
+    transfer = client.get("/api/source-transfer").json()
 
-    assert "blocked_missing_eodhd_server_token" in health["blockers"]
+    assert "blocked_missing_eodhd_server_token" not in health["blockers"]
     assert health["parallel_validation"]["credential_configured"] is False
+    assert health["parallel_validation"]["cross_vendor_validation_status"] == "not_configured"
+    assert health["parallel_validation"]["diagnostic_only"] is True
+    assert transfer["cross_vendor_validation_status"] == "not_configured"
+    assert transfer["cross_vendor_validation_status_code"] == (
+        "cross_vendor_validation_not_configured"
+    )
+    assert transfer["recorder_blocking"] is False
     assert public["parallel_validation"]["credential_configured"] is False
     assert "EODHD_API_TOKEN" not in str(public)
 
@@ -1285,6 +1493,48 @@ def test_parallel_vendor_credential_blocker_is_boolean_only(
     projected = client.get("/api/health").json()
     assert projected["parallel_validation"]["credential_configured"] is True
     assert "must-not-enter-web-process" not in str(projected)
+
+
+def test_cross_vendor_mismatch_is_warning_and_never_a_recorder_blocker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STOCKER_EODHD_TOKEN_CONFIGURED", "1")
+    cfg = config(tmp_path, parallel_enabled=True)
+    client = seeded_app(tmp_path, app_config=cfg)
+    repository = ProspectiveRepository(cfg.paths.database)
+    frozen = FrozenRecorderRepository(repository)
+    recorded_at = datetime(2026, 8, 3, 22, 0, tzinfo=UTC)
+    metadata = EvidenceMetadata(
+        run_id=cfg.runtime.run_id or "",
+        prospective_start_utc=cfg.runtime.prospective_start_utc,
+        app_version=cfg.runtime.app_version,
+        git_commit=cfg.runtime.git_commit,
+        model_artifact_id="synthetic_replay_not_frozen_m1",
+        universe_id="anchor-frozen-20-v1",
+        cohort="anchor_frozen_20",
+        source_timestamps=[recorded_at.isoformat()],
+        recorded_at_utc=recorded_at,
+    )
+    for offset in range(20):
+        session = date(2026, 7, 1) + timedelta(days=offset)
+        frozen.record_source_transfer_session(
+            metadata,
+            session=session,
+            valid=True,
+            decision="ibkr_transfer_not_supported",
+            report={
+                "decision": "ibkr_transfer_not_supported",
+                "cross_vendor_validation_diagnostic_only": True,
+            },
+        )
+
+    transfer = client.get("/api/source-transfer").json()
+    health = client.get("/api/health").json()
+
+    assert transfer["cross_vendor_validation_status"] == "warning"
+    assert transfer["recorder_blocking"] is False
+    assert "ibkr_transfer_not_supported" not in health["blockers"]
 
 
 def test_optional_auth_protects_browser_and_api_with_secure_cookie_support(

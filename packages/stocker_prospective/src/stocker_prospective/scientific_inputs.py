@@ -37,6 +37,7 @@ from stocker_prospective.group_o import (
     append_group_o_session_revision,
     build_group_o_context,
     load_group_o_session_package,
+    requires_group_o_implied_movement_correction,
 )
 from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_research.broad_conflict_options_iv_screen_v0 import (
@@ -64,6 +65,7 @@ from stocker_research.front_options_soft_regimes_v01 import (
     apply_front_options_dimensions,
     apply_serialized_diag_regime,
 )
+from stocker_research.m1c_low_movement_v0 import iv_expected_absolute
 
 GROUP_O_CONTRACT_VERSION = "frozen-m1c-microstructure-recorder-v0/group-o-session-v0"
 NEW_YORK = ZoneInfo("America/New_York")
@@ -517,6 +519,7 @@ def build_group_o_session_package(
     feature_manifest_path: str | Path,
     regime_mapping_path: str | Path,
     output_path: str | Path,
+    implied_movement_atm_iv_by_symbol_out: dict[str, float] | None = None,
 ) -> FrozenGroupOSessionPackage:
     """Build exact D-1 Group O contexts with frozen 2024 transforms only."""
 
@@ -559,6 +562,9 @@ def build_group_o_session_package(
                 realised_volatility_20d=float(stock["realised_volatility_20d"]),
             )
         pair_available = surface.get("pair_available") is True
+        atm_iv = float(cast(Any, surface["atm_iv"])) if pair_available else None
+        if implied_movement_atm_iv_by_symbol_out is not None and atm_iv is not None:
+            implied_movement_atm_iv_by_symbol_out[symbol] = atm_iv
         if pair_available:
             features = _context_features(
                 surface,
@@ -579,6 +585,9 @@ def build_group_o_session_package(
                 front_expiry=cast(date | None, surface.get("front_expiration_date")),
                 dte=cast(int | None, surface.get("front_dte")),
                 atm_strike=cast(float | None, surface.get("front_strike")),
+                previous_close_implied_movement_15m=(
+                    iv_expected_absolute(atm_iv, 15) if atm_iv is not None else None
+                ),
                 features=features,
                 missing_indicators=missing_indicators,
                 quality_status=(
@@ -754,21 +763,90 @@ def _preserve_resolved_group_o_contexts(
     *,
     previous: FrozenGroupOSessionPackage,
     candidate: FrozenGroupOSessionPackage,
+    include_implied_movement_corrections: bool,
 ) -> FrozenGroupOSessionPackage:
-    """Keep every context outside the exact-chain failure byte-for-byte unchanged."""
+    """Limit a revision to exact-chain failures and omitted derived movement."""
 
     previous_by_symbol = {context.symbol: context for context in previous.contexts}
-    contexts = tuple(
-        (
-            previous_by_symbol[context.symbol]
-            if previous_by_symbol[context.symbol].quality_status != "missing_exact_chain"
-            else context
-        )
-        for context in candidate.contexts
-    )
+    contexts: list[FrozenGroupOContext] = []
+    for candidate_context in candidate.contexts:
+        previous_context = previous_by_symbol[candidate_context.symbol]
+        if previous_context.quality_status == "missing_exact_chain":
+            contexts.append(candidate_context)
+            continue
+        candidate_movement = candidate_context.previous_close_implied_movement_15m
+        if include_implied_movement_corrections and (
+            requires_group_o_implied_movement_correction(previous_context)
+        ):
+            previous_pair_identity = (
+                previous_context.actual_option_observation_session,
+                previous_context.front_expiry,
+                previous_context.dte,
+                previous_context.atm_strike,
+            )
+            candidate_pair_identity = (
+                candidate_context.actual_option_observation_session,
+                candidate_context.front_expiry,
+                candidate_context.dte,
+                candidate_context.atm_strike,
+            )
+            if candidate_pair_identity != previous_pair_identity:
+                raise ValueError("Group O implied-movement exact ATM pair identity differs")
+            if (
+                candidate_movement is None
+                or not math.isfinite(candidate_movement)
+                or candidate_movement <= 0.0
+            ):
+                contexts.append(previous_context)
+                continue
+            contexts.append(
+                build_group_o_context(
+                    symbol=previous_context.symbol,
+                    signal_session=previous_context.signal_session,
+                    actual_option_observation_session=(
+                        previous_context.actual_option_observation_session
+                    ),
+                    front_expiry=previous_context.front_expiry,
+                    dte=previous_context.dte,
+                    atm_strike=previous_context.atm_strike,
+                    previous_close_implied_movement_15m=candidate_movement,
+                    features=previous_context.features,
+                    missing_indicators=previous_context.missing_indicators,
+                    quality_status=previous_context.quality_status,
+                    source_receipt_hashes=tuple(
+                        dict.fromkeys(
+                            (
+                                *previous_context.source_receipt_hashes,
+                                *candidate_context.source_receipt_hashes,
+                            )
+                        )
+                    ),
+                )
+            )
+            continue
+        contexts.append(previous_context)
     return FrozenGroupOSessionPackage.model_validate(
-        {**candidate.model_dump(mode="python"), "contexts": contexts}
+        {**candidate.model_dump(mode="python"), "contexts": tuple(contexts)}
     )
+
+
+def _implied_movement_atm_iv_sources(
+    package: FrozenGroupOSessionPackage,
+    candidate_atm_iv_by_symbol: Mapping[str, float],
+) -> dict[str, float]:
+    symbols = tuple(
+        context.symbol
+        for context in package.contexts
+        if requires_group_o_implied_movement_correction(context)
+    )
+    missing_sources = tuple(
+        symbol for symbol in symbols if symbol not in candidate_atm_iv_by_symbol
+    )
+    if missing_sources:
+        raise ValueError(
+            "Group O implied-movement ATM IV source unavailable: " + ",".join(missing_sources)
+        )
+    return {symbol: candidate_atm_iv_by_symbol[symbol] for symbol in symbols}
 
 
 def acquire_eodhd_group_o_session_package(
@@ -895,8 +973,7 @@ def acquire_eodhd_group_o_session_package(
                 )
                 raise ValueError(f"Group O option underlying identity differs for {symbol}")
             if any(
-                record.get("trade_date") != observation_session
-                for record in deduplicated.records
+                record.get("trade_date") != observation_session for record in deduplicated.records
             ):
                 write_group_o_attempt_receipt(
                     attempt_receipt_path,
@@ -971,9 +1048,7 @@ def acquire_eodhd_group_o_session_package(
         "missing_exact_chain_symbols": list(missing_exact_chain_symbols),
         "provider_dte_policy": provider_dte_policy,
         "provider_dte_diagnostics_path": str(provider_dte_diagnostics_path),
-        "provider_dte_diagnostics_file_sha256": _sha256_path(
-            provider_dte_diagnostics_path
-        ),
+        "provider_dte_diagnostics_file_sha256": _sha256_path(provider_dte_diagnostics_path),
         "provider_dte_diagnostic_counts": provider_dte_status_counts,
     }
     if missing_exact_chain_symbols:
@@ -998,7 +1073,8 @@ def acquire_eodhd_group_o_session_package(
         )
     destination = Path(output_path)
     candidate_path = cache / "candidate_package.json"
-    package = build_group_o_session_package(
+    candidate_atm_iv_by_symbol: dict[str, float] = {}
+    candidate_package = build_group_o_session_package(
         signal_session=signal_session,
         symbols=symbols,
         canonical_options_by_symbol=options_by_symbol,
@@ -1007,7 +1083,9 @@ def acquire_eodhd_group_o_session_package(
         feature_manifest_path=feature_manifest_path,
         regime_mapping_path=regime_mapping_path,
         output_path=candidate_path,
+        implied_movement_atm_iv_by_symbol_out=candidate_atm_iv_by_symbol,
     )
+    package = candidate_package
     published_revision_id: str | None = None
     published_at: datetime
     if supersedes_path is not None:
@@ -1017,7 +1095,14 @@ def acquire_eodhd_group_o_session_package(
             context_root=destination.parents[1],
             signal_session=signal_session,
         )
-        package = _preserve_resolved_group_o_contexts(previous=previous, candidate=package)
+        has_missing_exact_chain = any(
+            context.quality_status == "missing_exact_chain" for context in previous.contexts
+        )
+        package = _preserve_resolved_group_o_contexts(
+            previous=previous,
+            candidate=candidate_package,
+            include_implied_movement_corrections=not has_missing_exact_chain,
+        )
         write_immutable_bytes(
             cache / "revision_candidate_package.json",
             (package.model_dump_json(indent=2) + "\n").encode("utf-8"),
@@ -1027,8 +1112,43 @@ def acquire_eodhd_group_o_session_package(
             revision = append_group_o_session_revision(
                 context_root=destination.parents[1],
                 revised_package=package,
+                implied_movement_atm_iv_by_symbol=(
+                    {}
+                    if has_missing_exact_chain
+                    else _implied_movement_atm_iv_sources(
+                        previous,
+                        candidate_atm_iv_by_symbol,
+                    )
+                ),
                 clock=clock,
             )
+            if has_missing_exact_chain and any(
+                requires_group_o_implied_movement_correction(context)
+                for context in revision.package.contexts
+            ):
+                package = _preserve_resolved_group_o_contexts(
+                    previous=revision.package,
+                    candidate=candidate_package,
+                    include_implied_movement_corrections=True,
+                )
+                write_immutable_bytes(
+                    cache / "implied_movement_revision_candidate_package.json",
+                    (package.model_dump_json(indent=2) + "\n").encode("utf-8"),
+                    conflict_message=(
+                        "immutable Group O implied-movement revision candidate differs"
+                    ),
+                )
+                revision = append_group_o_session_revision(
+                    context_root=destination.parents[1],
+                    revised_package=package,
+                    implied_movement_atm_iv_by_symbol=(
+                        _implied_movement_atm_iv_sources(
+                            revision.package,
+                            candidate_atm_iv_by_symbol,
+                        )
+                    ),
+                    clock=clock,
+                )
         except GroupORevisionCutoffError as exc:
             write_group_o_attempt_receipt(
                 attempt_receipt_path,
@@ -1160,8 +1280,12 @@ class EODHDGroupOPreparationService:
         return None if not due else due[-1]
 
     @staticmethod
-    def _requires_exact_chain_revision(package: FrozenGroupOSessionPackage) -> bool:
-        return any(context.quality_status == "missing_exact_chain" for context in package.contexts)
+    def _requires_source_revision(package: FrozenGroupOSessionPackage) -> bool:
+        return any(
+            context.quality_status == "missing_exact_chain"
+            or requires_group_o_implied_movement_correction(context)
+            for context in package.contexts
+        )
 
     def poll(self, *, now: datetime) -> GroupOAcquisitionResult | None:
         now_utc = now.astimezone(UTC)
@@ -1197,7 +1321,7 @@ class EODHDGroupOPreparationService:
                 self.last_error = f"blocked_invalid_group_o_package: {exc}"
                 self._retry_after = None
                 return None
-            if not self._requires_exact_chain_revision(resolved):
+            if not self._requires_source_revision(resolved):
                 self.last_error = None
                 self._retry_after = None
                 return None
@@ -1216,9 +1340,7 @@ class EODHDGroupOPreparationService:
             observation_session=observation_session,
         )
         if persisted_retry is not None and now_utc < persisted_retry:
-            self.last_error = (
-                f"deferred_group_o_retry_not_before: {persisted_retry.isoformat()}"
-            )
+            self.last_error = f"deferred_group_o_retry_not_before: {persisted_retry.isoformat()}"
             self._retry_after = persisted_retry
             return None
         attempt_id, _ = allocate_group_o_attempt(

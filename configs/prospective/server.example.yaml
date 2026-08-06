@@ -41,6 +41,13 @@ runtime:
   run_id: REPLACE-WITH-PROSPECTIVE-RUN-ID
   recorder_lease_stale_seconds: 60
   heartbeat_seconds: 10
+  callback_inbox_batch_limit: 4096
+  # Enable only as an explicit retention policy. Compaction is limited to
+  # acknowledged callbacks with matching immutable raw/processing hashes.
+  callback_inbox_retention_enabled: true
+  callback_inbox_retention_seconds: 900
+  callback_inbox_compaction_interval_seconds: 60
+  callback_inbox_compaction_batch_limit: 4096
 
 risk:
   trading_enabled: false
@@ -62,7 +69,9 @@ web:
   replay_stop_timeout_seconds: 2.0
   replay_maximum_records: 250000
   replay_maximum_materialized_bytes: 67108864
-  operational_projection_cache_seconds: 60.0
+  # Static route, adapter, bundle, and provenance checks. Dynamic recorder
+  # heartbeat/inbox/bar/episode state is never held for this TTL.
+  operational_projection_cache_seconds: 300.0
   allowed_hosts:
     - 127.0.0.1
     - localhost
@@ -123,10 +132,10 @@ context:
   hmac_secret_env: STOCKER_CONTEXT_SIGNING_SECRET
   import_directory: /var/lib/stocker/daily-context/incoming
 
-# Append-only after-session EODHD bars for IBKR/EODHD source-parity evidence.
-# These observations are always marked ineligible for scoring.
+# Optional append-only after-session EODHD/IBKR diagnostic. It never authorizes
+# or blocks IBKR prospective evidence and its observations remain ineligible for scoring.
 parallel_validation:
-  enabled: true
+  enabled: false
   provider: eodhd
   api_token_env: EODHD_API_TOKEN
   credential_status_env: STOCKER_EODHD_TOKEN_CONFIGURED

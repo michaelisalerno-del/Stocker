@@ -12,6 +12,9 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from stocker_prospective.database import RECORDER_SQLITE_BUSY_TIMEOUT_MS
+from stocker_prospective.sqlite_coordination import CoordinatedSQLiteConnection
+
 
 class RecorderOperationalState(StrEnum):
     INACTIVE = "INACTIVE"
@@ -37,6 +40,7 @@ class OperationalThresholds(BaseModel):
     callback_heartbeat_stale_after: timedelta = timedelta(seconds=30)
     raw_storage_heartbeat_stale_after: timedelta = timedelta(seconds=60)
     acknowledgement_stale_after: timedelta = timedelta(seconds=30)
+    provider_bar_progress_stale_after: timedelta = timedelta(minutes=10)
     maximum_inbox_backlog: int = Field(default=5_000, ge=0)
     maximum_oldest_unacknowledged_age: timedelta = timedelta(seconds=60)
 
@@ -211,6 +215,15 @@ def evaluate_operational_state(
         maximum_age=thresholds.callback_heartbeat_stale_after,
     )
     callback_is_fresh = callback_received_is_fresh and callback_admitted_is_fresh
+    provider_bar_progress_is_fresh = (
+        not signals.callbacks_expected
+        or not signals.market_session_open
+        or _fresh(
+            signals.latest_completed_five_minute_bar_at_utc,
+            now=observed,
+            maximum_age=thresholds.provider_bar_progress_stale_after,
+        )
+    )
     raw_is_fresh = not signals.callbacks_expected or _fresh(
         signals.latest_raw_partition_committed_at_utc,
         now=observed,
@@ -292,6 +305,9 @@ def evaluate_operational_state(
     elif not expected_connection:
         state = RecorderOperationalState.RECORDING_DEGRADED
         reason = "IBKR_CONNECTION_STATE_UNEXPECTED"
+    elif not provider_bar_progress_is_fresh:
+        state = RecorderOperationalState.RECORDING_DEGRADED
+        reason = "PROVIDER_BAR_PROGRESS_STALE"
     elif not callback_is_fresh:
         state = RecorderOperationalState.RECORDING_DEGRADED
         reason = "CALLBACK_HEARTBEAT_STALE"
@@ -352,6 +368,7 @@ def evaluate_operational_state(
             "callback_heartbeat_fresh": callback_is_fresh,
             "callback_received_heartbeat_fresh": callback_received_is_fresh,
             "callback_durable_admission_heartbeat_fresh": (callback_admitted_is_fresh),
+            "provider_bar_progress_fresh": provider_bar_progress_is_fresh,
             "raw_storage_heartbeat_fresh": raw_is_fresh,
             "inbox_acknowledgement_fresh": acknowledgement_is_fresh,
             "expected_ibkr_connection_state": expected_connection,
@@ -402,6 +419,7 @@ def inactive_operational_projection(*, now: datetime) -> OperationalStateProject
             "callback_heartbeat_fresh": False,
             "callback_received_heartbeat_fresh": False,
             "callback_durable_admission_heartbeat_fresh": False,
+            "provider_bar_progress_fresh": False,
             "raw_storage_heartbeat_fresh": False,
             "inbox_acknowledgement_fresh": False,
             "expected_ibkr_connection_state": False,
@@ -561,14 +579,26 @@ def _iso(value: datetime | None) -> str | None:
 class RecorderOperationalRepository:
     """Generation-fenced writes for recorder health, gaps, and artifacts."""
 
-    def __init__(self, database_path: str | Path) -> None:
+    def __init__(
+        self,
+        database_path: str | Path,
+        *,
+        busy_timeout_ms: int = RECORDER_SQLITE_BUSY_TIMEOUT_MS,
+    ) -> None:
+        if busy_timeout_ms <= 0:
+            raise ValueError("SQLite busy timeout must be positive")
         self.database_path = Path(database_path)
+        self.busy_timeout_ms = busy_timeout_ms
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path, timeout=5.0)
+        connection = sqlite3.connect(
+            self.database_path,
+            timeout=self.busy_timeout_ms / 1_000,
+            factory=CoordinatedSQLiteConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         connection.execute("PRAGMA journal_mode = WAL")
         return connection
 

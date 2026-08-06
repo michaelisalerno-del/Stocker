@@ -348,9 +348,7 @@ def connect_v2(database_path: str | Path, *, verify_schema: bool = True) -> sqli
     if not path.is_file():
         raise SchemaError("V2 database does not exist")
     migrations = migration_plan()
-    applied = (
-        _probe_v2(path, migrations, verify_integrity=False) if verify_schema else set()
-    )
+    applied = _probe_v2(path, migrations, verify_integrity=False) if verify_schema else set()
     if verify_schema and applied != {item.version for item in migrations}:
         raise SchemaError("database schema is older than this runtime; run migrate")
     connection = _raw_connect(path)

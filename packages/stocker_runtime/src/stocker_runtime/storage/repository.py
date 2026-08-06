@@ -185,18 +185,14 @@ def callback_rows_hash(rows: tuple[Mapping[str, object], ...]) -> str:
                     None if row["provider_at_us"] is None else integer(row, "provider_at_us")
                 ),
                 "normalized_event_id": (
-                    None
-                    if row["normalized_event_id"] is None
-                    else str(row["normalized_event_id"])
+                    None if row["normalized_event_id"] is None else str(row["normalized_event_id"])
                 ),
                 "acknowledged_at_us": (
                     None
                     if row["acknowledged_at_us"] is None
                     else integer(row, "acknowledged_at_us")
                 ),
-                "failure_code": (
-                    None if row["failure_code"] is None else str(row["failure_code"])
-                ),
+                "failure_code": (None if row["failure_code"] is None else str(row["failure_code"])),
             }
             for row in sorted(rows, key=lambda item: integer(item, "source_sequence"))
         ],

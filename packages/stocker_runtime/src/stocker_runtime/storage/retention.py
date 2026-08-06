@@ -38,14 +38,19 @@ AND (EXISTS (
       AND watermark.compacted_through_sequence >= callback_inbox.source_sequence
 ))
 """
-ACK_PAYLOAD_CANDIDATES_SQL = """
+ACK_PAYLOAD_CANDIDATES_SQL = (
+    """
 SELECT source_sequence, run_id, receipt_batch_id
 FROM callback_inbox INDEXED BY callback_inbox_terminal_idx
 WHERE lifecycle = 'acknowledged' AND payload_json IS NOT NULL
   AND normalized_event_id IS NOT NULL AND acknowledged_at_us IS NOT NULL
   AND acknowledged_at_us <= ?
-""" + _RECEIPT_PROOF_SQL + " ORDER BY acknowledged_at_us, source_sequence LIMIT ?"
-FAILED_PAYLOAD_CANDIDATES_SQL = """
+"""
+    + _RECEIPT_PROOF_SQL
+    + " ORDER BY acknowledged_at_us, source_sequence LIMIT ?"
+)
+FAILED_PAYLOAD_CANDIDATES_SQL = (
+    """
 SELECT source_sequence, run_id, receipt_batch_id
 FROM callback_inbox INDEXED BY callback_inbox_failed_payload_idx
 WHERE lifecycle = 'failed' AND payload_json IS NOT NULL
@@ -53,14 +58,22 @@ WHERE lifecycle = 'failed' AND payload_json IS NOT NULL
   AND EXISTS (SELECT 1 FROM runs terminal_run
       WHERE terminal_run.run_id = callback_inbox.run_id
         AND terminal_run.status IN ('stopped', 'fatal'))
-""" + _RECEIPT_PROOF_SQL + " ORDER BY received_at_us, source_sequence LIMIT ?"
-ACK_TOMBSTONE_CANDIDATES_SQL = """
+"""
+    + _RECEIPT_PROOF_SQL
+    + " ORDER BY received_at_us, source_sequence LIMIT ?"
+)
+ACK_TOMBSTONE_CANDIDATES_SQL = (
+    """
 SELECT source_sequence, run_id, receipt_batch_id
 FROM callback_inbox INDEXED BY callback_inbox_ack_tombstone_idx
 WHERE lifecycle = 'acknowledged' AND payload_json IS NULL
   AND acknowledged_at_us IS NOT NULL AND acknowledged_at_us <= ?
-""" + _RECEIPT_PROOF_SQL + " ORDER BY acknowledged_at_us, source_sequence LIMIT ?"
-FAILED_TOMBSTONE_CANDIDATES_SQL = """
+"""
+    + _RECEIPT_PROOF_SQL
+    + " ORDER BY acknowledged_at_us, source_sequence LIMIT ?"
+)
+FAILED_TOMBSTONE_CANDIDATES_SQL = (
+    """
 SELECT source_sequence, run_id, receipt_batch_id
 FROM callback_inbox INDEXED BY callback_inbox_failed_tombstone_idx
 WHERE lifecycle = 'failed' AND payload_json IS NULL
@@ -68,7 +81,10 @@ WHERE lifecycle = 'failed' AND payload_json IS NULL
   AND EXISTS (SELECT 1 FROM runs terminal_run
       WHERE terminal_run.run_id = callback_inbox.run_id
         AND terminal_run.status IN ('stopped', 'fatal'))
-""" + _RECEIPT_PROOF_SQL + " ORDER BY received_at_us, source_sequence LIMIT ?"
+"""
+    + _RECEIPT_PROOF_SQL
+    + " ORDER BY received_at_us, source_sequence LIMIT ?"
+)
 
 
 class RetentionInvariantError(RuntimeError):
@@ -175,9 +191,7 @@ class RetentionManager:
         return page_count * page_size, wal_path.stat().st_size if wal_path.exists() else 0
 
     def _compact_payloads(self, connection: sqlite3.Connection, cutoff_us: int, limit: int) -> int:
-        acknowledged = tuple(
-            connection.execute(ACK_PAYLOAD_CANDIDATES_SQL, (cutoff_us, limit))
-        )
+        acknowledged = tuple(connection.execute(ACK_PAYLOAD_CANDIDATES_SQL, (cutoff_us, limit)))
         failed = tuple(
             connection.execute(
                 FAILED_PAYLOAD_CANDIDATES_SQL,
@@ -361,10 +375,8 @@ class RetentionManager:
                 or record.status_counts != derived_status_counts
                 or record.first_received_at_us != int(first_callback["received_at_us"])
                 or record.last_received_at_us != int(last_callback["received_at_us"])
-                or record.first_normalized_event_id
-                != first_callback["normalized_event_id"]
-                or record.last_normalized_event_id
-                != last_callback["normalized_event_id"]
+                or record.first_normalized_event_id != first_callback["normalized_event_id"]
+                or record.last_normalized_event_id != last_callback["normalized_event_id"]
                 or record.callback_rows_hash
                 != callback_rows_hash(tuple(dict(item) for item in callback_rows))
             ):
@@ -533,9 +545,7 @@ class RetentionManager:
     ) -> int:
         if limit <= 0:
             return 0
-        acknowledged = tuple(
-            connection.execute(ACK_TOMBSTONE_CANDIDATES_SQL, (cutoff_us, limit))
-        )
+        acknowledged = tuple(connection.execute(ACK_TOMBSTONE_CANDIDATES_SQL, (cutoff_us, limit)))
         failed = tuple(
             connection.execute(
                 FAILED_TOMBSTONE_CANDIDATES_SQL,

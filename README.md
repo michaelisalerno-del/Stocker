@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/michaelisalerno-del/Stocker/actions/workflows/ci.yml/badge.svg)
 
-Stocker is a from-scratch trading research and execution foundation. The first goal is
+Stocker is a from-scratch trading research and prospective-evaluation foundation. The first goal is
 not to find an edge or place trades. The goal is to make bad ideas cheap to disprove on
 a Mac, while keeping any future server execution small, boring, and protected by hard
 risk boundaries.
@@ -11,8 +11,7 @@ risk boundaries.
 
 - `apps/desktop/`: macOS research workspace for notebooks, data audits, baseline
   research, feature experiments, and backtest reports.
-- `apps/server/`: Linux execution workspace for dry runs, paper execution, future
-  broker adapters, state reconciliation, and monitoring hooks.
+- `apps/server/`: Linux workspace for the record-only/shadow prospective runtime.
 - `packages/stocker_core/`: config, logging, time, shared types, and CLI entry points.
 - `packages/stocker_data/`: local dataset paths, Parquet storage, validators, and
   exchange-calendar helpers.
@@ -21,8 +20,8 @@ risk boundaries.
   and research reports.
 - `packages/stocker_backtest/`: cost models and transparent vectorized/event-driven
   backtest interfaces.
-- `packages/stocker_execution/`: broker interface, orders, paper broker placeholder,
-  risk checks, and execution state.
+- `packages/stocker_runtime/`: authority-free V2 domain DTOs and first-party idea-plugin
+  contracts for prospective recording and shadow evaluation.
 - `packages/stocker_prospective/`: isolated record-only/shadow evidence recorder,
   immutable bundle contract, SQLite ledgers, optional market-data-only IBKR adapter,
   deterministic replay, and read-only web application.
@@ -37,7 +36,7 @@ The repo uses `uv` with dependency groups:
 
 - Default project dependencies: core config, logging, CLI, and settings libraries.
 - `research`: heavy Mac research stack.
-- `server`: lightweight server execution stack.
+- `server`: lightweight prospective server stack.
 - `dev`: tests, linting, typing, and pre-commit.
 
 ## Bootstrap On Mac
@@ -83,7 +82,6 @@ The server bootstrap installs only core and `server` dependency groups:
 
 ```bash
 uv sync --locked --no-editable --no-default-groups --group server
-uv run --no-sync stocker server dry-run --config configs/server.example.yaml
 ```
 
 The dedicated prospective recorder has a separate, no-order process boundary:
@@ -117,7 +115,7 @@ bash scripts/check.sh
 - No strategy optimization.
 - No remote deployment automation; example hardened systemd units are provided for
   explicit operator installation.
-- No event-driven accounting engine beyond an explicit placeholder.
+- No portfolio, risk-approval, order-intent, paper-execution, or live-execution runtime.
 
 ## Data Pipeline
 

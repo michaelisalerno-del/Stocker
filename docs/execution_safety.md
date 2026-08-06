@@ -36,5 +36,7 @@ exchange calendars, instrument-specific trading hours, and broker availability.
 
 ## Broker Boundaries
 
-Broker implementations must sit behind `stocker_execution.broker.Broker`. Research
-code, notebooks, and backtests must not call broker APIs directly.
+No order-capable broker interface is currently implemented. A future dedicated execution
+subsystem may accept only durable approved order intents under a separately accepted
+plan. Research code, plugins, notebooks, and backtests must not call broker order APIs
+directly.

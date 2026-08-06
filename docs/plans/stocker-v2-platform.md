@@ -1,6 +1,6 @@
 # Stocker V2 platform redesign
 
-Status: **Proposed for owner review. Not accepted for implementation.**
+Status: **Accepted by the owner on 2026-08-06. Phase 1 authorized for implementation.**
 
 Architect: project `architect` role, read-only, high reasoning effort.
 

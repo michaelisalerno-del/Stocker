@@ -1,7 +1,6 @@
 # Stocker Server
 
-The original `run_executor.py` remains a legacy dry-run scaffold. The first
-deployable prospective slice now lives in `stocker_prospective` and is strictly
+The current deployable prospective slice lives in `stocker_prospective` and is strictly
 record-only/shadow:
 
 ```bash

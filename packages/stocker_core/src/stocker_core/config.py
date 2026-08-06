@@ -69,23 +69,6 @@ class ResearchSettings(BaseModel):
     benchmark_symbol: str | None = None
 
 
-class BrokerConfig(BaseModel):
-    """Placeholder broker configuration without credentials."""
-
-    provider: str = "placeholder"
-    account_id_env: str | None = None
-    api_key_env: str | None = None
-
-
-class ServerSettings(BaseModel):
-    """Server runtime settings for future paper/live execution."""
-
-    mode: Literal["paper", "live"] = "paper"
-    host: str = "127.0.0.1"
-    port: int = Field(default=8000, ge=1, le=65_535)
-    broker: BrokerConfig = Field(default_factory=BrokerConfig)
-
-
 class ResearchConfig(BaseSettings):
     """Top-level config for Mac research and backtesting workflows."""
 
@@ -98,20 +81,6 @@ class ResearchConfig(BaseSettings):
     costs: CostsConfig = Field(default_factory=CostsConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     research: ResearchSettings = Field(default_factory=ResearchSettings)
-
-
-class ServerConfig(BaseSettings):
-    """Top-level config for server-side dry-run, paper, and future live execution."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="STOCKER_", env_nested_delimiter="__", extra="ignore"
-    )
-
-    data: DataConfig = Field(default_factory=DataConfig)
-    data_vendors: DataVendorsConfig = Field(default_factory=DataVendorsConfig)
-    costs: CostsConfig = Field(default_factory=CostsConfig)
-    risk: RiskConfig = Field(default_factory=RiskConfig)
-    server: ServerSettings = Field(default_factory=ServerSettings)
 
 
 def _read_yaml(path: str | Path) -> dict[str, Any]:
@@ -133,9 +102,3 @@ def load_research_config(path: str | Path) -> ResearchConfig:
     """Load a research config YAML file."""
 
     return load_config(path, ResearchConfig)
-
-
-def load_server_config(path: str | Path) -> ServerConfig:
-    """Load a server config YAML file."""
-
-    return load_config(path, ServerConfig)

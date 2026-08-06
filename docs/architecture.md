@@ -26,18 +26,17 @@ Desktop responsibilities:
 - Run vectorized and future event-driven backtests.
 - Produce reports that document why an idea failed or deserves more testing.
 
-## Server And Execution
+## Server And Prospective Evaluation
 
-The server side should be boring. It should run a small dependency set, load typed
-configuration, evaluate risk checks, reconcile state, expose dry-run or paper behavior,
-and eventually call a broker adapter through a narrow interface.
+The server side should be boring. Its currently implemented operational behavior is
+market-data-only prospective recording and shadow evaluation. V2 contracts represent
+observations, signals, and unapproved proposals without broker authority.
 
 Server responsibilities:
 
-- Load safe server configuration.
-- Run only in `paper` mode until live execution is explicitly added.
-- Block orders when risk limits fail.
-- Keep future broker integrations behind `stocker_execution.broker.Broker`.
+- Accept only `prospective_record` or `shadow` at the V2 contract boundary.
+- Keep idea plugins independent of broker, account, risk, and execution capabilities.
+- Reject paper and live modes because neither is implemented.
 - Prefer observability and predictability over research flexibility.
 
 ## Shared Packages
@@ -50,13 +49,13 @@ Server responsibilities:
   labels, single-symbol and universe experiment runners, and research report indexes.
 - `stocker_backtest`: cost models, transparent vectorized evaluation, and future
   event-driven interfaces.
-- `stocker_execution`: broker abstraction, orders, risk, state, and paper broker.
+- `stocker_runtime`: V2 authority-free domain DTOs and first-party plugin contracts.
 
 ## Separation Rules
 
-Signal code should not place orders. Backtests should not know about live broker
-credentials. Risk checks should be pure and testable. Execution should consume approved
-orders and current state, not research notebooks.
+Signal code must not place orders. Backtests should not know about broker credentials.
+No current V2 contract represents approval, an executable order, an account, or broker
+state. Those boundaries require separate owner-approved phases.
 
 Data trust is a separate boundary too. CSV ingestion, validation, audit reporting, and
 baseline reporting happen before edge discovery. A dataset that fails audit should not

@@ -22,13 +22,13 @@ At the time this document was introduced, the repository implements:
 - an optional market-data-only IBKR adapter for prospective recording
 - deterministic replay and virtual/shadow outcome projections
 - a read-only prospective web application
-- execution-domain interfaces, risk checks, and an in-memory paper-broker placeholder
+- authority-free V2 domain and first-party idea-plugin contracts
 
 It does **not** implement an order-capable IBKR adapter, a safely reconciled paper
-execution service, or live trading. The paper broker is a local placeholder for tests
-and dry runs, not proof that broker paper trading is production-ready. Existing
-execution abstractions are foundations that must still satisfy the approval,
-idempotency, account-validation, restart, and reconciliation requirements below.
+execution service, or live trading. The prior in-memory paper broker, direct submission
+interface, stateless risk/execution placeholders, and executor dry run were removed in
+V2 Phase 1 because they did not satisfy the approval, idempotency, account-validation,
+restart, or reconciliation requirements below.
 
 ## Operating modes
 

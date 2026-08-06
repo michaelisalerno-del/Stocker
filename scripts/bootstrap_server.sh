@@ -21,6 +21,4 @@ uv sync --locked --no-editable --no-default-groups --group server
 
 echo
 echo "Bootstrap complete."
-echo "Next steps:"
-echo "  uv run --no-sync stocker server dry-run --config configs/server.example.yaml"
-echo "  uv run --no-sync python apps/server/scripts/run_executor.py --config configs/server.example.yaml"
+echo "Use the market-data-only prospective runbook for explicit recorder or web startup."

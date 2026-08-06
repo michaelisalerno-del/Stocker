@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "stocker"
 version = "0.1.0"
-description = "Trading research and execution foundation with strict research, backtest, risk, and execution boundaries."
+description = "Trading research and prospective-runtime foundation with strict authority boundaries."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
@@ -74,9 +74,9 @@ packages = [
   "packages/stocker_data/src/stocker_data",
   "packages/stocker_research/src/stocker_research",
   "packages/stocker_backtest/src/stocker_backtest",
-  "packages/stocker_execution/src/stocker_execution",
   "packages/stocker_mcp/src/stocker_mcp",
   "packages/stocker_prospective/src/stocker_prospective",
+  "packages/stocker_runtime/src/stocker_runtime",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -89,9 +89,9 @@ pythonpath = [
   "packages/stocker_data/src",
   "packages/stocker_research/src",
   "packages/stocker_backtest/src",
-  "packages/stocker_execution/src",
   "packages/stocker_mcp/src",
   "packages/stocker_prospective/src",
+  "packages/stocker_runtime/src",
 ]
 addopts = "-q"
 
@@ -103,9 +103,9 @@ src = [
   "packages/stocker_data/src",
   "packages/stocker_research/src",
   "packages/stocker_backtest/src",
-  "packages/stocker_execution/src",
   "packages/stocker_mcp/src",
   "packages/stocker_prospective/src",
+  "packages/stocker_runtime/src",
   "apps",
   "tests",
 ]
@@ -127,9 +127,9 @@ packages = [
   "stocker_data",
   "stocker_research",
   "stocker_backtest",
-  "stocker_execution",
   "stocker_mcp",
   "stocker_prospective",
+  "stocker_runtime",
 ]
 ignore_missing_imports = true
 

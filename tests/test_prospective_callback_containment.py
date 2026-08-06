@@ -45,6 +45,7 @@ def adapter(
     *,
     max_unacknowledged: int = 100,
     busy_timeout_ms: int = 5_000,
+    require_durable_inbox_on_start: bool = False,
 ) -> tuple[IBKRMarketDataAdapter, DurableCallbackInbox]:
     inbox = DurableCallbackInbox(
         database(tmp_path),
@@ -71,6 +72,7 @@ def adapter(
             request_rate_limit=100,
         ),
         durable_inbox=inbox,
+        require_durable_inbox_on_start=require_durable_inbox_on_start,
     )
     value._connection_generation = 1
     return value, inbox
@@ -244,6 +246,30 @@ def test_hot_callback_is_durable_before_normalization_or_cache_update(
     assert value.fatal_callback_code is None
     assert scientific_callback_count(inbox) == 1
     assert value.stream_quotes.snapshot(7) == ({"field": "bid", "value": 10.0},)
+
+
+def test_bounded_quote_request_is_not_deferred_with_stream_batch(
+    tmp_path: Path,
+) -> None:
+    value, _inbox = adapter(tmp_path, require_durable_inbox_on_start=True)
+    value._track_request(29, "temporary_quote:AAL")
+    value.callbacks.begin(29, kind="temporary_quote")
+
+    value.contain_official_callback(
+        "tick_price",
+        29,
+        lambda: value.on_quote_update(
+            29,
+            {"field": "bid", "value": 10.0},
+            complete=True,
+        ),
+        provider_arguments=(29, 1, 10.0, {}),
+    )
+
+    result = value.callbacks.wait(29, timeout_seconds=0.01)
+    assert result.complete is True
+    assert result.items == ({"field": "bid", "value": 10.0},)
+    assert value.fatal_callback_code is None
 
 
 def test_unknown_request_is_quarantined_and_never_escapes_boundary(

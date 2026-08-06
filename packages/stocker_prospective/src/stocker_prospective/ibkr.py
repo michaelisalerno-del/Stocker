@@ -1107,6 +1107,7 @@ class IBKRMarketDataAdapter:
                 self._durable_inbox is not None
                 and self._batch_durable_callbacks
                 and single_row_hot_path
+                and not self.callbacks.is_pending(request_id)
             ):
                 owner = self._request_owners.get(request_id)
                 with self._pending_official_callback_lock:

@@ -1,0 +1,111 @@
+"""Public market-data-only IBKR facade."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+from stocker_runtime.ingestion.inbox import (
+    AdmissionResult,
+    CallbackFence,
+    MarketDataCallback,
+)
+
+
+@runtime_checkable
+class MarketDataAdapter(Protocol):
+    """Only capabilities the recorder may request from an external adapter."""
+
+    def set_callback(
+        self, callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult]
+    ) -> None: ...
+
+    def set_disconnect_callback(self, callback: Callable[[int], None]) -> None: ...
+
+    def connect(self) -> None: ...
+
+    def disconnect(self) -> None: ...
+
+    def subscribe(self, fence: CallbackFence) -> None: ...
+
+    def cancel(self, request_id: int) -> None: ...
+
+
+@dataclass(frozen=True)
+class IBKRSubscription:
+    """Exact security identity for one configured market-data request."""
+
+    request_id: int
+    con_id: int
+    symbol: str
+    security_type: str
+    exchange: str
+    currency: str
+    feed_kind: str
+
+    def __post_init__(self) -> None:
+        if (
+            self.request_id < 0
+            or self.con_id <= 0
+            or not self.symbol
+            or not self.security_type
+            or not self.exchange
+            or not self.currency
+            or self.feed_kind not in {"quotes", "trades", "bars"}
+        ):
+            raise ValueError("IBKR market-data subscription identity is invalid")
+
+
+class IBKRMarketData:
+    """Narrow facade over the private official API bridge."""
+
+    __slots__ = ("_bridge",)
+
+    def __init__(self, bridge: MarketDataAdapter) -> None:
+        self._bridge = bridge
+
+    @classmethod
+    def official(
+        cls,
+        *,
+        host: str,
+        port: int,
+        client_id: int,
+        read_only: bool,
+        external_read_only_verified: bool,
+        subscriptions: tuple[IBKRSubscription, ...],
+    ) -> IBKRMarketData:
+        """Create the private official bridge after explicit safety verification."""
+
+        from stocker_runtime.ingestion.official_bridge import create_official_bridge
+
+        bridge = create_official_bridge(
+            host=host,
+            port=port,
+            client_id=client_id,
+            read_only=read_only,
+            external_read_only_verified=external_read_only_verified,
+            subscriptions=subscriptions,
+        )
+        return cls(bridge)
+
+    def set_callback(
+        self, callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult]
+    ) -> None:
+        self._bridge.set_callback(callback)
+
+    def set_disconnect_callback(self, callback: Callable[[int], None]) -> None:
+        self._bridge.set_disconnect_callback(callback)
+
+    def connect(self) -> None:
+        self._bridge.connect()
+
+    def disconnect(self) -> None:
+        self._bridge.disconnect()
+
+    def subscribe(self, fence: CallbackFence) -> None:
+        self._bridge.subscribe(fence)
+
+    def cancel(self, request_id: int) -> None:
+        self._bridge.cancel(request_id)

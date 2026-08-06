@@ -1,7 +1,7 @@
 # Stocker V2 platform redesign
 
-Status: **Accepted by the owner on 2026-08-06. Phases 1 and 2 implemented; Phase 3 is
-not authorized.**
+Status: **Accepted by the owner on 2026-08-06. Phases 1–3 implemented; Phase 4 is not
+authorized.**
 
 Architect: project `architect` role, read-only, high reasoning effort.
 
@@ -839,6 +839,16 @@ visible cap result that Phase 3 must use; it does not invent recorder lifecycle 
 - **Dependencies:** Phase 1.
 
 ### Phase 3 — Read-only IBKR ingestion and transient inbox
+
+Implementation note (2026-08-06): the owner authorized Phase 3. The V2 runtime now has
+strict prospective-only recorder configuration, a public market-data-only IBKR facade
+over a private lazy official-client bridge, durable generation-fenced callback
+admission, ordered leases and recovery, idempotent event/latest projection, explicit
+post-projection acknowledgement, poison isolation, scoped gaps/staleness, chained
+receipts, bounded retention/cap reactions, and an offline replay lifecycle. It reuses
+the Phase 2 schema without adding a migration. No service is activated, automated
+tests use fakes/replay only, and no idea, shadow, account, order, risk, execution,
+paper, or live capability is introduced. Phase 4 remains separately authorized.
 
 - **Objective:** record normalized prospective market data with no ideas.
 - **Files/packages:** official bridge, IBKR facade, inbox, recorder, config/CLI.

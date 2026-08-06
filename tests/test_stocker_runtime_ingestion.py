@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,16 +12,20 @@ from typer.testing import CliRunner
 
 from stocker_runtime.cli import app
 from stocker_runtime.ingestion import (
+    AuthoritativeLeaseLost,
     CallbackFence,
     CallbackInbox,
     DuplicateWriterError,
+    InboxAdmissionError,
     InboxFullError,
     InstrumentSpec,
     MarketDataCallback,
+    MarketDataStatus,
     NormalizationError,
     Recorder,
     RecorderConfig,
     SubscriptionSpec,
+    WriterAuthority,
 )
 from stocker_runtime.storage import (
     RetentionResult,
@@ -60,6 +65,11 @@ def _seed_generation(database: Path) -> None:
             "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
             "VALUES ('run-1', 1, 'owner-1', 1)"
         )
+        connection.execute(
+            "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle, "
+            "process_heartbeat_at_us, connection_generation) "
+            "VALUES ('run-1', 1, 'running', 1, 2)"
+        )
 
 
 def _fence() -> CallbackFence:
@@ -70,6 +80,10 @@ def _fence() -> CallbackFence:
         request_id=3,
         subscription_id=None,
     )
+
+
+def _authority() -> WriterAuthority:
+    return WriterAuthority("run-1", 1, "owner-1")
 
 
 def _seed_subscription(database: Path) -> CallbackFence:
@@ -227,8 +241,10 @@ def test_lease_projects_in_source_order_and_acknowledges_only_after_projection(
         for received in (10, 11)
     ]
 
-    leased = inbox.lease_pending("worker-1", now_us=20, lease_us=10, limit=10)
-    first_event = inbox.project(leased[0])
+    leased = inbox.lease_pending(
+        "worker-1", now_us=20, lease_us=10, limit=10, authority=_authority()
+    )
+    first_event = inbox.project(leased[0], authority=_authority())
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -237,9 +253,13 @@ def test_lease_projects_in_source_order_and_acknowledges_only_after_projection(
             ).fetchone()[0]
             == "leased"
         )
-    inbox.acknowledge(leased[0], first_event.event_id, acknowledged_at_us=21)
-    second_event = inbox.project(leased[1])
-    inbox.acknowledge(leased[1], second_event.event_id, acknowledged_at_us=22)
+    inbox.acknowledge(
+        leased[0], first_event.event_id, acknowledged_at_us=21, authority=_authority()
+    )
+    second_event = inbox.project(leased[1], authority=_authority())
+    inbox.acknowledge(
+        leased[1], second_event.event_id, acknowledged_at_us=22, authority=_authority()
+    )
 
     assert [item.source_sequence for item in leased] == [item.source_sequence for item in admitted]
     with connect_v2(database) as connection:
@@ -260,13 +280,17 @@ def test_crash_after_admission_and_after_projection_recovers_idempotently(tmp_pa
         MarketDataCallback("trade", 10, 9, {"event_at_us": 9, "last": 100.25, "size": 2}),
     )
 
-    first_lease = inbox.lease_pending("dead-worker", now_us=10, lease_us=5, limit=1)[0]
-    projected = inbox.project(first_lease)
-    assert inbox.reclaim_expired_leases(now_us=14) == 0
-    assert inbox.reclaim_expired_leases(now_us=15) == 1
-    retry_lease = inbox.lease_pending("new-worker", now_us=15, lease_us=5, limit=1)[0]
-    retried = inbox.project(retry_lease)
-    inbox.acknowledge(retry_lease, retried.event_id, acknowledged_at_us=16)
+    first_lease = inbox.lease_pending(
+        "dead-worker", now_us=10, lease_us=5, limit=1, authority=_authority()
+    )[0]
+    projected = inbox.project(first_lease, authority=_authority())
+    assert inbox.reclaim_expired_leases(now_us=14, authority=_authority()) == 0
+    assert inbox.reclaim_expired_leases(now_us=15, authority=_authority()) == 1
+    retry_lease = inbox.lease_pending(
+        "new-worker", now_us=15, lease_us=5, limit=1, authority=_authority()
+    )[0]
+    retried = inbox.project(retry_lease, authority=_authority())
+    inbox.acknowledge(retry_lease, retried.event_id, acknowledged_at_us=16, authority=_authority())
 
     assert retried.event_id == projected.event_id
     assert projected.inserted is True
@@ -290,13 +314,13 @@ def test_poison_callback_is_failed_without_blocking_the_next_callback(tmp_path: 
     good = inbox.admit(
         fence, MarketDataCallback("quote", 11, None, {"event_at_us": 11, "bid": 1.0})
     )
-    leased = inbox.lease_pending("worker", now_us=20, lease_us=10, limit=10)
+    leased = inbox.lease_pending("worker", now_us=20, lease_us=10, limit=10, authority=_authority())
 
     with pytest.raises(NormalizationError):
-        inbox.project(leased[0])
-    inbox.fail(leased[0], "MALFORMED_CALLBACK", failed_at_us=20)
-    event = inbox.project(leased[1])
-    inbox.acknowledge(leased[1], event.event_id, acknowledged_at_us=21)
+        inbox.project(leased[0], authority=_authority())
+    inbox.fail(leased[0], "MALFORMED_CALLBACK", failed_at_us=20, authority=_authority())
+    event = inbox.project(leased[1], authority=_authority())
+    inbox.acknowledge(leased[1], event.event_id, acknowledged_at_us=21, authority=_authority())
 
     with connect_v2(database) as connection:
         states = tuple(
@@ -345,11 +369,13 @@ def test_receipt_chain_matches_phase2_contract_and_authorizes_compaction(tmp_pat
             fence,
             MarketDataCallback("quote", received, None, {"event_at_us": received, "bid": 1.0}),
         )
-    for leased in inbox.lease_pending("worker", now_us=12, lease_us=10, limit=10):
-        event = inbox.project(leased)
-        inbox.acknowledge(leased, event.event_id, acknowledged_at_us=12)
+    for leased in inbox.lease_pending(
+        "worker", now_us=12, lease_us=10, limit=10, authority=_authority()
+    ):
+        event = inbox.project(leased, authority=_authority())
+        inbox.acknowledge(leased, event.event_id, acknowledged_at_us=12, authority=_authority())
 
-    receipt = inbox.create_receipt("run-1", created_at_us=13, limit=10)
+    receipt = inbox.create_receipt("run-1", created_at_us=13, limit=10, authority=_authority())
     compacted = RetentionManager(
         database,
         RetentionPolicy(callback_payload_us=1, receipt_us=1_000, tombstone_us=1_000),
@@ -361,12 +387,19 @@ def test_receipt_chain_matches_phase2_contract_and_authorizes_compaction(tmp_pat
 
 
 class FakeMarketData:
-    def __init__(self) -> None:
+    def __init__(
+        self, *, fail_connect: bool = False, fail_subscribe: set[int] | None = None
+    ) -> None:
         self.callback = None
         self.disconnect_callback = None
+        self.status_callback = None
         self.connected = False
         self.subscriptions: list[CallbackFence] = []
         self.cancelled: list[int] = []
+        self.fail_connect = fail_connect
+        self.fail_subscribe = set() if fail_subscribe is None else fail_subscribe
+        self.connect_calls = 0
+        self.disconnect_calls = 0
 
     def set_callback(self, callback: object) -> None:
         self.callback = callback
@@ -374,13 +407,22 @@ class FakeMarketData:
     def set_disconnect_callback(self, callback: object) -> None:
         self.disconnect_callback = callback
 
+    def set_status_callback(self, callback: object) -> None:
+        self.status_callback = callback
+
     def connect(self) -> None:
+        self.connect_calls += 1
+        if self.fail_connect:
+            raise RuntimeError("connect failed")
         self.connected = True
 
     def disconnect(self) -> None:
+        self.disconnect_calls += 1
         self.connected = False
 
     def subscribe(self, fence: CallbackFence) -> None:
+        if fence.request_id in self.fail_subscribe:
+            raise RuntimeError("subscribe failed")
         self.subscriptions.append(fence)
 
     def cancel(self, request_id: int) -> None:
@@ -616,8 +658,9 @@ def test_recorder_consumes_optional_and_fatal_storage_cap_actions(
         def __init__(self, _database: Path) -> None:
             pass
 
-        def run(self, *, now_us: int) -> RetentionResult:
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
             assert now_us >= 101
+            assert callable(precondition)
             return self.result
 
     monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", FakeRetention)
@@ -726,7 +769,7 @@ def test_late_prior_run_callback_is_failed_and_receipted_by_current_recorder(
 
     with connect_v2(database) as connection:
         callback = connection.execute(
-            "SELECT lifecycle, receipt_batch_id FROM callback_inbox WHERE run_id='run-1'"
+            "SELECT lifecycle, receipt_batch_id FROM callback_inbox WHERE run_id='run-2'"
         ).fetchone()
     assert callback["lifecycle"] == "failed"
     assert callback["receipt_batch_id"] is not None
@@ -760,3 +803,261 @@ def test_official_callback_bridge_defines_no_authority_callbacks() -> None:
     }
     forbidden = ("order", "account", "position", "execution", "pnl", "fill", "portfolio")
     assert not any(term in name for name in names for term in forbidden)
+
+
+def test_official_tick_semantics_do_not_mix_quotes_and_trades() -> None:
+    from stocker_runtime.ingestion.official_bridge import (
+        _price_tick_projection,
+        _size_tick_projection,
+    )
+
+    assert _price_tick_projection("quotes", 1) == ("quote", "bid")
+    assert _price_tick_projection("quotes", 4) is None
+    assert _price_tick_projection("trades", 4) == ("trade", "last")
+    assert _size_tick_projection("quotes", 3) == ("quote", "ask_size")
+    assert _size_tick_projection("trades", 3) is None
+    assert _size_tick_projection("trades", 5) == ("trade", "size")
+
+
+def test_stale_recorder_object_cannot_mutate_or_touch_adapter_after_takeover(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('run-1', 2, 'owner-2', 101)"
+        )
+        connection.execute(
+            "UPDATE runtime_state SET recorder_generation=2, lifecycle='running', "
+            "process_heartbeat_at_us=101 WHERE run_id='run-1'"
+        )
+    disconnects = adapter.disconnect_calls
+    for action in (
+        lambda: recorder.disconnected(now_us=102),
+        lambda: recorder.reconnect(now_us=102),
+        lambda: recorder.stop(now_us=102),
+        lambda: recorder._fatal("STALE_MUST_NOT_WIN", 102),
+    ):
+        with pytest.raises(AuthoritativeLeaseLost):
+            action()
+    assert adapter.disconnect_calls == disconnects
+    assert adapter.cancelled == []
+    with connect_v2(database) as connection:
+        state = connection.execute(
+            "SELECT recorder_generation, lifecycle FROM runtime_state WHERE run_id='run-1'"
+        ).fetchone()
+    assert tuple(state) == (2, "running")
+
+
+def test_persisted_fatal_is_absorbing_for_same_object_and_future_start(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder._fatal("TEST_FATAL", 101)
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.reconnect(now_us=102)
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.receive(
+            state.fences[0],
+            MarketDataCallback("quote", 102, None, {"event_at_us": 102}),
+        )
+    with pytest.raises(Exception, match="fatal"):
+        Recorder(_config(database, run_id="run-2"), FakeMarketData()).start(
+            now_us=103, instruments=(instrument,), subscriptions=specs
+        )
+
+
+def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 1.0}),
+    )
+    monkeypatch.setattr(
+        recorder.inbox,
+        "project",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            sqlite3.OperationalError("injected projection failure")
+        ),
+    )
+    with pytest.raises(Exception, match="post-admission"):
+        recorder.drain(now_us=102)
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        status = connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
+    assert callback[0] == "leased"
+    assert callback[1] is not None
+    assert status == "fatal"
+
+
+def test_projection_uses_durable_payload_and_rejects_altered_lease_token(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    inbox.admit(
+        fence,
+        MarketDataCallback("quote", 10, None, {"event_at_us": 10, "bid": 1.0}),
+    )
+    leased = inbox.lease_pending("worker", now_us=11, lease_us=10, limit=1, authority=_authority())[
+        0
+    ]
+    with pytest.raises(InboxAdmissionError, match="lease token"):
+        inbox.project(replace(leased, event_uid="0" * 64), authority=_authority())
+    assert isinstance(leased.payload, dict)
+    leased.payload["bid"] = 999.0
+    projected = inbox.project(leased, authority=_authority())
+    with connect_v2(database) as connection:
+        bid = connection.execute(
+            "SELECT bid_value FROM market_events WHERE event_id=?", (projected.event_id,)
+        ).fetchone()[0]
+    assert bid == 1.0
+
+
+@pytest.mark.parametrize(
+    ("failed_request", "runtime_lifecycle", "required_lifecycle", "optional_lifecycle"),
+    ((3, "degraded", "disconnected", "disconnected"), (4, "running", "active", "paused")),
+)
+def test_subscription_state_is_truthful_when_subscribe_fails(
+    tmp_path: Path,
+    failed_request: int,
+    runtime_lifecycle: str,
+    required_lifecycle: str,
+    optional_lifecycle: str,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    Recorder(_config(database), FakeMarketData(fail_subscribe={failed_request})).start(
+        now_us=100, instruments=(instrument,), subscriptions=specs
+    )
+    with connect_v2(database) as connection:
+        runtime = connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0]
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+    assert runtime == runtime_lifecycle
+    assert states == {3: required_lifecycle, 4: optional_lifecycle}
+
+
+def test_partial_quote_callbacks_merge_into_latest_projection(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    for received_at_us, payload in (
+        (10, {"event_at_us": 10, "bid": 100.0, "bid_size": 2.0}),
+        (11, {"event_at_us": 11, "ask": 101.0, "ask_size": 3.0}),
+    ):
+        inbox.admit(fence, MarketDataCallback("quote", received_at_us, None, payload))
+    for leased in inbox.lease_pending(
+        "worker", now_us=12, lease_us=10, limit=10, authority=_authority()
+    ):
+        event = inbox.project(leased, authority=_authority())
+        inbox.acknowledge(leased, event.event_id, acknowledged_at_us=12, authority=_authority())
+    with connect_v2(database) as connection:
+        latest = connection.execute(
+            "SELECT bid_value, ask_value, bid_size_value, ask_size_value FROM market_latest"
+        ).fetchone()
+    assert tuple(latest) == (100.0, 101.0, 2.0, 3.0)
+
+
+def test_typed_optional_status_does_not_stop_required_feed(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.market_data_status(MarketDataStatus("pacing", 420, 4, "paced", 101))
+    with connect_v2(database) as connection:
+        runtime = connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0]
+        optional = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE request_id=4"
+        ).fetchone()[0]
+        gap = connection.execute(
+            "SELECT continuity_required FROM gaps WHERE reason LIKE 'IBKR_STATUS_420_%'"
+        ).fetchone()[0]
+    assert (runtime, optional, gap) == ("running", "paused", 0)
+
+
+def test_replay_rejects_oversized_fixture_before_starting_run(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    config_path = tmp_path / "runtime.json"
+    fixture_path = tmp_path / "fixture.json"
+    config_path.write_text(json.dumps(_config(database).model_dump(mode="json")), encoding="utf-8")
+    fixture_path.write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+    result = CliRunner().invoke(
+        app, ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "100"]
+    )
+    assert result.exit_code == 1
+    assert "8 MiB" in result.stdout
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+
+
+def test_receipts_accept_interleaved_global_sequences_without_skipping_same_run(
+    tmp_path: Path,
+) -> None:
+    from stocker_runtime.storage import RetentionManager, RetentionPolicy
+
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status, ended_at_us) VALUES "
+            "('run-2', 'prospective_record', 'ibkr', 1, ?, 'deadbee', "
+            "'prospective_protected', 'stopped', 9)",
+            ("d" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code) VALUES "
+            "('run-2', 1, 'owner-2', 1, 9, 1, 'CLEAN_STOP')"
+        )
+        for sequence, run_id in ((1, "run-1"), (2, "run-2"), (3, "run-1"), (4, "run-2")):
+            connection.execute(
+                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+                "recorder_generation, connection_generation, callback_kind, received_at_us, "
+                "payload_json, payload_sha256, lifecycle, failure_code) "
+                "VALUES (?, ?, ?, 1, 1, 'quote', ?, '{}', ?, 'failed', 'fixture')",
+                (sequence, f"event-{sequence}", run_id, sequence, f"{sequence:064x}"),
+            )
+    inbox = CallbackInbox(database)
+    first = inbox.create_receipt("run-1", created_at_us=10, limit=10, authority=_authority())
+    second = inbox.create_receipt("run-2", created_at_us=10, limit=10, authority=_authority())
+    assert first is not None and (
+        first.first_source_sequence,
+        first.last_source_sequence,
+        first.callback_count,
+    ) == (1, 3, 2)
+    assert second is not None and (
+        second.first_source_sequence,
+        second.last_source_sequence,
+        second.callback_count,
+    ) == (2, 4, 2)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status='stopped', ended_at_us=11 WHERE run_id='run-1'")
+    result = RetentionManager(
+        database, RetentionPolicy(callback_payload_us=1, receipt_us=1_000, tombstone_us=1_000)
+    ).run(now_us=12, measured_database_bytes=1, measured_wal_bytes=0)
+    assert result.payloads_compacted == 4

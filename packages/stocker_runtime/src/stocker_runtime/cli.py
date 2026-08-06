@@ -12,12 +12,13 @@ from typing import Annotated, cast
 
 import typer
 
-from stocker_runtime.domain import JsonValue
+from stocker_runtime.domain import JsonValue, canonical_json_bytes
 from stocker_runtime.ingestion import (
     AdmissionResult,
     CallbackFence,
     InstrumentSpec,
     MarketDataCallback,
+    MarketDataStatus,
     Recorder,
     SubscriptionSpec,
     load_recorder_config,
@@ -33,6 +34,16 @@ app = typer.Typer(
     no_args_is_help=True,
     help="Initialize, verify, migrate, and retain an isolated Stocker V2 database.",
 )
+
+MAX_REPLAY_FILE_BYTES = 8 * 1024 * 1024
+MAX_REPLAY_INSTRUMENTS = 10_000
+MAX_REPLAY_SUBSCRIPTIONS = 10_000
+MAX_REPLAY_CALLBACKS = 50_000
+MAX_REPLAY_CALLBACK_BYTES = 65_536
+
+
+class ReplayBlockedError(RuntimeError):
+    """A bounded replay pass could not make durable progress."""
 
 
 def _emit(payload: dict[str, object]) -> None:
@@ -126,6 +137,9 @@ class _ReplayMarketData:
     def set_disconnect_callback(self, _callback: Callable[[int], None]) -> None:
         return None
 
+    def set_status_callback(self, _callback: Callable[[MarketDataStatus], None]) -> None:
+        return None
+
     def connect(self) -> None:
         return None
 
@@ -149,14 +163,67 @@ def replay_recorder_command(
 
     try:
         loaded = load_recorder_config(config)
-        raw = json.loads(fixture.read_text(encoding="utf-8"))
+        if fixture.stat().st_size > MAX_REPLAY_FILE_BYTES:
+            raise ValueError("replay fixture exceeds the 8 MiB input limit")
+        raw = json.loads(fixture.read_bytes().decode("utf-8"))
         if not isinstance(raw, dict):
             raise ValueError("replay fixture must be an object")
-        instruments = tuple(InstrumentSpec(**item) for item in raw.get("instruments", ()))
-        subscriptions = tuple(SubscriptionSpec(**item) for item in raw.get("subscriptions", ()))
+        if set(raw) != {"instruments", "subscriptions", "callbacks"}:
+            raise ValueError(
+                "replay fixture requires exactly instruments, subscriptions, callbacks"
+            )
+        raw_instruments = raw["instruments"]
+        raw_subscriptions = raw["subscriptions"]
         callbacks = raw.get("callbacks", ())
-        if not isinstance(callbacks, list) or len(callbacks) > 50_000:
+        if not isinstance(raw_instruments, list) or len(raw_instruments) > MAX_REPLAY_INSTRUMENTS:
+            raise ValueError("replay instruments must be a bounded list")
+        if (
+            not isinstance(raw_subscriptions, list)
+            or len(raw_subscriptions) > MAX_REPLAY_SUBSCRIPTIONS
+        ):
+            raise ValueError("replay subscriptions must be a bounded list")
+        if not all(isinstance(item, dict) for item in raw_instruments):
+            raise ValueError("every replay instrument must be an object")
+        if not all(isinstance(item, dict) for item in raw_subscriptions):
+            raise ValueError("every replay subscription must be an object")
+        instruments = tuple(InstrumentSpec(**item) for item in raw_instruments)
+        subscriptions = tuple(SubscriptionSpec(**item) for item in raw_subscriptions)
+        if not isinstance(callbacks, list) or len(callbacks) > MAX_REPLAY_CALLBACKS:
             raise ValueError("replay callbacks must be a list of at most 50,000 items")
+        configured_request_ids = {spec.request_id for spec in subscriptions}
+        validated_callbacks: list[tuple[int, int, int | None, str, JsonValue]] = []
+        callback_keys = {
+            "request_id",
+            "callback_kind",
+            "received_at_us",
+            "provider_at_us",
+            "payload",
+        }
+        for item in callbacks:
+            if not isinstance(item, dict) or set(item) != callback_keys:
+                raise ValueError("replay callback has invalid fields")
+            request_id = item["request_id"]
+            received_at_us = item["received_at_us"]
+            provider_at_us = item["provider_at_us"]
+            callback_kind = item["callback_kind"]
+            if isinstance(request_id, bool) or not isinstance(request_id, int):
+                raise ValueError("replay callback request_id must be an integer")
+            if request_id not in configured_request_ids:
+                raise ValueError("replay callback request_id is not configured")
+            if isinstance(received_at_us, bool) or not isinstance(received_at_us, int):
+                raise ValueError("replay callback received_at_us must be an integer")
+            if provider_at_us is not None and (
+                isinstance(provider_at_us, bool) or not isinstance(provider_at_us, int)
+            ):
+                raise ValueError("replay callback provider_at_us must be an integer or null")
+            if not isinstance(callback_kind, str) or not callback_kind:
+                raise ValueError("replay callback callback_kind must be a non-empty string")
+            payload = cast(JsonValue, item["payload"])
+            if len(canonical_json_bytes(payload)) > MAX_REPLAY_CALLBACK_BYTES:
+                raise ValueError("replay callback payload exceeds 64 KiB")
+            validated_callbacks.append(
+                (request_id, received_at_us, provider_at_us, callback_kind, payload)
+            )
         adapter = _ReplayMarketData()
         recorder = Recorder(loaded, adapter)
         state = recorder.start(
@@ -165,35 +232,48 @@ def replay_recorder_command(
             subscriptions=subscriptions,
         )
         fences = {fence.request_id: fence for fence in state.fences}
-        for item in callbacks:
-            if not isinstance(item, dict):
-                raise ValueError("replay callback must be an object")
-            request_id = item.get("request_id")
+        for (
+            request_id,
+            received_at_us,
+            provider_at_us,
+            callback_kind,
+            payload,
+        ) in validated_callbacks:
             fence = fences.get(request_id)
             if fence is None:
                 raise ValueError("replay callback request_id is not configured")
-            received_at_us = item.get("received_at_us")
-            if isinstance(received_at_us, bool) or not isinstance(received_at_us, int):
-                raise ValueError("replay callback received_at_us must be an integer")
-            provider_at_us = item.get("provider_at_us")
-            if provider_at_us is not None and (
-                isinstance(provider_at_us, bool) or not isinstance(provider_at_us, int)
-            ):
-                raise ValueError("replay callback provider_at_us must be an integer or null")
-            payload = cast(JsonValue, item.get("payload"))
             recorder.receive(
                 fence,
                 MarketDataCallback(
-                    callback_kind=str(item.get("callback_kind", "")),
+                    callback_kind=callback_kind,
                     received_at_us=received_at_us,
                     provider_at_us=provider_at_us,
                     payload=payload,
                 ),
             )
         projected = 0
-        while recorder.inbox.nonterminal_count() > 0:
-            processed = recorder.drain(now_us=now_us + 1, limit=min(10_000, max(1, len(callbacks))))
+        max_passes = (len(callbacks) + 9_999) // 10_000 + 2
+        for pass_index in range(max_passes):
+            before = recorder.inbox.nonterminal_count()
+            if before == 0:
+                break
+            pass_now_us = now_us + 1 + pass_index * loaded.callback_lease_us
+            recorder.inbox.reclaim_expired_leases(
+                now_us=pass_now_us,
+                authority=recorder._authority(),
+            )
+            processed = recorder.drain(
+                now_us=pass_now_us,
+                limit=min(10_000, max(1, len(callbacks))),
+            )
             projected += processed
+            after = recorder.inbox.nonterminal_count()
+            if after >= before:
+                raise ReplayBlockedError(
+                    f"replay made no progress: nonterminal_count={after}, pass={pass_index}"
+                )
+        if recorder.inbox.nonterminal_count() != 0:
+            raise ReplayBlockedError("replay exceeded its deterministic processing bound")
         recorder.stop(now_us=now_us + 2)
     except (OSError, ValueError, RuntimeError, sqlite3.Error, TypeError) as error:
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})

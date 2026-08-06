@@ -869,7 +869,7 @@ def test_retention_compacts_only_durably_projected_acknowledged_receipted_payloa
         database,
         batch_id="receipt-1",
         first_sequence=eligible,
-        last_sequence=recent,
+        last_sequence=eligible,
         created_at_us=4,
     )
     manager = RetentionManager(

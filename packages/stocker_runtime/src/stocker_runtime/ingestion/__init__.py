@@ -4,6 +4,7 @@ from stocker_runtime.ingestion.ibkr_market_data import (
     IBKRMarketData,
     IBKRSubscription,
     MarketDataAdapter,
+    MarketDataStatus,
 )
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
@@ -16,8 +17,10 @@ from stocker_runtime.ingestion.inbox import (
     MarketDataCallback,
     NormalizationError,
     ProjectionResult,
+    WriterAuthority,
 )
 from stocker_runtime.ingestion.recorder import (
+    AuthoritativeLeaseLost,
     DuplicateWriterError,
     InstrumentSpec,
     Recorder,
@@ -30,6 +33,7 @@ from stocker_runtime.ingestion.recorder import (
 
 __all__ = [
     "AdmissionResult",
+    "AuthoritativeLeaseLost",
     "CallbackFence",
     "CallbackIdentityCollision",
     "CallbackInbox",
@@ -39,9 +43,11 @@ __all__ = [
     "InboxFullError",
     "LeasedCallback",
     "MarketDataAdapter",
+    "MarketDataStatus",
     "MarketDataCallback",
     "NormalizationError",
     "ProjectionResult",
+    "WriterAuthority",
     "RecorderConfig",
     "DuplicateWriterError",
     "InstrumentSpec",

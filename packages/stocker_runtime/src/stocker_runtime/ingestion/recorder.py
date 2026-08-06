@@ -14,15 +14,15 @@ from typing import Literal, Self, cast
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from stocker_runtime.domain import JsonValue, canonical_json_bytes
-from stocker_runtime.ingestion.ibkr_market_data import MarketDataAdapter
+from stocker_runtime.ingestion.ibkr_market_data import MarketDataAdapter, MarketDataStatus
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
     CallbackFence,
-    CallbackIdentityCollision,
     CallbackInbox,
     InboxAdmissionError,
     MarketDataCallback,
     NormalizationError,
+    WriterAuthority,
 )
 from stocker_runtime.storage import RetentionManager, StorageCapState, connect_v2
 
@@ -33,6 +33,10 @@ class DuplicateWriterError(RuntimeError):
 
 class RecorderFatalError(RuntimeError):
     """The recorder entered a persisted fail-stop state."""
+
+
+class AuthoritativeLeaseLost(RecorderFatalError):
+    """This recorder object no longer owns the persisted authoritative generation."""
 
 
 @dataclass(frozen=True)
@@ -124,6 +128,7 @@ def _safe_adapter(adapter: object) -> None:
     required = {
         "set_callback",
         "set_disconnect_callback",
+        "set_status_callback",
         "connect",
         "disconnect",
         "subscribe",
@@ -146,6 +151,29 @@ class Recorder:
         self._instruments: tuple[InstrumentSpec, ...] = ()
         self._subscriptions: tuple[SubscriptionSpec, ...] = ()
 
+    def _authority(self) -> WriterAuthority:
+        state = self._authority_state()
+        return WriterAuthority(
+            state.run_id,
+            state.recorder_generation,
+            self.config.owner_id,
+        )
+
+    def _verify_owned(self, connection: sqlite3.Connection) -> None:
+        try:
+            CallbackInbox.verify_writer(connection, self._authority())
+        except InboxAdmissionError as error:
+            raise AuthoritativeLeaseLost(str(error)) from error
+
+    def _check_owned(self) -> None:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            connection.commit()
+        finally:
+            connection.close()
+
     def start(
         self,
         *,
@@ -162,12 +190,25 @@ class Recorder:
         connection = connect_v2(self.config.database)
         try:
             connection.execute("BEGIN IMMEDIATE")
-            active = connection.execute(
-                "SELECT state.run_id, state.process_heartbeat_at_us, run.status "
-                "FROM runtime_state state JOIN runs run ON run.run_id = state.run_id "
-                "WHERE state.lifecycle IN ('starting','recovering','running','degraded') "
-                "ORDER BY state.run_id LIMIT 1"
-            ).fetchone()
+            if (
+                connection.execute("SELECT 1 FROM runs WHERE status='fatal' LIMIT 1").fetchone()
+                is not None
+            ):
+                raise RecorderFatalError(
+                    "persisted global fatal state requires explicit future operator recovery"
+                )
+            active_rows = tuple(
+                connection.execute(
+                    "SELECT state.run_id, state.process_heartbeat_at_us, run.status "
+                    "FROM runtime_state state JOIN runs run ON run.run_id = state.run_id "
+                    "WHERE state.lifecycle IN "
+                    "('starting','recovering','connecting','running','degraded') "
+                    "ORDER BY state.run_id"
+                )
+            )
+            if len(active_rows) > 1:
+                raise DuplicateWriterError("multiple authoritative recorder states are active")
+            active = None if not active_rows else active_rows[0]
             if active is not None:
                 heartbeat = active["process_heartbeat_at_us"]
                 fresh = (
@@ -266,19 +307,9 @@ class Recorder:
         finally:
             connection.close()
         self.state = RecorderState(self.config.run_id, generation, connection_generation, fences)
-        self.inbox.reclaim_expired_leases(now_us=now_us)
+        self.inbox.reclaim_expired_leases(now_us=now_us, authority=self._authority())
         self.drain(now_us=now_us)
-        cap = RetentionManager(self.config.database).run(now_us=now_us)
-        with connect_v2(self.config.database) as size_connection:
-            size_connection.execute(
-                "UPDATE runtime_state SET database_bytes=?, wal_bytes=? WHERE run_id=?",
-                (cap.database_bytes, cap.wal_bytes, self.config.run_id),
-            )
-        if not cap.admission_allowed:
-            self._fatal(cap.required_action or "STORAGE_CAP_FATAL", now_us)
-            raise RecorderFatalError(cap.required_action or "storage cap closed admission")
-        if not cap.optional_feeds_allowed:
-            self._pause_optional(now_us)
+        self.maintain(now_us=now_us)
         cast(
             Callable[[Callable[[CallbackFence, MarketDataCallback], AdmissionResult]], None],
             self.adapter.set_callback,
@@ -286,13 +317,8 @@ class Recorder:
         self.adapter.set_disconnect_callback(
             lambda disconnected_at_us: self.disconnected(now_us=disconnected_at_us)
         )
-        self.adapter.connect()
-        optional_requests = {spec.request_id for spec in self._subscriptions if spec.optional}
-        for fence in self.state.fences:
-            if not cap.optional_feeds_allowed and fence.request_id in optional_requests:
-                continue
-            self.adapter.subscribe(fence)
-        self._set_lifecycle("running", None, now_us)
+        self.adapter.set_status_callback(self.market_data_status)
+        self._connect_subscriptions(now_us=now_us)
         return self.state
 
     def _close_stale_writer(
@@ -409,7 +435,8 @@ class Recorder:
             connection.execute(
                 "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
                 "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
-                "requirements_hash, opened_at_us) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+                "continuity_required, optional, requirements_hash, opened_at_us) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'connecting', ?, ?, ?, ?)",
                 (
                     subscription_id,
                     self.config.run_id,
@@ -418,6 +445,8 @@ class Recorder:
                     spec.instrument_id,
                     spec.feed_kind,
                     spec.request_id,
+                    int(spec.continuity_required),
+                    int(spec.optional),
                     requirements_hash,
                     now_us,
                 ),
@@ -433,50 +462,282 @@ class Recorder:
             )
         return tuple(fences)
 
+    def _connect_subscriptions(self, *, now_us: int) -> None:
+        """Expose connected/active state only after each external action succeeds."""
+
+        self._check_owned()
+        self._set_lifecycle("connecting", None, now_us)
+        try:
+            self.adapter.connect()
+        except Exception as error:
+            self._persist_connection_failure(
+                now_us=now_us,
+                code="IBKR_CONNECT_FAILED",
+                details=type(error).__name__,
+            )
+            with suppress(Exception):
+                self.adapter.disconnect()
+            return
+        try:
+            self._check_owned()
+        except AuthoritativeLeaseLost:
+            with suppress(Exception):
+                self.adapter.disconnect()
+            raise
+        by_request = {spec.request_id: spec for spec in self._subscriptions}
+        for fence in self._authority_state().fences:
+            if fence.request_id is None:
+                continue
+            with connect_v2(self.config.database) as connection:
+                lifecycle = connection.execute(
+                    "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
+                    (fence.subscription_id,),
+                ).fetchone()
+            if lifecycle is None or str(lifecycle[0]) == "paused":
+                continue
+            spec = by_request[fence.request_id]
+            try:
+                self._check_owned()
+                self.adapter.subscribe(fence)
+                self._check_owned()
+            except AuthoritativeLeaseLost:
+                with suppress(Exception):
+                    self.adapter.disconnect()
+                raise
+            except Exception as error:
+                self._persist_subscription_failure(
+                    fence,
+                    spec,
+                    now_us=now_us,
+                    code="IBKR_SUBSCRIBE_FAILED",
+                    details=type(error).__name__,
+                )
+                if not spec.optional:
+                    self._persist_connection_failure(
+                        now_us=now_us,
+                        code="IBKR_SUBSCRIBE_FAILED",
+                        details="required subscription aborted remaining requests",
+                    )
+                    with suppress(Exception):
+                        self.adapter.disconnect()
+                    return
+                continue
+            connection = connect_v2(self.config.database)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                cursor = connection.execute(
+                    "UPDATE subscriptions SET lifecycle='active', closed_at_us=NULL "
+                    "WHERE subscription_id=? AND lifecycle='connecting'",
+                    (fence.subscription_id,),
+                )
+                if cursor.rowcount != 1:
+                    raise RecorderFatalError("subscription activation state changed")
+                connection.commit()
+            finally:
+                connection.close()
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            required_incomplete = connection.execute(
+                "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "
+                "AND connection_generation=? AND optional=0 AND lifecycle!='active' LIMIT 1",
+                (
+                    self.config.run_id,
+                    self._authority_state().recorder_generation,
+                    self._authority_state().connection_generation,
+                ),
+            ).fetchone()
+            lifecycle = "running" if required_incomplete is None else "degraded"
+            reason = None if required_incomplete is None else "REQUIRED_SUBSCRIPTION_UNAVAILABLE"
+            connection.execute(
+                "UPDATE runtime_state SET lifecycle=?, reason=?, process_heartbeat_at_us=? "
+                "WHERE run_id=? AND recorder_generation=?",
+                (
+                    lifecycle,
+                    reason,
+                    now_us,
+                    self.config.run_id,
+                    self._authority_state().recorder_generation,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _authority_state(self) -> RecorderState:
+        if self.state is None:
+            raise RecorderFatalError("recorder is not started")
+        return self.state
+
+    def _persist_connection_failure(self, *, now_us: int, code: str, details: str) -> None:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            state = self._authority_state()
+            specs = {spec.request_id: spec for spec in self._subscriptions}
+            for fence in state.fences:
+                if fence.request_id is None:
+                    continue
+                lifecycle = connection.execute(
+                    "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
+                    (fence.subscription_id,),
+                ).fetchone()
+                if lifecycle is None or str(lifecycle[0]) != "connecting":
+                    continue
+                spec = specs[fence.request_id]
+                self._open_gap(
+                    connection,
+                    cast(str, fence.subscription_id),
+                    now_us,
+                    code,
+                    spec.continuity_required,
+                )
+            connection.execute(
+                "UPDATE subscriptions SET lifecycle='disconnected' WHERE run_id=? "
+                "AND recorder_generation=? AND lifecycle='connecting'",
+                (self.config.run_id, self._authority_state().recorder_generation),
+            )
+            connection.execute(
+                "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=? "
+                "AND recorder_generation=?",
+                (code, self.config.run_id, self._authority_state().recorder_generation),
+            )
+            self._record_incident(connection, None, now_us, code, details)
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _persist_subscription_failure(
+        self,
+        fence: CallbackFence,
+        spec: SubscriptionSpec,
+        *,
+        now_us: int,
+        code: str,
+        details: str,
+    ) -> None:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            lifecycle = "paused" if spec.optional else "disconnected"
+            connection.execute(
+                "UPDATE subscriptions SET lifecycle=? WHERE subscription_id=?",
+                (lifecycle, fence.subscription_id),
+            )
+            self._open_gap(
+                connection,
+                cast(str, fence.subscription_id),
+                now_us,
+                code,
+                spec.continuity_required,
+            )
+            self._record_incident(connection, fence.subscription_id, now_us, code, details)
+            if not spec.optional:
+                connection.execute(
+                    "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=?",
+                    (code, self.config.run_id),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _record_incident(
+        self,
+        connection: sqlite3.Connection,
+        subscription_id: str | None,
+        now_us: int,
+        code: str,
+        details: str,
+    ) -> None:
+        incident_id = hashlib.sha256(
+            f"{self.config.run_id}|{subscription_id}|{code}|{now_us}".encode()
+        ).hexdigest()
+        details_json = canonical_json_bytes(cast(JsonValue, {"error": details})).decode()
+        connection.execute(
+            "INSERT OR IGNORE INTO incidents(incident_id, run_id, scope, severity, code, "
+            "subscription_id, opened_at_us, details_json) "
+            "VALUES (?, ?, 'market_data', 'degraded', ?, ?, ?, ?)",
+            (
+                incident_id,
+                self.config.run_id,
+                code,
+                subscription_id,
+                now_us,
+                details_json,
+            ),
+        )
+
     def receive(self, fence: CallbackFence, callback: MarketDataCallback) -> AdmissionResult:
         """External callback boundary: durable admission completes before return."""
 
-        if self.state is None:
-            raise RecorderFatalError("recorder is not started")
+        self._check_owned()
         try:
             return self.inbox.admit(fence, callback)
         except InboxAdmissionError:
-            self._fatal("CALLBACK_ADMISSION_FAILED", callback.received_at_us)
+            with suppress(AuthoritativeLeaseLost):
+                self._fatal("CALLBACK_ADMISSION_FAILED", callback.received_at_us)
             raise
 
     def drain(self, *, now_us: int, limit: int = 256) -> int:
         """Recover and process one bounded callback batch without blocking on poison."""
 
-        if self.state is None:
-            raise RecorderFatalError("recorder is not started")
-        processed = 0
-        for leased in self.inbox.lease_pending(
-            self.config.owner_id,
-            now_us=now_us,
-            lease_us=self.config.callback_lease_us,
-            limit=limit,
-        ):
-            try:
-                result = self.inbox.project(leased)
-            except NormalizationError:
-                self.inbox.fail(leased, "MALFORMED_CALLBACK", failed_at_us=now_us)
-                continue
-            except CallbackIdentityCollision:
-                self._fatal("EVENT_IDENTITY_COLLISION", now_us)
-                raise
-            self.inbox.acknowledge(leased, result.event_id, acknowledged_at_us=now_us)
-            processed += 1
-        self.inbox.create_pending_receipts(created_at_us=now_us, limit=limit)
-        self._heartbeat(now_us)
-        return processed
+        authority = self._authority()
+        try:
+            processed = 0
+            for leased in self.inbox.lease_pending(
+                self.config.owner_id,
+                now_us=now_us,
+                lease_us=self.config.callback_lease_us,
+                limit=limit,
+                authority=authority,
+            ):
+                try:
+                    result = self.inbox.project(leased, authority=authority)
+                except NormalizationError:
+                    self.inbox.fail(
+                        leased,
+                        "MALFORMED_CALLBACK",
+                        failed_at_us=now_us,
+                        authority=authority,
+                    )
+                    continue
+                self.inbox.acknowledge(
+                    leased,
+                    result.event_id,
+                    acknowledged_at_us=now_us,
+                    authority=authority,
+                )
+                processed += 1
+            self.inbox.create_pending_receipts(
+                created_at_us=now_us,
+                limit=limit,
+                authority=authority,
+            )
+            self._heartbeat(now_us)
+            return processed
+        except AuthoritativeLeaseLost:
+            raise
+        except Exception as error:
+            self._fatal("POST_ADMISSION_PRESERVATION_FAILED", now_us)
+            raise RecorderFatalError("post-admission preservation failed") from error
 
     def _heartbeat(self, now_us: int) -> None:
-        with connect_v2(self.config.database) as connection:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
             connection.execute(
                 "UPDATE runtime_state SET process_heartbeat_at_us=? WHERE run_id=? "
                 "AND recorder_generation=?",
                 (now_us, self.config.run_id, self.state.recorder_generation if self.state else -1),
             )
+            connection.commit()
+        finally:
+            connection.close()
 
     def mark_stale(self, *, now_us: int, market_data_expected: bool = True) -> int:
         """Open per-subscription gaps; optional staleness never blocks required feeds."""
@@ -487,7 +748,10 @@ class Recorder:
             return 0
         opened = 0
         by_request = {spec.request_id: spec for spec in self._subscriptions}
-        with connect_v2(self.config.database) as connection:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
             rows = tuple(
                 connection.execute(
                     "SELECT subscription.subscription_id, subscription.request_id, "
@@ -519,16 +783,22 @@ class Recorder:
                         spec.continuity_required,
                     )
                     opened += 1
-        return opened
+            connection.commit()
+            return opened
+        finally:
+            connection.close()
 
     def disconnected(self, *, now_us: int) -> None:
         """Treat a temporary socket loss as recoverable degraded state."""
 
-        if self.state is None:
-            raise RecorderFatalError("recorder is not started")
+        self._check_owned()
+        state = self._authority_state()
         required = {spec.request_id: spec.continuity_required for spec in self._subscriptions}
-        with connect_v2(self.config.database) as connection:
-            for fence in self.state.fences:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            for fence in state.fences:
                 self._open_gap(
                     connection,
                     cast(str, fence.subscription_id),
@@ -536,27 +806,109 @@ class Recorder:
                     "IBKR_DISCONNECT",
                     required[cast(int, fence.request_id)],
                 )
+            connection.execute(
+                "UPDATE subscriptions SET lifecycle='disconnected' WHERE run_id=? "
+                "AND recorder_generation=? AND lifecycle IN ('connecting','active')",
+                (self.config.run_id, state.recorder_generation),
+            )
+            connection.execute(
+                "UPDATE runtime_state SET lifecycle='degraded', reason='IBKR_DISCONNECT', "
+                "process_heartbeat_at_us=? WHERE run_id=? AND recorder_generation=?",
+                (now_us, self.config.run_id, state.recorder_generation),
+            )
+            connection.commit()
+        finally:
+            connection.close()
         self.adapter.disconnect()
-        self._set_lifecycle("degraded", "IBKR_DISCONNECT", now_us)
+
+    def market_data_status(self, status: MarketDataStatus) -> None:
+        """Persist a typed official status without broadening the broker surface."""
+
+        if status.kind == "temporary_disconnect" and status.request_id is None:
+            self.disconnected(now_us=status.received_at_us)
+            return
+        self._check_owned()
+        state = self._authority_state()
+        by_request = {fence.request_id: fence for fence in state.fences}
+        specs = {spec.request_id: spec for spec in self._subscriptions}
+        fence = None if status.request_id is None else by_request.get(status.request_id)
+        spec = None if status.request_id is None else specs.get(status.request_id)
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            if status.kind == "recovered":
+                if fence is not None:
+                    connection.execute(
+                        "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
+                        "AND subscription_id=? AND resolved_at_us IS NULL",
+                        (
+                            status.received_at_us,
+                            status.received_at_us,
+                            self.config.run_id,
+                            fence.subscription_id,
+                        ),
+                    )
+                self._record_incident(
+                    connection,
+                    None if fence is None else cast(str, fence.subscription_id),
+                    status.received_at_us,
+                    f"IBKR_STATUS_{status.code}_RECOVERED",
+                    status.message,
+                )
+            else:
+                code = f"IBKR_STATUS_{status.code}_{status.kind.upper()}"
+                if fence is not None and spec is not None:
+                    lifecycle = "paused" if spec.optional else "disconnected"
+                    connection.execute(
+                        "UPDATE subscriptions SET lifecycle=? WHERE subscription_id=?",
+                        (lifecycle, fence.subscription_id),
+                    )
+                    self._open_gap(
+                        connection,
+                        cast(str, fence.subscription_id),
+                        status.received_at_us,
+                        code,
+                        spec.continuity_required,
+                    )
+                    if not spec.optional:
+                        connection.execute(
+                            "UPDATE runtime_state SET lifecycle='degraded', reason=? "
+                            "WHERE run_id=? AND recorder_generation=?",
+                            (code, self.config.run_id, state.recorder_generation),
+                        )
+                self._record_incident(
+                    connection,
+                    None if fence is None else cast(str, fence.subscription_id),
+                    status.received_at_us,
+                    code,
+                    status.message,
+                )
+            connection.commit()
+        finally:
+            connection.close()
 
     def reconnect(self, *, now_us: int) -> RecorderState:
         """Fence old requests and reconnect with a new durable socket generation."""
 
-        if self.state is None:
-            raise RecorderFatalError("recorder is not started")
-        old = self.state
+        self._check_owned()
+        old = self._authority_state()
         connection = connect_v2(self.config.database)
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            paused_request_ids = {
+                int(row[0])
+                for row in connection.execute(
+                    "SELECT request_id FROM subscriptions WHERE run_id=? "
+                    "AND recorder_generation=? AND lifecycle='paused'",
+                    (self.config.run_id, old.recorder_generation),
+                )
+            }
             connection.execute(
                 "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? WHERE run_id=? "
-                "AND connection_generation=? AND lifecycle='active'",
+                "AND connection_generation=? AND lifecycle!='closed'",
                 (now_us, self.config.run_id, old.connection_generation),
-            )
-            connection.execute(
-                "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
-                "AND reason='IBKR_DISCONNECT' AND resolved_at_us IS NULL",
-                (now_us, now_us, self.config.run_id),
             )
             generation = old.connection_generation + 1
             fences = self._install_subscriptions(
@@ -567,6 +919,11 @@ class Recorder:
                 now_us,
             )
             for fence, spec in zip(fences, self._subscriptions, strict=True):
+                if fence.request_id in paused_request_ids:
+                    connection.execute(
+                        "UPDATE subscriptions SET lifecycle='paused' WHERE subscription_id=?",
+                        (fence.subscription_id,),
+                    )
                 self._open_gap(
                     connection,
                     cast(str, fence.subscription_id),
@@ -575,7 +932,7 @@ class Recorder:
                     spec.continuity_required,
                 )
             connection.execute(
-                "UPDATE runtime_state SET connection_generation=?, lifecycle='running', "
+                "UPDATE runtime_state SET connection_generation=?, lifecycle='connecting', "
                 "reason=NULL, process_heartbeat_at_us=? WHERE run_id=?",
                 (generation, now_us, self.config.run_id),
             )
@@ -587,9 +944,7 @@ class Recorder:
         finally:
             connection.close()
         self.state = RecorderState(self.config.run_id, old.recorder_generation, generation, fences)
-        self.adapter.connect()
-        for fence in fences:
-            self.adapter.subscribe(fence)
+        self._connect_subscriptions(now_us=now_us)
         return self.state
 
     def stop(self, *, now_us: int) -> None:
@@ -597,12 +952,19 @@ class Recorder:
 
         if self.state is None:
             return
-        self.adapter.disconnect()
-        with connect_v2(self.config.database) as connection:
+        self._check_owned()
+        with suppress(Exception):
+            self.adapter.disconnect()
+        self._check_owned()
+        state = self._authority_state()
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
             connection.execute(
                 "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? WHERE run_id=? "
-                "AND lifecycle IN ('active','paused')",
-                (now_us, self.config.run_id),
+                "AND recorder_generation=? AND lifecycle!='closed'",
+                (now_us, self.config.run_id, state.recorder_generation),
             )
             connection.execute(
                 "UPDATE recorder_generations SET ended_at_us=?, clean_stop=1, "
@@ -610,7 +972,7 @@ class Recorder:
                 (
                     now_us,
                     self.config.run_id,
-                    self.state.recorder_generation,
+                    state.recorder_generation,
                 ),
             )
             connection.execute(
@@ -622,23 +984,32 @@ class Recorder:
                 "UPDATE runs SET status='stopped', ended_at_us=? WHERE run_id=?",
                 (now_us, self.config.run_id),
             )
+            connection.commit()
+        finally:
+            connection.close()
         self.state = None
 
     def _pause_optional(self, now_us: int) -> None:
         if self.state is None:
             return
+        self._check_owned()
         optional = {spec.request_id: spec for spec in self._subscriptions if spec.optional}
-        with connect_v2(self.config.database) as connection:
-            for fence in self.state.fences:
-                if fence.request_id is None:
-                    continue
-                spec = optional.get(fence.request_id)
-                if spec is None:
-                    continue
-                self.adapter.cancel(fence.request_id)
+        for fence in self._authority_state().fences:
+            if fence.request_id is None:
+                continue
+            spec = optional.get(fence.request_id)
+            if spec is None:
+                continue
+            self._check_owned()
+            self.adapter.cancel(fence.request_id)
+            self._check_owned()
+            connection = connect_v2(self.config.database)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
                 connection.execute(
                     "UPDATE subscriptions SET lifecycle='paused', closed_at_us=? "
-                    "WHERE subscription_id=?",
+                    "WHERE subscription_id=? AND lifecycle!='closed'",
                     (now_us, fence.subscription_id),
                 )
                 self._open_gap(
@@ -648,37 +1019,72 @@ class Recorder:
                     "STORAGE_DEGRADED_OPTIONAL_PAUSED",
                     spec.continuity_required,
                 )
+                connection.commit()
+            finally:
+                connection.close()
 
     def _fatal(self, code: str, now_us: int) -> None:
-        if self.state is not None:
-            for fence in self.state.fences:
-                if fence.request_id is not None:
-                    with suppress(Exception):
-                        self.adapter.cancel(fence.request_id)
+        state = self._authority_state()
         try:
             connection = connect_v2(self.config.database)
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
                 CallbackInbox._record_fatal(connection, self.config.run_id, now_us, code)
                 connection.commit()
             finally:
                 connection.close()
-        except (OSError, sqlite3.Error):
-            pass
-        finally:
+        except AuthoritativeLeaseLost:
+            raise
+        except (OSError, sqlite3.Error) as error:
+            for fence in state.fences:
+                if fence.request_id is not None:
+                    with suppress(Exception):
+                        self.adapter.cancel(fence.request_id)
+            with suppress(Exception):
+                self.adapter.disconnect()
+            raise RecorderFatalError("fatal state could not be persisted") from error
+        for fence in state.fences:
+            if fence.request_id is not None:
+                with suppress(Exception):
+                    self.adapter.cancel(fence.request_id)
+        with suppress(Exception):
             self.adapter.disconnect()
 
     def maintain(self, *, now_us: int) -> StorageCapState:
         """Consume one bounded Phase 2 retention result and apply recorder reactions."""
 
-        if self.state is None:
-            raise RecorderFatalError("recorder is not started")
-        result = RetentionManager(self.config.database).run(now_us=now_us)
-        with connect_v2(self.config.database) as connection:
-            connection.execute(
-                "UPDATE runtime_state SET database_bytes=?, wal_bytes=? WHERE run_id=?",
-                (result.database_bytes, result.wal_bytes, self.config.run_id),
+        authority = self._authority()
+        self._check_owned()
+        try:
+            result = RetentionManager(self.config.database).run(
+                now_us=now_us,
+                precondition=lambda connection: CallbackInbox.verify_writer(connection, authority),
             )
+        except AuthoritativeLeaseLost:
+            raise
+        except InboxAdmissionError as error:
+            raise AuthoritativeLeaseLost(str(error)) from error
+        except Exception as error:
+            self._fatal("RETENTION_INVARIANT_FAILED", now_us)
+            raise RecorderFatalError("retention invariant failed") from error
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            connection.execute(
+                "UPDATE runtime_state SET database_bytes=?, wal_bytes=? WHERE run_id=? "
+                "AND recorder_generation=?",
+                (
+                    result.database_bytes,
+                    result.wal_bytes,
+                    self.config.run_id,
+                    authority.recorder_generation,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
         if not result.admission_allowed:
             self._fatal(result.required_action or "STORAGE_CAP_FATAL", now_us)
             raise RecorderFatalError(result.required_action or "storage cap closed admission")
@@ -688,12 +1094,24 @@ class Recorder:
         return result.cap_state
 
     def _set_lifecycle(self, lifecycle: str, reason: str | None, now_us: int) -> None:
-        with connect_v2(self.config.database) as connection:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
             connection.execute(
                 "UPDATE runtime_state SET lifecycle=?, reason=?, process_heartbeat_at_us=? "
-                "WHERE run_id=?",
-                (lifecycle, reason, now_us, self.config.run_id),
+                "WHERE run_id=? AND recorder_generation=?",
+                (
+                    lifecycle,
+                    reason,
+                    now_us,
+                    self.config.run_id,
+                    self._authority_state().recorder_generation,
+                ),
             )
+            connection.commit()
+        finally:
+            connection.close()
 
     def _open_gap(
         self,

@@ -115,6 +115,8 @@ CREATE TABLE subscriptions (
     feed_kind TEXT NOT NULL,
     request_id INTEGER NOT NULL,
     lifecycle TEXT NOT NULL,
+    continuity_required INTEGER NOT NULL DEFAULT 1 CHECK(continuity_required IN (0, 1)),
+    optional INTEGER NOT NULL DEFAULT 0 CHECK(optional IN (0, 1)),
     requirements_hash TEXT NOT NULL CHECK(length(requirements_hash) = 64),
     opened_at_us INTEGER NOT NULL,
     closed_at_us INTEGER,
@@ -229,6 +231,8 @@ CREATE TABLE market_events (
     volume_value REAL,
     bid_value REAL,
     ask_value REAL,
+    bid_size_value REAL,
+    ask_size_value REAL,
     last_value REAL,
     size_value REAL,
     payload_json TEXT NOT NULL CHECK(
@@ -334,7 +338,10 @@ CREATE TABLE market_latest (
     quality_bits INTEGER NOT NULL CHECK(quality_bits >= 0),
     bid_value REAL,
     ask_value REAL,
+    bid_size_value REAL,
+    ask_size_value REAL,
     last_value REAL,
+    size_value REAL,
     close_value REAL,
     PRIMARY KEY(instrument_id, feed_kind),
     FOREIGN KEY(event_id, run_id, instrument_id, feed_kind)

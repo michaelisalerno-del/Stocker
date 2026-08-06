@@ -242,17 +242,15 @@ class RetentionManager:
             raise RetentionInvariantError("receipt predecessor chain is missing")
         if len(chain) > MAX_MAINTENANCE_BATCH_ROWS:
             raise RetentionInvariantError("receipt predecessor chain exceeds verification bound")
-        expected_first = (
-            int(chain[0]["first_source_sequence"]) if watermark is None else after_sequence + 1
-        )
+        expected_after = -1 if watermark is None else after_sequence
         for linked_receipt in chain:
             record = self._verified_receipt(
                 connection,
                 linked_receipt,
-                expected_first=expected_first,
+                expected_after=expected_after,
                 expected_prior_hash=expected_prior,
             )
-            expected_first = record.last_source_sequence + 1
+            expected_after = record.last_source_sequence
             expected_prior = str(linked_receipt["chained_payload_hash"])
 
     def _receipt_candidates(
@@ -284,14 +282,30 @@ class RetentionManager:
         connection: sqlite3.Connection,
         row: sqlite3.Row,
         *,
-        expected_first: int,
+        expected_after: int,
         expected_prior_hash: str,
     ) -> CallbackReceiptRecord:
         first = int(row["first_source_sequence"])
         last = int(row["last_source_sequence"])
         count = int(row["callback_count"])
-        if first != expected_first or count != last - first + 1:
-            raise RetentionInvariantError("receipt source sequence/count invariant failed")
+        if first <= expected_after or last < first:
+            raise RetentionInvariantError("receipt sequence/count invariant failed")
+        covered = connection.execute(
+            "SELECT count(*) AS callback_count, min(source_sequence) AS first_sequence, "
+            "max(source_sequence) AS last_sequence, "
+            "sum(CASE WHEN receipt_batch_id=? THEN 0 ELSE 1 END) AS wrong_batch "
+            "FROM callback_inbox WHERE run_id=? AND source_sequence BETWEEN ? AND ?",
+            (str(row["batch_id"]), str(row["run_id"]), first, last),
+        ).fetchone()
+        if (
+            covered is None
+            or int(covered["callback_count"]) != count
+            or covered["first_sequence"] is None
+            or int(covered["first_sequence"]) != first
+            or int(covered["last_sequence"]) != last
+            or int(covered["wrong_batch"] or 0) != 0
+        ):
+            raise RetentionInvariantError("receipt sequence/count invariant failed")
         if count > MAX_MAINTENANCE_BATCH_ROWS:
             raise RetentionInvariantError("receipt callback count exceeds verification bound")
         if str(row["prior_chain_hash"]) != expected_prior_hash:
@@ -410,10 +424,10 @@ class RetentionManager:
             )
             if not candidates:
                 continue
-            expected_first = int(candidates[0]["first_source_sequence"])
+            expected_after = -1
             expected_prior_hash = "0" * 64
             if watermark is not None:
-                expected_first = int(watermark["compacted_through_sequence"]) + 1
+                expected_after = int(watermark["compacted_through_sequence"])
                 expected_prior_hash = str(watermark["last_receipt_chain_hash"])
             verified: list[CallbackReceiptRecord] = []
             chain_hashes: list[str] = []
@@ -421,11 +435,11 @@ class RetentionManager:
                 record = self._verified_receipt(
                     connection,
                     receipt,
-                    expected_first=expected_first,
+                    expected_after=expected_after,
                     expected_prior_hash=expected_prior_hash,
                 )
                 verified.append(record)
-                expected_first = record.last_source_sequence + 1
+                expected_after = record.last_source_sequence
                 expected_prior_hash = str(receipt["chained_payload_hash"])
                 chain_hashes.append(expected_prior_hash)
             previous_count = 0 if watermark is None else int(watermark["cumulative_callback_count"])
@@ -718,6 +732,7 @@ class RetentionManager:
         now_us: int,
         measured_database_bytes: int | None = None,
         measured_wal_bytes: int | None = None,
+        precondition: Callable[[sqlite3.Connection], None] | None = None,
     ) -> RetentionResult:
         """Run one bounded pass and return machine-readable cap/admission state."""
 
@@ -749,6 +764,8 @@ class RetentionManager:
 
             connection.set_progress_handler(progress, 1_000)
             connection.execute("BEGIN IMMEDIATE")
+            if precondition is not None:
+                precondition(connection)
             check_deadline()
             remaining = self.policy.maintenance_batch_rows
             payloads_compacted = self._compact_payloads(

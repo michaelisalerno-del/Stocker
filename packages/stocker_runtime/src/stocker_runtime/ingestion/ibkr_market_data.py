@@ -4,13 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
     CallbackFence,
     MarketDataCallback,
 )
+
+
+@dataclass(frozen=True)
+class MarketDataStatus:
+    """Typed, market-data-only interpretation of an official IBKR status."""
+
+    kind: Literal["temporary_disconnect", "recovered", "pacing", "request_rejected"]
+    code: int
+    request_id: int | None
+    message: str
+    received_at_us: int
 
 
 @runtime_checkable
@@ -22,6 +33,8 @@ class MarketDataAdapter(Protocol):
     ) -> None: ...
 
     def set_disconnect_callback(self, callback: Callable[[int], None]) -> None: ...
+
+    def set_status_callback(self, callback: Callable[[MarketDataStatus], None]) -> None: ...
 
     def connect(self) -> None: ...
 
@@ -97,6 +110,9 @@ class IBKRMarketData:
 
     def set_disconnect_callback(self, callback: Callable[[int], None]) -> None:
         self._bridge.set_disconnect_callback(callback)
+
+    def set_status_callback(self, callback: Callable[[MarketDataStatus], None]) -> None:
+        self._bridge.set_status_callback(callback)
 
     def connect(self) -> None:
         self._bridge.connect()

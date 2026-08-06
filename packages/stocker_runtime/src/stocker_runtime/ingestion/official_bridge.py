@@ -8,7 +8,11 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
-from stocker_runtime.ingestion.ibkr_market_data import IBKRSubscription, MarketDataAdapter
+from stocker_runtime.ingestion.ibkr_market_data import (
+    IBKRSubscription,
+    MarketDataAdapter,
+    MarketDataStatus,
+)
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
     CallbackFence,
@@ -18,6 +22,22 @@ from stocker_runtime.ingestion.inbox import (
 
 class OfficialBridgeUnavailable(RuntimeError):
     """The externally installed official API cannot be verified or loaded."""
+
+
+def _price_tick_projection(feed_kind: str, tick_type: int) -> tuple[str, str] | None:
+    if feed_kind == "quotes" and tick_type in {1, 2}:
+        return "quote", {1: "bid", 2: "ask"}[tick_type]
+    if feed_kind == "trades" and tick_type == 4:
+        return "trade", "last"
+    return None
+
+
+def _size_tick_projection(feed_kind: str, tick_type: int) -> tuple[str, str] | None:
+    if feed_kind == "quotes" and tick_type in {0, 3}:
+        return "quote", {0: "bid_size", 3: "ask_size"}[tick_type]
+    if feed_kind == "trades" and tick_type == 5:
+        return "trade", "size"
+    return None
 
 
 def create_official_bridge(
@@ -58,17 +78,16 @@ def create_official_bridge(
 
         def tickPrice(self, reqId: int, tickType: int, price: float, _attrib: Any) -> None:  # noqa: N802
             if owner is not None:
-                names = {1: "bid", 2: "ask", 4: "last"}
-                name = names.get(tickType)
-                if name is not None:
-                    owner.emit(reqId, "quote", {name: float(price)})
+                owner.tick_price(reqId, tickType, float(price))
 
         def tickSize(self, reqId: int, tickType: int, size: Any) -> None:  # noqa: N802
             if owner is not None:
-                names = {0: "bid_size", 3: "ask_size", 5: "size"}
-                name = names.get(tickType)
-                if name is not None:
-                    owner.emit(reqId, "quote", {name: float(size)})
+                owner.tick_size(reqId, tickType, float(size))
+
+        def error(self, reqId: int, errorCode: int, errorString: str, *args: Any) -> None:  # noqa: N802
+            del args
+            if owner is not None:
+                owner.official_status(reqId, errorCode, errorString)
 
         def realtimeBar(  # noqa: N802
             self,
@@ -140,6 +159,7 @@ class _PrivateOfficialBridge:
         self._fences: dict[int, CallbackFence] = {}
         self._callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult] | None = None
         self._disconnect_callback: Callable[[int], None] | None = None
+        self._status_callback: Callable[[MarketDataStatus], None] | None = None
         self._thread: threading.Thread | None = None
 
     def set_callback(
@@ -149,6 +169,9 @@ class _PrivateOfficialBridge:
 
     def set_disconnect_callback(self, callback: Callable[[int], None]) -> None:
         self._disconnect_callback = callback
+
+    def set_status_callback(self, callback: Callable[[MarketDataStatus], None]) -> None:
+        self._status_callback = callback
 
     def connect(self) -> None:
         result = self.__client.connect(self._host, self._port, self._client_id)
@@ -214,6 +237,52 @@ class _PrivateOfficialBridge:
                 provider_at_us=None,
                 payload=cast(Any, payload),
             ),
+        )
+
+    def tick_price(self, request_id: int, tick_type: int, price: float) -> None:
+        configured = self._configured.get(request_id)
+        if configured is None:
+            return
+        projection = _price_tick_projection(configured.feed_kind, tick_type)
+        if projection is not None:
+            kind, name = projection
+            self.emit(request_id, kind, {name: price})
+
+    def tick_size(self, request_id: int, tick_type: int, size: float) -> None:
+        configured = self._configured.get(request_id)
+        if configured is None:
+            return
+        projection = _size_tick_projection(configured.feed_kind, tick_type)
+        if projection is not None:
+            kind, name = projection
+            self.emit(request_id, kind, {name: size})
+
+    def official_status(self, request_id: int, code: int, message: str) -> None:
+        callback = self._status_callback
+        if callback is None:
+            return
+        temporary = {1100, 1300, 2103, 2105, 2110}
+        recovered = {1101, 1102, 2104, 2106, 2158}
+        pacing = {100, 101, 420}
+        rejected = {162, 200, 354, 10167, 10168}
+        if code in temporary:
+            kind = "temporary_disconnect"
+        elif code in recovered:
+            kind = "recovered"
+        elif code in pacing:
+            kind = "pacing"
+        elif code in rejected:
+            kind = "request_rejected"
+        else:
+            return
+        callback(
+            MarketDataStatus(
+                kind=cast(Any, kind),
+                code=code,
+                request_id=None if request_id < 0 else request_id,
+                message=message,
+                received_at_us=time.time_ns() // 1_000,
+            )
         )
 
     def connection_closed(self) -> None:

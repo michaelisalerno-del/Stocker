@@ -91,6 +91,13 @@ class ProjectionResult:
     inserted: bool
 
 
+@dataclass(frozen=True)
+class WriterAuthority:
+    run_id: str
+    recorder_generation: int
+    owner_id: str
+
+
 def _event_uid(fence: CallbackFence, callback: MarketDataCallback, payload_hash: str) -> str:
     material: JsonValue = {
         "run_id": fence.run_id,
@@ -127,6 +134,29 @@ class CallbackInbox:
 
         return connect_v2(self.database_path, verify_schema=False)
 
+    @staticmethod
+    def verify_writer(connection: sqlite3.Connection, authority: WriterAuthority) -> None:
+        row = connection.execute(
+            "SELECT state.lifecycle, run.status, generation.owner_id, generation.ended_at_us "
+            "FROM runtime_state state JOIN runs run ON run.run_id=state.run_id "
+            "JOIN recorder_generations generation ON generation.run_id=state.run_id "
+            "AND generation.generation=state.recorder_generation "
+            "WHERE state.run_id=? AND state.recorder_generation=?",
+            (authority.run_id, authority.recorder_generation),
+        ).fetchone()
+        global_fatal = connection.execute(
+            "SELECT 1 FROM runs WHERE status='fatal' LIMIT 1"
+        ).fetchone()
+        if (
+            row is None
+            or global_fatal is not None
+            or str(row["status"]) != "running"
+            or str(row["owner_id"]) != authority.owner_id
+            or row["ended_at_us"] is not None
+            or str(row["lifecycle"]) not in {"recovering", "connecting", "running", "degraded"}
+        ):
+            raise InboxAdmissionError("authoritative writer lease is no longer owned")
+
     def nonterminal_count(self) -> int:
         """Return the bounded recovery backlog for lifecycle orchestration."""
 
@@ -156,6 +186,7 @@ class CallbackInbox:
             raise InboxAdmissionError(f"callback durable admission failed: {error}") from error
         try:
             connection.execute("BEGIN IMMEDIATE")
+            authoritative = self._authoritative_admission(connection)
             existing = connection.execute(
                 "SELECT * FROM callback_inbox WHERE event_uid = ?", (event_uid,)
             ).fetchone()
@@ -182,7 +213,12 @@ class CallbackInbox:
                 ).fetchone()[0]
             )
             if nonterminal >= self.max_nonterminal_rows:
-                self._record_fatal(connection, fence.run_id, callback.received_at_us, "INBOX_FULL")
+                self._record_fatal(
+                    connection,
+                    str(authoritative["run_id"]),
+                    callback.received_at_us,
+                    "INBOX_FULL",
+                )
                 connection.commit()
                 raise InboxFullError("callback inbox hard limit of 50,000 is reached")
             prior = connection.execute(
@@ -193,7 +229,7 @@ class CallbackInbox:
             if prior is not None and callback.received_at_us < int(prior[0]):
                 self._record_fatal(
                     connection,
-                    fence.run_id,
+                    str(authoritative["run_id"]),
                     callback.received_at_us,
                     "CALLBACK_ORDERING_LOSS",
                 )
@@ -211,8 +247,8 @@ class CallbackInbox:
                 """,
                 (
                     event_uid,
-                    fence.run_id,
-                    fence.recorder_generation,
+                    str(authoritative["run_id"]),
+                    int(authoritative["recorder_generation"]),
                     fence.connection_generation,
                     fence.request_id,
                     callback.callback_kind,
@@ -243,8 +279,8 @@ class CallbackInbox:
                     callback.received_at_us,
                     callback.received_at_us,
                     nonterminal + int(fence_failure is None),
-                    fence.run_id,
-                    fence.recorder_generation,
+                    str(authoritative["run_id"]),
+                    int(authoritative["recorder_generation"]),
                 ),
             )
             connection.commit()
@@ -261,6 +297,25 @@ class CallbackInbox:
             raise
         finally:
             connection.close()
+
+    @staticmethod
+    def _authoritative_admission(connection: sqlite3.Connection) -> sqlite3.Row:
+        fatal = connection.execute("SELECT 1 FROM runs WHERE status='fatal' LIMIT 1").fetchone()
+        if fatal is not None:
+            raise InboxAdmissionError("global fatal state has closed callback admission")
+        rows = tuple(
+            connection.execute(
+                "SELECT state.run_id, state.recorder_generation, generation.owner_id "
+                "FROM runtime_state state JOIN runs run ON run.run_id=state.run_id "
+                "JOIN recorder_generations generation ON generation.run_id=state.run_id "
+                "AND generation.generation=state.recorder_generation "
+                "WHERE run.status='running' AND generation.ended_at_us IS NULL "
+                "AND state.lifecycle IN ('recovering','connecting','running','degraded')"
+            )
+        )
+        if len(rows) != 1:
+            raise InboxAdmissionError("authoritative recorder admission state is absent or split")
+        return cast(sqlite3.Row, rows[0])
 
     @staticmethod
     def _fence_failure(connection: sqlite3.Connection, fence: CallbackFence) -> str | None:
@@ -297,13 +352,25 @@ class CallbackInbox:
         code: str,
         sequence: int,
     ) -> None:
+        subscription = connection.execute(
+            "SELECT continuity_required FROM subscriptions WHERE subscription_id=? AND run_id=?",
+            (fence.subscription_id, fence.run_id),
+        ).fetchone()
+        continuity_required = 1 if subscription is None else int(subscription[0])
         gap_id = hashlib.sha256(
             f"{fence.run_id}|{fence.subscription_id}|{code}|{sequence}".encode()
         ).hexdigest()
         connection.execute(
             "INSERT INTO gaps(gap_id, run_id, subscription_id, started_at_us, reason, "
-            "data_loss_possible, continuity_required) VALUES (?, ?, ?, ?, ?, 1, 1)",
-            (gap_id, fence.run_id, fence.subscription_id, opened_at_us, code),
+            "data_loss_possible, continuity_required) VALUES (?, ?, ?, ?, ?, 1, ?)",
+            (
+                gap_id,
+                fence.run_id,
+                fence.subscription_id,
+                opened_at_us,
+                code,
+                continuity_required,
+            ),
         )
         incident_id = hashlib.sha256(
             f"{fence.run_id}|{fence.subscription_id}|{code}|{sequence}|incident".encode()
@@ -337,10 +404,12 @@ class CallbackInbox:
             (incident_id, run_id, code, opened_at_us),
         )
 
-    def reclaim_expired_leases(self, *, now_us: int) -> int:
+    def reclaim_expired_leases(self, *, now_us: int, authority: WriterAuthority) -> int:
         """Return expired leases to pending without changing source order."""
 
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self.verify_writer(connection, authority)
             cursor = connection.execute(
                 "UPDATE callback_inbox SET lifecycle = 'pending', lease_owner = NULL, "
                 "lease_expires_at_us = NULL WHERE lifecycle = 'leased' "
@@ -356,6 +425,7 @@ class CallbackInbox:
         now_us: int,
         lease_us: int,
         limit: int,
+        authority: WriterAuthority,
     ) -> tuple[LeasedCallback, ...]:
         """Lease a bounded pending prefix; never jump over an earlier active lease."""
 
@@ -364,6 +434,7 @@ class CallbackInbox:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self.verify_writer(connection, authority)
             rows = tuple(
                 connection.execute(
                     "SELECT * FROM callback_inbox WHERE lifecycle IN ('pending', 'leased') "
@@ -377,12 +448,14 @@ class CallbackInbox:
                     break
                 selected.append(row)
             if selected:
-                connection.executemany(
+                cursor = connection.executemany(
                     "UPDATE callback_inbox SET lifecycle = 'leased', lease_owner = ?, "
                     "lease_expires_at_us = ?, attempts = attempts + 1 "
                     "WHERE source_sequence = ? AND lifecycle = 'pending'",
                     ((owner, now_us + lease_us, int(row["source_sequence"])) for row in selected),
                 )
+                if cursor.rowcount != len(selected):
+                    raise InboxAdmissionError("callback lease acquisition was not atomic")
             connection.commit()
             return tuple(self._leased(row, owner) for row in selected)
         except Exception:
@@ -422,40 +495,14 @@ class CallbackInbox:
             raise NormalizationError(f"{name} must be a finite number")
         return result
 
-    def project(self, leased: LeasedCallback) -> ProjectionResult:
+    def project(self, leased: LeasedCallback, *, authority: WriterAuthority) -> ProjectionResult:
         """Idempotently write one typed event and its latest projection in one transaction."""
-
-        if not isinstance(leased.payload, Mapping):
-            raise NormalizationError("callback payload must be an object")
-        payload = cast(Mapping[str, object], leased.payload)
-        event_at = payload.get("event_at_us")
-        if isinstance(event_at, bool) or not isinstance(event_at, int) or event_at < 0:
-            raise NormalizationError("event_at_us must be a nonnegative integer")
-        if leased.callback_kind not in {"quote", "trade", "bar"}:
-            raise NormalizationError("callback kind is not a normalized market-data surface")
-        values = {
-            field: self._number(payload, field)
-            for field in (
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "bid",
-                "ask",
-                "last",
-                "size",
-            )
-        }
-        payload_json = canonical_json_text(
-            cast(JsonValue, leased.payload), max_bytes=MAX_CALLBACK_PAYLOAD_BYTES
-        )
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self.verify_writer(connection, authority)
             inbox_row = connection.execute(
-                "SELECT lifecycle, lease_owner, event_uid FROM callback_inbox "
-                "WHERE source_sequence = ?",
+                "SELECT * FROM callback_inbox WHERE source_sequence = ?",
                 (leased.source_sequence,),
             ).fetchone()
             if (
@@ -463,30 +510,79 @@ class CallbackInbox:
                 or str(inbox_row["lifecycle"]) != "leased"
                 or str(inbox_row["lease_owner"]) != leased.lease_owner
                 or str(inbox_row["event_uid"]) != leased.event_uid
+                or str(inbox_row["run_id"]) != leased.run_id
+                or int(inbox_row["recorder_generation"]) != leased.recorder_generation
+                or int(inbox_row["connection_generation"]) != leased.connection_generation
+                or inbox_row["request_id"] != leased.request_id
+                or str(inbox_row["callback_kind"]) != leased.callback_kind
+                or int(inbox_row["received_at_us"]) != leased.received_at_us
+                or inbox_row["provider_at_us"] != leased.provider_at_us
+                or str(inbox_row["payload_sha256"]) != leased.payload_sha256
             ):
-                raise InboxAdmissionError("callback lease is no longer owned")
+                raise InboxAdmissionError("callback lease token no longer matches durable evidence")
+            payload_json = inbox_row["payload_json"]
+            if payload_json is None:
+                raise InboxAdmissionError("leased callback payload is absent")
+            payload_text = str(payload_json)
+            durable_hash = hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+            if durable_hash != str(inbox_row["payload_sha256"]):
+                raise CallbackIdentityCollision("durable callback payload hash mismatch")
+            try:
+                parsed = json.loads(payload_text)
+            except json.JSONDecodeError as error:
+                raise CallbackIdentityCollision("durable callback payload is invalid") from error
+            if not isinstance(parsed, Mapping):
+                raise NormalizationError("callback payload must be an object")
+            payload = cast(Mapping[str, object], parsed)
+            canonical = canonical_json_text(
+                cast(JsonValue, parsed), max_bytes=MAX_CALLBACK_PAYLOAD_BYTES
+            )
+            if canonical != payload_text:
+                raise CallbackIdentityCollision("durable callback payload is not canonical")
+            event_at = payload.get("event_at_us")
+            if isinstance(event_at, bool) or not isinstance(event_at, int) or event_at < 0:
+                raise NormalizationError("event_at_us must be a nonnegative integer")
+            callback_kind = str(inbox_row["callback_kind"])
+            if callback_kind not in {"quote", "trade", "bar"}:
+                raise NormalizationError("callback kind is not a normalized market-data surface")
+            values = {
+                field: self._number(payload, field)
+                for field in (
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "bid",
+                    "ask",
+                    "bid_size",
+                    "ask_size",
+                    "last",
+                    "size",
+                )
+            }
+            run_id = str(inbox_row["run_id"])
+            recorder_generation = int(inbox_row["recorder_generation"])
+            connection_generation = int(inbox_row["connection_generation"])
+            request_id = inbox_row["request_id"]
+            received_at_us = int(inbox_row["received_at_us"])
             subscription = connection.execute(
                 "SELECT instrument_id, feed_kind FROM subscriptions WHERE run_id = ? "
                 "AND recorder_generation = ? AND connection_generation = ? AND request_id = ?",
-                (
-                    leased.run_id,
-                    leased.recorder_generation,
-                    leased.connection_generation,
-                    leased.request_id,
-                ),
+                (run_id, recorder_generation, connection_generation, request_id),
             ).fetchone()
             if subscription is None:
                 raise NormalizationError("callback subscription provenance is absent")
-            event_id = leased.event_uid
+            event_id = str(inbox_row["event_uid"])
             content = (
-                leased.run_id,
-                leased.source_sequence,
+                run_id,
+                int(inbox_row["source_sequence"]),
                 str(subscription["instrument_id"]),
                 str(subscription["feed_kind"]),
-                leased.callback_kind,
+                callback_kind,
                 event_at,
-                leased.received_at_us,
-                leased.connection_generation,
+                received_at_us,
+                connection_generation,
                 values["open"],
                 values["high"],
                 values["low"],
@@ -494,16 +590,19 @@ class CallbackInbox:
                 values["volume"],
                 values["bid"],
                 values["ask"],
+                values["bid_size"],
+                values["ask_size"],
                 values["last"],
                 values["size"],
-                payload_json,
-                leased.payload_sha256,
+                payload_text,
+                durable_hash,
             )
             existing = connection.execute(
                 "SELECT run_id, source_sequence, instrument_id, feed_kind, event_kind, "
                 "event_at_us, received_at_us, connection_generation, open_value, high_value, "
-                "low_value, close_value, volume_value, bid_value, ask_value, last_value, "
-                "size_value, payload_json, payload_sha256 FROM market_events WHERE event_id = ?",
+                "low_value, close_value, volume_value, bid_value, ask_value, bid_size_value, "
+                "ask_size_value, last_value, size_value, payload_json, payload_sha256 "
+                "FROM market_events WHERE event_id = ?",
                 (event_id,),
             ).fetchone()
             inserted = existing is None
@@ -512,8 +611,9 @@ class CallbackInbox:
                     "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
                     "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
                     "open_value, high_value, low_value, close_value, volume_value, bid_value, "
-                    "ask_value, last_value, size_value, payload_json, payload_sha256) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "ask_value, bid_size_value, ask_size_value, last_value, size_value, "
+                    "payload_json, payload_sha256) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (event_id, *content),
                 )
             elif tuple(existing) != content:
@@ -526,39 +626,50 @@ class CallbackInbox:
                 "WHERE latest.instrument_id = ? AND latest.feed_kind = ?",
                 (str(subscription["instrument_id"]), str(subscription["feed_kind"])),
             ).fetchone()
-            if latest is None or int(latest[0]) <= leased.source_sequence:
+            if latest is None or int(latest[0]) <= int(inbox_row["source_sequence"]):
                 connection.execute(
                     "INSERT INTO market_latest(run_id, instrument_id, feed_kind, event_id, "
                     "event_at_us, received_at_us, event_kind, quality_bits, bid_value, ask_value, "
-                    "last_value, close_value) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?) "
+                    "bid_size_value, ask_size_value, last_value, size_value, close_value) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(instrument_id, feed_kind) DO UPDATE SET run_id=excluded.run_id, "
                     "event_id=excluded.event_id, event_at_us=excluded.event_at_us, "
                     "received_at_us=excluded.received_at_us, event_kind=excluded.event_kind, "
-                    "quality_bits=excluded.quality_bits, bid_value=excluded.bid_value, "
-                    "ask_value=excluded.ask_value, last_value=excluded.last_value, "
-                    "close_value=excluded.close_value",
+                    "quality_bits=excluded.quality_bits, "
+                    "bid_value=COALESCE(excluded.bid_value, market_latest.bid_value), "
+                    "ask_value=COALESCE(excluded.ask_value, market_latest.ask_value), "
+                    "bid_size_value=COALESCE(excluded.bid_size_value, "
+                    "market_latest.bid_size_value), "
+                    "ask_size_value=COALESCE(excluded.ask_size_value, "
+                    "market_latest.ask_size_value), "
+                    "last_value=COALESCE(excluded.last_value, market_latest.last_value), "
+                    "size_value=COALESCE(excluded.size_value, market_latest.size_value), "
+                    "close_value=COALESCE(excluded.close_value, market_latest.close_value)",
                     (
-                        leased.run_id,
+                        run_id,
                         str(subscription["instrument_id"]),
                         str(subscription["feed_kind"]),
                         event_id,
                         event_at,
-                        leased.received_at_us,
-                        leased.callback_kind,
+                        received_at_us,
+                        callback_kind,
                         values["bid"],
                         values["ask"],
+                        values["bid_size"],
+                        values["ask_size"],
                         values["last"],
+                        values["size"],
                         values["close"],
                     ),
                 )
             connection.execute(
                 "UPDATE subscriptions SET latest_event_id = ? WHERE run_id = ? "
                 "AND connection_generation = ? AND request_id = ?",
-                (event_id, leased.run_id, leased.connection_generation, leased.request_id),
+                (event_id, run_id, connection_generation, request_id),
             )
             connection.execute(
                 "UPDATE runtime_state SET projection_heartbeat_at_us = ? WHERE run_id = ?",
-                (leased.received_at_us, leased.run_id),
+                (received_at_us, run_id),
             )
             connection.commit()
             return ProjectionResult(event_id, inserted)
@@ -570,11 +681,18 @@ class CallbackInbox:
             connection.close()
 
     def acknowledge(
-        self, leased: LeasedCallback, event_id: str, *, acknowledged_at_us: int
+        self,
+        leased: LeasedCallback,
+        event_id: str,
+        *,
+        acknowledged_at_us: int,
+        authority: WriterAuthority,
     ) -> None:
         """Mark terminal only after the exact durable projection is present."""
 
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self.verify_writer(connection, authority)
             cursor = connection.execute(
                 "UPDATE callback_inbox SET lifecycle = 'acknowledged', lease_owner = NULL, "
                 "lease_expires_at_us = NULL, normalized_event_id = ?, acknowledged_at_us = ? "
@@ -615,12 +733,21 @@ class CallbackInbox:
                     ),
                 )
 
-    def fail(self, leased: LeasedCallback, code: str, *, failed_at_us: int) -> None:
+    def fail(
+        self,
+        leased: LeasedCallback,
+        code: str,
+        *,
+        failed_at_us: int,
+        authority: WriterAuthority,
+    ) -> None:
         """Quarantine one poison callback while leaving later callbacks serviceable."""
 
         if not code:
             raise ValueError("failure code is required")
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self.verify_writer(connection, authority)
             cursor = connection.execute(
                 "UPDATE callback_inbox SET lifecycle = 'failed', lease_owner = NULL, "
                 "lease_expires_at_us = NULL, failure_code = ? WHERE source_sequence = ? "
@@ -645,7 +772,12 @@ class CallbackInbox:
             )
 
     def create_receipt(
-        self, run_id: str, *, created_at_us: int, limit: int = 10_000
+        self,
+        run_id: str,
+        *,
+        created_at_us: int,
+        limit: int = 10_000,
+        authority: WriterAuthority,
     ) -> CallbackReceiptRecord | None:
         """Receipt one contiguous terminal prefix using the Phase 2 evidence contract."""
 
@@ -654,6 +786,7 @@ class CallbackInbox:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self.verify_writer(connection, authority)
             previous = connection.execute(
                 "SELECT last_source_sequence, chained_payload_hash FROM callback_receipts "
                 "WHERE run_id = ? ORDER BY last_source_sequence DESC LIMIT 1",
@@ -691,8 +824,6 @@ class CallbackInbox:
                 return None
             first = terminal[0]
             last = terminal[-1]
-            if int(last["source_sequence"]) - int(first["source_sequence"]) + 1 != len(terminal):
-                raise InboxAdmissionError("receipt callback source sequence is not contiguous")
             if int(last["received_at_us"]) < int(first["received_at_us"]):
                 raise InboxAdmissionError("receipt callback receive order is reversed")
             row_hash = callback_rows_hash(tuple(dict(row) for row in terminal))
@@ -769,13 +900,18 @@ class CallbackInbox:
             connection.close()
 
     def create_pending_receipts(
-        self, *, created_at_us: int, limit: int = 10_000
+        self,
+        *,
+        created_at_us: int,
+        limit: int = 10_000,
+        authority: WriterAuthority,
     ) -> tuple[CallbackReceiptRecord, ...]:
         """Receipt terminal prefixes across current and late prior-run callbacks."""
 
         if not 1 <= limit <= 10_000:
             raise ValueError("receipt limit must be between 1 and 10,000")
         with self._connect() as connection:
+            self.verify_writer(connection, authority)
             run_ids = tuple(
                 str(row[0])
                 for row in connection.execute(
@@ -792,6 +928,7 @@ class CallbackInbox:
                 run_id,
                 created_at_us=created_at_us,
                 limit=remaining,
+                authority=authority,
             )
             if receipt is None:
                 continue

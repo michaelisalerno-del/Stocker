@@ -91,6 +91,22 @@ class _ClockProbeRequest:
     connection_generation: int
 
 
+@dataclass(frozen=True)
+class _PendingOfficialCallback:
+    callback_kind: str
+    request_id: int
+    callback: Callable[[], None]
+    provider_payload: dict[str, object]
+    provider_event_id: str
+    classification: CallbackClassification
+    received_at_utc: datetime
+    received_monotonic_ns: int
+    connection_generation: int
+    subscription_owner: str | None
+    symbol: str | None
+    stream_owner: dict[str, object] | None
+
+
 def _serialisable_provider_value(
     value: object,
     *,
@@ -408,6 +424,9 @@ class IBKRMarketDataAdapter:
         self._clock_probe_requests: deque[_ClockProbeRequest] = deque()
         self._clock_probe_lock = threading.RLock()
         self._official_callback_context = threading.local()
+        self._pending_official_callbacks: deque[_PendingOfficialCallback] = deque()
+        self._pending_official_callback_lock = threading.RLock()
+        self._batch_durable_callbacks = require_durable_inbox_on_start
         self._loop_thread: threading.Thread | None = None
         self._client: Any | None = None
         self._stopping = threading.Event()
@@ -513,6 +532,9 @@ class IBKRMarketDataAdapter:
         self.connection.shutting_down()
         self._stopping.set()
         self._client_loop_exit_expected.set()
+        self.flush_durable_callback_batch(
+            timeout_seconds=self.config.connect_timeout_seconds,
+        )
         self.callbacks.shutdown()
         self.stream_quotes.clear()
         for key in self.budget.shutdown():
@@ -525,6 +547,9 @@ class IBKRMarketDataAdapter:
         if self._loop_thread is not None:
             self._loop_thread.join(timeout=self.config.connect_timeout_seconds)
         self._loop_thread = None
+        self.flush_durable_callback_batch(
+            timeout_seconds=self.config.connect_timeout_seconds,
+        )
         self._connected.clear()
 
     def reconnect(self) -> None:
@@ -1078,6 +1103,39 @@ class IBKRMarketDataAdapter:
                     "historical_data_update",
                 }
             )
+            if (
+                self._durable_inbox is not None
+                and self._batch_durable_callbacks
+                and single_row_hot_path
+            ):
+                owner = self._request_owners.get(request_id)
+                with self._pending_official_callback_lock:
+                    if len(self._pending_official_callbacks) >= self._stream_event_limit:
+                        self._latch_callback_failure(
+                            callback_kind=callback_kind,
+                            request_id=request_id,
+                            error=CallbackInboxOverflow("callback batch queue exhausted"),
+                            source_sequence=None,
+                        )
+                        return
+                    stream_owner = self._request_stream_owners.get(request_id)
+                    self._pending_official_callbacks.append(
+                        _PendingOfficialCallback(
+                            callback_kind=callback_kind,
+                            request_id=request_id,
+                            callback=callback,
+                            provider_payload=provider_payload,
+                            provider_event_id=provider_event_id,
+                            classification=classification,
+                            received_at_utc=received_at,
+                            received_monotonic_ns=received_monotonic_ns,
+                            connection_generation=self._connection_generation,
+                            subscription_owner=owner,
+                            symbol=self._symbol_from_owner(owner),
+                            stream_owner=(None if stream_owner is None else dict(stream_owner)),
+                        )
+                    )
+                return
             if self._durable_inbox is not None:
                 owner = self._request_owners.get(request_id)
                 admission = self._durable_inbox.admit(
@@ -1179,9 +1237,7 @@ class IBKRMarketDataAdapter:
                     source_sequence=admitted_sequence,
                 )
             except Exception:
-                # This is the last-resort in-process latch. Durable recording
-                # is already best-effort inside _latch_callback_failure, but
-                # even an unexpected classifier bug must not escape EWrapper.
+                # No callback-boundary failure may escape into EWrapper.
                 with self._callback_failure_lock:
                     if self._fatal_callback_code is None:
                         self._fatal_callback_code = "CALLBACK_BOUNDARY_FAILURE"
@@ -1192,6 +1248,173 @@ class IBKRMarketDataAdapter:
             self._official_callback_context.received_monotonic_ns = None
             self._official_callback_context.capture_single_row = False
             self._official_callback_context.captured_stream_event = None
+
+    def flush_durable_callback_batch(self, *, timeout_seconds: float) -> int:
+        """Durably admit queued hot callbacks in bounded SQLite transactions."""
+
+        if timeout_seconds <= 0:
+            raise ValueError("callback batch timeout must be positive")
+        inbox = self._durable_inbox
+        if inbox is None or not self._batch_durable_callbacks:
+            return 0
+        deadline = time.monotonic() + timeout_seconds
+        flushed = 0
+        while True:
+            with self._pending_official_callback_lock:
+                count = min(4_096, len(self._pending_official_callbacks))
+                batch = tuple(self._pending_official_callbacks.popleft() for _ in range(count))
+            if not batch:
+                return flushed
+            try:
+                with inbox.callback_batch():
+                    for item in batch:
+                        admission = inbox.admit(
+                            callback_kind=f"official_provider_{item.callback_kind}",
+                            request_id=item.request_id,
+                            payload=item.provider_payload,
+                            connection_generation=item.connection_generation,
+                            classification=item.classification,
+                            received_utc=item.received_at_utc,
+                            received_monotonic_ns=item.received_monotonic_ns,
+                            inbox_event_id=item.provider_event_id,
+                            subscription_owner=item.subscription_owner,
+                            symbol=item.symbol,
+                            stream_owner=item.stream_owner,
+                            provider_envelope=True,
+                        )
+                        self._latest_durably_admitted_sequence = admission.event.source_sequence
+                        if admission.duplicate:
+                            raise CallbackIdentityCollision(
+                                "CALLBACK_PROVIDER_DELIVERY_ID_COLLISION"
+                            )
+            except Exception as exc:
+                with self._pending_official_callback_lock:
+                    self._pending_official_callbacks.extendleft(reversed(batch))
+                self._latch_callback_failure(
+                    callback_kind=batch[0].callback_kind,
+                    request_id=batch[0].request_id,
+                    error=exc,
+                    source_sequence=self._latest_durably_admitted_sequence,
+                )
+                return flushed
+
+            materialized: list[
+                tuple[
+                    _PendingOfficialCallback,
+                    str,
+                    int,
+                    dict[str, Any],
+                    dict[str, Any],
+                ]
+            ] = []
+            for item in batch:
+                try:
+                    self._official_callback_context.provider_event_id = item.provider_event_id
+                    self._official_callback_context.received_at_utc = item.received_at_utc
+                    self._official_callback_context.received_monotonic_ns = (
+                        item.received_monotonic_ns
+                    )
+                    self._official_callback_context.capture_single_row = True
+                    self._official_callback_context.captured_stream_event = None
+                    item.callback()
+                    captured = self._official_callback_context.captured_stream_event
+                    if captured is None:
+                        raise RuntimeError("official callback emitted no canonical stream event")
+                    captured_kind, captured_request_id, captured_payload = captured
+                    provider_json = json.dumps(
+                        item.provider_payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=True,
+                    )
+                    durable_payload = {
+                        **captured_payload,
+                        "original_provider_callback_kind": item.callback_kind,
+                        "original_provider_callback": item.provider_payload,
+                        "original_provider_callback_sha256": hashlib.sha256(
+                            provider_json.encode()
+                        ).hexdigest(),
+                    }
+                    materialized.append(
+                        (
+                            item,
+                            captured_kind,
+                            captured_request_id,
+                            captured_payload,
+                            durable_payload,
+                        )
+                    )
+                except Exception as exc:
+                    try:
+                        inbox.quarantine_provider_envelope(
+                            provider_envelope_event_id=item.provider_event_id,
+                            failure_classification=self._stable_callback_error_code(exc),
+                            quarantined_at=datetime.now(UTC),
+                        )
+                    finally:
+                        self._latch_callback_failure(
+                            callback_kind=item.callback_kind,
+                            request_id=item.request_id,
+                            error=exc,
+                            source_sequence=self._latest_durably_admitted_sequence,
+                        )
+                finally:
+                    self._official_callback_context.provider_event_id = None
+                    self._official_callback_context.received_at_utc = None
+                    self._official_callback_context.received_monotonic_ns = None
+                    self._official_callback_context.capture_single_row = False
+                    self._official_callback_context.captured_stream_event = None
+
+            if materialized:
+                try:
+                    committed: list[
+                        tuple[
+                            _PendingOfficialCallback,
+                            str,
+                            int,
+                            dict[str, Any],
+                        ]
+                    ] = []
+                    with inbox.callback_batch():
+                        for (
+                            item,
+                            kind,
+                            request_id,
+                            captured_payload,
+                            durable_payload,
+                        ) in materialized:
+                            event = inbox.materialize_provider_envelope(
+                                provider_envelope_event_id=item.provider_event_id,
+                                callback_kind=kind,
+                                request_id=request_id,
+                                payload=durable_payload,
+                                materialized_at=datetime.now(UTC),
+                            )
+                            self._latest_durably_admitted_sequence = event.source_sequence
+                            committed.append((item, kind, request_id, captured_payload))
+                except Exception as exc:
+                    self._latch_callback_failure(
+                        callback_kind=materialized[0][0].callback_kind,
+                        request_id=materialized[0][0].request_id,
+                        error=exc,
+                        source_sequence=self._latest_durably_admitted_sequence,
+                    )
+                    return flushed
+                for _item, kind, request_id, captured_payload in committed:
+                    if kind != "level1_quote_update":
+                        continue
+                    try:
+                        self.stream_quotes.add(request_id, captured_payload)
+                    except Exception as exc:
+                        self._latch_callback_failure(
+                            callback_kind=kind,
+                            request_id=request_id,
+                            error=exc,
+                            source_sequence=self._latest_durably_admitted_sequence,
+                        )
+            flushed += len(batch)
+            if time.monotonic() >= deadline:
+                return flushed
 
     @staticmethod
     def _stable_callback_error_code(error: Exception) -> str:

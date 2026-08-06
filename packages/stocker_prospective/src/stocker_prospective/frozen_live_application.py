@@ -706,6 +706,15 @@ class FrozenProspectiveApplication:
 
     def _poll_once(self, *, now: datetime) -> LivePollResult:
         observed = now.astimezone(UTC)
+        flush_callback_batch = getattr(
+            self.adapter,
+            "flush_durable_callback_batch",
+            None,
+        )
+        if callable(flush_callback_batch):
+            flush_callback_batch(
+                timeout_seconds=self.config.ibkr.stream_poll_interval_seconds,
+            )
         self._persist_connection_events(observed)
         observed_session = observed.astimezone(NEW_YORK).date()
         market_session_valid = False

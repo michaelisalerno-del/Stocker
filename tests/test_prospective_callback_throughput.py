@@ -59,6 +59,7 @@ def _adapter(tmp_path: Path) -> tuple[IBKRMarketDataAdapter, DurableCallbackInbo
             request_rate_limit=1_000,
         ),
         durable_inbox=inbox,
+        require_durable_inbox_on_start=True,
     )
     adapter._connection_generation = 1
     for index in range(QUOTE_STREAMS):
@@ -118,6 +119,7 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
     wall_started = time.perf_counter()
     cpu_started = time.process_time()
     batch_metrics: list[dict[str, float | int]] = []
+    provider_pending_before_normalization: list[int] = []
 
     for batch in range(BATCHES):
         for index in range(QUOTE_STREAMS):
@@ -128,13 +130,29 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
                 "market_data_type": "live",
                 "receive_timestamp_utc": NOW.isoformat(),
             }
+            def normalize_quote(
+                request_id: int = request_id,
+                payload: dict[str, object] = payload,
+                index: int = index,
+            ) -> None:
+                if index == 0:
+                    provider_pending_before_normalization.append(
+                        int(
+                            connection.execute(
+                                """
+                                SELECT COUNT(*)
+                                FROM callback_inbox_v1
+                                WHERE status = 'provider_pending'
+                                """
+                            ).fetchone()[0]
+                        )
+                    )
+                adapter.on_quote_update(request_id, payload)
+
             adapter.contain_official_callback(
                 "tick_price",
                 request_id,
-                lambda request_id=request_id, payload=payload: adapter.on_quote_update(
-                    request_id,
-                    payload,
-                ),
+                normalize_quote,
                 provider_arguments=(request_id, 1, payload["value"], {}),
             )
         provider_bar_at = NOW - timedelta(hours=2) + timedelta(minutes=5 * batch)
@@ -162,6 +180,7 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
                 ),
                 provider_arguments=(request_id, payload),
             )
+        adapter.flush_durable_callback_batch(timeout_seconds=2)
         accounting = inbox.accounting()
         batch_wall_at = NOW + timedelta(minutes=10 * batch)
         batch_metrics.append(
@@ -214,6 +233,12 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
     assert adapter.fatal_callback_code is None
     assert len(rows) == expected_callbacks
     assert metrics["durable_backlog"] == expected_callbacks
+    assert metrics["sqlite_begin_operations"] <= BATCHES * 2
+    assert provider_pending_before_normalization == [49, 49, 49, 49]
+    assert all(
+        "original_provider_callback" not in quote
+        for quote in adapter.stream_quotes.snapshot(100)
+    )
     assert [item["durable_backlog"] for item in batch_metrics] == [49, 98, 147, 196]
     provider_lags = [int(item["provider_bar_lag_seconds"]) for item in batch_metrics]
     assert provider_lags == sorted(provider_lags)

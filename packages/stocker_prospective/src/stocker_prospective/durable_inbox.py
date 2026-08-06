@@ -8,7 +8,8 @@ import math
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum, StrEnum
 from pathlib import Path
@@ -338,6 +339,25 @@ class DurableCallbackInbox:
                     raise
                 time.sleep(delay_seconds)
 
+    @contextmanager
+    def callback_batch(self) -> Iterator[None]:
+        """Commit several callback state transitions in one durable transaction."""
+
+        connection = self._connect()
+        if connection.in_transaction:
+            raise RuntimeError("callback batch transaction is already active")
+        self._begin_immediate(connection)
+        try:
+            yield
+        except Exception:
+            connection.rollback()
+            self._active_count_run_id = None
+            self._active_count = None
+            self._oldest_active_received_at = None
+            raise
+        else:
+            connection.commit()
+
     def _ensure_active_accounting(self, connection: sqlite3.Connection) -> None:
         if self._active_count is not None and self._active_count_run_id == self.run_id:
             return
@@ -526,8 +546,11 @@ class DurableCallbackInbox:
         )
         failure = classification.value if initial_status is InboxStatus.QUARANTINED else None
         acknowledgement = received_encoded if initial_status is InboxStatus.DIAGNOSTIC else None
-        with self._connect() as connection:
+        connection = self._connect()
+        owns_transaction = not connection.in_transaction
+        if owns_transaction:
             self._begin_immediate(connection)
+        try:
             self._ensure_active_accounting(connection)
             existing = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
@@ -554,7 +577,8 @@ class DurableCallbackInbox:
                     or existing["stream_owner_json"] != stream_owner_json
                     or not stored_payload_matches
                 ):
-                    connection.rollback()
+                    if owns_transaction:
+                        connection.rollback()
                     raise CallbackIdentityCollision("CALLBACK_IDENTITY_COLLISION")
                 if provider_envelope_event_id is not None:
                     self._complete_provider_envelope_in_transaction(
@@ -563,7 +587,8 @@ class DurableCallbackInbox:
                         canonical_event_id=event_id,
                         completed_at=received,
                     )
-                connection.commit()
+                if owns_transaction:
+                    connection.commit()
                 return InboxAdmissionResult(event=self._event(existing), duplicate=True)
             referenced_provider_active = (
                 provider_envelope_event_id is not None
@@ -581,7 +606,8 @@ class DurableCallbackInbox:
             assert self._active_count is not None
             unacknowledged = self._active_count - int(referenced_provider_active)
             if unacknowledged >= self.max_unacknowledged:
-                connection.rollback()
+                if owns_transaction:
+                    connection.rollback()
                 raise CallbackInboxOverflow("CALLBACK_OVERFLOW")
             admitted = datetime.now(UTC)
             admitted_encoded = admitted.isoformat()
@@ -642,11 +668,16 @@ class DurableCallbackInbox:
                 received_at=received,
                 admitted_at=admitted,
             )
-            connection.commit()
+            if owns_transaction:
+                connection.commit()
             row = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE source_sequence = ?",
                 (source_sequence,),
             ).fetchone()
+        except Exception:
+            if owns_transaction and connection.in_transaction:
+                connection.rollback()
+            raise
         assert row is not None
         return InboxAdmissionResult(event=self._event(row), duplicate=False)
 
@@ -746,14 +777,18 @@ class DurableCallbackInbox:
             ),
             None,
         )
-        with self._connect() as connection:
+        connection = self._connect()
+        owns_transaction = not connection.in_transaction
+        if owns_transaction:
             self._begin_immediate(connection)
+        try:
             row = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
                 (provider_envelope_event_id,),
             ).fetchone()
             if row is None:
-                connection.rollback()
+                if owns_transaction:
+                    connection.rollback()
                 raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_MISSING")
             if (
                 not str(row["callback_kind"]).startswith("official_provider_")
@@ -761,7 +796,8 @@ class DurableCallbackInbox:
                 or row["admission_run_id"] != self.run_id
                 or InboxStatus(str(row["status"])) is not InboxStatus.PROVIDER_PENDING
             ):
-                connection.rollback()
+                if owns_transaction:
+                    connection.rollback()
                 raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_IDENTITY_INVALID")
             cursor = connection.execute(
                 """
@@ -782,13 +818,19 @@ class DurableCallbackInbox:
                 ),
             )
             if cursor.rowcount != 1:
-                connection.rollback()
+                if owns_transaction:
+                    connection.rollback()
                 raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_TRANSITION_CHANGED")
-            connection.commit()
+            if owns_transaction:
+                connection.commit()
             materialized = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
                 (provider_envelope_event_id,),
             ).fetchone()
+        except Exception:
+            if owns_transaction and connection.in_transaction:
+                connection.rollback()
+            raise
         assert materialized is not None
         return self._event(materialized)
 

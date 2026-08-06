@@ -265,6 +265,10 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
         hashlib.sha256(f"raw:{event.inbox_event_id}".encode()).hexdigest()
         for event in leased
     )
+    raw_partition_hashes = tuple(
+        hashlib.sha256(f"partition:{index}".encode()).hexdigest()
+        for index in range(32)
+    )
     materialization_bytes_before = _database_bytes(inbox.database_path)
     materialization_cpu_started = time.process_time()
     materialization_wall_started = time.perf_counter()
@@ -272,9 +276,23 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
         leased,
         run_id=RUN_ID,
         recorder_generation=1,
-        raw_partition_hashes=("f" * 64,),
+        raw_partition_hashes=raw_partition_hashes,
         raw_event_ids=raw_event_ids,
         materialized_at=NOW + timedelta(hours=1),
+    )
+    inbox.commit_processing(
+        leased,
+        run_id=RUN_ID,
+        recorder_generation=1,
+        raw_partition_hashes=raw_partition_hashes,
+        committed_at=NOW + timedelta(hours=1),
+    )
+    inbox.acknowledge(
+        leased,
+        lease_owner="recorder",
+        lease_generation=1,
+        raw_partition_hashes=raw_partition_hashes,
+        acknowledged_at=NOW + timedelta(hours=1),
     )
     with inbox._connect() as measurement:
         stored_event_id_bytes, materialization_rows = measurement.execute(
@@ -283,10 +301,23 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
             FROM callback_raw_materialization_v1
             """
         ).fetchone()
+        stored_partition_hash_bytes = sum(
+            int(
+                measurement.execute(
+                    f"SELECT COALESCE(SUM(length({column})), 0) FROM {table}"
+                ).fetchone()[0]
+            )
+            for table, column in (
+                ("callback_raw_materialization_v1", "raw_partition_hashes_json"),
+                ("callback_processing_commit_v1", "raw_partition_hashes_json"),
+                ("callback_inbox_v1", "associated_raw_partition_hashes_json"),
+            )
+        )
     materialization_metrics = {
         "rows": int(materialization_rows),
         "raw_event_ids": len(raw_event_ids),
         "stored_event_id_bytes": int(stored_event_id_bytes),
+        "stored_partition_hash_bytes": stored_partition_hash_bytes,
         "database_growth_bytes": (
             _database_bytes(inbox.database_path) - materialization_bytes_before
         ),
@@ -302,7 +333,13 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
     assert materialization_metrics["stored_event_id_bytes"] <= (
         encoded_event_id_bytes + 2 * (expected_callbacks - 1)
     )
+    encoded_partition_hash_bytes = len(
+        json.dumps(sorted(raw_partition_hashes), separators=(",", ":"))
+    )
+    assert materialization_metrics["stored_partition_hash_bytes"] <= 3 * (
+        encoded_partition_hash_bytes + 2 * (expected_callbacks - 1)
+    )
     recovered = inbox.raw_materialization(leased)
     assert recovered is not None
-    assert recovered.partition_hashes == ("f" * 64,)
+    assert recovered.partition_hashes == tuple(sorted(raw_partition_hashes))
     assert recovered.raw_event_ids == tuple(sorted(raw_event_ids))

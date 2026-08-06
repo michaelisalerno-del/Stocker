@@ -1232,6 +1232,9 @@ class DurableCallbackInbox:
                     """,
                     (event.inbox_event_id,),
                 ).fetchone()
+                expected_hashes = (
+                    encoded_hashes if event.inbox_event_id == canonical_event_id else "[]"
+                )
                 expected_event_ids = (
                     encoded_event_ids if event.inbox_event_id == canonical_event_id else "[]"
                 )
@@ -1240,7 +1243,8 @@ class DurableCallbackInbox:
                     if (
                         str(existing["run_id"]) != run_id
                         or str(existing["lease_batch_id"]) != batch_id
-                        or str(existing["raw_partition_hashes_json"]) != encoded_hashes
+                        or str(existing["raw_partition_hashes_json"])
+                        not in {encoded_hashes, expected_hashes}
                         or existing_event_ids
                         not in {encoded_event_ids, expected_event_ids}
                     ):
@@ -1262,7 +1266,7 @@ class DurableCallbackInbox:
                         run_id,
                         recorder_generation,
                         batch_id,
-                        encoded_hashes,
+                        expected_hashes,
                         expected_event_ids,
                         observed.isoformat(),
                     ),
@@ -1293,27 +1297,40 @@ class DurableCallbackInbox:
         if len(rows) != len(batch):
             raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_PARTIAL")
         batch_ids = {str(row["lease_batch_id"]) for row in rows}
-        hashes = {str(row["raw_partition_hashes_json"]) for row in rows}
+        hash_encodings = [str(row["raw_partition_hashes_json"]) for row in rows]
+        populated_hashes = {value for value in hash_encodings if value != "[]"}
         event_id_encodings = [str(row["raw_event_ids_json"]) for row in rows]
         populated_event_ids = {value for value in event_id_encodings if value != "[]"}
         expected_batch_ids = {event.lease_batch_id for event in batch}
         if (
             len(batch_ids) != 1
-            or len(hashes) != 1
+            or len(populated_hashes) > 1
             or len(populated_event_ids) > 1
             or None in expected_batch_ids
             or batch_ids != expected_batch_ids
         ):
             raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_INCONSISTENT")
-        if populated_event_ids and "[]" in event_id_encodings:
-            canonical = min(
-                rows,
-                key=lambda row: (int(row["source_sequence"]), str(row["inbox_event_id"])),
-            )
-            if str(canonical["raw_event_ids_json"]) == "[]":
+        canonical = min(
+            rows,
+            key=lambda row: (int(row["source_sequence"]), str(row["inbox_event_id"])),
+        )
+        if (
+            populated_hashes
+            and "[]" in hash_encodings
+            and str(canonical["raw_partition_hashes_json"]) == "[]"
+        ) or (
+            populated_event_ids
+            and "[]" in event_id_encodings
+            and str(canonical["raw_event_ids_json"]) == "[]"
+        ):
                 raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_INCONSISTENT")
         return RawMaterialization(
-            partition_hashes=tuple(str(item) for item in json.loads(next(iter(hashes)))),
+            partition_hashes=tuple(
+                str(item)
+                for item in json.loads(
+                    "[]" if not populated_hashes else next(iter(populated_hashes))
+                )
+            ),
             raw_event_ids=tuple(
                 str(item)
                 for item in json.loads(
@@ -1638,9 +1655,18 @@ class DurableCallbackInbox:
             raise ValueError("blocked raw-only processing cannot claim scientific projection")
         observed = _utc(committed_at, label="callback processing commit timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
+        batch = tuple(events)
+        canonical_event_id = (
+            None
+            if not batch
+            else min(
+                batch,
+                key=lambda event: (event.source_sequence, event.inbox_event_id),
+            ).inbox_event_id
+        )
         with self._connect() as connection:
             self._begin_immediate(connection)
-            for event in events:
+            for event in batch:
                 if event.admission_run_id != run_id:
                     connection.rollback()
                     raise CallbackInboxError("CALLBACK_PROCESSING_RUN_DIFFERS")
@@ -1653,11 +1679,15 @@ class DurableCallbackInbox:
                     """,
                     (event.inbox_event_id,),
                 ).fetchone()
+                expected_hashes = (
+                    encoded_hashes if event.inbox_event_id == canonical_event_id else "[]"
+                )
                 if existing is not None:
                     if (
                         str(existing["run_id"]) != run_id
                         or int(existing["recorder_generation"]) != recorder_generation
-                        or str(existing["raw_partition_hashes_json"]) != encoded_hashes
+                        or str(existing["raw_partition_hashes_json"])
+                        not in {encoded_hashes, expected_hashes}
                         or str(existing["processing_disposition"]) != processing_disposition
                         or bool(existing["scientific_projection_complete"])
                         is not scientific_projection_complete
@@ -1679,7 +1709,7 @@ class DurableCallbackInbox:
                         event.source_sequence,
                         run_id,
                         recorder_generation,
-                        encoded_hashes,
+                        expected_hashes,
                         processing_disposition,
                         int(scientific_projection_complete),
                         observed.isoformat(),
@@ -1717,10 +1747,19 @@ class DurableCallbackInbox:
 
         observed = _utc(acknowledged_at, label="callback acknowledgement timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
+        batch = tuple(events)
+        canonical_event_id = (
+            None
+            if not batch
+            else min(
+                batch,
+                key=lambda event: (event.source_sequence, event.inbox_event_id),
+            ).inbox_event_id
+        )
         acknowledged = 0
         with self._connect() as connection:
             self._begin_immediate(connection)
-            for event in events:
+            for event in batch:
                 commit = connection.execute(
                     """
                     SELECT raw_partition_hashes_json
@@ -1732,7 +1771,11 @@ class DurableCallbackInbox:
                 if commit is None:
                     connection.rollback()
                     raise CallbackInboxError("CALLBACK_ACK_BEFORE_PROCESSING_COMMIT")
-                if str(commit["raw_partition_hashes_json"]) != encoded_hashes:
+                expected_hashes = (
+                    encoded_hashes if event.inbox_event_id == canonical_event_id else "[]"
+                )
+                committed_hashes = str(commit["raw_partition_hashes_json"])
+                if committed_hashes not in {encoded_hashes, expected_hashes}:
                     connection.rollback()
                     raise CallbackInboxError("CALLBACK_ACK_PARTITION_HASHES_DIFFER")
                 cursor = connection.execute(
@@ -1748,7 +1791,7 @@ class DurableCallbackInbox:
                     """,
                     (
                         observed.isoformat(),
-                        encoded_hashes,
+                        committed_hashes,
                         observed.isoformat(),
                         event.inbox_event_id,
                         lease_owner,

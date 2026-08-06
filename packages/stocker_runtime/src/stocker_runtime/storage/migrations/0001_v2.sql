@@ -337,17 +337,116 @@ CREATE TABLE market_latest (
     event_kind TEXT NOT NULL,
     quality_bits INTEGER NOT NULL CHECK(quality_bits >= 0),
     bid_value REAL,
+    bid_source_event_id TEXT REFERENCES market_events(event_id),
     ask_value REAL,
+    ask_source_event_id TEXT REFERENCES market_events(event_id),
     bid_size_value REAL,
+    bid_size_source_event_id TEXT REFERENCES market_events(event_id),
     ask_size_value REAL,
+    ask_size_source_event_id TEXT REFERENCES market_events(event_id),
     last_value REAL,
+    last_source_event_id TEXT REFERENCES market_events(event_id),
     size_value REAL,
+    size_source_event_id TEXT REFERENCES market_events(event_id),
     close_value REAL,
+    close_source_event_id TEXT REFERENCES market_events(event_id),
     PRIMARY KEY(instrument_id, feed_kind),
     FOREIGN KEY(event_id, run_id, instrument_id, feed_kind)
         REFERENCES market_events(event_id, run_id, instrument_id, feed_kind)
 ) STRICT;
 CREATE INDEX market_latest_event_time_idx ON market_latest(event_at_us DESC, instrument_id);
+
+CREATE TRIGGER market_latest_field_provenance_insert
+BEFORE INSERT ON market_latest
+BEGIN
+    SELECT CASE WHEN
+        (NEW.bid_value IS NULL) != (NEW.bid_source_event_id IS NULL)
+        OR (NEW.ask_value IS NULL) != (NEW.ask_source_event_id IS NULL)
+        OR (NEW.bid_size_value IS NULL) != (NEW.bid_size_source_event_id IS NULL)
+        OR (NEW.ask_size_value IS NULL) != (NEW.ask_size_source_event_id IS NULL)
+        OR (NEW.last_value IS NULL) != (NEW.last_source_event_id IS NULL)
+        OR (NEW.size_value IS NULL) != (NEW.size_source_event_id IS NULL)
+        OR (NEW.close_value IS NULL) != (NEW.close_source_event_id IS NULL)
+    THEN RAISE(ABORT, 'market_latest_field_provenance_missing') END;
+    SELECT CASE WHEN
+        (NEW.bid_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.bid_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.bid_value IS NEW.bid_value))
+        OR (NEW.ask_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.ask_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.ask_value IS NEW.ask_value))
+        OR (NEW.bid_size_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.bid_size_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind
+              AND event.bid_size_value IS NEW.bid_size_value))
+        OR (NEW.ask_size_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.ask_size_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind
+              AND event.ask_size_value IS NEW.ask_size_value))
+        OR (NEW.last_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.last_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.last_value IS NEW.last_value))
+        OR (NEW.size_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.size_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.size_value IS NEW.size_value))
+        OR (NEW.close_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.close_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.close_value IS NEW.close_value))
+    THEN RAISE(ABORT, 'market_latest_field_provenance_mismatch') END;
+END;
+
+CREATE TRIGGER market_latest_field_provenance_update
+BEFORE UPDATE ON market_latest
+BEGIN
+    SELECT CASE WHEN
+        (NEW.bid_value IS NULL) != (NEW.bid_source_event_id IS NULL)
+        OR (NEW.ask_value IS NULL) != (NEW.ask_source_event_id IS NULL)
+        OR (NEW.bid_size_value IS NULL) != (NEW.bid_size_source_event_id IS NULL)
+        OR (NEW.ask_size_value IS NULL) != (NEW.ask_size_source_event_id IS NULL)
+        OR (NEW.last_value IS NULL) != (NEW.last_source_event_id IS NULL)
+        OR (NEW.size_value IS NULL) != (NEW.size_source_event_id IS NULL)
+        OR (NEW.close_value IS NULL) != (NEW.close_source_event_id IS NULL)
+    THEN RAISE(ABORT, 'market_latest_field_provenance_missing') END;
+    SELECT CASE WHEN
+        (NEW.bid_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.bid_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.bid_value IS NEW.bid_value))
+        OR (NEW.ask_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.ask_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.ask_value IS NEW.ask_value))
+        OR (NEW.bid_size_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.bid_size_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind
+              AND event.bid_size_value IS NEW.bid_size_value))
+        OR (NEW.ask_size_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.ask_size_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind
+              AND event.ask_size_value IS NEW.ask_size_value))
+        OR (NEW.last_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.last_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.last_value IS NEW.last_value))
+        OR (NEW.size_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.size_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.size_value IS NEW.size_value))
+        OR (NEW.close_source_event_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM market_events event WHERE event.event_id=NEW.close_source_event_id
+              AND event.run_id=NEW.run_id AND event.instrument_id=NEW.instrument_id
+              AND event.feed_kind=NEW.feed_kind AND event.close_value IS NEW.close_value))
+    THEN RAISE(ABORT, 'market_latest_field_provenance_mismatch') END;
+END;
 
 CREATE TABLE idea_plugins (
     idea_id TEXT NOT NULL,

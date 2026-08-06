@@ -290,6 +290,13 @@ class RetentionManager:
         count = int(row["callback_count"])
         if first <= expected_after or last < first:
             raise RetentionInvariantError("receipt sequence/count invariant failed")
+        skipped = connection.execute(
+            "SELECT 1 FROM callback_inbox WHERE run_id=? AND source_sequence>? "
+            "AND source_sequence<? LIMIT 1",
+            (str(row["run_id"]), expected_after, first),
+        ).fetchone()
+        if skipped is not None:
+            raise RetentionInvariantError("receipt skipped an authoritative same-run callback")
         covered = connection.execute(
             "SELECT count(*) AS callback_count, min(source_sequence) AS first_sequence, "
             "max(source_sequence) AS last_sequence, "
@@ -690,7 +697,9 @@ class RetentionManager:
             "event_id",
             "event_kind NOT IN ('bar', 'historical_bar') AND event_at_us <= ? "
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
-            "WHERE l.event_id = market_events.event_id)",
+            "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
+            "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
+            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id))",
             now_us - self.policy.raw_market_event_us,
         )
         prune(
@@ -698,7 +707,9 @@ class RetentionManager:
             "event_id",
             "event_kind IN ('bar', 'historical_bar') AND event_at_us <= ? "
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
-            "WHERE l.event_id = market_events.event_id)",
+            "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
+            "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
+            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id))",
             now_us - self.policy.completed_bar_us,
         )
         deleted += self._prune_callback_tombstones(

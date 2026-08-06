@@ -200,7 +200,10 @@ class CallbackInbox:
                     or int(existing["received_at_us"]) != callback.received_at_us
                     or existing["provider_at_us"] != callback.provider_at_us
                     or str(existing["payload_sha256"]) != payload_hash
-                    or existing["payload_json"] != payload_json
+                    or (
+                        existing["payload_json"] is not None
+                        and existing["payload_json"] != payload_json
+                    )
                 ):
                     raise CallbackIdentityCollision(
                         f"callback identity {event_uid} names different content"
@@ -247,8 +250,8 @@ class CallbackInbox:
                 """,
                 (
                     event_uid,
-                    str(authoritative["run_id"]),
-                    int(authoritative["recorder_generation"]),
+                    fence.run_id,
+                    fence.recorder_generation,
                     fence.connection_generation,
                     fence.request_id,
                     callback.callback_kind,
@@ -629,22 +632,61 @@ class CallbackInbox:
             if latest is None or int(latest[0]) <= int(inbox_row["source_sequence"]):
                 connection.execute(
                     "INSERT INTO market_latest(run_id, instrument_id, feed_kind, event_id, "
-                    "event_at_us, received_at_us, event_kind, quality_bits, bid_value, ask_value, "
-                    "bid_size_value, ask_size_value, last_value, size_value, close_value) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?) "
+                    "event_at_us, received_at_us, event_kind, quality_bits, "
+                    "bid_value, bid_source_event_id, ask_value, ask_source_event_id, "
+                    "bid_size_value, bid_size_source_event_id, "
+                    "ask_size_value, ask_size_source_event_id, "
+                    "last_value, last_source_event_id, size_value, size_source_event_id, "
+                    "close_value, close_source_event_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(instrument_id, feed_kind) DO UPDATE SET run_id=excluded.run_id, "
                     "event_id=excluded.event_id, event_at_us=excluded.event_at_us, "
                     "received_at_us=excluded.received_at_us, event_kind=excluded.event_kind, "
                     "quality_bits=excluded.quality_bits, "
-                    "bid_value=COALESCE(excluded.bid_value, market_latest.bid_value), "
-                    "ask_value=COALESCE(excluded.ask_value, market_latest.ask_value), "
-                    "bid_size_value=COALESCE(excluded.bid_size_value, "
-                    "market_latest.bid_size_value), "
-                    "ask_size_value=COALESCE(excluded.ask_size_value, "
-                    "market_latest.ask_size_value), "
-                    "last_value=COALESCE(excluded.last_value, market_latest.last_value), "
-                    "size_value=COALESCE(excluded.size_value, market_latest.size_value), "
-                    "close_value=COALESCE(excluded.close_value, market_latest.close_value)",
+                    "bid_value=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.bid_value, market_latest.bid_value) "
+                    "ELSE excluded.bid_value END, "
+                    "bid_source_event_id=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.bid_source_event_id, market_latest.bid_source_event_id) "
+                    "ELSE excluded.bid_source_event_id END, "
+                    "ask_value=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.ask_value, market_latest.ask_value) "
+                    "ELSE excluded.ask_value END, "
+                    "ask_source_event_id=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.ask_source_event_id, market_latest.ask_source_event_id) "
+                    "ELSE excluded.ask_source_event_id END, "
+                    "bid_size_value=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.bid_size_value, market_latest.bid_size_value) "
+                    "ELSE excluded.bid_size_value END, "
+                    "bid_size_source_event_id=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.bid_size_source_event_id, "
+                    "market_latest.bid_size_source_event_id) "
+                    "ELSE excluded.bid_size_source_event_id END, "
+                    "ask_size_value=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.ask_size_value, market_latest.ask_size_value) "
+                    "ELSE excluded.ask_size_value END, "
+                    "ask_size_source_event_id=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.ask_size_source_event_id, "
+                    "market_latest.ask_size_source_event_id) "
+                    "ELSE excluded.ask_size_source_event_id END, "
+                    "last_value=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.last_value, market_latest.last_value) "
+                    "ELSE excluded.last_value END, "
+                    "last_source_event_id=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.last_source_event_id, market_latest.last_source_event_id) "
+                    "ELSE excluded.last_source_event_id END, "
+                    "size_value=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.size_value, market_latest.size_value) "
+                    "ELSE excluded.size_value END, "
+                    "size_source_event_id=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.size_source_event_id, market_latest.size_source_event_id) "
+                    "ELSE excluded.size_source_event_id END, "
+                    "close_value=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.close_value, market_latest.close_value) "
+                    "ELSE excluded.close_value END, "
+                    "close_source_event_id=CASE WHEN market_latest.run_id=excluded.run_id THEN "
+                    "COALESCE(excluded.close_source_event_id, market_latest.close_source_event_id) "
+                    "ELSE excluded.close_source_event_id END",
                     (
                         run_id,
                         str(subscription["instrument_id"]),
@@ -654,12 +696,19 @@ class CallbackInbox:
                         received_at_us,
                         callback_kind,
                         values["bid"],
+                        event_id if values["bid"] is not None else None,
                         values["ask"],
+                        event_id if values["ask"] is not None else None,
                         values["bid_size"],
+                        event_id if values["bid_size"] is not None else None,
                         values["ask_size"],
+                        event_id if values["ask_size"] is not None else None,
                         values["last"],
+                        event_id if values["last"] is not None else None,
                         values["size"],
+                        event_id if values["size"] is not None else None,
                         values["close"],
+                        event_id if values["close"] is not None else None,
                     ),
                 )
             connection.execute(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import sqlite3
@@ -761,18 +762,29 @@ def test_late_prior_run_callback_is_failed_and_receipted_by_current_recorder(
         subscriptions=specs,
     )
 
-    current_recorder.receive(
+    callback = MarketDataCallback("quote", 5_000_102, None, {"event_at_us": 5_000_102})
+    first = current_recorder.receive(
         prior.fences[0],
-        MarketDataCallback("quote", 5_000_102, None, {"event_at_us": 5_000_102}),
+        callback,
     )
+    retry = current_recorder.receive(prior.fences[0], callback)
     assert current_recorder.drain(now_us=5_000_103) == 0
 
     with connect_v2(database) as connection:
-        callback = connection.execute(
-            "SELECT lifecycle, receipt_batch_id FROM callback_inbox WHERE run_id='run-2'"
+        durable = connection.execute(
+            "SELECT lifecycle, receipt_batch_id FROM callback_inbox WHERE run_id='run-1'"
         ).fetchone()
-    assert callback["lifecycle"] == "failed"
-    assert callback["receipt_batch_id"] is not None
+        connection.execute(
+            "UPDATE callback_inbox SET payload_json=NULL WHERE event_uid=?",
+            (first.event_uid,),
+        )
+    compacted_retry = current_recorder.receive(prior.fences[0], callback)
+    assert durable["lifecycle"] == "failed"
+    assert durable["receipt_batch_id"] is not None
+    assert first.inserted is True
+    assert retry.event_uid == first.event_uid
+    assert retry.inserted is False
+    assert compacted_retry == retry
 
 
 def test_deterministic_callback_identity_collision_fails_closed(
@@ -957,16 +969,21 @@ def test_subscription_state_is_truthful_when_subscribe_fails(
 
 
 def test_partial_quote_callbacks_merge_into_latest_projection(tmp_path: Path) -> None:
+    from stocker_runtime.storage import RetentionManager, RetentionPolicy
+
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_generation(database)
     fence = _seed_subscription(database)
     inbox = CallbackInbox(database)
+    admitted = []
     for received_at_us, payload in (
         (10, {"event_at_us": 10, "bid": 100.0, "bid_size": 2.0}),
         (11, {"event_at_us": 11, "ask": 101.0, "ask_size": 3.0}),
     ):
-        inbox.admit(fence, MarketDataCallback("quote", received_at_us, None, payload))
+        admitted.append(
+            inbox.admit(fence, MarketDataCallback("quote", received_at_us, None, payload))
+        )
     for leased in inbox.lease_pending(
         "worker", now_us=12, lease_us=10, limit=10, authority=_authority()
     ):
@@ -974,9 +991,31 @@ def test_partial_quote_callbacks_merge_into_latest_projection(tmp_path: Path) ->
         inbox.acknowledge(leased, event.event_id, acknowledged_at_us=12, authority=_authority())
     with connect_v2(database) as connection:
         latest = connection.execute(
-            "SELECT bid_value, ask_value, bid_size_value, ask_size_value FROM market_latest"
+            "SELECT bid_value, ask_value, bid_size_value, ask_size_value, "
+            "bid_source_event_id, ask_source_event_id, bid_size_source_event_id, "
+            "ask_size_source_event_id FROM market_latest"
         ).fetchone()
-    assert tuple(latest) == (100.0, 101.0, 2.0, 3.0)
+    assert tuple(latest) == (
+        100.0,
+        101.0,
+        2.0,
+        3.0,
+        admitted[0].event_uid,
+        admitted[1].event_uid,
+        admitted[0].event_uid,
+        admitted[1].event_uid,
+    )
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status='stopped', ended_at_us=20 WHERE run_id='run-1'")
+    RetentionManager(database, RetentionPolicy(raw_market_event_us=1)).run(
+        now_us=100, measured_database_bytes=1, measured_wal_bytes=0
+    )
+    with connect_v2(database) as connection:
+        retained_sources = connection.execute(
+            "SELECT count(*) FROM market_events WHERE event_id IN (?, ?)",
+            (admitted[0].event_uid, admitted[1].event_uid),
+        ).fetchone()[0]
+    assert retained_sources == 2
 
 
 def test_typed_optional_status_does_not_stop_required_feed(tmp_path: Path) -> None:
@@ -1061,3 +1100,285 @@ def test_receipts_accept_interleaved_global_sequences_without_skipping_same_run(
         database, RetentionPolicy(callback_payload_us=1, receipt_us=1_000, tombstone_us=1_000)
     ).run(now_us=12, measured_database_bytes=1, measured_wal_bytes=0)
     assert result.payloads_compacted == 4
+
+
+def _force_recorder_takeover(database: Path) -> None:
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('run-1', 2, 'replacement', 101)"
+        )
+        connection.execute(
+            "UPDATE runtime_state SET recorder_generation=2, lifecycle='running', "
+            "process_heartbeat_at_us=101 WHERE run_id='run-1'"
+        )
+
+
+@pytest.mark.parametrize("failure_surface", ("connect", "subscribe"))
+def test_external_failure_after_takeover_disconnects_only_stale_adapter(
+    tmp_path: Path, failure_surface: str
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+
+    class TakeoverFailure(FakeMarketData):
+        def connect(self) -> None:
+            if failure_surface == "connect":
+                self.connect_calls += 1
+                _force_recorder_takeover(database)
+                raise RuntimeError("connect failed after takeover")
+            super().connect()
+
+        def subscribe(self, fence: CallbackFence) -> None:
+            if failure_surface == "subscribe":
+                _force_recorder_takeover(database)
+                raise RuntimeError("subscribe failed after takeover")
+            super().subscribe(fence)
+
+    adapter = TakeoverFailure()
+    with pytest.raises(AuthoritativeLeaseLost):
+        Recorder(_config(database), adapter).start(
+            now_us=100, instruments=(instrument,), subscriptions=specs
+        )
+    assert adapter.disconnect_calls >= 1
+    with connect_v2(database) as connection:
+        replacement = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+        ).fetchone()
+    assert tuple(replacement) == (2, "running", None)
+
+
+def test_required_subscribe_failure_disconnects_earlier_optional_success(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    reordered = (specs[1], specs[0])
+    adapter = FakeMarketData(fail_subscribe={3})
+    Recorder(_config(database), adapter).start(
+        now_us=100, instruments=(instrument,), subscriptions=reordered
+    )
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0]
+    assert states == {3: "disconnected", 4: "disconnected"}
+    assert runtime == "degraded"
+    assert adapter.connected is False
+
+
+def test_market_latest_resets_across_runs_and_tracks_each_field_source(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    first = Recorder(_config(database), FakeMarketData())
+    first_state = first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    bid = first.receive(
+        first_state.fences[0],
+        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
+    )
+    first.drain(now_us=102)
+    second = Recorder(
+        _config(
+            database,
+            run_id="run-2",
+            owner_id="owner-2",
+            writer_lease_stale_us=5_000_000,
+        ),
+        FakeMarketData(),
+    )
+    second_state = second.start(now_us=5_000_103, instruments=(instrument,), subscriptions=specs)
+    ask = second.receive(
+        second_state.fences[0],
+        MarketDataCallback("quote", 5_000_104, None, {"event_at_us": 5_000_104, "ask": 101.0}),
+    )
+    second.drain(now_us=5_000_105)
+    with connect_v2(database) as connection:
+        latest = connection.execute(
+            "SELECT run_id, bid_value, bid_source_event_id, ask_value, ask_source_event_id "
+            "FROM market_latest WHERE instrument_id='instrument-1' AND feed_kind='quotes'"
+        ).fetchone()
+    assert bid.event_uid != ask.event_uid
+    assert tuple(latest) == ("run-2", None, None, 101.0, ask.event_uid)
+
+
+def test_farm_warning_is_scoped_and_recovery_resolves_only_affected_feed(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    disconnects = adapter.disconnect_calls
+    recorder.market_data_status(
+        MarketDataStatus(
+            "farm_degraded", 2103, None, "market data farm disconnected", 101, ("quotes",)
+        )
+    )
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        gap = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
+        ).fetchone()
+    assert states == {3: "degraded", 4: "active"}
+    assert gap[0] is None
+    assert adapter.disconnect_calls == disconnects
+    assert adapter.connected is True
+    recorder.market_data_status(
+        MarketDataStatus(
+            "farm_recovered", 2104, None, "market data farm restored", 102, ("quotes",)
+        )
+    )
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0]
+        resolved = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
+        ).fetchone()[0]
+    assert states == {3: "active", 4: "active"}
+    assert (runtime, resolved) == ("running", 102)
+    recorder.market_data_status(
+        MarketDataStatus(
+            "farm_degraded", 2105, None, "historical farm disconnected", 103, ("bars",)
+        )
+    )
+    with connect_v2(database) as connection:
+        optional_scope = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+    assert optional_scope == {3: "active", 4: "degraded"}
+    assert adapter.disconnect_calls == disconnects
+    assert adapter.connected is True
+
+
+def test_replay_malformed_callback_after_start_cleans_up_writer(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    config_path = tmp_path / "runtime.json"
+    fixture_path = tmp_path / "fixture.json"
+    config_path.write_text(json.dumps(_config(database).model_dump(mode="json")), encoding="utf-8")
+    instrument, subscriptions = _specs()
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "instruments": [instrument.__dict__],
+                "subscriptions": [item.__dict__ for item in subscriptions],
+                "callbacks": [{"invalid": True}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        app, ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "100"]
+    )
+    assert result.exit_code == 1
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
+        assert connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0] == "stopped"
+
+
+def test_replay_foreign_unexpired_lease_errors_bounded_and_stops_current_writer(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle, lease_owner, lease_expires_at_us) "
+            "VALUES ('foreign-lease', 'run-1', 1, 2, 'quote', 2, '{}', ?, "
+            "'leased', 'dead-worker', 100000000)",
+            ("f" * 64,),
+        )
+    config_path = tmp_path / "runtime.json"
+    fixture_path = tmp_path / "fixture.json"
+    config_path.write_text(
+        json.dumps(_config(database, writer_lease_stale_us=5_000_000).model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    fixture_path.write_text(
+        json.dumps({"instruments": [], "subscriptions": [], "callbacks": []}), encoding="utf-8"
+    )
+    result = CliRunner().invoke(
+        app,
+        ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "5000002"],
+    )
+    payload = json.loads(result.stdout)
+    assert result.exit_code == 1
+    assert payload["error"] == "ReplayBlockedError"
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
+        assert connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0] == "stopped"
+
+
+def test_replay_budget_uses_preexisting_backlog_not_fixture_count(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    empty_payload_hash = hashlib.sha256(b"{}").hexdigest()
+    with connect_v2(database) as connection:
+        connection.executemany(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle) VALUES (?, 'run-1', 1, 2, 'quote', ?, '{}', ?, "
+            "'pending')",
+            ((f"backlog-{index}", index + 2, empty_payload_hash) for index in range(300)),
+        )
+    config_path = tmp_path / "runtime.json"
+    fixture_path = tmp_path / "fixture.json"
+    config_path.write_text(
+        json.dumps(_config(database, writer_lease_stale_us=5_000_000).model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    fixture_path.write_text(
+        json.dumps({"instruments": [], "subscriptions": [], "callbacks": []}), encoding="utf-8"
+    )
+    result = CliRunner().invoke(
+        app,
+        ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "5000002"],
+    )
+    assert result.exit_code == 0, result.stdout
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE lifecycle IN ('pending','leased')"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_replay_cleanup_does_not_mutate_replacement_after_authority_loss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    config_path = tmp_path / "runtime.json"
+    fixture_path = tmp_path / "fixture.json"
+    config_path.write_text(json.dumps(_config(database).model_dump(mode="json")), encoding="utf-8")
+    instrument, subscriptions = _specs()
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "instruments": [instrument.__dict__],
+                "subscriptions": [item.__dict__ for item in subscriptions],
+                "callbacks": [{"invalid": True}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def lose_authority(*_args: object, **_kwargs: object) -> object:
+        _force_recorder_takeover(database)
+        raise ValueError("fixture lost authority")
+
+    monkeypatch.setattr("stocker_runtime.cli._validated_replay_callback", lose_authority)
+    result = CliRunner().invoke(
+        app, ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "100"]
+    )
+    assert result.exit_code == 1
+    with connect_v2(database) as connection:
+        replacement = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+        ).fetchone()
+        status = connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
+    assert tuple(replacement) == (2, "running", None)
+    assert status == "running"

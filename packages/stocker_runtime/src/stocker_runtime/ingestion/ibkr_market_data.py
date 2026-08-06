@@ -17,11 +17,19 @@ from stocker_runtime.ingestion.inbox import (
 class MarketDataStatus:
     """Typed, market-data-only interpretation of an official IBKR status."""
 
-    kind: Literal["temporary_disconnect", "recovered", "pacing", "request_rejected"]
+    kind: Literal[
+        "temporary_disconnect",
+        "recovered",
+        "farm_degraded",
+        "farm_recovered",
+        "pacing",
+        "request_rejected",
+    ]
     code: int
     request_id: int | None
     message: str
     received_at_us: int
+    affected_feed_kinds: tuple[Literal["quotes", "trades", "bars"], ...] = ()
 
 
 @runtime_checkable

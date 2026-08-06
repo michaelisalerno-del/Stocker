@@ -271,6 +271,7 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
         first_sequence=1,
         last_sequence=1,
         created_at_us=30,
+        run_id="run-1",
     )
     with connect_v2(database) as connection:
         connection.execute(
@@ -467,6 +468,23 @@ def _seed_output_dependencies(database: Path) -> None:
         connection.execute(
             "INSERT INTO recorder_generations VALUES (?, ?, ?, ?, NULL, 0, NULL)",
             ("run-1", 1, "fixture", 10),
+        )
+        connection.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)",
+            (
+                "retention-run",
+                "shadow",
+                "ibkr",
+                10,
+                "9" * 64,
+                "deadbee",
+                "shadow_protected",
+                "created",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations VALUES (?, ?, ?, ?, NULL, 0, NULL)",
+            ("retention-run", 1, "retention-fixture", 10),
         )
         connection.execute(
             "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, "
@@ -728,7 +746,7 @@ def _seed_callback_for_retention(
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 uid,
-                "run-1",
+                "retention-run",
                 1,
                 1,
                 "tick",
@@ -748,7 +766,7 @@ def _seed_callback_for_retention(
                 "payload_json, payload_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     event_id,
-                    "run-1",
+                    "retention-run",
                     sequence,
                     "instrument-1",
                     "trades",
@@ -776,7 +794,7 @@ def _insert_receipt(
     last_sequence: int,
     created_at_us: int,
     prior_chain_hash: str = "0" * 64,
-    run_id: str = "run-1",
+    run_id: str = "retention-run",
 ) -> str:
     with connect_v2(database) as connection:
         rows = tuple(
@@ -948,7 +966,7 @@ def test_compaction_rejects_a_self_consistent_receipt_forged_away_from_callback_
     )
     forged = CallbackReceiptRecord(
         batch_id="forged",
-        run_id="run-1",
+        run_id="retention-run",
         first_source_sequence=sequence,
         last_source_sequence=sequence,
         callback_count=1,
@@ -992,13 +1010,14 @@ def test_receipt_rotation_rolls_permanent_watermark_before_deletion(tmp_path: Pa
     initialize_database(database)
     _seed_output_dependencies(database)
     with connect_v2(database) as connection:
-        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'run-1'")
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'retention-run'")
         for sequence in range(101, 107):
             connection.execute(
                 "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
                 "recorder_generation, connection_generation, callback_kind, received_at_us, "
                 "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) "
-                "VALUES (?, ?, 'run-1', 1, 1, 'tick', ?, NULL, ?, 'failed', 'fixture', ?)",
+                "VALUES (?, ?, 'retention-run', 1, 1, 'tick', ?, NULL, ?, "
+                "'failed', 'fixture', ?)",
                 (
                     sequence,
                     f"rotation-{sequence}",
@@ -1045,7 +1064,7 @@ def test_receipt_rotation_rolls_permanent_watermark_before_deletion(tmp_path: Pa
             "SELECT compacted_through_sequence, cumulative_callback_count, "
             "rolled_receipt_chain_hash, last_receipt_chain_hash "
             "FROM callback_compaction_watermarks WHERE run_id = ?",
-            ("run-1",),
+            ("retention-run",),
         ).fetchone()
     assert tuple(watermark)[:2] == (104, 4)
     assert watermark["last_receipt_chain_hash"] == second_hash
@@ -1057,13 +1076,14 @@ def test_receipt_rotation_continues_from_the_permanent_watermark(tmp_path: Path)
     initialize_database(database)
     _seed_output_dependencies(database)
     with connect_v2(database) as connection:
-        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'run-1'")
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'retention-run'")
         for sequence in range(101, 105):
             connection.execute(
                 "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
                 "recorder_generation, connection_generation, callback_kind, received_at_us, "
                 "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) "
-                "VALUES (?, ?, 'run-1', 1, 1, 'tick', ?, NULL, ?, 'failed', 'fixture', ?)",
+                "VALUES (?, ?, 'retention-run', 1, 1, 'tick', ?, NULL, ?, "
+                "'failed', 'fixture', ?)",
                 (
                     sequence,
                     f"continuation-{sequence}",
@@ -1097,7 +1117,7 @@ def test_receipt_rotation_continues_from_the_permanent_watermark(tmp_path: Path)
         first_rollup_hash = str(
             connection.execute(
                 "SELECT rolled_receipt_chain_hash FROM callback_compaction_watermarks "
-                "WHERE run_id = 'run-1'"
+                "WHERE run_id = 'retention-run'"
             ).fetchone()[0]
         )
     second_pass = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
@@ -1109,7 +1129,7 @@ def test_receipt_rotation_continues_from_the_permanent_watermark(tmp_path: Path)
         watermark = connection.execute(
             "SELECT compacted_through_sequence, cumulative_callback_count, "
             "rolled_receipt_chain_hash, last_receipt_chain_hash "
-            "FROM callback_compaction_watermarks WHERE run_id = 'run-1'"
+            "FROM callback_compaction_watermarks WHERE run_id = 'retention-run'"
         ).fetchone()
     assert tuple(watermark)[:2] == (104, 4)
     assert watermark["last_receipt_chain_hash"] == second_hash
@@ -1172,13 +1192,14 @@ def test_malformed_receipt_rolls_back_without_deleting_any_proof(tmp_path: Path)
     initialize_database(database)
     _seed_output_dependencies(database)
     with connect_v2(database) as connection:
-        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'run-1'")
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'retention-run'")
         for sequence in (51, 52):
             connection.execute(
                 "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
                 "recorder_generation, connection_generation, callback_kind, received_at_us, "
                 "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) "
-                "VALUES (?, ?, 'run-1', 1, 1, 'tick', ?, NULL, ?, 'failed', 'fixture', 'bad')",
+                "VALUES (?, ?, 'retention-run', 1, 1, 'tick', ?, NULL, ?, "
+                "'failed', 'fixture', 'bad')",
                 (sequence, f"bad-{sequence}", sequence, "a" * 64),
             )
     _insert_receipt(database, batch_id="bad", first_sequence=51, last_sequence=52, created_at_us=1)
@@ -1199,7 +1220,7 @@ def test_malformed_receipt_rolls_back_without_deleting_any_proof(tmp_path: Path)
         )
         assert (
             connection.execute(
-                "SELECT 1 FROM callback_compaction_watermarks WHERE run_id = 'run-1'"
+                "SELECT 1 FROM callback_compaction_watermarks WHERE run_id = 'retention-run'"
             ).fetchone()
             is None
         )
@@ -1239,7 +1260,7 @@ def test_closed_failed_callback_compacts_and_expires_only_with_receipt_proof(
 
     active = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
     with connect_v2(database) as connection:
-        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'run-1'")
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'retention-run'")
     closed = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
 
     assert active.payloads_compacted == 0
@@ -1490,6 +1511,7 @@ def test_inbox_tombstone_expires_while_its_market_event_remains(tmp_path: Path) 
         first_sequence=1,
         last_sequence=1,
         created_at_us=99,
+        run_id="run-1",
     )
 
     result = RetentionManager(
@@ -1563,6 +1585,122 @@ def test_granular_receipt_tombstones_expire_as_a_complete_batch(tmp_path: Path) 
                 (first, second),
             ).fetchone()[0]
             == 2
+        )
+
+
+def test_receipt_cannot_skip_unproven_same_run_predecessor_at_genesis(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status='stopped' WHERE run_id='retention-run'")
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_json, payload_sha256, lifecycle, failure_code) VALUES "
+            "(101, 'skipped-retention', 'retention-run', 1, 1, 'quote', 1, '{}', ?, "
+            "'failed', 'fixture')",
+            ("1" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_json, payload_sha256, lifecycle, failure_code) VALUES "
+            "(102, 'interleaved-other-run', 'run-1', 1, 1, 'quote', 1, '{}', ?, "
+            "'failed', 'fixture')",
+            ("2" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) VALUES "
+            "(103, 'forged-retention', 'retention-run', 1, 1, 'quote', 2, '{}', ?, "
+            "'failed', 'fixture', 'forged-skip')",
+            ("3" * 64,),
+        )
+    _insert_receipt(
+        database,
+        batch_id="forged-skip",
+        first_sequence=103,
+        last_sequence=103,
+        created_at_us=2,
+    )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=1, receipt_us=1, tombstone_us=1),
+    )
+    with pytest.raises(RetentionInvariantError, match="skipped"):
+        manager.run(now_us=10, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence=103"
+            ).fetchone()[0]
+            is not None
+        )
+        assert (
+            connection.execute(
+                "SELECT 1 FROM callback_compaction_watermarks WHERE run_id='retention-run'"
+            ).fetchone()
+            is None
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_receipts WHERE batch_id='forged-skip'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_receipt_cannot_skip_same_run_callback_after_permanent_watermark(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status='stopped' WHERE run_id='retention-run'")
+        for sequence, batch in ((101, "first-proof"), (103, None), (105, "later-proof")):
+            connection.execute(
+                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+                "recorder_generation, connection_generation, callback_kind, received_at_us, "
+                "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) "
+                "VALUES (?, ?, 'retention-run', 1, 1, 'quote', ?, '{}', ?, "
+                "'failed', 'fixture', ?)",
+                (sequence, f"watermark-{sequence}", sequence, f"{sequence:064x}", batch),
+            )
+    first_hash = _insert_receipt(
+        database,
+        batch_id="first-proof",
+        first_sequence=101,
+        last_sequence=101,
+        created_at_us=1,
+    )
+    _insert_receipt(
+        database,
+        batch_id="later-proof",
+        first_sequence=105,
+        last_sequence=105,
+        created_at_us=99,
+        prior_chain_hash=first_hash,
+    )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=1_000, receipt_us=50, tombstone_us=1_000),
+    )
+    first_pass = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    assert first_pass.receipts_rolled == 1
+    with pytest.raises(RetentionInvariantError, match="skipped"):
+        manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        watermark = connection.execute(
+            "SELECT compacted_through_sequence, cumulative_callback_count "
+            "FROM callback_compaction_watermarks WHERE run_id='retention-run'"
+        ).fetchone()
+        assert tuple(watermark) == (101, 1)
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_receipts WHERE batch_id='later-proof'"
+            ).fetchone()[0]
+            == 1
         )
 
 

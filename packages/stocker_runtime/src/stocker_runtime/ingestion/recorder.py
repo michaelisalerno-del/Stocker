@@ -470,13 +470,15 @@ class Recorder:
         try:
             self.adapter.connect()
         except Exception as error:
-            self._persist_connection_failure(
-                now_us=now_us,
-                code="IBKR_CONNECT_FAILED",
-                details=type(error).__name__,
-            )
-            with suppress(Exception):
-                self.adapter.disconnect()
+            try:
+                self._persist_connection_failure(
+                    now_us=now_us,
+                    code="IBKR_CONNECT_FAILED",
+                    details=type(error).__name__,
+                )
+            finally:
+                with suppress(Exception):
+                    self.adapter.disconnect()
             return
         try:
             self._check_owned()
@@ -505,13 +507,18 @@ class Recorder:
                     self.adapter.disconnect()
                 raise
             except Exception as error:
-                self._persist_subscription_failure(
-                    fence,
-                    spec,
-                    now_us=now_us,
-                    code="IBKR_SUBSCRIBE_FAILED",
-                    details=type(error).__name__,
-                )
+                try:
+                    self._persist_subscription_failure(
+                        fence,
+                        spec,
+                        now_us=now_us,
+                        code="IBKR_SUBSCRIBE_FAILED",
+                        details=type(error).__name__,
+                    )
+                except Exception:
+                    with suppress(Exception):
+                        self.adapter.disconnect()
+                    raise
                 if not spec.optional:
                     self._persist_connection_failure(
                         now_us=now_us,
@@ -585,7 +592,7 @@ class Recorder:
                     "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
                     (fence.subscription_id,),
                 ).fetchone()
-                if lifecycle is None or str(lifecycle[0]) != "connecting":
+                if lifecycle is None or str(lifecycle[0]) not in {"connecting", "active"}:
                     continue
                 spec = specs[fence.request_id]
                 self._open_gap(
@@ -597,8 +604,13 @@ class Recorder:
                 )
             connection.execute(
                 "UPDATE subscriptions SET lifecycle='disconnected' WHERE run_id=? "
-                "AND recorder_generation=? AND lifecycle='connecting'",
-                (self.config.run_id, self._authority_state().recorder_generation),
+                "AND recorder_generation=? AND connection_generation=? "
+                "AND lifecycle IN ('connecting','active')",
+                (
+                    self.config.run_id,
+                    state.recorder_generation,
+                    state.connection_generation,
+                ),
             )
             connection.execute(
                 "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=? "
@@ -827,6 +839,9 @@ class Recorder:
         if status.kind == "temporary_disconnect" and status.request_id is None:
             self.disconnected(now_us=status.received_at_us)
             return
+        if status.kind in {"farm_degraded", "farm_recovered"}:
+            self._market_data_farm_status(status)
+            return
         self._check_owned()
         state = self._authority_state()
         by_request = {fence.request_id: fence for fence in state.fences}
@@ -884,6 +899,102 @@ class Recorder:
                     code,
                     status.message,
                 )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _market_data_farm_status(self, status: MarketDataStatus) -> None:
+        """Scope farm health to affected feeds while the shared socket remains connected."""
+
+        self._check_owned()
+        state = self._authority_state()
+        specs = {spec.request_id: spec for spec in self._subscriptions}
+        targets = tuple(
+            fence
+            for fence in state.fences
+            if fence.request_id is not None
+            and (
+                fence.request_id == status.request_id
+                if status.request_id is not None
+                else specs[fence.request_id].feed_kind in status.affected_feed_kinds
+            )
+        )
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            if status.kind == "farm_degraded":
+                code = f"IBKR_FARM_{status.code}_DEGRADED"
+                for fence in targets:
+                    spec = specs[cast(int, fence.request_id)]
+                    connection.execute(
+                        "UPDATE subscriptions SET lifecycle='degraded' WHERE subscription_id=? "
+                        "AND lifecycle='active'",
+                        (fence.subscription_id,),
+                    )
+                    self._open_gap(
+                        connection,
+                        cast(str, fence.subscription_id),
+                        status.received_at_us,
+                        code,
+                        spec.continuity_required,
+                    )
+                    self._record_incident(
+                        connection,
+                        cast(str, fence.subscription_id),
+                        status.received_at_us,
+                        code,
+                        status.message,
+                    )
+                if targets:
+                    connection.execute(
+                        "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=? "
+                        "AND recorder_generation=?",
+                        (code, self.config.run_id, state.recorder_generation),
+                    )
+            else:
+                for fence in targets:
+                    connection.execute(
+                        "UPDATE subscriptions SET lifecycle='active' WHERE subscription_id=? "
+                        "AND lifecycle='degraded'",
+                        (fence.subscription_id,),
+                    )
+                    connection.execute(
+                        "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
+                        "AND subscription_id=? AND reason LIKE 'IBKR_FARM_%' "
+                        "AND resolved_at_us IS NULL",
+                        (
+                            status.received_at_us,
+                            status.received_at_us,
+                            self.config.run_id,
+                            fence.subscription_id,
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
+                        "AND subscription_id=? AND code LIKE 'IBKR_FARM_%' "
+                        "AND resolved_at_us IS NULL",
+                        (
+                            status.received_at_us,
+                            self.config.run_id,
+                            fence.subscription_id,
+                        ),
+                    )
+                required_degraded = connection.execute(
+                    "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "
+                    "AND connection_generation=? AND optional=0 AND lifecycle!='active' LIMIT 1",
+                    (
+                        self.config.run_id,
+                        state.recorder_generation,
+                        state.connection_generation,
+                    ),
+                ).fetchone()
+                if required_degraded is None:
+                    connection.execute(
+                        "UPDATE runtime_state SET lifecycle='running', reason=NULL WHERE run_id=? "
+                        "AND recorder_generation=?",
+                        (self.config.run_id, state.recorder_generation),
+                    )
             connection.commit()
         finally:
             connection.close()

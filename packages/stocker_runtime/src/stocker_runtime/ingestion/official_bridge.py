@@ -261,14 +261,20 @@ class _PrivateOfficialBridge:
         callback = self._status_callback
         if callback is None:
             return
-        temporary = {1100, 1300, 2103, 2105, 2110}
-        recovered = {1101, 1102, 2104, 2106, 2158}
+        temporary = {1100, 1300, 2110}
+        recovered = {1101, 1102}
+        farm_degraded = {2103: ("quotes", "trades"), 2105: ("bars",)}
+        farm_recovered = {2104: ("quotes", "trades"), 2106: ("bars",), 2158: ()}
         pacing = {100, 101, 420}
         rejected = {162, 200, 354, 10167, 10168}
         if code in temporary:
             kind = "temporary_disconnect"
         elif code in recovered:
             kind = "recovered"
+        elif code in farm_degraded:
+            kind = "farm_degraded"
+        elif code in farm_recovered:
+            kind = "farm_recovered"
         elif code in pacing:
             kind = "pacing"
         elif code in rejected:
@@ -282,6 +288,10 @@ class _PrivateOfficialBridge:
                 request_id=None if request_id < 0 else request_id,
                 message=message,
                 received_at_us=time.time_ns() // 1_000,
+                affected_feed_kinds=cast(
+                    Any,
+                    farm_degraded.get(code, farm_recovered.get(code, ())),
+                ),
             )
         )
 

@@ -1,4 +1,7 @@
+import copy
 import hashlib
+from collections.abc import Mapping
+from typing import get_origin
 
 import pytest
 from pydantic import ValidationError
@@ -31,8 +34,12 @@ def _manifest_data() -> dict[str, object]:
         "idea_version": "v0",
         "display_name": "Opening Leader Continuation",
         "description": "First-party prospective evidence plugin.",
-        "modes": ["prospective_record", "shadow"],
-        "output_kinds": ["observation", "signal", "proposed_trade"],
+        "modes": (RuntimeMode.PROSPECTIVE_RECORD, RuntimeMode.SHADOW),
+        "output_kinds": (
+            OutputKind.OBSERVATION,
+            OutputKind.SIGNAL,
+            OutputKind.PROPOSED_TRADE,
+        ),
         "parameter_schema_version": "v1",
         "parameter_schema": {"type": "object", "additionalProperties": False},
         "maximum_state_bytes": 65_536,
@@ -52,7 +59,7 @@ def test_manifest_accepts_only_immediate_runtime_modes() -> None:
 
     for unsupported_mode in ("paper", "live", "research", "unknown"):
         with pytest.raises(ValidationError):
-            IdeaManifest.model_validate({**_manifest_data(), "modes": [unsupported_mode]})
+            IdeaManifest.model_validate({**_manifest_data(), "modes": (unsupported_mode,)})
 
 
 def test_first_party_plugin_protocol_uses_bounded_authority_free_dtos() -> None:
@@ -382,9 +389,87 @@ def test_public_dto_json_is_deeply_immutable_and_round_trips() -> None:
 
         assert model.to_canonical_json() == canonical_before
         assert type(model).model_validate_json(canonical_before) == model
-        assert type(model).model_validate(model.model_dump(mode="json")) == model
+        assert type(model).model_validate(model.model_dump(mode="python")) == model
 
     assert activation.parameters_hash == parameters_hash
+
+
+def test_public_json_contract_is_read_only_and_survives_deep_copy() -> None:
+    observation = Observation(
+        subject_instrument_id="AAPL",
+        as_of_at_us=1,
+        payload={"nested": {"values": [1, 2]}},
+    )
+
+    for model_type, field_name in (
+        (Observation, "payload"),
+        (MarketEvent, "payload"),
+        (IdeaManifest, "parameter_schema"),
+        (IdeaActivation, "parameters"),
+    ):
+        assert get_origin(model_type.model_fields[field_name].annotation) is Mapping
+    assert isinstance(observation.payload, Mapping)
+    assert not isinstance(observation.payload, dict)
+    assert isinstance(observation.payload["nested"], Mapping)
+    assert observation.payload["nested"]["values"] == (1, 2)
+
+    for copied in (copy.deepcopy(observation), observation.model_copy(deep=True)):
+        assert copied == observation
+        with pytest.raises(TypeError):
+            copied.payload["nested"]["values"][0] = 9
+        with pytest.raises(TypeError):
+            copied.payload["nested"]["extra"] = True
+
+    assert Observation.model_validate_json(observation.to_canonical_json()) == observation
+
+
+@pytest.mark.parametrize("invalid_integer", [True, "1", 1.0])
+@pytest.mark.parametrize(
+    "model_type,valid_data,field_name",
+    [
+        (
+            MarketEvent,
+            {
+                "event_id": "event-001",
+                "instrument_id": "AAPL",
+                "feed_kind": "trades",
+                "event_kind": "trade",
+                "event_at_us": 1,
+                "received_at_us": 2,
+                "payload": {},
+            },
+            "event_at_us",
+        ),
+        (
+            Observation,
+            {"subject_instrument_id": "AAPL", "as_of_at_us": 1, "payload": {}},
+            "as_of_at_us",
+        ),
+        (
+            IdeaActivation,
+            {
+                "instance_id": "instance-001",
+                "parameters": {},
+                "parameters_hash": hashlib.sha256(b"{}").hexdigest(),
+                "plugin_code_hash": "b" * 64,
+                "activated_at_us": 1,
+                "run_id": "run-001",
+                "protected_data_class": ProtectedDataClass.PROSPECTIVE,
+                "universe": ("AAPL",),
+            },
+            "activated_at_us",
+        ),
+        (IdeaManifest, _manifest_data(), "maximum_outputs_per_batch"),
+    ],
+)
+def test_integer_timestamps_and_limits_reject_coercion(
+    model_type: type[MarketEvent | Observation | IdeaActivation | IdeaManifest],
+    valid_data: dict[str, object],
+    field_name: str,
+    invalid_integer: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        model_type.model_validate({**valid_data, field_name: invalid_integer})
 
 
 def test_market_event_payload_and_idea_batch_have_explicit_input_bounds() -> None:

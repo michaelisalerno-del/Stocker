@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from typing import Annotated, Literal, Protocol, Self, runtime_checkable
 
 from pydantic import Field, model_validator
@@ -34,7 +35,7 @@ class IdeaManifest(DomainModel):
     modes: tuple[RuntimeMode, ...] = Field(min_length=1)
     output_kinds: tuple[OutputKind, ...] = Field(min_length=1)
     parameter_schema_version: str = Field(min_length=1)
-    parameter_schema: dict[str, JsonValue]
+    parameter_schema: Mapping[str, JsonValue]
     maximum_state_bytes: int = Field(ge=1, le=MAX_PLUGIN_STATE_BYTES)
     maximum_outputs_per_batch: int = Field(ge=1, le=MAX_OUTPUTS_PER_BATCH)
 
@@ -51,7 +52,7 @@ class IdeaActivation(DomainModel):
     """Core-owned immutable activation details passed to one plugin instance."""
 
     instance_id: str = Field(min_length=1)
-    parameters: dict[str, JsonValue]
+    parameters: Mapping[str, JsonValue]
     parameters_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     plugin_code_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     activated_at_us: int = Field(ge=0)

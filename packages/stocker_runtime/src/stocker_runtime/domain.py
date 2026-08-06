@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Literal, Self
 
 from pydantic import (
@@ -15,16 +14,16 @@ from pydantic import (
     Field,
     FieldSerializationInfo,
     SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_serializer,
     model_validator,
 )
 
-type JsonValue = (
-    None | bool | int | float | str | list[JsonValue] | tuple[JsonValue, ...] | dict[str, JsonValue]
-)
+type JsonValue = None | bool | int | float | str | tuple[JsonValue, ...] | Mapping[str, JsonValue]
 
 MAX_OUTPUT_PAYLOAD_BYTES = 16 * 1024
 MAX_MARKET_EVENT_PAYLOAD_BYTES = 64 * 1024
+_JSON_FIELD_NAMES = frozenset({"parameter_schema", "parameters", "payload", "state"})
 FORBIDDEN_AUTHORITY_FIELD_NAMES = frozenset(
     {
         "account",
@@ -59,11 +58,51 @@ FORBIDDEN_AUTHORITY_FIELD_NAMES = frozenset(
 )
 
 
+class FrozenJsonObject(Mapping[str, object]):
+    """Tuple-backed JSON object with no mutable mapping storage."""
+
+    __slots__ = ("_items",)
+
+    def __init__(self, value: Mapping[str, object]) -> None:
+        self._items = tuple((key, _freeze_json(nested)) for key, nested in value.items())
+
+    def __getitem__(self, key: str) -> object:
+        for item_key, item_value in self._items:
+            if item_key == key:
+                return item_value
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (key for key, _value in self._items)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> FrozenJsonObject:
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Mapping):
+            return NotImplemented
+        return dict(self.items()) == dict(other.items())
+
+    def __repr__(self) -> str:
+        return repr(dict(self.items()))
+
+
 def _freeze_json(value: object) -> object:
     if isinstance(value, Mapping):
-        return MappingProxyType({key: _freeze_json(nested) for key, nested in value.items()})
+        return FrozenJsonObject(value)
     if isinstance(value, list | tuple):
         return tuple(_freeze_json(nested) for nested in value)
+    return value
+
+
+def _normalize_json_input(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _normalize_json_input(nested) for key, nested in value.items()}
+    if isinstance(value, list | tuple):
+        return tuple(_normalize_json_input(nested) for nested in value)
     return value
 
 
@@ -133,13 +172,26 @@ def ensure_authority_free_json(value: JsonValue) -> None:
 class DomainModel(BaseModel):
     """Immutable DTO with strict fields and deterministic JSON serialization."""
 
-    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", frozen=True)
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", frozen=True, strict=True)
 
-    _JSON_FIELD_NAMES = frozenset({"parameter_schema", "parameters", "payload", "state"})
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_nested_json_input(cls, value: object, info: ValidationInfo) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        normalized = dict(value)
+        if info.mode == "json":
+            normalized = {
+                field_name: tuple(field_value) if isinstance(field_value, list) else field_value
+                for field_name, field_value in normalized.items()
+            }
+        for field_name in _JSON_FIELD_NAMES & normalized.keys():
+            normalized[field_name] = _normalize_json_input(normalized[field_name])
+        return normalized
 
     @model_validator(mode="after")
     def freeze_nested_json(self) -> Self:
-        for field_name in self._JSON_FIELD_NAMES & type(self).model_fields.keys():
+        for field_name in _JSON_FIELD_NAMES & type(self).model_fields.keys():
             value = getattr(self, field_name)
             frozen_value = _freeze_json(value)
             if frozen_value is not value:
@@ -153,7 +205,7 @@ class DomainModel(BaseModel):
         handler: SerializerFunctionWrapHandler,
         info: FieldSerializationInfo,
     ) -> object:
-        if info.field_name in self._JSON_FIELD_NAMES:
+        if info.field_name in _JSON_FIELD_NAMES:
             return _thaw_json(value)
         return handler(value)
 
@@ -172,7 +224,7 @@ class MarketEvent(DomainModel):
     event_kind: str = Field(min_length=1)
     event_at_us: int = Field(ge=0)
     received_at_us: int = Field(ge=0)
-    payload: dict[str, JsonValue]
+    payload: Mapping[str, JsonValue]
 
     @model_validator(mode="after")
     def payload_fits_bound(self) -> Self:
@@ -191,7 +243,7 @@ class IdeaOutputBase(DomainModel):
 
     subject_instrument_id: str = Field(min_length=1)
     as_of_at_us: int = Field(ge=0)
-    payload: dict[str, JsonValue]
+    payload: Mapping[str, JsonValue]
 
     @model_validator(mode="after")
     def payload_fits_bound(self) -> Self:

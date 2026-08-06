@@ -85,6 +85,10 @@ def test_public_contract_schemas_reject_extra_fields_and_expose_no_authority_fie
         assert schema["additionalProperties"] is False
         assert not (set(model.model_fields) & forbidden_fields)
 
+    json_value_schema = IdeaActivation.model_json_schema()["$defs"]["JsonValue"]
+    json_value_types = {branch.get("type") for branch in json_value_schema["anyOf"]}
+    assert {"array", "object"} <= json_value_types
+
 
 def test_runtime_replaces_execution_placeholder_in_packaging_and_launcher() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

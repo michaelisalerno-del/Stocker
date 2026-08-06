@@ -1,6 +1,7 @@
 """Public first-party idea-plugin contracts."""
 
 from stocker_runtime.ideas.contract import (
+    MAX_EVENTS_PER_BATCH,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -15,5 +16,6 @@ __all__ = [
     "IdeaEvaluation",
     "IdeaManifest",
     "IdeaPlugin",
+    "MAX_EVENTS_PER_BATCH",
     "MarketDataRequirement",
 ]

@@ -6,14 +6,13 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from stocker_core.config import (
-    EODHDConfig,
-    ResearchConfig,
-    load_research_config,
-)
+from stocker_core.config import EODHDConfig, ResearchConfig, load_research_config
 
 console = Console()
-app = typer.Typer(no_args_is_help=True, help="Stocker research and execution utilities.")
+app = typer.Typer(
+    no_args_is_help=True,
+    help="Stocker research and prospective evaluation utilities.",
+)
 data_app = typer.Typer(no_args_is_help=True, help="Data utilities.")
 research_app = typer.Typer(no_args_is_help=True, help="Research utilities.")
 universe_app = typer.Typer(no_args_is_help=True, help="Universe data-management utilities.")

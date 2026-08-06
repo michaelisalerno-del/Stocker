@@ -16,11 +16,11 @@ from stocker_runtime.domain import (
     ProtectedDataClass,
     RuntimeMode,
     canonical_json_bytes,
-    ensure_authority_free_json,
 )
 
 MAX_PLUGIN_STATE_BYTES = 64 * 1024
 MAX_OUTPUTS_PER_BATCH = 256
+MAX_EVENTS_PER_BATCH = 256
 
 
 class IdeaManifest(DomainModel):
@@ -40,7 +40,6 @@ class IdeaManifest(DomainModel):
 
     @model_validator(mode="after")
     def declarations_are_unique(self) -> Self:
-        ensure_authority_free_json(self.parameter_schema)
         if len(set(self.modes)) != len(self.modes):
             raise ValueError("modes must not contain duplicates")
         if len(set(self.output_kinds)) != len(self.output_kinds):
@@ -61,8 +60,7 @@ class IdeaActivation(DomainModel):
     universe: tuple[str, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def parameters_have_no_authority(self) -> Self:
-        ensure_authority_free_json(self.parameters)
+    def parameters_hash_matches(self) -> Self:
         expected_hash = hashlib.sha256(canonical_json_bytes(self.parameters)).hexdigest()
         if self.parameters_hash != expected_hash:
             raise ValueError("parameters_hash does not match canonical parameters")
@@ -80,10 +78,10 @@ class MarketDataRequirement(DomainModel):
 
 
 class IdeaBatch(DomainModel):
-    """Immutable causal market-event input for one plugin evaluation."""
+    """Immutable causal input of at most 256 market events."""
 
     mode: RuntimeMode
-    events: tuple[MarketEvent, ...] = Field(min_length=1)
+    events: tuple[MarketEvent, ...] = Field(min_length=1, max_length=MAX_EVENTS_PER_BATCH)
     input_watermark: str = Field(min_length=1)
     causal_from_at_us: int = Field(ge=0)
     causal_through_at_us: int = Field(ge=0)
@@ -106,7 +104,6 @@ class IdeaEvaluation(DomainModel):
 
     @model_validator(mode="after")
     def state_fits_bound(self) -> Self:
-        ensure_authority_free_json(self.state)
         if len(self.state_json()) > MAX_PLUGIN_STATE_BYTES:
             raise ValueError(f"state exceeds {MAX_PLUGIN_STATE_BYTES} bytes")
         return self

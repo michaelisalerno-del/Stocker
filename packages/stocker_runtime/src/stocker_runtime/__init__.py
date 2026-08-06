@@ -1,6 +1,7 @@
 """Public contracts for Stocker's prospective-record and shadow runtime."""
 
 from stocker_runtime.domain import (
+    MAX_MARKET_EVENT_PAYLOAD_BYTES,
     IdeaOutput,
     JsonValue,
     MarketEvent,
@@ -14,6 +15,7 @@ from stocker_runtime.domain import (
     canonical_json_bytes,
 )
 from stocker_runtime.ideas import (
+    MAX_EVENTS_PER_BATCH,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -30,6 +32,8 @@ __all__ = [
     "IdeaManifest",
     "IdeaPlugin",
     "JsonValue",
+    "MAX_EVENTS_PER_BATCH",
+    "MAX_MARKET_EVENT_PAYLOAD_BYTES",
     "MarketDataRequirement",
     "MarketEvent",
     "Observation",

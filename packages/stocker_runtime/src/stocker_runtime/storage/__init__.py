@@ -9,6 +9,7 @@ from stocker_runtime.storage.connection import (
     initialize_database,
     migrate_database,
     migration_plan,
+    verify_database,
 )
 from stocker_runtime.storage.repository import (
     MAX_CALLBACK_PAYLOAD_BYTES,
@@ -22,6 +23,7 @@ from stocker_runtime.storage.repository import (
     OperationalRepository,
     ProvenanceError,
     StoreResult,
+    callback_rows_hash,
     canonical_json_text,
     deterministic_output_id,
     receipt_chain_hash,
@@ -60,10 +62,12 @@ __all__ = [
     "StoreResult",
     "StorageCapState",
     "canonical_json_text",
+    "callback_rows_hash",
     "connect_v2",
     "deterministic_output_id",
     "initialize_database",
     "migrate_database",
     "migration_plan",
     "receipt_chain_hash",
+    "verify_database",
 ]

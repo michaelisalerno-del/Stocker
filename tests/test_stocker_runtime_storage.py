@@ -23,6 +23,7 @@ from stocker_runtime.storage import (
     RetentionPolicy,
     SchemaError,
     StorageCapState,
+    callback_rows_hash,
     canonical_json_text,
     connect_v2,
     deterministic_output_id,
@@ -30,6 +31,13 @@ from stocker_runtime.storage import (
     migrate_database,
     migration_plan,
     receipt_chain_hash,
+    verify_database,
+)
+from stocker_runtime.storage.retention import (
+    ACK_PAYLOAD_CANDIDATES_SQL,
+    ACK_TOMBSTONE_CANDIDATES_SQL,
+    FAILED_PAYLOAD_CANDIDATES_SQL,
+    FAILED_TOMBSTONE_CANDIDATES_SQL,
 )
 
 
@@ -221,6 +229,112 @@ def test_schema_rejects_invalid_json_and_mode_data_class_mismatch(tmp_path: Path
                 "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
                 "opened_at_us, details_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("bad-json", "run-json", "runtime", "info", "bad", 1, "{not-json"),
+            )
+
+
+def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        statements = (
+            "UPDATE callback_inbox SET payload_json = '{ \"a\": 1 }' WHERE source_sequence = 1",
+            "UPDATE market_events SET payload_json = '{\"z\":1,\"a\":2}' "
+            "WHERE event_id = 'event-1'",
+            "UPDATE idea_plugins SET manifest_json = '{ \"a\": 1 }' WHERE idea_id = 'idea'",
+            "UPDATE idea_instances SET parameters_json = '{\"z\":1,\"a\":2}' "
+            "WHERE instance_id = 'instance-1'",
+        )
+        for statement in statements:
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+                connection.execute(statement)
+
+
+def test_acknowledgement_and_decoupled_event_references_enforce_provenance(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        cursor = connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle) VALUES ('ack-2', 'run-1', 1, 1, 'tick', 21, "
+            "'{}', ?, 'pending')",
+            ("a" * 64,),
+        )
+        sequence = int(cursor.lastrowid)
+        with pytest.raises(sqlite3.IntegrityError, match="acknowledgement_event_mismatch"):
+            connection.execute(
+                "UPDATE callback_inbox SET lifecycle = 'acknowledged', "
+                "normalized_event_id = 'event-1' WHERE source_sequence = ?",
+                (sequence,),
+            )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES ('event-2', 'run-1', ?, 'instrument-1', "
+            "'trades', 'tick', 21, 21, 1, '{}', ?)",
+            (sequence, "b" * 64),
+        )
+        connection.execute(
+            "UPDATE callback_inbox SET lifecycle = 'acknowledged', "
+            "normalized_event_id = 'event-2', acknowledged_at_us = 21 WHERE source_sequence = ?",
+            (sequence,),
+        )
+        connection.execute(
+            "INSERT INTO idea_checkpoints VALUES "
+            "('instance-1', 'event-1', '{}', ?, 20, 20, 0)",
+            ("c" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="checkpoint_event_provenance"):
+            connection.execute(
+                "UPDATE idea_checkpoints SET last_market_event_id = 'missing' "
+                "WHERE instance_id = 'instance-1'"
+            )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us, latest_event_id) VALUES "
+            "('sub-1', 'run-1', 1, 1, 'instrument-1', 'trades', 10, 'open', ?, 20, 'event-1')",
+            ("d" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="subscription_latest_event_provenance"):
+            connection.execute(
+                "UPDATE subscriptions SET feed_kind = 'quotes' WHERE subscription_id = 'sub-1'"
+            )
+
+
+def test_shadow_leg_event_references_match_position_run_and_instrument(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    proposal = IdeaOutputRecord(
+        **{
+            **_output().__dict__,
+            "output_kind": "proposed_trade",
+            "authority_status": "unapproved",
+        }
+    )
+    stored = OperationalRepository(database).put_idea_output(proposal)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, lifecycle, cost_model_id, fill_model_id, currency, data_class) "
+            "VALUES ('position-1', ?, 'run-1', 'instance-1', 'open', 'cost', 'fill', "
+            "'USD', 'shadow_protected')",
+            (stored.output_id,),
+        )
+        connection.execute(
+            "INSERT INTO shadow_legs(position_id, leg_number, instrument_id, side, quantity, "
+            "entry_market_event_id) VALUES "
+            "('position-1', 0, 'instrument-1', 'buy', 1, 'event-1')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="entry_event_provenance"):
+            connection.execute(
+                "UPDATE shadow_legs SET entry_market_event_id = 'missing' "
+                "WHERE position_id = 'position-1' AND leg_number = 0"
             )
 
 
@@ -461,8 +575,10 @@ def test_repository_and_schema_reject_cross_run_provenance(tmp_path: Path) -> No
     assert valid.output_id
     assert any(row[0] in {"idea_instances", "idea_outputs"} for row in violations)
 
+    with connect_v2(database):
+        pass
     with pytest.raises(SchemaError, match="foreign-key violations"):
-        connect_v2(database)
+        verify_database(database)
 
 
 def test_repository_cannot_promote_a_proposal(tmp_path: Path) -> None:
@@ -496,8 +612,8 @@ def _seed_callback_for_retention(
         cursor = connection.execute(
             "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
             "connection_generation, callback_kind, received_at_us, payload_json, "
-            "payload_sha256, lifecycle, normalized_event_id, acknowledged_at_us, "
-            "receipt_batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "payload_sha256, lifecycle, receipt_batch_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 uid,
                 "run-1",
@@ -507,13 +623,37 @@ def _seed_callback_for_retention(
                 received_at_us,
                 '{"private":"evidence"}',
                 "a" * 64,
-                lifecycle,
-                normalized_event_id,
-                acknowledged_at_us,
+                "pending" if lifecycle == "acknowledged" else lifecycle,
                 receipt_batch_id,
             ),
         )
-        return int(cursor.lastrowid)
+        sequence = int(cursor.lastrowid)
+        if lifecycle == "acknowledged":
+            event_id = f"retention-event-{uid}"
+            connection.execute(
+                "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+                "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+                "payload_json, payload_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event_id,
+                    "run-1",
+                    sequence,
+                    "instrument-1",
+                    "trades",
+                    "tick",
+                    received_at_us,
+                    received_at_us,
+                    1,
+                    "{}",
+                    "b" * 64,
+                ),
+            )
+            connection.execute(
+                "UPDATE callback_inbox SET lifecycle = 'acknowledged', "
+                "normalized_event_id = ?, acknowledged_at_us = ? WHERE source_sequence = ?",
+                (event_id, acknowledged_at_us, sequence),
+            )
+        return sequence
 
 
 def _insert_receipt(
@@ -526,19 +666,38 @@ def _insert_receipt(
     prior_chain_hash: str = "0" * 64,
     run_id: str = "run-1",
 ) -> str:
-    count = last_sequence - first_sequence + 1
+    with connect_v2(database) as connection:
+        rows = tuple(
+            connection.execute(
+                "SELECT event_uid, payload_sha256, run_id, source_sequence, callback_kind, "
+                "lifecycle, received_at_us, provider_at_us, normalized_event_id, "
+                "acknowledged_at_us, failure_code FROM callback_inbox "
+                "WHERE run_id = ? AND source_sequence BETWEEN ? AND ? ORDER BY source_sequence",
+                (run_id, first_sequence, last_sequence),
+            )
+        )
+    assert len(rows) == last_sequence - first_sequence + 1
+    kind_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = {}
+    for row in rows:
+        kind = str(row["callback_kind"])
+        status = str(row["lifecycle"])
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        status_counts[status] = status_counts.get(status, 0) + 1
+    count = len(rows)
     record = CallbackReceiptRecord(
         batch_id=batch_id,
         run_id=run_id,
         first_source_sequence=first_sequence,
         last_source_sequence=last_sequence,
         callback_count=count,
-        first_received_at_us=first_sequence,
-        last_received_at_us=last_sequence,
-        kind_counts={"tick": count},
-        status_counts={"acknowledged": count},
-        first_normalized_event_id=None,
-        last_normalized_event_id=None,
+        first_received_at_us=int(rows[0]["received_at_us"]),
+        last_received_at_us=int(rows[-1]["received_at_us"]),
+        kind_counts=kind_counts,
+        status_counts=status_counts,
+        callback_rows_hash=callback_rows_hash(tuple(dict(row) for row in rows)),
+        first_normalized_event_id=rows[0]["normalized_event_id"],
+        last_normalized_event_id=rows[-1]["normalized_event_id"],
         created_at_us=created_at_us,
         prior_chain_hash=prior_chain_hash,
     )
@@ -547,9 +706,10 @@ def _insert_receipt(
         connection.execute(
             "INSERT INTO callback_receipts(batch_id, run_id, first_source_sequence, "
             "last_source_sequence, callback_count, first_received_at_us, last_received_at_us, "
-            "kind_counts_json, status_counts_json, prior_chain_hash, chained_payload_hash, "
+            "kind_counts_json, status_counts_json, callback_rows_hash, prior_chain_hash, "
+            "chained_payload_hash, "
             "first_normalized_event_id, last_normalized_event_id, created_at_us) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 record.batch_id,
                 record.run_id,
@@ -560,6 +720,7 @@ def _insert_receipt(
                 record.last_received_at_us,
                 canonical_json_text(record.kind_counts, max_bytes=16_384),
                 canonical_json_text(record.status_counts, max_bytes=16_384),
+                record.callback_rows_hash,
                 record.prior_chain_hash,
                 chain_hash,
                 record.first_normalized_event_id,
@@ -576,13 +737,6 @@ def test_retention_compacts_only_durably_projected_acknowledged_receipted_payloa
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
-    _insert_receipt(
-        database,
-        batch_id="receipt-1",
-        first_sequence=2,
-        last_sequence=5,
-        created_at_us=4,
-    )
     eligible = _seed_callback_for_retention(database, uid="eligible", received_at_us=1)
     pending = _seed_callback_for_retention(
         database,
@@ -598,6 +752,13 @@ def test_retention_compacts_only_durably_projected_acknowledged_receipted_payloa
     )
     recent = _seed_callback_for_retention(
         database, uid="recent", received_at_us=99, acknowledged_at_us=99
+    )
+    _insert_receipt(
+        database,
+        batch_id="receipt-1",
+        first_sequence=eligible,
+        last_sequence=recent,
+        created_at_us=4,
     )
     manager = RetentionManager(
         database,
@@ -657,10 +818,80 @@ def test_compaction_rejects_a_corrupt_recent_receipt_before_payload_deletion(
         )
 
 
+def test_compaction_rejects_a_self_consistent_receipt_forged_away_from_callback_rows(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database, uid="forged-proof", received_at_us=1, receipt_batch_id="forged"
+    )
+    _insert_receipt(
+        database,
+        batch_id="forged",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=99,
+    )
+    forged = CallbackReceiptRecord(
+        batch_id="forged",
+        run_id="run-1",
+        first_source_sequence=sequence,
+        last_source_sequence=sequence,
+        callback_count=1,
+        first_received_at_us=1,
+        last_received_at_us=1,
+        kind_counts={"forged": 1},
+        status_counts={"acknowledged": 1},
+        callback_rows_hash="f" * 64,
+        first_normalized_event_id="retention-event-forged-proof",
+        last_normalized_event_id="retention-event-forged-proof",
+        created_at_us=99,
+        prior_chain_hash="0" * 64,
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE callback_receipts SET kind_counts_json = ?, callback_rows_hash = ?, "
+            "chained_payload_hash = ? WHERE batch_id = 'forged'",
+            (
+                canonical_json_text(forged.kind_counts, max_bytes=16_384),
+                forged.callback_rows_hash,
+                receipt_chain_hash(forged),
+            ),
+        )
+
+    with pytest.raises(RetentionInvariantError, match="authoritative callback rows"):
+        RetentionManager(database, RetentionPolicy(callback_payload_us=10, receipt_us=1_000)).run(
+            now_us=100, measured_database_bytes=1, measured_wal_bytes=0
+        )
+
+    with connect_v2(database) as connection:
+        assert connection.execute(
+            "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
+        ).fetchone()[0] is not None
+
+
 def test_receipt_rotation_rolls_permanent_watermark_before_deletion(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'run-1'")
+        for sequence in range(101, 107):
+            connection.execute(
+                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+                "recorder_generation, connection_generation, callback_kind, received_at_us, "
+                "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) "
+                "VALUES (?, ?, 'run-1', 1, 1, 'tick', ?, NULL, ?, 'failed', 'fixture', ?)",
+                (
+                    sequence,
+                    f"rotation-{sequence}",
+                    sequence,
+                    "a" * 64,
+                    f"r{1 + (sequence - 101) // 2}",
+                ),
+            )
     first_hash = _insert_receipt(
         database, batch_id="r1", first_sequence=101, last_sequence=102, created_at_us=20
     )
@@ -710,6 +941,16 @@ def test_malformed_receipt_rolls_back_without_deleting_any_proof(tmp_path: Path)
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'run-1'")
+        for sequence in (51, 52):
+            connection.execute(
+                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+                "recorder_generation, connection_generation, callback_kind, received_at_us, "
+                "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) "
+                "VALUES (?, ?, 'run-1', 1, 1, 'tick', ?, NULL, ?, 'failed', 'fixture', 'bad')",
+                (sequence, f"bad-{sequence}", sequence, "a" * 64),
+            )
     _insert_receipt(database, batch_id="bad", first_sequence=51, last_sequence=52, created_at_us=1)
     with connect_v2(database) as connection:
         connection.execute("UPDATE callback_receipts SET callback_count = 3 WHERE batch_id = 'bad'")
@@ -843,6 +1084,26 @@ def test_retention_deadline_rolls_back_safely(tmp_path: Path) -> None:
 
     with connect_v2(database) as connection:
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
+def test_default_100ms_retention_pass_makes_progress_on_expired_rows(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.executemany(
+            "INSERT INTO incidents(incident_id, run_id, scope, severity, code, opened_at_us, "
+            "resolved_at_us, details_json) VALUES (?, 'run-1', 'fixture', 'info', "
+            "'resolved', 1, 2, '{}')",
+            ((f"expired-{index}",) for index in range(500)),
+        )
+
+    result = RetentionManager(
+        database,
+        RetentionPolicy(resolved_diagnostic_us=10),
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.expired_rows_deleted == 500
 
 
 def test_retention_rejects_maintenance_batches_above_hard_bound() -> None:
@@ -1017,16 +1278,20 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
             "AND resolved_at_us <= ? ORDER BY resolved_at_us, gap_id LIMIT ?",
             (100, 10_000),
         ),
-        "callback_inbox_compaction_idx": (
-            "SELECT source_sequence FROM callback_inbox WHERE lifecycle = 'acknowledged' "
-            "AND payload_json IS NOT NULL AND acknowledged_at_us <= ? "
-            "ORDER BY source_sequence LIMIT ?",
+        "callback_inbox_terminal_idx": (
+            ACK_PAYLOAD_CANDIDATES_SQL,
             (100, 10_000),
         ),
-        "callback_inbox_tombstone_idx": (
-            "SELECT source_sequence FROM callback_inbox WHERE lifecycle = 'acknowledged' "
-            "AND payload_json IS NULL AND acknowledged_at_us <= ? "
-            "ORDER BY acknowledged_at_us, received_at_us, source_sequence LIMIT ?",
+        "callback_inbox_ack_tombstone_idx": (
+            ACK_TOMBSTONE_CANDIDATES_SQL,
+            (100, 10_000),
+        ),
+        "callback_inbox_failed_payload_idx": (
+            FAILED_PAYLOAD_CANDIDATES_SQL,
+            (100, 10_000),
+        ),
+        "callback_inbox_failed_tombstone_idx": (
+            FAILED_TOMBSTONE_CANDIDATES_SQL,
             (100, 10_000),
         ),
     }

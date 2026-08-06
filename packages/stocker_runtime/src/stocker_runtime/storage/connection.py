@@ -98,9 +98,36 @@ def _apply_pragmas(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA journal_size_limit = 67108864")
 
 
+def _is_canonical_json(value: object) -> int:
+    if not isinstance(value, str):
+        return 0
+    try:
+        parsed = json.loads(value)
+        canonical = json.dumps(
+            parsed,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return 0
+    return int(canonical == value)
+
+
+def _register_functions(connection: sqlite3.Connection) -> None:
+    connection.create_function(
+        "stocker_canonical_json",
+        1,
+        _is_canonical_json,
+        deterministic=True,
+    )
+
+
 def _raw_connect(database_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path, timeout=5.0, isolation_level=None)
     connection.row_factory = sqlite3.Row
+    _register_functions(connection)
     _apply_pragmas(connection)
     return connection
 
@@ -136,6 +163,7 @@ def _expected_schema_digest(migration_fingerprints: tuple[tuple[str, str], ...])
         raise SchemaError("runtime migration plan changed while verifying schema")
     connection = sqlite3.connect(":memory:", isolation_level=None)
     try:
+        _register_functions(connection)
         for migration in plan[: len(migration_fingerprints)]:
             connection.executescript(migration.sql)
         return _schema_digest(connection)
@@ -165,15 +193,21 @@ def _read_only_connect(database_path: Path) -> sqlite3.Connection:
     uri = f"{database_path.resolve().as_uri()}?mode=ro"
     connection = sqlite3.connect(uri, uri=True, timeout=5.0, isolation_level=None)
     connection.row_factory = sqlite3.Row
+    _register_functions(connection)
     connection.execute("PRAGMA query_only = ON")
     return connection
 
 
-def _probe_v2(database_path: Path, migrations: tuple[Migration, ...]) -> set[int]:
+def _probe_v2(
+    database_path: Path,
+    migrations: tuple[Migration, ...],
+    *,
+    verify_integrity: bool,
+) -> set[int]:
     with _read_only_connect(database_path) as connection:
         applied = _verify_applied_migrations(connection, migrations)
         _verify_schema_structure(connection, migrations, applied)
-        if tuple(connection.execute("PRAGMA foreign_key_check")):
+        if verify_integrity and tuple(connection.execute("PRAGMA foreign_key_check")):
             raise SchemaError("database contains foreign-key violations")
         return applied
 
@@ -261,6 +295,7 @@ def initialize_database(
     try:
         connection = sqlite3.connect(path, timeout=5.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
+        _register_functions(connection)
         connection.execute("PRAGMA auto_vacuum = INCREMENTAL")
         _apply_pragmas(connection)
         applied = _apply_migrations(
@@ -294,7 +329,7 @@ def migrate_database(
     if not path.is_file():
         raise SchemaError("V2 migration requires an existing database")
     migrations = migration_plan(migration_root)
-    _probe_v2(path, migrations)
+    _probe_v2(path, migrations, verify_integrity=True)
     with _raw_connect(path) as connection:
         applied = _verify_applied_migrations(connection, migrations)
         newly_applied = _apply_migrations(
@@ -313,7 +348,9 @@ def connect_v2(database_path: str | Path, *, verify_schema: bool = True) -> sqli
     if not path.is_file():
         raise SchemaError("V2 database does not exist")
     migrations = migration_plan()
-    applied = _probe_v2(path, migrations) if verify_schema else set()
+    applied = (
+        _probe_v2(path, migrations, verify_integrity=False) if verify_schema else set()
+    )
     if verify_schema and applied != {item.version for item in migrations}:
         raise SchemaError("database schema is older than this runtime; run migrate")
     connection = _raw_connect(path)
@@ -327,3 +364,18 @@ def connect_v2(database_path: str | Path, *, verify_schema: bool = True) -> sqli
     except Exception:
         connection.close()
         raise
+
+
+def verify_database(database_path: str | Path) -> None:
+    """Run explicit structural, foreign-key, and quick integrity verification."""
+
+    path = Path(database_path)
+    if not path.is_file():
+        raise SchemaError("V2 database does not exist")
+    migrations = migration_plan()
+    applied = _probe_v2(path, migrations, verify_integrity=True)
+    if applied != {item.version for item in migrations}:
+        raise SchemaError("database schema is older than this runtime; run migrate")
+    with _read_only_connect(path) as connection:
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise SchemaError("database quick_check failed")

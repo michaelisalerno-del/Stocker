@@ -16,12 +16,59 @@ from stocker_runtime.domain import JsonValue, canonical_json_bytes
 from stocker_runtime.storage.connection import connect_v2
 from stocker_runtime.storage.repository import (
     CallbackReceiptRecord,
+    callback_rows_hash,
     canonical_json_text,
     receipt_chain_hash,
 )
 
 DAY_US = 86_400_000_000
 MAX_MAINTENANCE_BATCH_ROWS = 10_000
+
+_RECEIPT_PROOF_SQL = """
+AND receipt_batch_id IS NOT NULL
+AND (EXISTS (
+    SELECT 1 FROM callback_receipts receipt
+    WHERE receipt.batch_id = callback_inbox.receipt_batch_id
+      AND receipt.run_id = callback_inbox.run_id
+      AND callback_inbox.source_sequence BETWEEN
+          receipt.first_source_sequence AND receipt.last_source_sequence
+) OR EXISTS (
+    SELECT 1 FROM callback_compaction_watermarks watermark
+    WHERE watermark.run_id = callback_inbox.run_id
+      AND watermark.compacted_through_sequence >= callback_inbox.source_sequence
+))
+"""
+ACK_PAYLOAD_CANDIDATES_SQL = """
+SELECT source_sequence, run_id, receipt_batch_id
+FROM callback_inbox INDEXED BY callback_inbox_terminal_idx
+WHERE lifecycle = 'acknowledged' AND payload_json IS NOT NULL
+  AND normalized_event_id IS NOT NULL AND acknowledged_at_us IS NOT NULL
+  AND acknowledged_at_us <= ?
+""" + _RECEIPT_PROOF_SQL + " ORDER BY acknowledged_at_us, source_sequence LIMIT ?"
+FAILED_PAYLOAD_CANDIDATES_SQL = """
+SELECT source_sequence, run_id, receipt_batch_id
+FROM callback_inbox INDEXED BY callback_inbox_failed_payload_idx
+WHERE lifecycle = 'failed' AND payload_json IS NOT NULL
+  AND failure_code IS NOT NULL AND received_at_us <= ?
+  AND EXISTS (SELECT 1 FROM runs terminal_run
+      WHERE terminal_run.run_id = callback_inbox.run_id
+        AND terminal_run.status IN ('stopped', 'fatal'))
+""" + _RECEIPT_PROOF_SQL + " ORDER BY received_at_us, source_sequence LIMIT ?"
+ACK_TOMBSTONE_CANDIDATES_SQL = """
+SELECT source_sequence, run_id, receipt_batch_id
+FROM callback_inbox INDEXED BY callback_inbox_ack_tombstone_idx
+WHERE lifecycle = 'acknowledged' AND payload_json IS NULL
+  AND acknowledged_at_us IS NOT NULL AND acknowledged_at_us <= ?
+""" + _RECEIPT_PROOF_SQL + " ORDER BY acknowledged_at_us, source_sequence LIMIT ?"
+FAILED_TOMBSTONE_CANDIDATES_SQL = """
+SELECT source_sequence, run_id, receipt_batch_id
+FROM callback_inbox INDEXED BY callback_inbox_failed_tombstone_idx
+WHERE lifecycle = 'failed' AND payload_json IS NULL
+  AND received_at_us <= ?
+  AND EXISTS (SELECT 1 FROM runs terminal_run
+      WHERE terminal_run.run_id = callback_inbox.run_id
+        AND terminal_run.status IN ('stopped', 'fatal'))
+""" + _RECEIPT_PROOF_SQL + " ORDER BY received_at_us, source_sequence LIMIT ?"
 
 
 class RetentionInvariantError(RuntimeError):
@@ -128,46 +175,16 @@ class RetentionManager:
         return page_count * page_size, wal_path.stat().st_size if wal_path.exists() else 0
 
     def _compact_payloads(self, connection: sqlite3.Connection, cutoff_us: int, limit: int) -> int:
-        candidates = tuple(
+        acknowledged = tuple(
+            connection.execute(ACK_PAYLOAD_CANDIDATES_SQL, (cutoff_us, limit))
+        )
+        failed = tuple(
             connection.execute(
-                """
-                SELECT source_sequence, run_id, receipt_batch_id
-                FROM callback_inbox
-                WHERE (
-                    (lifecycle = 'acknowledged'
-                        AND normalized_event_id IS NOT NULL
-                        AND acknowledged_at_us IS NOT NULL
-                        AND acknowledged_at_us <= ?)
-                    OR
-                    (lifecycle = 'failed'
-                        AND failure_code IS NOT NULL
-                        AND received_at_us <= ?
-                        AND EXISTS (
-                            SELECT 1 FROM runs terminal_run
-                            WHERE terminal_run.run_id = callback_inbox.run_id
-                              AND terminal_run.status IN ('stopped', 'fatal')
-                        ))
-                  )
-                  AND receipt_batch_id IS NOT NULL
-                  AND payload_json IS NOT NULL
-                  AND (EXISTS (
-                      SELECT 1 FROM callback_receipts
-                      WHERE callback_receipts.batch_id = callback_inbox.receipt_batch_id
-                        AND callback_receipts.run_id = callback_inbox.run_id
-                        AND callback_inbox.source_sequence BETWEEN
-                            callback_receipts.first_source_sequence
-                            AND callback_receipts.last_source_sequence
-                  ) OR EXISTS (
-                      SELECT 1 FROM callback_compaction_watermarks watermark
-                      WHERE watermark.run_id = callback_inbox.run_id
-                        AND watermark.compacted_through_sequence >= callback_inbox.source_sequence
-                  ))
-                ORDER BY source_sequence
-                LIMIT ?
-            """,
-                (cutoff_us, cutoff_us, limit),
+                FAILED_PAYLOAD_CANDIDATES_SQL,
+                (cutoff_us, max(0, limit - len(acknowledged))),
             )
         )
+        candidates = acknowledged + failed
         verified_batches: set[tuple[str, str]] = set()
         for candidate in candidates:
             key = (str(candidate["run_id"]), str(candidate["receipt_batch_id"]))
@@ -216,6 +233,7 @@ class RetentionManager:
         )
         for linked_receipt in chain:
             record = self._verified_receipt(
+                connection,
                 linked_receipt,
                 expected_first=expected_first,
                 expected_prior_hash=expected_prior,
@@ -247,8 +265,9 @@ class RetentionManager:
                 break
         return rows[: min(candidate_count, remaining)]
 
-    @staticmethod
     def _verified_receipt(
+        self,
+        connection: sqlite3.Connection,
         row: sqlite3.Row,
         *,
         expected_first: int,
@@ -259,6 +278,8 @@ class RetentionManager:
         count = int(row["callback_count"])
         if first != expected_first or count != last - first + 1:
             raise RetentionInvariantError("receipt source sequence/count invariant failed")
+        if count > MAX_MAINTENANCE_BATCH_ROWS:
+            raise RetentionInvariantError("receipt callback count exceeds verification bound")
         if str(row["prior_chain_hash"]) != expected_prior_hash:
             raise RetentionInvariantError("receipt predecessor hash invariant failed")
 
@@ -293,6 +314,7 @@ class RetentionManager:
             last_received_at_us=int(row["last_received_at_us"]),
             kind_counts=counts("kind_counts_json"),
             status_counts=counts("status_counts_json"),
+            callback_rows_hash=str(row["callback_rows_hash"]),
             first_normalized_event_id=(
                 None
                 if row["first_normalized_event_id"] is None
@@ -310,6 +332,43 @@ class RetentionManager:
             raise RetentionInvariantError("receipt time range is reversed")
         if receipt_chain_hash(record) != str(row["chained_payload_hash"]):
             raise RetentionInvariantError("receipt content hash invariant failed")
+        callback_rows = tuple(
+            connection.execute(
+                "SELECT event_uid, payload_sha256, run_id, source_sequence, callback_kind, "
+                "lifecycle, received_at_us, provider_at_us, normalized_event_id, "
+                "acknowledged_at_us, failure_code FROM callback_inbox "
+                "WHERE run_id = ? AND source_sequence BETWEEN ? AND ? "
+                "ORDER BY source_sequence LIMIT ?",
+                (record.run_id, first, last, count + 1),
+            )
+        )
+        if callback_rows:
+            if len(callback_rows) != count:
+                raise RetentionInvariantError("receipt callback row count invariant failed")
+            derived_kind_counts: dict[str, int] = {}
+            derived_status_counts: dict[str, int] = {}
+            for callback in callback_rows:
+                kind = str(callback["callback_kind"])
+                status = str(callback["lifecycle"])
+                derived_kind_counts[kind] = derived_kind_counts.get(kind, 0) + 1
+                derived_status_counts[status] = derived_status_counts.get(status, 0) + 1
+            first_callback = callback_rows[0]
+            last_callback = callback_rows[-1]
+            if (
+                int(first_callback["source_sequence"]) != first
+                or int(last_callback["source_sequence"]) != last
+                or record.kind_counts != derived_kind_counts
+                or record.status_counts != derived_status_counts
+                or record.first_received_at_us != int(first_callback["received_at_us"])
+                or record.last_received_at_us != int(last_callback["received_at_us"])
+                or record.first_normalized_event_id
+                != first_callback["normalized_event_id"]
+                or record.last_normalized_event_id
+                != last_callback["normalized_event_id"]
+                or record.callback_rows_hash
+                != callback_rows_hash(tuple(dict(item) for item in callback_rows))
+            ):
+                raise RetentionInvariantError("receipt does not match authoritative callback rows")
         return record
 
     def _roll_receipts(
@@ -348,6 +407,7 @@ class RetentionManager:
             chain_hashes: list[str] = []
             for receipt in candidates:
                 record = self._verified_receipt(
+                    connection,
                     receipt,
                     expected_first=expected_first,
                     expected_prior_hash=expected_prior_hash,
@@ -382,6 +442,7 @@ class RetentionManager:
                                     "last_received_at_us": item.last_received_at_us,
                                     "kind_counts": item.kind_counts,
                                     "status_counts": item.status_counts,
+                                    "callback_rows_hash": item.callback_rows_hash,
                                     "first_normalized_event_id": item.first_normalized_event_id,
                                     "last_normalized_event_id": item.last_normalized_event_id,
                                     "created_at_us": item.created_at_us,
@@ -449,10 +510,20 @@ class RetentionManager:
     ) -> int:
         if remaining <= 0:
             return 0
+        order_by = {
+            "shadow_marks": "marked_at_us, position_id",
+            "shadow_outcomes": "outcome_at_us, position_id",
+            "shadow_positions": "closed_at_us, position_id",
+            "idea_outputs": "emitted_at_us, output_id",
+            "market_events": "event_at_us, event_kind, event_id",
+            "subscriptions": "closed_at_us, subscription_id",
+            "incidents": "resolved_at_us, incident_id",
+            "gaps": "resolved_at_us, gap_id",
+        }.get(table, identity_column)
         cursor = connection.execute(
             f"DELETE FROM {table} WHERE {identity_column} IN ("  # noqa: S608
             f"SELECT {identity_column} FROM {table} WHERE {predicate} "
-            f"ORDER BY {identity_column} LIMIT ?)",
+            f"ORDER BY {order_by} LIMIT ?)",
             (*parameters, remaining),
         )
         return cursor.rowcount
@@ -462,35 +533,51 @@ class RetentionManager:
     ) -> int:
         if limit <= 0:
             return 0
-        candidates = tuple(
+        acknowledged = tuple(
+            connection.execute(ACK_TOMBSTONE_CANDIDATES_SQL, (cutoff_us, limit))
+        )
+        failed = tuple(
             connection.execute(
-                """
-                SELECT source_sequence, run_id, receipt_batch_id
-                FROM callback_inbox
-                WHERE payload_json IS NULL
-                  AND receipt_batch_id IS NOT NULL
-                  AND ((lifecycle = 'acknowledged'
-                        AND acknowledged_at_us IS NOT NULL
-                        AND acknowledged_at_us <= ?)
-                    OR (lifecycle = 'failed' AND received_at_us <= ?
-                        AND EXISTS (SELECT 1 FROM runs terminal_run
-                            WHERE terminal_run.run_id = callback_inbox.run_id
-                              AND terminal_run.status IN ('stopped', 'fatal'))))
-                  AND (EXISTS (SELECT 1 FROM callback_receipts receipt
-                        WHERE receipt.batch_id = callback_inbox.receipt_batch_id
-                          AND receipt.run_id = callback_inbox.run_id
-                          AND callback_inbox.source_sequence BETWEEN
-                              receipt.first_source_sequence AND receipt.last_source_sequence)
-                    OR EXISTS (SELECT 1 FROM callback_compaction_watermarks watermark
-                        WHERE watermark.run_id = callback_inbox.run_id
-                          AND watermark.compacted_through_sequence >=
-                              callback_inbox.source_sequence))
-                ORDER BY source_sequence
-                LIMIT ?
-                """,
-                (cutoff_us, cutoff_us, limit),
+                FAILED_TOMBSTONE_CANDIDATES_SQL,
+                (cutoff_us, max(0, limit - len(acknowledged))),
             )
         )
+        candidates = acknowledged + failed
+        grouped_sequences: dict[tuple[str, str], set[int]] = {}
+        for candidate in candidates:
+            key = (str(candidate["run_id"]), str(candidate["receipt_batch_id"]))
+            grouped_sequences.setdefault(key, set()).add(int(candidate["source_sequence"]))
+        complete_candidates: list[sqlite3.Row] = []
+        for key, sequences in grouped_sequences.items():
+            receipt = connection.execute(
+                "SELECT * FROM callback_receipts WHERE run_id = ? AND batch_id = ?", key
+            ).fetchone()
+            if receipt is None:
+                complete_candidates.extend(
+                    row
+                    for row in candidates
+                    if (str(row["run_id"]), str(row["receipt_batch_id"])) == key
+                )
+                continue
+            authoritative = {
+                int(row[0])
+                for row in connection.execute(
+                    "SELECT source_sequence FROM callback_inbox WHERE run_id = ? "
+                    "AND source_sequence BETWEEN ? AND ?",
+                    (
+                        key[0],
+                        int(receipt["first_source_sequence"]),
+                        int(receipt["last_source_sequence"]),
+                    ),
+                )
+            }
+            if sequences == authoritative:
+                complete_candidates.extend(
+                    row
+                    for row in candidates
+                    if (str(row["run_id"]), str(row["receipt_batch_id"])) == key
+                )
+        candidates = tuple(complete_candidates)
         verified_batches: set[tuple[str, str]] = set()
         for candidate in candidates:
             key = (str(candidate["run_id"]), str(candidate["receipt_batch_id"]))

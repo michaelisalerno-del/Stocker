@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -76,6 +77,7 @@ class CallbackReceiptRecord:
     last_received_at_us: int
     kind_counts: JsonValue
     status_counts: JsonValue
+    callback_rows_hash: str
     first_normalized_event_id: str | None
     last_normalized_event_id: str | None
     created_at_us: int
@@ -149,11 +151,55 @@ def receipt_chain_hash(record: CallbackReceiptRecord) -> str:
             "last_received_at_us": record.last_received_at_us,
             "kind_counts": record.kind_counts,
             "status_counts": record.status_counts,
+            "callback_rows_hash": record.callback_rows_hash,
             "first_normalized_event_id": record.first_normalized_event_id,
             "last_normalized_event_id": record.last_normalized_event_id,
             "created_at_us": record.created_at_us,
             "prior_chain_hash": record.prior_chain_hash,
         },
+    )
+    return hashlib.sha256(canonical_json_bytes(material)).hexdigest()
+
+
+def callback_rows_hash(rows: tuple[Mapping[str, object], ...]) -> str:
+    """Bind a receipt to the authoritative identity and outcome of each callback row."""
+
+    def integer(row: Mapping[str, object], field: str) -> int:
+        value = row[field]
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"callback {field} must be an integer")
+        return value
+
+    material = cast(
+        JsonValue,
+        [
+            {
+                "event_uid": str(row["event_uid"]),
+                "payload_sha256": str(row["payload_sha256"]),
+                "run_id": str(row["run_id"]),
+                "source_sequence": integer(row, "source_sequence"),
+                "callback_kind": str(row["callback_kind"]),
+                "lifecycle": str(row["lifecycle"]),
+                "received_at_us": integer(row, "received_at_us"),
+                "provider_at_us": (
+                    None if row["provider_at_us"] is None else integer(row, "provider_at_us")
+                ),
+                "normalized_event_id": (
+                    None
+                    if row["normalized_event_id"] is None
+                    else str(row["normalized_event_id"])
+                ),
+                "acknowledged_at_us": (
+                    None
+                    if row["acknowledged_at_us"] is None
+                    else integer(row, "acknowledged_at_us")
+                ),
+                "failure_code": (
+                    None if row["failure_code"] is None else str(row["failure_code"])
+                ),
+            }
+            for row in sorted(rows, key=lambda item: integer(item, "source_sequence"))
+        ],
     )
     return hashlib.sha256(canonical_json_bytes(material)).hexdigest()
 

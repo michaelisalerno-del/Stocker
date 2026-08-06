@@ -64,7 +64,7 @@ CREATE TABLE incidents (
     opened_at_us INTEGER NOT NULL CHECK(opened_at_us >= 0),
     resolved_at_us INTEGER,
     details_json TEXT NOT NULL CHECK(
-        json_valid(details_json) AND length(CAST(details_json AS BLOB)) <= 16384
+        stocker_canonical_json(details_json) = 1 AND length(CAST(details_json AS BLOB)) <= 16384
     )
 ) STRICT;
 CREATE INDEX incidents_run_opened_idx ON incidents(run_id, opened_at_us DESC, incident_id);
@@ -142,7 +142,7 @@ CREATE TABLE callback_inbox (
     provider_at_us INTEGER,
     payload_json TEXT CHECK(
         payload_json IS NULL OR (
-            json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 65536
+            stocker_canonical_json(payload_json) = 1 AND length(CAST(payload_json AS BLOB)) <= 65536
         )
     ),
     payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256) = 64),
@@ -161,14 +161,17 @@ CREATE INDEX callback_inbox_lease_idx
     ON callback_inbox(lifecycle, lease_expires_at_us, source_sequence);
 CREATE INDEX callback_inbox_run_sequence_idx ON callback_inbox(run_id, source_sequence);
 CREATE INDEX callback_inbox_terminal_idx
-    ON callback_inbox(run_id, acknowledged_at_us, source_sequence)
+    ON callback_inbox(acknowledged_at_us, source_sequence)
     WHERE lifecycle = 'acknowledged' AND payload_json IS NOT NULL;
-CREATE INDEX callback_inbox_compaction_idx
-    ON callback_inbox(lifecycle, acknowledged_at_us, source_sequence)
-    WHERE payload_json IS NOT NULL;
-CREATE INDEX callback_inbox_tombstone_idx
-    ON callback_inbox(lifecycle, acknowledged_at_us, received_at_us, source_sequence)
-    WHERE payload_json IS NULL;
+CREATE INDEX callback_inbox_failed_payload_idx
+    ON callback_inbox(received_at_us, source_sequence)
+    WHERE lifecycle = 'failed' AND payload_json IS NOT NULL;
+CREATE INDEX callback_inbox_ack_tombstone_idx
+    ON callback_inbox(acknowledged_at_us, source_sequence)
+    WHERE lifecycle = 'acknowledged' AND payload_json IS NULL;
+CREATE INDEX callback_inbox_failed_tombstone_idx
+    ON callback_inbox(received_at_us, source_sequence)
+    WHERE lifecycle = 'failed' AND payload_json IS NULL;
 
 CREATE TABLE callback_receipts (
     batch_id TEXT PRIMARY KEY,
@@ -179,11 +182,12 @@ CREATE TABLE callback_receipts (
     first_received_at_us INTEGER NOT NULL,
     last_received_at_us INTEGER NOT NULL,
     kind_counts_json TEXT NOT NULL CHECK(
-        json_valid(kind_counts_json) AND length(CAST(kind_counts_json AS BLOB)) <= 16384
+        stocker_canonical_json(kind_counts_json) = 1 AND length(CAST(kind_counts_json AS BLOB)) <= 16384
     ),
     status_counts_json TEXT NOT NULL CHECK(
-        json_valid(status_counts_json) AND length(CAST(status_counts_json AS BLOB)) <= 16384
+        stocker_canonical_json(status_counts_json) = 1 AND length(CAST(status_counts_json AS BLOB)) <= 16384
     ),
+    callback_rows_hash TEXT NOT NULL CHECK(length(callback_rows_hash) = 64),
     prior_chain_hash TEXT NOT NULL CHECK(length(prior_chain_hash) = 64),
     chained_payload_hash TEXT NOT NULL CHECK(length(chained_payload_hash) = 64),
     first_normalized_event_id TEXT,
@@ -228,7 +232,7 @@ CREATE TABLE market_events (
     last_value REAL,
     size_value REAL,
     payload_json TEXT NOT NULL CHECK(
-        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 65536
+        stocker_canonical_json(payload_json) = 1 AND length(CAST(payload_json AS BLOB)) <= 65536
     ),
     payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256) = 64),
     UNIQUE(event_id, run_id, instrument_id, feed_kind)
@@ -271,6 +275,54 @@ BEGIN
     ) THEN RAISE(ABORT, 'callback_market_event_provenance_mismatch') END;
 END;
 
+CREATE TRIGGER callback_inbox_acknowledged_event_insert
+BEFORE INSERT ON callback_inbox
+WHEN NEW.lifecycle = 'acknowledged'
+BEGIN
+    SELECT CASE WHEN NEW.normalized_event_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM market_events event
+        WHERE event.event_id = NEW.normalized_event_id
+          AND event.run_id = NEW.run_id
+          AND event.source_sequence = NEW.source_sequence
+    ) THEN RAISE(ABORT, 'callback_acknowledgement_event_mismatch') END;
+END;
+CREATE TRIGGER callback_inbox_acknowledged_event_update
+BEFORE UPDATE ON callback_inbox
+WHEN NEW.lifecycle = 'acknowledged'
+BEGIN
+    SELECT CASE WHEN NEW.normalized_event_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM market_events event
+        WHERE event.event_id = NEW.normalized_event_id
+          AND event.run_id = NEW.run_id
+          AND event.source_sequence = NEW.source_sequence
+    ) THEN RAISE(ABORT, 'callback_acknowledgement_event_mismatch') END;
+END;
+
+CREATE TRIGGER subscriptions_latest_event_provenance_insert
+BEFORE INSERT ON subscriptions
+WHEN NEW.latest_event_id IS NOT NULL
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM market_events event
+        WHERE event.event_id = NEW.latest_event_id
+          AND event.run_id = NEW.run_id
+          AND event.instrument_id = NEW.instrument_id
+          AND event.feed_kind = NEW.feed_kind
+    ) THEN RAISE(ABORT, 'subscription_latest_event_provenance_mismatch') END;
+END;
+CREATE TRIGGER subscriptions_latest_event_provenance_update
+BEFORE UPDATE OF run_id, instrument_id, feed_kind, latest_event_id ON subscriptions
+WHEN NEW.latest_event_id IS NOT NULL
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM market_events event
+        WHERE event.event_id = NEW.latest_event_id
+          AND event.run_id = NEW.run_id
+          AND event.instrument_id = NEW.instrument_id
+          AND event.feed_kind = NEW.feed_kind
+    ) THEN RAISE(ABORT, 'subscription_latest_event_provenance_mismatch') END;
+END;
+
 CREATE TABLE market_latest (
     run_id TEXT NOT NULL,
     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
@@ -299,7 +351,7 @@ CREATE TABLE idea_plugins (
     manifest_hash TEXT NOT NULL CHECK(length(manifest_hash) = 64),
     code_hash TEXT NOT NULL CHECK(length(code_hash) = 64),
     manifest_json TEXT NOT NULL CHECK(
-        json_valid(manifest_json) AND length(CAST(manifest_json AS BLOB)) <= 65536
+        stocker_canonical_json(manifest_json) = 1 AND length(CAST(manifest_json AS BLOB)) <= 65536
     ),
     discovered_at_us INTEGER NOT NULL,
     PRIMARY KEY(idea_id, idea_version)
@@ -312,7 +364,7 @@ CREATE TABLE idea_instances (
     run_id TEXT NOT NULL REFERENCES runs(run_id),
     mode TEXT NOT NULL CHECK(mode IN ('prospective_record', 'shadow')),
     parameters_json TEXT NOT NULL CHECK(
-        json_valid(parameters_json) AND length(CAST(parameters_json AS BLOB)) <= 65536
+        stocker_canonical_json(parameters_json) = 1 AND length(CAST(parameters_json AS BLOB)) <= 65536
     ),
     parameters_hash TEXT NOT NULL CHECK(length(parameters_hash) = 64),
     activated_at_us INTEGER NOT NULL,
@@ -335,13 +387,36 @@ CREATE TABLE idea_checkpoints (
     instance_id TEXT PRIMARY KEY REFERENCES idea_instances(instance_id),
     last_market_event_id TEXT,
     state_json TEXT NOT NULL CHECK(
-        json_valid(state_json) AND length(CAST(state_json AS BLOB)) <= 65536
+        stocker_canonical_json(state_json) = 1 AND length(CAST(state_json AS BLOB)) <= 65536
     ),
     state_hash TEXT NOT NULL CHECK(length(state_hash) = 64),
     last_success_at_us INTEGER,
     updated_at_us INTEGER NOT NULL,
     consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_failures >= 0)
 ) STRICT;
+
+CREATE TRIGGER idea_checkpoints_event_provenance_insert
+BEFORE INSERT ON idea_checkpoints
+WHEN NEW.last_market_event_id IS NOT NULL
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM idea_instances instance
+        JOIN market_events event ON event.event_id = NEW.last_market_event_id
+        WHERE instance.instance_id = NEW.instance_id
+          AND event.run_id = instance.run_id
+    ) THEN RAISE(ABORT, 'idea_checkpoint_event_provenance_mismatch') END;
+END;
+CREATE TRIGGER idea_checkpoints_event_provenance_update
+BEFORE UPDATE OF instance_id, last_market_event_id ON idea_checkpoints
+WHEN NEW.last_market_event_id IS NOT NULL
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM idea_instances instance
+        JOIN market_events event ON event.event_id = NEW.last_market_event_id
+        WHERE instance.instance_id = NEW.instance_id
+          AND event.run_id = instance.run_id
+    ) THEN RAISE(ABORT, 'idea_checkpoint_event_provenance_mismatch') END;
+END;
 
 CREATE TABLE idea_outputs (
     output_id TEXT PRIMARY KEY,
@@ -362,7 +437,7 @@ CREATE TABLE idea_outputs (
     last_input_event_id TEXT NOT NULL,
     output_ordinal INTEGER NOT NULL CHECK(output_ordinal >= 0),
     payload_json TEXT NOT NULL CHECK(
-        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 16384
+        stocker_canonical_json(payload_json) = 1 AND length(CAST(payload_json AS BLOB)) <= 16384
     ),
     payload_hash TEXT NOT NULL CHECK(length(payload_hash) = 64),
     content_hash TEXT NOT NULL CHECK(length(content_hash) = 64),
@@ -377,6 +452,7 @@ CREATE TABLE idea_outputs (
         REFERENCES idea_instances(instance_id, run_id, data_class),
     UNIQUE(output_id, run_id, instance_id, data_class)
 ) STRICT;
+
 CREATE INDEX idea_outputs_run_kind_time_idx
     ON idea_outputs(run_id, output_kind, as_of_at_us DESC, output_id);
 CREATE INDEX idea_outputs_instance_kind_time_idx
@@ -486,6 +562,43 @@ CREATE TABLE shadow_legs (
     PRIMARY KEY(position_id, leg_number)
 ) STRICT;
 
+CREATE TRIGGER shadow_legs_event_provenance_insert
+BEFORE INSERT ON shadow_legs
+BEGIN
+    SELECT CASE WHEN NEW.entry_market_event_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM shadow_positions position
+        JOIN market_events event ON event.event_id = NEW.entry_market_event_id
+        WHERE position.position_id = NEW.position_id
+          AND event.run_id = position.run_id
+          AND event.instrument_id = NEW.instrument_id
+    ) THEN RAISE(ABORT, 'shadow_leg_entry_event_provenance_mismatch') END;
+    SELECT CASE WHEN NEW.exit_market_event_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM shadow_positions position
+        JOIN market_events event ON event.event_id = NEW.exit_market_event_id
+        WHERE position.position_id = NEW.position_id
+          AND event.run_id = position.run_id
+          AND event.instrument_id = NEW.instrument_id
+    ) THEN RAISE(ABORT, 'shadow_leg_exit_event_provenance_mismatch') END;
+END;
+CREATE TRIGGER shadow_legs_event_provenance_update
+BEFORE UPDATE OF position_id, instrument_id, entry_market_event_id, exit_market_event_id ON shadow_legs
+BEGIN
+    SELECT CASE WHEN NEW.entry_market_event_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM shadow_positions position
+        JOIN market_events event ON event.event_id = NEW.entry_market_event_id
+        WHERE position.position_id = NEW.position_id
+          AND event.run_id = position.run_id
+          AND event.instrument_id = NEW.instrument_id
+    ) THEN RAISE(ABORT, 'shadow_leg_entry_event_provenance_mismatch') END;
+    SELECT CASE WHEN NEW.exit_market_event_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM shadow_positions position
+        JOIN market_events event ON event.event_id = NEW.exit_market_event_id
+        WHERE position.position_id = NEW.position_id
+          AND event.run_id = position.run_id
+          AND event.instrument_id = NEW.instrument_id
+    ) THEN RAISE(ABORT, 'shadow_leg_exit_event_provenance_mismatch') END;
+END;
+
 CREATE TABLE shadow_marks (
     position_id TEXT NOT NULL REFERENCES shadow_positions(position_id) ON DELETE CASCADE,
     marked_at_us INTEGER NOT NULL,
@@ -495,7 +608,7 @@ CREATE TABLE shadow_marks (
     return_value REAL,
     quality_bits INTEGER NOT NULL DEFAULT 0 CHECK(quality_bits >= 0),
     payload_json TEXT NOT NULL CHECK(
-        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 16384
+        stocker_canonical_json(payload_json) = 1 AND length(CAST(payload_json AS BLOB)) <= 16384
     ),
     PRIMARY KEY(position_id, marked_at_us)
 ) STRICT;
@@ -512,7 +625,7 @@ CREATE TABLE shadow_outcomes (
     mae REAL,
     completeness TEXT NOT NULL CHECK(completeness IN ('complete', 'incomplete', 'invalid')),
     payload_json TEXT NOT NULL CHECK(
-        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 16384
+        stocker_canonical_json(payload_json) = 1 AND length(CAST(payload_json AS BLOB)) <= 16384
     )
 ) STRICT;
 CREATE INDEX shadow_outcomes_time_idx ON shadow_outcomes(outcome_at_us DESC, position_id);

@@ -15,16 +15,20 @@ from stocker_runtime.storage.repository import (
     MAX_EXTENSION_JSON_BYTES,
     MAX_IDEA_OUTPUT_JSON_BYTES,
     MAX_NONTERMINAL_CALLBACK_ROWS,
+    CallbackReceiptRecord,
     IdeaOutputRecord,
     IdentityCollisionError,
     JsonAdmissionError,
     OperationalRepository,
+    ProvenanceError,
     StoreResult,
     canonical_json_text,
     deterministic_output_id,
+    receipt_chain_hash,
 )
 from stocker_runtime.storage.retention import (
     MAX_MAINTENANCE_BATCH_ROWS,
+    MaintenanceDeadlineExceeded,
     RetentionInvariantError,
     RetentionManager,
     RetentionPolicy,
@@ -34,6 +38,7 @@ from stocker_runtime.storage.retention import (
 
 __all__ = [
     "EXPECTED_TABLES",
+    "CallbackReceiptRecord",
     "IdentityCollisionError",
     "IdeaOutputRecord",
     "JsonAdmissionError",
@@ -44,7 +49,9 @@ __all__ = [
     "MigrationResult",
     "MAX_MAINTENANCE_BATCH_ROWS",
     "MAX_NONTERMINAL_CALLBACK_ROWS",
+    "MaintenanceDeadlineExceeded",
     "OperationalRepository",
+    "ProvenanceError",
     "RetentionInvariantError",
     "RetentionManager",
     "RetentionPolicy",
@@ -58,4 +65,5 @@ __all__ = [
     "initialize_database",
     "migrate_database",
     "migration_plan",
+    "receipt_chain_hash",
 ]

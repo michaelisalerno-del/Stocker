@@ -173,6 +173,8 @@ def _probe_v2(database_path: Path, migrations: tuple[Migration, ...]) -> set[int
     with _read_only_connect(database_path) as connection:
         applied = _verify_applied_migrations(connection, migrations)
         _verify_schema_structure(connection, migrations, applied)
+        if tuple(connection.execute("PRAGMA foreign_key_check")):
+            raise SchemaError("database contains foreign-key violations")
         return applied
 
 
@@ -206,27 +208,40 @@ def _apply_migrations(
     applied: set[int],
     applied_at_us: int,
 ) -> tuple[int, ...]:
-    newly_applied: list[int] = []
-    for migration in migrations:
-        if migration.version in applied:
-            continue
+    pending = tuple(migration for migration in migrations if migration.version not in applied)
+    if not pending:
+        _verify_schema_structure(connection, migrations, applied)
+        if tuple(connection.execute("PRAGMA foreign_key_check")):
+            raise SchemaError("database contains foreign-key violations")
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise SchemaError("database quick_check failed")
+        return ()
+    statements = ["BEGIN IMMEDIATE;"]
+    for migration in pending:
         name = migration.name.replace("'", "''")
         checksum = migration.sha256.replace("'", "''")
-        script = (
-            "BEGIN IMMEDIATE;\n"
-            f"{migration.sql}\n"
-            "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            f"VALUES ({migration.version}, '{name}', '{checksum}', {applied_at_us});\n"
-            "COMMIT;"
+        statements.extend(
+            (
+                migration.sql,
+                "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
+                f"VALUES ({migration.version}, '{name}', '{checksum}', {applied_at_us});",
+            )
         )
-        try:
-            connection.executescript(script)
-        except Exception:
-            if connection.in_transaction:
-                connection.rollback()
-            raise
-        newly_applied.append(migration.version)
-    return tuple(newly_applied)
+    try:
+        connection.executescript("\n".join(statements))
+        final_applied = applied | {migration.version for migration in pending}
+        _verify_schema_structure(connection, migrations, final_applied)
+        violations = tuple(connection.execute("PRAGMA foreign_key_check"))
+        if violations:
+            raise SchemaError("database contains foreign-key violations")
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise SchemaError("database quick_check failed")
+        connection.commit()
+    except Exception:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    return tuple(migration.version for migration in pending)
 
 
 def initialize_database(
@@ -254,7 +269,6 @@ def initialize_database(
             set(),
             applied_at_us if applied_at_us is not None else time.time_ns() // 1_000,
         )
-        _verify_schema_structure(connection, migrations, set(applied))
         return MigrationResult(applied_versions=applied, current_version=migrations[-1].version)
     except Exception:
         if connection is not None:
@@ -289,12 +303,6 @@ def migrate_database(
             applied,
             applied_at_us if applied_at_us is not None else time.time_ns() // 1_000,
         )
-        _verify_schema_structure(connection, migrations, {item.version for item in migrations})
-        violations = tuple(connection.execute("PRAGMA foreign_key_check"))
-        if violations:
-            raise SchemaError("database contains foreign-key violations")
-        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-            raise SchemaError("database quick_check failed")
     return MigrationResult(applied_versions=newly_applied, current_version=migrations[-1].version)
 
 

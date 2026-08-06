@@ -15,7 +15,12 @@ CREATE TABLE runs (
     git_commit TEXT NOT NULL,
     data_class TEXT NOT NULL CHECK(data_class IN ('prospective_protected', 'shadow_protected')),
     status TEXT NOT NULL CHECK(status IN ('created', 'running', 'stopped', 'fatal')),
-    prior_run_id TEXT REFERENCES runs(run_id)
+    prior_run_id TEXT REFERENCES runs(run_id),
+    CHECK(
+        (mode = 'prospective_record' AND data_class = 'prospective_protected')
+        OR (mode = 'shadow' AND data_class = 'shadow_protected')
+    ),
+    UNIQUE(run_id, mode, data_class)
 ) STRICT;
 
 CREATE TABLE recorder_generations (
@@ -43,7 +48,9 @@ CREATE TABLE runtime_state (
     inbox_bytes INTEGER NOT NULL DEFAULT 0 CHECK(inbox_bytes >= 0),
     database_bytes INTEGER NOT NULL DEFAULT 0 CHECK(database_bytes >= 0),
     wal_bytes INTEGER NOT NULL DEFAULT 0 CHECK(wal_bytes >= 0),
-    order_capability_observed INTEGER NOT NULL DEFAULT 0 CHECK(order_capability_observed = 0)
+    order_capability_observed INTEGER NOT NULL DEFAULT 0 CHECK(order_capability_observed = 0),
+    FOREIGN KEY(run_id, recorder_generation)
+        REFERENCES recorder_generations(run_id, generation)
 ) STRICT;
 
 CREATE TABLE incidents (
@@ -56,11 +63,15 @@ CREATE TABLE incidents (
     subscription_id TEXT,
     opened_at_us INTEGER NOT NULL CHECK(opened_at_us >= 0),
     resolved_at_us INTEGER,
-    details_json TEXT NOT NULL CHECK(length(CAST(details_json AS BLOB)) <= 16384)
+    details_json TEXT NOT NULL CHECK(
+        json_valid(details_json) AND length(CAST(details_json AS BLOB)) <= 16384
+    )
 ) STRICT;
 CREATE INDEX incidents_run_opened_idx ON incidents(run_id, opened_at_us DESC, incident_id);
 CREATE INDEX incidents_unresolved_idx ON incidents(run_id, severity, opened_at_us)
     WHERE resolved_at_us IS NULL;
+CREATE INDEX incidents_retention_idx
+    ON incidents(resolved_at_us, incident_id) WHERE resolved_at_us IS NOT NULL;
 
 CREATE TABLE gaps (
     gap_id TEXT PRIMARY KEY,
@@ -75,6 +86,8 @@ CREATE TABLE gaps (
 ) STRICT;
 CREATE INDEX gaps_run_started_idx ON gaps(run_id, started_at_us DESC, gap_id);
 CREATE INDEX gaps_unresolved_idx ON gaps(run_id, started_at_us) WHERE resolved_at_us IS NULL;
+CREATE INDEX gaps_retention_idx
+    ON gaps(resolved_at_us, gap_id) WHERE resolved_at_us IS NOT NULL;
 
 CREATE TABLE instruments (
     instrument_id TEXT PRIMARY KEY,
@@ -114,6 +127,8 @@ CREATE INDEX subscriptions_run_lifecycle_idx
     ON subscriptions(run_id, lifecycle, subscription_id);
 CREATE INDEX subscriptions_instrument_feed_idx
     ON subscriptions(instrument_id, feed_kind, opened_at_us DESC);
+CREATE INDEX subscriptions_retention_idx
+    ON subscriptions(closed_at_us, subscription_id) WHERE closed_at_us IS NOT NULL;
 
 CREATE TABLE callback_inbox (
     source_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,7 +141,9 @@ CREATE TABLE callback_inbox (
     received_at_us INTEGER NOT NULL CHECK(received_at_us >= 0),
     provider_at_us INTEGER,
     payload_json TEXT CHECK(
-        payload_json IS NULL OR length(CAST(payload_json AS BLOB)) <= 65536
+        payload_json IS NULL OR (
+            json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 65536
+        )
     ),
     payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256) = 64),
     lifecycle TEXT NOT NULL CHECK(lifecycle IN ('pending', 'leased', 'acknowledged', 'failed')),
@@ -134,7 +151,7 @@ CREATE TABLE callback_inbox (
     lease_expires_at_us INTEGER,
     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
     failure_code TEXT,
-    normalized_event_id TEXT REFERENCES market_events(event_id) ON DELETE SET NULL,
+    normalized_event_id TEXT,
     acknowledged_at_us INTEGER,
     receipt_batch_id TEXT,
     FOREIGN KEY(run_id, recorder_generation)
@@ -146,6 +163,12 @@ CREATE INDEX callback_inbox_run_sequence_idx ON callback_inbox(run_id, source_se
 CREATE INDEX callback_inbox_terminal_idx
     ON callback_inbox(run_id, acknowledged_at_us, source_sequence)
     WHERE lifecycle = 'acknowledged' AND payload_json IS NOT NULL;
+CREATE INDEX callback_inbox_compaction_idx
+    ON callback_inbox(lifecycle, acknowledged_at_us, source_sequence)
+    WHERE payload_json IS NOT NULL;
+CREATE INDEX callback_inbox_tombstone_idx
+    ON callback_inbox(lifecycle, acknowledged_at_us, received_at_us, source_sequence)
+    WHERE payload_json IS NULL;
 
 CREATE TABLE callback_receipts (
     batch_id TEXT PRIMARY KEY,
@@ -155,8 +178,13 @@ CREATE TABLE callback_receipts (
     callback_count INTEGER NOT NULL CHECK(callback_count > 0),
     first_received_at_us INTEGER NOT NULL,
     last_received_at_us INTEGER NOT NULL,
-    kind_counts_json TEXT NOT NULL CHECK(length(CAST(kind_counts_json AS BLOB)) <= 16384),
-    status_counts_json TEXT NOT NULL CHECK(length(CAST(status_counts_json AS BLOB)) <= 16384),
+    kind_counts_json TEXT NOT NULL CHECK(
+        json_valid(kind_counts_json) AND length(CAST(kind_counts_json AS BLOB)) <= 16384
+    ),
+    status_counts_json TEXT NOT NULL CHECK(
+        json_valid(status_counts_json) AND length(CAST(status_counts_json AS BLOB)) <= 16384
+    ),
+    prior_chain_hash TEXT NOT NULL CHECK(length(prior_chain_hash) = 64),
     chained_payload_hash TEXT NOT NULL CHECK(length(chained_payload_hash) = 64),
     first_normalized_event_id TEXT,
     last_normalized_event_id TEXT,
@@ -175,13 +203,14 @@ CREATE TABLE callback_compaction_watermarks (
     first_received_at_us INTEGER,
     last_received_at_us INTEGER,
     rolled_receipt_chain_hash TEXT NOT NULL CHECK(length(rolled_receipt_chain_hash) = 64),
+    last_receipt_chain_hash TEXT NOT NULL CHECK(length(last_receipt_chain_hash) = 64),
     updated_at_us INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE market_events (
     event_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES runs(run_id),
-    source_sequence INTEGER NOT NULL UNIQUE REFERENCES callback_inbox(source_sequence),
+    source_sequence INTEGER NOT NULL UNIQUE,
     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
     feed_kind TEXT NOT NULL,
     event_kind TEXT NOT NULL,
@@ -198,16 +227,52 @@ CREATE TABLE market_events (
     ask_value REAL,
     last_value REAL,
     size_value REAL,
-    payload_json TEXT NOT NULL CHECK(length(CAST(payload_json AS BLOB)) <= 65536),
-    payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256) = 64)
+    payload_json TEXT NOT NULL CHECK(
+        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 65536
+    ),
+    payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256) = 64),
+    UNIQUE(event_id, run_id, instrument_id, feed_kind)
 ) STRICT;
 CREATE INDEX market_events_run_time_idx ON market_events(run_id, event_at_us DESC, event_id);
 CREATE INDEX market_events_instrument_kind_time_idx
     ON market_events(instrument_id, event_kind, event_at_us DESC, event_id);
 CREATE INDEX market_events_run_kind_time_idx
     ON market_events(run_id, event_kind, event_at_us DESC, event_id);
+CREATE INDEX market_events_retention_idx ON market_events(event_at_us, event_kind, event_id);
+
+CREATE TRIGGER market_events_callback_provenance_insert
+BEFORE INSERT ON market_events
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM callback_inbox callback
+        WHERE callback.source_sequence = NEW.source_sequence
+          AND callback.run_id = NEW.run_id
+    ) THEN RAISE(ABORT, 'market_event_callback_provenance_mismatch') END;
+END;
+CREATE TRIGGER market_events_callback_provenance_update
+BEFORE UPDATE OF run_id, source_sequence ON market_events
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM callback_inbox callback
+        WHERE callback.source_sequence = NEW.source_sequence
+          AND callback.run_id = NEW.run_id
+    ) THEN RAISE(ABORT, 'market_event_callback_provenance_mismatch') END;
+END;
+
+CREATE TRIGGER callback_inbox_provenance_update
+BEFORE UPDATE OF run_id ON callback_inbox
+WHEN EXISTS (SELECT 1 FROM market_events event
+    WHERE event.source_sequence = OLD.source_sequence)
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM market_events event
+        WHERE event.source_sequence = OLD.source_sequence
+          AND event.run_id != NEW.run_id
+    ) THEN RAISE(ABORT, 'callback_market_event_provenance_mismatch') END;
+END;
 
 CREATE TABLE market_latest (
+    run_id TEXT NOT NULL,
     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
     feed_kind TEXT NOT NULL,
     event_id TEXT NOT NULL UNIQUE REFERENCES market_events(event_id),
@@ -219,7 +284,9 @@ CREATE TABLE market_latest (
     ask_value REAL,
     last_value REAL,
     close_value REAL,
-    PRIMARY KEY(instrument_id, feed_kind)
+    PRIMARY KEY(instrument_id, feed_kind),
+    FOREIGN KEY(event_id, run_id, instrument_id, feed_kind)
+        REFERENCES market_events(event_id, run_id, instrument_id, feed_kind)
 ) STRICT;
 CREATE INDEX market_latest_event_time_idx ON market_latest(event_at_us DESC, instrument_id);
 
@@ -231,7 +298,9 @@ CREATE TABLE idea_plugins (
     description TEXT NOT NULL,
     manifest_hash TEXT NOT NULL CHECK(length(manifest_hash) = 64),
     code_hash TEXT NOT NULL CHECK(length(code_hash) = 64),
-    manifest_json TEXT NOT NULL CHECK(length(CAST(manifest_json AS BLOB)) <= 65536),
+    manifest_json TEXT NOT NULL CHECK(
+        json_valid(manifest_json) AND length(CAST(manifest_json AS BLOB)) <= 65536
+    ),
     discovered_at_us INTEGER NOT NULL,
     PRIMARY KEY(idea_id, idea_version)
 ) STRICT;
@@ -242,7 +311,9 @@ CREATE TABLE idea_instances (
     idea_version TEXT NOT NULL,
     run_id TEXT NOT NULL REFERENCES runs(run_id),
     mode TEXT NOT NULL CHECK(mode IN ('prospective_record', 'shadow')),
-    parameters_json TEXT NOT NULL CHECK(length(CAST(parameters_json AS BLOB)) <= 65536),
+    parameters_json TEXT NOT NULL CHECK(
+        json_valid(parameters_json) AND length(CAST(parameters_json AS BLOB)) <= 65536
+    ),
     parameters_hash TEXT NOT NULL CHECK(length(parameters_hash) = 64),
     activated_at_us INTEGER NOT NULL,
     deactivated_at_us INTEGER,
@@ -250,14 +321,22 @@ CREATE TABLE idea_instances (
     error_code TEXT,
     data_class TEXT NOT NULL CHECK(data_class IN ('prospective_protected', 'shadow_protected')),
     FOREIGN KEY(idea_id, idea_version) REFERENCES idea_plugins(idea_id, idea_version),
-    UNIQUE(run_id, idea_id, idea_version, parameters_hash, activated_at_us)
+    FOREIGN KEY(run_id, mode, data_class) REFERENCES runs(run_id, mode, data_class),
+    CHECK(
+        (mode = 'prospective_record' AND data_class = 'prospective_protected')
+        OR (mode = 'shadow' AND data_class = 'shadow_protected')
+    ),
+    UNIQUE(run_id, idea_id, idea_version, parameters_hash, activated_at_us),
+    UNIQUE(instance_id, run_id, data_class)
 ) STRICT;
 CREATE INDEX idea_instances_run_health_idx ON idea_instances(run_id, health, instance_id);
 
 CREATE TABLE idea_checkpoints (
     instance_id TEXT PRIMARY KEY REFERENCES idea_instances(instance_id),
-    last_market_event_id TEXT REFERENCES market_events(event_id),
-    state_json TEXT NOT NULL CHECK(length(CAST(state_json AS BLOB)) <= 65536),
+    last_market_event_id TEXT,
+    state_json TEXT NOT NULL CHECK(
+        json_valid(state_json) AND length(CAST(state_json AS BLOB)) <= 65536
+    ),
     state_hash TEXT NOT NULL CHECK(length(state_hash) = 64),
     last_success_at_us INTEGER,
     updated_at_us INTEGER NOT NULL,
@@ -279,10 +358,12 @@ CREATE TABLE idea_outputs (
     strength REAL,
     confidence REAL,
     horizon_us INTEGER,
-    first_input_event_id TEXT NOT NULL REFERENCES market_events(event_id),
-    last_input_event_id TEXT NOT NULL REFERENCES market_events(event_id),
+    first_input_event_id TEXT NOT NULL,
+    last_input_event_id TEXT NOT NULL,
     output_ordinal INTEGER NOT NULL CHECK(output_ordinal >= 0),
-    payload_json TEXT NOT NULL CHECK(length(CAST(payload_json AS BLOB)) <= 16384),
+    payload_json TEXT NOT NULL CHECK(
+        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 16384
+    ),
     payload_hash TEXT NOT NULL CHECK(length(payload_hash) = 64),
     content_hash TEXT NOT NULL CHECK(length(content_hash) = 64),
     data_class TEXT NOT NULL CHECK(data_class IN ('prospective_protected', 'shadow_protected')),
@@ -291,7 +372,10 @@ CREATE TABLE idea_outputs (
         OR
         (output_kind IN ('proposed_position', 'proposed_trade')
             AND authority_status = 'unapproved')
-    )
+    ),
+    FOREIGN KEY(instance_id, run_id, data_class)
+        REFERENCES idea_instances(instance_id, run_id, data_class),
+    UNIQUE(output_id, run_id, instance_id, data_class)
 ) STRICT;
 CREATE INDEX idea_outputs_run_kind_time_idx
     ON idea_outputs(run_id, output_kind, as_of_at_us DESC, output_id);
@@ -299,6 +383,30 @@ CREATE INDEX idea_outputs_instance_kind_time_idx
     ON idea_outputs(instance_id, output_kind, as_of_at_us DESC, output_id);
 CREATE INDEX idea_outputs_instrument_time_idx
     ON idea_outputs(subject_instrument_id, as_of_at_us DESC, output_id);
+CREATE INDEX idea_outputs_retention_idx ON idea_outputs(emitted_at_us, output_id);
+
+CREATE TRIGGER idea_outputs_event_provenance_insert
+BEFORE INSERT ON idea_outputs
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM market_events first_event
+        JOIN market_events last_event ON last_event.event_id = NEW.last_input_event_id
+        WHERE first_event.event_id = NEW.first_input_event_id
+          AND first_event.run_id = NEW.run_id
+          AND last_event.run_id = NEW.run_id
+    ) THEN RAISE(ABORT, 'idea_output_event_provenance_mismatch') END;
+END;
+CREATE TRIGGER idea_outputs_event_provenance_update
+BEFORE UPDATE OF run_id, first_input_event_id, last_input_event_id ON idea_outputs
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM market_events first_event
+        JOIN market_events last_event ON last_event.event_id = NEW.last_input_event_id
+        WHERE first_event.event_id = NEW.first_input_event_id
+          AND first_event.run_id = NEW.run_id
+          AND last_event.run_id = NEW.run_id
+    ) THEN RAISE(ABORT, 'idea_output_event_provenance_mismatch') END;
+END;
 
 CREATE TABLE idea_output_legs (
     output_id TEXT NOT NULL REFERENCES idea_outputs(output_id) ON DELETE CASCADE,
@@ -315,9 +423,9 @@ CREATE TABLE idea_output_legs (
 
 CREATE TABLE shadow_positions (
     position_id TEXT PRIMARY KEY,
-    proposed_trade_output_id TEXT NOT NULL UNIQUE REFERENCES idea_outputs(output_id),
-    run_id TEXT NOT NULL REFERENCES runs(run_id),
-    instance_id TEXT NOT NULL REFERENCES idea_instances(instance_id),
+    proposed_trade_output_id TEXT NOT NULL UNIQUE,
+    run_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
     opened_at_us INTEGER,
     closed_at_us INTEGER,
     lifecycle TEXT NOT NULL CHECK(lifecycle IN ('pending', 'open', 'closed', 'invalid')),
@@ -325,12 +433,45 @@ CREATE TABLE shadow_positions (
     fill_model_id TEXT NOT NULL,
     currency TEXT NOT NULL,
     invalid_reason TEXT,
-    data_class TEXT NOT NULL CHECK(data_class = 'shadow_protected')
+    data_class TEXT NOT NULL CHECK(data_class = 'shadow_protected'),
+    FOREIGN KEY(instance_id, run_id, data_class)
+        REFERENCES idea_instances(instance_id, run_id, data_class),
+    FOREIGN KEY(proposed_trade_output_id, run_id, instance_id, data_class)
+        REFERENCES idea_outputs(output_id, run_id, instance_id, data_class)
 ) STRICT;
 CREATE INDEX shadow_positions_run_lifecycle_idx
     ON shadow_positions(run_id, lifecycle, opened_at_us DESC, position_id);
 CREATE INDEX shadow_positions_instance_time_idx
     ON shadow_positions(instance_id, opened_at_us DESC, position_id);
+CREATE INDEX shadow_positions_retention_idx
+    ON shadow_positions(closed_at_us, position_id) WHERE closed_at_us IS NOT NULL;
+
+CREATE TRIGGER shadow_positions_proposed_trade_insert
+BEFORE INSERT ON shadow_positions
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM idea_outputs output
+        WHERE output.output_id = NEW.proposed_trade_output_id
+          AND output.run_id = NEW.run_id
+          AND output.instance_id = NEW.instance_id
+          AND output.data_class = NEW.data_class
+          AND output.output_kind = 'proposed_trade'
+          AND output.authority_status = 'unapproved'
+    ) THEN RAISE(ABORT, 'shadow_position_proposal_provenance_mismatch') END;
+END;
+CREATE TRIGGER shadow_positions_proposed_trade_update
+BEFORE UPDATE OF proposed_trade_output_id, run_id, instance_id, data_class ON shadow_positions
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM idea_outputs output
+        WHERE output.output_id = NEW.proposed_trade_output_id
+          AND output.run_id = NEW.run_id
+          AND output.instance_id = NEW.instance_id
+          AND output.data_class = NEW.data_class
+          AND output.output_kind = 'proposed_trade'
+          AND output.authority_status = 'unapproved'
+    ) THEN RAISE(ABORT, 'shadow_position_proposal_provenance_mismatch') END;
+END;
 
 CREATE TABLE shadow_legs (
     position_id TEXT NOT NULL REFERENCES shadow_positions(position_id) ON DELETE CASCADE,
@@ -338,9 +479,9 @@ CREATE TABLE shadow_legs (
     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
     side TEXT NOT NULL CHECK(side IN ('buy', 'sell')),
     quantity REAL NOT NULL CHECK(quantity > 0),
-    entry_market_event_id TEXT REFERENCES market_events(event_id),
+    entry_market_event_id TEXT,
     entry_price REAL,
-    exit_market_event_id TEXT REFERENCES market_events(event_id),
+    exit_market_event_id TEXT,
     exit_price REAL,
     PRIMARY KEY(position_id, leg_number)
 ) STRICT;
@@ -353,7 +494,9 @@ CREATE TABLE shadow_marks (
     net_pnl REAL,
     return_value REAL,
     quality_bits INTEGER NOT NULL DEFAULT 0 CHECK(quality_bits >= 0),
-    payload_json TEXT NOT NULL CHECK(length(CAST(payload_json AS BLOB)) <= 16384),
+    payload_json TEXT NOT NULL CHECK(
+        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 16384
+    ),
     PRIMARY KEY(position_id, marked_at_us)
 ) STRICT;
 CREATE INDEX shadow_marks_time_idx ON shadow_marks(marked_at_us DESC, position_id);
@@ -368,7 +511,9 @@ CREATE TABLE shadow_outcomes (
     mfe REAL,
     mae REAL,
     completeness TEXT NOT NULL CHECK(completeness IN ('complete', 'incomplete', 'invalid')),
-    payload_json TEXT NOT NULL CHECK(length(CAST(payload_json AS BLOB)) <= 16384)
+    payload_json TEXT NOT NULL CHECK(
+        json_valid(payload_json) AND length(CAST(payload_json AS BLOB)) <= 16384
+    )
 ) STRICT;
 CREATE INDEX shadow_outcomes_time_idx ON shadow_outcomes(outcome_at_us DESC, position_id);
 

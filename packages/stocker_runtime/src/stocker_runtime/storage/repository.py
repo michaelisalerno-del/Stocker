@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from stocker_runtime.domain import JsonValue, canonical_json_bytes, ensure_authority_free_json
+from stocker_runtime.domain import (
+    FrozenJsonObject,
+    JsonValue,
+    canonical_json_bytes,
+    ensure_authority_free_json,
+)
 from stocker_runtime.storage.connection import connect_v2
 
 MAX_EXTENSION_JSON_BYTES = 64 * 1024
@@ -22,6 +28,10 @@ class JsonAdmissionError(ValueError):
 
 class IdentityCollisionError(RuntimeError):
     """A deterministic identity already names different durable content."""
+
+
+class ProvenanceError(RuntimeError):
+    """A write attempts to cross a run, mode, instance, or protected-data boundary."""
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,25 @@ class StoreResult:
     inserted: bool
 
 
+@dataclass(frozen=True)
+class CallbackReceiptRecord:
+    """Canonical receipt material used to verify and extend the callback evidence chain."""
+
+    batch_id: str
+    run_id: str
+    first_source_sequence: int
+    last_source_sequence: int
+    callback_count: int
+    first_received_at_us: int
+    last_received_at_us: int
+    kind_counts: JsonValue
+    status_counts: JsonValue
+    first_normalized_event_id: str | None
+    last_normalized_event_id: str | None
+    created_at_us: int
+    prior_chain_hash: str
+
+
 def canonical_json_text(value: JsonValue, *, max_bytes: int) -> str:
     """Admit canonical JSON within an explicit positive byte ceiling."""
 
@@ -67,14 +96,21 @@ def canonical_json_text(value: JsonValue, *, max_bytes: int) -> str:
     return encoded.decode("utf-8")
 
 
-def _payload_hash(record: IdeaOutputRecord) -> str:
-    payload_text = canonical_json_text(record.payload, max_bytes=MAX_IDEA_OUTPUT_JSON_BYTES)
-    return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+def _freeze_json(value: object) -> JsonValue:
+    if isinstance(value, dict):
+        return cast(JsonValue, FrozenJsonObject(value))
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return cast(JsonValue, value)
 
 
-def deterministic_output_id(record: IdeaOutputRecord) -> str:
-    """Derive retry-stable output identity from the accepted Phase 1 contract fields."""
+def _snapshot_payload(value: JsonValue) -> tuple[str, JsonValue]:
+    payload_json = canonical_json_text(value, max_bytes=MAX_IDEA_OUTPUT_JSON_BYTES)
+    parsed = json.loads(payload_json)
+    return payload_json, _freeze_json(parsed)
 
+
+def _output_id_from_payload_hash(record: IdeaOutputRecord, payload_hash: str) -> str:
     identity = cast(
         JsonValue,
         {
@@ -84,10 +120,42 @@ def deterministic_output_id(record: IdeaOutputRecord) -> str:
             "output_kind": record.output_kind,
             "output_ordinal": record.output_ordinal,
             "as_of_at_us": record.as_of_at_us,
-            "payload_hash": _payload_hash(record),
+            "payload_hash": payload_hash,
         },
     )
     return hashlib.sha256(canonical_json_bytes(identity)).hexdigest()
+
+
+def deterministic_output_id(record: IdeaOutputRecord) -> str:
+    """Derive retry-stable output identity from the accepted Phase 1 contract fields."""
+
+    payload_json, _ = _snapshot_payload(record.payload)
+    payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    return _output_id_from_payload_hash(record, payload_hash)
+
+
+def receipt_chain_hash(record: CallbackReceiptRecord) -> str:
+    """Hash every receipt field, including its explicit predecessor link."""
+
+    material = cast(
+        JsonValue,
+        {
+            "batch_id": record.batch_id,
+            "run_id": record.run_id,
+            "first_source_sequence": record.first_source_sequence,
+            "last_source_sequence": record.last_source_sequence,
+            "callback_count": record.callback_count,
+            "first_received_at_us": record.first_received_at_us,
+            "last_received_at_us": record.last_received_at_us,
+            "kind_counts": record.kind_counts,
+            "status_counts": record.status_counts,
+            "first_normalized_event_id": record.first_normalized_event_id,
+            "last_normalized_event_id": record.last_normalized_event_id,
+            "created_at_us": record.created_at_us,
+            "prior_chain_hash": record.prior_chain_hash,
+        },
+    )
+    return hashlib.sha256(canonical_json_bytes(material)).hexdigest()
 
 
 def _content_hash(record: IdeaOutputRecord, payload_hash: str) -> str:
@@ -125,22 +193,49 @@ class OperationalRepository:
     def put_idea_output(self, record: IdeaOutputRecord) -> StoreResult:
         """Insert once, accept an exact retry, and fail closed on an identity collision."""
 
+        payload_json, payload_snapshot = _snapshot_payload(record.payload)
         proposal = record.output_kind in {"proposed_position", "proposed_trade"}
         expected_status = "unapproved" if proposal else "recorded"
         if record.authority_status != expected_status:
             raise ValueError(f"{record.output_kind} requires authority_status={expected_status}")
         if proposal:
-            ensure_authority_free_json(record.payload)
-        payload_json = canonical_json_text(
-            record.payload,
-            max_bytes=MAX_IDEA_OUTPUT_JSON_BYTES,
-        )
+            ensure_authority_free_json(payload_snapshot)
         payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-        output_id = deterministic_output_id(record)
+        output_id = _output_id_from_payload_hash(record, payload_hash)
         content_hash = _content_hash(record, payload_hash)
         connection = connect_v2(self.database_path)
         try:
             connection.execute("BEGIN IMMEDIATE")
+            provenance = connection.execute(
+                """
+                SELECT instance.run_id, instance.data_class, instance.mode,
+                       run.mode AS run_mode, run.data_class AS run_data_class,
+                       first_event.run_id AS first_event_run_id,
+                       last_event.run_id AS last_event_run_id
+                FROM idea_instances instance
+                JOIN runs run ON run.run_id = instance.run_id
+                LEFT JOIN market_events first_event
+                    ON first_event.event_id = ?
+                LEFT JOIN market_events last_event
+                    ON last_event.event_id = ?
+                WHERE instance.instance_id = ?
+                """,
+                (
+                    record.first_input_event_id,
+                    record.last_input_event_id,
+                    record.instance_id,
+                ),
+            ).fetchone()
+            if (
+                provenance is None
+                or str(provenance["run_id"]) != record.run_id
+                or str(provenance["data_class"]) != record.data_class
+                or str(provenance["mode"]) != str(provenance["run_mode"])
+                or str(provenance["data_class"]) != str(provenance["run_data_class"])
+                or str(provenance["first_event_run_id"]) != record.run_id
+                or str(provenance["last_event_run_id"]) != record.run_id
+            ):
+                raise ProvenanceError("idea output provenance does not match its run and instance")
             cursor = connection.execute(
                 """
                 INSERT INTO idea_outputs(

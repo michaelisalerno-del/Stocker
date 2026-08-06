@@ -44,7 +44,7 @@ def init_command(database: Annotated[Path, typer.Argument()]) -> None:
 
     try:
         result = initialize_database(database)
-    except (OSError, SchemaError, ValueError) as error:
+    except (OSError, SchemaError, ValueError, sqlite3.Error) as error:
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
         raise typer.Exit(code=1) from error
     _emit(_migration_payload(result.current_version, result.applied_versions))

@@ -1273,6 +1273,10 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
         "callback_acknowledgement_stale_seconds",
         "callback_inbox_healthy_backlog",
         "callback_inbox_oldest_healthy_seconds",
+        "callback_inbox_retention_enabled",
+        "callback_inbox_retention_seconds",
+        "callback_inbox_compaction_interval_seconds",
+        "callback_inbox_compaction_batch_limit",
     ):
         legacy_payload["runtime"].pop(field_name)
     legacy_hash = hashlib.sha256(
@@ -1284,7 +1288,14 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
     ).hexdigest()
     legacy_activation = activation.model_copy(update={"configuration_hash": legacy_hash})
     upgraded_config = config.model_copy(
-        update={"runtime": config.runtime.model_copy(update={"git_commit": "b" * 40})}
+        update={
+            "runtime": config.runtime.model_copy(
+                update={
+                    "git_commit": "b" * 40,
+                    "callback_inbox_retention_enabled": True,
+                }
+            )
+        }
     )
 
     _require_compatible_existing_activation(
@@ -1415,9 +1426,7 @@ def test_existing_activation_accepts_disabling_optional_cross_vendor_diagnostic(
     application.shutdown(now=datetime.now(UTC))
     diagnostic_enabled_config = config.model_copy(
         update={
-            "parallel_validation": config.parallel_validation.model_copy(
-                update={"enabled": True}
-            )
+            "parallel_validation": config.parallel_validation.model_copy(update={"enabled": True})
         }
     )
     legacy_activation = activation.model_copy(
@@ -1450,11 +1459,7 @@ def test_existing_activation_accepts_legacy_bounded_inbox_batch_capacity(
     )
     application.shutdown(now=datetime.now(UTC))
     legacy_config = config.model_copy(
-        update={
-            "runtime": config.runtime.model_copy(
-                update={"callback_inbox_batch_limit": 256}
-            )
-        }
+        update={"runtime": config.runtime.model_copy(update={"callback_inbox_batch_limit": 256})}
     )
     legacy_activation = activation.model_copy(
         update={

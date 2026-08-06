@@ -112,6 +112,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV23,
     OpeningLeaderDeploymentRefreezeReceiptV24,
     OpeningLeaderDeploymentRefreezeReceiptV25,
+    OpeningLeaderDeploymentRefreezeReceiptV26,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -186,6 +187,10 @@ _HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
         "callback_acknowledgement_stale_seconds",
         "callback_inbox_healthy_backlog",
         "callback_inbox_oldest_healthy_seconds",
+        "callback_inbox_retention_enabled",
+        "callback_inbox_retention_seconds",
+        "callback_inbox_compaction_interval_seconds",
+        "callback_inbox_compaction_batch_limit",
     }
 )
 _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS = frozenset(
@@ -1388,6 +1393,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV23
         | OpeningLeaderDeploymentRefreezeReceiptV24
         | OpeningLeaderDeploymentRefreezeReceiptV25
+        | OpeningLeaderDeploymentRefreezeReceiptV26
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

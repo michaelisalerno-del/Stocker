@@ -272,6 +272,36 @@ def test_bounded_quote_request_is_not_deferred_with_stream_batch(
     assert value.fatal_callback_code is None
 
 
+def test_shutdown_materializes_callback_received_during_disconnect(
+    tmp_path: Path,
+) -> None:
+    value, inbox = adapter(tmp_path, require_durable_inbox_on_start=True)
+    activate(value)
+
+    class DisconnectCallbackClient:
+        def disconnect(self) -> None:
+            value.contain_official_callback(
+                "tick_price",
+                7,
+                lambda: value.on_quote_update(
+                    7,
+                    {"field": "bid", "value": 10.0},
+                ),
+                provider_arguments=(7, 1, 10.0, {}),
+            )
+
+        def cancelMktData(self, _request_id: int) -> None:  # noqa: N802
+            return None
+
+    value._client = DisconnectCallbackClient()
+
+    value.stop()
+
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == 1
+    assert inbox.accounting().pending == 1
+
+
 def test_unknown_request_is_quarantined_and_never_escapes_boundary(
     tmp_path: Path,
 ) -> None:

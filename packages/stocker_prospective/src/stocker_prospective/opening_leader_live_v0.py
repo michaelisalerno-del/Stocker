@@ -970,6 +970,34 @@ class OpeningLeaderDeploymentRefreezeReceiptV29(OpeningLeaderFreezeIdentityV0):
         return value
 
 
+class OpeningLeaderDeploymentRefreezeReceiptV30(OpeningLeaderFreezeIdentityV0):
+    """Operational supersession for bounded raw-materialization storage."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["opening-leader-continuation-deployment-refreeze-v30"]
+    recorder_version: Literal["opening-leader-continuation-recorder-v0"]
+    supersedes_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_deployment_receipt_id: str
+    frozen_semantics_changed: Literal[False]
+    refreeze_reason: Literal["operational_bounded_raw_materialization_storage"]
+    artifact_hashes: dict[str, str]
+    source_hashes: dict[str, str]
+    verification: dict[str, Literal["passed"]]
+    signature_scheme: Literal["sha256-canonical-self-binding-v0"]
+    signature_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("artifact_hashes", "source_hashes")
+    @classmethod
+    def _hashes_are_sha256(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value or any(
+            len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+            for digest in value.values()
+        ):
+            raise ValueError("deployment refreeze hashes must be lowercase SHA-256 values")
+        return value
+
+
 def _validate_package_contract(package_root: Path) -> None:
     contract = json.loads((package_root / "contract.json").read_text(encoding="utf-8"))
     cohort = json.loads((package_root / "cohort_manifest.json").read_text(encoding="utf-8"))
@@ -1034,6 +1062,7 @@ def _signature_payload(
         | OpeningLeaderDeploymentRefreezeReceiptV27
         | OpeningLeaderDeploymentRefreezeReceiptV28
         | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
     ),
 ) -> dict[str, object]:
     return receipt.model_dump(mode="json", exclude={"signature_sha256"})
@@ -1071,6 +1100,7 @@ def _deployment_id_payload(
         | OpeningLeaderDeploymentRefreezeReceiptV27
         | OpeningLeaderDeploymentRefreezeReceiptV28
         | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
     ),
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -1113,6 +1143,7 @@ def _deployment_id_payload(
             OpeningLeaderDeploymentRefreezeReceiptV27,
             OpeningLeaderDeploymentRefreezeReceiptV28,
             OpeningLeaderDeploymentRefreezeReceiptV29,
+            OpeningLeaderDeploymentRefreezeReceiptV30,
         ),
     ):
         payload.update(
@@ -1153,6 +1184,7 @@ def _deployment_id_payload(
             OpeningLeaderDeploymentRefreezeReceiptV27,
             OpeningLeaderDeploymentRefreezeReceiptV28,
             OpeningLeaderDeploymentRefreezeReceiptV29,
+            OpeningLeaderDeploymentRefreezeReceiptV30,
         ),
     ):
         payload["supersedes_deployment_receipt_id"] = receipt.supersedes_deployment_receipt_id
@@ -1191,6 +1223,7 @@ def _expected_deployment_receipt_id(
         | OpeningLeaderDeploymentRefreezeReceiptV27
         | OpeningLeaderDeploymentRefreezeReceiptV28
         | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
     ),
 ) -> str:
     digest = _sha256_bytes(_canonical_json(_deployment_id_payload(receipt)).encode("utf-8"))
@@ -1295,6 +1328,7 @@ def load_opening_leader_package_v0(
     | OpeningLeaderDeploymentRefreezeReceiptV27
     | OpeningLeaderDeploymentRefreezeReceiptV28
     | OpeningLeaderDeploymentRefreezeReceiptV29
+    | OpeningLeaderDeploymentRefreezeReceiptV30
 ):
     """Fail closed on any artifact, source, safety, or time-boundary drift."""
 
@@ -1370,6 +1404,7 @@ def load_opening_leader_package_v0(
             | OpeningLeaderDeploymentRefreezeReceiptV27
             | OpeningLeaderDeploymentRefreezeReceiptV28
             | OpeningLeaderDeploymentRefreezeReceiptV29
+            | OpeningLeaderDeploymentRefreezeReceiptV30
         ) = refreeze
     else:
         receipt = original_receipt
@@ -2129,6 +2164,33 @@ def load_opening_leader_package_v0(
         ):
             raise ValueError("opening-leader V29 deployment refreeze signature mismatch")
         receipt = refreeze_v29
+    refreeze_v30_path = root / "deployment_freeze_receipt_v30.json"
+    if refreeze_v30_path.exists():
+        if not refreeze_v29_path.is_file() or refreeze_v29_path.is_symlink():
+            raise ValueError("opening-leader V30 refreeze requires the immutable V29 receipt")
+        if not refreeze_v30_path.is_file() or refreeze_v30_path.is_symlink():
+            raise ValueError("opening-leader V30 deployment refreeze receipt is invalid")
+        refreeze_v30 = OpeningLeaderDeploymentRefreezeReceiptV30.model_validate_json(
+            refreeze_v30_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(receipt, OpeningLeaderDeploymentRefreezeReceiptV29):
+            raise ValueError("opening-leader V30 refreeze requires the verified V29 receipt")
+        if (
+            refreeze_v30.supersedes_receipt_sha256 != _sha256_path(refreeze_v29_path)
+            or refreeze_v30.supersedes_deployment_receipt_id != receipt.deployment_receipt_id
+            or refreeze_v30.frozen_semantics_changed is not False
+            or refreeze_v30.freeze_completed_at_utc <= receipt.freeze_completed_at_utc
+        ):
+            raise ValueError("opening-leader V30 deployment refreeze lineage mismatch")
+        refreeze_v30_signature = _sha256_bytes(
+            _canonical_json(_signature_payload(refreeze_v30)).encode("utf-8")
+        )
+        if (
+            refreeze_v30_signature != refreeze_v30.signature_sha256
+            or refreeze_v30.deployment_receipt_id != _expected_deployment_receipt_id(refreeze_v30)
+        ):
+            raise ValueError("opening-leader V30 deployment refreeze signature mismatch")
+        receipt = refreeze_v30
     start = (
         receipt.freeze_completed_at_utc
         if prospective_start_utc is None
@@ -2701,6 +2763,7 @@ __all__ = [
     "OpeningLeaderDeploymentRefreezeReceiptV27",
     "OpeningLeaderDeploymentRefreezeReceiptV28",
     "OpeningLeaderDeploymentRefreezeReceiptV29",
+    "OpeningLeaderDeploymentRefreezeReceiptV30",
     "OpeningLeaderDeploymentReceiptV0",
     "OpeningLeaderIBKROptionSnapshotterV0",
     "assert_opening_leader_runtime_configuration_v0",

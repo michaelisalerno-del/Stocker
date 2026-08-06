@@ -784,6 +784,32 @@ def test_raw_materialisation_fences_partition_and_event_identities(
         )
 
 
+def test_raw_materialisation_preserves_an_empty_raw_event_set(tmp_path: Path) -> None:
+    inbox = durable_inbox(migrated_database(tmp_path))
+    admit(inbox, event_id="callback-without-raw-event")
+    leased = inbox.lease(
+        lease_owner="recorder",
+        lease_generation=1,
+        now=NOW,
+        lease_timeout=timedelta(seconds=30),
+        limit=10,
+    )
+    inbox.commit_raw_materialization(
+        leased,
+        run_id=RUN_ID,
+        recorder_generation=1,
+        raw_partition_hashes=(),
+        raw_event_ids=(),
+        materialized_at=NOW,
+    )
+
+    materialization = inbox.raw_materialization(leased)
+
+    assert materialization is not None
+    assert materialization.partition_hashes == ()
+    assert materialization.raw_event_ids == ()
+
+
 def test_poison_resolution_requires_explicit_event_and_latch_evidence(
     tmp_path: Path,
 ) -> None:

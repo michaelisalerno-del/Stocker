@@ -536,12 +536,10 @@ class IBKRMarketDataAdapter:
             timeout_seconds=self.config.connect_timeout_seconds,
         )
         self.callbacks.shutdown()
-        self.stream_quotes.clear()
         for key in self.budget.shutdown():
             if key.isdigit():
                 self._tombstone_request(int(key), "adapter_shutdown")
                 self._cancel_upstream(int(key))
-        self._subscription_kinds.clear()
         if self._client is not None:
             self._client.disconnect()
         if self._loop_thread is not None:
@@ -550,6 +548,8 @@ class IBKRMarketDataAdapter:
         self.flush_durable_callback_batch(
             timeout_seconds=self.config.connect_timeout_seconds,
         )
+        self.stream_quotes.clear()
+        self._subscription_kinds.clear()
         self._connected.clear()
 
     def reconnect(self) -> None:

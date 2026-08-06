@@ -1213,6 +1213,10 @@ class DurableCallbackInbox:
         observed = _utc(materialized_at, label="callback raw materialization timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
         encoded_event_ids = _encoded(tuple(sorted(raw_event_ids)))
+        canonical_event_id = min(
+            batch,
+            key=lambda event: (event.source_sequence, event.inbox_event_id),
+        ).inbox_event_id
         with self._connect() as connection:
             self._begin_immediate(connection)
             for event in batch:
@@ -1228,20 +1232,18 @@ class DurableCallbackInbox:
                     """,
                     (event.inbox_event_id,),
                 ).fetchone()
-                expected = (
-                    run_id,
-                    batch_id,
-                    encoded_hashes,
-                    encoded_event_ids,
+                expected_event_ids = (
+                    encoded_event_ids if event.inbox_event_id == canonical_event_id else "[]"
                 )
                 if existing is not None:
-                    actual = (
-                        str(existing["run_id"]),
-                        str(existing["lease_batch_id"]),
-                        str(existing["raw_partition_hashes_json"]),
-                        str(existing["raw_event_ids_json"]),
-                    )
-                    if actual != expected:
+                    existing_event_ids = str(existing["raw_event_ids_json"])
+                    if (
+                        str(existing["run_id"]) != run_id
+                        or str(existing["lease_batch_id"]) != batch_id
+                        or str(existing["raw_partition_hashes_json"]) != encoded_hashes
+                        or existing_event_ids
+                        not in {encoded_event_ids, expected_event_ids}
+                    ):
                         connection.rollback()
                         raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_DIFFERS")
                     continue
@@ -1261,7 +1263,7 @@ class DurableCallbackInbox:
                         recorder_generation,
                         batch_id,
                         encoded_hashes,
-                        encoded_event_ids,
+                        expected_event_ids,
                         observed.isoformat(),
                     ),
                 )
@@ -1279,8 +1281,8 @@ class DurableCallbackInbox:
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT inbox_event_id, lease_batch_id, raw_partition_hashes_json,
-                       raw_event_ids_json
+                SELECT inbox_event_id, source_sequence, lease_batch_id,
+                       raw_partition_hashes_json, raw_event_ids_json
                 FROM callback_raw_materialization_v1
                 WHERE inbox_event_id IN ({",".join("?" for _ in batch)})
                 """,
@@ -1292,19 +1294,32 @@ class DurableCallbackInbox:
             raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_PARTIAL")
         batch_ids = {str(row["lease_batch_id"]) for row in rows}
         hashes = {str(row["raw_partition_hashes_json"]) for row in rows}
-        event_ids = {str(row["raw_event_ids_json"]) for row in rows}
+        event_id_encodings = [str(row["raw_event_ids_json"]) for row in rows]
+        populated_event_ids = {value for value in event_id_encodings if value != "[]"}
         expected_batch_ids = {event.lease_batch_id for event in batch}
         if (
             len(batch_ids) != 1
             or len(hashes) != 1
-            or len(event_ids) != 1
+            or len(populated_event_ids) > 1
             or None in expected_batch_ids
             or batch_ids != expected_batch_ids
         ):
             raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_INCONSISTENT")
+        if populated_event_ids and "[]" in event_id_encodings:
+            canonical = min(
+                rows,
+                key=lambda row: (int(row["source_sequence"]), str(row["inbox_event_id"])),
+            )
+            if str(canonical["raw_event_ids_json"]) == "[]":
+                raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_INCONSISTENT")
         return RawMaterialization(
             partition_hashes=tuple(str(item) for item in json.loads(next(iter(hashes)))),
-            raw_event_ids=tuple(str(item) for item in json.loads(next(iter(event_ids)))),
+            raw_event_ids=tuple(
+                str(item)
+                for item in json.loads(
+                    "[]" if not populated_event_ids else next(iter(populated_event_ids))
+                )
+            ),
         )
 
     def release(

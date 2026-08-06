@@ -253,3 +253,56 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
             payload["original_provider_callback_sha256"]
             == hashlib.sha256(encoded.encode()).hexdigest()
         )
+
+    leased = inbox.lease(
+        lease_owner="recorder",
+        lease_generation=1,
+        now=NOW + timedelta(hours=1),
+        lease_timeout=timedelta(seconds=30),
+        limit=4_096,
+    )
+    raw_event_ids = tuple(
+        hashlib.sha256(f"raw:{event.inbox_event_id}".encode()).hexdigest()
+        for event in leased
+    )
+    materialization_bytes_before = _database_bytes(inbox.database_path)
+    materialization_cpu_started = time.process_time()
+    materialization_wall_started = time.perf_counter()
+    inbox.commit_raw_materialization(
+        leased,
+        run_id=RUN_ID,
+        recorder_generation=1,
+        raw_partition_hashes=("f" * 64,),
+        raw_event_ids=raw_event_ids,
+        materialized_at=NOW + timedelta(hours=1),
+    )
+    with inbox._connect() as measurement:
+        stored_event_id_bytes, materialization_rows = measurement.execute(
+            """
+            SELECT COALESCE(SUM(length(raw_event_ids_json)), 0), COUNT(*)
+            FROM callback_raw_materialization_v1
+            """
+        ).fetchone()
+    materialization_metrics = {
+        "rows": int(materialization_rows),
+        "raw_event_ids": len(raw_event_ids),
+        "stored_event_id_bytes": int(stored_event_id_bytes),
+        "database_growth_bytes": (
+            _database_bytes(inbox.database_path) - materialization_bytes_before
+        ),
+        "cpu_seconds": round(time.process_time() - materialization_cpu_started, 6),
+        "wall_seconds": round(time.perf_counter() - materialization_wall_started, 6),
+    }
+    print(json.dumps({"raw_materialization": materialization_metrics}, sort_keys=True))
+
+    encoded_event_id_bytes = len(
+        json.dumps(sorted(raw_event_ids), separators=(",", ":"))
+    )
+    assert materialization_metrics["rows"] == expected_callbacks
+    assert materialization_metrics["stored_event_id_bytes"] <= (
+        encoded_event_id_bytes + 2 * (expected_callbacks - 1)
+    )
+    recovered = inbox.raw_materialization(leased)
+    assert recovered is not None
+    assert recovered.partition_hashes == ("f" * 64,)
+    assert recovered.raw_event_ids == tuple(sorted(raw_event_ids))

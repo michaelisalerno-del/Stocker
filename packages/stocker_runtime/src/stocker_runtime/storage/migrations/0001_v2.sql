@@ -580,17 +580,31 @@ BEGIN
           AND event.instrument_id = NEW.instrument_id
     ) THEN RAISE(ABORT, 'shadow_leg_exit_event_provenance_mismatch') END;
 END;
-CREATE TRIGGER shadow_legs_event_provenance_update
-BEFORE UPDATE OF position_id, instrument_id, entry_market_event_id, exit_market_event_id ON shadow_legs
+CREATE TRIGGER shadow_legs_entry_event_provenance_update
+BEFORE UPDATE OF position_id, instrument_id, entry_market_event_id ON shadow_legs
+WHEN NEW.entry_market_event_id IS NOT NULL AND (
+    NEW.entry_market_event_id IS NOT OLD.entry_market_event_id
+    OR NEW.position_id IS NOT OLD.position_id
+    OR NEW.instrument_id IS NOT OLD.instrument_id
+)
 BEGIN
-    SELECT CASE WHEN NEW.entry_market_event_id IS NOT NULL AND NOT EXISTS (
+    SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM shadow_positions position
         JOIN market_events event ON event.event_id = NEW.entry_market_event_id
         WHERE position.position_id = NEW.position_id
           AND event.run_id = position.run_id
           AND event.instrument_id = NEW.instrument_id
     ) THEN RAISE(ABORT, 'shadow_leg_entry_event_provenance_mismatch') END;
-    SELECT CASE WHEN NEW.exit_market_event_id IS NOT NULL AND NOT EXISTS (
+END;
+CREATE TRIGGER shadow_legs_exit_event_provenance_update
+BEFORE UPDATE OF position_id, instrument_id, exit_market_event_id ON shadow_legs
+WHEN NEW.exit_market_event_id IS NOT NULL AND (
+    NEW.exit_market_event_id IS NOT OLD.exit_market_event_id
+    OR NEW.position_id IS NOT OLD.position_id
+    OR NEW.instrument_id IS NOT OLD.instrument_id
+)
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM shadow_positions position
         JOIN market_events event ON event.event_id = NEW.exit_market_event_id
         WHERE position.position_id = NEW.position_id

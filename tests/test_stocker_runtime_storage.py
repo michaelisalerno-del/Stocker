@@ -336,6 +336,45 @@ def test_shadow_leg_event_references_match_position_run_and_instrument(tmp_path:
                 "UPDATE shadow_legs SET entry_market_event_id = 'missing' "
                 "WHERE position_id = 'position-1' AND leg_number = 0"
             )
+        connection.execute("DELETE FROM market_events WHERE event_id = 'event-1'")
+        cursor = connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle) VALUES "
+            "('exit-callback', 'run-1', 1, 1, 'tick', 40, '{}', ?, 'pending')",
+            ("e" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES "
+            "('exit-event', 'run-1', ?, 'instrument-1', 'trades', 'tick', 40, 40, 1, '{}', ?)",
+            (int(cursor.lastrowid), "f" * 64),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="exit_event_provenance"):
+            connection.execute(
+                "UPDATE shadow_legs SET exit_market_event_id = 'missing', exit_price = 11 "
+                "WHERE position_id = 'position-1' AND leg_number = 0"
+            )
+        connection.execute(
+            "UPDATE shadow_legs SET exit_market_event_id = 'exit-event', exit_price = 11 "
+            "WHERE position_id = 'position-1' AND leg_number = 0"
+        )
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, "
+            "currency) VALUES ('instrument-2', ?, 'stock', 'ABC', 'SMART', 'USD')",
+            ("9" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="event_provenance"):
+            connection.execute(
+                "UPDATE shadow_legs SET instrument_id = 'instrument-2' "
+                "WHERE position_id = 'position-1' AND leg_number = 0"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="event_provenance"):
+            connection.execute(
+                "UPDATE shadow_legs SET position_id = 'missing-position' "
+                "WHERE position_id = 'position-1' AND leg_number = 0"
+            )
 
 
 def test_canonical_json_admission_is_bounded_and_deterministic() -> None:

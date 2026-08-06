@@ -1057,7 +1057,7 @@ class IBKRMarketDataAdapter:
         sequence_before = self._latest_durably_admitted_sequence
         provider_event_id: str | None = None
         try:
-            self.flush_pending_callback_failure()
+            self._retry_pending_callback_failure()
             received_at = datetime.now(UTC)
             received_monotonic_ns = time.monotonic_ns()
             classification = (
@@ -1514,6 +1514,14 @@ class IBKRMarketDataAdapter:
         return True
 
     def flush_pending_callback_failure(self) -> None:
+        """Admit the queued callback batch before retrying a prior failure."""
+
+        self.flush_durable_callback_batch(
+            timeout_seconds=min(self.config.request_timeout_seconds, 0.1),
+        )
+        self._retry_pending_callback_failure()
+
+    def _retry_pending_callback_failure(self) -> None:
         """Retry the single bounded aggregate when SQLite becomes writable."""
 
         with self._callback_failure_lock:

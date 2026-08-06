@@ -180,7 +180,7 @@ def test_mixed_live_callback_load_retains_one_row_per_provider_delivery(
                 ),
                 provider_arguments=(request_id, payload),
             )
-        adapter.flush_durable_callback_batch(timeout_seconds=2)
+        adapter.flush_pending_callback_failure()
         accounting = inbox.accounting()
         batch_wall_at = NOW + timedelta(minutes=10 * batch)
         batch_metrics.append(

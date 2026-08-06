@@ -114,6 +114,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV25,
     OpeningLeaderDeploymentRefreezeReceiptV26,
     OpeningLeaderDeploymentRefreezeReceiptV27,
+    OpeningLeaderDeploymentRefreezeReceiptV28,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -706,15 +707,6 @@ class FrozenProspectiveApplication:
 
     def _poll_once(self, *, now: datetime) -> LivePollResult:
         observed = now.astimezone(UTC)
-        flush_callback_batch = getattr(
-            self.adapter,
-            "flush_durable_callback_batch",
-            None,
-        )
-        if callable(flush_callback_batch):
-            flush_callback_batch(
-                timeout_seconds=self.config.ibkr.stream_poll_interval_seconds,
-            )
         self._persist_connection_events(observed)
         observed_session = observed.astimezone(NEW_YORK).date()
         market_session_valid = False
@@ -1424,6 +1416,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV25
         | OpeningLeaderDeploymentRefreezeReceiptV26
         | OpeningLeaderDeploymentRefreezeReceiptV27
+        | OpeningLeaderDeploymentRefreezeReceiptV28
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

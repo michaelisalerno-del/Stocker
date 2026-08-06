@@ -1479,6 +1479,68 @@ def test_existing_activation_accepts_legacy_bounded_inbox_batch_capacity(
     )
 
 
+def test_existing_activation_accepts_legacy_batch_before_retention_controls(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        git_commit="a" * 40,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+
+    historical_run_id = "historical-retention-upgrade-v0"
+    legacy_payload = config.model_dump(mode="json")
+    legacy_payload["runtime"]["run_id"] = historical_run_id
+    legacy_payload["runtime"]["callback_inbox_batch_limit"] = 256
+    for field_name in (
+        "callback_inbox_retention_enabled",
+        "callback_inbox_retention_seconds",
+        "callback_inbox_compaction_interval_seconds",
+        "callback_inbox_compaction_batch_limit",
+    ):
+        legacy_payload["runtime"].pop(field_name)
+    legacy_payload["web"]["operational_projection_cache_seconds"] = 60.0
+    legacy_payload["parallel_validation"]["enabled"] = True
+    for field_name in (
+        "option_commission_per_contract",
+        "option_regulatory_fee_per_contract",
+        "option_exchange_fee_per_contract",
+    ):
+        legacy_payload["ibkr"].pop(field_name)
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            legacy_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    legacy_activation = activation.model_copy(update={"configuration_hash": legacy_hash})
+    upgraded_config = config.model_copy(
+        update={
+            "runtime": config.runtime.model_copy(
+                update={
+                    "git_commit": "b" * 40,
+                    "run_id": "replacement-retention-upgrade-v0",
+                    "callback_inbox_retention_enabled": True,
+                }
+            )
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=upgraded_config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version=legacy_activation.ibkr_api_version,
+        tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+        historical_run_ids=(historical_run_id,),
+    )
+
+
 def test_fatal_run_rollover_reuses_activation_only_via_persisted_run_identity(
     tmp_path: Path,
 ) -> None:

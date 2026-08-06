@@ -113,6 +113,7 @@ from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentRefreezeReceiptV24,
     OpeningLeaderDeploymentRefreezeReceiptV25,
     OpeningLeaderDeploymentRefreezeReceiptV26,
+    OpeningLeaderDeploymentRefreezeReceiptV27,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -177,21 +178,28 @@ _PROMOTION_RECOVERABLE_REJECTIONS = frozenset(
         "underlying_quote_stale",
     }
 )
-_HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
+_RETENTION_OPERATIONAL_RUNTIME_FIELDS = frozenset(
     {
-        "callback_inbox_max_unacknowledged",
-        "callback_inbox_batch_limit",
-        "callback_inbox_lease_seconds",
-        "callback_heartbeat_stale_seconds",
-        "raw_storage_heartbeat_stale_seconds",
-        "callback_acknowledgement_stale_seconds",
-        "callback_inbox_healthy_backlog",
-        "callback_inbox_oldest_healthy_seconds",
         "callback_inbox_retention_enabled",
         "callback_inbox_retention_seconds",
         "callback_inbox_compaction_interval_seconds",
         "callback_inbox_compaction_batch_limit",
     }
+)
+_HARDENING_OPERATIONAL_RUNTIME_FIELDS = (
+    frozenset(
+        {
+            "callback_inbox_max_unacknowledged",
+            "callback_inbox_batch_limit",
+            "callback_inbox_lease_seconds",
+            "callback_heartbeat_stale_seconds",
+            "raw_storage_heartbeat_stale_seconds",
+            "callback_acknowledgement_stale_seconds",
+            "callback_inbox_healthy_backlog",
+            "callback_inbox_oldest_healthy_seconds",
+        }
+    )
+    | _RETENTION_OPERATIONAL_RUNTIME_FIELDS
 )
 _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS = frozenset(
     {
@@ -302,6 +310,18 @@ def _activation_configuration_hash_candidates(
                                     app_version=activation_app_version,
                                     run_id=historical_run_id,
                                     tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_runtime_fields=(_RETENTION_OPERATIONAL_RUNTIME_FIELDS),
                                     omitted_ibkr_fields=omitted_ibkr_fields,
                                     web_projection_cache_seconds=web_projection_cache_seconds,
                                     parallel_validation_enabled=parallel_validation_enabled,
@@ -1394,6 +1414,7 @@ def build_frozen_prospective_application(
         | OpeningLeaderDeploymentRefreezeReceiptV24
         | OpeningLeaderDeploymentRefreezeReceiptV25
         | OpeningLeaderDeploymentRefreezeReceiptV26
+        | OpeningLeaderDeploymentRefreezeReceiptV27
         | None
     ) = None
     if paths.opening_leader_continuation_v0_root is not None:

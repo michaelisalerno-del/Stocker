@@ -26,6 +26,7 @@ dependencies = [
 stocker = "stocker_launcher:main"
 stocker-mcp = "stocker_launcher:mcp_main"
 stocker-prospective = "stocker_prospective.cli:app"
+stocker-runtime = "stocker_runtime.cli:app"
 
 [dependency-groups]
 research = [

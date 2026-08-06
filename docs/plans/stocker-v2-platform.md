@@ -1,6 +1,7 @@
 # Stocker V2 platform redesign
 
-Status: **Accepted by the owner on 2026-08-06. Phase 1 authorized for implementation.**
+Status: **Accepted by the owner on 2026-08-06. Phases 1 and 2 implemented; Phase 3 is
+not authorized.**
 
 Architect: project `architect` role, read-only, high reasoning effort.
 
@@ -815,6 +816,13 @@ execution, reconciliation, and cutover stay sequential.
 - **Dependencies:** accepted plan and owner decisions in Section 14.
 
 ### Phase 2 — Compact SQLite schema and bounded retention
+
+Implementation note (2026-08-06): the Phase 2 storage seam and maintenance CLI are
+implemented for new V2 databases. Callback admission, normalization, acknowledgement,
+the 50,000-nonterminal-row admission guard, and recorder reactions to degraded/fatal cap
+states remain Phase 3 responsibilities. Phase 2 provides the durable tables, payload and
+foreign-key constraints, receipt/watermark compaction seam, bounded retention policy, and
+visible cap result that Phase 3 must use; it does not invent recorder lifecycle behaviour.
 
 - **Objective:** create the authoritative operational store.
 - **Files/packages:** storage connection/repository/retention, `0001_v2.sql`, DB CLI.

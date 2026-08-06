@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import pickle
 from collections.abc import Mapping
 from typing import get_origin
 
@@ -413,7 +414,11 @@ def test_public_json_contract_is_read_only_and_survives_deep_copy() -> None:
     assert isinstance(observation.payload["nested"], Mapping)
     assert observation.payload["nested"]["values"] == (1, 2)
 
-    for copied in (copy.deepcopy(observation), observation.model_copy(deep=True)):
+    for copied in (
+        copy.deepcopy(observation),
+        observation.model_copy(deep=True),
+        pickle.loads(pickle.dumps(observation)),
+    ):
         assert copied == observation
         with pytest.raises(TypeError):
             copied.payload["nested"]["values"][0] = 9
@@ -421,6 +426,88 @@ def test_public_json_contract_is_read_only_and_survives_deep_copy() -> None:
             copied.payload["nested"]["extra"] = True
 
     assert Observation.model_validate_json(observation.to_canonical_json()) == observation
+
+
+def test_immutable_dto_copy_rejects_every_non_empty_update() -> None:
+    event = MarketEvent(
+        event_id="event-001",
+        instrument_id="AAPL",
+        feed_kind="trades",
+        event_kind="trade",
+        event_at_us=1,
+        received_at_us=2,
+        payload={},
+    )
+    batch = IdeaBatch(
+        mode=RuntimeMode.PROSPECTIVE_RECORD,
+        events=(event,),
+        input_watermark="event-001",
+        causal_from_at_us=1,
+        causal_through_at_us=1,
+    )
+    proposal = ProposedTrade(
+        subject_instrument_id="AAPL",
+        as_of_at_us=1,
+        payload={"reason": "causal evidence"},
+    )
+
+    adversarial_updates = (
+        (batch, {"mode": "live"}),
+        (proposal, {"status": "approved"}),
+        (proposal, {"payload": {"brokerOrderId": "forbidden"}}),
+        (proposal, {"payload": {"value": "x" * (16 * 1024)}}),
+        (proposal, {"payload": {"nested": []}}),
+    )
+
+    for model, update in adversarial_updates:
+        with pytest.raises(TypeError, match="immutable DTO copies cannot be updated"):
+            model.model_copy(update=update)
+
+    with pytest.raises(TypeError, match="immutable DTO copies cannot be updated"):
+        proposal.copy(update={"status": "approved"})
+
+    assert proposal.model_copy(update={}) == proposal
+    assert proposal.model_copy(deep=True) == proposal
+
+
+def test_immutable_json_object_serialization_does_constant_work_per_lookup() -> None:
+    from stocker_runtime.domain import FrozenJsonObject
+
+    class CountingKey(str):
+        comparisons = 0
+
+        def __eq__(self, other: object) -> bool:
+            type(self).comparisons += 1
+            return super().__eq__(other)
+
+        __hash__ = str.__hash__
+
+    value = FrozenJsonObject({CountingKey(f"k{index:03}"): index for index in range(128)})
+    CountingKey.comparisons = 0
+
+    encoded = canonical_json_bytes(value)
+
+    assert encoded.startswith(b'{"k000":0')
+    assert CountingKey.comparisons <= len(value)
+
+
+def test_market_event_serializes_a_valid_five_thousand_key_payload() -> None:
+    event = MarketEvent(
+        event_id="event-001",
+        instrument_id="AAPL",
+        feed_kind="trades",
+        event_kind="trade",
+        event_at_us=1,
+        received_at_us=2,
+        payload={f"{index:04x}": None for index in range(5_000)},
+    )
+
+    encoded = event.payload_json()
+
+    assert len(encoded) == 60_001
+    assert encoded.startswith(b'{"0000":null')
+    assert encoded.endswith(b'"1387":null}')
+    assert MarketEvent.model_validate_json(event.to_canonical_json()) == event
 
 
 @pytest.mark.parametrize("invalid_integer", [True, "1", 1.0])

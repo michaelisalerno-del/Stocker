@@ -6,7 +6,8 @@ import json
 import re
 from collections.abc import Iterator, Mapping
 from enum import StrEnum
-from typing import Literal, Self
+from types import MappingProxyType
+from typing import Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -59,35 +60,40 @@ FORBIDDEN_AUTHORITY_FIELD_NAMES = frozenset(
 
 
 class FrozenJsonObject(Mapping[str, object]):
-    """Tuple-backed JSON object with no mutable mapping storage."""
+    """Immutable JSON object with copied, constant-time mapping storage."""
 
-    __slots__ = ("_items",)
+    __slots__ = ("_data",)
+    _data: Mapping[str, object]
 
     def __init__(self, value: Mapping[str, object]) -> None:
-        self._items = tuple((key, _freeze_json(nested)) for key, nested in value.items())
+        copied = {key: _freeze_json(nested) for key, nested in value.items()}
+        object.__setattr__(self, "_data", MappingProxyType(copied))
 
     def __getitem__(self, key: str) -> object:
-        for item_key, item_value in self._items:
-            if item_key == key:
-                return item_value
-        raise KeyError(key)
+        return self._data[key]
 
     def __iter__(self) -> Iterator[str]:
-        return (key for key, _value in self._items)
+        return iter(self._data)
 
     def __len__(self) -> int:
-        return len(self._items)
+        return len(self._data)
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("immutable JSON objects cannot be changed")
 
     def __deepcopy__(self, _memo: dict[int, object]) -> FrozenJsonObject:
         return self
 
+    def __reduce__(self) -> tuple[type[FrozenJsonObject], tuple[dict[str, object]]]:
+        return type(self), (dict(self._data),)
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Mapping):
             return NotImplemented
-        return dict(self.items()) == dict(other.items())
+        return dict(self._data) == dict(other.items())
 
     def __repr__(self) -> str:
-        return repr(dict(self.items()))
+        return repr(dict(self._data))
 
 
 def _freeze_json(value: object) -> object:
@@ -170,7 +176,7 @@ def ensure_authority_free_json(value: JsonValue) -> None:
 
 
 class DomainModel(BaseModel):
-    """Immutable DTO with strict fields and deterministic JSON serialization."""
+    """Strict immutable DTO; unvalidated ``model_construct`` is outside this contract."""
 
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid", frozen=True, strict=True)
 
@@ -213,6 +219,32 @@ class DomainModel(BaseModel):
         """Serialize the DTO as compact, key-sorted UTF-8 JSON."""
 
         return canonical_json_bytes(self.model_dump(mode="json"))
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        """Copy an immutable DTO without allowing validation-bypassing updates."""
+
+        if update:
+            raise TypeError("immutable DTO copies cannot be updated")
+        return super().model_copy(update=update, deep=deep)
+
+    def copy(
+        self,
+        *,
+        include: Any = None,
+        exclude: Any = None,
+        update: dict[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        """Apply the same fail-closed policy to Pydantic's deprecated copy API."""
+
+        if include is not None or exclude is not None:
+            raise TypeError("immutable DTO copies cannot include or exclude fields")
+        return self.model_copy(update=update, deep=deep)
 
 
 class MarketEvent(DomainModel):

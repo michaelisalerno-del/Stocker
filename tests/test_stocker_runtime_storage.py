@@ -164,6 +164,25 @@ def test_all_pending_migrations_roll_back_when_a_later_migration_fails(tmp_path:
         assert connection.execute("SELECT max(version) FROM schema_migrations").fetchone() == (1,)
 
 
+def test_failed_initialization_removes_partial_database_and_sidecars(tmp_path: Path) -> None:
+    migration_root = tmp_path / "migrations"
+    migration_root.mkdir()
+    first = migration_plan()[0]
+    (migration_root / first.name).write_text(first.sql, encoding="utf-8")
+    (migration_root / "0002_broken.sql").write_text(
+        "CREATE TABLE should_rollback(value TEXT) STRICT;\nTHIS IS NOT SQL;\n",
+        encoding="utf-8",
+    )
+    database = tmp_path / "v2.sqlite3"
+
+    with pytest.raises(sqlite3.OperationalError):
+        initialize_database(database, migration_root=migration_root, applied_at_us=1)
+
+    assert not database.exists()
+    assert not Path(f"{database}-wal").exists()
+    assert not Path(f"{database}-shm").exists()
+
+
 def test_schema_has_no_future_trading_tables_or_columns(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -236,14 +255,69 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
+    stored = OperationalRepository(database).put_idea_output(_output())
+    proposal = OperationalRepository(database).put_idea_output(
+        IdeaOutputRecord(
+            **{
+                **_output().__dict__,
+                "output_kind": "proposed_trade",
+                "authority_status": "unapproved",
+            }
+        )
+    )
+    _insert_receipt(
+        database,
+        batch_id="json-receipt",
+        first_sequence=1,
+        last_sequence=1,
+        created_at_us=30,
+    )
     with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO incidents(incident_id, run_id, scope, severity, code, opened_at_us, "
+            "details_json) VALUES ('json-incident', 'run-1', 'fixture', 'info', "
+            "'json', 30, '{}')"
+        )
+        connection.execute(
+            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', '{}', ?, 30, 30, 0)",
+            ("7" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, lifecycle, cost_model_id, fill_model_id, currency, data_class) "
+            "VALUES ('json-position', ?, 'run-1', 'instance-1', 'closed', 'cost', 'fill', "
+            "'USD', 'shadow_protected')",
+            (proposal.output_id,),
+        )
+        connection.execute(
+            "INSERT INTO shadow_marks(position_id, marked_at_us, payload_json) "
+            "VALUES ('json-position', 31, '{}')"
+        )
+        connection.execute(
+            "INSERT INTO shadow_outcomes(position_id, outcome_at_us, reason, completeness, "
+            "payload_json) VALUES ('json-position', 32, 'fixture', 'complete', '{}')"
+        )
         statements = (
+            "UPDATE incidents SET details_json = '{ \"a\": 1 }' "
+            "WHERE incident_id = 'json-incident'",
             "UPDATE callback_inbox SET payload_json = '{ \"a\": 1 }' WHERE source_sequence = 1",
-            "UPDATE market_events SET payload_json = '{\"z\":1,\"a\":2}' "
+            "UPDATE callback_receipts SET kind_counts_json = '{ \"tick\": 1 }' "
+            "WHERE batch_id = 'json-receipt'",
+            "UPDATE callback_receipts SET status_counts_json = '{ \"pending\": 1 }' "
+            "WHERE batch_id = 'json-receipt'",
+            'UPDATE market_events SET payload_json = \'{"z":1,"a":2}\' '
             "WHERE event_id = 'event-1'",
             "UPDATE idea_plugins SET manifest_json = '{ \"a\": 1 }' WHERE idea_id = 'idea'",
-            "UPDATE idea_instances SET parameters_json = '{\"z\":1,\"a\":2}' "
+            'UPDATE idea_instances SET parameters_json = \'{"z":1,"a":2}\' '
             "WHERE instance_id = 'instance-1'",
+            "UPDATE idea_checkpoints SET state_json = '{ \"a\": 1 }' "
+            "WHERE instance_id = 'instance-1'",
+            f"UPDATE idea_outputs SET payload_json = '{{ \"a\": 1 }}' "
+            f"WHERE output_id = '{stored.output_id}'",
+            "UPDATE shadow_marks SET payload_json = '{ \"a\": 1 }' "
+            "WHERE position_id = 'json-position'",
+            "UPDATE shadow_outcomes SET payload_json = '{ \"a\": 1 }' "
+            "WHERE position_id = 'json-position'",
         )
         for statement in statements:
             with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
@@ -284,8 +358,7 @@ def test_acknowledgement_and_decoupled_event_references_enforce_provenance(
             (sequence,),
         )
         connection.execute(
-            "INSERT INTO idea_checkpoints VALUES "
-            "('instance-1', 'event-1', '{}', ?, 20, 20, 0)",
+            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', '{}', ?, 20, 20, 0)",
             ("c" * 64,),
         )
         with pytest.raises(sqlite3.IntegrityError, match="checkpoint_event_provenance"):
@@ -906,9 +979,12 @@ def test_compaction_rejects_a_self_consistent_receipt_forged_away_from_callback_
         )
 
     with connect_v2(database) as connection:
-        assert connection.execute(
-            "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
-        ).fetchone()[0] is not None
+        assert (
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
+            ).fetchone()[0]
+            is not None
+        )
 
 
 def test_receipt_rotation_rolls_permanent_watermark_before_deletion(tmp_path: Path) -> None:
@@ -974,6 +1050,121 @@ def test_receipt_rotation_rolls_permanent_watermark_before_deletion(tmp_path: Pa
     assert tuple(watermark)[:2] == (104, 4)
     assert watermark["last_receipt_chain_hash"] == second_hash
     assert watermark["rolled_receipt_chain_hash"] != second_hash
+
+
+def test_receipt_rotation_continues_from_the_permanent_watermark(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'run-1'")
+        for sequence in range(101, 105):
+            connection.execute(
+                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+                "recorder_generation, connection_generation, callback_kind, received_at_us, "
+                "payload_json, payload_sha256, lifecycle, failure_code, receipt_batch_id) "
+                "VALUES (?, ?, 'run-1', 1, 1, 'tick', ?, NULL, ?, 'failed', 'fixture', ?)",
+                (
+                    sequence,
+                    f"continuation-{sequence}",
+                    sequence,
+                    "a" * 64,
+                    "first" if sequence <= 102 else "second",
+                ),
+            )
+    first_hash = _insert_receipt(
+        database,
+        batch_id="first",
+        first_sequence=101,
+        last_sequence=102,
+        created_at_us=1,
+    )
+    second_hash = _insert_receipt(
+        database,
+        batch_id="second",
+        first_sequence=103,
+        last_sequence=104,
+        created_at_us=99,
+        prior_chain_hash=first_hash,
+    )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(receipt_us=50, max_receipts_per_run=1, tombstone_us=1_000),
+    )
+
+    first_pass = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        first_rollup_hash = str(
+            connection.execute(
+                "SELECT rolled_receipt_chain_hash FROM callback_compaction_watermarks "
+                "WHERE run_id = 'run-1'"
+            ).fetchone()[0]
+        )
+    second_pass = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert first_pass.receipts_rolled == 1
+    assert second_pass.receipts_rolled == 1
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 0
+        watermark = connection.execute(
+            "SELECT compacted_through_sequence, cumulative_callback_count, "
+            "rolled_receipt_chain_hash, last_receipt_chain_hash "
+            "FROM callback_compaction_watermarks WHERE run_id = 'run-1'"
+        ).fetchone()
+    assert tuple(watermark)[:2] == (104, 4)
+    assert watermark["last_receipt_chain_hash"] == second_hash
+    assert watermark["rolled_receipt_chain_hash"] != first_rollup_hash
+
+
+def test_rolled_watermark_authorizes_later_payload_compaction(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="watermark-payload",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="watermark-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="watermark-proof",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=1,
+    )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=1_000, receipt_us=10, tombstone_us=1_000),
+    )
+
+    rolled = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    compacting_manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=10, receipt_us=10, tombstone_us=1_000),
+    )
+    compacted = compacting_manager.run(
+        now_us=100,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+
+    assert rolled.receipts_rolled == 1
+    assert compacted.payloads_compacted == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT 1 FROM callback_receipts WHERE batch_id = 'watermark-proof'"
+            ).fetchone()
+            is None
+        )
+        assert (
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
+            ).fetchone()[0]
+            is None
+        )
 
 
 def test_malformed_receipt_rolls_back_without_deleting_any_proof(tmp_path: Path) -> None:
@@ -1125,6 +1316,56 @@ def test_retention_deadline_rolls_back_safely(tmp_path: Path) -> None:
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
 
+def test_retention_deadline_rolls_back_payload_compaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="deadline",
+        received_at_us=1,
+        receipt_batch_id="deadline-receipt",
+    )
+    _insert_receipt(
+        database,
+        batch_id="deadline-receipt",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=99,
+    )
+    compacted = False
+
+    def monotonic() -> float:
+        return 1.0 if compacted else 0.0
+
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=10, receipt_us=1_000),
+        monotonic=monotonic,
+    )
+    original_compact = manager._compact_payloads
+
+    def compact_then_expire(connection: sqlite3.Connection, cutoff_us: int, limit: int) -> int:
+        nonlocal compacted
+        result = original_compact(connection, cutoff_us, limit)
+        compacted = True
+        return result
+
+    monkeypatch.setattr(manager, "_compact_payloads", compact_then_expire)
+
+    with pytest.raises(MaintenanceDeadlineExceeded, match="deadline"):
+        manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    with connect_v2(database) as connection:
+        payload = connection.execute(
+            "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
+        ).fetchone()[0]
+    assert compacted is True
+    assert payload is not None
+
+
 def test_default_100ms_retention_pass_makes_progress_on_expired_rows(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -1268,6 +1509,89 @@ def test_inbox_tombstone_expires_while_its_market_event_remains(tmp_path: Path) 
         )
 
 
+def test_granular_receipt_tombstones_expire_as_a_complete_batch(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first = _seed_callback_for_retention(
+        database,
+        uid="batch-first",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="batch-proof",
+    )
+    second = _seed_callback_for_retention(
+        database,
+        uid="batch-second",
+        received_at_us=99,
+        acknowledged_at_us=99,
+        receipt_batch_id="batch-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="batch-proof",
+        first_sequence=first,
+        last_sequence=second,
+        created_at_us=99,
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE callback_inbox SET payload_json = NULL WHERE source_sequence BETWEEN ? AND ?",
+            (first, second),
+        )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(tombstone_us=10, receipt_us=1_000, raw_market_event_us=1_000),
+    )
+
+    partial = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    complete = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert partial.expired_rows_deleted == 0
+    assert complete.expired_rows_deleted == 2
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE source_sequence BETWEEN ? AND ?",
+                (first, second),
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE source_sequence BETWEEN ? AND ?",
+                (first, second),
+            ).fetchone()[0]
+            == 2
+        )
+
+
+def test_actual_wal_size_remains_fatal_when_a_reader_blocks_checkpoint(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    reader = sqlite3.connect(database)
+    try:
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM runs").fetchone()
+        with connect_v2(database) as writer:
+            writer.executemany(
+                "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+                "opened_at_us, details_json) VALUES (?, 'run-1', 'fixture', 'info', "
+                "'reader-blocked', 100, '{}')",
+                ((f"wal-{index}",) for index in range(100)),
+            )
+
+        result = RetentionManager(database, RetentionPolicy(wal_cap_bytes=1)).run(now_us=100)
+    finally:
+        reader.close()
+
+    assert result.wal_bytes >= 1
+    assert result.cap_state is StorageCapState.FATAL
+    assert result.admission_allowed is False
+    assert result.required_action == "WAL_CAP_FATAL"
+
+
 def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -1377,5 +1701,38 @@ def test_init_cli_reports_sqlite_failures_as_machine_json(
     assert json.loads(result.stdout) == {
         "error": "OperationalError",
         "message": "simulated database failure",
+        "status": "error",
+    }
+
+
+def test_migrate_and_retain_cli_errors_are_machine_readable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+
+    def fail_migration(_database: Path) -> None:
+        raise SchemaError("simulated schema mismatch")
+
+    class FailingRetentionManager:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int) -> None:
+            raise RetentionInvariantError(f"simulated receipt failure at {now_us}")
+
+    monkeypatch.setattr("stocker_runtime.cli.migrate_database", fail_migration)
+    migrated = CliRunner().invoke(runtime_app, ["migrate", str(database)])
+    monkeypatch.setattr("stocker_runtime.cli.RetentionManager", FailingRetentionManager)
+    retained = CliRunner().invoke(runtime_app, ["retain", str(database), "--now-us", "100"])
+
+    assert migrated.exit_code == retained.exit_code == 1
+    assert json.loads(migrated.stdout) == {
+        "error": "SchemaError",
+        "message": "simulated schema mismatch",
+        "status": "error",
+    }
+    assert json.loads(retained.stdout) == {
+        "error": "RetentionInvariantError",
+        "message": "simulated receipt failure at 100",
         "status": "error",
     }

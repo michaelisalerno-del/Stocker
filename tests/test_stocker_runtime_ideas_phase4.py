@@ -4,6 +4,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import os
 import time
 from collections.abc import Mapping
 from dataclasses import replace
@@ -109,9 +110,16 @@ def _seed(database: Path, *, mode: str = "prospective_record") -> None:
             )
 
 
-def _event(connection: object, sequence: int, symbol: str, close: float) -> None:
+def _event(
+    connection: object,
+    sequence: int,
+    symbol: str,
+    close: float,
+    *,
+    session: str = "2026-08-03",
+) -> None:
     payload: Mapping[str, JsonValue] = {
-        "session": "2026-08-03",
+        "session": session,
         "checkpoint": 6,
         "regular_session_open": 100.0,
         "checkpoint_close": close,
@@ -261,6 +269,37 @@ def test_review_pin_includes_executed_package_initializers() -> None:
         for module, source in sorted(sources.items())
     )
     assert reviewed_code_hash(MODULE) == hashlib.sha256(framed).hexdigest()
+
+
+def test_review_pin_tracks_transitive_helpers_and_rejects_forbidden_helper_imports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stocker_ideas
+
+    package_spec = stocker_ideas.__spec__
+    assert package_spec is not None and package_spec.submodule_search_locations is not None
+    package_root = tmp_path / "stocker_ideas"
+    plugin_root = package_root / "plugins"
+    plugin_root.mkdir(parents=True)
+    module = "stocker_ideas.plugins.phase4_test_plugin"
+    helper = "stocker_ideas.plugins.phase4_test_helper"
+    (plugin_root / "phase4_test_plugin.py").write_text(
+        f"from {helper} import VALUE\n", encoding="utf-8"
+    )
+    helper_path = plugin_root / "phase4_test_helper.py"
+    helper_path.write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        package_spec,
+        "submodule_search_locations",
+        [*package_spec.submodule_search_locations, str(package_root)],
+    )
+
+    first = reviewed_code_hash(module)
+    helper_path.write_text("VALUE = 2\n", encoding="utf-8")
+    assert reviewed_code_hash(module) != first
+    helper_path.write_text("import os\nVALUE = 2\n", encoding="utf-8")
+    with pytest.raises(IdeaDiscoveryError, match="forbidden plugin import: os"):
+        reviewed_code_hash(module)
 
 
 def test_reference_plugin_has_static_authority_boundary() -> None:
@@ -525,6 +564,35 @@ def test_incremental_output_persists_prior_checkpoint_lineage_and_survives_reten
     assert final_retained == "[]"
 
 
+def test_incomplete_prior_session_lineage_is_released_after_rollover(tmp_path: Path) -> None:
+    database = tmp_path / "lineage-release.sqlite3"
+    _seed(database)
+    discovered = discover_plugins((_config(),))[0]
+    runner = IdeaRunner(database, (discovered,))
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        for sequence, symbol in enumerate(COHORT[:10], start=1):
+            _event(connection, sequence, symbol, 101.0 + sequence / 100)
+    assert runner.run_once(now_us=2_000)[0].output_count == 0
+    RetentionManager(database, policy=RetentionPolicy(completed_bar_us=1)).run(now_us=10_000)
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 10
+        _event(connection, 11, "AAL", 102.0, session="2026-08-04")
+    assert runner.run_once(now_us=11_000)[0].output_count == 0
+    RetentionManager(database, policy=RetentionPolicy(completed_bar_us=1)).run(now_us=20_000)
+    with connect_v2(database) as connection:
+        event_ids = tuple(
+            row[0] for row in connection.execute("SELECT event_id FROM market_events")
+        )
+        retained = connection.execute(
+            "SELECT state_input_event_ids_json FROM idea_checkpoints WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()[0]
+    runner.close()
+    assert event_ids == ("event-11",)
+    assert retained == '["event-11"]'
+
+
 class _InvalidPlugin:
     def __init__(self, original: IdeaPlugin, failure: str) -> None:
         self._original = original
@@ -759,6 +827,12 @@ class _SlowPlugin(_InvalidPlugin):
         return self._original.evaluate(batch, state)
 
 
+class _CrashingPlugin(_InvalidPlugin):
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        del batch, state
+        os._exit(17)
+
+
 def test_hung_plugin_is_terminated_and_does_not_block_healthy_instance(tmp_path: Path) -> None:
     database = tmp_path / "timeout.sqlite3"
     _seed(database)
@@ -785,6 +859,45 @@ def test_hung_plugin_is_terminated_and_does_not_block_healthy_instance(tmp_path:
     assert error_code is not None
     assert "50MS" in error_code
     assert results[healthy_activation.instance_id].advanced is True
+
+
+def test_crashed_worker_is_restarted_and_all_workers_are_closed(tmp_path: Path) -> None:
+    database = tmp_path / "crash.sqlite3"
+    _seed(database)
+    good = discover_plugins((_config(),))[0]
+    runner = IdeaRunner(database, (good,))
+    crashed = runner.activate(run_id="run-1", plugin=good, activated_at_us=100)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE idea_instances SET deactivated_at_us=100 WHERE instance_id=?",
+            (crashed.instance_id,),
+        )
+    healthy = runner.activate(run_id="run-1", plugin=good, activated_at_us=101)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE idea_instances SET deactivated_at_us=NULL WHERE instance_id=?",
+            (crashed.instance_id,),
+        )
+        for sequence, symbol in enumerate(COHORT, start=1):
+            _event(connection, sequence, symbol, 101.0 + sequence / 100)
+    runner._plugins_by_instance[crashed.instance_id] = _CrashingPlugin(good.plugin, "crash")
+
+    first = {item.instance_id: item for item in runner.run_once(now_us=30_000)}
+    assert first[crashed.instance_id].advanced is False
+    assert first[healthy.instance_id].advanced is True
+    assert crashed.instance_id not in runner._workers
+    healthy_process = runner._workers[healthy.instance_id].process
+    assert healthy_process.is_alive()
+
+    runner._plugins_by_instance[crashed.instance_id] = good.plugin
+    second = {item.instance_id: item for item in runner.run_once(now_us=1_030_000)}
+    assert second[crashed.instance_id].advanced is True
+    restarted_process = runner._workers[crashed.instance_id].process
+    assert restarted_process.is_alive()
+    runner.close()
+    assert not healthy_process.is_alive()
+    assert not restarted_process.is_alive()
+    assert runner._workers == {}
 
 
 def test_repeated_plugin_failure_keeps_one_unresolved_incident(tmp_path: Path) -> None:
@@ -837,40 +950,64 @@ def test_plugin_incident_reopens_after_recovery_and_recurrence(tmp_path: Path) -
     assert tuple(incidents[0]) == (1_002_000, None)
 
 
-def test_staleness_block_is_independent_from_continuity_gap_block(tmp_path: Path) -> None:
-    database = tmp_path / "stale.sqlite3"
+@pytest.mark.parametrize(
+    ("reason", "gaps_block", "staleness_block", "initially_blocked"),
+    (
+        ("STREAM_STALE", False, True, True),
+        ("STREAM_STALE", True, False, False),
+        ("RECONNECT_UNCERTAINTY", True, False, True),
+        ("RECONNECT_UNCERTAINTY", False, True, False),
+    ),
+)
+def test_staleness_and_continuity_flags_block_only_their_gap_class_and_recover(
+    tmp_path: Path,
+    reason: str,
+    gaps_block: bool,
+    staleness_block: bool,
+    initially_blocked: bool,
+) -> None:
+    database = tmp_path / f"gap-{reason}-{gaps_block}-{staleness_block}.sqlite3"
     _seed(database)
     discovered = discover_plugins((_config(),))[0]
-    stale_only = replace(
+    scoped = replace(
         discovered,
         requirements=tuple(
             MarketDataRequirement(
                 **{
                     **requirement.model_dump(),
-                    "gaps_block": False,
-                    "staleness_block": True,
+                    "gaps_block": gaps_block,
+                    "staleness_block": staleness_block,
                 }
             )
             for requirement in discovered.requirements
         ),
     )
-    runner = IdeaRunner(database, (stale_only,))
-    runner.activate(run_id="run-1", plugin=stale_only, activated_at_us=100)
+    runner = IdeaRunner(database, (scoped,))
+    runner.activate(run_id="run-1", plugin=scoped, activated_at_us=100)
     with connect_v2(database) as connection:
         connection.execute(
             "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
             "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
             "requirements_hash, opened_at_us) VALUES "
-            "('stale-aal', 'run-1', 1, 1, 'AAL', 'bars_5m', 1, 'active', ?, 1)",
+            "('gap-aal', 'run-1', 1, 1, 'AAL', 'bars_5m', 1, 'active', ?, 1)",
             ("a" * 64,),
         )
         connection.execute(
             "INSERT INTO gaps(gap_id, run_id, subscription_id, started_at_us, reason, "
             "data_loss_possible, continuity_required) VALUES "
-            "('stale-gap', 'run-1', 'stale-aal', 2, 'STREAM_STALE', 0, 0)"
+            "('scoped-gap', 'run-1', 'gap-aal', 2, ?, 0, 0)",
+            (reason,),
         )
         _event(connection, 1, "AAL", 101.0)
-    assert runner.run_once(now_us=1_000)[0].advanced is False
+    first = runner.run_once(now_us=1_000)[0]
+    assert first.advanced is not initially_blocked
+    if initially_blocked:
+        with connect_v2(database) as connection:
+            connection.execute(
+                "UPDATE gaps SET ended_at_us=2, resolved_at_us=2 WHERE gap_id='scoped-gap'"
+            )
+        assert runner.run_once(now_us=2_000)[0].advanced is True
+    runner.close()
 
 
 class _RecorderAdapter:
@@ -894,6 +1031,47 @@ class _RecorderAdapter:
 
     def cancel(self, request_id: int) -> None:
         return None
+
+
+def test_recorder_is_default_off_without_idea_configuration(tmp_path: Path) -> None:
+    database = tmp_path / "recorder-default-off.sqlite3"
+    initialize_database(database)
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-default-off",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+        ),
+        _RecorderAdapter(),
+    )
+    recorder.start(
+        now_us=100,
+        instruments=(InstrumentSpec("AAL", 1, "stock", "AAL", "SMART", "USD"),),
+        subscriptions=(
+            SubscriptionSpec(
+                name="aal-bars",
+                instrument_id="AAL",
+                feed_kind="bars_5m",
+                request_id=1,
+                continuity_required=True,
+                optional=False,
+                stale_after_us=300_000_000,
+            ),
+        ),
+    )
+    with connect_v2(database) as connection:
+        instance_count = connection.execute("SELECT count(*) FROM idea_instances").fetchone()[0]
+    assert recorder.idea_requirements == ()
+    assert instance_count == 0
+    recorder.stop(now_us=101)
 
 
 def test_recorder_explicit_config_wires_generic_requirements_and_activation(tmp_path: Path) -> None:

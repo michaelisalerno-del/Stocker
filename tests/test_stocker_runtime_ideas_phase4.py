@@ -54,7 +54,12 @@ from stocker_runtime.ingestion import (
 )
 from stocker_runtime.ingestion.official_bridge import create_official_bridge
 from stocker_runtime.storage.connection import connect_v2, initialize_database
-from stocker_runtime.storage.repository import IdeaOutputRecord, deterministic_output_id
+from stocker_runtime.storage.repository import (
+    IdeaOutputRecord,
+    IdentityCollisionError,
+    OperationalRepository,
+    deterministic_output_id,
+)
 from stocker_runtime.storage.retention import RetentionManager, RetentionPolicy
 
 MODULE = "stocker_ideas.plugins.opening_leader_continuation_v0"
@@ -151,16 +156,19 @@ def _event(
     )
 
 
-def _persist_market_event(connection: object, sequence: int, event: MarketEvent) -> None:
+def _persist_market_event(
+    connection: object, sequence: int, event: MarketEvent, *, run_id: str = "run-1"
+) -> None:
     payload = event.payload
     payload_json = canonical_json_bytes(payload).decode()
     connection.execute(  # type: ignore[attr-defined]
         "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, recorder_generation, "
         "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
-        "VALUES (?, ?, 'run-1', 1, 1, 'bar', ?, ?, 'pending')",
+        "VALUES (?, ?, ?, 1, 1, 'bar', ?, ?, 'pending')",
         (
             sequence,
             event.event_id,
+            run_id,
             event.received_at_us,
             hashlib.sha256(payload_json.encode()).hexdigest(),
         ),
@@ -169,9 +177,10 @@ def _persist_market_event(connection: object, sequence: int, event: MarketEvent)
         "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, feed_kind, "
         "event_kind, event_at_us, received_at_us, connection_generation, payload_json, "
         "payload_sha256) "
-        "VALUES (?, 'run-1', ?, ?, 'bars', 'bar', ?, ?, 1, ?, ?)",
+        "VALUES (?, ?, ?, ?, 'bars', 'bar', ?, ?, 1, ?, ?)",
         (
             event.event_id,
+            run_id,
             sequence,
             event.instrument_id,
             event.event_at_us,
@@ -900,6 +909,48 @@ def test_runner_rejects_activation_for_a_different_bound_run(tmp_path: Path) -> 
         runner.activate(run_id="some-other-run", plugin=discovered, activated_at_us=100)
 
 
+def test_two_simultaneously_active_runs_remain_isolated_by_required_run_id(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "two-active-runs.sqlite3"
+    _seed(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs VALUES ('run-2', 'prospective_record', 'ibkr', 2, NULL, ?, "
+            "'fixture', ?, 'running', NULL)",
+            ("b" * 64, "prospective_protected"),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('run-2', 1, 'fixture-2', 2)"
+        )
+    discovered = discover_plugins((_config(),))[0]
+    run1_runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    run2_runner = IdeaRunner(database, (discovered,), run_id="run-2")
+    run1 = run1_runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    run2 = run2_runner.activate(run_id="run-2", plugin=discovered, activated_at_us=100)
+    run1_event = _raw_bar_event(1, "AAL", datetime(2026, 8, 3, 13, 30, tzinfo=UTC))
+    run2_event = _raw_bar_event(2, "AAOI", datetime(2026, 8, 3, 13, 30, tzinfo=UTC))
+    with connect_v2(database) as connection:
+        _persist_market_event(connection, 1, run1_event, run_id="run-1")
+        _persist_market_event(connection, 2, run2_event, run_id="run-2")
+
+    run1_results = run1_runner.run_once(now_us=1_000)
+    run2_results = run2_runner.run_once(now_us=1_000)
+    with connect_v2(database) as connection:
+        checkpoints = dict(
+            connection.execute("SELECT instance_id, last_market_event_id FROM idea_checkpoints")
+        )
+    run1_runner.close()
+    run2_runner.close()
+    assert tuple(result.instance_id for result in run1_results) == (run1.instance_id,)
+    assert tuple(result.instance_id for result in run2_results) == (run2.instance_id,)
+    assert checkpoints == {
+        run1.instance_id: run1_event.event_id,
+        run2.instance_id: run2_event.event_id,
+    }
+
+
 def _raw_bar_event(
     sequence: int,
     symbol: str,
@@ -1010,6 +1061,32 @@ def test_opening_leader_waits_for_complete_cohort_and_is_batch_order_independent
     assert tuple(output.model_dump(mode="json") for output in second.outputs) == expected
     assert tuple(output.model_dump(mode="json") for output in reversed_batch.outputs) == expected
     assert all(output.payload["slate_size"] == 20 for output in one_batch.outputs)
+
+
+@pytest.mark.parametrize(("valid_count", "output_count"), ((15, 3), (14, 0)))
+def test_opening_leader_applies_minimum_after_all_twenty_cross_checkpoint(
+    valid_count: int, output_count: int
+) -> None:
+    plugin = discover_plugins((_config(),))[0].plugin
+    session_open = datetime(2026, 8, 3, 13, 30, tzinfo=UTC)
+    boundary = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
+    evidence: list[MarketEvent] = []
+    for index, symbol in enumerate(COHORT):
+        evidence.append(_raw_bar_event(index * 2, symbol, session_open))
+        event_at = boundary - timedelta(seconds=5) if index < valid_count else boundary
+        evidence.append(
+            _raw_bar_event(
+                index * 2 + 1,
+                symbol,
+                event_at,
+                close=101.0 + index / 100,
+                received_at=boundary,
+            )
+        )
+    evaluation = plugin.evaluate(_batch(tuple(evidence)), {})
+    assert len(evaluation.outputs) == output_count
+    if evaluation.outputs:
+        assert all(output.payload["slate_size"] == valid_count for output in evaluation.outputs)
 
 
 def test_opening_leader_does_not_emit_incomplete_cohort_at_session_rollover() -> None:
@@ -1466,6 +1543,36 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
         ),
     )
     assert deterministic_output_id(repository_record) == proposed["output_id"]
+    repository = OperationalRepository(database)
+    retry = repository.put_idea_output(repository_record)
+    assert retry.output_id == proposed["output_id"]
+    assert retry.inserted is False
+
+    reordered_inputs = (input_ids[1], input_ids[0], *input_ids[2:])
+    collisions = (
+        replace(repository_record, payload={"changed": True}),
+        replace(
+            repository_record,
+            first_input_event_id=reordered_inputs[0],
+            input_event_ids=reordered_inputs,
+        ),
+        replace(
+            repository_record,
+            legs=(
+                ProposedTradeLeg(
+                    instrument_id="WULF",
+                    action="buy",
+                    target="long",
+                    quantity_value=2.0,
+                    currency="USD",
+                ),
+            ),
+        ),
+        replace(repository_record, subject_instrument_id="AAL"),
+    )
+    for collision in collisions:
+        with pytest.raises(IdentityCollisionError):
+            repository.put_idea_output(collision)
 
 
 def test_recorder_is_default_off_without_idea_configuration(tmp_path: Path) -> None:

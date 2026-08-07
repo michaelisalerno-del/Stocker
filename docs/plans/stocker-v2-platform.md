@@ -903,7 +903,8 @@ adapter-to-recorder integration test proves the default-off path without enriche
 fixtures or historical backfill. The runner is explicitly owned by one active run;
 activation watermarks survive callback tombstone and receipt compaction; gap blocking
 is scoped to evidence at or after activation; and runner/repository writes share one
-complete deterministic output identity. These are Phase 4 corrections only. No risk,
+complete deterministic output identity and content-hash contract. These are Phase 4
+corrections only. No risk,
 execution, paper, live, account, credential, or protected-data boundary changed.
 
 - **Objective:** activate generic ideas through configuration.

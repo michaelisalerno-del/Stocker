@@ -16,7 +16,10 @@ from stocker_runtime.domain import (
     canonical_json_bytes,
     ensure_authority_free_json,
 )
-from stocker_runtime.ideas.identity import deterministic_idea_output_id
+from stocker_runtime.ideas.identity import (
+    deterministic_idea_output_content_hash,
+    deterministic_idea_output_id,
+)
 from stocker_runtime.storage.connection import connect_v2
 
 MAX_EXTENSION_JSON_BYTES = 64 * 1024
@@ -199,36 +202,6 @@ def callback_rows_hash(rows: tuple[Mapping[str, object], ...]) -> str:
     return hashlib.sha256(canonical_json_bytes(material)).hexdigest()
 
 
-def _content_hash(record: IdeaOutputRecord, payload_hash: str) -> str:
-    input_event_ids = record.input_event_ids or (record.first_input_event_id,)
-    legs = cast(JsonValue, [leg.model_dump(mode="json") for leg in record.legs])
-    content = cast(
-        JsonValue,
-        {
-            "run_id": record.run_id,
-            "instance_id": record.instance_id,
-            "output_kind": record.output_kind,
-            "subject_instrument_id": record.subject_instrument_id,
-            "emitted_at_us": record.emitted_at_us,
-            "as_of_at_us": record.as_of_at_us,
-            "valid_until_at_us": record.valid_until_at_us,
-            "direction": record.direction,
-            "strength": record.strength,
-            "confidence": record.confidence,
-            "horizon_us": record.horizon_us,
-            "first_input_event_id": record.first_input_event_id,
-            "last_input_event_id": record.last_input_event_id,
-            "input_event_ids": input_event_ids,
-            "output_ordinal": record.output_ordinal,
-            "payload_hash": payload_hash,
-            "data_class": record.data_class,
-            "authority_status": record.authority_status,
-            "legs": legs,
-        },
-    )
-    return hashlib.sha256(canonical_json_bytes(content)).hexdigest()
-
-
 class OperationalRepository:
     """One-writer repository for generic V2 records; no broker or legacy access."""
 
@@ -265,7 +238,25 @@ class OperationalRepository:
             raise ValueError("only proposed trades may contain legs")
         payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
         output_id = _output_id_from_snapshot(record, payload_snapshot)
-        content_hash = _content_hash(record, payload_hash)
+        content_hash = deterministic_idea_output_content_hash(
+            run_id=record.run_id,
+            instance_id=record.instance_id,
+            output_kind=record.output_kind,
+            subject_instrument_id=record.subject_instrument_id,
+            emitted_at_us=record.emitted_at_us,
+            as_of_at_us=record.as_of_at_us,
+            valid_until_at_us=record.valid_until_at_us,
+            direction=record.direction,
+            strength=record.strength,
+            confidence=record.confidence,
+            horizon_us=record.horizon_us,
+            input_event_ids=input_event_ids,
+            output_ordinal=record.output_ordinal,
+            payload=payload_snapshot,
+            data_class=record.data_class,
+            authority_status=record.authority_status,
+            legs=record.legs,
+        )
         connection = connect_v2(self.database_path)
         try:
             connection.execute("BEGIN IMMEDIATE")

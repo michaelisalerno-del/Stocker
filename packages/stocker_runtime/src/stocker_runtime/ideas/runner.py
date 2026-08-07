@@ -24,7 +24,10 @@ from stocker_runtime.domain import (
 )
 from stocker_runtime.ideas.contract import IdeaActivation, IdeaBatch, IdeaEvaluation, IdeaPlugin
 from stocker_runtime.ideas.discovery import DiscoveredPlugin
-from stocker_runtime.ideas.identity import deterministic_idea_output_id
+from stocker_runtime.ideas.identity import (
+    deterministic_idea_output_content_hash,
+    deterministic_idea_output_id,
+)
 from stocker_runtime.storage.connection import connect_v2
 
 MAX_EVALUATION_NS = 50_000_000
@@ -637,12 +640,6 @@ class IdeaRunner:
     ) -> None:
         payload_json = output.payload_json().decode()
         payload_hash = hashlib.sha256(payload_json.encode()).hexdigest()
-        legs = cast(
-            JsonValue,
-            [leg.model_dump(mode="json") for leg in output.legs]
-            if isinstance(output, ProposedTrade)
-            else [],
-        )
         typed_legs = output.legs if isinstance(output, ProposedTrade) else ()
         output_id = deterministic_idea_output_id(
             instance_id=activation.instance_id,
@@ -656,17 +653,24 @@ class IdeaRunner:
         authority = (
             "unapproved" if output.kind in {"proposed_position", "proposed_trade"} else "recorded"
         )
-        content_hash = _hash(
-            cast(
-                JsonValue,
-                {
-                    "output_id": output_id,
-                    "subject": output.subject_instrument_id,
-                    "authority_status": authority,
-                    "data_class": activation.protected_data_class.value,
-                    "legs": legs,
-                },
-            )
+        content_hash = deterministic_idea_output_content_hash(
+            run_id=activation.run_id,
+            instance_id=activation.instance_id,
+            output_kind=output.kind,
+            subject_instrument_id=output.subject_instrument_id,
+            emitted_at_us=now_us,
+            as_of_at_us=output.as_of_at_us,
+            valid_until_at_us=None,
+            direction=None,
+            strength=None,
+            confidence=None,
+            horizon_us=None,
+            input_event_ids=event_ids,
+            output_ordinal=ordinal,
+            payload=output.payload,
+            data_class=activation.protected_data_class.value,
+            authority_status=authority,
+            legs=typed_legs,
         )
         try:
             connection.execute(

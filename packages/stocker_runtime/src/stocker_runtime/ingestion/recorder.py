@@ -721,22 +721,57 @@ class Recorder:
         try:
             connection.execute("BEGIN IMMEDIATE")
             self._verify_owned(connection)
-            lifecycle = "paused" if spec.optional else "disconnected"
-            connection.execute(
-                "UPDATE subscriptions SET lifecycle=? WHERE subscription_id=?",
-                (lifecycle, fence.subscription_id),
-            )
-            self._open_gap(
-                connection,
-                cast(str, fence.subscription_id),
-                now_us,
-                code,
-                spec.continuity_required,
-            )
+            affected: tuple[tuple[str, bool], ...]
+            if spec.optional:
+                connection.execute(
+                    "UPDATE subscriptions SET lifecycle='paused' WHERE subscription_id=?",
+                    (fence.subscription_id,),
+                )
+                affected = ((cast(str, fence.subscription_id), spec.continuity_required),)
+            else:
+                state = self._authority_state()
+                continuity = {
+                    item.request_id: item.continuity_required for item in self._subscriptions
+                }
+                affected_by_id = {
+                    str(row["subscription_id"]): continuity[int(row["request_id"])]
+                    for row in connection.execute(
+                        "SELECT subscription_id, request_id FROM subscriptions WHERE run_id=? "
+                        "AND recorder_generation=? AND connection_generation=? "
+                        "AND lifecycle IN ('connecting','active','degraded')",
+                        (
+                            self.config.run_id,
+                            state.recorder_generation,
+                            state.connection_generation,
+                        ),
+                    )
+                }
+                affected_by_id.setdefault(
+                    cast(str, fence.subscription_id), spec.continuity_required
+                )
+                affected = tuple(affected_by_id.items())
+                connection.execute(
+                    "UPDATE subscriptions SET lifecycle='disconnected' WHERE run_id=? "
+                    "AND recorder_generation=? AND connection_generation=? "
+                    "AND lifecycle IN ('connecting','active','degraded')",
+                    (
+                        self.config.run_id,
+                        state.recorder_generation,
+                        state.connection_generation,
+                    ),
+                )
+            for subscription_id, continuity_required in affected:
+                self._open_gap(
+                    connection,
+                    subscription_id,
+                    now_us,
+                    code,
+                    continuity_required,
+                )
             self._record_incident(connection, fence.subscription_id, now_us, code, details)
             if not spec.optional:
                 connection.execute(
-                    "UPDATE runtime_state SET "
+                    "UPDATE runtime_state SET connection_state='disconnected', "
                     "lifecycle=CASE WHEN lifecycle IN ('recovering','connecting','running') "
                     "OR (lifecycle='degraded' AND reason LIKE 'IBKR_FARM_%') "
                     "THEN 'degraded' ELSE lifecycle END, reason=CASE WHEN lifecycle IN "

@@ -1420,14 +1420,54 @@ def test_required_abort_disconnects_when_second_failure_persistence_fails(
             "AND subscription_id IS NULL"
         ).fetchone()[0]
         runtime = connection.execute(
-            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+            "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
         ).fetchone()
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        gap_requests = {
+            int(row[0])
+            for row in connection.execute(
+                "SELECT subscription.request_id FROM gaps gap JOIN subscriptions subscription "
+                "ON subscription.subscription_id=gap.subscription_id "
+                "WHERE gap.reason='IBKR_SUBSCRIBE_FAILED'"
+            )
+        }
     assert scoped == 1
     assert fabricated_global == 0
+    assert states == {3: "disconnected", 4: "disconnected"}
+    assert gap_requests == {3, 4}
     if second_failure == "takeover":
-        assert tuple(runtime) == (2, "running", "REPLACEMENT_OWNS_STATE")
+        assert tuple(runtime) == (2, "running", "REPLACEMENT_OWNS_STATE", "connected")
     else:
-        assert tuple(runtime) == (1, "degraded", "IBKR_SUBSCRIBE_FAILED")
+        assert tuple(runtime) == (1, "degraded", "IBKR_SUBSCRIBE_FAILED", "disconnected")
+
+
+def test_optional_subscribe_failure_remains_isolated_and_connected(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData(fail_subscribe={4})
+    Recorder(_config(database), adapter).start(
+        now_us=100, instruments=(instrument,), subscriptions=specs
+    )
+
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        scoped = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED' "
+            "AND subscription_id IS NOT NULL"
+        ).fetchone()[0]
+        global_incident = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED' "
+            "AND subscription_id IS NULL"
+        ).fetchone()[0]
+    assert states == {3: "active", 4: "paused"}
+    assert tuple(runtime) == ("running", None, "connected")
+    assert (scoped, global_incident) == (1, 0)
+    assert adapter.connected is True
+    assert adapter.disconnect_calls == 0
 
 
 def test_farm_recovery_does_not_clear_unrelated_degraded_or_paused_state(tmp_path: Path) -> None:

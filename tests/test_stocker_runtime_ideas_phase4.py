@@ -1074,7 +1074,7 @@ def test_opening_leader_retains_incremental_state_and_emits_c6_and_c12() -> None
     c12_evidence = tuple(
         event
         for event in _checkpoint_evidence(12, sequence_start=40)
-        if int(event.payload["bar_number"]) > 6
+        if cast(int, event.payload["bar_number"]) > 6
     )
     c12 = plugin.evaluate(_batch(c12_evidence), third.state)
     next_session = plugin.evaluate(

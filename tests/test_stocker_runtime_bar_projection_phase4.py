@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,13 +13,19 @@ import pytest
 import stocker_runtime.ideas.discovery as discovery_module
 from stocker_ideas.plugins.opening_leader_continuation_v0 import COHORT, MANIFEST, create_plugin
 from stocker_runtime.domain import (
+    JsonValue,
     MarketEvent,
     Observation,
     ProtectedDataClass,
     RuntimeMode,
     canonical_json_bytes,
 )
-from stocker_runtime.ideas.contract import IdeaBatch, IdeaEvaluation, MarketDataRequirement
+from stocker_runtime.ideas.contract import (
+    IdeaActivation,
+    IdeaBatch,
+    IdeaEvaluation,
+    MarketDataRequirement,
+)
 from stocker_runtime.ideas.discovery import IdeaConfig, discover_plugins, reviewed_code_hash
 from stocker_runtime.ideas.runner import IdeaRunner, IdeaRunnerError, _PluginWorker
 from stocker_runtime.ingestion.bar_projection import project_required_five_minute_bars
@@ -54,9 +61,9 @@ def _bar(
     event_at_us: int,
     *,
     received_at_us: int,
-    payload_overrides: dict[str, object] | None = None,
+    payload_overrides: dict[str, JsonValue] | None = None,
 ) -> None:
-    payload: dict[str, object] = {
+    payload: dict[str, JsonValue] = {
         "event_at_us": event_at_us,
         "open": 100.0 + sequence / 1_000,
         "high": 101.0 + sequence / 1_000,
@@ -100,7 +107,7 @@ def _requirement() -> MarketDataRequirement:
     )
 
 
-def _project(database: Path) -> tuple[object, tuple[object, ...]]:
+def _project(database: Path) -> tuple[sqlite3.Row, tuple[sqlite3.Row, ...]]:
     with connect_v2(database) as connection:
         project_required_five_minute_bars(
             connection, run_id="run-1", requirements=(_requirement(),)
@@ -131,9 +138,9 @@ def test_exact_sixty_raw_bars_produce_complete_restart_safe_receipt(tmp_path: Pa
                 received_at_us=end if index == 59 else opening + index * 5_000_000,
             )
     event, mappings = _project(database)
-    payload = json.loads(str(event["payload_json"]))  # type: ignore[index]
-    assert event["source_sequence"] is None  # type: ignore[index]
-    assert event["derived_after_source_sequence"] == 60  # type: ignore[index]
+    payload = json.loads(str(event["payload_json"]))
+    assert event["source_sequence"] is None
+    assert event["derived_after_source_sequence"] == 60
     assert payload["source_completeness"] == "complete"
     assert payload["input_count"] == 60
     assert len(mappings) == 60
@@ -143,7 +150,7 @@ def test_exact_sixty_raw_bars_produce_complete_restart_safe_receipt(tmp_path: Pa
 
     # Replaying projection after a process restart is an immutable no-op.
     event_again, mappings_again = _project(database)
-    assert event_again["event_id"] == event["event_id"]  # type: ignore[index]
+    assert event_again["event_id"] == event["event_id"]
     assert mappings_again == mappings
 
 
@@ -165,7 +172,7 @@ def test_one_missing_constituent_is_permanently_incomplete(tmp_path: Path) -> No
             sequence += 1
         _bar(connection, sequence, end, received_at_us=end)
     event, mappings = _project(database)
-    payload = json.loads(str(event["payload_json"]))  # type: ignore[index]
+    payload = json.loads(str(event["payload_json"]))
     assert payload["source_completeness"] == "incomplete"
     assert payload["missing_count"] == 1
     assert len(mappings) == 60
@@ -186,19 +193,19 @@ def test_one_missing_constituent_is_permanently_incomplete(tmp_path: Path) -> No
         unchanged = connection.execute(
             "SELECT event_id, payload_json FROM market_events WHERE event_kind='bar_5m'"
         ).fetchone()
-    assert unchanged["event_id"] == event["event_id"]  # type: ignore[index]
+    assert unchanged["event_id"] == event["event_id"]
     assert json.loads(str(unchanged["payload_json"]))["source_completeness"] == "incomplete"
 
 
-def _assert_incomplete_receipt_blocks_opening_leader(event: object) -> None:
+def _assert_incomplete_receipt_blocks_opening_leader(event: sqlite3.Row) -> None:
     projected = MarketEvent(
-        event_id=str(event["event_id"]),  # type: ignore[index]
-        instrument_id=str(event["instrument_id"]),  # type: ignore[index]
-        feed_kind=str(event["feed_kind"]),  # type: ignore[index]
-        event_kind=str(event["event_kind"]),  # type: ignore[index]
-        event_at_us=int(event["event_at_us"]),  # type: ignore[index]
-        received_at_us=int(event["received_at_us"]),  # type: ignore[index]
-        payload=json.loads(str(event["payload_json"])),  # type: ignore[index]
+        event_id=str(event["event_id"]),
+        instrument_id=str(event["instrument_id"]),
+        feed_kind=str(event["feed_kind"]),
+        event_kind=str(event["event_kind"]),
+        event_at_us=int(event["event_at_us"]),
+        received_at_us=int(event["received_at_us"]),
+        payload=json.loads(str(event["payload_json"])),
     )
     evidence = tuple(
         projected
@@ -229,7 +236,7 @@ def test_duplicate_raw_timestamp_produces_immutable_incomplete_receipt(
             )
 
     event, mappings = _project(database)
-    payload = json.loads(str(event["payload_json"]))  # type: ignore[index]
+    payload = json.loads(str(event["payload_json"]))
     assert payload["source_completeness"] == "incomplete"
     assert payload["input_count"] == 60
     assert payload["missing_count"] == 1
@@ -237,7 +244,7 @@ def test_duplicate_raw_timestamp_produces_immutable_incomplete_receipt(
     assert payload["unexpected_count"] == 0
     assert len(mappings) == 60
     replay, replay_mappings = _project(database)
-    assert replay["event_id"] == event["event_id"]  # type: ignore[index]
+    assert replay["event_id"] == event["event_id"]
     assert replay_mappings == mappings
     _assert_incomplete_receipt_blocks_opening_leader(event)
 
@@ -259,7 +266,7 @@ def test_malformed_numeric_payload_produces_immutable_incomplete_receipt(
             )
 
     event, mappings = _project(database)
-    payload = json.loads(str(event["payload_json"]))  # type: ignore[index]
+    payload = json.loads(str(event["payload_json"]))
     assert payload["source_completeness"] == "incomplete"
     assert payload["input_count"] == 60
     assert payload["missing_count"] == 0
@@ -268,7 +275,7 @@ def test_malformed_numeric_payload_produces_immutable_incomplete_receipt(
     assert payload["invalid_numeric_payload"] is True
     assert len(mappings) == 60
     replay, replay_mappings = _project(database)
-    assert replay["event_id"] == event["event_id"]  # type: ignore[index]
+    assert replay["event_id"] == event["event_id"]
     assert replay_mappings == mappings
     _assert_incomplete_receipt_blocks_opening_leader(event)
 
@@ -314,7 +321,7 @@ def test_incremental_projection_reads_only_after_last_immutable_window(tmp_path:
             )
         )
     assert len(derived) == 2
-    assert derived[0]["event_id"] == first["event_id"]  # type: ignore[index]
+    assert derived[0]["event_id"] == first["event_id"]
     assert json.loads(str(derived[1]["payload_json"]))["source_completeness"] == "complete"
     assert second_inputs == tuple(f"raw-{sequence}" for sequence in range(61, 121))
 
@@ -345,7 +352,7 @@ def test_resolved_overlapping_gap_still_invalidates_bar(tmp_path: Path) -> None:
                 received_at_us=end if index == 59 else opening + index * 5_000_000,
             )
     event, _ = _project(database)
-    payload = json.loads(str(event["payload_json"]))  # type: ignore[index]
+    payload = json.loads(str(event["payload_json"]))
     assert payload["source_completeness"] == "incomplete"
     assert payload["overlapping_gap_count"] == 1
 
@@ -415,7 +422,7 @@ def test_raw_source_sequence_remains_unique(tmp_path: Path) -> None:
 def _derived_bar(symbol: str, number: int, *, complete: bool = True) -> MarketEvent:
     opening = int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     end = opening + number * 300_000_000
-    payload: dict[str, object] = {
+    payload: dict[str, JsonValue] = {
         "session": "2026-08-03",
         "bar_number": number,
         "bar_start_at_us": end - 300_000_000,
@@ -540,7 +547,7 @@ def test_discovery_worker_hang_or_crash_is_bounded_and_cleaned_up(
 ) -> None:
     config = _config()
     parameters_hash = hashlib.sha256(canonical_json_bytes(config.parameters)).hexdigest()
-    provisional = discovery_module.IdeaActivation(
+    provisional = IdeaActivation(
         instance_id="discovery",
         parameters=config.parameters,
         parameters_hash=parameters_hash,

@@ -2293,6 +2293,53 @@ def test_farm_warning_is_scoped_and_recovery_resolves_only_affected_feed(tmp_pat
     assert adapter.connected is True
 
 
+@pytest.mark.parametrize(
+    ("recovered_at_us", "expected_resolution", "expected_lifecycle"),
+    ((100, None, "degraded"), (101, 101, "running")),
+)
+def test_farm_recovery_cannot_resolve_incident_or_gap_before_they_open(
+    tmp_path: Path,
+    recovered_at_us: int,
+    expected_resolution: int | None,
+    expected_lifecycle: str,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2103, None, "quotes lost", 101, ("quotes",))
+    )
+
+    recorder.market_data_status(
+        MarketDataStatus(
+            "farm_recovered",
+            2104,
+            None,
+            "quotes restored",
+            recovered_at_us,
+            ("quotes",),
+        )
+    )
+
+    with connect_v2(database) as connection:
+        gap_resolution = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
+        ).fetchone()[0]
+        incident_resolution = connection.execute(
+            "SELECT resolved_at_us FROM incidents WHERE code='IBKR_FARM_2103_DEGRADED'"
+        ).fetchone()[0]
+        runtime = connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0]
+        subscription = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE request_id=3"
+        ).fetchone()[0]
+    assert gap_resolution == expected_resolution
+    assert incident_resolution == expected_resolution
+    assert runtime == expected_lifecycle
+    assert subscription == ("active" if expected_resolution is not None else "degraded")
+
+
 def test_replay_malformed_callback_after_start_cleans_up_writer(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)

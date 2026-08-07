@@ -385,6 +385,13 @@ def test_schema_rejects_impossible_gap_and_callback_terminal_times(tmp_path: Pat
                 "normalized_event_id='event-1', acknowledged_at_us=19 "
                 "WHERE source_sequence=1"
             )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+                "opened_at_us, resolved_at_us, details_json) VALUES "
+                "('backward-incident', 'run-1', 'fixture', 'degraded', 'fixture', "
+                "30, 29, '{}')"
+            )
 
 
 def test_acknowledgement_and_decoupled_event_references_enforce_provenance(

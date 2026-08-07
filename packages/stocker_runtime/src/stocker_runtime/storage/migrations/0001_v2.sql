@@ -64,7 +64,9 @@ CREATE TABLE incidents (
     plugin_instance_id TEXT,
     subscription_id TEXT,
     opened_at_us INTEGER NOT NULL CHECK(opened_at_us >= 0),
-    resolved_at_us INTEGER,
+    resolved_at_us INTEGER CHECK(
+        resolved_at_us IS NULL OR resolved_at_us >= opened_at_us
+    ),
     details_json TEXT NOT NULL CHECK(
         stocker_canonical_json(details_json) = 1 AND length(CAST(details_json AS BLOB)) <= 16384
     )

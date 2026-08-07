@@ -1181,12 +1181,14 @@ class Recorder:
                     connection.execute(
                         "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
                         "AND subscription_id=? AND code=? "
+                        "AND opened_at_us<=? "
                         "AND resolved_at_us IS NULL",
                         (
                             status.received_at_us,
                             self.config.run_id,
                             fence.subscription_id,
                             matching_reason,
+                            status.received_at_us,
                         ),
                     )
                     unresolved_for_subscription = connection.execute(

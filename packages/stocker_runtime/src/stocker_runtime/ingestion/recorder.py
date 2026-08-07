@@ -19,6 +19,7 @@ from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
     CallbackFence,
     CallbackInbox,
+    CallbackTimestampOrderingLoss,
     InboxAdmissionError,
     MarketDataCallback,
     NormalizationError,
@@ -872,6 +873,9 @@ class Recorder:
             )
             self._heartbeat(now_us)
             return processed
+        except CallbackTimestampOrderingLoss as error:
+            self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", now_us)
+            raise RecorderFatalError("callback timestamp ordering loss") from error
         except AuthoritativeLeaseLost:
             raise
         except Exception as error:
@@ -1019,12 +1023,14 @@ class Recorder:
                 if fence is not None:
                     connection.execute(
                         "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
-                        "AND subscription_id=? AND resolved_at_us IS NULL",
+                        "AND subscription_id=? AND started_at_us<=? "
+                        "AND resolved_at_us IS NULL",
                         (
                             status.received_at_us,
                             status.received_at_us,
                             self.config.run_id,
                             fence.subscription_id,
+                            status.received_at_us,
                         ),
                     )
                 self._record_incident(
@@ -1161,6 +1167,7 @@ class Recorder:
                     connection.execute(
                         "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
                         "AND subscription_id=? AND reason=? "
+                        "AND started_at_us<=? "
                         "AND resolved_at_us IS NULL",
                         (
                             status.received_at_us,
@@ -1168,6 +1175,7 @@ class Recorder:
                             self.config.run_id,
                             fence.subscription_id,
                             matching_reason,
+                            status.received_at_us,
                         ),
                     )
                     connection.execute(

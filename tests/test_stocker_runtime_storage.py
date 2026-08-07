@@ -356,6 +356,37 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
             )
 
 
+def test_schema_rejects_impossible_gap_and_callback_terminal_times(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "INSERT INTO gaps(gap_id, run_id, started_at_us, ended_at_us, reason, "
+                "data_loss_possible, continuity_required) "
+                "VALUES ('backward-end', 'run-1', 100, 99, 'fixture', 1, 1)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "INSERT INTO gaps(gap_id, run_id, started_at_us, reason, "
+                "data_loss_possible, continuity_required, resolved_at_us) "
+                "VALUES ('missing-end', 'run-1', 100, 'fixture', 1, 1, 101)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "INSERT INTO gaps(gap_id, run_id, started_at_us, ended_at_us, reason, "
+                "data_loss_possible, continuity_required, resolved_at_us) "
+                "VALUES ('backward-resolution', 'run-1', 80, 90, 'fixture', 1, 1, 89)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "UPDATE callback_inbox SET lifecycle='acknowledged', "
+                "normalized_event_id='event-1', acknowledged_at_us=19 "
+                "WHERE source_sequence=1"
+            )
+
+
 def test_acknowledgement_and_decoupled_event_references_enforce_provenance(
     tmp_path: Path,
 ) -> None:
@@ -1533,7 +1564,7 @@ def test_inbox_tombstone_expires_while_its_market_event_remains(tmp_path: Path) 
     with connect_v2(database) as connection:
         connection.execute(
             "UPDATE callback_inbox SET lifecycle = 'acknowledged', payload_json = NULL, "
-            "normalized_event_id = 'event-1', acknowledged_at_us = 1, "
+            "normalized_event_id = 'event-1', acknowledged_at_us = 20, "
             "receipt_batch_id = 'tombstone-receipt' WHERE source_sequence = 1"
         )
     _insert_receipt(

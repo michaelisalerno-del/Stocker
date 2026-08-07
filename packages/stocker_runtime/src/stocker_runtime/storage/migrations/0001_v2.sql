@@ -80,11 +80,15 @@ CREATE TABLE gaps (
     run_id TEXT NOT NULL REFERENCES runs(run_id),
     subscription_id TEXT,
     started_at_us INTEGER NOT NULL CHECK(started_at_us >= 0),
-    ended_at_us INTEGER,
+    ended_at_us INTEGER CHECK(ended_at_us IS NULL OR ended_at_us >= started_at_us),
     reason TEXT NOT NULL,
     data_loss_possible INTEGER NOT NULL CHECK(data_loss_possible IN (0, 1)),
     continuity_required INTEGER NOT NULL CHECK(continuity_required IN (0, 1)),
-    resolved_at_us INTEGER
+    resolved_at_us INTEGER,
+    CHECK(
+        resolved_at_us IS NULL
+        OR (ended_at_us IS NOT NULL AND resolved_at_us >= ended_at_us)
+    )
 ) STRICT;
 CREATE INDEX gaps_run_started_idx ON gaps(run_id, started_at_us DESC, gap_id);
 CREATE INDEX gaps_unresolved_idx ON gaps(run_id, started_at_us) WHERE resolved_at_us IS NULL;
@@ -156,7 +160,9 @@ CREATE TABLE callback_inbox (
     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
     failure_code TEXT,
     normalized_event_id TEXT,
-    acknowledged_at_us INTEGER,
+    acknowledged_at_us INTEGER CHECK(
+        acknowledged_at_us IS NULL OR acknowledged_at_us >= received_at_us
+    ),
     receipt_batch_id TEXT,
     FOREIGN KEY(run_id, recorder_generation)
         REFERENCES recorder_generations(run_id, generation)

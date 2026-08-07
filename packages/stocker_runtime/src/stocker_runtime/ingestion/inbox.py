@@ -37,6 +37,10 @@ class CallbackIdentityCollision(InboxAdmissionError):
     """A deterministic callback identity names different durable content."""
 
 
+class CallbackTimestampOrderingLoss(InboxAdmissionError):
+    """Durable callback evidence is later than its attempted acknowledgement."""
+
+
 class NormalizationError(ValueError):
     """A callback is durable but cannot safely become a typed market event."""
 
@@ -796,6 +800,42 @@ class CallbackInbox:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self.verify_writer(connection, authority)
+            evidence = connection.execute(
+                "SELECT callback.received_at_us AS callback_received_at_us, "
+                "event.received_at_us AS event_received_at_us, "
+                "event.instrument_id, event.feed_kind FROM callback_inbox callback "
+                "JOIN market_events event ON event.event_id=? "
+                "AND event.source_sequence=callback.source_sequence "
+                "AND event.run_id=callback.run_id "
+                "AND event.connection_generation=callback.connection_generation "
+                "WHERE callback.source_sequence=? AND callback.lifecycle='leased' "
+                "AND callback.lease_owner=? AND callback.run_id=? "
+                "AND callback.recorder_generation=? AND callback.connection_generation=? "
+                "AND callback.request_id IS ?",
+                (
+                    event_id,
+                    leased.source_sequence,
+                    leased.lease_owner,
+                    leased.run_id,
+                    leased.recorder_generation,
+                    leased.connection_generation,
+                    leased.request_id,
+                ),
+            ).fetchone()
+            if evidence is None:
+                raise InboxAdmissionError(
+                    "callback acknowledgement lacks exact durable event evidence"
+                )
+            callback_received_at_us = int(evidence["callback_received_at_us"])
+            event_received_at_us = int(evidence["event_received_at_us"])
+            if (
+                callback_received_at_us != leased.received_at_us
+                or callback_received_at_us != event_received_at_us
+                or event_received_at_us > acknowledged_at_us
+            ):
+                raise CallbackTimestampOrderingLoss(
+                    "callback acknowledgement timestamp ordering moved backwards"
+                )
             cursor = connection.execute(
                 "UPDATE callback_inbox SET lifecycle = 'acknowledged', lease_owner = NULL, "
                 "lease_expires_at_us = NULL, normalized_event_id = ?, acknowledged_at_us = ? "
@@ -810,17 +850,6 @@ class CallbackInbox:
                 "WHERE run_id = ?",
                 (leased.run_id,),
             )
-            event = connection.execute(
-                "SELECT received_at_us, instrument_id, feed_kind FROM market_events "
-                "WHERE event_id=? AND source_sequence=? AND run_id=? "
-                "AND connection_generation=?",
-                (
-                    event_id,
-                    leased.source_sequence,
-                    leased.run_id,
-                    leased.connection_generation,
-                ),
-            ).fetchone()
             subscription = connection.execute(
                 "SELECT subscription_id, instrument_id, feed_kind FROM subscriptions "
                 "WHERE run_id=? AND recorder_generation=? "
@@ -833,18 +862,17 @@ class CallbackInbox:
                 ),
             ).fetchone()
             if (
-                event is not None
-                and subscription is not None
-                and str(event["instrument_id"]) == str(subscription["instrument_id"])
-                and str(event["feed_kind"]) == str(subscription["feed_kind"])
+                subscription is not None
+                and str(evidence["instrument_id"]) == str(subscription["instrument_id"])
+                and str(evidence["feed_kind"]) == str(subscription["feed_kind"])
             ):
                 # Gap starts and callback receipt times share the recorder's local
                 # clock. Provider/event times may lag and cannot prove recovery.
-                evidence_at_us = int(event["received_at_us"])
+                evidence_at_us = event_received_at_us
                 connection.execute(
                     "UPDATE gaps SET ended_at_us=?, resolved_at_us=? "
                     "WHERE run_id=? AND subscription_id=? "
-                    "AND reason IN (?, ?) AND started_at_us<=? "
+                    "AND reason IN (?, ?) AND started_at_us<=? AND ?<=? "
                     "AND resolved_at_us IS NULL",
                     (
                         evidence_at_us,
@@ -853,6 +881,8 @@ class CallbackInbox:
                         str(subscription["subscription_id"]),
                         *sorted(CALLBACK_RECOVERABLE_GAP_REASONS),
                         evidence_at_us,
+                        evidence_at_us,
+                        acknowledged_at_us,
                     ),
                 )
 

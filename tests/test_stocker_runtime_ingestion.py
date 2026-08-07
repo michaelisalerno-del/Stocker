@@ -1670,6 +1670,106 @@ def test_acknowledgement_resolves_only_causal_allowlisted_gap_for_exact_subscrip
         assert resolved[(required, reason, 102)] == (None, None)
 
 
+@pytest.mark.parametrize("with_gap", (False, True))
+def test_future_callback_evidence_fails_closed_without_acknowledging_or_resolving(
+    tmp_path: Path, with_gap: bool
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 150, 140, {"event_at_us": 140, "bid": 10.0}),
+    )
+    if with_gap:
+        with connect_v2(database) as connection:
+            Recorder._open_gap_for_run(
+                connection,
+                "run-1",
+                str(state.fences[0].subscription_id),
+                102,
+                "STREAM_STALE",
+                True,
+            )
+
+    with pytest.raises(RecorderFatalError, match="timestamp ordering"):
+        recorder.drain(now_us=104)
+
+    assert adapter.connected is False
+    assert set(adapter.cancelled) == {3, 4}
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json, normalized_event_id, acknowledged_at_us "
+            "FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        event_count = connection.execute(
+            "SELECT count(*) FROM market_events WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()[0]
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        unresolved_stale = connection.execute(
+            "SELECT count(*) FROM gaps WHERE reason='STREAM_STALE' AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+    assert tuple(callback) == (
+        "leased",
+        '{"bid":10.0,"event_at_us":140}',
+        None,
+        None,
+    )
+    assert event_count == 1
+    assert tuple(runtime) == (
+        "fatal",
+        "CALLBACK_TIMESTAMP_ORDERING_LOSS",
+        "disconnected",
+    )
+    assert unresolved_stale == int(with_gap)
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.receive(
+            state.fences[0],
+            MarketDataCallback("quote", 150, 140, {"event_at_us": 140, "bid": 10.0}),
+        )
+    assert recorder.inbox.nonterminal_count() == 1
+
+
+def test_callback_evidence_equal_to_acknowledgement_time_can_resolve_gap(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        Recorder._open_gap_for_run(
+            connection,
+            "run-1",
+            str(state.fences[0].subscription_id),
+            150,
+            "STREAM_STALE",
+            True,
+        )
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 150, 140, {"event_at_us": 140, "bid": 10.0}),
+    )
+
+    assert recorder.drain(now_us=150) == 1
+
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, acknowledged_at_us FROM callback_inbox"
+        ).fetchone()
+        gap = connection.execute(
+            "SELECT ended_at_us, resolved_at_us FROM gaps WHERE reason='STREAM_STALE'"
+        ).fetchone()
+    assert tuple(callback) == ("acknowledged", 150)
+    assert tuple(gap) == (150, 150)
+
+
 def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

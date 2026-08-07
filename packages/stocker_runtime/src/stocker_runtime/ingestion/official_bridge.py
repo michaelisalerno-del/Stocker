@@ -47,7 +47,7 @@ def create_official_bridge(
     client_id: int,
     read_only: bool,
     external_read_only_verified: bool,
-    subscriptions: tuple[IBKRSubscription, ...],
+    subscriptions: tuple[IBKRSubscription, ...] = (),
 ) -> MarketDataAdapter:
     """Construct a private official client holder; imports remain lazy and server-only."""
 
@@ -117,15 +117,17 @@ def create_official_bridge(
 
     wrapper = _Callbacks()
     client = EClient(wrapper)
-    contracts: dict[int, Any] = {}
-    for request_id, item in configured.items():
+
+    def make_contract(item: IBKRSubscription) -> Any:
         contract = Contract()
         contract.conId = item.con_id
         contract.symbol = item.symbol
         contract.secType = item.security_type
         contract.exchange = item.exchange
         contract.currency = item.currency
-        contracts[request_id] = contract
+        return contract
+
+    contracts = {request_id: make_contract(item) for request_id, item in configured.items()}
     owner = _PrivateOfficialBridge(
         client=client,
         host=host,
@@ -133,6 +135,7 @@ def create_official_bridge(
         client_id=client_id,
         configured=configured,
         contracts=contracts,
+        contract_factory=make_contract,
     )
     return cast(MarketDataAdapter, owner)
 
@@ -149,6 +152,7 @@ class _PrivateOfficialBridge:
         client_id: int,
         configured: dict[int, IBKRSubscription],
         contracts: dict[int, Any],
+        contract_factory: Callable[[IBKRSubscription], Any],
     ) -> None:
         self.__client = client
         self._host = host
@@ -156,6 +160,7 @@ class _PrivateOfficialBridge:
         self._client_id = client_id
         self._configured = configured
         self._contracts = contracts
+        self._contract_factory = contract_factory
         self._fences: dict[int, CallbackFence] = {}
         self._callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult] | None = None
         self._disconnect_callback: Callable[[int], None] | None = None
@@ -186,6 +191,21 @@ class _PrivateOfficialBridge:
 
     def disconnect(self) -> None:
         self.__client.disconnect()
+
+    def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
+        """Install the core-owned exact read-only request set before connecting."""
+
+        if self._thread is not None:
+            raise OfficialBridgeUnavailable("subscriptions cannot change after connect")
+        if len({item.request_id for item in subscriptions}) != len(subscriptions):
+            raise OfficialBridgeUnavailable("IBKR request identifiers must be unique")
+        configured = {item.request_id: item for item in subscriptions}
+        if self._configured and self._configured != configured:
+            raise OfficialBridgeUnavailable("configured subscription identity changed")
+        self._configured = configured
+        self._contracts = {
+            request_id: self._contract_factory(item) for request_id, item in configured.items()
+        }
 
     def subscribe(self, fence: CallbackFence) -> None:
         if fence.request_id is None or fence.request_id not in self._configured:

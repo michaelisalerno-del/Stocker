@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import re
 import sqlite3
 from collections.abc import Callable
 from contextlib import suppress
@@ -16,12 +17,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from stocker_runtime.domain import JsonValue, canonical_json_bytes
 from stocker_runtime.ideas.discovery import (
     DiscoveredPlugin,
+    IdeaDiscoveryError,
+    aggregate_instruments,
     aggregate_requirements,
     discover_plugins,
     load_idea_configs,
 )
 from stocker_runtime.ideas.runner import IdeaRunner
-from stocker_runtime.ingestion.ibkr_market_data import MarketDataAdapter, MarketDataStatus
+from stocker_runtime.ingestion.ibkr_market_data import (
+    IBKRSubscription,
+    MarketDataAdapter,
+    MarketDataStatus,
+)
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
     CallbackFence,
@@ -45,6 +52,17 @@ class RecorderFatalError(RuntimeError):
 
 class AuthoritativeLeaseLost(RecorderFatalError):
     """This recorder object no longer owns the persisted authoritative generation."""
+
+
+_IDEA_REQUEST_ID_BASE = 1_000_000
+_CADENCE = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>us|ms|s|m|h)$")
+_SECURITY_TYPES = {
+    "stock": "STK",
+    "option": "OPT",
+    "future": "FUT",
+    "forex": "CASH",
+    "index": "IND",
+}
 
 
 @dataclass(frozen=True)
@@ -104,6 +122,7 @@ class RecorderConfig(BaseModel):
     git_commit: str = Field(pattern=r"^[a-f0-9]{7,64}$")
     writer_lease_stale_us: int = Field(default=60_000_000, ge=5_000_000)
     callback_lease_us: int = Field(default=30_000_000, ge=5_000_000)
+    market_data_line_limit: int = Field(default=100, ge=1, le=10_000)
     idea_config: Path | None = None
 
     @model_validator(mode="after")
@@ -201,18 +220,16 @@ class Recorder:
 
         if self.state is not None:
             raise DuplicateWriterError("this recorder is already started")
+        instruments, subscriptions, generated_idea_subscriptions = self._prepare_inputs(
+            instruments, subscriptions
+        )
         self._instruments = instruments
         self._subscriptions = subscriptions
-        available = {(item.instrument_id, item.feed_kind) for item in subscriptions}
-        missing_idea_requirements = tuple(
-            (item.instrument_id, item.feed_kind)
-            for item in self.idea_requirements
-            if (item.instrument_id, item.feed_kind) not in available
+        self._configure_adapter(
+            instruments,
+            subscriptions,
+            required=generated_idea_subscriptions,
         )
-        if missing_idea_requirements:
-            raise RecorderFatalError(
-                f"configured idea requirements lack subscriptions: {missing_idea_requirements}"
-            )
         connection = connect_v2(self.config.database)
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -357,6 +374,164 @@ class Recorder:
         self.adapter.set_status_callback(self.market_data_status)
         self._connect_subscriptions(now_us=now_us)
         return self.state
+
+    @staticmethod
+    def _cadence_us(cadence: str) -> int:
+        match = _CADENCE.fullmatch(cadence)
+        if match is None:
+            raise RecorderFatalError(f"unsupported idea requirement cadence: {cadence}")
+        factor = {
+            "us": 1,
+            "ms": 1_000,
+            "s": 1_000_000,
+            "m": 60_000_000,
+            "h": 3_600_000_000,
+        }[match.group("unit")]
+        return int(match.group("count")) * factor
+
+    def _prepare_inputs(
+        self,
+        instruments: tuple[InstrumentSpec, ...],
+        subscriptions: tuple[SubscriptionSpec, ...],
+    ) -> tuple[tuple[InstrumentSpec, ...], tuple[SubscriptionSpec, ...], bool]:
+        """Merge core-owned idea requirements into the recorder's exact request set."""
+
+        instrument_by_id = {item.instrument_id: item for item in instruments}
+        if len(instrument_by_id) != len(instruments):
+            raise RecorderFatalError("instrument identities must be unique")
+        caller_instrument_ids = frozenset(instrument_by_id)
+        for plugin in self._ideas:
+            own_instrument_ids = {item.instrument_id for item in plugin.config.instruments}
+            missing = sorted(
+                {
+                    requirement.instrument_id
+                    for requirement in plugin.requirements
+                    if requirement.instrument_id not in own_instrument_ids
+                    and requirement.instrument_id not in caller_instrument_ids
+                }
+            )
+            if missing:
+                raise RecorderFatalError(
+                    f"configured idea requirement lacks same-entry instrument metadata: {missing}"
+                )
+        try:
+            configured_instruments = aggregate_instruments(self._ideas)
+        except IdeaDiscoveryError as error:
+            raise RecorderFatalError(str(error)) from error
+        for configured in configured_instruments:
+            candidate = InstrumentSpec(
+                instrument_id=configured.instrument_id,
+                ibkr_con_id=configured.ibkr_con_id,
+                kind=configured.kind,
+                symbol=configured.symbol,
+                exchange=configured.exchange,
+                currency=configured.currency,
+            )
+            prior = instrument_by_id.get(candidate.instrument_id)
+            if prior is not None and prior != candidate:
+                raise RecorderFatalError(
+                    f"conflicting instrument metadata for {candidate.instrument_id}"
+                )
+            instrument_by_id[candidate.instrument_id] = candidate
+
+        subscription_by_key: dict[tuple[str, str], SubscriptionSpec] = {}
+        request_ids: set[int] = set()
+        names: set[str] = set()
+        for subscription in subscriptions:
+            key = (subscription.instrument_id, subscription.feed_kind)
+            if key in subscription_by_key:
+                raise RecorderFatalError(f"duplicate subscription requirement for {key}")
+            if subscription.request_id in request_ids or subscription.name in names:
+                raise RecorderFatalError(
+                    "subscription request identifiers and names must be unique"
+                )
+            if subscription.instrument_id not in instrument_by_id:
+                raise RecorderFatalError(
+                    f"subscription lacks instrument metadata: {subscription.instrument_id}"
+                )
+            subscription_by_key[key] = subscription
+            request_ids.add(subscription.request_id)
+            names.add(subscription.name)
+
+        generated = False
+        next_request_id = _IDEA_REQUEST_ID_BASE
+        for requirement in self.idea_requirements:
+            key = (requirement.instrument_id, requirement.feed_kind)
+            if key in subscription_by_key:
+                continue
+            if requirement.instrument_id not in instrument_by_id:
+                raise RecorderFatalError(
+                    "configured idea requirement lacks instrument metadata: "
+                    f"{requirement.instrument_id}"
+                )
+            while next_request_id in request_ids:
+                next_request_id += 1
+            subscription = SubscriptionSpec(
+                name=f"idea:{requirement.instrument_id}:{requirement.feed_kind}",
+                instrument_id=requirement.instrument_id,
+                feed_kind=requirement.feed_kind,
+                request_id=next_request_id,
+                continuity_required=requirement.gaps_block,
+                optional=not (requirement.gaps_block or requirement.staleness_block),
+                stale_after_us=max(15_000_000, 3 * self._cadence_us(requirement.cadence)),
+            )
+            subscription_by_key[key] = subscription
+            request_ids.add(next_request_id)
+            names.add(subscription.name)
+            next_request_id += 1
+            generated = True
+        merged_instruments = tuple(instrument_by_id[key] for key in sorted(instrument_by_id))
+        # Existing recorder subscriptions retain their caller-owned fence order;
+        # generated requirements are appended in aggregate_requirements order.
+        merged_subscriptions = tuple(subscription_by_key.values())
+        if len(merged_subscriptions) > self.config.market_data_line_limit:
+            raise RecorderFatalError(
+                "configured market-data subscriptions exceed the explicit line limit"
+            )
+        return merged_instruments, merged_subscriptions, generated
+
+    def _configure_adapter(
+        self,
+        instruments: tuple[InstrumentSpec, ...],
+        subscriptions: tuple[SubscriptionSpec, ...],
+        *,
+        required: bool,
+    ) -> None:
+        configure = getattr(self.adapter, "configure_subscriptions", None)
+        if not callable(configure):
+            if required:
+                raise RecorderFatalError(
+                    "market-data adapter cannot accept core-owned idea subscriptions"
+                )
+            return
+        instrument_by_id = {item.instrument_id: item for item in instruments}
+        exact: list[IBKRSubscription] = []
+        for subscription in subscriptions:
+            instrument = instrument_by_id[subscription.instrument_id]
+            if instrument.ibkr_con_id is None:
+                raise RecorderFatalError(
+                    f"IBKR contract identity is missing for {instrument.instrument_id}"
+                )
+            security_type = _SECURITY_TYPES.get(instrument.kind.lower())
+            if security_type is None:
+                raise RecorderFatalError(f"unsupported IBKR instrument kind: {instrument.kind}")
+            exact.append(
+                IBKRSubscription(
+                    request_id=subscription.request_id,
+                    con_id=instrument.ibkr_con_id,
+                    symbol=instrument.symbol,
+                    security_type=security_type,
+                    exchange=instrument.exchange,
+                    currency=instrument.currency,
+                    feed_kind=subscription.feed_kind,
+                )
+            )
+        try:
+            configure(tuple(exact))
+        except Exception as error:
+            raise RecorderFatalError(
+                f"market-data adapter rejected core-owned subscriptions: {type(error).__name__}"
+            ) from error
 
     def _close_stale_writer(
         self,

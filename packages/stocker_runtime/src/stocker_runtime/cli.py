@@ -17,6 +17,7 @@ from stocker_runtime.domain import JsonValue, canonical_json_bytes
 from stocker_runtime.ingestion import (
     AdmissionResult,
     CallbackFence,
+    IBKRSubscription,
     InstrumentSpec,
     MarketDataCallback,
     MarketDataStatus,
@@ -179,6 +180,9 @@ class _ReplayMarketData:
         return None
 
     def disconnect(self) -> None:
+        return None
+
+    def configure_subscriptions(self, _subscriptions: tuple[IBKRSubscription, ...]) -> None:
         return None
 
     def subscribe(self, _fence: CallbackFence) -> None:

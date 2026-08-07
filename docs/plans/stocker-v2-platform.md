@@ -925,6 +925,20 @@ spawned workers; one blocked, crashed, or overrun plugin cannot stop later insta
 No paper, live, risk, execution, account, credential, or protected-data boundary was
 added or changed.
 
+Fourth correction note (2026-08-07): enabled idea configuration now carries the
+broker-neutral instrument identities needed by its declared requirements. The recorder
+merges those identities and requirements, allocates deterministic collision-free request
+identifiers within an explicit market-data line limit, and installs the resulting exact
+read-only request set into the official adapter before connect. A configured idea no
+longer requires duplicated adapter, recorder-instrument, or recorder-subscription wiring.
+The five-minute projector orders constituents chronologically, uses deterministic ties,
+and records maximum source-sequence and receive-time watermarks across every constituent
+and progress input; a progress input is reusable as the next interval's first constituent.
+The 7,200-callback official-adapter fixture drains in 29 transactions of at most 256 rows
+and still emits the frozen generic outputs. These remain Phase 4 corrections only; no
+risk, execution, shadow valuation, paper, live, account, credential, or protected-data
+boundary changed.
+
 - **Objective:** activate generic ideas through configuration.
 - **Files/packages:** discovery, runner, Opening Leader reference plugin and tests.
 - **Schema:** plugin/instance/checkpoint/output/leg tables.

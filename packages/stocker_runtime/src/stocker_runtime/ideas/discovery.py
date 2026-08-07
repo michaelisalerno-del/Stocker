@@ -61,6 +61,17 @@ class IdeaDiscoveryError(ValueError):
     """A configured plugin is invalid or crosses the authority boundary."""
 
 
+class IdeaInstrumentConfig(DomainModel):
+    """Broker-neutral instrument identity carried by one idea configuration entry."""
+
+    instrument_id: str = Field(min_length=1)
+    ibkr_con_id: int = Field(gt=0)
+    kind: str = Field(min_length=1)
+    symbol: str = Field(min_length=1)
+    exchange: str = Field(min_length=1)
+    currency: str = Field(min_length=1)
+
+
 class IdeaConfig(DomainModel):
     """Explicit default-off configuration for one reviewed first-party idea."""
 
@@ -70,6 +81,7 @@ class IdeaConfig(DomainModel):
     expected_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     parameters: Mapping[str, JsonValue]
     universe: tuple[str, ...] = Field(min_length=1)
+    instruments: tuple[IdeaInstrumentConfig, ...] = ()
     enabled: bool = True
 
     @model_validator(mode="after")
@@ -80,6 +92,9 @@ class IdeaConfig(DomainModel):
             raise ValueError("factory must be a stable Python identifier")
         if len(set(self.universe)) != len(self.universe):
             raise ValueError("universe must not contain duplicates")
+        instrument_ids = tuple(item.instrument_id for item in self.instruments)
+        if len(set(instrument_ids)) != len(instrument_ids):
+            raise ValueError("configured instrument identities must not contain duplicates")
         return self
 
 
@@ -481,3 +496,20 @@ def aggregate_requirements(
                 ),
             )
     return tuple(sorted(merged.values(), key=lambda item: item.to_canonical_json()))
+
+
+def aggregate_instruments(
+    plugins: Sequence[DiscoveredPlugin],
+) -> tuple[IdeaInstrumentConfig, ...]:
+    """Merge exact configured instrument identities and reject ambiguous metadata."""
+
+    merged: dict[str, IdeaInstrumentConfig] = {}
+    for plugin in plugins:
+        for instrument in plugin.config.instruments:
+            prior = merged.get(instrument.instrument_id)
+            if prior is not None and prior != instrument:
+                raise IdeaDiscoveryError(
+                    f"conflicting instrument metadata for {instrument.instrument_id}"
+                )
+            merged[instrument.instrument_id] = instrument
+    return tuple(merged[key] for key in sorted(merged))

@@ -62,6 +62,7 @@ def _bar(
     *,
     received_at_us: int,
     payload_overrides: dict[str, JsonValue] | None = None,
+    event_id: str | None = None,
 ) -> None:
     payload: dict[str, JsonValue] = {
         "event_at_us": event_at_us,
@@ -73,7 +74,7 @@ def _bar(
     }
     payload.update(payload_overrides or {})
     payload_json = canonical_json_bytes(payload).decode()
-    event_id = f"raw-{sequence}"
+    event_id = f"raw-{sequence}" if event_id is None else event_id
     connection.execute(  # type: ignore[attr-defined]
         "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
         "recorder_generation, connection_generation, callback_kind, received_at_us, "
@@ -152,6 +153,71 @@ def test_exact_sixty_raw_bars_produce_complete_restart_safe_receipt(tmp_path: Pa
     event_again, mappings_again = _project(database)
     assert event_again["event_id"] == event["event_id"]
     assert mappings_again == mappings
+
+
+def test_projection_is_identical_for_reverse_source_arrival(tmp_path: Path) -> None:
+    chronological = tmp_path / "chronological.sqlite3"
+    reverse = tmp_path / "reverse.sqlite3"
+    mixed = tmp_path / "mixed.sqlite3"
+    opening = _seed(chronological)
+    _seed(reverse)
+    _seed(mixed)
+    end = opening + 300_000_000
+    for database, arrival_order in (
+        (chronological, tuple(range(60))),
+        (reverse, tuple(reversed(range(60)))),
+        (mixed, (*range(0, 60, 2), *range(1, 60, 2))),
+    ):
+        with connect_v2(database) as connection:
+            for source_sequence, chronological_index in enumerate(arrival_order, start=1):
+                event_at_us = opening + chronological_index * 5_000_000
+                _bar(
+                    connection,
+                    source_sequence,
+                    event_at_us,
+                    received_at_us=(
+                        end + chronological_index if chronological_index in {0, 59} else event_at_us
+                    ),
+                    event_id=f"raw-at-{chronological_index}",
+                    payload_overrides={
+                        "open": 100.0 + chronological_index,
+                        "high": 101.0 + chronological_index,
+                        "low": 99.0 + chronological_index,
+                        "close": 100.5 + chronological_index,
+                        "volume": float(chronological_index + 1),
+                    },
+                )
+
+    first, first_mappings = _project(chronological)
+    second, second_mappings = _project(reverse)
+    third, third_mappings = _project(mixed)
+    first_payload = json.loads(str(first["payload_json"]))
+    second_payload = json.loads(str(second["payload_json"]))
+    third_payload = json.loads(str(third["payload_json"]))
+    for payload in (first_payload, second_payload, third_payload):
+        assert payload["source_completeness"] == "complete"
+        assert payload["open"] == 100.0
+        assert payload["high"] == 160.0
+        assert payload["low"] == 99.0
+        assert payload["close"] == 159.5
+        assert payload["volume"] == 1_830.0
+        assert payload["derived_after_source_sequence"] == 60
+    assert (
+        len(
+            {
+                first_payload["input_ids_hash"],
+                second_payload["input_ids_hash"],
+                third_payload["input_ids_hash"],
+            }
+        )
+        == 1
+    )
+    assert first["event_id"] == second["event_id"] == third["event_id"]
+    assert first["received_at_us"] == second["received_at_us"] == third["received_at_us"]
+    assert first["received_at_us"] == end + 59
+    expected_mappings = [tuple(row) for row in first_mappings]
+    assert [tuple(row) for row in second_mappings] == expected_mappings
+    assert [tuple(row) for row in third_mappings] == expected_mappings
 
 
 def test_one_missing_constituent_is_permanently_incomplete(tmp_path: Path) -> None:

@@ -54,11 +54,11 @@ def _project_instrument(
         (run_id, instrument_id),
     ).fetchone()
     lower_bound_us = 0 if projected is None else int(projected["event_at_us"])
-    lower_sequence = (
-        after_source_sequence
-        if projected is None
-        else max(after_source_sequence, int(projected["derived_after_source_sequence"]))
-    )
+    # The event at ``lower_bound_us`` may have served as the prior interval's
+    # progress proof and must also remain available as this interval's first
+    # constituent. Event time excludes immutable prior windows; the activation
+    # fence alone excludes pre-activation source sequences.
+    lower_sequence = after_source_sequence
     raw_rows = connection.execute(
         "SELECT event_id, source_sequence, event_at_us, received_at_us, "
         "connection_generation, payload_json FROM market_events "
@@ -75,7 +75,18 @@ def _project_instrument(
     for session_open_us in sessions:
         session_close_us = session_open_us + 78 * _FIVE_MINUTES_US
         session_rows = tuple(
-            row for row in raw_rows if session_open_us <= int(row["event_at_us"]) < session_close_us
+            sorted(
+                (
+                    row
+                    for row in raw_rows
+                    if session_open_us <= int(row["event_at_us"]) < session_close_us
+                ),
+                key=lambda row: (
+                    int(row["event_at_us"]),
+                    int(row["source_sequence"]),
+                    str(row["event_id"]),
+                ),
+            )
         )
         if not session_rows:
             continue
@@ -98,23 +109,18 @@ def _project_instrument(
             constituents = tuple(
                 row for row in session_rows if start_us <= int(row["event_at_us"]) < end_us
             )
-            maximum_constituent_sequence = max(
-                (int(row["source_sequence"]) for row in constituents), default=0
-            )
             progress = next(
                 (
                     row
                     for row in session_rows
-                    if int(row["source_sequence"]) > maximum_constituent_sequence
-                    and int(row["event_at_us"]) >= end_us
-                    and int(row["received_at_us"]) >= end_us
+                    if int(row["event_at_us"]) >= end_us and int(row["received_at_us"]) >= end_us
                 ),
                 None,
             )
             expected_final = next(
                 (
                     row
-                    for row in reversed(constituents)
+                    for row in constituents
                     if int(row["event_at_us"]) == end_us - _FIVE_SECONDS_US
                     and int(row["received_at_us"]) >= end_us
                 ),
@@ -159,7 +165,14 @@ def _project_instrument(
                 (int(row["source_sequence"]) for row in constituents),
                 default=int(causal_progress["source_sequence"]),
             )
-            last_sequence = int(causal_progress["source_sequence"])
+            evidence_rows = (
+                constituents
+                if progress_id in ordered_input_ids
+                else (*constituents, causal_progress)
+            )
+            last_sequence = max(int(row["source_sequence"]) for row in evidence_rows)
+            received_watermark = max(int(row["received_at_us"]) for row in evidence_rows)
+            connection_generation = max(int(row["connection_generation"]) for row in evidence_rows)
             payloads = tuple(
                 cast(Mapping[str, object], json.loads(str(row["payload_json"])))
                 for row in constituents
@@ -234,8 +247,8 @@ def _project_instrument(
                     last_sequence,
                     instrument_id,
                     end_us,
-                    int(causal_progress["received_at_us"]),
-                    int(causal_progress["connection_generation"]),
+                    received_watermark,
+                    connection_generation,
                     _numeric(first_payload, "open") if complete else None,
                     max(cast(tuple[float, ...], tuple(_numeric(p, "high") for p in payloads)))
                     if complete

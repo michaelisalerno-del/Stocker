@@ -48,6 +48,8 @@ class MarketDataAdapter(Protocol):
 
     def disconnect(self) -> None: ...
 
+    def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None: ...
+
     def subscribe(self, fence: CallbackFence) -> None: ...
 
     def cancel(self, request_id: int) -> None: ...
@@ -95,7 +97,7 @@ class IBKRMarketData:
         client_id: int,
         read_only: bool,
         external_read_only_verified: bool,
-        subscriptions: tuple[IBKRSubscription, ...],
+        subscriptions: tuple[IBKRSubscription, ...] = (),
     ) -> IBKRMarketData:
         """Create the private official bridge after explicit safety verification."""
 
@@ -127,6 +129,9 @@ class IBKRMarketData:
 
     def disconnect(self) -> None:
         self._bridge.disconnect()
+
+    def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
+        self._bridge.configure_subscriptions(subscriptions)
 
     def subscribe(self, fence: CallbackFence) -> None:
         self._bridge.subscribe(fence)

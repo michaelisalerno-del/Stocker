@@ -16,6 +16,7 @@ from typing import cast
 
 import pytest
 
+import stocker_runtime.ingestion.recorder as recorder_module
 from stocker_ideas.plugins.opening_leader_continuation_v0 import MANIFEST
 from stocker_runtime.domain import (
     JsonValue,
@@ -37,8 +38,11 @@ from stocker_runtime.ideas import (
     deterministic_idea_output_id,
 )
 from stocker_runtime.ideas.discovery import (
+    DiscoveredPlugin,
     IdeaConfig,
     IdeaDiscoveryError,
+    IdeaInstrumentConfig,
+    aggregate_instruments,
     aggregate_requirements,
     discover_plugins,
     load_idea_configs,
@@ -100,6 +104,22 @@ def _config(**changes: object) -> IdeaConfig:
     }
     values.update(changes)
     return IdeaConfig.model_validate(values)
+
+
+def _configured_instruments(
+    symbols: tuple[str, ...] = COHORT,
+) -> tuple[IdeaInstrumentConfig, ...]:
+    return tuple(
+        IdeaInstrumentConfig(
+            instrument_id=symbol,
+            ibkr_con_id=index,
+            kind="stock",
+            symbol=symbol,
+            exchange="SMART",
+            currency="USD",
+        )
+        for index, symbol in enumerate(symbols, start=1)
+    )
 
 
 def _seed(database: Path, *, mode: str = "prospective_record") -> None:
@@ -213,6 +233,7 @@ def test_empty_config_discovers_and_runs_nothing() -> None:
     assert discover_plugins(()) == ()
     example = load_idea_configs(Path("configs/ideas/v2.example.json"))
     assert len(example) == 1
+    assert example[0].instruments == ()
     assert discover_plugins(example) == ()
 
 
@@ -246,6 +267,30 @@ def test_discovery_rejects_duplicate_identity_and_bad_parameters() -> None:
         discover_plugins((_config(), _config()))
     with pytest.raises(IdeaDiscoveryError, match="parameter"):
         discover_plugins((_config(parameters={"checkpoints": [9]}),))
+
+
+def test_instrument_metadata_aggregation_is_exact_and_deterministic() -> None:
+    base = discover_plugins((_config(),))[0]
+    first = replace(base, config=_config(instruments=_configured_instruments(("AAL",))))
+    identical = replace(base, config=_config(instruments=_configured_instruments(("AAL",))))
+    assert aggregate_instruments((first, identical)) == _configured_instruments(("AAL",))
+    conflict = replace(
+        base,
+        config=_config(
+            instruments=(
+                IdeaInstrumentConfig(
+                    instrument_id="AAL",
+                    ibkr_con_id=999,
+                    kind="stock",
+                    symbol="AAL",
+                    exchange="SMART",
+                    currency="USD",
+                ),
+            )
+        ),
+    )
+    with pytest.raises(IdeaDiscoveryError, match="conflicting instrument metadata"):
+        aggregate_instruments((first, conflict))
 
 
 @pytest.mark.parametrize("checkpoints", ([6, 6], [12, 6], [12, 12]))
@@ -293,6 +338,30 @@ def test_discovery_rejects_unreviewed_hash_and_aggregates_requirements() -> None
     aggregated = aggregate_requirements((plugin,))
     assert len(aggregated) == 20
     assert aggregated == tuple(sorted(aggregated, key=lambda item: item.to_canonical_json()))
+
+
+def test_duplicate_requirements_merge_blocking_flags_conservatively() -> None:
+    plugin = discover_plugins((_config(),))[0]
+    passive = MarketDataRequirement(
+        feed_kind="bars",
+        event_kind="bar_5m",
+        instrument_id="AAL",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    strict = MarketDataRequirement(
+        feed_kind="bars",
+        event_kind="bar_5m",
+        instrument_id="AAL",
+        cadence="5s",
+        gaps_block=True,
+        staleness_block=True,
+    )
+    merged = aggregate_requirements(
+        (replace(plugin, requirements=(passive,)), replace(plugin, requirements=(strict,)))
+    )
+    assert merged == (strict,)
 
 
 def test_reference_plugin_uses_supported_phase3_raw_bar_subscription() -> None:
@@ -1403,6 +1472,10 @@ def test_gap_blocking_is_scoped_to_activation_interval(
 
 
 class _RecorderAdapter:
+    def __init__(self) -> None:
+        self.configured_subscriptions: tuple[IBKRSubscription, ...] = ()
+        self.subscribed_request_ids: list[int] = []
+
     def set_callback(self, callback: object) -> None:
         self.callback = callback
 
@@ -1418,7 +1491,13 @@ class _RecorderAdapter:
     def disconnect(self) -> None:
         return None
 
+    def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
+        self.configured_subscriptions = subscriptions
+
     def subscribe(self, fence: object) -> None:
+        request_id = getattr(fence, "request_id", None)
+        assert isinstance(request_id, int)
+        self.subscribed_request_ids.append(request_id)
         return None
 
     def cancel(self, request_id: int) -> None:
@@ -1472,18 +1551,15 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
     database = tmp_path / "official-plugin.sqlite3"
     initialize_database(database)
     idea_path = tmp_path / "ideas.json"
-    idea_path.write_text(json.dumps([_config().model_dump(mode="json")]), encoding="utf-8")
-    ibkr_subscriptions = tuple(
-        IBKRSubscription(index, index, symbol, "STK", "SMART", "USD", "bars")
-        for index, symbol in enumerate(COHORT, start=1)
-    )
+    config_value = _config(instruments=_configured_instruments()).model_dump(mode="json")
+    idea_path.write_text(json.dumps([config_value]), encoding="utf-8")
     bridge = create_official_bridge(
         host="127.0.0.1",
         port=4002,
         client_id=71,
         read_only=True,
         external_read_only_verified=True,
-        subscriptions=ibkr_subscriptions,
+        subscriptions=(),
     )
     recorder = Recorder(
         RecorderConfig(
@@ -1502,23 +1578,7 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
         ),
         bridge,
     )
-    instruments = tuple(
-        InstrumentSpec(symbol, index, "stock", symbol, "SMART", "USD")
-        for index, symbol in enumerate(COHORT, start=1)
-    )
-    subscriptions = tuple(
-        SubscriptionSpec(
-            name=f"{symbol}-bars",
-            instrument_id=symbol,
-            feed_kind="bars",
-            request_id=index,
-            continuity_required=True,
-            optional=False,
-            stale_after_us=10_000_000,
-        )
-        for index, symbol in enumerate(COHORT, start=1)
-    )
-    recorder.start(now_us=1, instruments=instruments, subscriptions=subscriptions)
+    recorder.start(now_us=1, instruments=(), subscriptions=())
     client = clients[0]
     wrapper = client.wrapper  # type: ignore[attr-defined]
     open_seconds = int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp())
@@ -1528,7 +1588,7 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
         for index, _symbol in enumerate(COHORT, start=1):
             close = 101.0 + index / 100 if bar_number == 6 * 60 - 1 else 100.0
             wrapper.realtimeBar(
-                index,
+                client.requests[index - 1],  # type: ignore[attr-defined]
                 bar_seconds,
                 100.0,
                 max(100.0, close),
@@ -1541,7 +1601,15 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
             callback_count += 1
     drain_at = time.time_ns() // 1_000 + 1_000_000
     assert callback_count == 7_200
-    assert recorder.drain(now_us=drain_at) == callback_count
+    drained = 0
+    transactions = 0
+    while recorder.inbox.nonterminal_count():
+        processed = recorder.drain(now_us=drain_at + transactions, limit=256)
+        assert 0 < processed <= 256
+        drained += processed
+        transactions += 1
+    assert drained == callback_count
+    assert transactions == 29
     with connect_v2(database) as connection:
         outputs = connection.execute(
             "SELECT * FROM idea_outputs ORDER BY output_ordinal"
@@ -1555,7 +1623,7 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
             )
         )
     recorder.stop(now_us=drain_at + 1)
-    assert client.requests == list(range(1, 21))  # type: ignore[attr-defined]
+    assert client.requests == list(range(1_000_000, 1_000_000 + len(COHORT)))  # type: ignore[attr-defined]
     assert [row["output_kind"] for row in outputs] == [
         "observation",
         "signal",
@@ -1672,7 +1740,7 @@ def test_recorder_explicit_config_wires_generic_requirements_and_activation(tmp_
     database = tmp_path / "recorder.sqlite3"
     initialize_database(database)
     idea_path = tmp_path / "ideas.json"
-    config_value = _config().model_dump(mode="json")
+    config_value = _config(instruments=_configured_instruments()).model_dump(mode="json")
     idea_path.write_text(json.dumps([config_value]), encoding="utf-8")
     recorder = Recorder(
         RecorderConfig(
@@ -1691,25 +1759,213 @@ def test_recorder_explicit_config_wires_generic_requirements_and_activation(tmp_
         ),
         _RecorderAdapter(),
     )
-    instruments = tuple(
-        InstrumentSpec(symbol, index + 1, "stock", symbol, "SMART", "USD")
-        for index, symbol in enumerate(COHORT)
-    )
-    subscriptions = tuple(
-        SubscriptionSpec(
-            name=f"{symbol}-bars",
-            instrument_id=symbol,
-            feed_kind="bars",
-            request_id=index + 1,
-            continuity_required=True,
-            optional=False,
-            stale_after_us=300_000_000,
-        )
-        for index, symbol in enumerate(COHORT)
-    )
-    recorder.start(now_us=100, instruments=instruments, subscriptions=subscriptions)
+    adapter = cast(_RecorderAdapter, recorder.adapter)
+    recorder.start(now_us=100, instruments=(), subscriptions=())
     with connect_v2(database) as connection:
         instances = connection.execute("SELECT count(*) FROM idea_instances").fetchone()[0]
     assert len(recorder.idea_requirements) == len(COHORT)
+    assert len(adapter.configured_subscriptions) == len(COHORT)
+    assert adapter.subscribed_request_ids == sorted(adapter.subscribed_request_ids)
+    assert {item.symbol for item in adapter.configured_subscriptions} == set(COHORT)
     assert instances == 1
     recorder.stop(now_us=101)
+
+
+def _synthetic_discovered(config: IdeaConfig) -> DiscoveredPlugin:
+    base = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        feed_kind="bars",
+        event_kind="bar_5m",
+        instrument_id="AAL",
+        cadence="5s",
+        gaps_block=True,
+        staleness_block=True,
+    )
+    return replace(
+        base,
+        config=config,
+        universe_hash=hashlib.sha256(canonical_json_bytes(config.universe)).hexdigest(),
+        requirements=(requirement,),
+    )
+
+
+def test_synthetic_idea_config_adds_subscription_without_core_wiring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "synthetic-subscription.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(
+        universe=("AAL",),
+        instruments=_configured_instruments(("AAL",)),
+    )
+    monkeypatch.setattr(
+        recorder_module,
+        "discover_plugins",
+        lambda _configs: (_synthetic_discovered(configured),),
+    )
+    # The synthetic seam is the generic config: no Recorder instrument or
+    # SubscriptionSpec is supplied for AAL.
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    adapter = _RecorderAdapter()
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-synthetic",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            idea_config=idea_path,
+        ),
+        adapter,
+    )
+    recorder.start(now_us=100, instruments=(), subscriptions=())
+    assert adapter.configured_subscriptions == (
+        IBKRSubscription(1_000_000, 1, "AAL", "STK", "SMART", "USD", "bars"),
+    )
+    assert adapter.subscribed_request_ids == [1_000_000]
+    recorder.stop(now_us=101)
+
+
+def test_idea_requirement_without_same_entry_instrument_metadata_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "missing-instrument.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=())
+    monkeypatch.setattr(
+        recorder_module,
+        "discover_plugins",
+        lambda _configs: (_synthetic_discovered(configured),),
+    )
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-missing-instrument",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            idea_config=idea_path,
+        ),
+        _RecorderAdapter(),
+    )
+    with pytest.raises(Exception, match="instrument metadata"):
+        recorder.start(now_us=100, instruments=(), subscriptions=())
+
+
+def test_generated_request_ids_skip_base_specs_and_reconnect_reuses_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "request-ids.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    monkeypatch.setattr(
+        recorder_module,
+        "discover_plugins",
+        lambda _configs: (_synthetic_discovered(configured),),
+    )
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    adapter = _RecorderAdapter()
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-request-ids",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            market_data_line_limit=2,
+            idea_config=idea_path,
+        ),
+        adapter,
+    )
+    instrument = InstrumentSpec("MSFT", 2, "stock", "MSFT", "SMART", "USD")
+    base = SubscriptionSpec(
+        name="base-msft-bars",
+        instrument_id="MSFT",
+        feed_kind="bars",
+        request_id=1_000_000,
+        continuity_required=False,
+        optional=True,
+        stale_after_us=15_000_000,
+    )
+    first = recorder.start(now_us=100, instruments=(instrument,), subscriptions=(base,))
+    assert {item.request_id for item in adapter.configured_subscriptions} == {
+        1_000_000,
+        1_000_001,
+    }
+    assert {fence.request_id for fence in first.fences} == {1_000_000, 1_000_001}
+    second = recorder.reconnect(now_us=101)
+    assert second.connection_generation == first.connection_generation + 1
+    assert {fence.request_id for fence in second.fences} == {1_000_000, 1_000_001}
+    assert adapter.subscribed_request_ids == [1_000_000, 1_000_001] * 2
+    recorder.stop(now_us=102)
+
+
+def test_combined_subscriptions_fail_closed_at_explicit_line_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "line-limit.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    monkeypatch.setattr(
+        recorder_module,
+        "discover_plugins",
+        lambda _configs: (_synthetic_discovered(configured),),
+    )
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-line-limit",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            market_data_line_limit=1,
+            idea_config=idea_path,
+        ),
+        _RecorderAdapter(),
+    )
+    with pytest.raises(Exception, match="line limit"):
+        recorder.start(
+            now_us=100,
+            instruments=(InstrumentSpec("MSFT", 2, "stock", "MSFT", "SMART", "USD"),),
+            subscriptions=(
+                SubscriptionSpec(
+                    name="base-msft-bars",
+                    instrument_id="MSFT",
+                    feed_kind="bars",
+                    request_id=1_000_000,
+                    continuity_required=False,
+                    optional=True,
+                    stale_after_us=15_000_000,
+                ),
+            ),
+        )

@@ -1494,3 +1494,140 @@ def test_farm_recovery_resolves_only_matching_outage_and_fatal_remains_absorbing
         recorder.market_data_status(
             MarketDataStatus("farm_recovered", 2106, None, "farm two ok", 105, ("quotes",))
         )
+
+
+def test_disconnect_fences_degraded_farm_before_recovery_and_preserves_paused_optional(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE subscriptions SET lifecycle='paused' WHERE request_id=4")
+
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2103, None, "quote farm lost", 101, ("quotes",))
+    )
+    recorder.disconnected(now_us=102)
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+    assert states == {3: "disconnected", 4: "paused"}
+
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2104, None, "quote farm ok", 103, ("quotes",))
+    )
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        recovery = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
+        ).fetchone()[0]
+    assert states == {3: "disconnected", 4: "paused"}
+    assert tuple(runtime) == ("degraded", "IBKR_DISCONNECT")
+    assert recovery == 103
+
+    recorder.reconnect(now_us=104)
+    with connect_v2(database) as connection:
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2"
+            )
+        )
+    assert current == {3: "active", 4: "paused"}
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2103, None, "new quote farm lost", 105, ("quotes",))
+    )
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2104, None, "new quote farm ok", 106, ("quotes",))
+    )
+    with connect_v2(database) as connection:
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2"
+            )
+        )
+    assert current == {3: "active", 4: "paused"}
+
+
+def test_late_farm_recovery_across_reconnect_is_scoped_and_stale_authority_cannot_mutate(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2103, None, "old quote farm lost", 101, ("quotes",))
+    )
+    recorder.disconnected(now_us=102)
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2105, None, "late bar farm loss", 103, ("bars",))
+    )
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2106, None, "late bar farm ok", 104, ("bars",))
+    )
+    with connect_v2(database) as connection:
+        disconnected = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=1"
+            )
+        )
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+    assert disconnected == {3: "disconnected", 4: "disconnected"}
+    assert tuple(runtime) == ("degraded", "IBKR_DISCONNECT")
+
+    recorder.reconnect(now_us=105)
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2105, None, "bar farm lost", 106, ("bars",))
+    )
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2104, None, "old quote farm ok", 107, ("quotes",))
+    )
+    with connect_v2(database) as connection:
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2"
+            )
+        )
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+    assert current == {3: "active", 4: "degraded"}
+    assert tuple(runtime) == ("degraded", "IBKR_FARM_2105_DEGRADED")
+
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2106, None, "current bar farm ok", 108, ("bars",))
+    )
+    with connect_v2(database) as connection:
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2"
+            )
+        )
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        old_quote_gap = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED' "
+            "AND subscription_id IN "
+            "(SELECT subscription_id FROM subscriptions WHERE connection_generation=1)"
+        ).fetchone()[0]
+    assert current == {3: "active", 4: "active"}
+    assert tuple(runtime) == ("running", None)
+    assert old_quote_gap is None
+
+    _force_recorder_takeover(database)
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.market_data_status(
+            MarketDataStatus("farm_recovered", 2104, None, "quote farm ok", 109, ("quotes",))
+        )
+    with connect_v2(database) as connection:
+        replacement = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+        ).fetchone()
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2"
+            )
+        )
+    assert tuple(replacement) == (2, "running", None)
+    assert current == {3: "active", 4: "active"}

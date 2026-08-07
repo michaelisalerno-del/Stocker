@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from stocker_runtime import Observation, ProposedPosition, ProposedTrade, Signal
+from stocker_runtime import Observation, ProposedPosition, ProposedTrade, ProposedTradeLeg, Signal
 
 
 def test_observation_serializes_to_canonical_json() -> None:
@@ -34,11 +34,26 @@ def test_all_output_types_are_unapproved_evidence_with_strict_fields(
     output_type: type[Observation | Signal | ProposedPosition | ProposedTrade],
     kind: str,
 ) -> None:
-    output = output_type(
-        subject_instrument_id="AAPL@SMART:USD",
-        as_of_at_us=1_786_032_000_000_000,
-        payload={"reason": "causal evidence"},
-    )
+    fields = {
+        "subject_instrument_id": "AAPL@SMART:USD",
+        "as_of_at_us": 1_786_032_000_000_000,
+        "payload": {"reason": "causal evidence"},
+    }
+    if output_type is ProposedTrade:
+        output = ProposedTrade(
+            **fields,
+            legs=(
+                ProposedTradeLeg(
+                    instrument_id="AAPL@SMART:USD",
+                    action="buy",
+                    target="long",
+                    quantity_value=1.0,
+                    currency="USD",
+                ),
+            ),
+        )
+    else:
+        output = output_type(**fields)
 
     assert output.kind == kind
     if isinstance(output, (ProposedPosition, ProposedTrade)):

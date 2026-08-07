@@ -318,10 +318,35 @@ class ProposedPosition(ProposedOutputBase):
     kind: Literal["proposed_position"] = "proposed_position"
 
 
+class ProposedTradeLeg(DomainModel):
+    """One typed, authority-free leg of an unapproved trade proposal."""
+
+    instrument_id: str = Field(min_length=1)
+    action: Literal["buy", "sell"]
+    target: Literal["long", "short", "reduce", "close"]
+    quantity_value: float | None = Field(default=None, gt=0)
+    notional_value: float | None = Field(default=None, gt=0)
+    currency: str | None = Field(default=None, min_length=1)
+    price_hint: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def has_sizing_hint(self) -> Self:
+        if self.quantity_value is None and self.notional_value is None:
+            raise ValueError("trade leg requires quantity_value or notional_value")
+        return self
+
+
 class ProposedTrade(ProposedOutputBase):
     """An unapproved trade proposal with no execution authority."""
 
     kind: Literal["proposed_trade"] = "proposed_trade"
+    legs: tuple[ProposedTradeLeg, ...] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def subjects_one_of_its_legs(self) -> Self:
+        if self.subject_instrument_id not in {leg.instrument_id for leg in self.legs}:
+            raise ValueError("proposed trade subject must identify one of its legs")
+        return self
 
 
 type IdeaOutput = Observation | Signal | ProposedPosition | ProposedTrade

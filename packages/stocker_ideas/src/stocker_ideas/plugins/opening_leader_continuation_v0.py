@@ -20,10 +20,11 @@ from stocker_runtime.domain import (
     Observation,
     OutputKind,
     ProposedTrade,
+    ProposedTradeLeg,
     RuntimeMode,
     Signal,
 )
-from stocker_runtime.ideas import (
+from stocker_runtime.ideas.contract import (
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -78,7 +79,7 @@ MANIFEST = IdeaManifest(
         },
     },
     maximum_state_bytes=65_536,
-    maximum_outputs_per_batch=3,
+    maximum_outputs_per_batch=6,
 )
 
 
@@ -100,27 +101,56 @@ class OpeningLeaderContinuationV0:
         )
 
     def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
-        del state
-        by_checkpoint: dict[tuple[str, int], tuple[str, float, float]] = {}
-        duplicate_keys: set[tuple[str, int]] = set()
+        prior = state if isinstance(state, Mapping) else {}
+        session_value = prior.get("session")
+        current_session = session_value if isinstance(session_value, str) else None
+        emitted_value = prior.get("emitted")
+        emitted = {
+            int(value)
+            for value in (emitted_value if isinstance(emitted_value, tuple | list) else ())
+            if isinstance(value, int) and not isinstance(value, bool) and value in (6, 12)
+        }
+        bars: dict[int, dict[str, tuple[float, float] | None]] = {6: {}, 12: {}}
+        stored_bars = prior.get("bars")
+        if isinstance(stored_bars, Mapping):
+            for checkpoint in (6, 12):
+                stored_checkpoint = stored_bars.get(str(checkpoint))
+                if not isinstance(stored_checkpoint, Mapping):
+                    continue
+                for symbol, value in stored_checkpoint.items():
+                    if not isinstance(symbol, str):
+                        continue
+                    if value is None:
+                        bars[checkpoint][symbol] = None
+                    elif isinstance(value, tuple | list) and len(value) == 2:
+                        stored_open, stored_close = value
+                        if (
+                            isinstance(stored_open, int | float)
+                            and not isinstance(stored_open, bool)
+                            and isinstance(stored_close, int | float)
+                            and not isinstance(stored_close, bool)
+                        ):
+                            bars[checkpoint][symbol] = (
+                                float(stored_open),
+                                float(stored_close),
+                            )
         for event in batch.events:
             payload = event.payload
             if (
                 event.instrument_id not in COHORT
                 or event.feed_kind != "bars_5m"
                 or payload.get("source_completeness") != "complete"
-                or payload.get("duplicate_resolution") == "unresolved"
             ):
                 continue
             session = payload.get("session")
-            checkpoint = payload.get("checkpoint")
+            event_checkpoint = payload.get("checkpoint")
             opening = payload.get("regular_session_open")
             close = payload.get("checkpoint_close")
             if (
                 not isinstance(session, str)
-                or not isinstance(checkpoint, int)
-                or isinstance(checkpoint, bool)
-                or checkpoint not in (6, 12)
+                or not isinstance(event_checkpoint, int)
+                or isinstance(event_checkpoint, bool)
+                or event_checkpoint not in (6, 12)
                 or not isinstance(opening, int | float)
                 or isinstance(opening, bool)
                 or not isinstance(close, int | float)
@@ -129,30 +159,33 @@ class OpeningLeaderContinuationV0:
                 or close <= 0
             ):
                 continue
-            key = (event.instrument_id, checkpoint)
-            if key in duplicate_keys:
+            if current_session is not None and session < current_session:
                 continue
-            if key in by_checkpoint:
-                by_checkpoint.pop(key)
-                duplicate_keys.add(key)
+            if current_session is None or session > current_session:
+                current_session = session
+                emitted.clear()
+                bars = {6: {}, 12: {}}
+            if payload.get("duplicate_resolution") == "unresolved":
+                bars[event_checkpoint][event.instrument_id] = None
                 continue
-            by_checkpoint[key] = (session, float(opening), float(close))
+            existing = bars[event_checkpoint].get(event.instrument_id, "missing")
+            bars[event_checkpoint][event.instrument_id] = (
+                (float(opening), float(close)) if existing == "missing" else None
+            )
 
         outputs: list[IdeaOutput] = []
-        latest_state: dict[str, JsonValue] = {"input_watermark": batch.input_watermark}
+        minimum = 15
         for checkpoint in (6, 12):
-            rows = [
-                (instrument, values)
-                for (instrument, candidate), values in by_checkpoint.items()
-                if candidate == checkpoint
-            ]
-            if not rows:
+            if checkpoint in emitted:
                 continue
-            sessions = {values[0] for _, values in rows}
-            eligible = len(rows) >= 15 and len(sessions) == 1
+            rows = [
+                (instrument, values) for instrument, values in bars[checkpoint].items() if values
+            ]
+            if len(rows) < minimum:
+                continue
             ranking = sorted(
                 (
-                    (10_000.0 * (values[2] / values[1] - 1.0), instrument)
+                    (10_000.0 * (values[1] / values[0] - 1.0), instrument)
                     for instrument, values in rows
                 ),
                 key=lambda item: (-item[0], item[1]),
@@ -164,8 +197,8 @@ class OpeningLeaderContinuationV0:
                 {
                     "checkpoint": checkpoint,
                     "checkpoint_role": "primary" if checkpoint == 6 else "secondary",
-                    "session": next(iter(sessions)) if len(sessions) == 1 else None,
-                    "eligible": eligible,
+                    "session": current_session,
+                    "eligible": True,
                     "slate_size": len(ranking),
                     "rank_1": leader[1],
                     "rank_1_return_bps": leader[0],
@@ -175,6 +208,7 @@ class OpeningLeaderContinuationV0:
                     ),
                     "selected_identity": "rank_1",
                     "direction": "LONG",
+                    "sizing_basis": "one_share_reference",
                     "frozen_version": "opening-leader-continuation-recorder-v0",
                 },
             )
@@ -182,20 +216,41 @@ class OpeningLeaderContinuationV0:
             outputs.append(
                 Observation(subject_instrument_id=leader[1], as_of_at_us=as_of, payload=payload)
             )
-            if eligible:
-                outputs.extend(
-                    (
-                        Signal(subject_instrument_id=leader[1], as_of_at_us=as_of, payload=payload),
-                        ProposedTrade(
-                            subject_instrument_id=leader[1],
-                            as_of_at_us=as_of,
-                            payload={**payload, "action": "buy", "target": "long"},
+            outputs.extend(
+                (
+                    Signal(subject_instrument_id=leader[1], as_of_at_us=as_of, payload=payload),
+                    ProposedTrade(
+                        subject_instrument_id=leader[1],
+                        as_of_at_us=as_of,
+                        payload={**payload, "action": "buy", "target": "long"},
+                        legs=(
+                            ProposedTradeLeg(
+                                instrument_id=leader[1],
+                                action="buy",
+                                target="long",
+                                quantity_value=1.0,
+                                currency="USD",
+                            ),
                         ),
-                    )
+                    ),
                 )
-            latest_state[f"checkpoint_{checkpoint}"] = cast(JsonValue, payload)
-            break  # one causal checkpoint per bounded evaluation
-        return IdeaEvaluation(state=cast(JsonValue, latest_state), outputs=tuple(outputs))
+            )
+            emitted.add(checkpoint)
+        latest_state = cast(
+            JsonValue,
+            {
+                "session": current_session,
+                "emitted": tuple(sorted(emitted)),
+                "bars": {
+                    str(checkpoint): {
+                        symbol: values for symbol, values in sorted(bars[checkpoint].items())
+                    }
+                    for checkpoint in (6, 12)
+                },
+                "input_watermark": batch.input_watermark,
+            },
+        )
+        return IdeaEvaluation(state=latest_state, outputs=tuple(outputs))
 
 
 def create_plugin() -> OpeningLeaderContinuationV0:

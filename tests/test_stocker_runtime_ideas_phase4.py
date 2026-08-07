@@ -4,28 +4,47 @@ import ast
 import hashlib
 import importlib.util
 import json
+import time
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from stocker_ideas.plugins.opening_leader_continuation_v0 import MANIFEST
 from stocker_runtime.domain import (
+    JsonValue,
+    MarketEvent,
     Observation,
     ProposedPosition,
     ProtectedDataClass,
     RuntimeMode,
     canonical_json_bytes,
 )
-from stocker_runtime.ideas import IdeaBatch, IdeaEvaluation
+from stocker_runtime.ideas import (
+    IdeaActivation,
+    IdeaBatch,
+    IdeaEvaluation,
+    IdeaManifest,
+    IdeaPlugin,
+    MarketDataRequirement,
+)
 from stocker_runtime.ideas.discovery import (
     IdeaConfig,
     IdeaDiscoveryError,
     aggregate_requirements,
     discover_plugins,
     load_idea_configs,
+    reviewed_code_hash,
 )
 from stocker_runtime.ideas.runner import IdeaRunner
+from stocker_runtime.ingestion import (
+    InstrumentSpec,
+    Recorder,
+    RecorderConfig,
+    SubscriptionSpec,
+)
 from stocker_runtime.storage.connection import connect_v2, initialize_database
 
 MODULE = "stocker_ideas.plugins.opening_leader_continuation_v0"
@@ -59,7 +78,7 @@ def _config(**changes: object) -> IdeaConfig:
     values: dict[str, object] = {
         "module": MODULE,
         "factory": "create_plugin",
-        "expected_code_hash": hashlib.sha256(Path(spec.origin).read_bytes()).hexdigest(),
+        "expected_code_hash": reviewed_code_hash(MODULE),
         "expected_manifest_hash": hashlib.sha256(MANIFEST.to_canonical_json()).hexdigest(),
         "parameters": {"checkpoints": [6, 12], "minimum_complete_slate": 15},
         "universe": COHORT,
@@ -90,7 +109,7 @@ def _seed(database: Path, *, mode: str = "prospective_record") -> None:
 
 
 def _event(connection: object, sequence: int, symbol: str, close: float) -> None:
-    payload = {
+    payload: Mapping[str, JsonValue] = {
         "session": "2026-08-03",
         "checkpoint": 6,
         "regular_session_open": 100.0,
@@ -237,11 +256,17 @@ def test_runner_has_no_backfill_and_commits_outputs_with_checkpoint(tmp_path: Pa
             "SELECT output_kind, subject_instrument_id, authority_status, payload_json "
             "FROM idea_outputs ORDER BY output_ordinal"
         ).fetchall()
+        legs = connection.execute(
+            "SELECT instrument_id, action, target, quantity_value, currency FROM idea_output_legs"
+        ).fetchall()
     assert checkpoint == "event-21"
     # Pre-activation AAL was not backfilled, so only 19 bars are considered; minimum is 15.
     assert [row["output_kind"] for row in outputs] == ["observation", "signal", "proposed_trade"]
     assert outputs[-1]["authority_status"] == "unapproved"
     assert json.loads(outputs[-1]["payload_json"])["selected_identity"] == "rank_1"
+    assert [tuple(row) for row in legs] == [
+        (outputs[-1]["subject_instrument_id"], "buy", "long", 1.0, "USD")
+    ]
 
 
 def test_one_plugin_failure_does_not_stop_other_instance(tmp_path: Path) -> None:
@@ -250,7 +275,17 @@ def test_one_plugin_failure_does_not_stop_other_instance(tmp_path: Path) -> None
     good = discover_plugins((_config(),))[0]
     runner = IdeaRunner(database, (good,))
     failed = runner.activate(run_id="run-1", plugin=good, activated_at_us=100)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE idea_instances SET deactivated_at_us=100 WHERE instance_id=?",
+            (failed.instance_id,),
+        )
     healthy = runner.activate(run_id="run-1", plugin=good, activated_at_us=101)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE idea_instances SET deactivated_at_us=NULL WHERE instance_id=?",
+            (failed.instance_id,),
+        )
     runner._plugins_by_instance[failed.instance_id] = object()  # explicit fault injection boundary
     with connect_v2(database) as connection:
         for index, symbol in enumerate(COHORT, start=1):
@@ -365,18 +400,18 @@ def test_runner_batches_at_256_without_skipping_the_remainder(tmp_path: Path) ->
 
 
 class _InvalidPlugin:
-    def __init__(self, original: object, failure: str) -> None:
+    def __init__(self, original: IdeaPlugin, failure: str) -> None:
         self._original = original
         self._failure = failure
 
     @property
-    def manifest(self) -> object:
-        return self._original.manifest  # type: ignore[attr-defined,no-any-return]
+    def manifest(self) -> IdeaManifest:
+        return self._original.manifest
 
-    def requirements(self, activation: object) -> object:
-        return self._original.requirements(activation)  # type: ignore[attr-defined,no-any-return]
+    def requirements(self, activation: IdeaActivation) -> tuple[MarketDataRequirement, ...]:
+        return self._original.requirements(activation)
 
-    def evaluate(self, batch: IdeaBatch, state: object) -> IdeaEvaluation:
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
         del state
         if self._failure == "forbidden_kind":
             return IdeaEvaluation(
@@ -426,3 +461,288 @@ def test_invalid_plugin_result_degrades_without_partial_checkpoint(
     assert result.advanced is False
     assert checkpoint is None
     assert output_count == 0
+
+
+def test_activation_uses_durable_inbox_watermark_and_retry_is_idempotent(tmp_path: Path) -> None:
+    database = tmp_path / "activation.sqlite3"
+    _seed(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_sha256, lifecycle) VALUES (1, 'pending-1', 'run-1', 1, 1, "
+            "'bar', 10, ?, 'pending')",
+            ("1" * 64,),
+        )
+    discovered = discover_plugins((_config(),))[0]
+    runner = IdeaRunner(database, (discovered,))
+    first = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        _event(connection, 2, "AAL", 101.0)
+    retry = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        activated_after = connection.execute(
+            "SELECT activated_after_source_sequence FROM idea_instances"
+        ).fetchone()[0]
+    assert activated_after == 1
+    assert retry.instance_id == first.instance_id
+    assert retry.inserted is False
+
+
+def test_removing_config_disables_an_active_instance_without_evaluation(tmp_path: Path) -> None:
+    database = tmp_path / "disabled.sqlite3"
+    _seed(database)
+    discovered = discover_plugins((_config(),))[0]
+    activation = IdeaRunner(database, (discovered,)).activate(
+        run_id="run-1", plugin=discovered, activated_at_us=100
+    )
+    empty_runner = IdeaRunner(database, ())
+    assert empty_runner.deactivate_unconfigured(run_id="run-1", now_us=101) == (
+        activation.instance_id,
+    )
+    assert empty_runner.run_once(now_us=102) == ()
+    with connect_v2(database) as connection:
+        row = connection.execute(
+            "SELECT health, deactivated_at_us FROM idea_instances WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()
+    assert tuple(row) == ("disabled", 101)
+
+
+def _bar_event(sequence: int, symbol: str, checkpoint: int, session: str) -> MarketEvent:
+    return MarketEvent(
+        event_id=f"{session}-{checkpoint}-{sequence}",
+        instrument_id=symbol,
+        feed_kind="bars_5m",
+        event_kind="bar",
+        event_at_us=1_000 + sequence,
+        received_at_us=2_000 + sequence,
+        payload={
+            "session": session,
+            "checkpoint": checkpoint,
+            "regular_session_open": 100.0,
+            "checkpoint_close": 101.0 + sequence / 100,
+            "source_completeness": "complete",
+            "duplicate_resolution": "unique",
+        },
+    )
+
+
+def _batch(events: tuple[MarketEvent, ...]) -> IdeaBatch:
+    return IdeaBatch(
+        mode=RuntimeMode.PROSPECTIVE_RECORD,
+        events=events,
+        input_watermark=events[-1].event_id,
+        causal_from_at_us=min(event.event_at_us for event in events),
+        causal_through_at_us=max(event.event_at_us for event in events),
+    )
+
+
+def test_opening_leader_retains_incremental_state_and_emits_c6_and_c12() -> None:
+    plugin = discover_plugins((_config(),))[0].plugin
+    first = plugin.evaluate(
+        _batch(
+            tuple(
+                _bar_event(index, symbol, 6, "2026-08-03")
+                for index, symbol in enumerate(COHORT[:10])
+            )
+        ),
+        {},
+    )
+    second = plugin.evaluate(
+        _batch(
+            tuple(
+                _bar_event(index + 10, symbol, 6, "2026-08-03")
+                for index, symbol in enumerate(COHORT[10:15])
+            )
+        ),
+        first.state,
+    )
+    third = plugin.evaluate(
+        _batch(
+            tuple(
+                _bar_event(index + 30, symbol, 12, "2026-08-03")
+                for index, symbol in enumerate(COHORT[:15])
+            )
+        ),
+        second.state,
+    )
+    next_session = plugin.evaluate(
+        _batch(
+            tuple(
+                _bar_event(index + 60, symbol, 6, "2026-08-04")
+                for index, symbol in enumerate(COHORT[:10])
+            )
+        ),
+        third.state,
+    )
+    assert first.outputs == ()
+    assert [output.kind for output in second.outputs] == ["observation", "signal", "proposed_trade"]
+    assert [output.kind for output in third.outputs] == ["observation", "signal", "proposed_trade"]
+    assert next_session.outputs == ()
+    next_state = cast(Mapping[str, JsonValue], next_session.state)
+    assert next_state["session"] == "2026-08-04"
+
+
+class _SlowPlugin(_InvalidPlugin):
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        time.sleep(0.2)
+        return self._original.evaluate(batch, state)
+
+
+def test_hung_plugin_is_terminated_and_does_not_block_healthy_instance(tmp_path: Path) -> None:
+    database = tmp_path / "timeout.sqlite3"
+    _seed(database)
+    good = discover_plugins((_config(),))[0]
+    runner = IdeaRunner(database, (good,))
+    slow_activation = runner.activate(run_id="run-1", plugin=good, activated_at_us=100)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE idea_instances SET deactivated_at_us=100 WHERE instance_id=?",
+            (slow_activation.instance_id,),
+        )
+    healthy_activation = runner.activate(run_id="run-1", plugin=good, activated_at_us=101)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE idea_instances SET deactivated_at_us=NULL WHERE instance_id=?",
+            (slow_activation.instance_id,),
+        )
+        for index, symbol in enumerate(COHORT, start=1):
+            _event(connection, index, symbol, 101.0 + index / 100)
+    runner._plugins_by_instance[slow_activation.instance_id] = _SlowPlugin(good.plugin, "slow")
+    results = {item.instance_id: item for item in runner.run_once(now_us=30_000)}
+    runner.close()
+    error_code = results[slow_activation.instance_id].error_code
+    assert error_code is not None
+    assert "50MS" in error_code
+    assert results[healthy_activation.instance_id].advanced is True
+
+
+def test_repeated_plugin_failure_keeps_one_unresolved_incident(tmp_path: Path) -> None:
+    database = tmp_path / "incidents.sqlite3"
+    _seed(database)
+    discovered = discover_plugins((_config(),))[0]
+    runner = IdeaRunner(database, (discovered,))
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    runner._plugins_by_instance[activation.instance_id] = object()
+    with connect_v2(database) as connection:
+        _event(connection, 1, "AAL", 101.0)
+    runner.run_once(now_us=1_000)
+    runner.run_once(now_us=2_000)
+    with connect_v2(database) as connection:
+        count = connection.execute(
+            "SELECT count(*) FROM incidents WHERE plugin_instance_id=? AND resolved_at_us IS NULL",
+            (activation.instance_id,),
+        ).fetchone()[0]
+        failures = connection.execute(
+            "SELECT consecutive_failures FROM idea_checkpoints WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()[0]
+    assert count == 1
+    assert failures == 1
+
+
+def test_staleness_block_is_independent_from_continuity_gap_block(tmp_path: Path) -> None:
+    database = tmp_path / "stale.sqlite3"
+    _seed(database)
+    discovered = discover_plugins((_config(),))[0]
+    stale_only = replace(
+        discovered,
+        requirements=tuple(
+            MarketDataRequirement(
+                **{
+                    **requirement.model_dump(),
+                    "gaps_block": False,
+                    "staleness_block": True,
+                }
+            )
+            for requirement in discovered.requirements
+        ),
+    )
+    runner = IdeaRunner(database, (stale_only,))
+    runner.activate(run_id="run-1", plugin=stale_only, activated_at_us=100)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us) VALUES "
+            "('stale-aal', 'run-1', 1, 1, 'AAL', 'bars_5m', 1, 'active', ?, 1)",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO gaps(gap_id, run_id, subscription_id, started_at_us, reason, "
+            "data_loss_possible, continuity_required) VALUES "
+            "('stale-gap', 'run-1', 'stale-aal', 2, 'STREAM_STALE', 0, 0)"
+        )
+        _event(connection, 1, "AAL", 101.0)
+    assert runner.run_once(now_us=1_000)[0].advanced is False
+
+
+class _RecorderAdapter:
+    def set_callback(self, callback: object) -> None:
+        self.callback = callback
+
+    def set_disconnect_callback(self, callback: object) -> None:
+        self.disconnect_callback = callback
+
+    def set_status_callback(self, callback: object) -> None:
+        self.status_callback = callback
+
+    def connect(self) -> None:
+        return None
+
+    def disconnect(self) -> None:
+        return None
+
+    def subscribe(self, fence: object) -> None:
+        return None
+
+    def cancel(self, request_id: int) -> None:
+        return None
+
+
+def test_recorder_explicit_config_wires_generic_requirements_and_activation(tmp_path: Path) -> None:
+    database = tmp_path / "recorder.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    config_value = _config().model_dump(mode="json")
+    idea_path.write_text(json.dumps([config_value]), encoding="utf-8")
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-wired",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            idea_config=idea_path,
+        ),
+        _RecorderAdapter(),
+    )
+    instruments = tuple(
+        InstrumentSpec(symbol, index + 1, "stock", symbol, "SMART", "USD")
+        for index, symbol in enumerate(COHORT)
+    )
+    subscriptions = tuple(
+        SubscriptionSpec(
+            name=f"{symbol}-bars",
+            instrument_id=symbol,
+            feed_kind="bars_5m",
+            request_id=index + 1,
+            continuity_required=True,
+            optional=False,
+            stale_after_us=300_000_000,
+        )
+        for index, symbol in enumerate(COHORT)
+    )
+    recorder.start(now_us=100, instruments=instruments, subscriptions=subscriptions)
+    with connect_v2(database) as connection:
+        instances = connection.execute("SELECT count(*) FROM idea_instances").fetchone()[0]
+    assert len(recorder.idea_requirements) == len(COHORT)
+    assert instances == 1
+    recorder.stop(now_us=101)

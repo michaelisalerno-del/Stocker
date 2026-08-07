@@ -649,14 +649,36 @@ CREATE TABLE idea_output_legs (
     output_id TEXT NOT NULL REFERENCES idea_outputs(output_id) ON DELETE CASCADE,
     leg_number INTEGER NOT NULL CHECK(leg_number >= 0),
     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
-    action TEXT NOT NULL,
-    target TEXT NOT NULL,
-    quantity_value REAL,
-    notional_value REAL,
+    action TEXT NOT NULL CHECK(action IN ('buy', 'sell')),
+    target TEXT NOT NULL CHECK(target IN ('long', 'short', 'reduce', 'close')),
+    quantity_value REAL CHECK(quantity_value IS NULL OR quantity_value > 0),
+    notional_value REAL CHECK(notional_value IS NULL OR notional_value > 0),
     currency TEXT,
-    price_hint REAL,
+    price_hint REAL CHECK(price_hint IS NULL OR price_hint > 0),
+    CHECK(quantity_value IS NOT NULL OR notional_value IS NOT NULL),
     PRIMARY KEY(output_id, leg_number)
 ) STRICT;
+
+CREATE TRIGGER idea_output_legs_provenance_insert
+BEFORE INSERT ON idea_output_legs
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM idea_outputs output
+        JOIN idea_instances instance ON instance.instance_id=output.instance_id
+        JOIN json_each(instance.universe_json) member ON member.value=NEW.instrument_id
+        WHERE output.output_id=NEW.output_id AND output.output_kind='proposed_trade'
+    ) THEN RAISE(ABORT, 'idea_output_leg_provenance_mismatch') END;
+END;
+CREATE TRIGGER idea_output_legs_provenance_update
+BEFORE UPDATE OF output_id, instrument_id ON idea_output_legs
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM idea_outputs output
+        JOIN idea_instances instance ON instance.instance_id=output.instance_id
+        JOIN json_each(instance.universe_json) member ON member.value=NEW.instrument_id
+        WHERE output.output_id=NEW.output_id AND output.output_kind='proposed_trade'
+    ) THEN RAISE(ABORT, 'idea_output_leg_provenance_mismatch') END;
+END;
 
 CREATE TABLE shadow_positions (
     position_id TEXT PRIMARY KEY,

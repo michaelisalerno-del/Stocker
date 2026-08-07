@@ -138,29 +138,76 @@ def _source(module_name: str) -> tuple[Path, bytes]:
     return path, path.read_bytes()
 
 
-def _validate_source(module_name: str, source: bytes) -> None:
+def _validate_source(module_name: str, source: bytes) -> tuple[str, ...]:
     try:
         tree = ast.parse(source, filename=module_name)
     except SyntaxError as error:
         raise IdeaDiscoveryError(f"invalid plugin source: {error}") from error
+    first_party_imports: set[str] = set()
     for node in ast.walk(tree):
         imported: list[str] = []
         if isinstance(node, ast.Import):
             imported = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                raise IdeaDiscoveryError(
+                    "relative plugin imports are forbidden; use a pinned absolute module"
+                )
             imported = [node.module or ""]
         for name in imported:
             root = name.split(".", 1)[0]
             if root in FORBIDDEN_IMPORTS or name.startswith(FORBIDDEN_IMPORT_PREFIXES):
                 raise IdeaDiscoveryError(f"forbidden plugin import: {name}")
-            if name.startswith("stocker_runtime") and not name.startswith(
-                ("stocker_runtime.domain", "stocker_runtime.ideas")
+            if name.startswith("stocker_runtime") and not (
+                name == "stocker_runtime.domain"
+                or name.startswith("stocker_runtime.domain.")
+                or name == "stocker_runtime.ideas.contract"
             ):
                 raise IdeaDiscoveryError(f"plugin may only use public runtime contracts: {name}")
+            if name.startswith("stocker_ideas"):
+                if not name.startswith(FIRST_PARTY_PREFIX):
+                    raise IdeaDiscoveryError(
+                        f"plugin import is outside the reviewed plugin tree: {name}"
+                    )
+                if name == FIRST_PARTY_PREFIX.removesuffix("."):
+                    raise IdeaDiscoveryError(
+                        "plugin helpers must be imported through their full pinned module"
+                    )
+                first_party_imports.add(name)
         if isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_ATTRIBUTES:
             raise IdeaDiscoveryError(f"forbidden plugin authority attribute: {node.attr}")
         if isinstance(node, ast.Name) and node.id in FORBIDDEN_ATTRIBUTES:
             raise IdeaDiscoveryError(f"forbidden plugin authority name: {node.id}")
+    return tuple(sorted(first_party_imports))
+
+
+def _source_graph(module_name: str) -> tuple[bytes, tuple[str, ...]]:
+    """Validate and hash the complete explicit first-party source dependency graph."""
+
+    pending = [module_name]
+    sources: dict[str, bytes] = {}
+    while pending:
+        current = pending.pop()
+        if current in sources:
+            continue
+        _, source = _source(current)
+        sources[current] = source
+        pending.extend(name for name in _validate_source(current, source) if name not in sources)
+    framed = b"".join(
+        len(name.encode()).to_bytes(4, "big")
+        + name.encode()
+        + len(source).to_bytes(8, "big")
+        + source
+        for name, source in sorted(sources.items())
+    )
+    return framed, tuple(sorted(sources))
+
+
+def reviewed_code_hash(module_name: str) -> str:
+    """Return the review pin for a plugin and all explicit first-party dependencies."""
+
+    source_graph, _ = _source_graph(module_name)
+    return hashlib.sha256(source_graph).hexdigest()
 
 
 def _validate_parameter_value(value: JsonValue, schema: Mapping[str, Any], path: str) -> None:
@@ -243,8 +290,7 @@ def _validate_parameter_schema(schema: Mapping[str, Any], path: str = "parameter
 
 
 def _discover(config: IdeaConfig) -> DiscoveredPlugin:
-    _, source = _source(config.module)
-    _validate_source(config.module, source)
+    source_graph, _ = _source_graph(config.module)
     module = importlib.import_module(config.module)
     candidates = [name for name in vars(module) if name == config.factory]
     if len(candidates) != 1:
@@ -264,7 +310,7 @@ def _discover(config: IdeaConfig) -> DiscoveredPlugin:
     _validate_parameter_schema(manifest.parameter_schema)
     _validate_parameter_value(config.parameters, manifest.parameter_schema, "parameters")
     manifest_json = manifest.to_canonical_json().decode()
-    code_hash = hashlib.sha256(source).hexdigest()
+    code_hash = hashlib.sha256(source_graph).hexdigest()
     manifest_hash = hashlib.sha256(manifest_json.encode()).hexdigest()
     if config.expected_code_hash != code_hash:
         raise IdeaDiscoveryError("configured plugin code hash does not match reviewed source")

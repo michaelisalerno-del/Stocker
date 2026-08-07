@@ -21,11 +21,24 @@ from stocker_runtime import (
     OutputKind,
     ProposedPosition,
     ProposedTrade,
+    ProposedTradeLeg,
     ProtectedDataClass,
     RuntimeMode,
     Signal,
     canonical_json_bytes,
 )
+
+
+def _leg() -> tuple[ProposedTradeLeg, ...]:
+    return (
+        ProposedTradeLeg(
+            instrument_id="AAPL",
+            action="buy",
+            target="long",
+            quantity_value=1.0,
+            currency="USD",
+        ),
+    )
 
 
 def _manifest_data() -> dict[str, object]:
@@ -201,13 +214,19 @@ def test_batch_rejects_unsupported_modes(unsupported_mode: str) -> None:
     ],
 )
 def test_proposals_cannot_carry_normalized_authority_fields(forbidden_field: str) -> None:
-    for proposal_type in (ProposedPosition, ProposedTrade):
-        with pytest.raises(ValidationError, match="forbidden authority field"):
-            proposal_type(
-                subject_instrument_id="AAPL",
-                as_of_at_us=1,
-                payload={"nested": {forbidden_field: "forbidden"}},
-            )
+    with pytest.raises(ValidationError, match="forbidden authority field"):
+        ProposedPosition(
+            subject_instrument_id="AAPL",
+            as_of_at_us=1,
+            payload={"nested": {forbidden_field: "forbidden"}},
+        )
+    with pytest.raises(ValidationError, match="forbidden authority field"):
+        ProposedTrade(
+            subject_instrument_id="AAPL",
+            as_of_at_us=1,
+            payload={"nested": {forbidden_field: "forbidden"}},
+            legs=_leg(),
+        )
 
 
 def test_non_proposal_json_allows_legitimate_evidence_and_configuration_vocabulary() -> None:
@@ -319,6 +338,7 @@ def test_public_dto_json_is_deeply_immutable_and_round_trips() -> None:
                 subject_instrument_id="AAPL",
                 as_of_at_us=1,
                 payload={"nested": {"value": 1}, "items": ["first"]},
+                legs=_leg(),
             ),
             "payload",
             ("nested",),
@@ -356,6 +376,7 @@ def test_public_dto_json_is_deeply_immutable_and_round_trips() -> None:
                         subject_instrument_id="AAPL",
                         as_of_at_us=1,
                         payload={"reason": "causal evidence"},
+                        legs=_leg(),
                     ),
                 ),
             ),
@@ -449,6 +470,7 @@ def test_immutable_dto_copy_rejects_every_non_empty_update() -> None:
         subject_instrument_id="AAPL",
         as_of_at_us=1,
         payload={"reason": "causal evidence"},
+        legs=_leg(),
     )
 
     adversarial_updates = (

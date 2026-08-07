@@ -12,6 +12,7 @@ from typing import Literal, cast
 from stocker_runtime.domain import (
     FrozenJsonObject,
     JsonValue,
+    ProposedTradeLeg,
     canonical_json_bytes,
     ensure_authority_free_json,
 )
@@ -56,6 +57,8 @@ class IdeaOutputRecord:
     payload: JsonValue
     data_class: Literal["prospective_protected", "shadow_protected"]
     authority_status: Literal["recorded", "unapproved"]
+    input_event_ids: tuple[str, ...] = ()
+    legs: tuple[ProposedTradeLeg, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,16 +116,20 @@ def _snapshot_payload(value: JsonValue) -> tuple[str, JsonValue]:
 
 
 def _output_id_from_payload_hash(record: IdeaOutputRecord, payload_hash: str) -> str:
+    input_event_ids = record.input_event_ids or (record.first_input_event_id,)
+    legs = cast(JsonValue, [leg.model_dump(mode="json") for leg in record.legs])
     identity = cast(
         JsonValue,
         {
             "instance_id": record.instance_id,
             "first_input_event_id": record.first_input_event_id,
             "last_input_event_id": record.last_input_event_id,
+            "input_event_ids": input_event_ids,
             "output_kind": record.output_kind,
             "output_ordinal": record.output_ordinal,
             "as_of_at_us": record.as_of_at_us,
             "payload_hash": payload_hash,
+            "legs": legs,
         },
     )
     return hashlib.sha256(canonical_json_bytes(identity)).hexdigest()
@@ -201,6 +208,8 @@ def callback_rows_hash(rows: tuple[Mapping[str, object], ...]) -> str:
 
 
 def _content_hash(record: IdeaOutputRecord, payload_hash: str) -> str:
+    input_event_ids = record.input_event_ids or (record.first_input_event_id,)
+    legs = cast(JsonValue, [leg.model_dump(mode="json") for leg in record.legs])
     content = cast(
         JsonValue,
         {
@@ -217,10 +226,12 @@ def _content_hash(record: IdeaOutputRecord, payload_hash: str) -> str:
             "horizon_us": record.horizon_us,
             "first_input_event_id": record.first_input_event_id,
             "last_input_event_id": record.last_input_event_id,
+            "input_event_ids": input_event_ids,
             "output_ordinal": record.output_ordinal,
             "payload_hash": payload_hash,
             "data_class": record.data_class,
             "authority_status": record.authority_status,
+            "legs": legs,
         },
     )
     return hashlib.sha256(canonical_json_bytes(content)).hexdigest()
@@ -242,6 +253,24 @@ class OperationalRepository:
             raise ValueError(f"{record.output_kind} requires authority_status={expected_status}")
         if proposal:
             ensure_authority_free_json(payload_snapshot)
+        input_event_ids = record.input_event_ids or (
+            (record.first_input_event_id,)
+            if record.first_input_event_id == record.last_input_event_id
+            else ()
+        )
+        if not input_event_ids or len(input_event_ids) > 256:
+            raise ValueError("idea output requires 1..256 ordered input event ids")
+        if len(set(input_event_ids)) != len(input_event_ids):
+            raise ValueError("idea output input event ids must be unique")
+        if (
+            input_event_ids[0] != record.first_input_event_id
+            or input_event_ids[-1] != record.last_input_event_id
+        ):
+            raise ValueError("idea output input endpoints do not match full provenance")
+        if record.output_kind == "proposed_trade" and not record.legs:
+            raise ValueError("proposed trade requires typed legs")
+        if record.output_kind != "proposed_trade" and record.legs:
+            raise ValueError("only proposed trades may contain legs")
         payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
         output_id = _output_id_from_payload_hash(record, payload_hash)
         content_hash = _content_hash(record, payload_hash)
@@ -278,6 +307,33 @@ class OperationalRepository:
                 or str(provenance["last_event_run_id"]) != record.run_id
             ):
                 raise ProvenanceError("idea output provenance does not match its run and instance")
+            placeholders = ",".join("?" for _ in input_event_ids)
+            input_rows = connection.execute(
+                f"SELECT event_id, run_id FROM market_events WHERE event_id IN ({placeholders})",  # noqa: S608
+                input_event_ids,
+            ).fetchall()
+            if len(input_rows) != len(input_event_ids) or any(
+                str(item["run_id"]) != record.run_id for item in input_rows
+            ):
+                raise ProvenanceError("full idea output provenance crosses its run")
+            logical = connection.execute(
+                "SELECT output_id, content_hash FROM idea_outputs WHERE instance_id=? "
+                "AND input_watermark=? AND output_kind=? AND output_ordinal=? AND as_of_at_us=?",
+                (
+                    record.instance_id,
+                    record.last_input_event_id,
+                    record.output_kind,
+                    record.output_ordinal,
+                    record.as_of_at_us,
+                ),
+            ).fetchone()
+            if logical is not None and (
+                str(logical["output_id"]) != output_id
+                or str(logical["content_hash"]) != content_hash
+            ):
+                raise IdentityCollisionError(
+                    "logical output identity already names different content"
+                )
             cursor = connection.execute(
                 """
                 INSERT INTO idea_outputs(
@@ -309,7 +365,7 @@ class OperationalRepository:
                         canonical_json_bytes(
                             cast(
                                 JsonValue,
-                                (record.first_input_event_id, record.last_input_event_id),
+                                input_event_ids,
                             )
                         )
                     ).hexdigest(),
@@ -331,6 +387,29 @@ class OperationalRepository:
                     raise IdentityCollisionError(
                         f"output identity {output_id} already names different content"
                     )
+            for ordinal, event_id in enumerate(input_event_ids):
+                connection.execute(
+                    "INSERT INTO idea_output_inputs(output_id, event_id, input_ordinal) "
+                    "VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                    (output_id, event_id, ordinal),
+                )
+            for ordinal, leg in enumerate(record.legs):
+                connection.execute(
+                    "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
+                    "target, quantity_value, notional_value, currency, price_hint) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                    (
+                        output_id,
+                        ordinal,
+                        leg.instrument_id,
+                        leg.action,
+                        leg.target,
+                        leg.quantity_value,
+                        leg.notional_value,
+                        leg.currency,
+                        leg.price_hint,
+                    ),
+                )
             connection.commit()
             return StoreResult(output_id=output_id, inserted=inserted)
         except Exception:

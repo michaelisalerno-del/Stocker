@@ -14,6 +14,13 @@ from typing import Literal, Self, cast
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from stocker_runtime.domain import JsonValue, canonical_json_bytes
+from stocker_runtime.ideas.discovery import (
+    DiscoveredPlugin,
+    aggregate_requirements,
+    discover_plugins,
+    load_idea_configs,
+)
+from stocker_runtime.ideas.runner import IdeaRunner
 from stocker_runtime.ingestion.ibkr_market_data import MarketDataAdapter, MarketDataStatus
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
@@ -97,6 +104,7 @@ class RecorderConfig(BaseModel):
     git_commit: str = Field(pattern=r"^[a-f0-9]{7,64}$")
     writer_lease_stale_us: int = Field(default=60_000_000, ge=5_000_000)
     callback_lease_us: int = Field(default=30_000_000, ge=5_000_000)
+    idea_config: Path | None = None
 
     @model_validator(mode="after")
     def loopback_only(self) -> Self:
@@ -151,6 +159,13 @@ class Recorder:
         self.state: RecorderState | None = None
         self._instruments: tuple[InstrumentSpec, ...] = ()
         self._subscriptions: tuple[SubscriptionSpec, ...] = ()
+        self._ideas: tuple[DiscoveredPlugin, ...] = (
+            ()
+            if config.idea_config is None
+            else discover_plugins(load_idea_configs(config.idea_config))
+        )
+        self.idea_requirements = aggregate_requirements(self._ideas)
+        self._idea_runner: IdeaRunner | None = None
 
     def _authority(self) -> WriterAuthority:
         state = self._authority_state()
@@ -188,6 +203,16 @@ class Recorder:
             raise DuplicateWriterError("this recorder is already started")
         self._instruments = instruments
         self._subscriptions = subscriptions
+        available = {(item.instrument_id, item.feed_kind) for item in subscriptions}
+        missing_idea_requirements = tuple(
+            (item.instrument_id, item.feed_kind)
+            for item in self.idea_requirements
+            if (item.instrument_id, item.feed_kind) not in available
+        )
+        if missing_idea_requirements:
+            raise RecorderFatalError(
+                f"configured idea requirements lack subscriptions: {missing_idea_requirements}"
+            )
         connection = connect_v2(self.config.database)
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -311,6 +336,14 @@ class Recorder:
         finally:
             connection.close()
         self.state = RecorderState(self.config.run_id, generation, connection_generation, fences)
+        self._idea_runner = IdeaRunner(self.config.database, self._ideas)
+        self._idea_runner.deactivate_unconfigured(run_id=self.config.run_id, now_us=now_us)
+        for plugin in self._ideas:
+            self._idea_runner.activate(
+                run_id=self.config.run_id,
+                plugin=plugin,
+                activated_at_us=now_us,
+            )
         self.inbox.reclaim_expired_leases(now_us=now_us, authority=self._authority())
         self.drain(now_us=now_us)
         self.maintain(now_us=now_us)
@@ -872,6 +905,8 @@ class Recorder:
                 authority=authority,
             )
             self._heartbeat(now_us)
+            if self._idea_runner is not None:
+                self._idea_runner.run_once(now_us=now_us)
             return processed
         except CallbackTimestampOrderingLoss as error:
             self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", now_us)
@@ -1315,6 +1350,9 @@ class Recorder:
         """Close subscriptions and the writer generation without changing mode."""
 
         if self.state is None:
+            if self._idea_runner is not None:
+                self._idea_runner.close()
+                self._idea_runner = None
             return
         self._check_owned()
         with suppress(Exception):
@@ -1352,6 +1390,9 @@ class Recorder:
         finally:
             connection.close()
         self.state = None
+        if self._idea_runner is not None:
+            self._idea_runner.close()
+            self._idea_runner = None
 
     def _pause_optional(self, now_us: int) -> None:
         if self.state is None:

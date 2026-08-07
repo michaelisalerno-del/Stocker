@@ -16,6 +16,7 @@ from stocker_runtime.ideas.discovery import (
     aggregate_requirements,
     discover_plugins,
     load_idea_configs,
+    reviewed_code_hash,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "aggregate_requirements",
     "discover_plugins",
     "load_idea_configs",
+    "reviewed_code_hash",
 ]

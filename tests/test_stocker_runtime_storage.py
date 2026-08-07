@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from stocker_runtime import ProposedTradeLeg
 from stocker_runtime.cli import app as runtime_app
 from stocker_runtime.storage import (
     EXPECTED_TABLES,
@@ -39,6 +40,18 @@ from stocker_runtime.storage.retention import (
     FAILED_PAYLOAD_CANDIDATES_SQL,
     FAILED_TOMBSTONE_CANDIDATES_SQL,
 )
+
+
+def _proposal_legs() -> tuple[ProposedTradeLeg, ...]:
+    return (
+        ProposedTradeLeg(
+            instrument_id="instrument-1",
+            action="buy",
+            target="long",
+            quantity_value=1.0,
+            currency="USD",
+        ),
+    )
 
 
 def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
@@ -290,6 +303,7 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
                 **_output().__dict__,
                 "output_kind": "proposed_trade",
                 "authority_status": "unapproved",
+                "legs": _proposal_legs(),
             }
         )
     )
@@ -458,6 +472,7 @@ def test_shadow_leg_event_references_match_position_run_and_instrument(tmp_path:
             **_output().__dict__,
             "output_kind": "proposed_trade",
             "authority_status": "unapproved",
+            "legs": _proposal_legs(),
         }
     )
     stored = OperationalRepository(database).put_idea_output(proposal)
@@ -666,6 +681,63 @@ def test_repository_output_identity_is_deterministic_and_collision_checked(
         repository.put_idea_output(_output(emitted_at_us=31))
 
 
+def test_repository_persists_every_ordered_input_and_typed_trade_leg(tmp_path: Path) -> None:
+    database = tmp_path / "full-provenance.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle) VALUES "
+            "('callback-2', 'run-1', 1, 1, 'tick', 21, '{}', ?, 'pending')",
+            ("2" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES "
+            "('event-2', 'run-1', 2, 'instrument-1', 'trades', 'tick', 21, 21, 1, '{}', ?)",
+            ("3" * 64,),
+        )
+    record = IdeaOutputRecord(
+        **{
+            **_output().__dict__,
+            "output_kind": "proposed_trade",
+            "authority_status": "unapproved",
+            "last_input_event_id": "event-2",
+            "input_event_ids": ("event-1", "event-2"),
+            "legs": _proposal_legs(),
+        }
+    )
+    stored = OperationalRepository(database).put_idea_output(record)
+    with connect_v2(database) as connection:
+        inputs = tuple(
+            connection.execute(
+                "SELECT event_id FROM idea_output_inputs WHERE output_id=? ORDER BY input_ordinal",
+                (stored.output_id,),
+            )
+        )
+        leg = connection.execute(
+            "SELECT instrument_id, action, target, quantity_value, currency "
+            "FROM idea_output_legs WHERE output_id=?",
+            (stored.output_id,),
+        ).fetchone()
+    assert tuple(row[0] for row in inputs) == ("event-1", "event-2")
+    assert tuple(leg) == ("instrument-1", "buy", "long", 1.0, "USD")
+    changed_leg = ProposedTradeLeg(
+        instrument_id="instrument-1",
+        action="buy",
+        target="long",
+        quantity_value=2.0,
+        currency="USD",
+    )
+    with pytest.raises(IdentityCollisionError, match="logical output identity"):
+        OperationalRepository(database).put_idea_output(
+            IdeaOutputRecord(**{**record.__dict__, "legs": (changed_leg,)})
+        )
+
+
 def test_repository_snapshots_a_stateful_payload_exactly_once(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -678,6 +750,7 @@ def test_repository_snapshots_a_stateful_payload_exactly_once(tmp_path: Path) ->
             "output_kind": "proposed_trade",
             "payload": payload,
             "authority_status": "unapproved",
+            "legs": _proposal_legs(),
         }
     )
 
@@ -799,6 +872,7 @@ def test_repository_cannot_promote_a_proposal(tmp_path: Path) -> None:
             **signal.__dict__,
             "output_kind": "proposed_trade",
             "authority_status": "recorded",
+            "legs": _proposal_legs(),
         }
     )
 

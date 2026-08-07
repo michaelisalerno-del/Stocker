@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
 import sqlite3
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import cast
 
@@ -15,6 +16,7 @@ from stocker_runtime.domain import (
     IdeaOutput,
     JsonValue,
     MarketEvent,
+    ProposedTrade,
     ProtectedDataClass,
     RuntimeMode,
     canonical_json_bytes,
@@ -25,6 +27,10 @@ from stocker_runtime.ideas.discovery import DiscoveredPlugin
 from stocker_runtime.storage.connection import connect_v2
 
 MAX_EVALUATION_NS = 50_000_000
+MAX_EVALUATION_SECONDS = MAX_EVALUATION_NS / 1_000_000_000
+WORKER_START_SECONDS = 5.0
+RETRY_BASE_US = 1_000_000
+RETRY_MAX_US = 60_000_000
 
 
 class IdeaRunnerError(RuntimeError):
@@ -46,6 +52,60 @@ class EvaluationResult:
     error_code: str | None = None
 
 
+def _worker_main(connection: Connection, plugin: IdeaPlugin) -> None:
+    """Run reviewed plugin code outside the recorder process; this is not a sandbox."""
+
+    connection.send(("ready", None))
+    while True:
+        try:
+            message = connection.recv()
+        except EOFError:
+            return
+        if message is None:
+            return
+        batch, state = message
+        try:
+            evaluation = plugin.evaluate(batch, state)
+            connection.send(("ok", evaluation.model_dump(mode="python")))
+        except BaseException as error:
+            connection.send(("error", f"{type(error).__name__}:{error}"))
+
+
+class _PluginWorker:
+    def __init__(self, plugin: IdeaPlugin) -> None:
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(target=_worker_main, args=(child, plugin), daemon=True)
+        process.start()
+        child.close()
+        if not parent.poll(WORKER_START_SECONDS) or parent.recv()[0] != "ready":
+            process.terminate()
+            process.join(timeout=1)
+            parent.close()
+            raise IdeaRunnerError("plugin worker failed to start")
+        self.connection = parent
+        self.process = process
+
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        self.connection.send((batch, state))
+        if not self.connection.poll(MAX_EVALUATION_SECONDS):
+            self.terminate()
+            raise IdeaRunnerError("plugin evaluation exceeded 50ms execution bound")
+        status, payload = self.connection.recv()
+        if status != "ok":
+            raise IdeaRunnerError(str(payload))
+        return IdeaEvaluation.model_validate(payload)
+
+    def terminate(self) -> None:
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join(timeout=1)
+            if self.process.is_alive():
+                self.process.kill()
+                self.process.join(timeout=1)
+        self.connection.close()
+
+
 def _hash(value: JsonValue) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 
@@ -61,6 +121,7 @@ class IdeaRunner:
         self.database_path = Path(database_path)
         self._discovered = plugins
         self._plugins_by_instance: dict[str, IdeaPlugin | object] = {}
+        self._workers: dict[str, _PluginWorker] = {}
         with connect_v2(self.database_path) as connection:
             rows = connection.execute(
                 "SELECT instance_id, idea_id, idea_version, plugin_code_hash, parameters_hash, "
@@ -117,9 +178,30 @@ class IdeaRunner:
                 raise IdeaRunnerError(
                     f"activation universe contains unknown instrument {missing[0]}"
                 )
+            existing = connection.execute(
+                "SELECT instance_id, data_class FROM idea_instances WHERE run_id=? AND idea_id=? "
+                "AND idea_version=? AND plugin_code_hash=? AND manifest_hash=? "
+                "AND parameters_hash=? AND universe_hash=? AND deactivated_at_us IS NULL",
+                (
+                    run_id,
+                    plugin.manifest.idea_id,
+                    plugin.manifest.idea_version,
+                    plugin.code_hash,
+                    plugin.manifest_hash,
+                    plugin.parameters_hash,
+                    plugin.universe_hash,
+                ),
+            ).fetchone()
+            if existing is not None:
+                connection.rollback()
+                instance_id = str(existing["instance_id"])
+                self._plugins_by_instance[instance_id] = plugin.plugin
+                return ActivationResult(
+                    instance_id, ProtectedDataClass(str(existing["data_class"])), False
+                )
             watermark = int(
                 connection.execute(
-                    "SELECT coalesce(max(source_sequence), 0) FROM market_events WHERE run_id=?",
+                    "SELECT coalesce(max(source_sequence), 0) FROM callback_inbox WHERE run_id=?",
                     (run_id,),
                 ).fetchone()[0]
             )
@@ -224,7 +306,60 @@ class IdeaRunner:
             )
         return tuple(self._run_instance(instance_id, now_us=now_us) for instance_id in instance_ids)
 
+    def deactivate_unconfigured(self, *, run_id: str, now_us: int) -> tuple[str, ...]:
+        """Disable active instances absent from the explicit current configuration."""
+
+        configured = {plugin.identity for plugin in self._discovered}
+        with connect_v2(self.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT instance_id, idea_id, idea_version, plugin_code_hash, parameters_hash, "
+                "universe_hash FROM idea_instances WHERE run_id=? AND deactivated_at_us IS NULL",
+                (run_id,),
+            ).fetchall()
+            deactivated = tuple(
+                str(row["instance_id"])
+                for row in rows
+                if tuple(str(row[key]) for key in row.keys()[1:]) not in configured
+            )
+            for instance_id in deactivated:
+                connection.execute(
+                    "UPDATE idea_instances SET deactivated_at_us=?, health='disabled', "
+                    "error_code=NULL WHERE instance_id=? AND deactivated_at_us IS NULL",
+                    (now_us, instance_id),
+                )
+                connection.execute(
+                    "UPDATE incidents SET resolved_at_us=? WHERE plugin_instance_id=? "
+                    "AND resolved_at_us IS NULL",
+                    (now_us, instance_id),
+                )
+            connection.commit()
+        for instance_id in deactivated:
+            self._plugins_by_instance.pop(instance_id, None)
+            worker = self._workers.pop(instance_id, None)
+            if worker is not None:
+                worker.terminate()
+        return deactivated
+
+    def close(self) -> None:
+        """Stop all plugin workers without affecting recorder or persisted state."""
+
+        for worker in self._workers.values():
+            worker.terminate()
+        self._workers.clear()
+
     def _run_instance(self, instance_id: str, *, now_us: int) -> EvaluationResult:
+        with connect_v2(self.database_path) as connection:
+            retry = connection.execute(
+                "SELECT consecutive_failures, updated_at_us FROM idea_checkpoints "
+                "WHERE instance_id=?",
+                (instance_id,),
+            ).fetchone()
+        if retry is not None and int(retry["consecutive_failures"]) > 0:
+            failures = int(retry["consecutive_failures"])
+            retry_delay = min(RETRY_MAX_US, RETRY_BASE_US * (2 ** min(failures - 1, 6)))
+            if now_us < int(retry["updated_at_us"]) + retry_delay:
+                return EvaluationResult(instance_id, False, 0, "RETRY_BACKOFF")
         plugin = self._plugins_by_instance.get(instance_id)
         if plugin is None or not hasattr(plugin, "evaluate"):
             return self._degrade(instance_id, now_us, "PLUGIN_UNAVAILABLE")
@@ -233,18 +368,20 @@ class IdeaRunner:
             if context is None:
                 return EvaluationResult(instance_id, False, 0)
             activation, batch, state, event_ids, starting_checkpoint = context
-            started = time.monotonic_ns()
-            evaluation = cast(IdeaPlugin, plugin).evaluate(batch, state)
-            elapsed = time.monotonic_ns() - started
-            if elapsed > MAX_EVALUATION_NS:
-                raise IdeaRunnerError("plugin evaluation exceeded 50ms observation bound")
-            evaluation = IdeaEvaluation.model_validate(evaluation.model_dump(mode="python"))
+            worker = self._workers.get(instance_id)
+            if worker is None:
+                worker = _PluginWorker(cast(IdeaPlugin, plugin))
+                self._workers[instance_id] = worker
+            evaluation = worker.evaluate(batch, state)
             self._validate_evaluation(activation, cast(IdeaPlugin, plugin), batch, evaluation)
             self._commit_evaluation(
                 activation, batch, evaluation, event_ids, starting_checkpoint, now_us
             )
             return EvaluationResult(instance_id, True, len(evaluation.outputs))
         except Exception as error:
+            worker = self._workers.pop(instance_id, None)
+            if worker is not None:
+                worker.terminate()
             code = f"{type(error).__name__}:{error}".upper()[:64]
             return self._degrade(instance_id, now_us, code)
 
@@ -263,16 +400,23 @@ class IdeaRunner:
                 raise IdeaRunnerError("instance checkpoint is missing")
             requirements = json.loads(str(row["requirements_json"]))
             for requirement in requirements:
-                if requirement["gaps_block"]:
-                    gap = connection.execute(
-                        "SELECT 1 FROM gaps gap JOIN subscriptions subscription "
-                        "ON subscription.subscription_id=gap.subscription_id "
-                        "WHERE gap.run_id=? AND gap.resolved_at_us IS NULL "
-                        "AND subscription.instrument_id=? AND subscription.feed_kind=? LIMIT 1",
-                        (row["run_id"], requirement["instrument_id"], requirement["feed_kind"]),
-                    ).fetchone()
-                    if gap is not None:
-                        return None
+                gap = connection.execute(
+                    "SELECT 1 FROM gaps gap JOIN subscriptions subscription "
+                    "ON subscription.subscription_id=gap.subscription_id "
+                    "WHERE gap.run_id=? AND gap.resolved_at_us IS NULL "
+                    "AND subscription.instrument_id=? AND subscription.feed_kind=? "
+                    "AND ((gap.reason='STREAM_STALE' AND ?=1) OR "
+                    "(gap.reason!='STREAM_STALE' AND ?=1)) LIMIT 1",
+                    (
+                        row["run_id"],
+                        requirement["instrument_id"],
+                        requirement["feed_kind"],
+                        int(requirement["staleness_block"]),
+                        int(requirement["gaps_block"]),
+                    ),
+                ).fetchone()
+                if gap is not None:
+                    return None
             start_sequence = (
                 int(row["last_source_sequence"])
                 if row["last_source_sequence"] is not None
@@ -349,6 +493,10 @@ class IdeaRunner:
                 if getattr(output, "status", None) != "unapproved":
                     raise IdeaRunnerError("proposal is not explicitly unapproved")
                 ensure_authority_free_json(output.payload)
+            if isinstance(output, ProposedTrade):
+                for leg in output.legs:
+                    if leg.instrument_id not in activation.universe:
+                        raise IdeaRunnerError("proposed trade leg is outside activation universe")
 
     def _commit_evaluation(
         self,
@@ -410,6 +558,11 @@ class IdeaRunner:
                 "UPDATE idea_instances SET health='healthy', error_code=NULL WHERE instance_id=?",
                 (activation.instance_id,),
             )
+            connection.execute(
+                "UPDATE incidents SET resolved_at_us=? WHERE plugin_instance_id=? "
+                "AND resolved_at_us IS NULL",
+                (now_us, activation.instance_id),
+            )
             connection.commit()
 
     @staticmethod
@@ -425,6 +578,12 @@ class IdeaRunner:
     ) -> None:
         payload_json = output.payload_json().decode()
         payload_hash = hashlib.sha256(payload_json.encode()).hexdigest()
+        legs = cast(
+            JsonValue,
+            [leg.model_dump(mode="json") for leg in output.legs]
+            if isinstance(output, ProposedTrade)
+            else [],
+        )
         identity = cast(
             JsonValue,
             {
@@ -435,6 +594,7 @@ class IdeaRunner:
                 "ordinal": ordinal,
                 "as_of_at_us": output.as_of_at_us,
                 "payload_hash": payload_hash,
+                "legs": legs,
             },
         )
         output_id = _hash(identity)
@@ -449,6 +609,7 @@ class IdeaRunner:
                     "subject": output.subject_instrument_id,
                     "authority_status": authority,
                     "data_class": activation.protected_data_class.value,
+                    "legs": legs,
                 },
             )
         )
@@ -500,6 +661,24 @@ class IdeaRunner:
                 "ON CONFLICT DO NOTHING",
                 (output_id, event_id, input_ordinal),
             )
+        if isinstance(output, ProposedTrade):
+            for leg_number, leg in enumerate(output.legs):
+                connection.execute(
+                    "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
+                    "target, quantity_value, notional_value, currency, price_hint) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                    (
+                        output_id,
+                        leg_number,
+                        leg.instrument_id,
+                        leg.action,
+                        leg.target,
+                        leg.quantity_value,
+                        leg.notional_value,
+                        leg.currency,
+                        leg.price_hint,
+                    ),
+                )
 
     def _degrade(self, instance_id: str, now_us: int, code: str) -> EvaluationResult:
         with connect_v2(self.database_path) as connection:
@@ -513,16 +692,7 @@ class IdeaRunner:
                 "updated_at_us=? WHERE instance_id=?",
                 (now_us, instance_id),
             )
-            incident_id = _hash(
-                cast(
-                    JsonValue,
-                    {
-                        "instance_id": instance_id,
-                        "code": code,
-                        "opened_at_us": now_us,
-                    },
-                )
-            )
+            incident_id = _hash(cast(JsonValue, {"instance_id": instance_id, "open": True}))
             run = connection.execute(
                 "SELECT run_id FROM idea_instances WHERE instance_id=?", (instance_id,)
             ).fetchone()
@@ -530,7 +700,8 @@ class IdeaRunner:
                 connection.execute(
                     "INSERT OR IGNORE INTO incidents(incident_id, run_id, scope, severity, code, "
                     "plugin_instance_id, opened_at_us, details_json) VALUES (?, ?, 'idea_plugin', "
-                    "'degraded', ?, ?, ?, '{}')",
+                    "'degraded', ?, ?, ?, '{}') ON CONFLICT(incident_id) DO UPDATE SET "
+                    "code=excluded.code, details_json=excluded.details_json",
                     (incident_id, run[0], code, instance_id, now_us),
                 )
             connection.commit()

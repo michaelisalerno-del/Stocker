@@ -878,6 +878,18 @@ unreleased V2 migration was hardened for full input-event provenance, so scratch
 databases created by earlier phases must be recreated. Phase 5 remains separately
 authorized.
 
+Correction note (2026-08-07): the first Phase 4 review found blocking integration and
+causality defects. A bounded correction commit now wires explicit default-off idea
+configuration into the recorder, freezes activation after the durable callback-inbox
+watermark with idempotent retry, retains incremental Opening Leader C6/C12 session
+state, persists typed unapproved proposal legs and complete input provenance, enforces
+gap and staleness declarations, and terminates an overrun in a dedicated spawned plugin
+worker so unaffected instances continue. Plugin incidents are bounded to one unresolved
+incident per instance and source review pins cover the explicit transitive first-party
+source graph. Worker isolation is operational failure containment for reviewed code,
+not a malicious-code sandbox. This correction awaits the required independent read-only
+review; Phase 5 has not begun and remains separately authorized.
+
 - **Objective:** activate generic ideas through configuration.
 - **Files/packages:** discovery, runner, Opening Leader reference plugin and tests.
 - **Schema:** plugin/instance/checkpoint/output/leg tables.

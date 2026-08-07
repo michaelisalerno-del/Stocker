@@ -520,13 +520,15 @@ class Recorder:
                         self.adapter.disconnect()
                     raise
                 if not spec.optional:
-                    self._persist_connection_failure(
-                        now_us=now_us,
-                        code="IBKR_SUBSCRIBE_FAILED",
-                        details="required subscription aborted remaining requests",
-                    )
-                    with suppress(Exception):
-                        self.adapter.disconnect()
+                    try:
+                        self._persist_connection_failure(
+                            now_us=now_us,
+                            code="IBKR_SUBSCRIBE_FAILED",
+                            details="required subscription aborted remaining requests",
+                        )
+                    finally:
+                        with suppress(Exception):
+                            self.adapter.disconnect()
                     return
                 continue
             connection = connect_v2(self.config.database)
@@ -919,6 +921,11 @@ class Recorder:
                 else specs[fence.request_id].feed_kind in status.affected_feed_kinds
             )
         )
+        if not targets:
+            return
+        recovery_source_code = {2104: 2103, 2106: 2105}.get(status.code)
+        if status.kind == "farm_recovered" and recovery_source_code is None:
+            return
         connection = connect_v2(self.config.database)
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -953,33 +960,47 @@ class Recorder:
                         (code, self.config.run_id, state.recorder_generation),
                     )
             else:
+                matching_reason = f"IBKR_FARM_{recovery_source_code}_DEGRADED"
                 for fence in targets:
                     connection.execute(
-                        "UPDATE subscriptions SET lifecycle='active' WHERE subscription_id=? "
-                        "AND lifecycle='degraded'",
-                        (fence.subscription_id,),
-                    )
-                    connection.execute(
                         "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
-                        "AND subscription_id=? AND reason LIKE 'IBKR_FARM_%' "
+                        "AND subscription_id=? AND reason=? "
                         "AND resolved_at_us IS NULL",
                         (
                             status.received_at_us,
                             status.received_at_us,
                             self.config.run_id,
                             fence.subscription_id,
+                            matching_reason,
                         ),
                     )
                     connection.execute(
                         "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
-                        "AND subscription_id=? AND code LIKE 'IBKR_FARM_%' "
+                        "AND subscription_id=? AND code=? "
                         "AND resolved_at_us IS NULL",
                         (
                             status.received_at_us,
                             self.config.run_id,
                             fence.subscription_id,
+                            matching_reason,
                         ),
                     )
+                    unresolved_for_subscription = connection.execute(
+                        "SELECT 1 FROM gaps WHERE run_id=? AND subscription_id=? "
+                        "AND reason LIKE 'IBKR_FARM_%' AND resolved_at_us IS NULL LIMIT 1",
+                        (self.config.run_id, fence.subscription_id),
+                    ).fetchone()
+                    if unresolved_for_subscription is None:
+                        connection.execute(
+                            "UPDATE subscriptions SET lifecycle='active' "
+                            "WHERE subscription_id=? AND lifecycle='degraded'",
+                            (fence.subscription_id,),
+                        )
+                runtime = connection.execute(
+                    "SELECT lifecycle, reason FROM runtime_state WHERE run_id=? "
+                    "AND recorder_generation=?",
+                    (self.config.run_id, state.recorder_generation),
+                ).fetchone()
                 required_degraded = connection.execute(
                     "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "
                     "AND connection_generation=? AND optional=0 AND lifecycle!='active' LIMIT 1",
@@ -989,12 +1010,28 @@ class Recorder:
                         state.connection_generation,
                     ),
                 ).fetchone()
-                if required_degraded is None:
-                    connection.execute(
-                        "UPDATE runtime_state SET lifecycle='running', reason=NULL WHERE run_id=? "
-                        "AND recorder_generation=?",
-                        (self.config.run_id, state.recorder_generation),
-                    )
+                if runtime is not None and str(runtime["reason"]) == matching_reason:
+                    unresolved_farm = connection.execute(
+                        "SELECT reason FROM gaps WHERE run_id=? AND reason LIKE 'IBKR_FARM_%' "
+                        "AND resolved_at_us IS NULL ORDER BY started_at_us DESC, gap_id LIMIT 1",
+                        (self.config.run_id,),
+                    ).fetchone()
+                    if unresolved_farm is not None:
+                        connection.execute(
+                            "UPDATE runtime_state SET lifecycle='degraded', reason=? "
+                            "WHERE run_id=? AND recorder_generation=?",
+                            (
+                                str(unresolved_farm["reason"]),
+                                self.config.run_id,
+                                state.recorder_generation,
+                            ),
+                        )
+                    elif required_degraded is None:
+                        connection.execute(
+                            "UPDATE runtime_state SET lifecycle='running', reason=NULL "
+                            "WHERE run_id=? AND recorder_generation=?",
+                            (self.config.run_id, state.recorder_generation),
+                        )
             connection.commit()
         finally:
             connection.close()

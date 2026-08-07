@@ -267,6 +267,12 @@ BEGIN
     ) THEN RAISE(ABORT, 'market_event_callback_provenance_mismatch') END;
 END;
 
+CREATE TRIGGER market_events_immutable_update
+BEFORE UPDATE ON market_events
+BEGIN
+    SELECT RAISE(ABORT, 'market_event_immutable');
+END;
+
 CREATE TRIGGER callback_inbox_provenance_update
 BEFORE UPDATE OF run_id ON callback_inbox
 WHEN EXISTS (SELECT 1 FROM market_events event

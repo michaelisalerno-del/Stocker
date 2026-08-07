@@ -306,8 +306,6 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
             "WHERE batch_id = 'json-receipt'",
             "UPDATE callback_receipts SET status_counts_json = '{ \"pending\": 1 }' "
             "WHERE batch_id = 'json-receipt'",
-            'UPDATE market_events SET payload_json = \'{"z":1,"a":2}\' '
-            "WHERE event_id = 'event-1'",
             "UPDATE idea_plugins SET manifest_json = '{ \"a\": 1 }' WHERE idea_id = 'idea'",
             'UPDATE idea_instances SET parameters_json = \'{"z":1,"a":2}\' '
             "WHERE instance_id = 'instance-1'",
@@ -323,6 +321,11 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
         for statement in statements:
             with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
                 connection.execute(statement)
+        with pytest.raises(sqlite3.IntegrityError, match="market_event_immutable"):
+            connection.execute(
+                'UPDATE market_events SET payload_json = \'{"z":1,"a":2}\' '
+                "WHERE event_id = 'event-1'"
+            )
 
 
 def test_acknowledgement_and_decoupled_event_references_enforce_provenance(
@@ -1874,3 +1877,45 @@ def test_migrate_and_retain_cli_errors_are_machine_readable(
         "message": "simulated receipt failure at 100",
         "status": "error",
     }
+
+
+def test_market_events_are_update_immutable_but_retention_can_delete(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="immutable-event",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="immutable-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="immutable-proof",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=1,
+    )
+    with connect_v2(database) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="market_event_immutable"):
+            connection.execute(
+                "UPDATE market_events SET event_at_us=2 WHERE source_sequence=?", (sequence,)
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="market_event_immutable"):
+            connection.execute(
+                "UPDATE market_events SET payload_sha256=? WHERE source_sequence=?",
+                ("f" * 64, sequence),
+            )
+        connection.execute("UPDATE runs SET status='stopped' WHERE run_id='retention-run'")
+    RetentionManager(
+        database,
+        RetentionPolicy(raw_market_event_us=1, callback_payload_us=1_000, receipt_us=1_000),
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT 1 FROM market_events WHERE source_sequence=?", (sequence,)
+            ).fetchone()
+            is None
+        )

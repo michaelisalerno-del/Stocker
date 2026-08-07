@@ -1382,3 +1382,115 @@ def test_replay_cleanup_does_not_mutate_replacement_after_authority_loss(
         status = connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
     assert tuple(replacement) == (2, "running", None)
     assert status == "running"
+
+
+@pytest.mark.parametrize("second_failure", ("takeover", "database"))
+def test_required_abort_disconnects_when_second_failure_persistence_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second_failure: str
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData(fail_subscribe={3})
+    recorder = Recorder(_config(database), adapter)
+
+    def fail_second_persistence(**_kwargs: object) -> None:
+        if second_failure == "takeover":
+            _force_recorder_takeover(database)
+            with connect_v2(database) as connection:
+                connection.execute(
+                    "UPDATE runtime_state SET reason='REPLACEMENT_OWNS_STATE' "
+                    "WHERE run_id='run-1' AND recorder_generation=2"
+                )
+            raise AuthoritativeLeaseLost("replacement took authority")
+        raise sqlite3.OperationalError("injected second persistence failure")
+
+    monkeypatch.setattr(recorder, "_persist_connection_failure", fail_second_persistence)
+    with pytest.raises((AuthoritativeLeaseLost, sqlite3.OperationalError)):
+        recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert adapter.connected is False
+    assert adapter.disconnect_calls >= 1
+    with connect_v2(database) as connection:
+        scoped = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED' "
+            "AND subscription_id IS NOT NULL"
+        ).fetchone()[0]
+        fabricated_global = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED' "
+            "AND subscription_id IS NULL"
+        ).fetchone()[0]
+        runtime = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+        ).fetchone()
+    assert scoped == 1
+    assert fabricated_global == 0
+    if second_failure == "takeover":
+        assert tuple(runtime) == (2, "running", "REPLACEMENT_OWNS_STATE")
+    else:
+        assert tuple(runtime) == (1, "degraded", "IBKR_SUBSCRIBE_FAILED")
+
+
+def test_farm_recovery_does_not_clear_unrelated_degraded_or_paused_state(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE subscriptions SET lifecycle='paused' WHERE request_id=4")
+        connection.execute(
+            "UPDATE runtime_state SET lifecycle='degraded', reason='PAUSE_OPTIONAL_FEEDS'"
+        )
+    recorder.market_data_status(MarketDataStatus("farm_recovered", 2158, None, "ok", 101, ()))
+    with connect_v2(database) as connection:
+        paused = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE request_id=4"
+        ).fetchone()[0]
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+    assert paused == "paused"
+    assert tuple(runtime) == ("degraded", "PAUSE_OPTIONAL_FEEDS")
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE runtime_state SET lifecycle='degraded', reason='UNRELATED_DIAGNOSTIC'"
+        )
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2104, None, "farm ok", 102, ("quotes",))
+    )
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        ) == ("degraded", "UNRELATED_DIAGNOSTIC")
+
+
+def test_farm_recovery_resolves_only_matching_outage_and_fatal_remains_absorbing(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2103, None, "farm one", 101, ("quotes",))
+    )
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2105, None, "farm two", 102, ("quotes",))
+    )
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2104, None, "farm one ok", 103, ("quotes",))
+    )
+    with connect_v2(database) as connection:
+        gaps = dict(
+            connection.execute(
+                "SELECT reason, resolved_at_us FROM gaps WHERE reason LIKE 'IBKR_FARM_%'"
+            )
+        )
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+    assert gaps["IBKR_FARM_2103_DEGRADED"] == 103
+    assert gaps["IBKR_FARM_2105_DEGRADED"] is None
+    assert tuple(runtime) == ("degraded", "IBKR_FARM_2105_DEGRADED")
+    recorder._fatal("TEST_FATAL", 104)
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.market_data_status(
+            MarketDataStatus("farm_recovered", 2106, None, "farm two ok", 105, ("quotes",))
+        )

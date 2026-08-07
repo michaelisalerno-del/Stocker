@@ -12,7 +12,9 @@ Protected outcomes are never read and therefore cannot tune these frozen paramet
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime, time, timedelta
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from stocker_runtime.domain import (
     IdeaOutput,
@@ -54,6 +56,8 @@ COHORT = (
     "SOFI",
     "WULF",
 )
+_NEW_YORK = ZoneInfo("America/New_York")
+_RAW_BAR_US = 5_000_000
 
 MANIFEST = IdeaManifest(
     api_version=1,
@@ -99,9 +103,9 @@ class OpeningLeaderContinuationV0:
             raise ValueError("Opening Leader V0 parameters must match its frozen semantics")
         return tuple(
             MarketDataRequirement(
-                feed_kind="bars_5m",
+                feed_kind="bars",
                 instrument_id=instrument_id,
-                cadence="5m",
+                cadence="5s",
                 gaps_block=True,
                 staleness_block=True,
             )
@@ -118,7 +122,10 @@ class OpeningLeaderContinuationV0:
             for value in (emitted_value if isinstance(emitted_value, tuple | list) else ())
             if isinstance(value, int) and not isinstance(value, bool) and value in (6, 12)
         }
-        bars: dict[int, dict[str, tuple[float, float, str, int] | None]] = {6: {}, 12: {}}
+        opens: dict[str, tuple[float, str, int] | None] = {}
+        closes: dict[int, dict[str, tuple[float, str, int] | None]] = {6: {}, 12: {}}
+        progress: dict[int, dict[str, str]] = {6: {}, 12: {}}
+        open_lineage: list[str] = []
         checkpoint_lineage: dict[int, list[str]] = {6: [], 12: []}
         lineage_value = prior.get("lineage")
         lineage = [
@@ -126,35 +133,50 @@ class OpeningLeaderContinuationV0:
             for value in (lineage_value if isinstance(lineage_value, tuple | list) else ())
             if isinstance(value, str)
         ]
-        stored_bars = prior.get("bars")
-        stored_checkpoint_lineage = prior.get("checkpoint_lineage")
-        if isinstance(stored_bars, Mapping):
+
+        def restore_value(value: object) -> tuple[float, str, int] | None:
+            if value is None:
+                return None
+            if not isinstance(value, tuple | list) or len(value) != 3:
+                return None
+            number, event_id, event_at_us = value
+            if (
+                isinstance(number, bool)
+                or not isinstance(number, int | float)
+                or not isinstance(event_id, str)
+                or isinstance(event_at_us, bool)
+                or not isinstance(event_at_us, int)
+            ):
+                return None
+            return float(number), event_id, event_at_us
+
+        stored_opens = prior.get("opens")
+        if isinstance(stored_opens, Mapping):
+            for symbol, value in stored_opens.items():
+                if isinstance(symbol, str):
+                    opens[symbol] = restore_value(value)
+        stored_closes = prior.get("closes")
+        if isinstance(stored_closes, Mapping):
             for checkpoint in (6, 12):
-                stored_checkpoint = stored_bars.get(str(checkpoint))
-                if not isinstance(stored_checkpoint, Mapping):
-                    continue
-                for symbol, value in stored_checkpoint.items():
-                    if not isinstance(symbol, str):
-                        continue
-                    if value is None:
-                        bars[checkpoint][symbol] = None
-                    elif isinstance(value, tuple | list) and len(value) == 4:
-                        stored_open, stored_close, stored_event_id, stored_event_at_us = value
-                        if (
-                            isinstance(stored_open, int | float)
-                            and not isinstance(stored_open, bool)
-                            and isinstance(stored_close, int | float)
-                            and not isinstance(stored_close, bool)
-                            and isinstance(stored_event_id, str)
-                            and isinstance(stored_event_at_us, int)
-                            and not isinstance(stored_event_at_us, bool)
-                        ):
-                            bars[checkpoint][symbol] = (
-                                float(stored_open),
-                                float(stored_close),
-                                stored_event_id,
-                                stored_event_at_us,
-                            )
+                values = stored_closes.get(str(checkpoint))
+                if isinstance(values, Mapping):
+                    for symbol, value in values.items():
+                        if isinstance(symbol, str):
+                            closes[checkpoint][symbol] = restore_value(value)
+        stored_progress = prior.get("progress")
+        if isinstance(stored_progress, Mapping):
+            for checkpoint in (6, 12):
+                values = stored_progress.get(str(checkpoint))
+                if isinstance(values, Mapping):
+                    progress[checkpoint] = {
+                        str(symbol): str(event_id)
+                        for symbol, event_id in values.items()
+                        if isinstance(symbol, str) and isinstance(event_id, str)
+                    }
+        stored_open_lineage = prior.get("open_lineage")
+        if isinstance(stored_open_lineage, tuple | list):
+            open_lineage = [value for value in stored_open_lineage if isinstance(value, str)]
+        stored_checkpoint_lineage = prior.get("checkpoint_lineage")
         if isinstance(stored_checkpoint_lineage, Mapping):
             for checkpoint in (6, 12):
                 values = stored_checkpoint_lineage.get(str(checkpoint))
@@ -166,21 +188,50 @@ class OpeningLeaderContinuationV0:
         outputs: list[IdeaOutput] = []
         output_lineages: list[tuple[str, ...]] = []
 
+        def remember(event_id: str) -> None:
+            if event_id not in lineage:
+                lineage.append(event_id)
+
+        def remember_open(event_id: str) -> None:
+            remember(event_id)
+            if event_id not in open_lineage:
+                open_lineage.append(event_id)
+
+        def remember_checkpoint(event_id: str, checkpoint: int) -> None:
+            remember(event_id)
+            if event_id not in checkpoint_lineage[checkpoint]:
+                checkpoint_lineage[checkpoint].append(event_id)
+
+        def boundary_us(checkpoint: int) -> int:
+            if current_session is None:
+                raise ValueError("checkpoint session is absent")
+            session_date = datetime.fromisoformat(current_session).date()
+            local_open = datetime.combine(session_date, time(9, 30), tzinfo=_NEW_YORK)
+            return int((local_open + timedelta(minutes=5 * checkpoint)).timestamp() * 1_000_000)
+
         def emit_ready() -> None:
             for checkpoint in (6, 12):
                 if checkpoint in emitted:
                     continue
+                if set(progress[checkpoint]) != set(COHORT):
+                    continue
                 rows = [
-                    (instrument, values)
-                    for instrument, values in bars[checkpoint].items()
-                    if values is not None
+                    (instrument, opens.get(instrument), closes[checkpoint].get(instrument))
+                    for instrument in COHORT
+                    if opens.get(instrument) is not None
+                    and closes[checkpoint].get(instrument) is not None
                 ]
                 if len(rows) < 15:
+                    emitted.add(checkpoint)
+                    closes[checkpoint] = {}
+                    progress[checkpoint] = {}
+                    checkpoint_lineage[checkpoint] = []
                     continue
                 ranking = sorted(
                     (
-                        (10_000.0 * (values[1] / values[0] - 1.0), instrument)
-                        for instrument, values in rows
+                        (10_000.0 * (close[0] / opening[0] - 1.0), instrument)
+                        for instrument, opening, close in rows
+                        if opening is not None and close is not None
                     ),
                     key=lambda item: (-item[0], item[1]),
                 )
@@ -206,7 +257,7 @@ class OpeningLeaderContinuationV0:
                         "frozen_version": "opening-leader-continuation-recorder-v0",
                     },
                 )
-                as_of = max(values[3] for _, values in rows)
+                as_of = boundary_us(checkpoint)
                 outputs.extend(
                     (
                         Observation(
@@ -229,37 +280,31 @@ class OpeningLeaderContinuationV0:
                         ),
                     )
                 )
-                used = set(checkpoint_lineage[checkpoint])
+                used = set(open_lineage) | set(checkpoint_lineage[checkpoint])
                 output_lineage = tuple(event_id for event_id in lineage if event_id in used)
                 output_lineages.extend((output_lineage, output_lineage, output_lineage))
                 emitted.add(checkpoint)
-                bars[checkpoint] = {}
+                closes[checkpoint] = {}
+                progress[checkpoint] = {}
                 checkpoint_lineage[checkpoint] = []
-
-        def remember_event(event_id: str, checkpoint: int) -> None:
-            if event_id not in lineage:
-                lineage.append(event_id)
-            if event_id not in checkpoint_lineage[checkpoint]:
-                checkpoint_lineage[checkpoint].append(event_id)
 
         for event in batch.events:
             payload = event.payload
             if (
                 event.instrument_id not in COHORT
-                or event.feed_kind != "bars_5m"
-                or payload.get("source_completeness") != "complete"
+                or event.feed_kind != "bars"
+                or event.event_kind != "bar"
             ):
                 continue
-            session = payload.get("session")
-            event_checkpoint = payload.get("checkpoint")
-            opening = payload.get("regular_session_open")
-            close = payload.get("checkpoint_close")
+            event_datetime = datetime.fromtimestamp(event.event_at_us / 1_000_000, tz=UTC)
+            local_event = event_datetime.astimezone(_NEW_YORK)
+            session = local_event.date().isoformat()
+            local_open = datetime.combine(local_event.date(), time(9, 30), tzinfo=_NEW_YORK)
+            session_open_us = int(local_open.timestamp() * 1_000_000)
+            opening = payload.get("open")
+            close = payload.get("close")
             if (
-                not isinstance(session, str)
-                or not isinstance(event_checkpoint, int)
-                or isinstance(event_checkpoint, bool)
-                or event_checkpoint not in (6, 12)
-                or not isinstance(opening, int | float)
+                not isinstance(opening, int | float)
                 or isinstance(opening, bool)
                 or not isinstance(close, int | float)
                 or isinstance(close, bool)
@@ -273,43 +318,77 @@ class OpeningLeaderContinuationV0:
                 emit_ready()
                 current_session = session
                 emitted.clear()
-                bars = {6: {}, 12: {}}
+                opens = {}
+                closes = {6: {}, 12: {}}
+                progress = {6: {}, 12: {}}
+                open_lineage = []
                 checkpoint_lineage = {6: [], 12: []}
                 lineage = []
-            resolution = payload.get("duplicate_resolution")
-            existing = bars[event_checkpoint].get(event.instrument_id, "missing")
 
-            if resolution == "unresolved":
-                if existing is not None:
-                    remember_event(event.event_id, event_checkpoint)
-                bars[event_checkpoint][event.instrument_id] = None
-                continue
-            if existing == "missing" or resolution == "causally_resolved":
-                remember_event(event.event_id, event_checkpoint)
-                bars[event_checkpoint][event.instrument_id] = (
-                    float(opening),
-                    float(close),
-                    event.event_id,
-                    event.event_at_us,
-                )
-            elif existing is not None:
-                remember_event(event.event_id, event_checkpoint)
-                bars[event_checkpoint][event.instrument_id] = None
+            if event.event_at_us == session_open_us:
+                existing_open = opens.get(event.instrument_id, "missing")
+                if existing_open == "missing":
+                    remember_open(event.event_id)
+                    opens[event.instrument_id] = (
+                        float(opening),
+                        event.event_id,
+                        event.event_at_us,
+                    )
+                elif existing_open is not None and existing_open[0] != float(opening):
+                    remember_open(event.event_id)
+                    opens[event.instrument_id] = None
+
+            for checkpoint in (6, 12):
+                checkpoint_boundary = boundary_us(checkpoint)
+                close_start = checkpoint_boundary - _RAW_BAR_US
+                if event.event_at_us == close_start:
+                    existing_close = closes[checkpoint].get(event.instrument_id, "missing")
+                    if existing_close == "missing":
+                        remember_checkpoint(event.event_id, checkpoint)
+                        closes[checkpoint][event.instrument_id] = (
+                            float(close),
+                            event.event_id,
+                            event.event_at_us,
+                        )
+                    elif existing_close is not None and existing_close[0] != float(close):
+                        remember_checkpoint(event.event_id, checkpoint)
+                        closes[checkpoint][event.instrument_id] = None
+                if (
+                    event.event_at_us >= checkpoint_boundary
+                    or (
+                        event.event_at_us == close_start
+                        and event.received_at_us >= checkpoint_boundary
+                    )
+                ) and event.instrument_id not in progress[checkpoint]:
+                    remember_checkpoint(event.event_id, checkpoint)
+                    progress[checkpoint][event.instrument_id] = event.event_id
 
         emit_ready()
-        retained_set = {event_id for values in checkpoint_lineage.values() for event_id in values}
+        retained_set = set(open_lineage) | {
+            event_id for values in checkpoint_lineage.values() for event_id in values
+        }
+        if 12 in emitted:
+            opens = {}
+            open_lineage = []
+            retained_set = {
+                event_id for values in checkpoint_lineage.values() for event_id in values
+            }
         retained = tuple(event_id for event_id in lineage if event_id in retained_set)
         latest_state = cast(
             JsonValue,
             {
                 "session": current_session,
                 "emitted": tuple(sorted(emitted)),
-                "bars": {
-                    str(checkpoint): {
-                        symbol: values for symbol, values in sorted(bars[checkpoint].items())
-                    }
+                "opens": {symbol: value for symbol, value in sorted(opens.items())},
+                "closes": {
+                    str(checkpoint): dict(sorted(closes[checkpoint].items()))
                     for checkpoint in (6, 12)
                 },
+                "progress": {
+                    str(checkpoint): dict(sorted(progress[checkpoint].items()))
+                    for checkpoint in (6, 12)
+                },
+                "open_lineage": tuple(open_lineage),
                 "checkpoint_lineage": {
                     str(checkpoint): tuple(checkpoint_lineage[checkpoint]) for checkpoint in (6, 12)
                 },

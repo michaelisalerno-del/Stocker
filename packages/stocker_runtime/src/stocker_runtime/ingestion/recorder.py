@@ -336,7 +336,7 @@ class Recorder:
         finally:
             connection.close()
         self.state = RecorderState(self.config.run_id, generation, connection_generation, fences)
-        self._idea_runner = IdeaRunner(self.config.database, self._ideas)
+        self._idea_runner = IdeaRunner(self.config.database, self._ideas, run_id=self.config.run_id)
         self._idea_runner.deactivate_unconfigured(run_id=self.config.run_id, now_us=now_us)
         for plugin in self._ideas:
             self._idea_runner.activate(

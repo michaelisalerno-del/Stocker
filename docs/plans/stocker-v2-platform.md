@@ -894,6 +894,18 @@ containment for reviewed code,
 not a malicious-code sandbox. This correction awaits the required independent read-only
 review; Phase 5 has not begun and remains separately authorized.
 
+Second correction note (2026-08-07): adversarial review against the actual Phase 3
+adapter removed the unsupported enriched `bars_5m` assumption. The frozen reference
+plugin now consumes the normalized raw five-second OHLCV `bars` feed, derives the
+canonical XNYS C6/C12 boundaries, and waits for causal checkpoint progress from the
+entire configured cohort before applying the frozen minimum-15 slate. A fake official
+adapter-to-recorder integration test proves the default-off path without enriched
+fixtures or historical backfill. The runner is explicitly owned by one active run;
+activation watermarks survive callback tombstone and receipt compaction; gap blocking
+is scoped to evidence at or after activation; and runner/repository writes share one
+complete deterministic output identity. These are Phase 4 corrections only. No risk,
+execution, paper, live, account, credential, or protected-data boundary changed.
+
 - **Objective:** activate generic ideas through configuration.
 - **Files/packages:** discovery, runner, Opening Leader reference plugin and tests.
 - **Schema:** plugin/instance/checkpoint/output/leg tables.

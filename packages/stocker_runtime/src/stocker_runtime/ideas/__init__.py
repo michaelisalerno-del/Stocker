@@ -18,6 +18,7 @@ from stocker_runtime.ideas.discovery import (
     load_idea_configs,
     reviewed_code_hash,
 )
+from stocker_runtime.ideas.identity import deterministic_idea_output_id
 
 __all__ = [
     "IdeaActivation",
@@ -32,6 +33,7 @@ __all__ = [
     "MarketDataRequirement",
     "aggregate_requirements",
     "discover_plugins",
+    "deterministic_idea_output_id",
     "load_idea_configs",
     "reviewed_code_hash",
 ]

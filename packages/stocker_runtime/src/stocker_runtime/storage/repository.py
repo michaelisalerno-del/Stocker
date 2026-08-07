@@ -16,6 +16,7 @@ from stocker_runtime.domain import (
     canonical_json_bytes,
     ensure_authority_free_json,
 )
+from stocker_runtime.ideas.identity import deterministic_idea_output_id
 from stocker_runtime.storage.connection import connect_v2
 
 MAX_EXTENSION_JSON_BYTES = 64 * 1024
@@ -115,32 +116,23 @@ def _snapshot_payload(value: JsonValue) -> tuple[str, JsonValue]:
     return payload_json, _freeze_json(parsed)
 
 
-def _output_id_from_payload_hash(record: IdeaOutputRecord, payload_hash: str) -> str:
-    input_event_ids = record.input_event_ids or (record.first_input_event_id,)
-    legs = cast(JsonValue, [leg.model_dump(mode="json") for leg in record.legs])
-    identity = cast(
-        JsonValue,
-        {
-            "instance_id": record.instance_id,
-            "first_input_event_id": record.first_input_event_id,
-            "last_input_event_id": record.last_input_event_id,
-            "input_event_ids": input_event_ids,
-            "output_kind": record.output_kind,
-            "output_ordinal": record.output_ordinal,
-            "as_of_at_us": record.as_of_at_us,
-            "payload_hash": payload_hash,
-            "legs": legs,
-        },
+def _output_id_from_snapshot(record: IdeaOutputRecord, payload: JsonValue) -> str:
+    return deterministic_idea_output_id(
+        instance_id=record.instance_id,
+        input_event_ids=record.input_event_ids or (record.first_input_event_id,),
+        output_kind=record.output_kind,
+        output_ordinal=record.output_ordinal,
+        as_of_at_us=record.as_of_at_us,
+        payload=payload,
+        legs=record.legs,
     )
-    return hashlib.sha256(canonical_json_bytes(identity)).hexdigest()
 
 
 def deterministic_output_id(record: IdeaOutputRecord) -> str:
     """Derive retry-stable output identity from the accepted Phase 1 contract fields."""
 
-    payload_json, _ = _snapshot_payload(record.payload)
-    payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-    return _output_id_from_payload_hash(record, payload_hash)
+    _, payload_snapshot = _snapshot_payload(record.payload)
+    return _output_id_from_snapshot(record, payload_snapshot)
 
 
 def receipt_chain_hash(record: CallbackReceiptRecord) -> str:
@@ -272,7 +264,7 @@ class OperationalRepository:
         if record.output_kind != "proposed_trade" and record.legs:
             raise ValueError("only proposed trades may contain legs")
         payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-        output_id = _output_id_from_payload_hash(record, payload_hash)
+        output_id = _output_id_from_snapshot(record, payload_snapshot)
         content_hash = _content_hash(record, payload_hash)
         connection = connect_v2(self.database_path)
         try:

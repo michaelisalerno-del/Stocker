@@ -24,6 +24,7 @@ from stocker_runtime.domain import (
 )
 from stocker_runtime.ideas.contract import IdeaActivation, IdeaBatch, IdeaEvaluation, IdeaPlugin
 from stocker_runtime.ideas.discovery import DiscoveredPlugin
+from stocker_runtime.ideas.identity import deterministic_idea_output_id
 from stocker_runtime.storage.connection import connect_v2
 
 MAX_EVALUATION_NS = 50_000_000
@@ -117,15 +118,34 @@ def _json(value: JsonValue) -> str:
 class IdeaRunner:
     """Core-owned runner; plugins receive immutable DTOs and no privileged object."""
 
-    def __init__(self, database_path: str | Path, plugins: tuple[DiscoveredPlugin, ...]) -> None:
+    def __init__(
+        self,
+        database_path: str | Path,
+        plugins: tuple[DiscoveredPlugin, ...],
+        *,
+        run_id: str,
+    ) -> None:
         self.database_path = Path(database_path)
         self._discovered = plugins
         self._plugins_by_instance: dict[str, IdeaPlugin | object] = {}
         self._workers: dict[str, _PluginWorker] = {}
         with connect_v2(self.database_path) as connection:
+            active_runs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT run_id FROM runs WHERE status IN ('created','running') "
+                    "AND run_id=? ORDER BY run_id",
+                    (run_id,),
+                )
+            )
+            if len(active_runs) != 1:
+                raise IdeaRunnerError("idea runner requires exactly one active bound run")
+            self.run_id = active_runs[0]
             rows = connection.execute(
                 "SELECT instance_id, idea_id, idea_version, plugin_code_hash, parameters_hash, "
-                "universe_hash FROM idea_instances WHERE deactivated_at_us IS NULL"
+                "universe_hash FROM idea_instances WHERE run_id=? "
+                "AND deactivated_at_us IS NULL",
+                (self.run_id,),
             ).fetchall()
         by_identity = {
             (
@@ -151,6 +171,8 @@ class IdeaRunner:
     ) -> ActivationResult:
         """Freeze an activation at the current causal watermark; never backfill earlier rows."""
 
+        if run_id != self.run_id:
+            raise IdeaRunnerError("activation does not match the idea runner bound run")
         with connect_v2(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             run = connection.execute(
@@ -201,8 +223,13 @@ class IdeaRunner:
                 )
             watermark = int(
                 connection.execute(
-                    "SELECT coalesce(max(source_sequence), 0) FROM callback_inbox WHERE run_id=?",
-                    (run_id,),
+                    "SELECT coalesce(max(sequence), 0) FROM ("
+                    "SELECT max(source_sequence) AS sequence FROM callback_inbox WHERE run_id=? "
+                    "UNION ALL SELECT max(source_sequence) FROM market_events WHERE run_id=? "
+                    "UNION ALL SELECT max(last_source_sequence) FROM callback_receipts "
+                    "WHERE run_id=? UNION ALL SELECT max(compacted_through_sequence) "
+                    "FROM callback_compaction_watermarks WHERE run_id=?)",
+                    (run_id, run_id, run_id, run_id),
                 ).fetchone()[0]
             )
             identity_material = cast(
@@ -300,8 +327,12 @@ class IdeaRunner:
             instance_ids = tuple(
                 str(row[0])
                 for row in connection.execute(
-                    "SELECT instance_id FROM idea_instances WHERE deactivated_at_us IS NULL "
-                    "AND health != 'disabled' ORDER BY instance_id"
+                    "SELECT instance.instance_id FROM idea_instances instance "
+                    "JOIN runs run USING(run_id) WHERE instance.run_id=? "
+                    "AND run.status IN ('created','running') "
+                    "AND instance.deactivated_at_us IS NULL "
+                    "AND instance.health != 'disabled' ORDER BY instance.instance_id",
+                    (self.run_id,),
                 )
             )
         return tuple(self._run_instance(instance_id, now_us=now_us) for instance_id in instance_ids)
@@ -409,12 +440,14 @@ class IdeaRunner:
                     "ON subscription.subscription_id=gap.subscription_id "
                     "WHERE gap.run_id=? AND gap.resolved_at_us IS NULL "
                     "AND subscription.instrument_id=? AND subscription.feed_kind=? "
+                    "AND (gap.ended_at_us IS NULL OR gap.ended_at_us>=?) "
                     "AND ((gap.reason='STREAM_STALE' AND ?=1) OR "
                     "(gap.reason!='STREAM_STALE' AND ?=1)) LIMIT 1",
                     (
                         row["run_id"],
                         requirement["instrument_id"],
                         requirement["feed_kind"],
+                        int(row["activated_at_us"]),
                         int(requirement["staleness_block"]),
                         int(requirement["gaps_block"]),
                     ),
@@ -467,7 +500,9 @@ class IdeaRunner:
                 events=events,
                 input_watermark=events[-1].event_id,
                 causal_from_at_us=min(item.event_at_us for item in events),
-                causal_through_at_us=max(item.event_at_us for item in events),
+                causal_through_at_us=max(
+                    max(item.event_at_us, item.received_at_us) for item in events
+                ),
                 prior_state_input_event_ids=prior_state_input_event_ids,
             )
             return (
@@ -608,20 +643,16 @@ class IdeaRunner:
             if isinstance(output, ProposedTrade)
             else [],
         )
-        identity = cast(
-            JsonValue,
-            {
-                "instance_id": activation.instance_id,
-                "input_watermark": event_ids[-1],
-                "input_event_ids": event_ids,
-                "kind": output.kind,
-                "ordinal": ordinal,
-                "as_of_at_us": output.as_of_at_us,
-                "payload_hash": payload_hash,
-                "legs": legs,
-            },
+        typed_legs = output.legs if isinstance(output, ProposedTrade) else ()
+        output_id = deterministic_idea_output_id(
+            instance_id=activation.instance_id,
+            input_event_ids=event_ids,
+            output_kind=output.kind,
+            output_ordinal=ordinal,
+            as_of_at_us=output.as_of_at_us,
+            payload=output.payload,
+            legs=typed_legs,
         )
-        output_id = _hash(identity)
         authority = (
             "unapproved" if output.kind in {"proposed_position", "proposed_trade"} else "recorded"
         )
@@ -629,7 +660,7 @@ class IdeaRunner:
             cast(
                 JsonValue,
                 {
-                    "identity": identity,
+                    "output_id": output_id,
                     "subject": output.subject_instrument_id,
                     "authority_status": authority,
                     "data_class": activation.protected_data_class.value,

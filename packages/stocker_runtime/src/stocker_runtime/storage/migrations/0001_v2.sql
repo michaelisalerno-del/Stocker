@@ -43,6 +43,8 @@ CREATE TABLE runtime_state (
     callback_heartbeat_at_us INTEGER,
     admission_heartbeat_at_us INTEGER,
     projection_heartbeat_at_us INTEGER,
+    connection_state TEXT NOT NULL DEFAULT 'disconnected'
+        CHECK(connection_state IN ('disconnected', 'connecting', 'connected')),
     connection_generation INTEGER NOT NULL DEFAULT 0 CHECK(connection_generation >= 0),
     inbox_nonterminal_count INTEGER NOT NULL DEFAULT 0 CHECK(inbox_nonterminal_count >= 0),
     inbox_bytes INTEGER NOT NULL DEFAULT 0 CHECK(inbox_bytes >= 0),

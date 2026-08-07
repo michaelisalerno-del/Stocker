@@ -847,7 +847,7 @@ def test_stale_recorder_object_cannot_mutate_or_touch_adapter_after_takeover(
         )
         connection.execute(
             "UPDATE runtime_state SET recorder_generation=2, lifecycle='running', "
-            "process_heartbeat_at_us=101 WHERE run_id='run-1'"
+            "connection_state='connected', process_heartbeat_at_us=101 WHERE run_id='run-1'"
         )
     disconnects = adapter.disconnect_calls
     for action in (
@@ -1110,7 +1110,7 @@ def _force_recorder_takeover(database: Path) -> None:
         )
         connection.execute(
             "UPDATE runtime_state SET recorder_generation=2, lifecycle='running', "
-            "process_heartbeat_at_us=101 WHERE run_id='run-1'"
+            "connection_state='connected', process_heartbeat_at_us=101 WHERE run_id='run-1'"
         )
 
 
@@ -1144,9 +1144,9 @@ def test_external_failure_after_takeover_disconnects_only_stale_adapter(
     assert adapter.disconnect_calls >= 1
     with connect_v2(database) as connection:
         replacement = connection.execute(
-            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+            "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
         ).fetchone()
-    assert tuple(replacement) == (2, "running", None)
+    assert tuple(replacement) == (2, "running", None, "connected")
 
 
 def test_required_subscribe_failure_disconnects_earlier_optional_success(tmp_path: Path) -> None:
@@ -1377,10 +1377,10 @@ def test_replay_cleanup_does_not_mutate_replacement_after_authority_loss(
     assert result.exit_code == 1
     with connect_v2(database) as connection:
         replacement = connection.execute(
-            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+            "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
         ).fetchone()
         status = connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
-    assert tuple(replacement) == (2, "running", None)
+    assert tuple(replacement) == (2, "running", None, "connected")
     assert status == "running"
 
 
@@ -1513,19 +1513,25 @@ def test_disconnect_fences_degraded_farm_before_recovery_and_preserves_paused_op
     recorder.disconnected(now_us=102)
     with connect_v2(database) as connection:
         states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        connection_state = connection.execute(
+            "SELECT connection_state FROM runtime_state"
+        ).fetchone()[0]
     assert states == {3: "disconnected", 4: "paused"}
+    assert connection_state == "disconnected"
 
     recorder.market_data_status(
         MarketDataStatus("farm_recovered", 2104, None, "quote farm ok", 103, ("quotes",))
     )
     with connect_v2(database) as connection:
         states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
-        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
         recovery = connection.execute(
             "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
         ).fetchone()[0]
     assert states == {3: "disconnected", 4: "paused"}
-    assert tuple(runtime) == ("degraded", "IBKR_DISCONNECT")
+    assert tuple(runtime) == ("degraded", "IBKR_DISCONNECT", "disconnected")
     assert recovery == 103
 
     recorder.reconnect(now_us=104)
@@ -1535,7 +1541,11 @@ def test_disconnect_fences_degraded_farm_before_recovery_and_preserves_paused_op
                 "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2"
             )
         )
+        connection_state = connection.execute(
+            "SELECT connection_state FROM runtime_state"
+        ).fetchone()[0]
     assert current == {3: "active", 4: "paused"}
+    assert connection_state == "connected"
     recorder.market_data_status(
         MarketDataStatus("farm_degraded", 2103, None, "new quote farm lost", 105, ("quotes",))
     )
@@ -1754,10 +1764,131 @@ def test_connect_time_farm_callback_cannot_mutate_after_authority_takeover(
     assert adapter.connected is False
     with connect_v2(database) as connection:
         replacement = connection.execute(
-            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+            "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
         ).fetchone()
         gap = connection.execute(
             "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
         ).fetchone()
-    assert tuple(replacement) == (2, "running", "REPLACEMENT_OWNS_STARTUP")
+    assert tuple(replacement) == (2, "running", "REPLACEMENT_OWNS_STARTUP", "connected")
     assert gap is not None and gap[0] is None
+
+
+def test_startup_storage_pause_survives_connection_and_reconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    degraded = RetentionResult(
+        cap_state=StorageCapState.DEGRADED,
+        database_bytes=95,
+        wal_bytes=1,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=False,
+        required_action="PAUSE_OPTIONAL_FEEDS",
+        checkpoint_attempted=False,
+        incremental_vacuum_attempted=False,
+    )
+
+    class StartupRetention:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            assert now_us == 100
+            assert callable(precondition)
+            return degraded
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", StartupRetention)
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    with connect_v2(database) as connection:
+        first = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=1"
+            )
+        )
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state, connection_generation FROM runtime_state"
+        ).fetchone()
+        storage_gap = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='STORAGE_DEGRADED_OPTIONAL_PAUSED'"
+        ).fetchone()
+    assert first == {3: "active", 4: "paused"}
+    assert tuple(runtime) == ("degraded", "PAUSE_OPTIONAL_FEEDS", "connected", 1)
+    assert storage_gap is not None and storage_gap[0] is None
+    assert adapter.cancelled == [4]
+    assert [fence.request_id for fence in adapter.subscriptions] == [3]
+
+    recorder.reconnect(now_us=101)
+    with connect_v2(database) as connection:
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2"
+            )
+        )
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state, connection_generation FROM runtime_state"
+        ).fetchone()
+        storage_gap = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='STORAGE_DEGRADED_OPTIONAL_PAUSED'"
+        ).fetchone()
+    assert current == {3: "active", 4: "paused"}
+    assert tuple(runtime) == ("degraded", "PAUSE_OPTIONAL_FEEDS", "connected", 2)
+    assert storage_gap is not None and storage_gap[0] is None
+
+
+def test_connect_finalization_preserves_unrelated_degraded_reason(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+
+    class PreconnectDegradedMarketData(FakeMarketData):
+        def connect(self) -> None:
+            super().connect()
+            with connect_v2(database) as connection:
+                connection.execute(
+                    "UPDATE runtime_state SET lifecycle='degraded', reason='PRECONNECT_DIAGNOSTIC'"
+                )
+
+    recorder = Recorder(_config(database), PreconnectDegradedMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert states == {3: "active", 4: "active"}
+    assert tuple(runtime) == ("degraded", "PRECONNECT_DIAGNOSTIC", "connected")
+
+
+def test_fatal_during_connect_is_absorbing_and_marks_connection_disconnected(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+
+    class FatalConnectMarketData(FakeMarketData):
+        def connect(self) -> None:
+            super().connect()
+            with connect_v2(database) as connection:
+                CallbackInbox._record_fatal(connection, "run-1", 101, "STARTUP_FATAL")
+
+    adapter = FatalConnectMarketData()
+    recorder = Recorder(_config(database), adapter)
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    assert adapter.connected is False
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert tuple(runtime) == ("fatal", "STARTUP_FATAL", "disconnected")

@@ -280,12 +280,13 @@ class Recorder:
             )
             connection.execute(
                 "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle, reason, "
-                "process_heartbeat_at_us, connection_generation, inbox_nonterminal_count) "
-                "VALUES (?, ?, 'recovering', NULL, ?, ?, "
+                "process_heartbeat_at_us, connection_state, connection_generation, "
+                "inbox_nonterminal_count) VALUES (?, ?, 'recovering', NULL, ?, "
+                "'disconnected', ?, "
                 "(SELECT count(*) FROM callback_inbox WHERE lifecycle IN ('pending','leased'))) "
                 "ON CONFLICT(run_id) DO UPDATE SET "
                 "recorder_generation=excluded.recorder_generation, "
-                "lifecycle=excluded.lifecycle, reason=NULL, "
+                "lifecycle=excluded.lifecycle, reason=NULL, connection_state='disconnected', "
                 "process_heartbeat_at_us=excluded.process_heartbeat_at_us, "
                 "connection_generation=excluded.connection_generation, "
                 "inbox_nonterminal_count=excluded.inbox_nonterminal_count",
@@ -358,7 +359,7 @@ class Recorder:
         )
         connection.execute(
             "UPDATE runtime_state SET lifecycle='stopped', reason='UNCLEAN_RESTART', "
-            "process_heartbeat_at_us=? WHERE run_id=?",
+            "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=?",
             (now_us, stale_run_id),
         )
         if not continuing_same_run:
@@ -466,7 +467,7 @@ class Recorder:
         """Expose connected/active state only after each external action succeeds."""
 
         self._check_owned()
-        self._set_lifecycle("connecting", None, now_us)
+        self._begin_connecting(now_us)
         try:
             self.adapter.connect()
         except Exception as error:
@@ -567,10 +568,11 @@ class Recorder:
             self._verify_owned(connection)
             state = self._authority_state()
             runtime = connection.execute(
-                "SELECT lifecycle FROM runtime_state WHERE run_id=? AND recorder_generation=?",
+                "SELECT lifecycle, reason, connection_state FROM runtime_state "
+                "WHERE run_id=? AND recorder_generation=?",
                 (self.config.run_id, state.recorder_generation),
             ).fetchone()
-            if runtime is not None and str(runtime["lifecycle"]) == "connecting":
+            if runtime is not None and str(runtime["connection_state"]) == "connecting":
                 connection.execute(
                     "UPDATE subscriptions SET lifecycle='degraded' WHERE run_id=? "
                     "AND recorder_generation=? AND connection_generation=? "
@@ -633,8 +635,12 @@ class Recorder:
                     )
                 )
                 connection.execute(
-                    "UPDATE runtime_state SET lifecycle=?, reason=?, process_heartbeat_at_us=? "
-                    "WHERE run_id=? AND recorder_generation=? AND lifecycle='connecting'",
+                    "UPDATE runtime_state SET connection_state='connected', "
+                    "lifecycle=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                    "THEN ? ELSE lifecycle END, reason=CASE WHEN lifecycle IN "
+                    "('recovering','connecting','running') THEN ? ELSE reason END, "
+                    "process_heartbeat_at_us=? WHERE run_id=? AND recorder_generation=? "
+                    "AND connection_state='connecting'",
                     (
                         lifecycle,
                         reason,
@@ -687,7 +693,13 @@ class Recorder:
                 ),
             )
             connection.execute(
-                "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=? "
+                "UPDATE runtime_state SET connection_state='disconnected', "
+                "lifecycle=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                "OR (lifecycle='degraded' AND (reason='IBKR_DISCONNECT' "
+                "OR reason LIKE 'IBKR_FARM_%')) THEN 'degraded' ELSE lifecycle END, "
+                "reason=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                "OR (lifecycle='degraded' AND (reason='IBKR_DISCONNECT' "
+                "OR reason LIKE 'IBKR_FARM_%')) THEN ? ELSE reason END WHERE run_id=? "
                 "AND recorder_generation=?",
                 (code, self.config.run_id, self._authority_state().recorder_generation),
             )
@@ -724,7 +736,12 @@ class Recorder:
             self._record_incident(connection, fence.subscription_id, now_us, code, details)
             if not spec.optional:
                 connection.execute(
-                    "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=?",
+                    "UPDATE runtime_state SET "
+                    "lifecycle=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                    "OR (lifecycle='degraded' AND reason LIKE 'IBKR_FARM_%') "
+                    "THEN 'degraded' ELSE lifecycle END, reason=CASE WHEN lifecycle IN "
+                    "('recovering','connecting','running') OR (lifecycle='degraded' "
+                    "AND reason LIKE 'IBKR_FARM_%') THEN ? ELSE reason END WHERE run_id=?",
                     (code, self.config.run_id),
                 )
             connection.commit()
@@ -915,7 +932,12 @@ class Recorder:
                 ),
             )
             connection.execute(
-                "UPDATE runtime_state SET lifecycle='degraded', reason='IBKR_DISCONNECT', "
+                "UPDATE runtime_state SET connection_state='disconnected', "
+                "lifecycle=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                "OR (lifecycle='degraded' AND reason LIKE 'IBKR_FARM_%') "
+                "THEN 'degraded' ELSE lifecycle END, reason=CASE WHEN lifecycle IN "
+                "('recovering','connecting','running') OR (lifecycle='degraded' "
+                "AND reason LIKE 'IBKR_FARM_%') THEN 'IBKR_DISCONNECT' ELSE reason END, "
                 "process_heartbeat_at_us=? WHERE run_id=? AND recorder_generation=?",
                 (now_us, self.config.run_id, state.recorder_generation),
             )
@@ -979,8 +1001,12 @@ class Recorder:
                     )
                     if not spec.optional:
                         connection.execute(
-                            "UPDATE runtime_state SET lifecycle='degraded', reason=? "
-                            "WHERE run_id=? AND recorder_generation=?",
+                            "UPDATE runtime_state SET lifecycle=CASE WHEN lifecycle IN "
+                            "('recovering','connecting','running') OR (lifecycle='degraded' "
+                            "AND reason LIKE 'IBKR_FARM_%') THEN 'degraded' ELSE lifecycle END, "
+                            "reason=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                            "OR (lifecycle='degraded' AND reason LIKE 'IBKR_FARM_%') "
+                            "THEN ? ELSE reason END WHERE run_id=? AND recorder_generation=?",
                             (code, self.config.run_id, state.recorder_generation),
                         )
                 self._record_incident(
@@ -1022,16 +1048,12 @@ class Recorder:
             if status.kind == "farm_degraded":
                 code = f"IBKR_FARM_{status.code}_DEGRADED"
                 runtime = connection.execute(
-                    "SELECT lifecycle, reason FROM runtime_state WHERE run_id=? "
+                    "SELECT lifecycle, reason, connection_state FROM runtime_state WHERE run_id=? "
                     "AND recorder_generation=?",
                     (self.config.run_id, state.recorder_generation),
                 ).fetchone()
-                state_mutation_allowed = runtime is not None and (
-                    str(runtime["lifecycle"]) == "running"
-                    or (
-                        str(runtime["lifecycle"]) == "degraded"
-                        and str(runtime["reason"]).startswith("IBKR_FARM_")
-                    )
+                state_mutation_allowed = (
+                    runtime is not None and str(runtime["connection_state"]) == "connected"
                 )
                 affected_connection_state = False
                 for fence in targets:
@@ -1067,23 +1089,23 @@ class Recorder:
                     )
                 if affected_connection_state:
                     connection.execute(
-                        "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=? "
-                        "AND recorder_generation=?",
+                        "UPDATE runtime_state SET lifecycle=CASE WHEN lifecycle IN "
+                        "('recovering','connecting','running') OR (lifecycle='degraded' "
+                        "AND reason LIKE 'IBKR_FARM_%') THEN 'degraded' ELSE lifecycle END, "
+                        "reason=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                        "OR (lifecycle='degraded' AND reason LIKE 'IBKR_FARM_%') "
+                        "THEN ? ELSE reason END WHERE run_id=? AND recorder_generation=?",
                         (code, self.config.run_id, state.recorder_generation),
                     )
             else:
                 matching_reason = f"IBKR_FARM_{recovery_source_code}_DEGRADED"
                 runtime = connection.execute(
-                    "SELECT lifecycle, reason FROM runtime_state WHERE run_id=? "
+                    "SELECT lifecycle, reason, connection_state FROM runtime_state WHERE run_id=? "
                     "AND recorder_generation=?",
                     (self.config.run_id, state.recorder_generation),
                 ).fetchone()
-                activation_allowed = runtime is not None and (
-                    str(runtime["lifecycle"]) == "running"
-                    or (
-                        str(runtime["lifecycle"]) == "degraded"
-                        and str(runtime["reason"]).startswith("IBKR_FARM_")
-                    )
+                activation_allowed = (
+                    runtime is not None and str(runtime["connection_state"]) == "connected"
                 )
                 for fence in targets:
                     connection.execute(
@@ -1211,8 +1233,11 @@ class Recorder:
                     spec.continuity_required,
                 )
             connection.execute(
-                "UPDATE runtime_state SET connection_generation=?, lifecycle='connecting', "
-                "reason=NULL, process_heartbeat_at_us=? WHERE run_id=?",
+                "UPDATE runtime_state SET connection_generation=?, "
+                "connection_state='disconnected', lifecycle=CASE WHEN lifecycle='degraded' "
+                "AND reason='IBKR_DISCONNECT' THEN 'recovering' ELSE lifecycle END, "
+                "reason=CASE WHEN lifecycle='degraded' AND reason='IBKR_DISCONNECT' "
+                "THEN NULL ELSE reason END, process_heartbeat_at_us=? WHERE run_id=?",
                 (generation, now_us, self.config.run_id),
             )
             connection.commit()
@@ -1256,7 +1281,7 @@ class Recorder:
             )
             connection.execute(
                 "UPDATE runtime_state SET lifecycle='stopped', reason=NULL, "
-                "process_heartbeat_at_us=? WHERE run_id=?",
+                "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=?",
                 (now_us, self.config.run_id),
             )
             connection.execute(
@@ -1383,6 +1408,26 @@ class Recorder:
                 (
                     lifecycle,
                     reason,
+                    now_us,
+                    self.config.run_id,
+                    self._authority_state().recorder_generation,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _begin_connecting(self, now_us: int) -> None:
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            connection.execute(
+                "UPDATE runtime_state SET connection_state='connecting', "
+                "lifecycle=CASE WHEN lifecycle='recovering' THEN 'connecting' ELSE lifecycle END, "
+                "reason=CASE WHEN lifecycle='recovering' THEN NULL ELSE reason END, "
+                "process_heartbeat_at_us=? WHERE run_id=? AND recorder_generation=?",
+                (
                     now_us,
                     self.config.run_id,
                     self._authority_state().recorder_generation,

@@ -398,7 +398,8 @@ class CallbackInbox:
         incident_id = hashlib.sha256(f"{run_id}|{code}".encode()).hexdigest()
         connection.execute("UPDATE runs SET status = 'fatal' WHERE run_id = ?", (run_id,))
         connection.execute(
-            "UPDATE runtime_state SET lifecycle = 'fatal', reason = ? WHERE run_id = ?",
+            "UPDATE runtime_state SET lifecycle = 'fatal', reason = ?, "
+            "connection_state = 'disconnected' WHERE run_id = ?",
             (code, run_id),
         )
         connection.execute(

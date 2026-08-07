@@ -67,6 +67,34 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
 
+def test_runtime_connection_state_is_constrained_and_defaults_disconnected(tmp_path: Path) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    initialize_database(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status) VALUES ('run-1', 'prospective_record', 'ibkr', 1, ?, "
+            "'deadbee', 'prospective_protected', 'running')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('run-1', 1, 'owner-1', 1)"
+        )
+        connection.execute(
+            "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle) "
+            "VALUES ('run-1', 1, 'recovering')"
+        )
+        assert (
+            connection.execute("SELECT connection_state FROM runtime_state").fetchone()[0]
+            == "disconnected"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "UPDATE runtime_state SET connection_state='unknown' WHERE run_id='run-1'"
+            )
+
+
 def test_initialize_database_refuses_existing_or_legacy_files(tmp_path: Path) -> None:
     database = tmp_path / "legacy.sqlite3"
     with sqlite3.connect(database) as connection:

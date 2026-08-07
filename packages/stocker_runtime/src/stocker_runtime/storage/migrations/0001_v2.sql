@@ -476,7 +476,7 @@ CREATE TABLE idea_plugins (
         stocker_canonical_json(manifest_json) = 1 AND length(CAST(manifest_json AS BLOB)) <= 65536
     ),
     discovered_at_us INTEGER NOT NULL,
-    PRIMARY KEY(idea_id, idea_version)
+    PRIMARY KEY(idea_id, idea_version, code_hash)
 ) STRICT;
 
 CREATE TABLE idea_instances (
@@ -489,12 +489,25 @@ CREATE TABLE idea_instances (
         stocker_canonical_json(parameters_json) = 1 AND length(CAST(parameters_json AS BLOB)) <= 65536
     ),
     parameters_hash TEXT NOT NULL CHECK(length(parameters_hash) = 64),
+    plugin_code_hash TEXT NOT NULL CHECK(length(plugin_code_hash) = 64),
+    manifest_hash TEXT NOT NULL CHECK(length(manifest_hash) = 64),
+    universe_json TEXT NOT NULL CHECK(
+        stocker_canonical_json(universe_json) = 1 AND length(CAST(universe_json AS BLOB)) <= 65536
+    ),
+    universe_hash TEXT NOT NULL CHECK(length(universe_hash) = 64),
+    requirements_json TEXT NOT NULL CHECK(
+        stocker_canonical_json(requirements_json) = 1
+        AND length(CAST(requirements_json AS BLOB)) <= 65536
+    ),
+    requirements_hash TEXT NOT NULL CHECK(length(requirements_hash) = 64),
+    activated_after_source_sequence INTEGER NOT NULL CHECK(activated_after_source_sequence >= 0),
     activated_at_us INTEGER NOT NULL,
     deactivated_at_us INTEGER,
     health TEXT NOT NULL CHECK(health IN ('healthy', 'degraded', 'disabled')),
     error_code TEXT,
     data_class TEXT NOT NULL CHECK(data_class IN ('prospective_protected', 'shadow_protected')),
-    FOREIGN KEY(idea_id, idea_version) REFERENCES idea_plugins(idea_id, idea_version),
+    FOREIGN KEY(idea_id, idea_version, plugin_code_hash)
+        REFERENCES idea_plugins(idea_id, idea_version, code_hash),
     FOREIGN KEY(run_id, mode, data_class) REFERENCES runs(run_id, mode, data_class),
     CHECK(
         (mode = 'prospective_record' AND data_class = 'prospective_protected')
@@ -508,6 +521,7 @@ CREATE INDEX idea_instances_run_health_idx ON idea_instances(run_id, health, ins
 CREATE TABLE idea_checkpoints (
     instance_id TEXT PRIMARY KEY REFERENCES idea_instances(instance_id),
     last_market_event_id TEXT,
+    last_source_sequence INTEGER CHECK(last_source_sequence IS NULL OR last_source_sequence >= 0),
     state_json TEXT NOT NULL CHECK(
         stocker_canonical_json(state_json) = 1 AND length(CAST(state_json AS BLOB)) <= 65536
     ),
@@ -526,10 +540,11 @@ BEGIN
         JOIN market_events event ON event.event_id = NEW.last_market_event_id
         WHERE instance.instance_id = NEW.instance_id
           AND event.run_id = instance.run_id
+          AND event.source_sequence = NEW.last_source_sequence
     ) THEN RAISE(ABORT, 'idea_checkpoint_event_provenance_mismatch') END;
 END;
 CREATE TRIGGER idea_checkpoints_event_provenance_update
-BEFORE UPDATE OF instance_id, last_market_event_id ON idea_checkpoints
+BEFORE UPDATE OF instance_id, last_market_event_id, last_source_sequence ON idea_checkpoints
 WHEN NEW.last_market_event_id IS NOT NULL
 BEGIN
     SELECT CASE WHEN NOT EXISTS (
@@ -537,6 +552,7 @@ BEGIN
         JOIN market_events event ON event.event_id = NEW.last_market_event_id
         WHERE instance.instance_id = NEW.instance_id
           AND event.run_id = instance.run_id
+          AND event.source_sequence = NEW.last_source_sequence
     ) THEN RAISE(ABORT, 'idea_checkpoint_event_provenance_mismatch') END;
 END;
 
@@ -557,6 +573,8 @@ CREATE TABLE idea_outputs (
     horizon_us INTEGER,
     first_input_event_id TEXT NOT NULL,
     last_input_event_id TEXT NOT NULL,
+    input_watermark TEXT NOT NULL,
+    input_events_hash TEXT NOT NULL CHECK(length(input_events_hash) = 64),
     output_ordinal INTEGER NOT NULL CHECK(output_ordinal >= 0),
     payload_json TEXT NOT NULL CHECK(
         stocker_canonical_json(payload_json) = 1 AND length(CAST(payload_json AS BLOB)) <= 16384
@@ -574,6 +592,9 @@ CREATE TABLE idea_outputs (
         REFERENCES idea_instances(instance_id, run_id, data_class),
     UNIQUE(output_id, run_id, instance_id, data_class)
 ) STRICT;
+CREATE UNIQUE INDEX idea_outputs_logical_identity_idx ON idea_outputs(
+    instance_id, input_watermark, output_kind, output_ordinal, as_of_at_us
+);
 
 CREATE INDEX idea_outputs_run_kind_time_idx
     ON idea_outputs(run_id, output_kind, as_of_at_us DESC, output_id);
@@ -604,6 +625,24 @@ BEGIN
           AND first_event.run_id = NEW.run_id
           AND last_event.run_id = NEW.run_id
     ) THEN RAISE(ABORT, 'idea_output_event_provenance_mismatch') END;
+END;
+
+CREATE TABLE idea_output_inputs (
+    output_id TEXT NOT NULL REFERENCES idea_outputs(output_id) ON DELETE CASCADE,
+    event_id TEXT NOT NULL,
+    input_ordinal INTEGER NOT NULL CHECK(input_ordinal >= 0),
+    PRIMARY KEY(output_id, event_id),
+    UNIQUE(output_id, input_ordinal)
+) STRICT;
+
+CREATE TRIGGER idea_output_inputs_provenance_insert
+BEFORE INSERT ON idea_output_inputs
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM idea_outputs output
+        JOIN market_events event ON event.event_id = NEW.event_id
+        WHERE output.output_id = NEW.output_id AND event.run_id = output.run_id
+    ) THEN RAISE(ABORT, 'idea_output_input_provenance_mismatch') END;
 END;
 
 CREATE TABLE idea_output_legs (

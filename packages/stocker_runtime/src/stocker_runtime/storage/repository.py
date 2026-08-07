@@ -284,9 +284,9 @@ class OperationalRepository:
                     output_id, run_id, instance_id, output_kind, subject_instrument_id,
                     emitted_at_us, as_of_at_us, valid_until_at_us, direction, strength,
                     confidence, horizon_us, first_input_event_id, last_input_event_id,
-                    output_ordinal, payload_json, payload_hash, content_hash, data_class,
-                    authority_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    input_watermark, input_events_hash, output_ordinal, payload_json,
+                    payload_hash, content_hash, data_class, authority_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(output_id) DO NOTHING
                 """,
                 (
@@ -304,6 +304,15 @@ class OperationalRepository:
                     record.horizon_us,
                     record.first_input_event_id,
                     record.last_input_event_id,
+                    record.last_input_event_id,
+                    hashlib.sha256(
+                        canonical_json_bytes(
+                            cast(
+                                JsonValue,
+                                (record.first_input_event_id, record.last_input_event_id),
+                            )
+                        )
+                    ).hexdigest(),
                     record.output_ordinal,
                     payload_json,
                     payload_hash,

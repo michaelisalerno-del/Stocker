@@ -1,0 +1,17 @@
+[
+  {
+    "module": "stocker_ideas.plugins.opening_leader_continuation_v0",
+    "factory": "create_plugin",
+    "expected_code_hash": "59292a0c4ba2dacad3131b15851dafd0787199667f98aa55a5aa3730f6736b8d",
+    "expected_manifest_hash": "5d974001b44930b7f3dd1c6e1a03d198810a09e4da6cd73952415ff6d1ae4422",
+    "parameters": {
+      "checkpoints": [6, 12],
+      "minimum_complete_slate": 15
+    },
+    "universe": [
+      "AAL", "AAOI", "APLD", "ASTS", "CIFR", "HIMS", "IONQ", "IREN", "MARA", "MP",
+      "MRNA", "MSTR", "NVTS", "QBTS", "RGTI", "RIOT", "RIVN", "SMCI", "SOFI", "WULF"
+    ],
+    "enabled": false
+  }
+]

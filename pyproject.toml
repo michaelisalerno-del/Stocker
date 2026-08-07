@@ -78,6 +78,7 @@ packages = [
   "packages/stocker_mcp/src/stocker_mcp",
   "packages/stocker_prospective/src/stocker_prospective",
   "packages/stocker_runtime/src/stocker_runtime",
+  "packages/stocker_ideas/src/stocker_ideas",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -93,6 +94,7 @@ pythonpath = [
   "packages/stocker_mcp/src",
   "packages/stocker_prospective/src",
   "packages/stocker_runtime/src",
+  "packages/stocker_ideas/src",
 ]
 addopts = "-q"
 
@@ -107,6 +109,7 @@ src = [
   "packages/stocker_mcp/src",
   "packages/stocker_prospective/src",
   "packages/stocker_runtime/src",
+  "packages/stocker_ideas/src",
   "apps",
   "tests",
 ]
@@ -131,6 +134,7 @@ packages = [
   "stocker_mcp",
   "stocker_prospective",
   "stocker_runtime",
+  "stocker_ideas",
 ]
 ignore_missing_imports = true
 

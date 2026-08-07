@@ -1,6 +1,6 @@
 # Stocker V2 platform redesign
 
-Status: **Accepted by the owner on 2026-08-06. Phases 1–3 implemented; Phase 4 is not
+Status: **Accepted by the owner on 2026-08-06. Phases 1–4 implemented; Phase 5 is not
 authorized.**
 
 Architect: project `architect` role, read-only, high reasoning effort.
@@ -865,6 +865,18 @@ paper, or live capability is introduced. Phase 4 remains separately authorized.
 - **Dependencies:** Phase 2.
 
 ### Phase 4 — Plugin discovery, isolation, and reference idea
+
+Implementation note (2026-08-07): the owner authorized Phase 4. The V2 runtime now
+loads only explicitly configured, hash-pinned first-party modules; validates their
+static authority boundary, manifest, parameters, requirements, and resource limits;
+freezes activation identity at a causal source watermark; and evaluates each instance
+sequentially with an independent atomic output/state/checkpoint transaction. The
+Opening Leader Continuation V0 reference plugin retains only its frozen causal C6/C12
+bar-ranking and unapproved proposal semantics. Legacy option snapshots, reports,
+shadow valuation, broker access, and protected-result tuning are not ported. The
+unreleased V2 migration was hardened for full input-event provenance, so scratch V2
+databases created by earlier phases must be recreated. Phase 5 remains separately
+authorized.
 
 - **Objective:** activate generic ideas through configuration.
 - **Files/packages:** discovery, runner, Opening Leader reference plugin and tests.

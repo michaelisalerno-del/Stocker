@@ -308,7 +308,7 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
             "'json', 30, '{}')"
         )
         connection.execute(
-            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', '{}', ?, 30, 30, 0)",
+            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', 1, '{}', ?, 30, 30, 0)",
             ("7" * 64,),
         )
         connection.execute(
@@ -428,7 +428,7 @@ def test_acknowledgement_and_decoupled_event_references_enforce_provenance(
             (sequence,),
         )
         connection.execute(
-            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', '{}', ?, 20, 20, 0)",
+            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', 1, '{}', ?, 20, 20, 0)",
             ("c" * 64,),
         )
         with pytest.raises(sqlite3.IntegrityError, match="checkpoint_event_provenance"):
@@ -579,8 +579,10 @@ def _seed_output_dependencies(database: Path) -> None:
         )
         connection.execute(
             "INSERT INTO idea_instances(instance_id, idea_id, idea_version, run_id, mode, "
-            "parameters_json, parameters_hash, activated_at_us, health, data_class) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "parameters_json, parameters_hash, plugin_code_hash, manifest_hash, universe_json, "
+            "universe_hash, requirements_json, requirements_hash, activated_after_source_sequence, "
+            "activated_at_us, health, data_class) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "instance-1",
                 "idea",
@@ -589,6 +591,13 @@ def _seed_output_dependencies(database: Path) -> None:
                 "shadow",
                 "{}",
                 "0" * 64,
+                "f" * 64,
+                "e" * 64,
+                '["instrument-1"]',
+                "1" * 64,
+                "[]",
+                "2" * 64,
+                0,
                 22,
                 "healthy",
                 "shadow_protected",
@@ -1525,8 +1534,8 @@ def test_short_evidence_expiry_preserves_long_provenance_ids_and_current_project
     stored = OperationalRepository(database).put_idea_output(_output())
     with connect_v2(database) as connection:
         connection.execute(
-            "INSERT INTO idea_checkpoints VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("instance-1", "event-1", "{}", "0" * 64, 30, 30, 0),
+            "INSERT INTO idea_checkpoints VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("instance-1", "event-1", 1, "{}", "0" * 64, 30, 30, 0),
         )
         connection.execute(
             "INSERT INTO market_latest(run_id, instrument_id, feed_kind, event_id, "

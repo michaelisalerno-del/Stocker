@@ -812,12 +812,17 @@ class Recorder:
     def receive(self, fence: CallbackFence, callback: MarketDataCallback) -> AdmissionResult:
         """External callback boundary: durable admission completes before return."""
 
-        self._check_owned()
         try:
+            self._check_owned()
             return self.inbox.admit(fence, callback)
+        except AuthoritativeLeaseLost:
+            self._cleanup_private_adapter()
+            raise
         except InboxAdmissionError:
-            with suppress(AuthoritativeLeaseLost):
+            try:
                 self._fatal("CALLBACK_ADMISSION_FAILED", callback.received_at_us)
+            except AuthoritativeLeaseLost:
+                self._cleanup_private_adapter()
             raise
 
     def drain(self, *, now_us: int, limit: int = 256) -> int:
@@ -1363,26 +1368,34 @@ class Recorder:
                 connection.close()
 
     def _fatal(self, code: str, now_us: int) -> None:
-        state = self._authority_state()
         try:
             connection = connect_v2(self.config.database)
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 self._verify_owned(connection)
-                CallbackInbox._record_fatal(connection, self.config.run_id, now_us, code)
+                CallbackInbox._record_fatal(
+                    connection,
+                    self.config.run_id,
+                    now_us,
+                    code,
+                    authority=self._authority(),
+                )
                 connection.commit()
             finally:
                 connection.close()
         except AuthoritativeLeaseLost:
             raise
         except (OSError, sqlite3.Error) as error:
-            for fence in state.fences:
-                if fence.request_id is not None:
-                    with suppress(Exception):
-                        self.adapter.cancel(fence.request_id)
+            self._cleanup_private_adapter()
+            raise RecorderFatalError("fatal state could not be persisted") from error
+        self._cleanup_private_adapter()
+
+    def _cleanup_private_adapter(self) -> None:
+        state = self.state
+        if state is None:
             with suppress(Exception):
                 self.adapter.disconnect()
-            raise RecorderFatalError("fatal state could not be persisted") from error
+            return
         for fence in state.fences:
             if fence.request_id is not None:
                 with suppress(Exception):

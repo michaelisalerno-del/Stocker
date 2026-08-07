@@ -1234,6 +1234,123 @@ def test_persisted_fatal_is_absorbing_for_same_object_and_future_start(tmp_path:
         )
 
 
+@pytest.mark.parametrize(
+    ("failure_kind", "cleanup_failure", "expected_reason"),
+    (
+        ("inbox_full", None, "INBOX_FULL"),
+        ("ordering", "cancel", "CALLBACK_ORDERING_LOSS"),
+        ("database", "disconnect", "CALLBACK_ADMISSION_FAILED"),
+    ),
+)
+def test_recorder_admission_fatal_is_terminal_and_cleans_private_adapter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    cleanup_failure: str | None,
+    expected_reason: str,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+
+    class CleanupFailureMarketData(FakeMarketData):
+        def cancel(self, request_id: int) -> None:
+            super().cancel(request_id)
+            if cleanup_failure == "cancel":
+                raise RuntimeError("cancel cleanup failed")
+
+        def disconnect(self) -> None:
+            super().disconnect()
+            if cleanup_failure == "disconnect":
+                raise RuntimeError("disconnect cleanup failed")
+
+    adapter = CleanupFailureMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    if failure_kind == "inbox_full":
+        recorder.inbox = CallbackInbox(database, max_nonterminal_rows=1)
+        recorder.receive(
+            state.fences[0],
+            MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 1.0}),
+        )
+        failing = MarketDataCallback("quote", 102, None, {"event_at_us": 102, "bid": 2.0})
+    elif failure_kind == "ordering":
+        recorder.receive(
+            state.fences[0],
+            MarketDataCallback("quote", 102, None, {"event_at_us": 102, "bid": 2.0}),
+        )
+        failing = MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 1.0})
+    else:
+
+        def fail_database_admission(
+            _fence: CallbackFence, _callback: MarketDataCallback
+        ) -> AdmissionResult:
+            raise InboxAdmissionError("callback durable admission failed: disk full")
+
+        monkeypatch.setattr(recorder.inbox, "admit", fail_database_admission)
+        failing = MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 1.0})
+
+    with pytest.raises(InboxAdmissionError):
+        recorder.receive(state.fences[0], failing)
+
+    assert adapter.connected is False
+    assert set(adapter.cancelled) == {3, 4}
+    with connect_v2(database, verify_schema=False) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        subscriptions = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        generation = connection.execute(
+            "SELECT ended_at_us, clean_stop, termination_code FROM recorder_generations "
+            "WHERE run_id='run-1' AND generation=1"
+        ).fetchone()
+        status = connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
+    assert tuple(runtime) == ("fatal", expected_reason, "disconnected")
+    assert subscriptions == {3: "disconnected", 4: "disconnected"}
+    assert tuple(generation) == (failing.received_at_us, 0, expected_reason)
+    assert status == "fatal"
+
+    disconnects = adapter.disconnect_calls
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.receive(state.fences[0], failing)
+    assert adapter.disconnect_calls > disconnects
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        ) == ("fatal", expected_reason)
+
+
+def test_stale_receive_cleans_only_private_adapter_and_preserves_replacement(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    _force_recorder_takeover(database)
+
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.receive(
+            state.fences[0],
+            MarketDataCallback("quote", 102, None, {"event_at_us": 102, "bid": 1.0}),
+        )
+
+    assert adapter.connected is False
+    assert set(adapter.cancelled) == {3, 4}
+    with connect_v2(database) as connection:
+        replacement = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        generation = connection.execute(
+            "SELECT ended_at_us, termination_code FROM recorder_generations "
+            "WHERE run_id='run-1' AND generation=2"
+        ).fetchone()
+    assert tuple(replacement) == (2, "running", None, "connected")
+    assert tuple(generation) == (None, None)
+
+
 def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2428,7 +2545,13 @@ def test_fatal_during_connect_is_absorbing_and_marks_connection_disconnected(
         def connect(self) -> None:
             super().connect()
             with connect_v2(database) as connection:
-                CallbackInbox._record_fatal(connection, "run-1", 101, "STARTUP_FATAL")
+                CallbackInbox._record_fatal(
+                    connection,
+                    "run-1",
+                    101,
+                    "STARTUP_FATAL",
+                    authority=WriterAuthority("run-1", 1, "owner-1"),
+                )
 
     adapter = FatalConnectMarketData()
     recorder = Recorder(_config(database), adapter)

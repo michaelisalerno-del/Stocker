@@ -221,6 +221,11 @@ class CallbackInbox:
                     str(authoritative["run_id"]),
                     callback.received_at_us,
                     "INBOX_FULL",
+                    authority=WriterAuthority(
+                        str(authoritative["run_id"]),
+                        int(authoritative["recorder_generation"]),
+                        str(authoritative["owner_id"]),
+                    ),
                 )
                 connection.commit()
                 raise InboxFullError("callback inbox hard limit of 50,000 is reached")
@@ -235,6 +240,11 @@ class CallbackInbox:
                     str(authoritative["run_id"]),
                     callback.received_at_us,
                     "CALLBACK_ORDERING_LOSS",
+                    authority=WriterAuthority(
+                        str(authoritative["run_id"]),
+                        int(authoritative["recorder_generation"]),
+                        str(authoritative["owner_id"]),
+                    ),
                 )
                 connection.commit()
                 raise InboxAdmissionError("callback receive ordering moved backwards")
@@ -393,19 +403,54 @@ class CallbackInbox:
 
     @staticmethod
     def _record_fatal(
-        connection: sqlite3.Connection, run_id: str, opened_at_us: int, code: str
+        connection: sqlite3.Connection,
+        run_id: str,
+        opened_at_us: int,
+        code: str,
+        *,
+        authority: WriterAuthority,
     ) -> None:
-        incident_id = hashlib.sha256(f"{run_id}|{code}".encode()).hexdigest()
+        current = connection.execute(
+            "SELECT state.recorder_generation, state.lifecycle, state.reason, generation.owner_id "
+            "FROM runtime_state state JOIN recorder_generations generation "
+            "ON generation.run_id=state.run_id "
+            "AND generation.generation=state.recorder_generation WHERE state.run_id=?",
+            (run_id,),
+        ).fetchone()
+        if current is None or (
+            authority.run_id != run_id
+            or authority.recorder_generation != int(current["recorder_generation"])
+            or authority.owner_id != str(current["owner_id"])
+        ):
+            raise InboxAdmissionError("fatal transition no longer owns writer authority")
+        generation = int(current["recorder_generation"])
+        terminal_code = (
+            str(current["reason"])
+            if str(current["lifecycle"]) == "fatal" and current["reason"] is not None
+            else code
+        )
+        incident_id = hashlib.sha256(f"{run_id}|{terminal_code}".encode()).hexdigest()
         connection.execute("UPDATE runs SET status = 'fatal' WHERE run_id = ?", (run_id,))
         connection.execute(
+            "UPDATE subscriptions SET lifecycle='disconnected' WHERE run_id=? "
+            "AND recorder_generation=? AND lifecycle!='closed'",
+            (run_id, generation),
+        )
+        connection.execute(
+            "UPDATE recorder_generations SET ended_at_us=COALESCE(ended_at_us, ?), "
+            "clean_stop=0, termination_code=COALESCE(termination_code, ?) "
+            "WHERE run_id=? AND generation=?",
+            (opened_at_us, terminal_code, run_id, generation),
+        )
+        connection.execute(
             "UPDATE runtime_state SET lifecycle = 'fatal', reason = ?, "
-            "connection_state = 'disconnected' WHERE run_id = ?",
-            (code, run_id),
+            "connection_state = 'disconnected' WHERE run_id = ? AND recorder_generation=?",
+            (terminal_code, run_id, generation),
         )
         connection.execute(
             "INSERT OR IGNORE INTO incidents(incident_id, run_id, scope, severity, code, "
             "opened_at_us, details_json) VALUES (?, ?, 'recorder', 'fatal', ?, ?, '{}')",
-            (incident_id, run_id, code, opened_at_us),
+            (incident_id, run_id, terminal_code, opened_at_us),
         )
 
     def reclaim_expired_leases(self, *, now_us: int, authority: WriterAuthority) -> int:

@@ -86,6 +86,9 @@ class IdeaBatch(DomainModel):
     input_watermark: str = Field(min_length=1)
     causal_from_at_us: int = Field(ge=0)
     causal_through_at_us: int = Field(ge=0)
+    prior_state_input_event_ids: tuple[str, ...] = Field(
+        default=(), max_length=MAX_EVENTS_PER_BATCH
+    )
 
     @model_validator(mode="after")
     def causal_range_is_ordered(self) -> Self:
@@ -102,11 +105,22 @@ class IdeaEvaluation(DomainModel):
 
     state: JsonValue
     outputs: tuple[BoundedIdeaOutput, ...] = Field(max_length=MAX_OUTPUTS_PER_BATCH)
+    retained_input_event_ids: tuple[str, ...] = Field(default=(), max_length=MAX_EVENTS_PER_BATCH)
+    output_input_event_ids: tuple[tuple[str, ...], ...] = Field(
+        default=(), max_length=MAX_OUTPUTS_PER_BATCH
+    )
 
     @model_validator(mode="after")
     def state_fits_bound(self) -> Self:
         if len(self.state_json()) > MAX_PLUGIN_STATE_BYTES:
             raise ValueError(f"state exceeds {MAX_PLUGIN_STATE_BYTES} bytes")
+        if len(set(self.retained_input_event_ids)) != len(self.retained_input_event_ids):
+            raise ValueError("retained input event ids must be unique")
+        if any(
+            not lineage or len(lineage) > MAX_EVENTS_PER_BATCH or len(set(lineage)) != len(lineage)
+            for lineage in self.output_input_event_ids
+        ):
+            raise ValueError("every output lineage must contain 1..256 unique event ids")
         return self
 
     def state_json(self) -> bytes:

@@ -699,7 +699,10 @@ class RetentionManager:
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
             "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
             "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
-            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id))",
+            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
+            "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
+            "json_each(checkpoint.state_input_event_ids_json) input "
+            "WHERE input.value=market_events.event_id)",
             now_us - self.policy.raw_market_event_us,
         )
         prune(
@@ -709,7 +712,10 @@ class RetentionManager:
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
             "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
             "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
-            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id))",
+            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
+            "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
+            "json_each(checkpoint.state_input_event_ids_json) input "
+            "WHERE input.value=market_events.event_id)",
             now_us - self.policy.completed_bar_us,
         )
         deleted += self._prune_callback_tombstones(

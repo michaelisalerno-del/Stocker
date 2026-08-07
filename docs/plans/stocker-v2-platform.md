@@ -886,7 +886,11 @@ state, persists typed unapproved proposal legs and complete input provenance, en
 gap and staleness declarations, and terminates an overrun in a dedicated spawned plugin
 worker so unaffected instances continue. Plugin incidents are bounded to one unresolved
 incident per instance and source review pins cover the explicit transitive first-party
-source graph. Worker isolation is operational failure containment for reviewed code,
+source graph, including executed package initializers, before module import. The frozen
+reference plugin rejects noncanonical parameter and universe identities. Bounded generic
+checkpoint lineage preserves incremental output provenance across restart and protects
+still-needed market events from retention. Worker isolation is operational failure
+containment for reviewed code,
 not a malicious-code sandbox. This correction awaits the required independent read-only
 review; Phase 5 has not begun and remains separately authorized.
 

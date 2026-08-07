@@ -279,8 +279,8 @@ class IdeaRunner:
                 empty_state = "{}"
                 connection.execute(
                     "INSERT INTO idea_checkpoints(instance_id, last_market_event_id, "
-                    "last_source_sequence, state_json, "
-                    "state_hash, updated_at_us) VALUES (?, NULL, ?, ?, ?, ?)",
+                    "last_source_sequence, state_json, state_hash, state_input_event_ids_json, "
+                    "updated_at_us) VALUES (?, NULL, ?, ?, ?, '[]', ?)",
                     (
                         instance_id,
                         None,
@@ -362,6 +362,9 @@ class IdeaRunner:
                 return EvaluationResult(instance_id, False, 0, "RETRY_BACKOFF")
         plugin = self._plugins_by_instance.get(instance_id)
         if plugin is None or not hasattr(plugin, "evaluate"):
+            worker = self._workers.pop(instance_id, None)
+            if worker is not None:
+                worker.terminate()
             return self._degrade(instance_id, now_us, "PLUGIN_UNAVAILABLE")
         try:
             context = self._load_batch(instance_id)
@@ -391,7 +394,8 @@ class IdeaRunner:
         with connect_v2(self.database_path) as connection:
             row = connection.execute(
                 "SELECT instance.*, checkpoint.last_market_event_id, "
-                "checkpoint.last_source_sequence, checkpoint.state_json "
+                "checkpoint.last_source_sequence, checkpoint.state_json, "
+                "checkpoint.state_input_event_ids_json "
                 "FROM idea_instances instance JOIN idea_checkpoints checkpoint USING(instance_id) "
                 "WHERE instance.instance_id=?",
                 (instance_id,),
@@ -445,6 +449,9 @@ class IdeaRunner:
                 )
                 for item in rows
             )
+            prior_state_input_event_ids = tuple(
+                str(value) for value in json.loads(str(row["state_input_event_ids_json"]))
+            )
             activation = IdeaActivation(
                 instance_id=instance_id,
                 parameters=cast(Mapping[str, JsonValue], json.loads(str(row["parameters_json"]))),
@@ -461,6 +468,7 @@ class IdeaRunner:
                 input_watermark=events[-1].event_id,
                 causal_from_at_us=min(item.event_at_us for item in events),
                 causal_through_at_us=max(item.event_at_us for item in events),
+                prior_state_input_event_ids=prior_state_input_event_ids,
             )
             return (
                 activation,
@@ -481,6 +489,20 @@ class IdeaRunner:
             raise IdeaRunnerError("plugin state exceeds manifest bound")
         if len(evaluation.outputs) > min(plugin.manifest.maximum_outputs_per_batch, 256):
             raise IdeaRunnerError("plugin outputs exceed manifest bound")
+        available = (
+            *batch.prior_state_input_event_ids,
+            *(event.event_id for event in batch.events),
+        )
+        available = tuple(dict.fromkeys(available))
+        available_set = set(available)
+        if len(evaluation.output_input_event_ids) != len(evaluation.outputs):
+            raise IdeaRunnerError("plugin must declare one causal lineage per output")
+        declared = (*evaluation.output_input_event_ids, evaluation.retained_input_event_ids)
+        for lineage in declared:
+            if not set(lineage).issubset(available_set) or tuple(
+                event_id for event_id in available if event_id in set(lineage)
+            ) != tuple(lineage):
+                raise IdeaRunnerError("plugin declared invalid or unordered causal lineage")
         allowed = {item.value for item in plugin.manifest.output_kinds}
         for output in evaluation.outputs:
             if output.kind not in allowed:
@@ -509,7 +531,7 @@ class IdeaRunner:
     ) -> None:
         state_json = evaluation.state_json().decode()
         state_hash = hashlib.sha256(state_json.encode()).hexdigest()
-        input_events_hash = _hash(cast(JsonValue, event_ids))
+        retained_json = _json(cast(JsonValue, evaluation.retained_input_event_ids))
         with connect_v2(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
@@ -520,14 +542,15 @@ class IdeaRunner:
             if current_id != starting_checkpoint:
                 raise IdeaRunnerError("checkpoint changed during plugin evaluation")
             for ordinal, output in enumerate(evaluation.outputs):
+                output_event_ids = evaluation.output_input_event_ids[ordinal]
                 self._insert_output(
                     connection,
                     activation,
                     batch,
                     output,
                     ordinal,
-                    event_ids,
-                    input_events_hash,
+                    output_event_ids,
+                    _hash(cast(JsonValue, output_event_ids)),
                     now_us,
                 )
             watermark_row = connection.execute(
@@ -538,7 +561,7 @@ class IdeaRunner:
                 raise IdeaRunnerError("input watermark disappeared before checkpoint commit")
             changed = connection.execute(
                 "UPDATE idea_checkpoints SET last_market_event_id=?, last_source_sequence=?, "
-                "state_json=?, state_hash=?, "
+                "state_json=?, state_hash=?, state_input_event_ids_json=?, "
                 "last_success_at_us=?, updated_at_us=?, consecutive_failures=0 WHERE instance_id=? "
                 "AND last_market_event_id IS ?",
                 (
@@ -546,6 +569,7 @@ class IdeaRunner:
                     int(watermark_row[0]),
                     state_json,
                     state_hash,
+                    retained_json,
                     now_us,
                     now_us,
                     activation.instance_id,
@@ -588,7 +612,7 @@ class IdeaRunner:
             JsonValue,
             {
                 "instance_id": activation.instance_id,
-                "input_watermark": batch.input_watermark,
+                "input_watermark": event_ids[-1],
                 "input_event_ids": event_ids,
                 "kind": output.kind,
                 "ordinal": ordinal,
@@ -630,7 +654,7 @@ class IdeaRunner:
                     output.as_of_at_us,
                     event_ids[0],
                     event_ids[-1],
-                    batch.input_watermark,
+                    event_ids[-1],
                     input_events_hash,
                     ordinal,
                     payload_json,
@@ -646,7 +670,7 @@ class IdeaRunner:
                 "AND output_kind=? AND output_ordinal=? AND as_of_at_us=?",
                 (
                     activation.instance_id,
-                    batch.input_watermark,
+                    event_ids[-1],
                     output.kind,
                     ordinal,
                     output.as_of_at_us,
@@ -701,7 +725,8 @@ class IdeaRunner:
                     "INSERT OR IGNORE INTO incidents(incident_id, run_id, scope, severity, code, "
                     "plugin_instance_id, opened_at_us, details_json) VALUES (?, ?, 'idea_plugin', "
                     "'degraded', ?, ?, ?, '{}') ON CONFLICT(incident_id) DO UPDATE SET "
-                    "code=excluded.code, details_json=excluded.details_json",
+                    "code=excluded.code, opened_at_us=excluded.opened_at_us, "
+                    "resolved_at_us=NULL, details_json=excluded.details_json",
                     (incident_id, run[0], code, instance_id, now_us),
                 )
             connection.commit()

@@ -526,10 +526,43 @@ CREATE TABLE idea_checkpoints (
         stocker_canonical_json(state_json) = 1 AND length(CAST(state_json AS BLOB)) <= 65536
     ),
     state_hash TEXT NOT NULL CHECK(length(state_hash) = 64),
+    state_input_event_ids_json TEXT NOT NULL CHECK(
+        stocker_canonical_json(state_input_event_ids_json) = 1
+        AND json_type(state_input_event_ids_json) = 'array'
+        AND json_array_length(state_input_event_ids_json) <= 256
+        AND length(CAST(state_input_event_ids_json AS BLOB)) <= 32768
+    ),
     last_success_at_us INTEGER,
     updated_at_us INTEGER NOT NULL,
     consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_failures >= 0)
 ) STRICT;
+
+CREATE TRIGGER idea_checkpoints_state_inputs_insert
+BEFORE INSERT ON idea_checkpoints
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT value FROM json_each(NEW.state_input_event_ids_json)
+        GROUP BY value HAVING count(*) > 1
+    ) OR EXISTS (
+        SELECT 1 FROM json_each(NEW.state_input_event_ids_json) input
+        JOIN idea_instances instance ON instance.instance_id=NEW.instance_id
+        LEFT JOIN market_events event ON event.event_id=input.value AND event.run_id=instance.run_id
+        WHERE event.event_id IS NULL
+    ) THEN RAISE(ABORT, 'idea_checkpoint_state_input_provenance_mismatch') END;
+END;
+CREATE TRIGGER idea_checkpoints_state_inputs_update
+BEFORE UPDATE OF instance_id, state_input_event_ids_json ON idea_checkpoints
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT value FROM json_each(NEW.state_input_event_ids_json)
+        GROUP BY value HAVING count(*) > 1
+    ) OR EXISTS (
+        SELECT 1 FROM json_each(NEW.state_input_event_ids_json) input
+        JOIN idea_instances instance ON instance.instance_id=NEW.instance_id
+        LEFT JOIN market_events event ON event.event_id=input.value AND event.run_id=instance.run_id
+        WHERE event.event_id IS NULL
+    ) THEN RAISE(ABORT, 'idea_checkpoint_state_input_provenance_mismatch') END;
+END;
 
 CREATE TRIGGER idea_checkpoints_event_provenance_insert
 BEFORE INSERT ON idea_checkpoints

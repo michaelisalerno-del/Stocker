@@ -126,16 +126,25 @@ class DiscoveredPlugin:
 
 
 def _source(module_name: str) -> tuple[Path, bytes]:
-    spec = importlib.util.find_spec(module_name)
-    if spec is None or spec.origin is None:
-        raise IdeaDiscoveryError(f"configured plugin module not found: {module_name}")
-    path = Path(spec.origin).resolve()
+    if module_name != "stocker_ideas" and not module_name.startswith("stocker_ideas."):
+        raise IdeaDiscoveryError("plugin source must stay inside the first-party package")
     package_spec = importlib.util.find_spec("stocker_ideas")
+    if package_spec is None:
+        raise IdeaDiscoveryError(f"configured plugin module not found: {module_name}")
     roots = () if package_spec is None else tuple(package_spec.submodule_search_locations or ())
-    inside_package = any(path.is_relative_to(Path(root).resolve()) for root in roots)
-    if path.suffix != ".py" or not inside_package:
-        raise IdeaDiscoveryError("plugin must be a source module in the first-party package")
-    return path, path.read_bytes()
+    relative = module_name.split(".")[1:]
+    for root_value in roots:
+        root = Path(root_value).resolve()
+        module_path = root.joinpath(*relative)
+        candidates = (
+            (root / "__init__.py",)
+            if not relative
+            else (module_path.with_suffix(".py"), module_path / "__init__.py")
+        )
+        for path in candidates:
+            if path.is_file() and path.resolve().is_relative_to(root):
+                return path.resolve(), path.read_bytes()
+    raise IdeaDiscoveryError(f"configured plugin module not found: {module_name}")
 
 
 def _validate_source(module_name: str, source: bytes) -> tuple[str, ...]:
@@ -190,6 +199,8 @@ def _source_graph(module_name: str) -> tuple[bytes, tuple[str, ...]]:
         current = pending.pop()
         if current in sources:
             continue
+        parts = current.split(".")
+        pending.extend(".".join(parts[:index]) for index in range(1, len(parts)))
         _, source = _source(current)
         sources[current] = source
         pending.extend(name for name in _validate_source(current, source) if name not in sources)
@@ -291,6 +302,9 @@ def _validate_parameter_schema(schema: Mapping[str, Any], path: str = "parameter
 
 def _discover(config: IdeaConfig) -> DiscoveredPlugin:
     source_graph, _ = _source_graph(config.module)
+    code_hash = hashlib.sha256(source_graph).hexdigest()
+    if config.expected_code_hash != code_hash:
+        raise IdeaDiscoveryError("configured plugin code hash does not match reviewed source")
     module = importlib.import_module(config.module)
     candidates = [name for name in vars(module) if name == config.factory]
     if len(candidates) != 1:
@@ -310,10 +324,7 @@ def _discover(config: IdeaConfig) -> DiscoveredPlugin:
     _validate_parameter_schema(manifest.parameter_schema)
     _validate_parameter_value(config.parameters, manifest.parameter_schema, "parameters")
     manifest_json = manifest.to_canonical_json().decode()
-    code_hash = hashlib.sha256(source_graph).hexdigest()
     manifest_hash = hashlib.sha256(manifest_json.encode()).hexdigest()
-    if config.expected_code_hash != code_hash:
-        raise IdeaDiscoveryError("configured plugin code hash does not match reviewed source")
     if config.expected_manifest_hash != manifest_hash:
         raise IdeaDiscoveryError("configured plugin manifest hash does not match reviewed manifest")
     parameters_hash = hashlib.sha256(canonical_json_bytes(config.parameters)).hexdigest()

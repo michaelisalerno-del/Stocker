@@ -322,7 +322,8 @@ def test_schema_rejects_valid_but_noncanonical_json(tmp_path: Path) -> None:
             "'json', 30, '{}')"
         )
         connection.execute(
-            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', 1, '{}', ?, 30, 30, 0)",
+            "INSERT INTO idea_checkpoints VALUES "
+            "('instance-1', 'event-1', 1, '{}', ?, '[]', 30, 30, 0)",
             ("7" * 64,),
         )
         connection.execute(
@@ -442,7 +443,8 @@ def test_acknowledgement_and_decoupled_event_references_enforce_provenance(
             (sequence,),
         )
         connection.execute(
-            "INSERT INTO idea_checkpoints VALUES ('instance-1', 'event-1', 1, '{}', ?, 20, 20, 0)",
+            "INSERT INTO idea_checkpoints VALUES "
+            "('instance-1', 'event-1', 1, '{}', ?, '[]', 20, 20, 0)",
             ("c" * 64,),
         )
         with pytest.raises(sqlite3.IntegrityError, match="checkpoint_event_provenance"):
@@ -1608,7 +1610,7 @@ def test_short_evidence_expiry_preserves_long_provenance_ids_and_current_project
     stored = OperationalRepository(database).put_idea_output(_output())
     with connect_v2(database) as connection:
         connection.execute(
-            "INSERT INTO idea_checkpoints VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO idea_checkpoints VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?)",
             ("instance-1", "event-1", 1, "{}", "0" * 64, 30, 30, 0),
         )
         connection.execute(

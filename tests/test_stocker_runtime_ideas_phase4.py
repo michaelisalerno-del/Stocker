@@ -46,6 +46,7 @@ from stocker_runtime.ingestion import (
     SubscriptionSpec,
 )
 from stocker_runtime.storage.connection import connect_v2, initialize_database
+from stocker_runtime.storage.retention import RetentionManager, RetentionPolicy
 
 MODULE = "stocker_ideas.plugins.opening_leader_continuation_v0"
 COHORT = (
@@ -153,6 +154,15 @@ def test_empty_config_discovers_and_runs_nothing() -> None:
     assert discover_plugins(example) == ()
 
 
+def test_incremental_lineage_contract_is_bounded() -> None:
+    with pytest.raises(ValueError, match="at most 256 items"):
+        IdeaEvaluation(
+            state={},
+            outputs=(),
+            retained_input_event_ids=tuple(f"event-{index}" for index in range(257)),
+        )
+
+
 def test_discovery_is_deterministic_and_freezes_hashes() -> None:
     first = discover_plugins((_config(),))
     second = discover_plugins((_config(),))
@@ -176,6 +186,44 @@ def test_discovery_rejects_duplicate_identity_and_bad_parameters() -> None:
         discover_plugins((_config(parameters={"checkpoints": [9]}),))
 
 
+@pytest.mark.parametrize("checkpoints", ([6, 6], [12, 6], [12, 12]))
+def test_reference_plugin_rejects_nonfrozen_checkpoint_identity(
+    checkpoints: list[int],
+) -> None:
+    with pytest.raises(IdeaDiscoveryError, match="parameter"):
+        discover_plugins(
+            (
+                _config(
+                    parameters={
+                        "checkpoints": checkpoints,
+                        "minimum_complete_slate": 15,
+                    }
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("universe", (COHORT[:-1], tuple(reversed(COHORT))))
+def test_reference_plugin_rejects_noncanonical_universe(universe: tuple[str, ...]) -> None:
+    with pytest.raises(IdeaDiscoveryError, match="requirements"):
+        discover_plugins((_config(universe=universe),))
+
+
+@pytest.mark.parametrize("minimum", (14, 16))
+def test_reference_plugin_rejects_nonfrozen_minimum(minimum: int) -> None:
+    with pytest.raises(IdeaDiscoveryError, match="parameter"):
+        discover_plugins(
+            (
+                _config(
+                    parameters={
+                        "checkpoints": [6, 12],
+                        "minimum_complete_slate": minimum,
+                    }
+                ),
+            )
+        )
+
+
 def test_discovery_rejects_unreviewed_hash_and_aggregates_requirements() -> None:
     with pytest.raises(IdeaDiscoveryError, match="code hash"):
         discover_plugins((_config(expected_code_hash="0" * 64),))
@@ -183,6 +231,36 @@ def test_discovery_rejects_unreviewed_hash_and_aggregates_requirements() -> None
     aggregated = aggregate_requirements((plugin,))
     assert len(aggregated) == 20
     assert aggregated == tuple(sorted(aggregated, key=lambda item: item.to_canonical_json()))
+
+
+def test_bad_source_pin_is_rejected_before_plugin_module_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_import(_module: str) -> object:
+        raise AssertionError("unreviewed plugin module executed")
+
+    monkeypatch.setattr(
+        "stocker_runtime.ideas.discovery.importlib.import_module", unexpected_import
+    )
+    with pytest.raises(IdeaDiscoveryError, match="code hash"):
+        discover_plugins((_config(expected_code_hash="0" * 64),))
+
+
+def test_review_pin_includes_executed_package_initializers() -> None:
+    modules = ("stocker_ideas", "stocker_ideas.plugins", MODULE)
+    sources: dict[str, bytes] = {}
+    for module in modules:
+        spec = importlib.util.find_spec(module)
+        assert spec is not None and spec.origin is not None
+        sources[module] = Path(spec.origin).read_bytes()
+    framed = b"".join(
+        len(module.encode()).to_bytes(4, "big")
+        + module.encode()
+        + len(source).to_bytes(8, "big")
+        + source
+        for module, source in sorted(sources.items())
+    )
+    assert reviewed_code_hash(MODULE) == hashlib.sha256(framed).hexdigest()
 
 
 def test_reference_plugin_has_static_authority_boundary() -> None:
@@ -399,6 +477,54 @@ def test_runner_batches_at_256_without_skipping_the_remainder(tmp_path: Path) ->
     assert checkpoint == "event-257"
 
 
+@pytest.mark.parametrize("restart", (False, True))
+def test_incremental_output_persists_prior_checkpoint_lineage_and_survives_retention(
+    tmp_path: Path, restart: bool
+) -> None:
+    database = tmp_path / f"lineage-{restart}.sqlite3"
+    _seed(database)
+    discovered = discover_plugins((_config(),))[0]
+    runner = IdeaRunner(database, (discovered,))
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        for sequence, symbol in enumerate(COHORT[:10], start=1):
+            _event(connection, sequence, symbol, 101.0 + sequence / 100)
+    assert runner.run_once(now_us=2_000)[0].output_count == 0
+    with connect_v2(database) as connection:
+        retained = json.loads(
+            connection.execute(
+                "SELECT state_input_event_ids_json FROM idea_checkpoints WHERE instance_id=?",
+                (activation.instance_id,),
+            ).fetchone()[0]
+        )
+    assert retained == [f"event-{sequence}" for sequence in range(1, 11)]
+    RetentionManager(database, policy=RetentionPolicy(completed_bar_us=1)).run(now_us=10_000)
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 10
+    if restart:
+        runner.close()
+        runner = IdeaRunner(database, (discovered,))
+    with connect_v2(database) as connection:
+        for sequence, symbol in enumerate(COHORT[10:15], start=11):
+            _event(connection, sequence, symbol, 101.0 + sequence / 100)
+    assert runner.run_once(now_us=11_000)[0].output_count == 3
+    with connect_v2(database) as connection:
+        rows = connection.execute(
+            "SELECT input_ordinal, event_id FROM idea_output_inputs "
+            "WHERE output_id=(SELECT output_id FROM idea_outputs WHERE output_ordinal=0) "
+            "ORDER BY input_ordinal"
+        ).fetchall()
+        final_retained = connection.execute(
+            "SELECT state_input_event_ids_json FROM idea_checkpoints WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()[0]
+    runner.close()
+    assert [tuple(row) for row in rows] == [
+        (sequence - 1, f"event-{sequence}") for sequence in range(1, 16)
+    ]
+    assert final_retained == "[]"
+
+
 class _InvalidPlugin:
     def __init__(self, original: IdeaPlugin, failure: str) -> None:
         self._original = original
@@ -509,7 +635,13 @@ def test_removing_config_disables_an_active_instance_without_evaluation(tmp_path
     assert tuple(row) == ("disabled", 101)
 
 
-def _bar_event(sequence: int, symbol: str, checkpoint: int, session: str) -> MarketEvent:
+def _bar_event(
+    sequence: int,
+    symbol: str,
+    checkpoint: int,
+    session: str,
+    resolution: str = "unique",
+) -> MarketEvent:
     return MarketEvent(
         event_id=f"{session}-{checkpoint}-{sequence}",
         instrument_id=symbol,
@@ -523,7 +655,7 @@ def _bar_event(sequence: int, symbol: str, checkpoint: int, session: str) -> Mar
             "regular_session_open": 100.0,
             "checkpoint_close": 101.0 + sequence / 100,
             "source_completeness": "complete",
-            "duplicate_resolution": "unique",
+            "duplicate_resolution": resolution,
         },
     )
 
@@ -584,6 +716,43 @@ def test_opening_leader_retains_incremental_state_and_emits_c6_and_c12() -> None
     assert next_state["session"] == "2026-08-04"
 
 
+def test_opening_leader_flushes_complete_prior_session_before_rollover() -> None:
+    plugin = discover_plugins((_config(),))[0].plugin
+    prior = tuple(
+        _bar_event(index, symbol, 6, "2026-08-03") for index, symbol in enumerate(COHORT[:15])
+    )
+    rollover = _bar_event(30, COHORT[0], 6, "2026-08-04")
+    evaluation = plugin.evaluate(_batch((*prior, rollover)), {})
+    assert [output.kind for output in evaluation.outputs] == [
+        "observation",
+        "signal",
+        "proposed_trade",
+    ]
+    assert {output.payload["session"] for output in evaluation.outputs} == {"2026-08-03"}
+    state = cast(Mapping[str, JsonValue], evaluation.state)
+    assert state["session"] == "2026-08-04"
+
+
+def test_opening_leader_accepts_only_explicit_resolution_after_ambiguity() -> None:
+    plugin = discover_plugins((_config(),))[0].plugin
+    unambiguous = tuple(
+        _bar_event(index, symbol, 6, "2026-08-03") for index, symbol in enumerate(COHORT[1:15])
+    )
+    unresolved = _bar_event(20, "AAL", 6, "2026-08-03", "unresolved")
+    ambiguous = plugin.evaluate(_batch((*unambiguous, unresolved)), {})
+    assert ambiguous.outputs == ()
+    resolved = plugin.evaluate(
+        _batch((_bar_event(21, "AAL", 6, "2026-08-03", "causally_resolved"),)),
+        ambiguous.state,
+    )
+    assert [output.kind for output in resolved.outputs] == [
+        "observation",
+        "signal",
+        "proposed_trade",
+    ]
+    assert all(len(lineage) == 16 for lineage in resolved.output_input_event_ids)
+
+
 class _SlowPlugin(_InvalidPlugin):
     def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
         time.sleep(0.2)
@@ -640,6 +809,32 @@ def test_repeated_plugin_failure_keeps_one_unresolved_incident(tmp_path: Path) -
         ).fetchone()[0]
     assert count == 1
     assert failures == 1
+
+
+def test_plugin_incident_reopens_after_recovery_and_recurrence(tmp_path: Path) -> None:
+    database = tmp_path / "incident-recurrence.sqlite3"
+    _seed(database)
+    discovered = discover_plugins((_config(),))[0]
+    runner = IdeaRunner(database, (discovered,))
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    runner._plugins_by_instance[activation.instance_id] = object()
+    with connect_v2(database) as connection:
+        _event(connection, 1, "AAL", 101.0)
+    assert runner.run_once(now_us=1_000)[0].advanced is False
+    runner._plugins_by_instance[activation.instance_id] = discovered.plugin
+    assert runner.run_once(now_us=1_001_000)[0].advanced is True
+    runner._plugins_by_instance[activation.instance_id] = object()
+    with connect_v2(database) as connection:
+        _event(connection, 2, "AAOI", 102.0)
+    assert runner.run_once(now_us=1_002_000)[0].advanced is False
+    with connect_v2(database) as connection:
+        incidents = connection.execute(
+            "SELECT opened_at_us, resolved_at_us FROM incidents WHERE plugin_instance_id=?",
+            (activation.instance_id,),
+        ).fetchall()
+    runner.close()
+    assert len(incidents) == 1
+    assert tuple(incidents[0]) == (1_002_000, None)
 
 
 def test_staleness_block_is_independent_from_continuity_gap_block(tmp_path: Path) -> None:

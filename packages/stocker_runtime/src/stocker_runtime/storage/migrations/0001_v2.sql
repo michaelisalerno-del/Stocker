@@ -294,7 +294,7 @@ CREATE TABLE market_event_derivations (
     derived_event_id TEXT NOT NULL
         REFERENCES market_events(event_id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     input_event_id TEXT NOT NULL REFERENCES market_events(event_id),
-    input_ordinal INTEGER NOT NULL CHECK(input_ordinal >= 0 AND input_ordinal <= 60),
+    input_ordinal INTEGER NOT NULL CHECK(input_ordinal >= 0),
     input_role TEXT NOT NULL CHECK(input_role IN ('constituent', 'progress')),
     created_at_us INTEGER NOT NULL CHECK(created_at_us >= 0),
     PRIMARY KEY(derived_event_id, input_ordinal),

@@ -229,7 +229,7 @@ def _project_instrument(
             event_id = _hash(event_material)
             payload_json = canonical_json_bytes(cast(JsonValue, receipt)).decode()
             mapping_rows: list[tuple[str, str, int, str, int]] = []
-            for ordinal, input_id in enumerate(ordered_input_ids[:_EXPECTED_CONSTITUENTS]):
+            for ordinal, input_id in enumerate(ordered_input_ids):
                 mapping_rows.append((event_id, input_id, ordinal, "constituent", end_us))
             if progress_id not in {row[1] for row in mapping_rows}:
                 mapping_rows.append((event_id, progress_id, len(mapping_rows), "progress", end_us))

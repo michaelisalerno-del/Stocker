@@ -315,6 +315,67 @@ def test_duplicate_raw_timestamp_produces_immutable_incomplete_receipt(
     _assert_incomplete_receipt_blocks_opening_leader(event)
 
 
+def test_duplicate_rich_incomplete_receipt_maps_every_unique_input(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "duplicate-rich.sqlite3"
+    opening = _seed(database)
+    end = opening + 300_000_000
+    constituent_count = 65
+    with connect_v2(database) as connection:
+        for index in range(constituent_count):
+            chronological_index = min(index, 59)
+            _bar(
+                connection,
+                index + 1,
+                opening + chronological_index * 5_000_000,
+                received_at_us=opening + chronological_index * 5_000_000,
+                event_id=f"duplicate-rich-{index:03d}",
+            )
+        _bar(
+            connection,
+            constituent_count + 1,
+            end,
+            received_at_us=end,
+            event_id="duplicate-rich-progress",
+        )
+
+    event, mappings = _project(database)
+    payload = json.loads(str(event["payload_json"]))
+    assert payload["source_completeness"] == "incomplete"
+    assert payload["input_count"] == constituent_count
+    assert payload["duplicate_count"] == constituent_count - 60
+    assert len(mappings) == constituent_count + 1
+    assert len({row["input_event_id"] for row in mappings}) == constituent_count + 1
+    assert tuple(mappings[-1]) == (
+        constituent_count,
+        "duplicate-rich-progress",
+        "progress",
+    )
+    replay, replay_mappings = _project(database)
+    assert replay["event_id"] == event["event_id"]
+    assert replay_mappings == mappings
+
+    RetentionManager(
+        database,
+        RetentionPolicy(
+            raw_market_event_us=1,
+            derivation_mapping_us=1,
+            completed_bar_us=10_000_000_000,
+        ),
+    ).run(now_us=end + 2)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute("SELECT count(*) FROM market_event_derivations").fetchone()[0] == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE event_kind='bar'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
 def test_malformed_numeric_payload_produces_immutable_incomplete_receipt(
     tmp_path: Path,
 ) -> None:
@@ -571,6 +632,7 @@ def _config() -> IdeaConfig:
         expected_manifest_hash=hashlib.sha256(MANIFEST.to_canonical_json()).hexdigest(),
         parameters={"checkpoints": (6, 12), "minimum_complete_slate": 15},
         universe=COHORT,
+        enabled=True,
     )
 
 

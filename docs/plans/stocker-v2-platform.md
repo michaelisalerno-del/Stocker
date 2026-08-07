@@ -939,6 +939,18 @@ and still emits the frozen generic outputs. These remain Phase 4 corrections onl
 risk, execution, shadow valuation, paper, live, account, credential, or protected-data
 boundary changed.
 
+Fifth correction note (2026-08-07): plugin activation is now explicitly default-off;
+omitting `enabled` discovers, subscribes, and evaluates nothing. Runner pagination uses
+the complete persisted `(source sequence, event ID)` keyset, so raw and derived events
+that share a sequence cannot be skipped at the 256-event boundary or after restart.
+Incomplete five-minute receipts retain a deterministic derivation row for every unique
+constituent and any distinct progress event instead of truncating provenance at sixty;
+exact completeness still requires exactly sixty aligned constituents. Duplicate-rich
+provenance remains bounded by raw-event retention and the authoritative 8 GiB database
+fatal cap. The unreleased V2 migration changed again, so Phase 2–4 scratch databases
+must be recreated. No Phase 5, paper, live, risk, execution, account, credential, or
+protected-data boundary changed.
+
 - **Objective:** activate generic ideas through configuration.
 - **Files/packages:** discovery, runner, Opening Leader reference plugin and tests.
 - **Schema:** plugin/instance/checkpoint/output/leg tables.

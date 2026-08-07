@@ -82,7 +82,7 @@ class IdeaConfig(DomainModel):
     parameters: Mapping[str, JsonValue]
     universe: tuple[str, ...] = Field(min_length=1)
     instruments: tuple[IdeaInstrumentConfig, ...] = ()
-    enabled: bool = True
+    enabled: bool = False
 
     @model_validator(mode="after")
     def stable_values(self) -> IdeaConfig:

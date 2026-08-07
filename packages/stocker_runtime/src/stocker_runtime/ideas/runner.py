@@ -629,7 +629,10 @@ class IdeaRunner:
                 "AND (json_extract(requirement.value, '$.event_kind') IS NULL "
                 "OR event.event_kind=json_extract(requirement.value, '$.event_kind')) "
                 "WHERE event.run_id=? "
-                "AND coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
+                "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
+                "OR (? IS NOT NULL AND "
+                "coalesce(event.source_sequence, event.derived_after_source_sequence)=? "
+                "AND event.event_id>?)) "
                 "AND (event.event_kind!='bar_5m' OR "
                 "json_extract(event.payload_json, '$.first_source_sequence')>?) "
                 "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
@@ -638,6 +641,9 @@ class IdeaRunner:
                     row["requirements_json"],
                     row["run_id"],
                     start_sequence,
+                    row["last_market_event_id"],
+                    start_sequence,
+                    row["last_market_event_id"],
                     int(row["activated_after_source_sequence"]),
                 ),
             ).fetchall()

@@ -101,6 +101,7 @@ def _config(**changes: object) -> IdeaConfig:
         "expected_manifest_hash": hashlib.sha256(MANIFEST.to_canonical_json()).hexdigest(),
         "parameters": {"checkpoints": [6, 12], "minimum_complete_slate": 15},
         "universe": COHORT,
+        "enabled": True,
     }
     values.update(changes)
     return IdeaConfig.model_validate(values)
@@ -235,6 +236,14 @@ def test_empty_config_discovers_and_runs_nothing() -> None:
     assert len(example) == 1
     assert example[0].instruments == ()
     assert discover_plugins(example) == ()
+
+
+def test_idea_configuration_requires_explicit_enablement() -> None:
+    values = _config().model_dump(mode="python")
+    values.pop("enabled")
+    omitted = IdeaConfig.model_validate(values)
+    assert omitted.enabled is False
+    assert discover_plugins((omitted,)) == ()
 
 
 def test_incremental_lineage_contract_is_bounded() -> None:
@@ -705,6 +714,79 @@ def test_runner_batches_at_256_without_skipping_the_remainder(tmp_path: Path) ->
     assert first.advanced is True
     assert second.advanced is True
     assert checkpoint == "batch-257"
+
+
+class _CursorRecordingPlugin:
+    def __init__(self, original: IdeaPlugin) -> None:
+        self._manifest = original.manifest
+
+    @property
+    def manifest(self) -> IdeaManifest:
+        return self._manifest
+
+    def requirements(self, activation: IdeaActivation) -> tuple[MarketDataRequirement, ...]:
+        del activation
+        return ()
+
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        prior = state if isinstance(state, Mapping) else {}
+        seen = prior.get("seen", ())
+        assert isinstance(seen, tuple | list)
+        return IdeaEvaluation(
+            state={"seen": (*seen, *(event.event_id for event in batch.events))},
+            outputs=(),
+        )
+
+
+def test_runner_keyset_cursor_does_not_skip_tied_sequence_after_256(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "tied-cursor.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind=None,
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(
+        original,
+        plugin=_CursorRecordingPlugin(original.plugin),
+        requirements=(requirement,),
+    )
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        for index in range(257):
+            event = _derived_progress_event(1, "AAL")
+            event = MarketEvent(
+                **{
+                    **event.model_dump(mode="python"),
+                    "event_id": f"tied-{index:03d}",
+                    "event_at_us": event.event_at_us + index,
+                    "received_at_us": event.received_at_us + index,
+                    "payload": {**event.payload, "first_source_sequence": 1},
+                }
+            )
+            _persist_market_event(connection, 1, event)
+
+    assert runner.run_once(now_us=2_000)[0].advanced is True
+    runner.close()
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    assert runner.run_once(now_us=3_000)[0].advanced is True
+    assert runner.run_once(now_us=4_000)[0].advanced is False
+    with connect_v2(database) as connection:
+        checkpoint = connection.execute(
+            "SELECT last_source_sequence, last_market_event_id, state_json FROM idea_checkpoints"
+        ).fetchone()
+    runner.close()
+    assert tuple(checkpoint[:2]) == (1, "tied-256")
+    assert json.loads(str(checkpoint["state_json"]))["seen"] == [
+        f"tied-{index:03d}" for index in range(257)
+    ]
 
 
 @pytest.mark.parametrize("restart", (False, True))
@@ -1734,6 +1816,43 @@ def test_recorder_is_default_off_without_idea_configuration(tmp_path: Path) -> N
     assert recorder.idea_requirements == ()
     assert instance_count == 0
     recorder.stop(now_us=101)
+
+
+def test_omitted_enablement_creates_no_subscription_instance_or_evaluation(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "recorder-omitted-enable.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    value = _config(instruments=_configured_instruments()).model_dump(mode="json")
+    value.pop("enabled")
+    idea_path.write_text(json.dumps([value]), encoding="utf-8")
+    adapter = _RecorderAdapter()
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-omitted-enable",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            idea_config=idea_path,
+        ),
+        adapter,
+    )
+    recorder.start(now_us=100, instruments=(), subscriptions=())
+    assert recorder.idea_requirements == ()
+    assert adapter.configured_subscriptions == ()
+    assert recorder.drain(now_us=101) == 0
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM idea_instances").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM idea_outputs").fetchone()[0] == 0
+    recorder.stop(now_us=102)
 
 
 def test_recorder_explicit_config_wires_generic_requirements_and_activation(tmp_path: Path) -> None:

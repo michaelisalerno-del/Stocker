@@ -48,8 +48,15 @@ def _seed(database: Path) -> int:
     return int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
 
 
-def _bar(connection: object, sequence: int, event_at_us: int, *, received_at_us: int) -> None:
-    payload = {
+def _bar(
+    connection: object,
+    sequence: int,
+    event_at_us: int,
+    *,
+    received_at_us: int,
+    payload_overrides: dict[str, object] | None = None,
+) -> None:
+    payload: dict[str, object] = {
         "event_at_us": event_at_us,
         "open": 100.0 + sequence / 1_000,
         "high": 101.0 + sequence / 1_000,
@@ -57,6 +64,7 @@ def _bar(connection: object, sequence: int, event_at_us: int, *, received_at_us:
         "close": 100.5 + sequence / 1_000,
         "volume": 1.0,
     }
+    payload.update(payload_overrides or {})
     payload_json = canonical_json_bytes(payload).decode()
     event_id = f"raw-{sequence}"
     connection.execute(  # type: ignore[attr-defined]
@@ -180,6 +188,89 @@ def test_one_missing_constituent_is_permanently_incomplete(tmp_path: Path) -> No
         ).fetchone()
     assert unchanged["event_id"] == event["event_id"]  # type: ignore[index]
     assert json.loads(str(unchanged["payload_json"]))["source_completeness"] == "incomplete"
+
+
+def _assert_incomplete_receipt_blocks_opening_leader(event: object) -> None:
+    projected = MarketEvent(
+        event_id=str(event["event_id"]),  # type: ignore[index]
+        instrument_id=str(event["instrument_id"]),  # type: ignore[index]
+        feed_kind=str(event["feed_kind"]),  # type: ignore[index]
+        event_kind=str(event["event_kind"]),  # type: ignore[index]
+        event_at_us=int(event["event_at_us"]),  # type: ignore[index]
+        received_at_us=int(event["received_at_us"]),  # type: ignore[index]
+        payload=json.loads(str(event["payload_json"])),  # type: ignore[index]
+    )
+    evidence = tuple(
+        projected
+        if symbol == "AAL" and number == 1
+        else _derived_bar(symbol, number, complete=COHORT.index(symbol) < 15)
+        for number in range(1, 7)
+        for symbol in COHORT
+    )
+    assert create_plugin().evaluate(_idea_batch(evidence), {}).outputs == ()
+
+
+def test_duplicate_raw_timestamp_produces_immutable_incomplete_receipt(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "duplicate-time.sqlite3"
+    opening = _seed(database)
+    end = opening + 300_000_000
+    with connect_v2(database) as connection:
+        for index in range(60):
+            event_at_us = opening + index * 5_000_000
+            if index == 17:
+                event_at_us -= 5_000_000
+            _bar(
+                connection,
+                index + 1,
+                event_at_us,
+                received_at_us=end if index == 59 else event_at_us,
+            )
+
+    event, mappings = _project(database)
+    payload = json.loads(str(event["payload_json"]))  # type: ignore[index]
+    assert payload["source_completeness"] == "incomplete"
+    assert payload["input_count"] == 60
+    assert payload["missing_count"] == 1
+    assert payload["duplicate_count"] == 1
+    assert payload["unexpected_count"] == 0
+    assert len(mappings) == 60
+    replay, replay_mappings = _project(database)
+    assert replay["event_id"] == event["event_id"]  # type: ignore[index]
+    assert replay_mappings == mappings
+    _assert_incomplete_receipt_blocks_opening_leader(event)
+
+
+def test_malformed_numeric_payload_produces_immutable_incomplete_receipt(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "malformed-numeric.sqlite3"
+    opening = _seed(database)
+    end = opening + 300_000_000
+    with connect_v2(database) as connection:
+        for index in range(60):
+            _bar(
+                connection,
+                index + 1,
+                opening + index * 5_000_000,
+                received_at_us=end if index == 59 else opening + index * 5_000_000,
+                payload_overrides={"open": "NaN"} if index == 17 else None,
+            )
+
+    event, mappings = _project(database)
+    payload = json.loads(str(event["payload_json"]))  # type: ignore[index]
+    assert payload["source_completeness"] == "incomplete"
+    assert payload["input_count"] == 60
+    assert payload["missing_count"] == 0
+    assert payload["duplicate_count"] == 0
+    assert payload["unexpected_count"] == 0
+    assert payload["invalid_numeric_payload"] is True
+    assert len(mappings) == 60
+    replay, replay_mappings = _project(database)
+    assert replay["event_id"] == event["event_id"]  # type: ignore[index]
+    assert replay_mappings == mappings
+    _assert_incomplete_receipt_blocks_opening_leader(event)
 
 
 def test_incremental_projection_reads_only_after_last_immutable_window(tmp_path: Path) -> None:

@@ -960,8 +960,150 @@ def test_stale_writer_from_another_run_is_closed_before_takeover(tmp_path: Path)
     with connect_v2(database) as connection:
         runs = dict(connection.execute("SELECT run_id, status FROM runs"))
         states = dict(connection.execute("SELECT run_id, lifecycle FROM runtime_state"))
+        old_subscriptions = tuple(
+            connection.execute(
+                "SELECT lifecycle, closed_at_us FROM subscriptions WHERE run_id='run-1'"
+            )
+        )
+        replacement_subscriptions = tuple(
+            connection.execute(
+                "SELECT lifecycle, closed_at_us FROM subscriptions WHERE run_id='run-2'"
+            )
+        )
     assert runs == {"run-1": "stopped", "run-2": "running"}
     assert states == {"run-1": "stopped", "run-2": "running"}
+    assert all(tuple(row) == ("closed", 5_000_101) for row in old_subscriptions)
+    assert all(tuple(row) == ("active", None) for row in replacement_subscriptions)
+
+
+@pytest.mark.parametrize(
+    "stale_lifecycle", ("active", "connecting", "disconnected", "degraded", "paused")
+)
+def test_stale_takeover_closes_every_owned_subscription_and_scopes_uncertainty(
+    tmp_path: Path, stale_lifecycle: str
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    Recorder(_config(database), FakeMarketData()).start(
+        now_us=100, instruments=(instrument,), subscriptions=specs
+    )
+    with connect_v2(database) as connection:
+        if stale_lifecycle == "paused":
+            connection.execute("UPDATE subscriptions SET lifecycle='paused' WHERE request_id=4")
+        else:
+            connection.execute(
+                "UPDATE subscriptions SET lifecycle=? WHERE recorder_generation=1",
+                (stale_lifecycle,),
+            )
+        required_id = connection.execute(
+            "SELECT subscription_id FROM subscriptions WHERE request_id=3"
+        ).fetchone()[0]
+        Recorder._open_gap_for_run(
+            connection,
+            "run-1",
+            str(required_id),
+            99,
+            "EXISTING_SCIENTIFIC_GAP",
+            True,
+        )
+
+    replacement = Recorder(
+        _config(database, owner_id="owner-2", writer_lease_stale_us=5_000_000),
+        FakeMarketData(),
+    )
+    replacement.start(now_us=5_000_101, instruments=(instrument,), subscriptions=specs)
+
+    with connect_v2(database) as connection:
+        old = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE recorder_generation=1"
+            )
+        )
+        old_closed = {
+            int(row[0]): int(row[1])
+            for row in connection.execute(
+                "SELECT request_id, closed_at_us FROM subscriptions WHERE recorder_generation=1"
+            )
+        }
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE recorder_generation=2"
+            )
+        )
+        current_closed = tuple(
+            connection.execute("SELECT closed_at_us FROM subscriptions WHERE recorder_generation=2")
+        )
+        uncertainty = {
+            int(row[0]): int(row[1])
+            for row in connection.execute(
+                "SELECT subscription.request_id, gap.continuity_required FROM gaps gap "
+                "JOIN subscriptions subscription "
+                "ON subscription.subscription_id=gap.subscription_id "
+                "WHERE subscription.recorder_generation=1 "
+                "AND gap.reason='UNCLEAN_RECORDER_RESTART'"
+            )
+        }
+        existing = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='EXISTING_SCIENTIFIC_GAP'"
+        ).fetchone()
+    assert old == {3: "closed", 4: "closed"}
+    assert old_closed == {3: 5_000_101, 4: 5_000_101}
+    assert current == {3: "active", 4: "active"}
+    assert all(row[0] is None for row in current_closed)
+    assert uncertainty == ({3: 1} if stale_lifecycle == "paused" else {3: 1, 4: 0})
+    assert existing is not None and existing[0] is None
+
+
+def test_stale_takeover_closure_is_idempotent_and_old_rows_are_retention_prunable(
+    tmp_path: Path,
+) -> None:
+    from stocker_runtime.storage import RetentionManager, RetentionPolicy
+
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    Recorder(_config(database), FakeMarketData()).start(
+        now_us=100, instruments=(instrument,), subscriptions=specs
+    )
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE subscriptions SET lifecycle='disconnected'")
+
+    class RepeatedCloseRecorder(Recorder):
+        def _close_stale_writer(self, *args: object, **kwargs: object) -> None:
+            super()._close_stale_writer(*args, **kwargs)  # type: ignore[arg-type]
+            super()._close_stale_writer(*args, **kwargs)  # type: ignore[arg-type]
+
+    RepeatedCloseRecorder(
+        _config(database, owner_id="owner-2", writer_lease_stale_us=5_000_000),
+        FakeMarketData(),
+    ).start(now_us=5_000_101, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM gaps WHERE reason='UNCLEAN_RECORDER_RESTART'"
+            ).fetchone()[0]
+            == 2
+        )
+
+    RetentionManager(
+        database,
+        RetentionPolicy(closed_subscription_us=1),
+    ).run(now_us=5_000_103, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        generations = dict(
+            connection.execute(
+                "SELECT recorder_generation, count(*) FROM subscriptions "
+                "GROUP BY recorder_generation"
+            )
+        )
+        current = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions WHERE recorder_generation=2"
+            )
+        )
+    assert generations == {2: 2}
+    assert current == {3: "active", 4: "active"}
 
 
 def test_late_prior_run_callback_is_failed_and_receipted_by_current_recorder(

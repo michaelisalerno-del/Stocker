@@ -199,7 +199,8 @@ class Recorder:
                 )
             active_rows = tuple(
                 connection.execute(
-                    "SELECT state.run_id, state.process_heartbeat_at_us, run.status "
+                    "SELECT state.run_id, state.recorder_generation, "
+                    "state.process_heartbeat_at_us, run.status "
                     "FROM runtime_state state JOIN runs run ON run.run_id = state.run_id "
                     "WHERE state.lifecycle IN "
                     "('starting','recovering','connecting','running','degraded') "
@@ -227,6 +228,7 @@ class Recorder:
                 self._close_stale_writer(
                     connection,
                     str(active["run_id"]),
+                    int(active["recorder_generation"]),
                     now_us=now_us,
                     gap_start_us=min(gap_start, now_us),
                     continuing_same_run=str(active["run_id"]) == self.config.run_id,
@@ -326,6 +328,7 @@ class Recorder:
         self,
         connection: sqlite3.Connection,
         stale_run_id: str,
+        stale_generation: int,
         *,
         now_us: int,
         gap_start_us: int,
@@ -333,34 +336,41 @@ class Recorder:
     ) -> None:
         rows = tuple(
             connection.execute(
-                "SELECT subscription_id FROM subscriptions WHERE run_id = ? "
-                "AND lifecycle = 'active'",
-                (stale_run_id,),
+                "SELECT subscription_id, lifecycle, continuity_required, optional "
+                "FROM subscriptions WHERE run_id=? AND recorder_generation=? "
+                "AND lifecycle!='closed'",
+                (stale_run_id, stale_generation),
             )
         )
         for row in rows:
+            # An optional paused feed is intentionally out of service and already has
+            # its causal gap; every other nonterminal state has restart uncertainty.
+            if str(row["lifecycle"]) == "paused" and bool(row["optional"]):
+                continue
             self._open_gap_for_run(
                 connection,
                 stale_run_id,
                 str(row["subscription_id"]),
                 gap_start_us,
                 "UNCLEAN_RECORDER_RESTART",
-                True,
+                bool(row["continuity_required"]),
             )
         connection.execute(
             "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? WHERE run_id=? "
-            "AND lifecycle='active'",
-            (now_us, stale_run_id),
+            "AND recorder_generation=? AND lifecycle!='closed'",
+            (now_us, stale_run_id, stale_generation),
         )
         connection.execute(
             "UPDATE recorder_generations SET ended_at_us=?, clean_stop=0, "
-            "termination_code='UNCLEAN_RESTART' WHERE run_id=? AND ended_at_us IS NULL",
-            (now_us, stale_run_id),
+            "termination_code='UNCLEAN_RESTART' WHERE run_id=? AND generation=? "
+            "AND ended_at_us IS NULL",
+            (now_us, stale_run_id, stale_generation),
         )
         connection.execute(
             "UPDATE runtime_state SET lifecycle='stopped', reason='UNCLEAN_RESTART', "
-            "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=?",
-            (now_us, stale_run_id),
+            "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=? "
+            "AND recorder_generation=?",
+            (now_us, stale_run_id, stale_generation),
         )
         if not continuing_same_run:
             connection.execute(

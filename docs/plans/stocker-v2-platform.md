@@ -907,6 +907,24 @@ complete deterministic output identity and content-hash contract. These are Phas
 corrections only. No risk,
 execution, paper, live, account, credential, or protected-data boundary changed.
 
+Third correction note (2026-08-07): the raw-feed integration is now evidence-complete.
+A generic core projector derives one immutable five-minute receipt only after causal
+evidence crosses the interval boundary. A complete receipt requires exactly sixty
+aligned IBKR five-second bars and no overlapping gap, including a gap resolved after a
+reconnect; missing, duplicate, malformed, or gap-overlapped input remains permanently
+incomplete. Opening Leader consumes these generic receipts, retaining 120 receipt IDs
+at C6 and at most 240 at C12 rather than thousands of raw callback IDs. Ordered
+derivation mappings preserve raw provenance for 30 days: 1,560 derived bars and 93,600
+mappings per full 20-symbol regular session, bounded to at most 2,808,000 mappings over
+the 30-day tier before raw-input pruning; compact count/hash/gap proof remains in the
+longer-lived derived receipt. The existing 8 GiB database cap remains authoritative.
+Restart verification checks canonical persisted manifest, source, activation,
+requirements, checkpoint and lineage bindings before evaluation. Discovery
+import/factory/requirements and evaluation request/response delivery are bounded in
+spawned workers; one blocked, crashed, or overrun plugin cannot stop later instances.
+No paper, live, risk, execution, account, credential, or protected-data boundary was
+added or changed.
+
 - **Objective:** activate generic ideas through configuration.
 - **Files/packages:** discovery, runner, Opening Leader reference plugin and tests.
 - **Schema:** plugin/instance/checkpoint/output/leg tables.

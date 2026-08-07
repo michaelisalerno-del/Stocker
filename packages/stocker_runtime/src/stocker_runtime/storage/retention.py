@@ -111,6 +111,7 @@ class RetentionPolicy:
     max_receipts_per_run: int = 2_048
     tombstone_us: int = 7 * DAY_US
     raw_market_event_us: int = 30 * DAY_US
+    derivation_mapping_us: int = 30 * DAY_US
     completed_bar_us: int = 400 * DAY_US
     closed_subscription_us: int = 90 * DAY_US
     resolved_diagnostic_us: int = 400 * DAY_US
@@ -127,6 +128,7 @@ class RetentionPolicy:
             self.max_receipts_per_run,
             self.tombstone_us,
             self.raw_market_event_us,
+            self.derivation_mapping_us,
             self.completed_bar_us,
             self.closed_subscription_us,
             self.resolved_diagnostic_us,
@@ -693,29 +695,39 @@ class RetentionManager:
             protected_cutoff,
         )
         prune(
+            "market_event_derivations",
+            "rowid",
+            "created_at_us <= ?",
+            now_us - self.policy.derivation_mapping_us,
+        )
+        prune(
             "market_events",
             "event_id",
-            "event_kind NOT IN ('bar', 'historical_bar') AND event_at_us <= ? "
+            "event_kind NOT IN ('historical_bar', 'bar_5m') AND event_at_us <= ? "
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
             "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
             "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
             "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
             "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
             "json_each(checkpoint.state_input_event_ids_json) input "
-            "WHERE input.value=market_events.event_id)",
+            "WHERE input.value=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
+            "WHERE derivation.input_event_id=market_events.event_id)",
             now_us - self.policy.raw_market_event_us,
         )
         prune(
             "market_events",
             "event_id",
-            "event_kind IN ('bar', 'historical_bar') AND event_at_us <= ? "
+            "event_kind IN ('historical_bar', 'bar_5m') AND event_at_us <= ? "
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
             "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
             "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
             "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
             "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
             "json_each(checkpoint.state_input_event_ids_json) input "
-            "WHERE input.value=market_events.event_id)",
+            "WHERE input.value=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
+            "WHERE derivation.input_event_id=market_events.event_id)",
             now_us - self.policy.completed_bar_us,
         )
         deleted += self._prune_callback_tombstones(

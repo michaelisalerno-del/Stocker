@@ -226,7 +226,8 @@ CREATE TABLE callback_compaction_watermarks (
 CREATE TABLE market_events (
     event_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES runs(run_id),
-    source_sequence INTEGER NOT NULL UNIQUE,
+    source_sequence INTEGER UNIQUE,
+    derived_after_source_sequence INTEGER,
     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
     feed_kind TEXT NOT NULL,
     event_kind TEXT NOT NULL,
@@ -249,6 +250,13 @@ CREATE TABLE market_events (
         stocker_canonical_json(payload_json) = 1 AND length(CAST(payload_json AS BLOB)) <= 65536
     ),
     payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256) = 64),
+    CHECK(
+        (event_kind = 'bar_5m' AND source_sequence IS NULL
+            AND derived_after_source_sequence IS NOT NULL)
+        OR
+        (event_kind != 'bar_5m' AND source_sequence IS NOT NULL
+            AND derived_after_source_sequence IS NULL)
+    ),
     UNIQUE(event_id, run_id, instrument_id, feed_kind)
 ) STRICT;
 CREATE INDEX market_events_run_time_idx ON market_events(run_id, event_at_us DESC, event_id);
@@ -257,9 +265,13 @@ CREATE INDEX market_events_instrument_kind_time_idx
 CREATE INDEX market_events_run_kind_time_idx
     ON market_events(run_id, event_kind, event_at_us DESC, event_id);
 CREATE INDEX market_events_retention_idx ON market_events(event_at_us, event_kind, event_id);
+CREATE INDEX market_events_causal_sequence_idx ON market_events(
+    run_id, coalesce(source_sequence, derived_after_source_sequence), event_id
+);
 
 CREATE TRIGGER market_events_callback_provenance_insert
 BEFORE INSERT ON market_events
+WHEN NEW.event_kind != 'bar_5m'
 BEGIN
     SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM callback_inbox callback
@@ -269,12 +281,55 @@ BEGIN
 END;
 CREATE TRIGGER market_events_callback_provenance_update
 BEFORE UPDATE OF run_id, source_sequence ON market_events
+WHEN NEW.event_kind != 'bar_5m'
 BEGIN
     SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM callback_inbox callback
         WHERE callback.source_sequence = NEW.source_sequence
           AND callback.run_id = NEW.run_id
     ) THEN RAISE(ABORT, 'market_event_callback_provenance_mismatch') END;
+END;
+
+CREATE TABLE market_event_derivations (
+    derived_event_id TEXT NOT NULL
+        REFERENCES market_events(event_id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+    input_event_id TEXT NOT NULL REFERENCES market_events(event_id),
+    input_ordinal INTEGER NOT NULL CHECK(input_ordinal >= 0 AND input_ordinal <= 60),
+    input_role TEXT NOT NULL CHECK(input_role IN ('constituent', 'progress')),
+    created_at_us INTEGER NOT NULL CHECK(created_at_us >= 0),
+    PRIMARY KEY(derived_event_id, input_ordinal),
+    UNIQUE(derived_event_id, input_event_id)
+) STRICT;
+CREATE INDEX market_event_derivations_input_idx
+    ON market_event_derivations(input_event_id, derived_event_id);
+CREATE INDEX market_event_derivations_retention_idx
+    ON market_event_derivations(created_at_us, derived_event_id, input_ordinal);
+CREATE TRIGGER market_event_derivations_provenance_insert
+BEFORE INSERT ON market_event_derivations
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM market_events derived
+        JOIN market_events input ON input.event_id=NEW.input_event_id
+        WHERE derived.event_id=NEW.derived_event_id
+          AND derived.event_kind='bar_5m'
+          AND input.event_kind='bar'
+          AND input.run_id=derived.run_id
+          AND input.instrument_id=derived.instrument_id
+          AND input.feed_kind=derived.feed_kind
+          AND input.source_sequence<=derived.derived_after_source_sequence
+          AND (
+              (NEW.input_role='constituent'
+                  AND input.event_at_us>=derived.event_at_us-300000000
+                  AND input.event_at_us<derived.event_at_us)
+              OR
+              (NEW.input_role='progress' AND input.event_at_us>=derived.event_at_us)
+          )
+    ) THEN RAISE(ABORT, 'market_event_derivation_provenance_mismatch') END;
+END;
+CREATE TRIGGER market_event_derivations_immutable_update
+BEFORE UPDATE ON market_event_derivations
+BEGIN
+    SELECT RAISE(ABORT, 'market_event_derivation_immutable');
 END;
 
 CREATE TRIGGER market_events_immutable_update
@@ -573,7 +628,8 @@ BEGIN
         JOIN market_events event ON event.event_id = NEW.last_market_event_id
         WHERE instance.instance_id = NEW.instance_id
           AND event.run_id = instance.run_id
-          AND event.source_sequence = NEW.last_source_sequence
+          AND coalesce(event.source_sequence, event.derived_after_source_sequence)
+              = NEW.last_source_sequence
     ) THEN RAISE(ABORT, 'idea_checkpoint_event_provenance_mismatch') END;
 END;
 CREATE TRIGGER idea_checkpoints_event_provenance_update
@@ -585,7 +641,8 @@ BEGIN
         JOIN market_events event ON event.event_id = NEW.last_market_event_id
         WHERE instance.instance_id = NEW.instance_id
           AND event.run_id = instance.run_id
-          AND event.source_sequence = NEW.last_source_sequence
+          AND coalesce(event.source_sequence, event.derived_after_source_sequence)
+              = NEW.last_source_sequence
     ) THEN RAISE(ABORT, 'idea_checkpoint_event_provenance_mismatch') END;
 END;
 

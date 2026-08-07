@@ -6,6 +6,8 @@ import hashlib
 import json
 import multiprocessing
 import sqlite3
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
@@ -22,7 +24,14 @@ from stocker_runtime.domain import (
     canonical_json_bytes,
     ensure_authority_free_json,
 )
-from stocker_runtime.ideas.contract import IdeaActivation, IdeaBatch, IdeaEvaluation, IdeaPlugin
+from stocker_runtime.ideas.contract import (
+    IdeaActivation,
+    IdeaBatch,
+    IdeaEvaluation,
+    IdeaManifest,
+    IdeaPlugin,
+    MarketDataRequirement,
+)
 from stocker_runtime.ideas.discovery import DiscoveredPlugin
 from stocker_runtime.ideas.identity import (
     deterministic_idea_output_content_hash,
@@ -91,11 +100,44 @@ class _PluginWorker:
         self.process = process
 
     def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
-        self.connection.send((batch, state))
-        if not self.connection.poll(MAX_EVALUATION_SECONDS):
+        deadline = time.monotonic() + MAX_EVALUATION_SECONDS
+        send_error: list[BaseException] = []
+
+        def send() -> None:
+            try:
+                self.connection.send((batch, state))
+            except BaseException as error:
+                send_error.append(error)
+
+        sender = threading.Thread(target=send, daemon=True, name="stocker-plugin-send")
+        sender.start()
+        sender.join(max(0.0, deadline - time.monotonic()))
+        if sender.is_alive():
             self.terminate()
-            raise IdeaRunnerError("plugin evaluation exceeded 50ms execution bound")
-        status, payload = self.connection.recv()
+            raise IdeaRunnerError("plugin evaluation exceeded 50ms end-to-end bound during send")
+        if send_error:
+            self.terminate()
+            raise IdeaRunnerError(f"plugin request delivery failed: {send_error[0]}")
+        if not self.connection.poll(max(0.0, deadline - time.monotonic())):
+            self.terminate()
+            raise IdeaRunnerError("plugin evaluation exceeded 50ms end-to-end bound")
+        response: list[object] = []
+        receive_error: list[BaseException] = []
+
+        def receive() -> None:
+            try:
+                response.append(self.connection.recv())
+            except BaseException as error:
+                receive_error.append(error)
+
+        receiver = threading.Thread(target=receive, daemon=True, name="stocker-plugin-receive")
+        receiver.start()
+        receiver.join(max(0.0, deadline - time.monotonic()))
+        if receiver.is_alive() or not response:
+            self.terminate()
+            detail = f": {receive_error[0]}" if receive_error else ""
+            raise IdeaRunnerError(f"plugin response delivery failed within 50ms{detail}")
+        status, payload = cast(tuple[object, object], response[0])
         if status != "ok":
             raise IdeaRunnerError(str(payload))
         return IdeaEvaluation.model_validate(payload)
@@ -118,6 +160,19 @@ def _json(value: JsonValue) -> str:
     return canonical_json_bytes(value).decode()
 
 
+def _verified_json(text: str, expected_hash: str, label: str) -> object:
+    try:
+        value = json.loads(text)
+        canonical = canonical_json_bytes(cast(JsonValue, value))
+    except Exception as error:
+        raise IdeaRunnerError(f"{label} is not valid canonical JSON") from error
+    if canonical.decode() != text:
+        raise IdeaRunnerError(f"{label} is not canonical JSON")
+    if hashlib.sha256(canonical).hexdigest() != expected_hash:
+        raise IdeaRunnerError(f"{label} hash mismatch")
+    return value
+
+
 class IdeaRunner:
     """Core-owned runner; plugins receive immutable DTOs and no privileged object."""
 
@@ -131,7 +186,18 @@ class IdeaRunner:
         self.database_path = Path(database_path)
         self._discovered = plugins
         self._plugins_by_instance: dict[str, IdeaPlugin | object] = {}
+        self._discovered_by_instance: dict[str, DiscoveredPlugin] = {}
         self._workers: dict[str, _PluginWorker] = {}
+        by_identity = {
+            (
+                plugin.manifest.idea_id,
+                plugin.manifest.idea_version,
+                plugin.code_hash,
+                plugin.parameters_hash,
+                plugin.universe_hash,
+            ): plugin
+            for plugin in plugins
+        }
         with connect_v2(self.database_path) as connection:
             active_runs = tuple(
                 str(row[0])
@@ -145,25 +211,97 @@ class IdeaRunner:
                 raise IdeaRunnerError("idea runner requires exactly one active bound run")
             self.run_id = active_runs[0]
             rows = connection.execute(
-                "SELECT instance_id, idea_id, idea_version, plugin_code_hash, parameters_hash, "
-                "universe_hash FROM idea_instances WHERE run_id=? "
-                "AND deactivated_at_us IS NULL",
+                "SELECT instance.*, checkpoint.last_market_event_id, "
+                "checkpoint.last_source_sequence, checkpoint.state_json, checkpoint.state_hash, "
+                "checkpoint.state_input_event_ids_json "
+                "FROM idea_instances instance JOIN idea_checkpoints checkpoint USING(instance_id) "
+                "WHERE instance.run_id=? AND instance.deactivated_at_us IS NULL",
                 (self.run_id,),
             ).fetchall()
-        by_identity = {
-            (
-                plugin.manifest.idea_id,
-                plugin.manifest.idea_version,
-                plugin.code_hash,
-                plugin.parameters_hash,
-                plugin.universe_hash,
-            ): plugin.plugin
-            for plugin in plugins
-        }
-        for row in rows:
-            identity = tuple(str(row[key]) for key in row.keys()[1:])
-            if identity in by_identity:
-                self._plugins_by_instance[str(row["instance_id"])] = by_identity[identity]
+            for row in rows:
+                identity = (
+                    str(row["idea_id"]),
+                    str(row["idea_version"]),
+                    str(row["plugin_code_hash"]),
+                    str(row["parameters_hash"]),
+                    str(row["universe_hash"]),
+                )
+                discovered = by_identity.get(identity)
+                if discovered is not None:
+                    self._verify_persisted_instance(connection, row, discovered)
+                    instance_id = str(row["instance_id"])
+                    self._plugins_by_instance[instance_id] = discovered.plugin
+                    self._discovered_by_instance[instance_id] = discovered
+
+    @staticmethod
+    def _verify_persisted_instance(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+        discovered: DiscoveredPlugin,
+    ) -> None:
+        plugin_row = connection.execute(
+            "SELECT * FROM idea_plugins WHERE idea_id=? AND idea_version=? AND code_hash=?",
+            (row["idea_id"], row["idea_version"], row["plugin_code_hash"]),
+        ).fetchone()
+        if plugin_row is None:
+            raise IdeaRunnerError("persisted plugin identity is missing")
+        manifest_value = _verified_json(
+            str(plugin_row["manifest_json"]), str(plugin_row["manifest_hash"]), "manifest"
+        )
+        del manifest_value
+        manifest = IdeaManifest.model_validate_json(str(plugin_row["manifest_json"]))
+        if (
+            str(plugin_row["manifest_hash"]) != discovered.manifest_hash
+            or str(plugin_row["code_hash"]) != discovered.code_hash
+            or str(row["manifest_hash"]) != discovered.manifest_hash
+            or manifest != discovered.manifest
+        ):
+            raise IdeaRunnerError("persisted manifest or source binding mismatch")
+        parameters = _verified_json(
+            str(row["parameters_json"]), str(row["parameters_hash"]), "parameters"
+        )
+        universe = _verified_json(str(row["universe_json"]), str(row["universe_hash"]), "universe")
+        requirements = _verified_json(
+            str(row["requirements_json"]), str(row["requirements_hash"]), "requirements"
+        )
+        state = _verified_json(str(row["state_json"]), str(row["state_hash"]), "checkpoint state")
+        del state
+        if (
+            parameters != json.loads(_json(discovered.config.parameters))
+            or universe != json.loads(_json(discovered.config.universe))
+            or requirements != [item.model_dump(mode="json") for item in discovered.requirements]
+        ):
+            raise IdeaRunnerError("persisted activation binding mismatch")
+        lineage_text = str(row["state_input_event_ids_json"])
+        try:
+            lineage = json.loads(lineage_text)
+        except json.JSONDecodeError as error:
+            raise IdeaRunnerError("checkpoint lineage is invalid JSON") from error
+        if (
+            canonical_json_bytes(cast(JsonValue, lineage)).decode() != lineage_text
+            or not isinstance(lineage, list)
+            or len(lineage) > 256
+            or len(set(lineage)) != len(lineage)
+            or any(not isinstance(event_id, str) for event_id in lineage)
+        ):
+            raise IdeaRunnerError("checkpoint lineage is not canonical and bounded")
+        if lineage:
+            placeholders = ",".join("?" for _ in lineage)
+            count = connection.execute(
+                f"SELECT count(*) FROM market_events WHERE run_id=? "  # noqa: S608
+                f"AND event_id IN ({placeholders})",
+                (row["run_id"], *lineage),
+            ).fetchone()[0]
+            if int(count) != len(lineage):
+                raise IdeaRunnerError("checkpoint lineage crosses its run binding")
+        if row["last_market_event_id"] is not None:
+            watermark = connection.execute(
+                "SELECT coalesce(source_sequence, derived_after_source_sequence) "
+                "FROM market_events WHERE event_id=? AND run_id=?",
+                (row["last_market_event_id"], row["run_id"]),
+            ).fetchone()
+            if watermark is None or int(watermark[0]) != int(row["last_source_sequence"]):
+                raise IdeaRunnerError("checkpoint event watermark binding mismatch")
 
     def activate(
         self,
@@ -221,6 +359,7 @@ class IdeaRunner:
                 connection.rollback()
                 instance_id = str(existing["instance_id"])
                 self._plugins_by_instance[instance_id] = plugin.plugin
+                self._discovered_by_instance[instance_id] = plugin
                 return ActivationResult(
                     instance_id, ProtectedDataClass(str(existing["data_class"])), False
                 )
@@ -321,6 +460,7 @@ class IdeaRunner:
                 )
             connection.commit()
         self._plugins_by_instance[instance_id] = plugin.plugin
+        self._discovered_by_instance[instance_id] = plugin
         return ActivationResult(instance_id, data_class, inserted)
 
     def run_once(self, *, now_us: int) -> tuple[EvaluationResult, ...]:
@@ -370,6 +510,7 @@ class IdeaRunner:
             connection.commit()
         for instance_id in deactivated:
             self._plugins_by_instance.pop(instance_id, None)
+            self._discovered_by_instance.pop(instance_id, None)
             worker = self._workers.pop(instance_id, None)
             if worker is not None:
                 worker.terminate()
@@ -429,14 +570,33 @@ class IdeaRunner:
             row = connection.execute(
                 "SELECT instance.*, checkpoint.last_market_event_id, "
                 "checkpoint.last_source_sequence, checkpoint.state_json, "
-                "checkpoint.state_input_event_ids_json "
+                "checkpoint.state_hash, checkpoint.state_input_event_ids_json "
                 "FROM idea_instances instance JOIN idea_checkpoints checkpoint USING(instance_id) "
                 "WHERE instance.instance_id=?",
                 (instance_id,),
             ).fetchone()
             if row is None:
                 raise IdeaRunnerError("instance checkpoint is missing")
-            requirements = json.loads(str(row["requirements_json"]))
+            discovered = self._discovered_by_instance.get(instance_id)
+            if discovered is None:
+                raise IdeaRunnerError("configured plugin binding is missing")
+            self._verify_persisted_instance(connection, row, discovered)
+            requirements = tuple(
+                MarketDataRequirement.model_validate(item)
+                for item in json.loads(str(row["requirements_json"]))
+            )
+            # Imported at the use site to avoid the ingestion package's public recorder
+            # exports creating a runner/recorder import cycle.
+            from stocker_runtime.ingestion.bar_projection import (
+                project_required_five_minute_bars,
+            )
+
+            project_required_five_minute_bars(
+                connection,
+                run_id=str(row["run_id"]),
+                requirements=requirements,
+                after_source_sequence=int(row["activated_after_source_sequence"]),
+            )
             for requirement in requirements:
                 gap = connection.execute(
                     "SELECT 1 FROM gaps gap JOIN subscriptions subscription "
@@ -448,11 +608,11 @@ class IdeaRunner:
                     "(gap.reason!='STREAM_STALE' AND ?=1)) LIMIT 1",
                     (
                         row["run_id"],
-                        requirement["instrument_id"],
-                        requirement["feed_kind"],
+                        requirement.instrument_id,
+                        requirement.feed_kind,
                         int(row["activated_at_us"]),
-                        int(requirement["staleness_block"]),
-                        int(requirement["gaps_block"]),
+                        int(requirement.staleness_block),
+                        int(requirement.gaps_block),
                     ),
                 ).fetchone()
                 if gap is not None:
@@ -466,9 +626,20 @@ class IdeaRunner:
                 "SELECT event.* FROM market_events event JOIN json_each(?) requirement "
                 "ON event.instrument_id=json_extract(requirement.value, '$.instrument_id') "
                 "AND event.feed_kind=json_extract(requirement.value, '$.feed_kind') "
-                "WHERE event.run_id=? AND event.source_sequence>? "
-                "ORDER BY event.source_sequence LIMIT 256",
-                (row["requirements_json"], row["run_id"], start_sequence),
+                "AND (json_extract(requirement.value, '$.event_kind') IS NULL "
+                "OR event.event_kind=json_extract(requirement.value, '$.event_kind')) "
+                "WHERE event.run_id=? "
+                "AND coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
+                "AND (event.event_kind!='bar_5m' OR "
+                "json_extract(event.payload_json, '$.first_source_sequence')>?) "
+                "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
+                "event.event_id LIMIT 256",
+                (
+                    row["requirements_json"],
+                    row["run_id"],
+                    start_sequence,
+                    int(row["activated_after_source_sequence"]),
+                ),
             ).fetchall()
             rows = list(candidates)
             if not rows:
@@ -516,8 +687,8 @@ class IdeaRunner:
                 None if row["last_market_event_id"] is None else str(row["last_market_event_id"]),
             )
 
-    @staticmethod
     def _validate_evaluation(
+        self,
         activation: IdeaActivation,
         plugin: IdeaPlugin,
         batch: IdeaBatch,
@@ -541,14 +712,49 @@ class IdeaRunner:
                 event_id for event_id in available if event_id in set(lineage)
             ) != tuple(lineage):
                 raise IdeaRunnerError("plugin declared invalid or unordered causal lineage")
+        event_times: dict[str, tuple[int, int]] = {
+            event.event_id: (event.event_at_us, event.received_at_us) for event in batch.events
+        }
+        missing_prior = tuple(
+            event_id
+            for event_id in batch.prior_state_input_event_ids
+            if event_id not in event_times
+        )
+        if missing_prior:
+            placeholders = ",".join("?" for _ in missing_prior)
+            with connect_v2(self.database_path) as connection:
+                rows = connection.execute(
+                    f"SELECT event_id, event_at_us, received_at_us FROM market_events "  # noqa: S608
+                    f"WHERE run_id=? AND event_id IN ({placeholders})",
+                    (activation.run_id, *missing_prior),
+                ).fetchall()
+            event_times.update(
+                {
+                    str(row["event_id"]): (
+                        int(row["event_at_us"]),
+                        int(row["received_at_us"]),
+                    )
+                    for row in rows
+                }
+            )
+            if any(event_id not in event_times for event_id in missing_prior):
+                raise IdeaRunnerError("retained causal evidence is missing")
         allowed = {item.value for item in plugin.manifest.output_kinds}
-        for output in evaluation.outputs:
+        for output, lineage in zip(
+            evaluation.outputs, evaluation.output_input_event_ids, strict=True
+        ):
             if output.kind not in allowed:
                 raise IdeaRunnerError("plugin emitted a forbidden output kind")
             if output.subject_instrument_id not in activation.universe:
                 raise IdeaRunnerError("plugin output subject is outside the activation universe")
-            if not batch.causal_from_at_us <= output.as_of_at_us <= batch.causal_through_at_us:
+            if not (
+                min(event_times[event_id][0] for event_id in lineage)
+                <= output.as_of_at_us
+                <= batch.causal_through_at_us
+            ):
                 raise IdeaRunnerError("plugin output as-of time is outside its causal input")
+            if any(event_times[event_id][0] > output.as_of_at_us for event_id in lineage):
+                raise IdeaRunnerError("plugin output declares evidence later than its as-of time")
             if output.kind in {"proposed_position", "proposed_trade"}:
                 if getattr(output, "status", None) != "unapproved":
                     raise IdeaRunnerError("proposal is not explicitly unapproved")
@@ -592,7 +798,8 @@ class IdeaRunner:
                     now_us,
                 )
             watermark_row = connection.execute(
-                "SELECT source_sequence FROM market_events WHERE event_id=? AND run_id=?",
+                "SELECT coalesce(source_sequence, derived_after_source_sequence) "
+                "FROM market_events WHERE event_id=? AND run_id=?",
                 (batch.input_watermark, activation.run_id),
             ).fetchone()
             if watermark_row is None:

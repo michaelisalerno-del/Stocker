@@ -8,6 +8,8 @@ import importlib
 import importlib.util
 import inspect
 import json
+import multiprocessing
+import queue
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -52,6 +54,7 @@ FORBIDDEN_ATTRIBUTES = {
     "risk_approval",
 }
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
+DISCOVERY_SECONDS = 2.0
 
 
 class IdeaDiscoveryError(ValueError):
@@ -84,6 +87,7 @@ class IdeaConfig(DomainModel):
 class DiscoveredPlugin:
     config: IdeaConfig
     plugin: IdeaPlugin
+    manifest: IdeaManifest
     code_hash: str
     manifest_hash: str
     manifest_json: str
@@ -100,10 +104,6 @@ class DiscoveredPlugin:
             self.parameters_hash,
             self.universe_hash,
         )
-
-    @property
-    def manifest(self) -> IdeaManifest:
-        return self.plugin.manifest
 
     def activation(
         self,
@@ -221,6 +221,78 @@ def reviewed_code_hash(module_name: str) -> str:
     return hashlib.sha256(source_graph).hexdigest()
 
 
+def _discovery_worker(
+    results: Any,
+    module_name: str,
+    factory_name: str,
+    activation_json: str,
+) -> None:
+    """Import and execute plugin startup hooks outside the recorder process."""
+
+    try:
+        module = importlib.import_module(module_name)
+        candidates = [name for name in vars(module) if name == factory_name]
+        if len(candidates) != 1:
+            raise IdeaDiscoveryError("plugin module must expose exactly one configured factory")
+        factory = getattr(module, factory_name)
+        if not callable(factory) or inspect.signature(factory).parameters:
+            raise IdeaDiscoveryError("plugin factory must be a no-argument callable")
+        plugin = factory()
+        if not isinstance(plugin, IdeaPlugin):
+            raise IdeaDiscoveryError("factory result does not satisfy IdeaPlugin protocol")
+        activation = IdeaActivation.model_validate_json(activation_json)
+        requirements = tuple(plugin.requirements(activation))
+        results.put(
+            (
+                "ok",
+                plugin,
+                plugin.manifest.model_dump(mode="python"),
+                tuple(item.model_dump(mode="python") for item in requirements),
+            )
+        )
+    except BaseException as error:
+        results.put(("error", f"{type(error).__name__}:{error}"))
+
+
+def _load_plugin_isolated(
+    config: IdeaConfig, provisional: IdeaActivation
+) -> tuple[IdeaPlugin, IdeaManifest, tuple[MarketDataRequirement, ...]]:
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue(maxsize=1)
+    process = context.Process(
+        target=_discovery_worker,
+        args=(results, config.module, config.factory, provisional.to_canonical_json().decode()),
+        daemon=True,
+    )
+    process.start()
+    try:
+        try:
+            result = results.get(timeout=DISCOVERY_SECONDS)
+        except queue.Empty as error:
+            raise IdeaDiscoveryError("plugin discovery exceeded startup bound") from error
+        if not isinstance(result, tuple) or not result or result[0] != "ok":
+            detail = (
+                result[1] if isinstance(result, tuple) and len(result) > 1 else "worker crashed"
+            )
+            raise IdeaDiscoveryError(f"plugin requirements/startup failed: {detail}")
+        _, plugin_value, manifest_value, requirement_values = result
+        plugin = cast(IdeaPlugin, plugin_value)
+        manifest = IdeaManifest.model_validate(manifest_value)
+        requirements = tuple(
+            MarketDataRequirement.model_validate(item) for item in requirement_values
+        )
+        return plugin, manifest, requirements
+    finally:
+        if process.is_alive():
+            process.terminate()
+        process.join(timeout=1)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=1)
+        results.close()
+        results.join_thread()
+
+
 def _validate_parameter_value(value: JsonValue, schema: Mapping[str, Any], path: str) -> None:
     expected = schema.get("type")
     valid = (
@@ -305,28 +377,6 @@ def _discover(config: IdeaConfig) -> DiscoveredPlugin:
     code_hash = hashlib.sha256(source_graph).hexdigest()
     if config.expected_code_hash != code_hash:
         raise IdeaDiscoveryError("configured plugin code hash does not match reviewed source")
-    module = importlib.import_module(config.module)
-    candidates = [name for name in vars(module) if name == config.factory]
-    if len(candidates) != 1:
-        raise IdeaDiscoveryError("plugin module must expose exactly one configured factory")
-    factory = getattr(module, config.factory)
-    if not callable(factory) or inspect.signature(factory).parameters:
-        raise IdeaDiscoveryError("plugin factory must be a no-argument callable")
-    plugin = factory()
-    if not isinstance(plugin, IdeaPlugin):
-        raise IdeaDiscoveryError("factory result does not satisfy IdeaPlugin protocol")
-    try:
-        manifest = IdeaManifest.model_validate(plugin.manifest.model_dump(mode="python"))
-    except Exception as error:
-        raise IdeaDiscoveryError(f"invalid plugin manifest: {error}") from error
-    if manifest.api_version != 1 or not _NAME.fullmatch(manifest.idea_id):
-        raise IdeaDiscoveryError("manifest has unsupported API version or unstable idea_id")
-    _validate_parameter_schema(manifest.parameter_schema)
-    _validate_parameter_value(config.parameters, manifest.parameter_schema, "parameters")
-    manifest_json = manifest.to_canonical_json().decode()
-    manifest_hash = hashlib.sha256(manifest_json.encode()).hexdigest()
-    if config.expected_manifest_hash != manifest_hash:
-        raise IdeaDiscoveryError("configured plugin manifest hash does not match reviewed manifest")
     parameters_hash = hashlib.sha256(canonical_json_bytes(config.parameters)).hexdigest()
     universe_hash = hashlib.sha256(canonical_json_bytes(config.universe)).hexdigest()
     provisional = IdeaActivation(
@@ -340,14 +390,25 @@ def _discover(config: IdeaConfig) -> DiscoveredPlugin:
         universe=config.universe,
     )
     try:
-        requirements = tuple(plugin.requirements(provisional))
+        plugin, manifest, requirements = _load_plugin_isolated(config, provisional)
     except Exception as error:
-        raise IdeaDiscoveryError(f"plugin requirements failed validation: {error}") from error
+        if isinstance(error, IdeaDiscoveryError):
+            raise
+        raise IdeaDiscoveryError(f"plugin startup failed validation: {error}") from error
+    if manifest.api_version != 1 or not _NAME.fullmatch(manifest.idea_id):
+        raise IdeaDiscoveryError("manifest has unsupported API version or unstable idea_id")
+    _validate_parameter_schema(manifest.parameter_schema)
+    _validate_parameter_value(config.parameters, manifest.parameter_schema, "parameters")
+    manifest_json = manifest.to_canonical_json().decode()
+    manifest_hash = hashlib.sha256(manifest_json.encode()).hexdigest()
+    if config.expected_manifest_hash != manifest_hash:
+        raise IdeaDiscoveryError("configured plugin manifest hash does not match reviewed manifest")
     if not requirements or len(set(requirements)) != len(requirements):
         raise IdeaDiscoveryError("plugin requirements must be nonempty and unique")
     return DiscoveredPlugin(
         config=config,
         plugin=plugin,
+        manifest=manifest,
         code_hash=code_hash,
         manifest_hash=manifest_hash,
         manifest_json=manifest_json,
@@ -408,6 +469,11 @@ def aggregate_requirements(
             merged[key] = MarketDataRequirement(
                 instrument_id=requirement.instrument_id,
                 feed_kind=requirement.feed_kind,
+                event_kind=(
+                    requirement.event_kind
+                    if prior is None or prior.event_kind == requirement.event_kind
+                    else None
+                ),
                 cadence=requirement.cadence,
                 gaps_block=(requirement.gaps_block or (prior.gaps_block if prior else False)),
                 staleness_block=(

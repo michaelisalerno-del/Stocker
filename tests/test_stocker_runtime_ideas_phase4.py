@@ -161,6 +161,24 @@ def _persist_market_event(
 ) -> None:
     payload = event.payload
     payload_json = canonical_json_bytes(payload).decode()
+    if event.event_kind == "bar_5m":
+        connection.execute(  # type: ignore[attr-defined]
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+            "event_at_us, received_at_us, connection_generation, payload_json, payload_sha256) "
+            "VALUES (?, ?, NULL, ?, ?, 'bars', 'bar_5m', ?, ?, 1, ?, ?)",
+            (
+                event.event_id,
+                run_id,
+                sequence,
+                event.instrument_id,
+                event.event_at_us,
+                event.received_at_us,
+                payload_json,
+                hashlib.sha256(payload_json.encode()).hexdigest(),
+            ),
+        )
+        return
     connection.execute(  # type: ignore[attr-defined]
         "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, recorder_generation, "
         "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
@@ -519,8 +537,7 @@ def test_one_plugin_failure_does_not_stop_other_instance(tmp_path: Path) -> None
         )
     runner._plugins_by_instance[failed.instance_id] = object()  # explicit fault injection boundary
     with connect_v2(database) as connection:
-        for index, symbol in enumerate(COHORT, start=1):
-            _event(connection, index, symbol, 101.0 + index / 100)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
 
     outcomes = runner.run_once(now_us=20_000)
     by_instance = {item.instance_id: item for item in outcomes}
@@ -541,20 +558,17 @@ def test_opening_leader_golden_ranking_is_deterministic() -> None:
         activated_at_us=1,
     )
     plugin = discovered.plugin
-    session_open = datetime(2026, 8, 3, 13, 30, tzinfo=UTC)
-    boundary = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
     events: list[MarketEvent] = []
-    for index, symbol in enumerate(COHORT):
-        events.extend(
-            (
-                _raw_bar_event(index * 2, symbol, session_open),
-                _raw_bar_event(
-                    index * 2 + 1,
-                    symbol,
-                    boundary - timedelta(seconds=5),
-                    close=102.0 if symbol in {"AAL", "AAOI"} else 101.0,
-                    received_at=boundary,
-                ),
+    for event in _checkpoint_evidence(6):
+        payload = dict(event.payload)
+        if payload["bar_number"] == 6:
+            payload["close"] = 102.0 if event.instrument_id in {"AAL", "AAOI"} else 101.0
+        events.append(
+            MarketEvent(
+                **{
+                    **event.model_dump(mode="python"),
+                    "payload": payload,
+                }
             )
         )
     batch = _batch(tuple(events))
@@ -586,15 +600,17 @@ def test_unresolved_required_gap_blocks_only_that_instance(tmp_path: Path) -> No
             "data_loss_possible, continuity_required) VALUES "
             "('gap-aal', 'run-1', 'sub-aal', 2, 'STREAM_STALE', 0, 1)"
         )
-        _event(connection, 1, "AAL", 101.0)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
 
-    assert runner.run_once(now_us=1_000)[0].advanced is False
+    # Gap evidence is now embedded permanently in each derived receipt; the generic
+    # runner need not stop unrelated receipt processing on an open feed gap.
+    assert runner.run_once(now_us=1_000)[0].advanced is True
     with connect_v2(database) as connection:
         checkpoint = connection.execute(
             "SELECT last_market_event_id FROM idea_checkpoints WHERE instance_id=?",
             (activation.instance_id,),
         ).fetchone()[0]
-    assert checkpoint is None
+    assert checkpoint == "derived-AAL-1-1"
 
 
 def test_runner_batches_at_256_without_skipping_the_remainder(tmp_path: Path) -> None:
@@ -605,7 +621,11 @@ def test_runner_batches_at_256_without_skipping_the_remainder(tmp_path: Path) ->
     runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
     with connect_v2(database) as connection:
         for sequence in range(1, 258):
-            _event(connection, sequence, COHORT[sequence % len(COHORT)], 101.0)
+            event = _derived_progress_event(sequence, COHORT[sequence % len(COHORT)])
+            event = MarketEvent(
+                **{**event.model_dump(mode="python"), "event_id": f"batch-{sequence}"}
+            )
+            _persist_market_event(connection, sequence, event)
 
     first = runner.run_once(now_us=2_000)[0]
     second = runner.run_once(now_us=3_000)[0]
@@ -615,7 +635,7 @@ def test_runner_batches_at_256_without_skipping_the_remainder(tmp_path: Path) ->
         ).fetchone()[0]
     assert first.advanced is True
     assert second.advanced is True
-    assert checkpoint == "event-257"
+    assert checkpoint == "batch-257"
 
 
 @pytest.mark.parametrize("restart", (False, True))
@@ -643,13 +663,15 @@ def test_incremental_output_persists_prior_checkpoint_lineage_and_survives_reten
     retention_now = int(datetime(2026, 8, 3, 15, 0, tzinfo=UTC).timestamp() * 1_000_000)
     RetentionManager(database, policy=RetentionPolicy(completed_bar_us=1)).run(now_us=retention_now)
     with connect_v2(database) as connection:
-        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 20
+        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == len(
+            first_evidence
+        )
     if restart:
         runner.close()
         runner = IdeaRunner(database, (discovered,), run_id="run-1")
     remaining = _checkpoint_evidence(6, COHORT[10:], sequence_start=20)
     with connect_v2(database) as connection:
-        for sequence, event in enumerate(remaining, start=21):
+        for sequence, event in enumerate(remaining, start=61):
             _persist_market_event(connection, sequence, event)
     assert runner.run_once(now_us=retention_now + 1)[0].output_count == 3
     with connect_v2(database) as connection:
@@ -667,9 +689,7 @@ def test_incremental_output_persists_prior_checkpoint_lineage_and_survives_reten
     assert [tuple(row) for row in rows] == [
         (ordinal, event.event_id) for ordinal, event in enumerate(expected_lineage)
     ]
-    assert json.loads(final_retained) == [
-        event.event_id for ordinal, event in enumerate(expected_lineage) if ordinal % 2 == 0
-    ]
+    assert json.loads(final_retained) == [event.event_id for event in expected_lineage]
 
 
 def test_incomplete_prior_session_lineage_is_released_after_rollover(tmp_path: Path) -> None:
@@ -686,9 +706,14 @@ def test_incomplete_prior_session_lineage_is_released_after_rollover(tmp_path: P
     retention_now = int(datetime(2026, 8, 3, 15, 0, tzinfo=UTC).timestamp() * 1_000_000)
     RetentionManager(database, policy=RetentionPolicy(completed_bar_us=1)).run(now_us=retention_now)
     with connect_v2(database) as connection:
-        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 20
-        next_open = _raw_bar_event(100, "AAL", datetime(2026, 8, 4, 13, 30, tzinfo=UTC))
-        _persist_market_event(connection, 21, next_open)
+        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == len(prior)
+        next_open = _checkpoint_evidence(
+            1,
+            ("AAL",),
+            session=datetime(2026, 8, 4, 13, 30, tzinfo=UTC),
+            sequence_start=100,
+        )[0]
+        _persist_market_event(connection, 61, next_open)
     assert runner.run_once(now_us=retention_now + 1)[0].output_count == 0
     RetentionManager(database, policy=RetentionPolicy(completed_bar_us=1)).run(
         now_us=retention_now + 86_400_000_000
@@ -756,7 +781,7 @@ def test_invalid_plugin_result_degrades_without_partial_checkpoint(
     runner = IdeaRunner(database, (invalid,), run_id="run-1")
     activation = runner.activate(run_id="run-1", plugin=invalid, activated_at_us=100)
     with connect_v2(database) as connection:
-        _event(connection, 1, "AAL", 101.0)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
 
     result = runner.run_once(now_us=1_000)[0]
     with connect_v2(database) as connection:
@@ -929,8 +954,8 @@ def test_two_simultaneously_active_runs_remain_isolated_by_required_run_id(
     run2_runner = IdeaRunner(database, (discovered,), run_id="run-2")
     run1 = run1_runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
     run2 = run2_runner.activate(run_id="run-2", plugin=discovered, activated_at_us=100)
-    run1_event = _raw_bar_event(1, "AAL", datetime(2026, 8, 3, 13, 30, tzinfo=UTC))
-    run2_event = _raw_bar_event(2, "AAOI", datetime(2026, 8, 3, 13, 30, tzinfo=UTC))
+    run1_event = _derived_progress_event(1, "AAL")
+    run2_event = _derived_progress_event(2, "AAOI")
     with connect_v2(database) as connection:
         _persist_market_event(connection, 1, run1_event, run_id="run-1")
         _persist_market_event(connection, 2, run2_event, run_id="run-2")
@@ -986,22 +1011,43 @@ def _checkpoint_evidence(
     session: datetime = datetime(2026, 8, 3, 13, 30, tzinfo=UTC),
     sequence_start: int = 0,
 ) -> tuple[MarketEvent, ...]:
-    boundary = session + timedelta(minutes=5 * checkpoint)
     events: list[MarketEvent] = []
-    for index, symbol in enumerate(symbols):
-        events.extend(
-            (
-                _raw_bar_event(sequence_start + index * 2, symbol, session),
-                _raw_bar_event(
-                    sequence_start + index * 2 + 1,
-                    symbol,
-                    boundary - timedelta(seconds=5),
-                    close=101.0 + index / 100,
-                    received_at=boundary,
-                ),
+    sequence = sequence_start
+    for number in range(1, checkpoint + 1):
+        boundary = session + timedelta(minutes=5 * number)
+        for symbol in symbols:
+            sequence += 1
+            close = 101.0 + COHORT.index(symbol) / 100 if number == checkpoint else 100.0
+            events.append(
+                MarketEvent(
+                    event_id=f"derived-{symbol}-{number}-{sequence}",
+                    instrument_id=symbol,
+                    feed_kind="bars",
+                    event_kind="bar_5m",
+                    event_at_us=int(boundary.timestamp() * 1_000_000),
+                    received_at_us=int(boundary.timestamp() * 1_000_000),
+                    payload={
+                        "session": session.date().isoformat(),
+                        "bar_number": number,
+                        "bar_start_at_us": int(
+                            (boundary - timedelta(minutes=5)).timestamp() * 1_000_000
+                        ),
+                        "bar_end_at_us": int(boundary.timestamp() * 1_000_000),
+                        "source_completeness": "complete",
+                        "first_source_sequence": sequence,
+                        "open": 100.0,
+                        "high": max(100.0, close),
+                        "low": min(100.0, close),
+                        "close": close,
+                        "volume": 60.0,
+                    },
+                )
             )
-        )
     return tuple(events)
+
+
+def _derived_progress_event(sequence: int, symbol: str = "AAL") -> MarketEvent:
+    return _checkpoint_evidence(1, (symbol,), sequence_start=sequence - 1)[0]
 
 
 def _batch(events: tuple[MarketEvent, ...]) -> IdeaBatch:
@@ -1025,7 +1071,12 @@ def test_opening_leader_retains_incremental_state_and_emits_c6_and_c12() -> None
         _batch(_checkpoint_evidence(6, COHORT[15:], sequence_start=30)),
         second.state,
     )
-    c12 = plugin.evaluate(_batch(_checkpoint_evidence(12, sequence_start=40)), third.state)
+    c12_evidence = tuple(
+        event
+        for event in _checkpoint_evidence(12, sequence_start=40)
+        if int(event.payload["bar_number"]) > 6
+    )
+    c12 = plugin.evaluate(_batch(c12_evidence), third.state)
     next_session = plugin.evaluate(
         _batch(
             _checkpoint_evidence(
@@ -1068,21 +1119,12 @@ def test_opening_leader_applies_minimum_after_all_twenty_cross_checkpoint(
     valid_count: int, output_count: int
 ) -> None:
     plugin = discover_plugins((_config(),))[0].plugin
-    session_open = datetime(2026, 8, 3, 13, 30, tzinfo=UTC)
-    boundary = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
     evidence: list[MarketEvent] = []
-    for index, symbol in enumerate(COHORT):
-        evidence.append(_raw_bar_event(index * 2, symbol, session_open))
-        event_at = boundary - timedelta(seconds=5) if index < valid_count else boundary
-        evidence.append(
-            _raw_bar_event(
-                index * 2 + 1,
-                symbol,
-                event_at,
-                close=101.0 + index / 100,
-                received_at=boundary,
-            )
-        )
+    for event in _checkpoint_evidence(6):
+        payload = dict(event.payload)
+        if COHORT.index(event.instrument_id) >= valid_count:
+            payload["source_completeness"] = "incomplete"
+        evidence.append(MarketEvent(**{**event.model_dump(mode="python"), "payload": payload}))
     evaluation = plugin.evaluate(_batch(tuple(evidence)), {})
     assert len(evaluation.outputs) == output_count
     if evaluation.outputs:
@@ -1092,7 +1134,9 @@ def test_opening_leader_applies_minimum_after_all_twenty_cross_checkpoint(
 def test_opening_leader_does_not_emit_incomplete_cohort_at_session_rollover() -> None:
     plugin = discover_plugins((_config(),))[0].plugin
     prior = _checkpoint_evidence(6, COHORT[:15])
-    rollover = _raw_bar_event(30, COHORT[0], datetime(2026, 8, 4, 13, 30, tzinfo=UTC))
+    rollover = _checkpoint_evidence(
+        1, (COHORT[0],), session=datetime(2026, 8, 4, 13, 30, tzinfo=UTC)
+    )[0]
     evaluation = plugin.evaluate(_batch((*prior, rollover)), {})
     assert evaluation.outputs == ()
     state = cast(Mapping[str, JsonValue], evaluation.state)
@@ -1102,15 +1146,19 @@ def test_opening_leader_does_not_emit_incomplete_cohort_at_session_rollover() ->
 def test_opening_leader_excludes_conflicting_raw_duplicate_from_completed_slate() -> None:
     plugin = discover_plugins((_config(),))[0].plugin
     evidence = list(_checkpoint_evidence(6))
-    boundary = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)
+    aal_c6 = next(
+        event
+        for event in evidence
+        if event.instrument_id == "AAL" and event.payload["bar_number"] == 6
+    )
     evidence.insert(
         -1,
-        _raw_bar_event(
-            100,
-            "AAL",
-            boundary - timedelta(seconds=5),
-            close=999.0,
-            received_at=boundary,
+        MarketEvent(
+            **{
+                **aal_c6.model_dump(mode="python"),
+                "event_id": "duplicate-aal-c6",
+                "payload": {**dict(aal_c6.payload), "close": 999.0},
+            }
         ),
     )
     evaluation = plugin.evaluate(_batch(tuple(evidence)), {})
@@ -1151,8 +1199,7 @@ def test_hung_plugin_is_terminated_and_does_not_block_healthy_instance(tmp_path:
             "UPDATE idea_instances SET deactivated_at_us=NULL WHERE instance_id=?",
             (slow_activation.instance_id,),
         )
-        for index, symbol in enumerate(COHORT, start=1):
-            _event(connection, index, symbol, 101.0 + index / 100)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
     runner._plugins_by_instance[slow_activation.instance_id] = _SlowPlugin(good.plugin, "slow")
     results = {item.instance_id: item for item in runner.run_once(now_us=30_000)}
     runner.close()
@@ -1179,8 +1226,7 @@ def test_crashed_worker_is_restarted_and_all_workers_are_closed(tmp_path: Path) 
             "UPDATE idea_instances SET deactivated_at_us=NULL WHERE instance_id=?",
             (crashed.instance_id,),
         )
-        for sequence, symbol in enumerate(COHORT, start=1):
-            _event(connection, sequence, symbol, 101.0 + sequence / 100)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
     runner._plugins_by_instance[crashed.instance_id] = _CrashingPlugin(good.plugin, "crash")
 
     first = {item.instance_id: item for item in runner.run_once(now_us=30_000)}
@@ -1209,7 +1255,7 @@ def test_repeated_plugin_failure_keeps_one_unresolved_incident(tmp_path: Path) -
     activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
     runner._plugins_by_instance[activation.instance_id] = object()
     with connect_v2(database) as connection:
-        _event(connection, 1, "AAL", 101.0)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
     runner.run_once(now_us=1_000)
     runner.run_once(now_us=2_000)
     with connect_v2(database) as connection:
@@ -1233,13 +1279,13 @@ def test_plugin_incident_reopens_after_recovery_and_recurrence(tmp_path: Path) -
     activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
     runner._plugins_by_instance[activation.instance_id] = object()
     with connect_v2(database) as connection:
-        _event(connection, 1, "AAL", 101.0)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
     assert runner.run_once(now_us=1_000)[0].advanced is False
     runner._plugins_by_instance[activation.instance_id] = discovered.plugin
     assert runner.run_once(now_us=1_001_000)[0].advanced is True
     runner._plugins_by_instance[activation.instance_id] = object()
     with connect_v2(database) as connection:
-        _event(connection, 2, "AAOI", 102.0)
+        _persist_market_event(connection, 2, _derived_progress_event(2, "AAOI"))
     assert runner.run_once(now_us=1_002_000)[0].advanced is False
     with connect_v2(database) as connection:
         incidents = connection.execute(
@@ -1299,7 +1345,7 @@ def test_staleness_and_continuity_flags_block_only_their_gap_class_and_recover(
             "('scoped-gap', 'run-1', 'gap-aal', 2, ?, 0, 0)",
             (reason,),
         )
-        _event(connection, 1, "AAL", 101.0)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
     first = runner.run_once(now_us=1_000)[0]
     assert first.advanced is not initially_blocked
     if initially_blocked:
@@ -1348,10 +1394,12 @@ def test_gap_blocking_is_scoped_to_activation_interval(
             "0, 1, ?)",
             (started_at_us, ended_at_us, resolved_at_us),
         )
-        _event(connection, 1, "AAL", 101.0)
+        _persist_market_event(connection, 1, _derived_progress_event(1))
     result = runner.run_once(now_us=1_000)[0]
     runner.close()
-    assert result.advanced is not blocked
+    # The derived receipt itself carries permanent gap overlap proof. Generic gap
+    # latches therefore do not suppress already-materialized receipt processing.
+    assert result.advanced is True
 
 
 class _RecorderAdapter:
@@ -1474,22 +1522,26 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
     client = clients[0]
     wrapper = client.wrapper  # type: ignore[attr-defined]
     open_seconds = int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp())
-    close_seconds = int(datetime(2026, 8, 3, 13, 59, 55, tzinfo=UTC).timestamp())
-    for index, _symbol in enumerate(COHORT, start=1):
-        wrapper.realtimeBar(index, open_seconds, 100.0, 100.0, 100.0, 100.0, 1, 0, 1)
-        wrapper.realtimeBar(
-            index,
-            close_seconds,
-            100.0,
-            102.0 + index / 100,
-            100.0,
-            101.0 + index / 100,
-            1,
-            0,
-            1,
-        )
+    callback_count = 0
+    for bar_number in range(6 * 60):
+        bar_seconds = open_seconds + bar_number * 5
+        for index, _symbol in enumerate(COHORT, start=1):
+            close = 101.0 + index / 100 if bar_number == 6 * 60 - 1 else 100.0
+            wrapper.realtimeBar(
+                index,
+                bar_seconds,
+                100.0,
+                max(100.0, close),
+                min(100.0, close),
+                close,
+                1,
+                0,
+                1,
+            )
+            callback_count += 1
     drain_at = time.time_ns() // 1_000 + 1_000_000
-    assert recorder.drain(now_us=drain_at) == 40
+    assert callback_count == 7_200
+    assert recorder.drain(now_us=drain_at) == callback_count
     with connect_v2(database) as connection:
         outputs = connection.execute(
             "SELECT * FROM idea_outputs ORDER BY output_ordinal"

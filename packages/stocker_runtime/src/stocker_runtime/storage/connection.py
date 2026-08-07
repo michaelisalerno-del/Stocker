@@ -46,6 +46,7 @@ EXPECTED_TABLES = frozenset(
         "callback_receipts",
         "callback_compaction_watermarks",
         "market_events",
+        "market_event_derivations",
         "market_latest",
         "idea_plugins",
         "idea_instances",

@@ -72,6 +72,7 @@ class MarketDataRequirement(DomainModel):
     """Market-data need declared by a plugin and fulfilled by the core."""
 
     feed_kind: str = Field(min_length=1)
+    event_kind: str | None = Field(default=None, min_length=1)
     instrument_id: str = Field(min_length=1)
     cadence: str = Field(min_length=1)
     gaps_block: bool

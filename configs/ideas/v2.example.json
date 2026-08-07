@@ -2,7 +2,7 @@
   {
     "module": "stocker_ideas.plugins.opening_leader_continuation_v0",
     "factory": "create_plugin",
-    "expected_code_hash": "f8dad0f287a3dfc3539ca9c59e90442d00ea2d12233c437bf33d16b316b1904b",
+    "expected_code_hash": "1f9edd90c381b676201a68074f6321074b675992125ffb29a131e050c3fd3ab6",
     "expected_manifest_hash": "9c4faf545a922bf3221b7b0c37791a27bf2f9fce635d541a19157cd1b36aaa58",
     "parameters": {
       "checkpoints": [6, 12],

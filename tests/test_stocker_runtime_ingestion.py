@@ -1493,6 +1493,183 @@ def test_stale_receive_cleans_only_private_adapter_and_preserves_replacement(
     assert tuple(generation) == (None, None)
 
 
+def test_pre_gap_callback_cannot_clear_startup_storage_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from stocker_runtime.storage import RetentionManager, RetentionPolicy
+
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.receive(
+        state.fences[1],
+        MarketDataCallback("bar", 101, None, {"event_at_us": 101, "close": 10.0}),
+    )
+    degraded = RetentionResult(
+        cap_state=StorageCapState.DEGRADED,
+        database_bytes=95,
+        wal_bytes=1,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=False,
+        required_action="PAUSE_OPTIONAL_FEEDS",
+        checkpoint_attempted=False,
+        incremental_vacuum_attempted=False,
+    )
+
+    class PauseRetention:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            assert now_us == 102
+            assert callable(precondition)
+            return degraded
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", PauseRetention)
+    recorder.maintain(now_us=102)
+    assert recorder.drain(now_us=103) == 1
+
+    with connect_v2(database) as connection:
+        gap = connection.execute(
+            "SELECT ended_at_us, resolved_at_us FROM gaps "
+            "WHERE reason='STORAGE_DEGRADED_OPTIONAL_PAUSED'"
+        ).fetchone()
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        optional = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE request_id=4"
+        ).fetchone()[0]
+    assert tuple(gap) == (None, None)
+    assert tuple(runtime) == ("degraded", "PAUSE_OPTIONAL_FEEDS")
+    assert optional == "paused"
+
+    retained = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=1,
+            receipt_us=1_000,
+            tombstone_us=1_000,
+            resolved_diagnostic_us=1,
+        ),
+    ).run(now_us=105, measured_database_bytes=1, measured_wal_bytes=0)
+    assert retained.payloads_compacted == 1
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM gaps WHERE reason='STORAGE_DEGRADED_OPTIONAL_PAUSED'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_acknowledgement_resolves_only_causal_allowlisted_gap_for_exact_subscription(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, 90, {"event_at_us": 90, "bid": 9.0}),
+    )
+    with connect_v2(database) as connection:
+        required = str(
+            connection.execute(
+                "SELECT subscription_id FROM subscriptions WHERE request_id=3"
+            ).fetchone()[0]
+        )
+        optional = str(
+            connection.execute(
+                "SELECT subscription_id FROM subscriptions WHERE request_id=4"
+            ).fetchone()[0]
+        )
+        for reason, started_at_us in (
+            ("STREAM_STALE", 102),
+            ("RECONNECT_UNCERTAINTY", 103),
+            ("STREAM_STALE", 200),
+            ("STORAGE_DEGRADED_OPTIONAL_PAUSED", 102),
+            ("IBKR_FARM_2103_DEGRADED", 102),
+            ("IBKR_STATUS_420_PACING", 102),
+            ("IBKR_DISCONNECT", 102),
+            ("UNCLEAN_RECORDER_RESTART", 102),
+            ("IBKR_SUBSCRIBE_FAILED", 102),
+        ):
+            Recorder._open_gap_for_run(
+                connection,
+                "run-1",
+                required,
+                started_at_us,
+                reason,
+                True,
+            )
+        Recorder._open_gap_for_run(connection, "run-1", optional, 102, "STREAM_STALE", False)
+
+    assert recorder.drain(now_us=104) == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM gaps WHERE resolved_at_us IS NOT NULL"
+            ).fetchone()[0]
+            == 0
+        )
+
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('run-1', 2, 'future-owner', 120)"
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "continuity_required, optional, requirements_hash, opened_at_us) "
+            "SELECT 'future-subscription', run_id, 2, 99, instrument_id, feed_kind, request_id, "
+            "'active', continuity_required, optional, requirements_hash, 120 "
+            "FROM subscriptions WHERE subscription_id=?",
+            (required,),
+        )
+        Recorder._open_gap_for_run(
+            connection, "run-1", "future-subscription", 102, "STREAM_STALE", True
+        )
+
+    callback = MarketDataCallback("quote", 150, 140, {"event_at_us": 140, "bid": 10.0})
+    first = recorder.receive(state.fences[0], callback)
+    assert recorder.drain(now_us=153) == 1
+    retry = recorder.receive(state.fences[0], callback)
+    assert retry == replace(first, inserted=False)
+    assert recorder.drain(now_us=154) == 0
+
+    with connect_v2(database) as connection:
+        rows = tuple(
+            connection.execute(
+                "SELECT subscription_id, reason, started_at_us, ended_at_us, resolved_at_us "
+                "FROM gaps ORDER BY subscription_id, reason, started_at_us"
+            )
+        )
+    resolved = {(str(row[0]), str(row[1]), int(row[2])): (row[3], row[4]) for row in rows}
+    assert resolved[(required, "STREAM_STALE", 102)] == (150, 153)
+    assert resolved[(required, "RECONNECT_UNCERTAINTY", 103)] == (150, 153)
+    assert resolved[(required, "STREAM_STALE", 200)] == (None, None)
+    assert resolved[(optional, "STREAM_STALE", 102)] == (None, None)
+    assert resolved[("future-subscription", "STREAM_STALE", 102)] == (None, None)
+    for reason in (
+        "STORAGE_DEGRADED_OPTIONAL_PAUSED",
+        "IBKR_FARM_2103_DEGRADED",
+        "IBKR_STATUS_420_PACING",
+        "IBKR_DISCONNECT",
+        "UNCLEAN_RECORDER_RESTART",
+        "IBKR_SUBSCRIBE_FAILED",
+    ):
+        assert resolved[(required, reason, 102)] == (None, None)
+
+
 def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

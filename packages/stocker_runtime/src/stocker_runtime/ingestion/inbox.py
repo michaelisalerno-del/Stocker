@@ -41,6 +41,14 @@ class NormalizationError(ValueError):
     """A callback is durable but cannot safely become a typed market event."""
 
 
+CALLBACK_RECOVERABLE_GAP_REASONS = frozenset(
+    {
+        "RECONNECT_UNCERTAINTY",
+        "STREAM_STALE",
+    }
+)
+
+
 @dataclass(frozen=True)
 class CallbackFence:
     """Durable recorder, socket, and request ownership presented by one callback."""
@@ -802,29 +810,49 @@ class CallbackInbox:
                 "WHERE run_id = ?",
                 (leased.run_id,),
             )
+            event = connection.execute(
+                "SELECT received_at_us, instrument_id, feed_kind FROM market_events "
+                "WHERE event_id=? AND source_sequence=? AND run_id=? "
+                "AND connection_generation=?",
+                (
+                    event_id,
+                    leased.source_sequence,
+                    leased.run_id,
+                    leased.connection_generation,
+                ),
+            ).fetchone()
             subscription = connection.execute(
                 "SELECT subscription_id, instrument_id, feed_kind FROM subscriptions "
-                "WHERE run_id=? "
-                "AND connection_generation=? AND request_id=?",
+                "WHERE run_id=? AND recorder_generation=? "
+                "AND connection_generation=? AND request_id IS ? AND lifecycle='active'",
                 (
                     leased.run_id,
+                    leased.recorder_generation,
                     leased.connection_generation,
                     leased.request_id,
                 ),
             ).fetchone()
-            if subscription is not None:
+            if (
+                event is not None
+                and subscription is not None
+                and str(event["instrument_id"]) == str(subscription["instrument_id"])
+                and str(event["feed_kind"]) == str(subscription["feed_kind"])
+            ):
+                # Gap starts and callback receipt times share the recorder's local
+                # clock. Provider/event times may lag and cannot prove recovery.
+                evidence_at_us = int(event["received_at_us"])
                 connection.execute(
-                    "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
-                    "AND subscription_id IN (SELECT subscription_id FROM subscriptions "
-                    "WHERE run_id=? AND instrument_id=? AND feed_kind=?) "
+                    "UPDATE gaps SET ended_at_us=?, resolved_at_us=? "
+                    "WHERE run_id=? AND subscription_id=? "
+                    "AND reason IN (?, ?) AND started_at_us<=? "
                     "AND resolved_at_us IS NULL",
                     (
-                        acknowledged_at_us,
+                        evidence_at_us,
                         acknowledged_at_us,
                         leased.run_id,
-                        leased.run_id,
-                        str(subscription["instrument_id"]),
-                        str(subscription["feed_kind"]),
+                        str(subscription["subscription_id"]),
+                        *sorted(CALLBACK_RECOVERABLE_GAP_REASONS),
+                        evidence_at_us,
                     ),
                 )
 

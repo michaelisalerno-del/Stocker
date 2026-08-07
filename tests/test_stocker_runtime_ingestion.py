@@ -4,6 +4,10 @@ import hashlib
 import inspect
 import json
 import sqlite3
+import sys
+import threading
+import types
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,6 +17,7 @@ from typer.testing import CliRunner
 
 from stocker_runtime.cli import app
 from stocker_runtime.ingestion import (
+    AdmissionResult,
     AuthoritativeLeaseLost,
     CallbackFence,
     CallbackInbox,
@@ -25,6 +30,7 @@ from stocker_runtime.ingestion import (
     NormalizationError,
     Recorder,
     RecorderConfig,
+    RecorderFatalError,
     SubscriptionSpec,
     WriterAuthority,
 )
@@ -191,6 +197,79 @@ def test_default_inbox_hard_boundary_is_exactly_50000_rows(tmp_path: Path) -> No
         )
 
 
+def test_exact_duplicate_at_50000_rows_is_a_nonaction_not_an_overflow(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    inbox = CallbackInbox(database)
+    callback = MarketDataCallback("quote", 1, None, {"event_at_us": 1, "bid": 100.0})
+    first = inbox.admit(_fence(), callback)
+    with connect_v2(database) as connection:
+        connection.executemany(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle) VALUES (?, 'run-1', 1, 2, 'quote', ?, '{}', ?, "
+            "'pending')",
+            (
+                (f"capacity-{sequence}", sequence, f"{sequence:064x}")
+                for sequence in range(2, 50_001)
+            ),
+        )
+
+    duplicate = inbox.admit(_fence(), callback)
+
+    assert duplicate == replace(first, inserted=False)
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 50_000
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
+        assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
+
+
+def test_concurrent_admission_serializes_the_exact_50000_row_boundary(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    with connect_v2(database) as connection:
+        connection.executemany(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle) VALUES (?, 'run-1', 1, 2, 'quote', ?, '{}', ?, "
+            "'pending')",
+            (
+                (f"capacity-{sequence}", sequence, f"{sequence:064x}")
+                for sequence in range(1, 50_000)
+            ),
+        )
+    inbox = CallbackInbox(database)
+    start = threading.Barrier(2)
+
+    def admit(value: float) -> object:
+        start.wait(timeout=5)
+        try:
+            return inbox.admit(
+                _fence(),
+                MarketDataCallback("quote", 50_000, None, {"event_at_us": 50_000, "bid": value}),
+            )
+        except InboxFullError as error:
+            return error
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(admit, (100.0, 101.0)))
+
+    assert sum(isinstance(result, InboxFullError) for result in results) == 1
+    assert sum(isinstance(result, AdmissionResult) for result in results) == 1
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 50_000
+        assert (
+            connection.execute("SELECT max(source_sequence) FROM callback_inbox").fetchone()[0]
+            == 50_000
+        )
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert tuple(runtime) == ("fatal", "INBOX_FULL", "disconnected")
+
+
 def test_public_ingestion_surface_has_no_broker_authority() -> None:
     from stocker_runtime.ingestion.ibkr_market_data import IBKRMarketData
 
@@ -305,6 +384,68 @@ def test_crash_after_admission_and_after_projection_recovers_idempotently(tmp_pa
     assert tuple(row) == ("acknowledged", 2)
 
 
+def test_acknowledgement_write_failure_preserves_leased_callback_and_projection(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    admitted = inbox.admit(
+        fence,
+        MarketDataCallback("quote", 10, None, {"event_at_us": 10, "bid": 100.0}),
+    )
+    leased = inbox.lease_pending("worker", now_us=11, lease_us=10, limit=1, authority=_authority())[
+        0
+    ]
+    projected = inbox.project(leased, authority=_authority())
+    with connect_v2(database) as connection:
+        connection.execute(
+            "CREATE TRIGGER fail_acknowledgement BEFORE UPDATE OF lifecycle ON callback_inbox "
+            "WHEN NEW.lifecycle='acknowledged' BEGIN SELECT RAISE(ABORT, 'disk full'); END"
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="disk full"):
+        inbox.acknowledge(
+            leased,
+            projected.event_id,
+            acknowledged_at_us=12,
+            authority=_authority(),
+        )
+
+    with connect_v2(database, verify_schema=False) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json, normalized_event_id FROM callback_inbox "
+            "WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE event_id=?", (projected.event_id,)
+            ).fetchone()[0]
+            == 1
+        )
+        connection.execute("DROP TRIGGER fail_acknowledgement")
+    assert callback[0] == "leased"
+    assert callback[1] is not None
+    assert callback[2] is None
+
+    inbox.acknowledge(
+        leased,
+        projected.event_id,
+        acknowledged_at_us=13,
+        authority=_authority(),
+    )
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT lifecycle, normalized_event_id FROM callback_inbox WHERE source_sequence=?",
+                (admitted.source_sequence,),
+            ).fetchone()
+        ) == ("acknowledged", projected.event_id)
+
+
 def test_poison_callback_is_failed_without_blocking_the_next_callback(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -385,6 +526,51 @@ def test_receipt_chain_matches_phase2_contract_and_authorizes_compaction(tmp_pat
     assert receipt is not None
     assert receipt.callback_count == 2
     assert compacted.payloads_compacted == 2
+
+
+def test_receipt_write_failure_preserves_terminal_payload_and_unassigned_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    admitted = inbox.admit(
+        fence,
+        MarketDataCallback("quote", 10, None, {"event_at_us": 10, "bid": 100.0}),
+    )
+    leased = inbox.lease_pending("worker", now_us=11, lease_us=10, limit=1, authority=_authority())[
+        0
+    ]
+    projected = inbox.project(leased, authority=_authority())
+    inbox.acknowledge(
+        leased,
+        projected.event_id,
+        acknowledged_at_us=12,
+        authority=_authority(),
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "CREATE TRIGGER fail_receipt BEFORE INSERT ON callback_receipts "
+            "BEGIN SELECT RAISE(ABORT, 'disk full'); END"
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="disk full"):
+        inbox.create_receipt("run-1", created_at_us=13, authority=_authority())
+
+    with connect_v2(database, verify_schema=False) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json, receipt_batch_id FROM callback_inbox "
+            "WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 0
+        connection.execute("DROP TRIGGER fail_receipt")
+    assert tuple(callback) == ("acknowledged", '{"bid":100.0,"event_at_us":10}', None)
+
+    receipt = inbox.create_receipt("run-1", created_at_us=14, authority=_authority())
+    assert receipt is not None and receipt.callback_count == 1
 
 
 class FakeMarketData:
@@ -681,6 +867,46 @@ def test_recorder_consumes_optional_and_fatal_storage_cap_actions(
     assert tuple(runtime) == ("fatal", "WAL_CAP_FATAL", 100, 64)
 
 
+def test_maintenance_database_failure_preserves_admitted_evidence_and_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
+    )
+
+    class FailingRetention:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            raise sqlite3.OperationalError("disk I/O error after callback admission")
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", FailingRetention)
+
+    with pytest.raises(RecorderFatalError, match="retention invariant failed"):
+        recorder.maintain(now_us=102)
+
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert callback[0] == "pending" and callback[1] is not None
+    assert tuple(runtime) == ("fatal", "RETENTION_INVARIANT_FAILED", "disconnected")
+    assert adapter.connected is False
+    assert set(adapter.cancelled) == {3, 4}
+
+
 def test_backward_callback_receive_order_is_a_persisted_global_fatal(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -829,6 +1055,127 @@ def test_official_tick_semantics_do_not_mix_quotes_and_trades() -> None:
     assert _size_tick_projection("quotes", 3) == ("quote", "ask_size")
     assert _size_tick_projection("trades", 3) is None
     assert _size_tick_projection("trades", 5) == ("trade", "size")
+
+
+def test_official_wrapper_translates_realistic_market_data_sequence_without_broker_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.ingestion import IBKRSubscription
+    from stocker_runtime.ingestion.official_bridge import create_official_bridge
+
+    clients: list[object] = []
+
+    class EWrapper:
+        pass
+
+    class Contract:
+        pass
+
+    class EClient:
+        def __init__(self, wrapper: object) -> None:
+            self.wrapper = wrapper
+            self.requests: list[tuple[str, int]] = []
+            self.cancelled: list[tuple[str, int]] = []
+            self.disconnected = False
+            clients.append(self)
+
+        def connect(self, host: str, port: int, client_id: int) -> bool:
+            assert (host, port, client_id) == ("127.0.0.1", 4001, 71)
+            return True
+
+        def run(self) -> None:
+            return None
+
+        def disconnect(self) -> None:
+            self.disconnected = True
+
+        def reqMktData(self, request_id: int, *_args: object) -> None:  # noqa: N802
+            self.requests.append(("market", request_id))
+
+        def reqRealTimeBars(self, request_id: int, *_args: object) -> None:  # noqa: N802
+            self.requests.append(("bars", request_id))
+
+        def cancelMktData(self, request_id: int) -> None:  # noqa: N802
+            self.cancelled.append(("market", request_id))
+
+        def cancelRealTimeBars(self, request_id: int) -> None:  # noqa: N802
+            self.cancelled.append(("bars", request_id))
+
+    package = types.ModuleType("ibapi")
+    client_module = types.ModuleType("ibapi.client")
+    contract_module = types.ModuleType("ibapi.contract")
+    wrapper_module = types.ModuleType("ibapi.wrapper")
+    client_module.EClient = EClient  # type: ignore[attr-defined]
+    contract_module.Contract = Contract  # type: ignore[attr-defined]
+    wrapper_module.EWrapper = EWrapper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ibapi", package)
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
+    monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+
+    bridge = create_official_bridge(
+        host="127.0.0.1",
+        port=4001,
+        client_id=71,
+        read_only=True,
+        external_read_only_verified=True,
+        subscriptions=(
+            IBKRSubscription(3, 123, "AAPL", "STK", "SMART", "USD", "quotes"),
+            IBKRSubscription(4, 123, "AAPL", "STK", "SMART", "USD", "trades"),
+            IBKRSubscription(5, 123, "AAPL", "STK", "SMART", "USD", "bars"),
+        ),
+    )
+    callbacks: list[tuple[CallbackFence, MarketDataCallback]] = []
+    statuses: list[MarketDataStatus] = []
+    disconnects: list[int] = []
+
+    def capture(fence: CallbackFence, callback: MarketDataCallback) -> AdmissionResult:
+        callbacks.append((fence, callback))
+        return AdmissionResult(len(callbacks), f"event-{len(callbacks)}", True)
+
+    bridge.set_callback(capture)
+    bridge.set_status_callback(statuses.append)
+    bridge.set_disconnect_callback(disconnects.append)
+    bridge.connect()
+    for request_id in (3, 4, 5):
+        bridge.subscribe(CallbackFence("run-1", 1, 1, request_id, f"sub-{request_id}"))
+
+    client = clients[0]
+    wrapper = client.wrapper  # type: ignore[attr-defined]
+    wrapper.tickPrice(3, 1, 100.0, object())
+    wrapper.tickSize(3, 0, 10)
+    wrapper.tickPrice(3, 4, 999.0, object())
+    wrapper.tickPrice(4, 4, 100.25, object())
+    wrapper.tickSize(4, 5, 3)
+    wrapper.realtimeBar(5, 1_700_000_000, 99.0, 101.0, 98.0, 100.0, 50, 0, 2)
+    wrapper.error(3, 420, "pacing")
+    wrapper.error(-1, 2103, "market farm disconnected")
+    wrapper.error(3, 9999, "ignored")
+    wrapper.connectionClosed()
+
+    assert [(item.callback_kind, item.payload) for _, item in callbacks] == [
+        ("quote", {"event_at_us": callbacks[0][1].received_at_us, "bid": 100.0}),
+        ("quote", {"event_at_us": callbacks[1][1].received_at_us, "bid_size": 10.0}),
+        ("trade", {"event_at_us": callbacks[2][1].received_at_us, "last": 100.25}),
+        ("trade", {"event_at_us": callbacks[3][1].received_at_us, "size": 3.0}),
+        (
+            "bar",
+            {
+                "event_at_us": 1_700_000_000_000_000,
+                "open": 99.0,
+                "high": 101.0,
+                "low": 98.0,
+                "close": 100.0,
+                "volume": 50.0,
+            },
+        ),
+    ]
+    assert [(status.kind, status.code, status.request_id) for status in statuses] == [
+        ("pacing", 420, 3),
+        ("farm_degraded", 2103, None),
+    ]
+    assert len(disconnects) == 1
+    assert client.requests == [("market", 3), ("market", 4), ("bars", 5)]  # type: ignore[attr-defined]
 
 
 def test_stale_recorder_object_cannot_mutate_or_touch_adapter_after_takeover(
@@ -1052,6 +1399,73 @@ def test_replay_rejects_oversized_fixture_before_starting_run(tmp_path: Path) ->
         assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
 
 
+def test_replay_rejects_more_than_50000_callbacks_before_starting_run(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    config_path = tmp_path / "runtime.json"
+    fixture_path = tmp_path / "fixture.json"
+    config_path.write_text(json.dumps(_config(database).model_dump(mode="json")), encoding="utf-8")
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "instruments": [],
+                "subscriptions": [],
+                "callbacks": [None] * 50_001,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app, ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "100"]
+    )
+
+    assert result.exit_code == 1
+    assert "at most 50,000" in result.stdout
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+
+
+def test_replay_rejects_oversized_callback_and_cleans_started_writer(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    config_path = tmp_path / "runtime.json"
+    fixture_path = tmp_path / "fixture.json"
+    config_path.write_text(json.dumps(_config(database).model_dump(mode="json")), encoding="utf-8")
+    instrument, subscriptions = _specs()
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "instruments": [instrument.__dict__],
+                "subscriptions": [item.__dict__ for item in subscriptions],
+                "callbacks": [
+                    {
+                        "request_id": 3,
+                        "callback_kind": "quote",
+                        "received_at_us": 101,
+                        "provider_at_us": None,
+                        "payload": {"event_at_us": 101, "blob": "x" * 65_536},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app, ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "100"]
+    )
+
+    assert result.exit_code == 1
+    assert "payload exceeds 64 KiB" in result.stdout
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 0
+        assert tuple(
+            connection.execute("SELECT lifecycle, connection_state FROM runtime_state").fetchone()
+        ) == ("stopped", "disconnected")
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
+
+
 def test_receipts_accept_interleaved_global_sequences_without_skipping_same_run(
     tmp_path: Path,
 ) -> None:
@@ -1112,6 +1526,101 @@ def _force_recorder_takeover(database: Path) -> None:
             "UPDATE runtime_state SET recorder_generation=2, lifecycle='running', "
             "connection_state='connected', process_heartbeat_at_us=101 WHERE run_id='run-1'"
         )
+
+
+def test_authority_takeover_during_slow_drain_preserves_lease_and_replacement_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    original_project = recorder.inbox.project
+
+    def slow_project(*args: object, **kwargs: object) -> object:
+        entered.set()
+        assert release.wait(timeout=5)
+        return original_project(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(recorder.inbox, "project", slow_project)
+    disconnects = adapter.disconnect_calls
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(recorder.drain, now_us=102)
+        assert entered.wait(timeout=5)
+        _force_recorder_takeover(database)
+        release.set()
+        with pytest.raises(AuthoritativeLeaseLost):
+            future.result(timeout=5)
+
+    assert adapter.disconnect_calls == disconnects
+    assert adapter.cancelled == []
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        replacement = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert callback[0] == "leased" and callback[1] is not None
+    assert tuple(replacement) == (2, "running", None, "connected")
+
+
+def test_authority_takeover_during_slow_maintenance_cannot_publish_old_measurements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        prior_measurements = tuple(
+            connection.execute("SELECT database_bytes, wal_bytes FROM runtime_state").fetchone()
+        )
+    entered = threading.Event()
+    release = threading.Event()
+
+    class SlowRetention:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            entered.set()
+            assert release.wait(timeout=5)
+            assert callable(precondition)
+            with connect_v2(database) as connection:
+                precondition(connection)
+            raise AssertionError("lost authority must stop retention")
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", SlowRetention)
+    disconnects = adapter.disconnect_calls
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(recorder.maintain, now_us=101)
+        assert entered.wait(timeout=5)
+        _force_recorder_takeover(database)
+        release.set()
+        with pytest.raises(AuthoritativeLeaseLost):
+            future.result(timeout=5)
+
+    assert adapter.disconnect_calls == disconnects
+    assert adapter.cancelled == []
+    with connect_v2(database) as connection:
+        replacement = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason, connection_state, "
+            "database_bytes, wal_bytes FROM runtime_state"
+        ).fetchone()
+    assert tuple(replacement[:4]) == (2, "running", None, "connected")
+    assert tuple(replacement[4:]) == prior_measurements
 
 
 @pytest.mark.parametrize("failure_surface", ("connect", "subscribe"))

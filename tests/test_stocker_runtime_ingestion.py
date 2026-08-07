@@ -1631,3 +1631,133 @@ def test_late_farm_recovery_across_reconnect_is_scoped_and_stale_authority_canno
         )
     assert tuple(replacement) == (2, "running", None)
     assert current == {3: "active", 4: "active"}
+
+
+@pytest.mark.parametrize(
+    ("emitted", "expected_states", "expected_runtime"),
+    (
+        (
+            (MarketDataStatus("farm_degraded", 2103, None, "quotes lost", 101, ("quotes",)),),
+            {3: "degraded", 4: "active"},
+            ("degraded", "IBKR_FARM_2103_DEGRADED"),
+        ),
+        (
+            (MarketDataStatus("farm_degraded", 2105, None, "bars lost", 101, ("bars",)),),
+            {3: "active", 4: "degraded"},
+            ("running", None),
+        ),
+        (
+            (
+                MarketDataStatus("farm_degraded", 2103, None, "quotes lost", 101, ("quotes",)),
+                MarketDataStatus("farm_recovered", 2104, None, "quotes ok", 102, ("quotes",)),
+            ),
+            {3: "active", 4: "active"},
+            ("running", None),
+        ),
+    ),
+)
+def test_connect_time_farm_callbacks_are_reconciled_before_running(
+    tmp_path: Path,
+    emitted: tuple[MarketDataStatus, ...],
+    expected_states: dict[int, str],
+    expected_runtime: tuple[str, str | None],
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+
+    class ConnectStatusMarketData(FakeMarketData):
+        def connect(self) -> None:
+            super().connect()
+            assert callable(self.status_callback)
+            for status in emitted:
+                self.status_callback(status)
+
+    recorder = Recorder(_config(database), ConnectStatusMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        unresolved = tuple(
+            connection.execute(
+                "SELECT reason FROM gaps WHERE reason LIKE 'IBKR_FARM_%' "
+                "AND resolved_at_us IS NULL ORDER BY reason"
+            )
+        )
+    assert states == expected_states
+    assert tuple(runtime) == expected_runtime
+    assert tuple(row[0] for row in unresolved) == (
+        () if len(emitted) == 2 else (f"IBKR_FARM_{emitted[0].code}_DEGRADED",)
+    )
+
+
+def test_subscribe_time_required_farm_outage_prevents_false_active_and_running(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+
+    class SubscribeStatusMarketData(FakeMarketData):
+        def subscribe(self, fence: CallbackFence) -> None:
+            super().subscribe(fence)
+            if fence.request_id == 3:
+                assert callable(self.status_callback)
+                self.status_callback(
+                    MarketDataStatus("farm_degraded", 2103, None, "quotes lost", 101, ("quotes",))
+                )
+
+    recorder = Recorder(_config(database), SubscribeStatusMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    with connect_v2(database) as connection:
+        states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        gap = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
+        ).fetchone()
+    assert states == {3: "degraded", 4: "active"}
+    assert tuple(runtime) == ("degraded", "IBKR_FARM_2103_DEGRADED")
+    assert gap is not None and gap[0] is None
+
+
+def test_connect_time_farm_callback_cannot_mutate_after_authority_takeover(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+
+    class TakeoverStatusMarketData(FakeMarketData):
+        def connect(self) -> None:
+            super().connect()
+            assert callable(self.status_callback)
+            self.status_callback(
+                MarketDataStatus("farm_degraded", 2103, None, "quotes lost", 101, ("quotes",))
+            )
+            _force_recorder_takeover(database)
+            with connect_v2(database) as connection:
+                connection.execute(
+                    "UPDATE runtime_state SET reason='REPLACEMENT_OWNS_STARTUP' "
+                    "WHERE recorder_generation=2"
+                )
+            self.status_callback(
+                MarketDataStatus("farm_recovered", 2104, None, "quotes ok", 102, ("quotes",))
+            )
+
+    adapter = TakeoverStatusMarketData()
+    recorder = Recorder(_config(database), adapter)
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    assert adapter.connected is False
+    with connect_v2(database) as connection:
+        replacement = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason FROM runtime_state"
+        ).fetchone()
+        gap = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_FARM_2103_DEGRADED'"
+        ).fetchone()
+    assert tuple(replacement) == (2, "running", "REPLACEMENT_OWNS_STARTUP")
+    assert gap is not None and gap[0] is None

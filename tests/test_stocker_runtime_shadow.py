@@ -257,6 +257,121 @@ def test_shadow_uses_first_causal_ask_then_bid_and_closes_deterministically(tmp_
     assert outcome[4] == "complete"
 
 
+def test_split_bid_ask_callbacks_form_causal_snapshots_with_exact_side_provenance(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "split-quotes.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 99.0, 100.0, 1),
+            (2, "entry-bid", "AAPL", 100.0, None, 2),
+            (3, "entry-ask", "AAPL", None, 106.0, 3),
+            (4, "exit-bid", "AAPL", 105.0, None, 4),
+        ),
+    )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=2),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1,),
+    )
+
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=4) == 1
+
+    with connect_v2(database) as connection:
+        position = connection.execute(
+            "SELECT lifecycle, opened_at_us, closed_at_us FROM shadow_positions"
+        ).fetchone()
+        leg = connection.execute(
+            "SELECT entry_market_event_id, entry_bid_market_event_id, "
+            "entry_ask_market_event_id, entry_price, exit_market_event_id, "
+            "exit_bid_market_event_id, exit_ask_market_event_id, exit_price "
+            "FROM shadow_legs"
+        ).fetchone()
+        mark = connection.execute("SELECT payload_json FROM shadow_marks").fetchone()
+        outcome = connection.execute(
+            "SELECT gross_pnl, payload_json FROM shadow_outcomes"
+        ).fetchone()
+
+    expected_exit_quote_ids = [
+        {
+            "ask_event_id": "entry-ask",
+            "bid_event_id": "exit-bid",
+            "instrument_id": "AAPL",
+            "leg_number": 0,
+        }
+    ]
+    assert tuple(position) == ("closed", 3, 4)
+    assert tuple(leg) == (
+        "entry-ask",
+        "entry-bid",
+        "entry-ask",
+        106.0,
+        "exit-bid",
+        "exit-bid",
+        "entry-ask",
+        105.0,
+    )
+    assert json.loads(mark["payload_json"])["quote_event_ids"] == expected_exit_quote_ids
+    assert outcome["gross_pnl"] == -1.0
+    outcome_payload = json.loads(outcome["payload_json"])
+    assert outcome_payload["exit_quote_event_ids"] == expected_exit_quote_ids
+    assert outcome_payload["mfe_quote_event_ids"] == expected_exit_quote_ids
+    assert outcome_payload["mae_quote_event_ids"] == expected_exit_quote_ids
+    assert outcome_payload["policy_hash"] == hashlib.sha256(
+        json.dumps(
+            {
+                "cost": policy.cost.model_dump(mode="json"),
+                "fill": policy.fill.model_dump(mode="json"),
+                "horizons_us": policy.horizons_us,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+
+
+def test_split_quote_state_survives_restart_and_source_compaction_idempotently(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "split-restart.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 99.0, 100.0, 1),
+            (2, "entry-bid", "AAPL", 100.0, None, 2),
+            (3, "entry-ask", "AAPL", None, 106.0, 3),
+            (4, "exit-bid", "AAPL", 105.0, None, 4),
+        ),
+    )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=2),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1,),
+    )
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=3) == 1
+    raw = sqlite3.connect(database)
+    try:
+        raw.execute("PRAGMA foreign_keys=OFF")
+        raw.execute("DELETE FROM market_events WHERE event_id IN ('entry-bid', 'entry-ask')")
+        raw.commit()
+    finally:
+        raw.close()
+
+    restarted = ShadowEngine(database, run_id="run", policy=policy)
+    assert restarted.run_once(now_us=4) == 1
+    assert restarted.run_once(now_us=4) == 0
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT lifecycle, exit_bid_market_event_id, exit_ask_market_event_id "
+                "FROM shadow_positions JOIN shadow_legs USING(position_id)"
+            ).fetchone()
+        ) == ("closed", "exit-bid", "entry-ask")
+        assert connection.execute("SELECT count(*) FROM shadow_marks").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM shadow_outcomes").fetchone()[0] == 1
+
+
 def test_shadow_rejects_non_shadow_runs_and_invalid_quantity(tmp_path: Path) -> None:
     database = tmp_path / "shadow.sqlite3"
     _seed(database, quantity=None)
@@ -269,6 +384,26 @@ def test_shadow_rejects_non_shadow_runs_and_invalid_quantity(tmp_path: Path) -> 
             "invalid",
             "quantity_unavailable",
         )
+
+
+def test_shadow_rejects_more_than_eight_trade_legs_without_partial_state(tmp_path: Path) -> None:
+    database = tmp_path / "too-many-legs.sqlite3"
+    legs = tuple((f"LEG-{index}", "buy", 1.0, "USD") for index in range(9))
+    _seed_case(
+        database,
+        quotes=((1, "input", "AAPL", 100.0, 101.0, 1),),
+        legs=legs,
+    )
+
+    assert ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=1) == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT lifecycle, invalid_reason FROM shadow_positions"
+            ).fetchone()
+        ) == ("invalid", "leg_count_exceeds_limit")
+        assert connection.execute("SELECT count(*) FROM shadow_quote_state").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
 
 
 def _policy(*, max_quote_age_us: int = 100, per_side_bps: float = 10) -> ShadowPolicy:
@@ -503,14 +638,101 @@ def test_evidence_projection_is_bounded_and_resumes_after_restart(tmp_path: Path
         first_cursor = int(
             connection.execute("SELECT next_source_sequence FROM shadow_progress").fetchone()[0]
         )
-    assert first_cursor == 258
-    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=1_000) == 0
+    assert first_cursor == 10
+    restarted = ShadowEngine(database, run_id="run", policy=policy)
+    assert restarted.run_once(now_us=1_000) == 0
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute("SELECT next_source_sequence FROM shadow_progress").fetchone()[0]
+            == 18
+        )
+    for _ in range(40):
+        restarted.run_once(now_us=1_000)
     with connect_v2(database) as connection:
         assert (
             connection.execute("SELECT next_source_sequence FROM shadow_progress").fetchone()[0]
             == 303
         )
         assert connection.execute("SELECT count(*) FROM shadow_marks").fetchone()[0] <= 8
+
+
+def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_restart(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "fair-schedule.sqlite3"
+    quotes: list[QuoteSeed] = [(1, "input", "AAPL", 100.0, 101.0, 1)]
+    quotes.extend(
+        (sequence, f"quote-{sequence}", "AAPL", 100.0, 101.0, sequence)
+        for sequence in range(2, 303)
+    )
+    _seed_case(database, quotes=tuple(quotes))
+    with connect_v2(database) as connection:
+        for ordinal in range(2, 34):
+            output_id = f"proposal-{ordinal:02d}"
+            connection.execute(
+                "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+                "subject_instrument_id, emitted_at_us, as_of_at_us, valid_until_at_us, "
+                "direction, strength, confidence, horizon_us, first_input_event_id, "
+                "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+                "payload_json, payload_hash, content_hash, data_class, authority_status) "
+                "SELECT ?, run_id, instance_id, output_kind, subject_instrument_id, emitted_at_us, "
+                "as_of_at_us, valid_until_at_us, direction, strength, confidence, horizon_us, "
+                "first_input_event_id, last_input_event_id, input_watermark, input_events_hash, "
+                "?, payload_json, payload_hash, ?, data_class, authority_status "
+                "FROM idea_outputs WHERE output_id='proposal'",
+                (output_id, ordinal, _hash(output_id)),
+            )
+            connection.execute(
+                "INSERT INTO idea_output_inputs VALUES (?, 'input', 0)", (output_id,)
+            )
+            connection.execute(
+                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
+                "target, quantity_value, currency) VALUES (?, 0, 'AAPL', 'buy', 'long', 1, 'USD')",
+                (output_id,),
+            )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=1_000) == 32
+    with connect_v2(database) as connection:
+        first_cursor = connection.execute(
+            "SELECT progress.next_source_sequence FROM shadow_progress progress "
+            "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "WHERE position.proposed_trade_output_id='proposal'"
+        ).fetchone()[0]
+        assert first_cursor == 10
+        assert connection.execute("SELECT count(*) FROM shadow_positions").fetchone()[0] == 32
+        assert connection.execute(
+            "SELECT 1 FROM shadow_positions WHERE proposed_trade_output_id='proposal-33'"
+        ).fetchone() is None
+
+    restarted = ShadowEngine(database, run_id="run", policy=policy)
+    assert restarted.run_once(now_us=1_000) == 1
+    with connect_v2(database) as connection:
+        schedule = tuple(
+            connection.execute(
+                "SELECT position.proposed_trade_output_id, progress.schedule_count, "
+                "progress.next_source_sequence FROM shadow_progress progress "
+                "JOIN shadow_positions position ON position.position_id=progress.position_id "
+                "WHERE position.proposed_trade_output_id IN ('proposal', 'proposal-33') "
+                "ORDER BY position.proposed_trade_output_id"
+            )
+        )
+        assert tuple(tuple(row) for row in schedule) == (
+            ("proposal", 2, 18),
+            ("proposal-33", 1, 10),
+        )
+        assert connection.execute("SELECT count(*) FROM shadow_positions").fetchone()[0] == 33
+
+    assert restarted.run_once(now_us=1_000) == 0
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute("SELECT min(schedule_count) FROM shadow_progress").fetchone()[0]
+            == 2
+        )
 
 
 def test_open_recovery_uses_durable_progress_after_entry_event_is_pruned(tmp_path: Path) -> None:
@@ -555,6 +777,50 @@ def test_retention_preserves_unprocessed_open_evidence_until_final_horizon(
         assert connection.execute(
             "SELECT event_id FROM market_events WHERE event_id='exit'"
         ).fetchone()[0] == "exit"
+
+
+def test_retention_does_not_preserve_unrelated_instrument_in_same_shadow_run(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "instrument-retention.sqlite3"
+    _seed(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, "
+            "currency) "
+            "VALUES ('MSFT', ?, 'stock', 'MSFT', 'SMART', 'USD')",
+            (_hash("MSFT"),),
+        )
+        _insert_quote(
+            connection,
+            sequence=4,
+            event_id="unrelated-msft",
+            instrument_id="MSFT",
+            bid=200.0,
+            ask=201.0,
+            event_at_us=12,
+        )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=2) == 1
+
+    RetentionManager(database, RetentionPolicy(raw_market_event_us=10)).run(
+        now_us=100,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+
+    with connect_v2(database) as connection:
+        retained_ids = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT event_id FROM market_events WHERE event_id IN ('exit', 'unrelated-msft')"
+            )
+        }
+    assert retained_ids == {"exit"}
 
 
 def test_one_shadow_failure_records_one_incident_and_other_proposal_advances(

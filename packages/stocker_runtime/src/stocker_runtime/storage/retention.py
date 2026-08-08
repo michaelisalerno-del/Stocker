@@ -715,7 +715,9 @@ class RetentionManager:
             "WHERE derivation.input_event_id=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
             "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "JOIN shadow_legs leg ON leg.position_id=position.position_id "
             "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
+            "AND leg.instrument_id=market_events.instrument_id "
             "AND market_events.source_sequence>=progress.next_source_sequence "
             "AND progress.final_target_at_us>=?)",
             now_us - self.policy.raw_market_event_us,
@@ -736,7 +738,9 @@ class RetentionManager:
             "WHERE derivation.input_event_id=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
             "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "JOIN shadow_legs leg ON leg.position_id=position.position_id "
             "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
+            "AND leg.instrument_id=market_events.instrument_id "
             "AND coalesce(market_events.source_sequence, "
             "market_events.derived_after_source_sequence)>=progress.next_source_sequence "
             "AND progress.final_target_at_us>=?)",

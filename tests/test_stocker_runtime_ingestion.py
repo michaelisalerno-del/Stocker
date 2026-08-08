@@ -1191,6 +1191,7 @@ def test_official_tick_semantics_do_not_mix_quotes_and_trades() -> None:
     )
 
     assert _price_tick_projection("quotes", 1) == ("quote", "bid")
+    assert _price_tick_projection("quotes", 2) == ("quote", "ask")
     assert _price_tick_projection("quotes", 4) is None
     assert _price_tick_projection("trades", 4) == ("trade", "last")
     assert _size_tick_projection("quotes", 3) == ("quote", "ask_size")
@@ -1284,6 +1285,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     client = clients[0]
     wrapper = client.wrapper  # type: ignore[attr-defined]
     wrapper.tickPrice(3, 1, 100.0, object())
+    wrapper.tickPrice(3, 2, 101.0, object())
     wrapper.tickSize(3, 0, 10)
     wrapper.tickPrice(3, 4, 999.0, object())
     wrapper.tickPrice(4, 4, 100.25, object())
@@ -1296,9 +1298,10 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
 
     assert [(item.callback_kind, item.payload) for _, item in callbacks] == [
         ("quote", {"event_at_us": callbacks[0][1].received_at_us, "bid": 100.0}),
-        ("quote", {"event_at_us": callbacks[1][1].received_at_us, "bid_size": 10.0}),
-        ("trade", {"event_at_us": callbacks[2][1].received_at_us, "last": 100.25}),
-        ("trade", {"event_at_us": callbacks[3][1].received_at_us, "size": 3.0}),
+        ("quote", {"event_at_us": callbacks[1][1].received_at_us, "ask": 101.0}),
+        ("quote", {"event_at_us": callbacks[2][1].received_at_us, "bid_size": 10.0}),
+        ("trade", {"event_at_us": callbacks[3][1].received_at_us, "last": 100.25}),
+        ("trade", {"event_at_us": callbacks[4][1].received_at_us, "size": 3.0}),
         (
             "bar",
             {

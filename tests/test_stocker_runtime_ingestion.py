@@ -114,7 +114,6 @@ def _seed_subscription(database: Path) -> CallbackFence:
 def test_recorder_config_rejects_unsafe_mode_host_and_read_only_state(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     for changes in (
-        {"mode": "shadow"},
         {"mode": "paper"},
         {"mode": "live"},
         {"host": "192.0.2.1"},

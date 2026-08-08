@@ -39,6 +39,7 @@ from stocker_runtime.ingestion.inbox import (
     NormalizationError,
     WriterAuthority,
 )
+from stocker_runtime.shadow import ShadowEngine
 from stocker_runtime.storage import RetentionManager, StorageCapState, connect_v2
 
 
@@ -112,7 +113,7 @@ class RecorderConfig(BaseModel):
     database: Path
     run_id: str = Field(min_length=1)
     owner_id: str = Field(min_length=1)
-    mode: Literal["prospective_record"]
+    mode: Literal["prospective_record", "shadow"]
     host: str
     port: int = Field(ge=1, le=65_535)
     client_id: int = Field(ge=0)
@@ -185,6 +186,7 @@ class Recorder:
         )
         self.idea_requirements = aggregate_requirements(self._ideas)
         self._idea_runner: IdeaRunner | None = None
+        self._shadow_engine: ShadowEngine | None = None
 
     def _authority(self) -> WriterAuthority:
         state = self._authority_state()
@@ -283,17 +285,22 @@ class Recorder:
             if run is None:
                 connection.execute(
                     "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, "
-                    "git_commit, data_class, status) VALUES (?, 'prospective_record', 'ibkr', "
-                    "?, ?, ?, 'prospective_protected', 'running')",
+                    "git_commit, data_class, status) VALUES (?, ?, 'ibkr', ?, ?, ?, ?, 'running')",
                     (
                         self.config.run_id,
+                        self.config.mode,
                         now_us,
                         self.config.config_hash,
                         self.config.git_commit,
+                        (
+                            "prospective_protected"
+                            if self.config.mode == "prospective_record"
+                            else "shadow_protected"
+                        ),
                     ),
                 )
             elif (
-                str(run["mode"]) != "prospective_record"
+                str(run["mode"]) != self.config.mode
                 or str(run["config_hash"]) != self.config.config_hash
             ):
                 raise RecorderFatalError("run mode or frozen configuration changed")
@@ -354,6 +361,11 @@ class Recorder:
             connection.close()
         self.state = RecorderState(self.config.run_id, generation, connection_generation, fences)
         self._idea_runner = IdeaRunner(self.config.database, self._ideas, run_id=self.config.run_id)
+        self._shadow_engine = (
+            ShadowEngine(self.config.database, run_id=self.config.run_id)
+            if self.config.mode == "shadow"
+            else None
+        )
         self._idea_runner.deactivate_unconfigured(run_id=self.config.run_id, now_us=now_us)
         for plugin in self._ideas:
             self._idea_runner.activate(
@@ -1082,6 +1094,8 @@ class Recorder:
             self._heartbeat(now_us)
             if self._idea_runner is not None:
                 self._idea_runner.run_once(now_us=now_us)
+            if self._shadow_engine is not None:
+                self._shadow_engine.run_once(now_us=now_us)
             return processed
         except CallbackTimestampOrderingLoss as error:
             self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", now_us)

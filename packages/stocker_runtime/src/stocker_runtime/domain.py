@@ -247,6 +247,22 @@ class DomainModel(BaseModel):
         return self.model_copy(update=update, deep=deep)
 
 
+class ShadowFillPolicy(DomainModel):
+    """Versioned, conservative virtual-price convention; it is not a broker fill."""
+
+    model_id: str = Field(min_length=1, max_length=128)
+    entry_convention: Literal["buy_ask_sell_bid"] = "buy_ask_sell_bid"
+    exit_convention: Literal["buy_bid_sell_ask"] = "buy_bid_sell_ask"
+    max_quote_age_us: int = Field(default=60_000_000, gt=0)
+
+
+class ShadowCostPolicy(DomainModel):
+    """Versioned virtual cost policy, expressed as a non-negative basis-point charge."""
+
+    model_id: str = Field(min_length=1, max_length=128)
+    per_side_bps: float = Field(default=0.0, ge=0.0, le=10_000.0)
+
+
 class MarketEvent(DomainModel):
     """Immutable normalized market evidence with a 64 KiB payload ceiling."""
 

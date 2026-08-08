@@ -1,0 +1,354 @@
+"""Deterministic valuation of unapproved proposed trades as virtual shadow evidence."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
+
+from stocker_runtime.domain import ShadowCostPolicy, ShadowFillPolicy
+from stocker_runtime.storage import connect_v2
+
+
+@dataclass(frozen=True)
+class ShadowPolicy:
+    """Frozen per-engine valuation policy with bounded outcome horizons."""
+
+    fill: ShadowFillPolicy
+    cost: ShadowCostPolicy
+    horizons_us: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not self.horizons_us or len(self.horizons_us) > 8:
+            raise ValueError("shadow policy requires 1..8 horizons")
+        if tuple(sorted(set(self.horizons_us))) != self.horizons_us:
+            raise ValueError("shadow horizons must be unique and ascending")
+        if self.horizons_us[-1] > 30 * 24 * 60 * 60 * 1_000_000:
+            raise ValueError("shadow horizon exceeds 30 days")
+
+    @classmethod
+    def default(cls) -> ShadowPolicy:
+        return cls(
+            fill=ShadowFillPolicy(model_id="conservative_quote_v1"),
+            cost=ShadowCostPolicy(model_id="zero_bps_v1"),
+            horizons_us=(30 * 60 * 1_000_000,),
+        )
+
+
+class ShadowEngine:
+    """One-writer, restart-safe virtual evidence projector for an existing shadow run."""
+
+    def __init__(
+        self, database_path: str | Path, *, run_id: str, policy: ShadowPolicy | None = None
+    ):
+        self.database_path = Path(database_path)
+        self.run_id = run_id
+        self.policy = policy or ShadowPolicy.default()
+
+    @staticmethod
+    def _position_id(output_id: str) -> str:
+        return hashlib.sha256(f"shadow-position-v1:{output_id}".encode()).hexdigest()
+
+    def run_once(self, *, now_us: int) -> int:
+        """Advance every proposal once; exact retries are harmless and causal only."""
+
+        with connect_v2(self.database_path) as connection:
+            run = connection.execute(
+                "SELECT mode, data_class FROM runs WHERE run_id=?", (self.run_id,)
+            ).fetchone()
+            if (
+                run is None
+                or str(run["mode"]) != "shadow"
+                or str(run["data_class"]) != "shadow_protected"
+            ):
+                raise ValueError("shadow engine requires a shadow-protected shadow run")
+            connection.execute("BEGIN IMMEDIATE")
+            proposals = tuple(
+                connection.execute(
+                    "SELECT output.output_id, output.instance_id, output.emitted_at_us, "
+                    "output.last_input_event_id FROM idea_outputs output "
+                    "LEFT JOIN shadow_positions position "
+                    "ON position.proposed_trade_output_id=output.output_id "
+                    "WHERE output.run_id=? AND output.output_kind='proposed_trade' "
+                    "AND output.authority_status='unapproved' "
+                    "AND output.data_class='shadow_protected' "
+                    "AND (position.position_id IS NULL "
+                    "OR position.lifecycle IN ('pending','open')) "
+                    "ORDER BY output.emitted_at_us, output.output_id",
+                    (self.run_id,),
+                )
+            )
+            changed = 0
+            for proposal in proposals:
+                changed += self._advance(connection, proposal, now_us)
+            connection.commit()
+            return changed
+
+    def _advance(self, connection: sqlite3.Connection, proposal: sqlite3.Row, now_us: int) -> int:
+        output_id = str(proposal["output_id"])
+        position_id = self._position_id(output_id)
+        position = connection.execute(
+            "SELECT * FROM shadow_positions WHERE proposed_trade_output_id=?", (output_id,)
+        ).fetchone()
+        if position is None:
+            legs = tuple(
+                connection.execute(
+                    "SELECT leg_number, instrument_id, action, quantity_value, currency "
+                    "FROM idea_output_legs WHERE output_id=? ORDER BY leg_number",
+                    (output_id,),
+                )
+            )
+            currencies = {str(leg["currency"] or "") for leg in legs}
+            if not legs or any(leg["quantity_value"] is None for leg in legs):
+                return self._invalidate(
+                    connection, position_id, proposal, "quantity_unavailable", now_us
+                )
+            if len(currencies) != 1 or not next(iter(currencies)):
+                return self._invalidate(
+                    connection, position_id, proposal, "currency_unavailable", now_us
+                )
+            connection.execute(
+                "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+                "instance_id, "
+                "lifecycle, cost_model_id, fill_model_id, currency, data_class) "
+                "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 'shadow_protected')",
+                (
+                    position_id,
+                    output_id,
+                    self.run_id,
+                    str(proposal["instance_id"]),
+                    self.policy.cost.model_id,
+                    self.policy.fill.model_id,
+                    next(iter(currencies)),
+                ),
+            )
+            position = connection.execute(
+                "SELECT * FROM shadow_positions WHERE position_id=?", (position_id,)
+            ).fetchone()
+        if str(position["lifecycle"]) == "pending":
+            return self._open_if_ready(connection, position, proposal, now_us)
+        return self._mark_or_close(connection, position, now_us)
+
+    def _quote(
+        self,
+        connection: sqlite3.Connection,
+        instrument_id: str,
+        after_sequence: int,
+        now_us: int,
+        *,
+        latest: bool = False,
+    ) -> sqlite3.Row | None:
+        return cast(
+            sqlite3.Row | None,
+            connection.execute(
+                "SELECT event_id, source_sequence, event_at_us, bid_value, ask_value "
+                "FROM market_events "
+                "WHERE run_id=? AND instrument_id=? AND source_sequence>? AND event_at_us<=? "
+                "AND bid_value IS NOT NULL AND ask_value IS NOT NULL "
+                "ORDER BY source_sequence " + ("DESC" if latest else "ASC") + ", event_id LIMIT 1",
+                (self.run_id, instrument_id, after_sequence, now_us),
+            ).fetchone(),
+        )
+
+    def _open_if_ready(
+        self,
+        connection: sqlite3.Connection,
+        position: sqlite3.Row,
+        proposal: sqlite3.Row,
+        now_us: int,
+    ) -> int:
+        boundary = connection.execute(
+            "SELECT source_sequence FROM market_events WHERE event_id=?",
+            (proposal["last_input_event_id"],),
+        ).fetchone()
+        if boundary is None or boundary[0] is None:
+            return 0
+        legs = tuple(
+            connection.execute(
+                "SELECT leg_number, instrument_id, action, quantity_value FROM idea_output_legs "
+                "WHERE output_id=? ORDER BY leg_number",
+                (proposal["output_id"],),
+            )
+        )
+        quotes = tuple(
+            self._quote(connection, str(leg["instrument_id"]), int(boundary[0]), now_us)
+            for leg in legs
+        )
+        if any(quote is None for quote in quotes):
+            return 0
+        if any(
+            float(quote["bid_value"]) <= 0
+            or float(quote["ask_value"]) <= 0
+            or float(quote["bid_value"]) > float(quote["ask_value"])
+            for quote in quotes
+            if quote is not None
+        ):
+            return self._invalidate(
+                connection,
+                str(position["position_id"]),
+                proposal,
+                "crossed_or_invalid_quote",
+                now_us,
+            )
+        opened_at = max(int(quote["event_at_us"]) for quote in quotes if quote is not None)
+        for leg, quote in zip(legs, quotes, strict=True):
+            assert quote is not None
+            price = float(quote["ask_value"] if str(leg["action"]) == "buy" else quote["bid_value"])
+            connection.execute(
+                "INSERT INTO shadow_legs(position_id, leg_number, instrument_id, side, quantity, "
+                "entry_market_event_id, entry_price) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    position["position_id"],
+                    leg["leg_number"],
+                    leg["instrument_id"],
+                    leg["action"],
+                    leg["quantity_value"],
+                    quote["event_id"],
+                    price,
+                ),
+            )
+        connection.execute(
+            "UPDATE shadow_positions SET lifecycle='open', opened_at_us=? WHERE position_id=?",
+            (opened_at, position["position_id"]),
+        )
+        return 1
+
+    def _mark_or_close(
+        self, connection: sqlite3.Connection, position: sqlite3.Row, now_us: int
+    ) -> int:
+        legs = tuple(
+            connection.execute(
+                "SELECT * FROM shadow_legs WHERE position_id=? ORDER BY leg_number",
+                (position["position_id"],),
+            )
+        )
+        entry_boundary = max(
+            int(
+                connection.execute(
+                    "SELECT source_sequence FROM market_events WHERE event_id=?",
+                    (leg["entry_market_event_id"],),
+                ).fetchone()[0]
+            )
+            for leg in legs
+        )
+        quotes = tuple(
+            self._quote(connection, str(leg["instrument_id"]), entry_boundary, now_us, latest=True)
+            for leg in legs
+        )
+        if any(quote is None for quote in quotes):
+            return 0
+        if any(
+            now_us - int(quote["event_at_us"]) > self.policy.fill.max_quote_age_us
+            for quote in quotes
+            if quote is not None
+        ):
+            return 0
+        if any(
+            float(quote["bid_value"]) <= 0
+            or float(quote["ask_value"]) <= 0
+            or float(quote["bid_value"]) > float(quote["ask_value"])
+            for quote in quotes
+            if quote is not None
+        ):
+            return 0
+        gross = 0.0
+        entry_notional = 0.0
+        mark_ids: list[str] = []
+        for leg, quote in zip(legs, quotes, strict=True):
+            assert quote is not None
+            entry = float(leg["entry_price"])
+            quantity = float(leg["quantity"])
+            mark = float(quote["bid_value"] if str(leg["side"]) == "buy" else quote["ask_value"])
+            sign = 1.0 if str(leg["side"]) == "buy" else -1.0
+            gross += sign * (mark - entry) * quantity
+            entry_notional += entry * quantity
+            mark_ids.append(str(quote["event_id"]))
+        cost = entry_notional * self.policy.cost.per_side_bps / 10_000.0
+        marked_at = max(int(quote["event_at_us"]) for quote in quotes if quote is not None)
+        payload = json.dumps(
+            {"market_event_ids": mark_ids, "cost_model_id": self.policy.cost.model_id},
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        connection.execute(
+            "INSERT INTO shadow_marks(position_id, marked_at_us, gross_value, gross_pnl, net_pnl, "
+            "return_value, quality_bits, payload_json) VALUES (?, ?, ?, ?, ?, ?, 0, ?) "
+            "ON CONFLICT(position_id, marked_at_us) DO NOTHING",
+            (
+                position["position_id"],
+                marked_at,
+                entry_notional + gross,
+                gross,
+                gross - 2 * cost,
+                gross / entry_notional if entry_notional else None,
+                payload,
+            ),
+        )
+        if now_us < int(position["opened_at_us"]) + self.policy.horizons_us[-1]:
+            return 1
+        for leg, quote in zip(legs, quotes, strict=True):
+            assert quote is not None
+            exit_price = float(
+                quote["bid_value"] if str(leg["side"]) == "buy" else quote["ask_value"]
+            )
+            connection.execute(
+                "UPDATE shadow_legs SET exit_market_event_id=?, exit_price=? "
+                "WHERE position_id=? AND leg_number=?",
+                (quote["event_id"], exit_price, position["position_id"], leg["leg_number"]),
+            )
+        extremes = tuple(
+            connection.execute(
+                "SELECT gross_pnl FROM shadow_marks WHERE position_id=?", (position["position_id"],)
+            )
+        )
+        connection.execute(
+            "UPDATE shadow_positions SET lifecycle='closed', closed_at_us=? WHERE position_id=?",
+            (marked_at, position["position_id"]),
+        )
+        connection.execute(
+            "INSERT INTO shadow_outcomes(position_id, outcome_at_us, reason, gross_pnl, net_pnl, "
+            "return_value, mfe, mae, completeness, payload_json) "
+            "VALUES (?, ?, 'horizon', ?, ?, ?, ?, ?, 'complete', ?) "
+            "ON CONFLICT(position_id) DO NOTHING",
+            (
+                position["position_id"],
+                marked_at,
+                gross,
+                gross - 2 * cost,
+                gross / entry_notional if entry_notional else None,
+                max(float(row[0]) for row in extremes),
+                min(float(row[0]) for row in extremes),
+                payload,
+            ),
+        )
+        return 1
+
+    def _invalidate(
+        self,
+        connection: sqlite3.Connection,
+        position_id: str,
+        proposal: sqlite3.Row,
+        reason: str,
+        now_us: int,
+    ) -> int:
+        connection.execute(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, closed_at_us, lifecycle, cost_model_id, fill_model_id, currency, "
+            "invalid_reason, data_class) "
+            "VALUES (?, ?, ?, ?, ?, 'invalid', ?, ?, 'UNKNOWN', ?, 'shadow_protected') "
+            "ON CONFLICT(proposed_trade_output_id) DO NOTHING",
+            (
+                position_id,
+                proposal["output_id"],
+                self.run_id,
+                proposal["instance_id"],
+                now_us,
+                self.policy.cost.model_id,
+                self.policy.fill.model_id,
+                reason,
+            ),
+        )
+        return 1

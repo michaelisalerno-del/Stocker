@@ -12,6 +12,8 @@ from stocker_runtime.domain import (
     ProposedTradeLeg,
     ProtectedDataClass,
     RuntimeMode,
+    ShadowCostPolicy,
+    ShadowFillPolicy,
     Signal,
     canonical_json_bytes,
 )
@@ -44,6 +46,8 @@ __all__ = [
     "ProposedTrade",
     "ProposedTradeLeg",
     "RuntimeMode",
+    "ShadowCostPolicy",
+    "ShadowFillPolicy",
     "Signal",
     "canonical_json_bytes",
 ]

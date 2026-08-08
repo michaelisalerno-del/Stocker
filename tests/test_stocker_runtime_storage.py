@@ -61,7 +61,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -167,7 +167,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (7, '0007_future.sql', ?, 2)",
+            "VALUES (8, '0008_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -179,6 +179,108 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
         connection.execute("UPDATE schema_migrations SET sha256 = ?", ("0" * 64,))
     with pytest.raises(SchemaError, match="checksum"):
         connect_v2(tampered)
+
+
+def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_history(
+    tmp_path: Path,
+) -> None:
+    def initialize_v6(database: Path, migration_root: Path) -> None:
+        migration_root.mkdir()
+        for migration in migration_plan()[:6]:
+            (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+        initialize_database(database, migration_root=migration_root, applied_at_us=1)
+        _seed_output_dependencies(database, verify_schema=False)
+
+    def insert_position(
+        database: Path,
+        *,
+        suffix: str,
+        ordinal: int,
+        policy_json: str,
+        policy_hash: str,
+    ) -> None:
+        with connect_v2(database, verify_schema=False) as connection:
+            output_id = f"proposal-{suffix}"
+            position_id = f"position-{suffix}"
+            connection.execute(
+                "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+                "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
+                "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+                "payload_json, payload_hash, content_hash, data_class, authority_status) "
+                "VALUES (?, 'run-1', 'instance-1', 'proposed_trade', 'instrument-1', 30, 25, "
+                "'event-1', 'event-1', 'event-1', ?, ?, '{}', ?, ?, "
+                "'shadow_protected', 'unapproved')",
+                (output_id, "3" * 64, ordinal, "4" * 64, suffix * 64),
+            )
+            connection.execute(
+                "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+                "instance_id, lifecycle, cost_model_id, fill_model_id, currency, data_class, "
+                "policy_json, policy_hash) VALUES (?, ?, 'run-1', 'instance-1', 'pending', "
+                "'cost', 'fill', 'USD', 'shadow_protected', ?, ?)",
+                (position_id, output_id, policy_json, policy_hash),
+            )
+            connection.execute(
+                "INSERT INTO shadow_progress(position_id, entry_after_source_sequence, "
+                "next_source_sequence, next_horizon_index, updated_at_us, "
+                "pending_retention_deadline_us) VALUES (?, 1, 2, 0, 30, 100)",
+                (position_id,),
+            )
+
+    backfill_database = tmp_path / "backfill-v6.sqlite3"
+    initialize_v6(backfill_database, tmp_path / "backfill-migrations")
+    insert_position(
+        backfill_database,
+        suffix="a",
+        ordinal=0,
+        policy_json='{"id":"a"}',
+        policy_hash="a" * 64,
+    )
+
+    result = migrate_database(backfill_database, applied_at_us=2)
+
+    assert result.applied_versions == (7,)
+    with connect_v2(backfill_database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT run_id, policy_hash, policy_json FROM shadow_run_policies"
+            ).fetchone()
+        ) == ("run-1", "a" * 64, '{"id":"a"}')
+        assert (
+            connection.execute("SELECT pending_evidence_drained FROM shadow_progress").fetchone()[0]
+            == 0
+        )
+
+    conflict_database = tmp_path / "conflict-v6.sqlite3"
+    initialize_v6(conflict_database, tmp_path / "conflict-migrations")
+    insert_position(
+        conflict_database,
+        suffix="a",
+        ordinal=0,
+        policy_json='{"id":"a"}',
+        policy_hash="a" * 64,
+    )
+    insert_position(
+        conflict_database,
+        suffix="b",
+        ordinal=1,
+        policy_json='{"id":"b"}',
+        policy_hash="b" * 64,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+        migrate_database(conflict_database, applied_at_us=2)
+    with connect_v2(conflict_database, verify_schema=False) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_migrations").fetchone()[0] == 6
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_schema WHERE name='shadow_run_policies'"
+            ).fetchone()
+            is None
+        )
+        progress_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(shadow_progress)")
+        }
+        assert "pending_evidence_drained" not in progress_columns
 
 
 def test_migration_plan_requires_order_and_failed_migration_is_atomic(tmp_path: Path) -> None:
@@ -577,8 +679,8 @@ def test_canonical_json_admission_is_bounded_and_deterministic() -> None:
         canonical_json_text({"payload": "large"}, max_bytes=8)
 
 
-def _seed_output_dependencies(database: Path) -> None:
-    with connect_v2(database) as connection:
+def _seed_output_dependencies(database: Path, *, verify_schema: bool = True) -> None:
+    with connect_v2(database, verify_schema=verify_schema) as connection:
         connection.execute(
             "INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)",
             ("run-1", "shadow", "ibkr", 10, "a" * 64, "deadbee", "shadow_protected", "created"),
@@ -2004,11 +2106,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6],
-        "current_version": 6,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7],
+        "current_version": 7,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 6, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 7, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

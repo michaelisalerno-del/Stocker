@@ -7,6 +7,7 @@ import sqlite3
 from stocker_runtime.storage.repository import canonical_json_text
 
 ENTRY_EVIDENCE_EXPIRED = "entry_evidence_expired"
+MAX_PENDING_TERMINALIZATIONS_PER_PASS = 32
 MAX_SHADOW_OUTCOME_PAYLOAD_BYTES = 16_384
 
 
@@ -21,26 +22,30 @@ def terminalize_expired_pending_positions(
 
     if limit <= 0:
         return ()
-    select = (
-        "SELECT position.position_id, position.proposed_trade_output_id, "
-        "position.policy_hash FROM shadow_positions position "
-        "JOIN shadow_progress progress ON progress.position_id=position.position_id "
-        "WHERE position.lifecycle='pending' "
-        "AND progress.pending_retention_deadline_us<? "
-    )
+    limit = min(limit, MAX_PENDING_TERMINALIZATIONS_PER_PASS)
     if position_id is not None:
         rows = tuple(
             connection.execute(
-                select + "AND position.position_id=? "
-                "ORDER BY progress.pending_retention_deadline_us, position.position_id LIMIT ?",
-                (now_us, position_id, limit),
+                "SELECT position.position_id, position.proposed_trade_output_id, "
+                "position.policy_hash FROM shadow_positions position "
+                "JOIN shadow_progress progress ON progress.position_id=position.position_id "
+                "WHERE position.position_id=? AND position.lifecycle='pending' "
+                "AND progress.pending_evidence_drained=1 "
+                "AND progress.pending_retention_deadline_us<? LIMIT ?",
+                (position_id, now_us, limit),
             )
         )
     else:
         rows = tuple(
             connection.execute(
-                select
-                + "ORDER BY progress.pending_retention_deadline_us, position.position_id LIMIT ?",
+                "SELECT position.position_id, position.proposed_trade_output_id, "
+                "position.policy_hash FROM shadow_progress progress "
+                "INDEXED BY shadow_progress_pending_expiry_idx "
+                "JOIN shadow_positions position ON position.position_id=progress.position_id "
+                "WHERE progress.pending_evidence_drained=1 "
+                "AND progress.pending_retention_deadline_us<? "
+                "AND position.lifecycle='pending' "
+                "ORDER BY progress.pending_retention_deadline_us, progress.position_id LIMIT ?",
                 (now_us, limit),
             )
         )

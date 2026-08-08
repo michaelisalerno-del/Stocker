@@ -20,7 +20,10 @@ from stocker_runtime.storage.repository import (
     canonical_json_text,
     receipt_chain_hash,
 )
-from stocker_runtime.storage.shadow import terminalize_expired_pending_positions
+from stocker_runtime.storage.shadow import (
+    MAX_PENDING_TERMINALIZATIONS_PER_PASS,
+    terminalize_expired_pending_positions,
+)
 
 DAY_US = 86_400_000_000
 MAX_MAINTENANCE_BATCH_ROWS = 10_000
@@ -731,10 +734,9 @@ class RetentionManager:
             "AND leg.instrument_id=market_events.instrument_id "
             "AND market_events.source_sequence>=progress.next_source_sequence "
             "AND market_events.source_sequence>progress.entry_after_source_sequence "
-            "AND progress.pending_retention_deadline_us>=?)",
+            "AND market_events.received_at_us<=progress.pending_retention_deadline_us)",
             now_us - self.policy.raw_market_event_us,
             now_us - self.policy.raw_market_event_us,
-            now_us,
         )
         prune(
             "market_events",
@@ -821,7 +823,7 @@ class RetentionManager:
             terminalized = terminalize_expired_pending_positions(
                 connection,
                 now_us=now_us,
-                limit=remaining,
+                limit=min(remaining, MAX_PENDING_TERMINALIZATIONS_PER_PASS),
             )
             check_deadline()
             remaining -= len(terminalized)

@@ -114,6 +114,23 @@ class ShadowEngine:
     def _policy_hash(self) -> str:
         return hashlib.sha256(self._policy_json().encode()).hexdigest()
 
+    def _bind_policy(self, connection: sqlite3.Connection) -> None:
+        binding = connection.execute(
+            "SELECT policy_hash, policy_json FROM shadow_run_policies WHERE run_id=?",
+            (self.run_id,),
+        ).fetchone()
+        policy_hash = self._policy_hash()
+        policy_json = self._policy_json()
+        if binding is None:
+            connection.execute(
+                "INSERT INTO shadow_run_policies(run_id, policy_hash, policy_json) "
+                "VALUES (?, ?, ?)",
+                (self.run_id, policy_hash, policy_json),
+            )
+            return
+        if tuple(binding) != (policy_hash, policy_json):
+            raise _PolicyMismatch("shadow run policy differs from its durable binding")
+
     def run_once(self, *, now_us: int) -> int:
         """Advance bounded causal evidence; isolate one virtual position's failure."""
 
@@ -128,6 +145,7 @@ class ShadowEngine:
             ):
                 raise ValueError("shadow engine requires a shadow-protected shadow run")
             connection.execute("BEGIN IMMEDIATE")
+            self._bind_policy(connection)
             scheduled = tuple(
                 connection.execute(
                     "SELECT output_id FROM shadow_schedule "
@@ -189,13 +207,6 @@ class ShadowEngine:
         sequence_limit: int,
     ) -> tuple[int, int]:
         position = self._ensure_position(connection, proposal, now_us)
-        if terminalize_expired_pending_positions(
-            connection,
-            now_us=now_us,
-            limit=1,
-            position_id=str(position["position_id"]),
-        ):
-            return 1, 0
         if str(position["lifecycle"]) == "invalid":
             return 1, 0
         if str(position["policy_hash"]) != self._policy_hash():
@@ -226,13 +237,16 @@ class ShadowEngine:
             connection,
             legs,
             next_sequence=int(progress["next_source_sequence"]),
+            received_cutoff_us=(
+                min(now_us, int(progress["pending_retention_deadline_us"]))
+                if str(position["lifecycle"]) == "pending"
+                else now_us
+            ),
             limit=sequence_limit,
         )
         changed = 0
         consumed = 0
         for event in events:
-            if int(event["received_at_us"]) > now_us:
-                break
             consumed += 1
             sequence = int(event["source_sequence"])
             self._apply_event(
@@ -275,6 +289,25 @@ class ShadowEngine:
             progress = connection.execute(
                 "SELECT * FROM shadow_progress WHERE position_id=?", (position["position_id"],)
             ).fetchone()
+        if (
+            str(position["lifecycle"]) == "pending"
+            and now_us > int(progress["pending_retention_deadline_us"])
+            and len(events) < sequence_limit
+        ):
+            connection.execute(
+                "UPDATE shadow_progress SET pending_evidence_drained=1, updated_at_us=? "
+                "WHERE position_id=?",
+                (now_us, position["position_id"]),
+            )
+            terminalized = terminalize_expired_pending_positions(
+                connection,
+                now_us=now_us,
+                limit=1,
+                position_id=str(position["position_id"]),
+            )
+            if len(terminalized) != 1:
+                raise RuntimeError("drained pending shadow position did not terminalize")
+            changed += 1
         return changed, consumed
 
     def _ensure_position(
@@ -403,6 +436,7 @@ class ShadowEngine:
         legs: tuple[sqlite3.Row, ...],
         *,
         next_sequence: int,
+        received_cutoff_us: int,
         limit: int,
     ) -> tuple[sqlite3.Row, ...]:
         fetched: list[sqlite3.Row] = []
@@ -415,11 +449,13 @@ class ShadowEngine:
                     "INDEXED BY market_events_shadow_raw_idx "
                     "WHERE run_id=? AND instrument_id=? AND event_kind='quote' "
                     "AND source_sequence>=? AND source_sequence IS NOT NULL "
+                    "AND received_at_us<=? "
                     "ORDER BY source_sequence, event_id LIMIT ?",
                     (
                         self.run_id,
                         instrument_id,
                         next_sequence,
+                        received_cutoff_us,
                         min(limit, MAX_EVENTS_PER_INSTRUMENT_FETCH),
                     ),
                 )

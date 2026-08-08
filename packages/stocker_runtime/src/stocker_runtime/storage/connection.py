@@ -57,6 +57,7 @@ EXPECTED_TABLES = frozenset(
         "shadow_positions",
         "shadow_progress",
         "shadow_quote_state",
+        "shadow_run_policies",
         "shadow_schedule",
         "shadow_legs",
         "shadow_marks",

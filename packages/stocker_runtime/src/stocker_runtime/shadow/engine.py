@@ -161,6 +161,7 @@ class ShadowEngine:
         latest: bool = False,
         not_before_us: int = 0,
         before_sequence: int | None = None,
+        reference_at_us: int | None = None,
     ) -> sqlite3.Row | None:
         upper_sequence = (
             before_sequence if before_sequence is not None else 9_223_372_036_854_775_807
@@ -174,10 +175,11 @@ class ShadowEngine:
                 (self.run_id, instrument_id, after_sequence, upper_sequence, not_before_us, now_us),
             )
         )
+        reference_at = now_us if reference_at_us is None else reference_at_us
         valid = tuple(
             row
             for row in rows
-            if now_us - int(row["event_at_us"]) <= self.policy.fill.max_quote_age_us
+            if reference_at - int(row["event_at_us"]) <= self.policy.fill.max_quote_age_us
             and float(row["bid_value"] or 0) > 0
             and float(row["ask_value"] or 0) > 0
             and float(row["bid_value"]) <= float(row["ask_value"])
@@ -382,14 +384,16 @@ class ShadowEngine:
         placeholders = ",".join("?" for _ in instrument_ids)
         sequences = tuple(
             connection.execute(
-                f"SELECT DISTINCT source_sequence FROM market_events WHERE run_id=? "  # noqa: S608
+                f"SELECT source_sequence, max(event_at_us) AS reference_at_us "  # noqa: S608
+                "FROM market_events WHERE run_id=? "
                 f"AND instrument_id IN ({placeholders}) AND source_sequence>? AND event_at_us<=? "
-                "ORDER BY source_sequence",
+                "GROUP BY source_sequence ORDER BY source_sequence",
                 (self.run_id, *instrument_ids, entry_boundary, now_us),
             )
         )
         for sequence_row in sequences:
             sequence = int(sequence_row[0])
+            reference_at_us = int(sequence_row["reference_at_us"])
             quotes = tuple(
                 self._quote(
                     connection,
@@ -398,6 +402,7 @@ class ShadowEngine:
                     now_us,
                     latest=True,
                     before_sequence=sequence,
+                    reference_at_us=reference_at_us,
                 )
                 for leg in legs
             )

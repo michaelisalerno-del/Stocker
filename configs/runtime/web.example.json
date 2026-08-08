@@ -1,6 +1,6 @@
 {
-  "database": "data/stocker-v2.sqlite3",
-  "backup_directory": null,
+  "database": "/var/lib/stocker/v2/stocker-v2.sqlite3",
+  "backup_directory": "/var/lib/stocker/backups-v2",
   "run_id": null,
   "host": "127.0.0.1",
   "port": 8000,

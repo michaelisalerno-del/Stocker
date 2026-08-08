@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule the weekly Stocker V2 backup tier
+
+[Timer]
+OnCalendar=Sun *-*-* 22:45:00 UTC
+Persistent=true
+RandomizedDelaySec=900
+Unit=stocker-backup-weekly.service
+
+[Install]
+WantedBy=timers.target

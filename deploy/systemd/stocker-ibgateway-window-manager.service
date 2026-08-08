@@ -1,5 +1,5 @@
 [Unit]
-Description=Private window manager for the manually authenticated IB Gateway
+Description=Private window manager for the market-data-only IB Gateway
 Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
 Requires=stocker-ibgateway-display.service
 After=stocker-ibgateway-display.service

@@ -1,11 +1,11 @@
 [Unit]
-Description=Daily Stocker prospective database backup
+Description=Schedule the daily Stocker V2 backup tier
 
 [Timer]
 OnCalendar=*-*-* 23:45:00 UTC
 Persistent=true
 RandomizedDelaySec=300
-Unit=stocker-backup.service
+Unit=stocker-backup-daily.service
 
 [Install]
 WantedBy=timers.target

@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from stocker_runtime.cli import app as runtime_cli
-from stocker_runtime.storage import connect_v2, initialize_database
+from stocker_runtime.storage import connect_v2, create_backup, initialize_database
 from stocker_runtime.web import WebConfig, create_web_app
 from stocker_runtime.web import queries as web_queries
 from stocker_runtime.web.queries import (
@@ -803,7 +803,15 @@ def test_meta_and_diagnostics_are_bounded_and_authority_free(tmp_path: Path) -> 
                 (f"gap-{number}", 200 + number, 201 + number, 202 + number),
             )
     for number in range(3):
-        (backup_directory / f"backup-{number}.json").write_text("{}", encoding="utf-8")
+        create_backup(
+            database,
+            backup_directory,
+            tier="daily",
+            created_at_us=300 + number,
+        )
+    (backup_directory / "callback-payload.json").write_text(
+        '{"secret":"not diagnostics"}', encoding="utf-8"
+    )
     client = TestClient(create_web_app(_config(database, backup_directory=backup_directory)))
 
     meta = client.get("/api/v2/meta")
@@ -826,6 +834,8 @@ def test_meta_and_diagnostics_are_bounded_and_authority_free(tmp_path: Path) -> 
     assert len(diagnostics["gaps"]) == 2
     assert len(diagnostics["subscriptions"]) == 1
     assert len(diagnostics["backups"]["items"]) == 2
+    assert diagnostics["backups"]["status"]["state"] == "healthy"
+    assert "secret" not in json.dumps(diagnostics)
     assert diagnostics["database"]["query_only"] is True
     assert diagnostics["hashes"]["build"] == "c4bb701"
     assert diagnostics["hashes"]["configuration"] == "b" * 64

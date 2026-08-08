@@ -1,25 +1,17 @@
 [Unit]
-Description=Stocker V2 query-only web application
+Description=Stocker V2 weekly checked compressed backup
 Documentation=file:/opt/stocker/current/docs/plans/stocker-v2-platform.md
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
+After=stocker-recorder.service
 ConditionPathExists=/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
 
 [Service]
-Type=simple
-User=stocker-web
+Type=oneshot
+User=stocker-backup
 Group=stocker-readers
 WorkingDirectory=/opt/stocker/current
-EnvironmentFile=/etc/stocker/stocker-web.env
+EnvironmentFile=-/etc/stocker/stocker-backup.env
 ExecCondition=+/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
-ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime web run --config /etc/stocker/web.json
-Restart=on-failure
-RestartSec=10
-RestartPreventExitStatus=78
-KillSignal=SIGTERM
-TimeoutStopSec=30
+ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime backup create --database /var/lib/stocker/v2/stocker-v2.sqlite3 --destination /var/lib/stocker/backups-v2 --tier weekly
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true
@@ -31,12 +23,8 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX
 IPAddressDeny=any
-IPAddressAllow=localhost
 ReadOnlyPaths=/var/lib/stocker/v2
-ReadOnlyPaths=/var/lib/stocker/backups-v2
 ReadWritePaths=/var/lib/stocker/v2/stocker-v2.sqlite3-shm
-
-[Install]
-WantedBy=multi-user.target
+ReadWritePaths=/var/lib/stocker/backups-v2

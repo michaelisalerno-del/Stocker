@@ -40,7 +40,12 @@ from stocker_runtime.ingestion.inbox import (
     WriterAuthority,
 )
 from stocker_runtime.shadow import ShadowEngine
-from stocker_runtime.storage import RetentionManager, StorageCapState, connect_v2
+from stocker_runtime.storage import (
+    RetentionManager,
+    StorageCapState,
+    connect_v2,
+    read_backup_manifests,
+)
 
 
 class DuplicateWriterError(RuntimeError):
@@ -125,6 +130,7 @@ class RecorderConfig(BaseModel):
     callback_lease_us: int = Field(default=30_000_000, ge=5_000_000)
     market_data_line_limit: int = Field(default=100, ge=1, le=10_000)
     idea_config: Path | None = None
+    backup_directory: Path | None = None
 
     @model_validator(mode="after")
     def loopback_only(self) -> Self:
@@ -1687,6 +1693,7 @@ class Recorder:
             connection.commit()
         finally:
             connection.close()
+        self._sync_backup_status(now_us=now_us)
         if not result.admission_allowed:
             self._fatal(result.required_action or "STORAGE_CAP_FATAL", now_us)
             raise RecorderFatalError(result.required_action or "storage cap closed admission")
@@ -1694,6 +1701,47 @@ class Recorder:
             self._pause_optional(now_us)
             self._set_lifecycle("degraded", result.required_action, now_us)
         return result.cap_state
+
+    def _sync_backup_status(self, *, now_us: int) -> None:
+        """Persist backup health through the sole authoritative database writer."""
+
+        if self.config.backup_directory is None:
+            return
+        status = read_backup_manifests(self.config.backup_directory, limit=1).status
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            if status.state == "healthy":
+                connection.execute(
+                    "UPDATE incidents SET resolved_at_us=? WHERE run_id=? AND scope='storage' "
+                    "AND code='BACKUP_DEGRADED' AND resolved_at_us IS NULL",
+                    (now_us, self.config.run_id),
+                )
+            else:
+                existing = connection.execute(
+                    "SELECT 1 FROM incidents WHERE run_id=? AND scope='storage' "
+                    "AND code='BACKUP_DEGRADED' AND resolved_at_us IS NULL LIMIT 1",
+                    (self.config.run_id,),
+                ).fetchone()
+                if existing is None:
+                    status_code = status.code or "BACKUP_STATUS_UNAVAILABLE"
+                    opened_at_us = min(status.checked_at_us or now_us, now_us)
+                    incident_id = hashlib.sha256(
+                        f"{self.config.run_id}|backup|{opened_at_us}|{status_code}".encode()
+                    ).hexdigest()
+                    details_json = canonical_json_bytes(
+                        cast(JsonValue, {"backup_status_code": status_code})
+                    ).decode()
+                    connection.execute(
+                        "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+                        "opened_at_us, details_json) VALUES (?, ?, 'storage', 'degraded', "
+                        "'BACKUP_DEGRADED', ?, ?)",
+                        (incident_id, self.config.run_id, opened_at_us, details_json),
+                    )
+            connection.commit()
+        finally:
+            connection.close()
 
     def _set_lifecycle(self, lifecycle: str, reason: str | None, now_us: int) -> None:
         connection = connect_v2(self.config.database)

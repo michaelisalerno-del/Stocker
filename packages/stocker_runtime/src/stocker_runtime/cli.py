@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import signal
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 import typer
 
@@ -17,6 +19,7 @@ from stocker_runtime.domain import JsonValue, canonical_json_bytes
 from stocker_runtime.ingestion import (
     AdmissionResult,
     CallbackFence,
+    IBKRMarketData,
     IBKRSubscription,
     InstrumentSpec,
     MarketDataCallback,
@@ -26,10 +29,14 @@ from stocker_runtime.ingestion import (
     load_recorder_config,
 )
 from stocker_runtime.storage import (
+    BackupError,
+    BackupPolicy,
     RetentionManager,
     SchemaError,
+    create_backup,
     initialize_database,
     migrate_database,
+    restore_backup,
 )
 
 app = typer.Typer(
@@ -37,13 +44,19 @@ app = typer.Typer(
     help="Initialize, verify, migrate, and retain an isolated Stocker V2 database.",
 )
 web_app = typer.Typer(help="Run the bounded read-only Stocker V2 web process.")
+backup_app = typer.Typer(help="Create and restore checked compressed Stocker V2 backups.")
+recorder_app = typer.Typer(help="Run the sole market-data-only Stocker V2 recorder.")
 app.add_typer(web_app, name="web")
+app.add_typer(backup_app, name="backup")
+app.add_typer(recorder_app, name="recorder")
 
 MAX_REPLAY_FILE_BYTES = 8 * 1024 * 1024
 MAX_REPLAY_INSTRUMENTS = 10_000
 MAX_REPLAY_SUBSCRIPTIONS = 10_000
 MAX_REPLAY_CALLBACKS = 50_000
 MAX_REPLAY_CALLBACK_BYTES = 65_536
+RECORDER_DRAIN_INTERVAL_SECONDS = 0.05
+RECORDER_MAINTENANCE_INTERVAL_US = 60_000_000
 
 
 class ReplayBlockedError(RuntimeError):
@@ -159,6 +172,192 @@ def validate_recorder_command(config: Annotated[Path, typer.Argument()]) -> None
             "status": "ok",
         }
     )
+
+
+@backup_app.command("create")
+def backup_create_command(
+    database: Annotated[Path, typer.Option("--database", exists=True, dir_okay=False)],
+    destination: Annotated[Path, typer.Option("--destination", file_okay=False)],
+    tier: Annotated[Literal["daily", "weekly"], typer.Option("--tier")],
+    created_at_us: Annotated[int | None, typer.Option("--created-at-us", min=0)] = None,
+) -> None:
+    """Create one checked online backup under the frozen retention policy."""
+
+    try:
+        artifact = create_backup(
+            database,
+            destination,
+            tier=tier,
+            created_at_us=created_at_us,
+            policy=BackupPolicy(),
+        )
+    except (BackupError, OSError, ValueError, sqlite3.Error) as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=1) from error
+    _emit(
+        {
+            "archive_filename": artifact.archive_path.name,
+            "compressed_bytes": artifact.manifest.compressed_bytes,
+            "manifest_filename": artifact.manifest_path.name,
+            "status": "ok",
+            "tier": artifact.manifest.tier,
+        }
+    )
+
+
+@backup_app.command("restore")
+def backup_restore_command(
+    manifest: Annotated[Path, typer.Option("--manifest", exists=True, dir_okay=False)],
+    destination: Annotated[Path, typer.Option("--destination", dir_okay=False)],
+) -> None:
+    """Verify both hashes and restore into a path that does not exist."""
+
+    try:
+        result = restore_backup(manifest, destination)
+    except (BackupError, OSError, ValueError, sqlite3.Error) as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=1) from error
+    _emit(
+        {
+            "destination": str(result.destination),
+            "status": "ok",
+            "uncompressed_bytes": result.uncompressed_bytes,
+            "uncompressed_sha256": result.uncompressed_sha256,
+        }
+    )
+
+
+def _bounded_nonempty_text(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 256:
+        raise ValueError(f"recorder input {field} must be bounded non-empty text")
+    return value
+
+
+def _load_recorder_inputs(
+    path: Path,
+) -> tuple[tuple[InstrumentSpec, ...], tuple[SubscriptionSpec, ...]]:
+    if path.stat().st_size > MAX_REPLAY_FILE_BYTES:
+        raise ValueError("recorder input exceeds the 8 MiB input limit")
+    payload = json.loads(path.read_bytes().decode("utf-8"))
+    if not isinstance(payload, dict) or set(payload) != {"instruments", "subscriptions"}:
+        raise ValueError("recorder input requires exactly instruments and subscriptions")
+    raw_instruments = payload["instruments"]
+    raw_subscriptions = payload["subscriptions"]
+    if not isinstance(raw_instruments, list) or len(raw_instruments) > MAX_REPLAY_INSTRUMENTS:
+        raise ValueError("recorder instruments must be a bounded list")
+    if not isinstance(raw_subscriptions, list) or len(raw_subscriptions) > MAX_REPLAY_SUBSCRIPTIONS:
+        raise ValueError("recorder subscriptions must be a bounded list")
+    instruments: list[InstrumentSpec] = []
+    for item in raw_instruments:
+        fields = {"instrument_id", "ibkr_con_id", "kind", "symbol", "exchange", "currency"}
+        if not isinstance(item, dict) or set(item) != fields:
+            raise ValueError("recorder instrument has invalid fields")
+        con_id = item["ibkr_con_id"]
+        if isinstance(con_id, bool) or not isinstance(con_id, int) or con_id <= 0:
+            raise ValueError("recorder instrument ibkr_con_id must be a positive integer")
+        instruments.append(
+            InstrumentSpec(
+                instrument_id=_bounded_nonempty_text(item["instrument_id"], field="instrument_id"),
+                ibkr_con_id=con_id,
+                kind=_bounded_nonempty_text(item["kind"], field="kind"),
+                symbol=_bounded_nonempty_text(item["symbol"], field="symbol"),
+                exchange=_bounded_nonempty_text(item["exchange"], field="exchange"),
+                currency=_bounded_nonempty_text(item["currency"], field="currency"),
+            )
+        )
+    subscriptions: list[SubscriptionSpec] = []
+    for item in raw_subscriptions:
+        fields = {
+            "name",
+            "instrument_id",
+            "feed_kind",
+            "request_id",
+            "continuity_required",
+            "optional",
+            "stale_after_us",
+        }
+        if not isinstance(item, dict) or set(item) != fields:
+            raise ValueError("recorder subscription has invalid fields")
+        request_id = item["request_id"]
+        stale_after_us = item["stale_after_us"]
+        continuity_required = item["continuity_required"]
+        optional = item["optional"]
+        if isinstance(request_id, bool) or not isinstance(request_id, int) or request_id < 0:
+            raise ValueError("recorder subscription request_id must be a nonnegative integer")
+        if (
+            isinstance(stale_after_us, bool)
+            or not isinstance(stale_after_us, int)
+            or stale_after_us <= 0
+        ):
+            raise ValueError("recorder subscription stale_after_us must be a positive integer")
+        if not isinstance(continuity_required, bool) or not isinstance(optional, bool):
+            raise ValueError("recorder subscription flags must be booleans")
+        subscriptions.append(
+            SubscriptionSpec(
+                name=_bounded_nonempty_text(item["name"], field="name"),
+                instrument_id=_bounded_nonempty_text(item["instrument_id"], field="instrument_id"),
+                feed_kind=_bounded_nonempty_text(item["feed_kind"], field="feed_kind"),
+                request_id=request_id,
+                continuity_required=continuity_required,
+                optional=optional,
+                stale_after_us=stale_after_us,
+            )
+        )
+    return tuple(instruments), tuple(subscriptions)
+
+
+@recorder_app.command("run")
+def recorder_run_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, dir_okay=False)],
+    inputs: Annotated[Path, typer.Option("--inputs", exists=True, dir_okay=False)],
+) -> None:
+    """Run the market-data-only recorder until SIGTERM or SIGINT."""
+
+    recorder: Recorder | None = None
+    shutdown = threading.Event()
+    termination = "requested"
+
+    def request_shutdown(signum: int, _frame: object) -> None:
+        nonlocal termination
+        termination = "sigterm" if signum == signal.SIGTERM else "sigint"
+        shutdown.set()
+
+    previous_sigterm = signal.signal(signal.SIGTERM, request_shutdown)
+    previous_sigint = signal.signal(signal.SIGINT, request_shutdown)
+    try:
+        loaded = load_recorder_config(config)
+        instruments, subscriptions = _load_recorder_inputs(inputs)
+        adapter = IBKRMarketData.official(
+            host=loaded.host,
+            port=loaded.port,
+            client_id=loaded.client_id,
+            read_only=loaded.read_only,
+            external_read_only_verified=loaded.external_read_only_verified,
+        )
+        recorder = Recorder(loaded, adapter)
+        recorder.start(
+            now_us=time.time_ns() // 1_000,
+            instruments=instruments,
+            subscriptions=subscriptions,
+        )
+        next_maintenance_at_us = time.time_ns() // 1_000 + RECORDER_MAINTENANCE_INTERVAL_US
+        while not shutdown.wait(RECORDER_DRAIN_INTERVAL_SECONDS):
+            now_us = time.time_ns() // 1_000
+            recorder.drain(now_us=now_us)
+            if now_us >= next_maintenance_at_us:
+                recorder.maintain(now_us=now_us)
+                next_maintenance_at_us = now_us + RECORDER_MAINTENANCE_INTERVAL_US
+        recorder.stop(now_us=time.time_ns() // 1_000)
+    except (OSError, ValueError, RuntimeError, sqlite3.Error, TypeError) as error:
+        if recorder is not None and recorder.state is not None:
+            with suppress(Exception):
+                recorder.stop(now_us=time.time_ns() // 1_000)
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=1) from error
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        signal.signal(signal.SIGINT, previous_sigint)
+    _emit({"status": "ok", "termination": termination})
 
 
 @web_app.command("run")

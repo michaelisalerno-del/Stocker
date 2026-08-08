@@ -486,7 +486,8 @@ async function loadDiagnostics() {
     compactList(payload.subscriptions, ["instrument_id", "feed_kind", "lifecycle"]),
   ]);
   replace(document.querySelector("#diagnostic-backups"), [
-    compactList(payload.backups.items, ["name", "size_bytes", "modified_at_ns"]),
+    metric("Backup state", payload.backups.status.state),
+    compactList(payload.backups.items, ["tier", "created_at_us", "archive_filename", "compressed_bytes"]),
   ]);
   replace(document.querySelector("#diagnostic-hashes"), [fields(payload.hashes, "", 48)]);
   replace(document.querySelector("#diagnostic-retention"), [fields(payload.retention, "", 24)]);

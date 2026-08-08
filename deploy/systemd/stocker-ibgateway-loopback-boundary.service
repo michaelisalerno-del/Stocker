@@ -1,5 +1,5 @@
 [Unit]
-Description=Verify the IB Gateway loopback and firewall boundary
+Description=Verify the market-data-only IB Gateway loopback and firewall boundary
 Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
 Requires=ufw.service
 After=ufw.service

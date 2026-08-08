@@ -1,0 +1,18 @@
+{
+  "database": "/var/lib/stocker/v2/stocker-v2.sqlite3",
+  "run_id": "replace-with-new-v2-run-id",
+  "owner_id": "stocker-recorder",
+  "mode": "prospective_record",
+  "host": "127.0.0.1",
+  "port": 4003,
+  "client_id": 71,
+  "read_only": true,
+  "external_read_only_verified": true,
+  "config_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "git_commit": "0000000",
+  "writer_lease_stale_us": 60000000,
+  "callback_lease_us": 30000000,
+  "market_data_line_limit": 100,
+  "idea_config": null,
+  "backup_directory": "/var/lib/stocker/backups-v2"
+}

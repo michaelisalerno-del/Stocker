@@ -48,9 +48,11 @@ jobs:
           uv run python -c "import stocker_prospective"
           uv run stocker-prospective --help
 
-      - name: Test compact V2 web API and polling
+      - name: Verify Stocker V2 runtime, backup, deployment, and web boundaries
         run: |
-          uv run pytest tests/test_stocker_runtime_web.py
+          uv run ruff check packages/stocker_runtime/src/stocker_runtime deploy/scripts/prepare-v2-sqlite-boundary.py tests/test_stocker_runtime_backup.py tests/test_stocker_runtime_deployment.py tests/test_stocker_runtime_web.py
+          uv run mypy --no-incremental packages/stocker_runtime/src/stocker_runtime
+          uv run pytest tests/test_stocker_runtime_backup.py tests/test_stocker_runtime_deployment.py tests/test_stocker_runtime_web.py
           node --check --input-type=module < packages/stocker_runtime/src/stocker_runtime/web/static/app.js
           node --test tests/js/test_v2_web_app.mjs
 

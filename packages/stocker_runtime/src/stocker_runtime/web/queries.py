@@ -12,8 +12,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from stocker_runtime.storage import read_backup_manifests
 from stocker_runtime.web.config import WebConfig
 
 API_ROUTES = (
@@ -208,33 +209,20 @@ class ReadModel:
 
     def _backup_projection(self, *, limit: int) -> dict[str, Any]:
         root = self.config.backup_directory
-        if root is None or not root.is_dir() or root.is_symlink():
-            return {"available": False, "items": [], "truncated": False}
-        entries: list[dict[str, Any]] = []
-        scanned = 0
-        try:
-            for item in root.iterdir():
-                scanned += 1
-                if scanned > limit:
-                    break
-                if item.is_symlink() or not item.is_file():
-                    continue
-                stat = item.stat()
-                entries.append(
-                    {
-                        "name": item.name,
-                        "size_bytes": stat.st_size,
-                        "modified_at_ns": stat.st_mtime_ns,
-                    }
-                )
-        except OSError:
-            return {"available": False, "items": [], "truncated": False}
-        entries.sort(key=lambda item: (item["modified_at_ns"], item["name"]), reverse=True)
-        return {
-            "available": True,
-            "items": entries,
-            "truncated": scanned > limit,
-        }
+        if root is None:
+            return {
+                "available": False,
+                "items": [],
+                "status": {
+                    "checked_at_us": None,
+                    "code": None,
+                    "format_version": 1,
+                    "latest_manifest_filename": None,
+                    "state": "unavailable",
+                },
+                "truncated": False,
+            }
+        return cast(dict[str, Any], read_backup_manifests(root, limit=limit).to_dict())
 
     def _backup_summary(self) -> dict[str, Any]:
         projection = self._backup_projection(limit=200)
@@ -243,7 +231,7 @@ class ReadModel:
         return {
             "available": projection["available"],
             "entries": len(items),
-            "latest": None if not items else items[0]["name"],
+            "latest": None if not items else items[0]["archive_filename"],
         }
 
     def live(

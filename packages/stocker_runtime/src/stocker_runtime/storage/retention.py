@@ -734,7 +734,16 @@ class RetentionManager:
             "AND leg.instrument_id=market_events.instrument_id "
             "AND market_events.source_sequence>=progress.next_source_sequence "
             "AND market_events.source_sequence>progress.entry_after_source_sequence "
-            "AND market_events.received_at_us<=progress.pending_retention_deadline_us)",
+            "AND (market_events.received_at_us<=progress.pending_retention_deadline_us "
+            "OR market_events.event_id=(SELECT barrier.event_id FROM market_events barrier "
+            "INDEXED BY market_events_shadow_raw_idx "
+            "WHERE barrier.run_id=position.run_id "
+            "AND barrier.instrument_id=leg.instrument_id "
+            "AND barrier.event_kind='quote' "
+            "AND barrier.source_sequence>=progress.next_source_sequence "
+            "AND barrier.source_sequence>progress.entry_after_source_sequence "
+            "AND barrier.source_sequence IS NOT NULL "
+            "ORDER BY barrier.source_sequence, barrier.event_id LIMIT 1)))",
             now_us - self.policy.raw_market_event_us,
             now_us - self.policy.raw_market_event_us,
         )

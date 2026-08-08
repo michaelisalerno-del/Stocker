@@ -31,6 +31,7 @@ def terminalize_expired_pending_positions(
                 "JOIN shadow_progress progress ON progress.position_id=position.position_id "
                 "WHERE position.position_id=? AND position.lifecycle='pending' "
                 "AND progress.pending_evidence_drained=1 "
+                "AND progress.pending_expiry_active=1 "
                 "AND progress.pending_retention_deadline_us<? LIMIT ?",
                 (position_id, now_us, limit),
             )
@@ -43,6 +44,7 @@ def terminalize_expired_pending_positions(
                 "INDEXED BY shadow_progress_pending_expiry_idx "
                 "JOIN shadow_positions position ON position.position_id=progress.position_id "
                 "WHERE progress.pending_evidence_drained=1 "
+                "AND progress.pending_expiry_active=1 "
                 "AND progress.pending_retention_deadline_us<? "
                 "AND position.lifecycle='pending' "
                 "ORDER BY progress.pending_retention_deadline_us, progress.position_id LIMIT ?",

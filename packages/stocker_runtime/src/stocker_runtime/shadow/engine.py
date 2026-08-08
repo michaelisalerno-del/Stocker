@@ -82,6 +82,13 @@ class _Snapshot:
     quotes: tuple[_Quote, ...]
 
 
+@dataclass(frozen=True)
+class _EventBatch:
+    eligible: tuple[sqlite3.Row, ...]
+    fetched_count: int
+    barrier_source_sequence: int | None
+
+
 class _PolicyMismatch(ValueError):
     pass
 
@@ -233,7 +240,7 @@ class ShadowEngine:
             for state, leg in zip(states, legs, strict=True)
         ):
             raise RuntimeError("shadow position quote state does not match its proposal legs")
-        events = self._events(
+        event_batch = self._events(
             connection,
             legs,
             next_sequence=int(progress["next_source_sequence"]),
@@ -244,6 +251,7 @@ class ShadowEngine:
             ),
             limit=sequence_limit,
         )
+        events = event_batch.eligible
         changed = 0
         consumed = 0
         for event in events:
@@ -292,7 +300,10 @@ class ShadowEngine:
         if (
             str(position["lifecycle"]) == "pending"
             and now_us > int(progress["pending_retention_deadline_us"])
-            and len(events) < sequence_limit
+            and (
+                event_batch.barrier_source_sequence is not None
+                or event_batch.fetched_count < sequence_limit
+            )
         ):
             connection.execute(
                 "UPDATE shadow_progress SET pending_evidence_drained=1, updated_at_us=? "
@@ -438,7 +449,7 @@ class ShadowEngine:
         next_sequence: int,
         received_cutoff_us: int,
         limit: int,
-    ) -> tuple[sqlite3.Row, ...]:
+    ) -> _EventBatch:
         fetched: list[sqlite3.Row] = []
         instruments = tuple(dict.fromkeys(str(leg["instrument_id"]) for leg in legs))
         for instrument_id in instruments:
@@ -449,19 +460,25 @@ class ShadowEngine:
                     "INDEXED BY market_events_shadow_raw_idx "
                     "WHERE run_id=? AND instrument_id=? AND event_kind='quote' "
                     "AND source_sequence>=? AND source_sequence IS NOT NULL "
-                    "AND received_at_us<=? "
                     "ORDER BY source_sequence, event_id LIMIT ?",
                     (
                         self.run_id,
                         instrument_id,
                         next_sequence,
-                        received_cutoff_us,
                         min(limit, MAX_EVENTS_PER_INSTRUMENT_FETCH),
                     ),
                 )
             )
         fetched.sort(key=lambda row: (int(row["source_sequence"]), str(row["event_id"])))
-        return tuple(fetched[:limit])
+        ordered = tuple(fetched[:limit])
+        eligible: list[sqlite3.Row] = []
+        barrier_source_sequence: int | None = None
+        for event in ordered:
+            if int(event["received_at_us"]) > received_cutoff_us:
+                barrier_source_sequence = int(event["source_sequence"])
+                break
+            eligible.append(event)
+        return _EventBatch(tuple(eligible), len(ordered), barrier_source_sequence)
 
     def _apply_event(
         self,

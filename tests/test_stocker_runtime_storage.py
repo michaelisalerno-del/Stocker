@@ -61,7 +61,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -167,7 +167,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (8, '0008_future.sql', ?, 2)",
+            "VALUES (9, '0009_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -238,7 +238,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7,)
+    assert result.applied_versions == (7, 8)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -248,6 +248,10 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
         assert (
             connection.execute("SELECT pending_evidence_drained FROM shadow_progress").fetchone()[0]
             == 0
+        )
+        assert (
+            connection.execute("SELECT pending_expiry_active FROM shadow_progress").fetchone()[0]
+            == 1
         )
 
     conflict_database = tmp_path / "conflict-v6.sqlite3"
@@ -281,6 +285,64 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
             str(row[1]) for row in connection.execute("PRAGMA table_info(shadow_progress)")
         }
         assert "pending_evidence_drained" not in progress_columns
+
+
+def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path) -> None:
+    migration_root = tmp_path / "v7-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:7]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    database = tmp_path / "terminal-v7.sqlite3"
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    _seed_output_dependencies(database, verify_schema=False)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+            "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
+            "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+            "payload_json, payload_hash, content_hash, data_class, authority_status) "
+            "VALUES ('terminal-proposal', 'run-1', 'instance-1', 'proposed_trade', "
+            "'instrument-1', 30, 25, 'event-1', 'event-1', 'event-1', ?, 0, '{}', ?, ?, "
+            "'shadow_protected', 'unapproved')",
+            ("3" * 64, "4" * 64, "5" * 64),
+        )
+        connection.execute(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, closed_at_us, lifecycle, cost_model_id, fill_model_id, currency, "
+            "invalid_reason, data_class, policy_json, policy_hash) VALUES "
+            "('terminal-position', 'terminal-proposal', 'run-1', 'instance-1', 40, 'invalid', "
+            "'cost', 'fill', 'USD', 'entry_evidence_expired', 'shadow_protected', '{}', ?)",
+            ("6" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO shadow_progress(position_id, entry_after_source_sequence, "
+            "next_source_sequence, next_horizon_index, updated_at_us, "
+            "pending_retention_deadline_us, pending_evidence_drained) "
+            "VALUES ('terminal-position', 1, 2, 0, 40, 30, 1)"
+        )
+
+    result = migrate_database(database, applied_at_us=2)
+
+    assert result.applied_versions == (8,)
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT pending_evidence_drained, pending_expiry_active FROM shadow_progress"
+            ).fetchone()
+        ) == (1, 0)
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM shadow_progress "
+                "INDEXED BY shadow_progress_pending_expiry_idx "
+                "WHERE pending_evidence_drained=1 AND pending_expiry_active=1"
+            ).fetchone()[0]
+            == 0
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="shadow_pending_expiry_active_monotonic"):
+            connection.execute(
+                "UPDATE shadow_progress SET pending_expiry_active=1 "
+                "WHERE position_id='terminal-position'"
+            )
 
 
 def test_migration_plan_requires_order_and_failed_migration_is_atomic(tmp_path: Path) -> None:
@@ -2106,11 +2168,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7],
-        "current_version": 7,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8],
+        "current_version": 8,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 7, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 8, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

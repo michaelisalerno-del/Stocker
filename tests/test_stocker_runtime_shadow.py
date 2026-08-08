@@ -20,6 +20,7 @@ from stocker_runtime.storage import (
     connect_v2,
     initialize_database,
 )
+from stocker_runtime.storage.shadow import terminalize_expired_pending_positions
 
 ROOT = Path(__file__).resolve().parents[1]
 SHADOW_PACKAGE = ROOT / "packages/stocker_runtime/src/stocker_runtime/shadow"
@@ -889,6 +890,11 @@ def test_retention_expiry_selector_is_small_indexed_and_drained_only(
     assert ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=2) == 0
     with connect_v2(database) as connection:
         connection.execute("UPDATE shadow_progress SET pending_evidence_drained=1")
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="shadow_pending_expiry_deactivate_requires_terminal",
+        ):
+            connection.execute("UPDATE shadow_progress SET pending_expiry_active=0")
     statements: list[str] = []
 
     def traced_connect(path: str | Path) -> sqlite3.Connection:
@@ -913,15 +919,106 @@ def test_retention_expiry_selector_is_small_indexed_and_drained_only(
         plan = tuple(str(row[3]) for row in connection.execute(f"EXPLAIN QUERY PLAN {selector}"))
         assert tuple(
             connection.execute(
-                "SELECT position.lifecycle, outcome.reason FROM shadow_positions position "
-                "JOIN shadow_outcomes outcome USING(position_id)"
+                "SELECT position.lifecycle, outcome.reason, progress.pending_evidence_drained, "
+                "progress.pending_expiry_active FROM shadow_positions position "
+                "JOIN shadow_outcomes outcome USING(position_id) "
+                "JOIN shadow_progress progress USING(position_id)"
             ).fetchone()
-        ) == ("invalid", "entry_evidence_expired")
+        ) == ("invalid", "entry_evidence_expired", 1, 0)
 
     assert "INDEXED BY shadow_progress_pending_expiry_idx" in selector
+    assert "pending_expiry_active=1" in selector
     assert "LIMIT 32" in selector
     assert any("shadow_progress_pending_expiry_idx" in row for row in plan)
     assert all("USE TEMP B-TREE" not in row and "SCAN shadow_positions" not in row for row in plan)
+
+
+def test_expiry_selector_does_not_traverse_terminalized_drained_prefix(tmp_path: Path) -> None:
+    database = tmp_path / "expiry-stale-prefix.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 100.0, 101.0, 1),
+            (2, "crossed", "AAPL", 102.0, 101.0, 2),
+        ),
+    )
+    policy = _policy()
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=2) == 0
+    stale_count = 2_048
+    with connect_v2(database) as connection:
+        connection.executemany(
+            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+            "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
+            "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+            "payload_json, payload_hash, content_hash, data_class, authority_status) "
+            "VALUES (?, 'run', 'instance', 'proposed_trade', 'AAPL', 1, 1, 'input', "
+            "'input', 'input', ?, ?, '{}', ?, ?, 'shadow_protected', 'unapproved')",
+            (
+                (
+                    f"stale-output-{ordinal}",
+                    _hash(f"stale-inputs-{ordinal}"),
+                    ordinal,
+                    _hash("{}"),
+                    _hash(f"stale-content-{ordinal}"),
+                )
+                for ordinal in range(1, stale_count + 1)
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, closed_at_us, lifecycle, cost_model_id, fill_model_id, currency, "
+            "invalid_reason, data_class, policy_json, policy_hash) "
+            "SELECT ?, ?, run_id, instance_id, ?, 'invalid', cost_model_id, fill_model_id, "
+            "currency, 'entry_evidence_expired', data_class, policy_json, policy_hash "
+            "FROM shadow_positions WHERE proposed_trade_output_id='proposal'",
+            (
+                (f"stale-position-{ordinal}", f"stale-output-{ordinal}", ordinal)
+                for ordinal in range(1, stale_count + 1)
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO shadow_progress(position_id, entry_after_source_sequence, "
+            "next_source_sequence, next_horizon_index, updated_at_us, "
+            "pending_retention_deadline_us, pending_evidence_drained) "
+            "VALUES (?, 1, 2, 0, 1, ?, 1)",
+            ((f"stale-position-{ordinal}", ordinal) for ordinal in range(1, stale_count + 1)),
+        )
+        connection.execute(
+            "UPDATE shadow_progress SET pending_evidence_drained=1 "
+            "WHERE position_id NOT LIKE 'stale-position-%'"
+        )
+        callback_count = 0
+
+        def progress_budget() -> int:
+            nonlocal callback_count
+            callback_count += 1
+            return int(callback_count > 50)
+
+        connection.set_progress_handler(progress_budget, 100)
+        terminalized = terminalize_expired_pending_positions(
+            connection,
+            now_us=2_592_000_000_002,
+            limit=1,
+        )
+        connection.set_progress_handler(None, 0)
+
+        assert len(terminalized) == 1
+        assert callback_count <= 50
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM shadow_progress "
+                "INDEXED BY shadow_progress_pending_expiry_idx "
+                "WHERE pending_evidence_drained=1 AND pending_expiry_active=1"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM shadow_progress WHERE pending_expiry_active!=0 "
+                "AND position_id LIKE 'stale-position-%'"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_raw_quote_batch_is_bounded_and_future_provider_evidence_never_reappears(
@@ -997,6 +1094,7 @@ def test_raw_quote_batch_is_bounded_and_future_provider_evidence_never_reappears
     assert any("USING INDEX market_events_shadow_raw_idx" in row for row in plan)
     assert all("USE TEMP B-TREE" not in row for row in plan)
     assert "LIMIT 8" in selector
+    assert "received_at_us<=" not in selector
 
     restarted = ShadowEngine(database, run_id="run", policy=policy)
     assert restarted.run_once(now_us=20_000) == 1
@@ -1008,6 +1106,184 @@ def test_raw_quote_batch_is_bounded_and_future_provider_evidence_never_reappears
                 "JOIN shadow_legs USING(position_id)"
             ).fetchone()
         ) == ("open", "usable-entry")
+
+
+def test_lower_source_future_receipt_blocks_higher_ready_quote_until_ordered(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "received-order-barrier.sqlite3"
+    _seed_case(
+        database,
+        quotes=((1, "input", "AAPL", 100.0, 101.0, 1),),
+    )
+    with connect_v2(database) as connection:
+        _insert_raw_market_event(
+            connection,
+            sequence=2,
+            event_id="lower-future-receipt",
+            event_kind="quote",
+            event_at_us=2,
+            received_at_us=100,
+            bid=100.0,
+            ask=101.0,
+        )
+        _insert_raw_market_event(
+            connection,
+            sequence=3,
+            event_id="higher-ready-receipt",
+            event_kind="quote",
+            event_at_us=3,
+            received_at_us=3,
+            bid=99.0,
+            ask=100.0,
+        )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    engine = ShadowEngine(database, run_id="run", policy=policy)
+
+    assert engine.run_once(now_us=3) == 0
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, progress.next_source_sequence "
+                "FROM shadow_positions position JOIN shadow_progress progress USING(position_id)"
+            ).fetchone()
+        ) == ("pending", 2)
+        assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
+
+    restarted = ShadowEngine(database, run_id="run", policy=policy)
+    assert restarted.run_once(now_us=3) == 0
+    assert restarted.run_once(now_us=100) == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, leg.entry_market_event_id "
+                "FROM shadow_positions position JOIN shadow_legs leg USING(position_id)"
+            ).fetchone()
+        ) == ("open", "lower-future-receipt")
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_full_quote_batch_stops_at_postdeadline_order_barrier(
+    tmp_path: Path, restart: bool
+) -> None:
+    database = tmp_path / f"deadline-order-barrier-{restart}.sqlite3"
+    deadline_us = 2_592_000_000_001
+    _seed_case(
+        database,
+        quotes=((1, "input", "AAPL", 100.0, 101.0, 1),),
+    )
+    with connect_v2(database) as connection:
+        for sequence in range(2, 10):
+            _insert_raw_market_event(
+                connection,
+                sequence=sequence,
+                event_id=f"postdeadline-{sequence}",
+                event_kind="quote",
+                event_at_us=sequence,
+                received_at_us=deadline_us + 1,
+                bid=100.0,
+                ask=101.0,
+            )
+        _insert_raw_market_event(
+            connection,
+            sequence=10,
+            event_id="later-predeadline",
+            event_kind="quote",
+            event_at_us=10,
+            received_at_us=deadline_us,
+            bid=99.0,
+            ask=100.0,
+        )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    engine = ShadowEngine(database, run_id="run", policy=policy)
+    if restart:
+        assert engine.run_once(now_us=2) == 0
+        engine = ShadowEngine(database, run_id="run", policy=policy)
+
+    assert engine.run_once(now_us=deadline_us + 2) == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, progress.next_source_sequence, "
+                "progress.pending_evidence_drained FROM shadow_positions position "
+                "JOIN shadow_progress progress USING(position_id)"
+            ).fetchone()
+        ) == ("invalid", 2, 1)
+        assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM shadow_outcomes").fetchone()[0] == 1
+
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=deadline_us + 3) == 0
+
+
+def test_retention_keeps_first_postdeadline_order_barrier_until_terminalization(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "retained-order-barrier.sqlite3"
+    deadline_us = 2_592_000_000_001
+    _seed_case(
+        database,
+        quotes=((1, "input", "AAPL", 100.0, 101.0, 1),),
+    )
+    with connect_v2(database) as connection:
+        for sequence in range(2, 10):
+            _insert_raw_market_event(
+                connection,
+                sequence=sequence,
+                event_id=f"postdeadline-{sequence}",
+                event_kind="quote",
+                event_at_us=sequence,
+                received_at_us=deadline_us + 1,
+                bid=100.0,
+                ask=101.0,
+            )
+        _insert_raw_market_event(
+            connection,
+            sequence=10,
+            event_id="later-predeadline",
+            event_kind="quote",
+            event_at_us=10,
+            received_at_us=deadline_us,
+            bid=99.0,
+            ask=100.0,
+        )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=2) == 0
+
+    RetentionManager(database, RetentionPolicy(raw_market_event_us=1)).run(
+        now_us=deadline_us + 2,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+    with connect_v2(database) as connection:
+        retained = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT event_id FROM market_events WHERE source_sequence BETWEEN 2 AND 10"
+            )
+        }
+    assert retained == {"postdeadline-2", "later-predeadline"}
+
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=deadline_us + 2) == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT lifecycle, next_source_sequence FROM shadow_positions "
+                "JOIN shadow_progress USING(position_id)"
+            ).fetchone()
+        ) == ("invalid", 2)
+        assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
 
 
 def test_open_recovery_uses_durable_progress_after_entry_event_is_pruned(tmp_path: Path) -> None:

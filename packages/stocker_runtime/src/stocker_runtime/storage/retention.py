@@ -31,6 +31,25 @@ MAX_MAINTENANCE_BATCH_ROWS = 10_000
 MAX_STORED_IDEA_OUTPUT_LEGS = 16
 MAX_IDEA_OUTPUT_CASCADE_ROWS = 1 + 256 + MAX_STORED_IDEA_OUTPUT_LEGS + 1 + 1 + 1
 MAX_IDEA_OUTPUT_PARENTS_PER_PASS = MAX_MAINTENANCE_BATCH_ROWS // MAX_IDEA_OUTPUT_CASCADE_ROWS
+# A terminal shadow position can retain one progress row and one quote-state row per leg.
+MAX_SHADOW_POSITION_CASCADE_ROWS = 1 + 1 + 8
+
+SHADOW_POSITION_RETENTION_CANDIDATES_SQL = (
+    "SELECT position.position_id, "
+    "1 + (SELECT count(*) FROM shadow_progress progress "
+    "WHERE progress.position_id=position.position_id) "
+    "+ (SELECT count(*) FROM shadow_quote_state state "
+    "WHERE state.position_id=position.position_id) AS cascade_rows "
+    "FROM shadow_positions position INDEXED BY shadow_positions_retention_idx "
+    "WHERE position.closed_at_us IS NOT NULL AND position.closed_at_us<=? "
+    "AND NOT EXISTS (SELECT 1 FROM shadow_marks mark "
+    "WHERE mark.position_id=position.position_id) "
+    "AND NOT EXISTS (SELECT 1 FROM shadow_outcomes outcome "
+    "WHERE outcome.position_id=position.position_id) "
+    "AND NOT EXISTS (SELECT 1 FROM shadow_legs leg "
+    "WHERE leg.position_id=position.position_id) "
+    "ORDER BY position.closed_at_us, position.position_id LIMIT ?"
+)
 
 IDEA_OUTPUT_RETENTION_CANDIDATES_SQL = (
     "SELECT output.output_id, "
@@ -679,6 +698,63 @@ class RetentionManager:
         connection.executemany("DELETE FROM idea_outputs WHERE output_id=?", selected)
         return deleted_rows
 
+    def _prune_shadow_positions(
+        self, connection: sqlite3.Connection, cutoff_us: int, remaining: int
+    ) -> int:
+        if remaining <= 0:
+            return 0
+        candidates = tuple(
+            connection.execute(
+                SHADOW_POSITION_RETENTION_CANDIDATES_SQL,
+                (cutoff_us, min(remaining, MAX_MAINTENANCE_BATCH_ROWS)),
+            )
+        )
+        deleted_rows = 0
+        for candidate in candidates:
+            available = remaining - deleted_rows
+            if available <= 0:
+                break
+            position_id = str(candidate["position_id"])
+            cascade_rows = int(candidate["cascade_rows"])
+            if not 1 <= cascade_rows <= MAX_SHADOW_POSITION_CASCADE_ROWS:
+                raise RetentionInvariantError("shadow position cascade exceeds schema bound")
+            if cascade_rows <= available:
+                prior_changes = connection.total_changes
+                cursor = connection.execute(
+                    "DELETE FROM shadow_positions WHERE position_id=? "
+                    "AND closed_at_us IS NOT NULL AND closed_at_us<=? "
+                    "AND NOT EXISTS (SELECT 1 FROM shadow_marks mark "
+                    "WHERE mark.position_id=shadow_positions.position_id) "
+                    "AND NOT EXISTS (SELECT 1 FROM shadow_outcomes outcome "
+                    "WHERE outcome.position_id=shadow_positions.position_id) "
+                    "AND NOT EXISTS (SELECT 1 FROM shadow_legs leg "
+                    "WHERE leg.position_id=shadow_positions.position_id)",
+                    (position_id, cutoff_us),
+                )
+                physical_changes = connection.total_changes - prior_changes
+                if cursor.rowcount != 1 or physical_changes != cascade_rows:
+                    raise RetentionInvariantError("shadow position cascade accounting changed")
+                deleted_rows += physical_changes
+                continue
+
+            quote_cursor = connection.execute(
+                "DELETE FROM shadow_quote_state WHERE position_id=? AND leg_number IN ("
+                "SELECT leg_number FROM shadow_quote_state WHERE position_id=? "
+                "ORDER BY leg_number LIMIT ?)",
+                (position_id, position_id, available),
+            )
+            deleted_rows += quote_cursor.rowcount
+            available = remaining - deleted_rows
+            if available > 0:
+                progress_cursor = connection.execute(
+                    "DELETE FROM shadow_progress WHERE position_id=? "
+                    "AND NOT EXISTS (SELECT 1 FROM shadow_quote_state state "
+                    "WHERE state.position_id=shadow_progress.position_id)",
+                    (position_id,),
+                )
+                deleted_rows += progress_cursor.rowcount
+        return deleted_rows
+
     def _prune_expired(self, connection: sqlite3.Connection, now_us: int, limit: int) -> int:
         deleted = 0
 
@@ -715,17 +791,10 @@ class RetentionManager:
             "AND p.closed_at_us IS NOT NULL AND p.closed_at_us <= ?)",
             protected_cutoff,
         )
-        prune(
-            "shadow_positions",
-            "position_id",
-            "closed_at_us IS NOT NULL AND closed_at_us <= ? "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_marks m "
-            "WHERE m.position_id = shadow_positions.position_id) "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_outcomes o "
-            "WHERE o.position_id = shadow_positions.position_id) "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_legs l "
-            "WHERE l.position_id = shadow_positions.position_id)",
+        deleted += self._prune_shadow_positions(
+            connection,
             protected_cutoff,
+            limit - deleted,
         )
         deleted += self._prune_idea_outputs(
             connection,
@@ -751,6 +820,8 @@ class RetentionManager:
             "WHERE input.value=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
             "WHERE derivation.input_event_id=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
+            "WHERE derivation.derived_event_id=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
             "JOIN shadow_positions position ON position.position_id=progress.position_id "
             "JOIN shadow_legs leg ON leg.position_id=position.position_id "
@@ -793,7 +864,9 @@ class RetentionManager:
             "json_each(checkpoint.state_input_event_ids_json) input "
             "WHERE input.value=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
-            "WHERE derivation.input_event_id=market_events.event_id)",
+            "WHERE derivation.input_event_id=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
+            "WHERE derivation.derived_event_id=market_events.event_id)",
             now_us - self.policy.completed_bar_us,
         )
         deleted += self._prune_callback_tombstones(

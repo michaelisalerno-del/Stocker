@@ -42,7 +42,9 @@ from stocker_runtime.storage.retention import (
     IDEA_OUTPUT_RETENTION_CANDIDATES_SQL,
     MAX_IDEA_OUTPUT_CASCADE_ROWS,
     MAX_IDEA_OUTPUT_PARENTS_PER_PASS,
+    MAX_SHADOW_POSITION_CASCADE_ROWS,
     MAX_STORED_IDEA_OUTPUT_LEGS,
+    SHADOW_POSITION_RETENTION_CANDIDATES_SQL,
 )
 
 
@@ -2449,6 +2451,179 @@ def test_retention_prunes_one_maximum_sealed_output_by_parent_cascade(tmp_path: 
         assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 256
 
 
+def _seed_closed_shadow_retention_case(database: Path, *, leg_count: int) -> None:
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    base = _output()
+    proposal = OperationalRepository(database).put_idea_output(
+        IdeaOutputRecord(
+            **{
+                **base.__dict__,
+                "output_kind": "proposed_trade",
+                "authority_status": "unapproved",
+                "legs": tuple(
+                    ProposedTradeLeg(
+                        instrument_id="instrument-1",
+                        action="buy",
+                        target="long",
+                        quantity_value=float(leg_number + 1),
+                        currency="USD",
+                    )
+                    for leg_number in range(leg_count)
+                ),
+            }
+        )
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, closed_at_us, lifecycle, cost_model_id, fill_model_id, currency, "
+            "data_class) VALUES ('closed-position', ?, 'run-1', 'instance-1', 40, 'closed', "
+            "'cost', 'fill', 'USD', 'shadow_protected')",
+            (proposal.output_id,),
+        )
+        connection.execute(
+            "INSERT INTO shadow_progress(position_id, entry_after_source_sequence, "
+            "next_source_sequence, next_horizon_index, updated_at_us) "
+            "VALUES ('closed-position', 1, 2, 0, 40)"
+        )
+        connection.executemany(
+            "INSERT INTO shadow_quote_state(position_id, leg_number, instrument_id) "
+            "VALUES ('closed-position', ?, 'instrument-1')",
+            ((leg_number,) for leg_number in range(leg_count)),
+        )
+
+
+def test_shadow_position_retention_budget_one_makes_physical_progress_without_cascade(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "one-row-shadow-retention.sqlite3"
+    _seed_closed_shadow_retention_case(database, leg_count=1)
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(idea_shadow_us=10, maintenance_batch_rows=1),
+    )
+
+    states: list[tuple[int, int, int, int]] = []
+    for _ in range(3):
+        result = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+        with connect_v2(database) as connection:
+            states.append(
+                (
+                    result.expired_rows_deleted,
+                    connection.execute("SELECT count(*) FROM shadow_positions").fetchone()[0],
+                    connection.execute("SELECT count(*) FROM shadow_progress").fetchone()[0],
+                    connection.execute("SELECT count(*) FROM shadow_quote_state").fetchone()[0],
+                )
+            )
+
+    assert states == [(1, 1, 1, 0), (1, 1, 0, 0), (1, 0, 0, 0)]
+
+
+def test_shadow_position_retention_counts_maximum_quote_state_cascade_rows(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "maximum-shadow-retention.sqlite3"
+    _seed_closed_shadow_retention_case(database, leg_count=8)
+
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            idea_shadow_us=10,
+            maintenance_batch_rows=MAX_SHADOW_POSITION_CASCADE_ROWS,
+        ),
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.expired_rows_deleted == MAX_SHADOW_POSITION_CASCADE_ROWS
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM shadow_positions").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM shadow_progress").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM shadow_quote_state").fetchone()[0] == 0
+
+
+def test_derived_event_retention_waits_for_explicit_mapping_prune_at_batch_cut(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "derived-event-cascade.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_json, payload_sha256, lifecycle) VALUES "
+            "(2, 'bar-callback', 'run-1', 1, 1, 'bar', 10, '{}', ?, 'pending')",
+            ("1" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES "
+            "('input-bar', 'run-1', 2, 'instrument-1', 'bars', 'bar', 10, 10, 1, '{}', ?)",
+            ("2" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, event_at_us, "
+            "received_at_us, connection_generation, payload_json, payload_sha256) VALUES "
+            "('derived-bar', 'run-1', NULL, 2, 'instrument-1', 'bars', 'bar_5m', 20, 20, 1, "
+            "'{}', ?)",
+            ("3" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) VALUES "
+            "('derived-bar', 'input-bar', 0, 'constituent', 99)"
+        )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(
+            raw_market_event_us=10**18,
+            completed_bar_us=10,
+            derivation_mapping_us=1_000,
+            idea_shadow_us=10**18,
+            maintenance_batch_rows=1,
+        ),
+    )
+
+    before_mapping_expiry = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        first_counts = tuple(
+            int(value)
+            for value in connection.execute(
+                "SELECT "
+                "(SELECT count(*) FROM market_events WHERE event_id='derived-bar'), "
+                "(SELECT count(*) FROM market_event_derivations "
+                "WHERE derived_event_id='derived-bar')"
+            ).fetchone()
+        )
+    mapping_pass = manager.run(now_us=2_000, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        second_counts = tuple(
+            int(value)
+            for value in connection.execute(
+                "SELECT "
+                "(SELECT count(*) FROM market_events WHERE event_id='derived-bar'), "
+                "(SELECT count(*) FROM market_event_derivations "
+                "WHERE derived_event_id='derived-bar')"
+            ).fetchone()
+        )
+    event_pass = manager.run(now_us=2_000, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert before_mapping_expiry.expired_rows_deleted == 0
+    assert first_counts == (1, 1)
+    assert mapping_pass.expired_rows_deleted == 1
+    assert second_counts == (1, 0)
+    assert event_pass.expired_rows_deleted == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE event_id='derived-bar'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
 def test_retention_uses_one_shared_batch_budget_and_expires_dependencies_in_order(
     tmp_path: Path,
 ) -> None:
@@ -2800,6 +2975,10 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
             IDEA_OUTPUT_RETENTION_CANDIDATES_SQL,
             (100, MAX_IDEA_OUTPUT_PARENTS_PER_PASS),
         ),
+        "shadow_positions_retention_idx": (
+            SHADOW_POSITION_RETENTION_CANDIDATES_SQL,
+            (100, 10_000),
+        ),
         "subscriptions_retention_idx": (
             "SELECT subscription_id FROM subscriptions WHERE closed_at_us IS NOT NULL "
             "AND closed_at_us <= ? ORDER BY closed_at_us, subscription_id LIMIT ?",
@@ -2839,8 +3018,14 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
                 for row in connection.execute(f"EXPLAIN QUERY PLAN {query}", parameters)
             )
             assert expected_index in plan
-            if expected_index == "idea_outputs_retention_idx":
+            if expected_index in {
+                "idea_outputs_retention_idx",
+                "shadow_positions_retention_idx",
+            }:
                 assert "USE TEMP B-TREE" not in plan
+            if expected_index == "shadow_positions_retention_idx":
+                assert "sqlite_autoindex_shadow_progress_1" in plan
+                assert "sqlite_autoindex_shadow_quote_state_1" in plan
 
 
 def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: Path) -> None:

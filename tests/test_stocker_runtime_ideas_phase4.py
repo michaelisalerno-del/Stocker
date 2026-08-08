@@ -704,6 +704,87 @@ def test_runner_commit_boundary_covers_batch_watermark_and_overlapping_callback(
     assert boundary == 3
 
 
+def test_runner_sealed_retry_survives_real_lineage_compaction(tmp_path: Path) -> None:
+    database = tmp_path / "runner-compacted-retry.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(
+        original,
+        plugin=_EarlyLineageProposalPlugin(original.plugin),
+        requirements=(requirement,),
+    )
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    try:
+        activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+        with connect_v2(database) as connection:
+            _event(connection, 1, "AAL", 100.0)
+            _event(connection, 2, "AAL", 101.0)
+        loaded = runner._load_batch(activation.instance_id)
+        assert loaded is not None
+        loaded_activation, batch, state, _, _ = loaded
+        evaluation = discovered.plugin.evaluate(batch, state)
+        assert runner.run_once(now_us=1_000)[0].output_count == 1
+        output_id = deterministic_idea_output_id(
+            instance_id=activation.instance_id,
+            input_event_ids=("event-1",),
+            output_kind=evaluation.outputs[0].kind,
+            output_ordinal=0,
+            as_of_at_us=evaluation.outputs[0].as_of_at_us,
+            payload=evaluation.outputs[0].payload,
+            legs=cast(ProposedTrade, evaluation.outputs[0]).legs,
+        )
+
+        RetentionManager(
+            database,
+            RetentionPolicy(raw_market_event_us=1, idea_shadow_us=10**18),
+        ).run(
+            now_us=batch.causal_through_at_us + 100,
+            measured_database_bytes=1,
+            measured_wal_bytes=0,
+        )
+        with connect_v2(database) as connection:
+            assert (
+                connection.execute(
+                    "SELECT 1 FROM market_events WHERE event_id='event-1'"
+                ).fetchone()
+                is None
+            )
+            connection.execute("BEGIN IMMEDIATE")
+            runner._insert_output(
+                connection,
+                loaded_activation,
+                batch,
+                evaluation.outputs[0],
+                0,
+                ("event-1",),
+                hashlib.sha256(canonical_json_bytes(cast(JsonValue, ("event-1",)))).hexdigest(),
+                1_000,
+            )
+            connection.commit()
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM idea_outputs WHERE output_id=?", (output_id,)
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM idea_output_seals WHERE output_id=?", (output_id,)
+                ).fetchone()[0]
+                == 1
+            )
+    finally:
+        runner.close()
+
+
 def test_one_plugin_failure_does_not_stop_other_instance(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     _seed(database)

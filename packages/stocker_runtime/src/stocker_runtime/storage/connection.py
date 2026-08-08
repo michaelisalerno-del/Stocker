@@ -53,6 +53,7 @@ EXPECTED_TABLES = frozenset(
         "idea_checkpoints",
         "idea_outputs",
         "idea_output_commit_boundaries",
+        "idea_output_seals",
         "idea_output_inputs",
         "idea_output_legs",
         "shadow_positions",

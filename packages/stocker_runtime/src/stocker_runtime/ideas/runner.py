@@ -914,8 +914,11 @@ class IdeaRunner:
             )
         except sqlite3.IntegrityError as error:
             existing = connection.execute(
-                "SELECT content_hash FROM idea_outputs WHERE instance_id=? AND input_watermark=? "
-                "AND output_kind=? AND output_ordinal=? AND as_of_at_us=?",
+                "SELECT output.content_hash, seal.output_id AS sealed_output_id "
+                "FROM idea_outputs output "
+                "LEFT JOIN idea_output_seals seal ON seal.output_id=output.output_id "
+                "WHERE output.instance_id=? AND output.input_watermark=? "
+                "AND output.output_kind=? AND output.output_ordinal=? AND output.as_of_at_us=?",
                 (
                     activation.instance_id,
                     event_ids[-1],
@@ -926,6 +929,40 @@ class IdeaRunner:
             ).fetchone()
             if existing is None or str(existing[0]) != content_hash:
                 raise IdeaRunnerError("deterministic output identity collision") from error
+            if existing["sealed_output_id"] is None:
+                raise IdeaRunnerError("deterministic output is not durably sealed") from error
+            stored_inputs = tuple(
+                str(row["event_id"])
+                for row in connection.execute(
+                    "SELECT event_id FROM idea_output_inputs WHERE output_id=? "
+                    "ORDER BY input_ordinal",
+                    (output_id,),
+                )
+            )
+            stored_legs = tuple(
+                tuple(row)
+                for row in connection.execute(
+                    "SELECT instrument_id, action, target, quantity_value, notional_value, "
+                    "currency, price_hint FROM idea_output_legs WHERE output_id=? "
+                    "ORDER BY leg_number",
+                    (output_id,),
+                )
+            )
+            expected_legs = tuple(
+                (
+                    leg.instrument_id,
+                    leg.action,
+                    leg.target,
+                    leg.quantity_value,
+                    leg.notional_value,
+                    leg.currency,
+                    leg.price_hint,
+                )
+                for leg in typed_legs
+            )
+            if stored_inputs != event_ids or stored_legs != expected_legs:
+                raise IdeaRunnerError("deterministic output sealed provenance mismatch") from error
+            return
         for input_ordinal, event_id in enumerate(event_ids):
             connection.execute(
                 "INSERT INTO idea_output_inputs(output_id, event_id, input_ordinal) "
@@ -951,6 +988,10 @@ class IdeaRunner:
                         leg.price_hint,
                     ),
                 )
+        connection.execute(
+            "INSERT INTO idea_output_seals(output_id) VALUES (?) ON CONFLICT DO NOTHING",
+            (output_id,),
+        )
 
     def _degrade(self, instance_id: str, now_us: int, code: str) -> EvaluationResult:
         with connect_v2(self.database_path) as connection:

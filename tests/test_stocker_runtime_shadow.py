@@ -135,6 +135,7 @@ def _seed_case(
 ) -> None:
     initialize_database(database)
     with connect_v2(database) as connection:
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             "INSERT INTO runs VALUES ('run', 'shadow', 'ibkr', 1, NULL, ?, 'deadbee', "
             "'shadow_protected', 'running', NULL)",
@@ -204,6 +205,7 @@ def _seed_case(
                     "target, quantity_value, currency) VALUES ('proposal', ?, ?, ?, ?, ?, ?)",
                     (leg_number, instrument_id, action, target, quantity, currency),
                 )
+        connection.execute("INSERT INTO idea_output_seals VALUES ('proposal')")
     with connect_v2(database) as connection:
         for sequence, event_id, instrument_id, bid, ask, event_at_us in quotes:
             if sequence <= proposal_commit_after_source_sequence:
@@ -319,6 +321,37 @@ def test_missing_proposal_commit_boundary_is_global_fatal_not_scoped_incident(
         connection.execute(str(trigger_sql))
 
     with pytest.raises(RuntimeError, match="durable commit boundary"):
+        ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=2)
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM shadow_positions").fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT schedule_count FROM shadow_schedule WHERE output_id='proposal'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_missing_output_seal_is_global_fatal_not_scoped_incident(tmp_path: Path) -> None:
+    database = tmp_path / "missing-output-seal.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 98.0, 99.0, 1),
+            (2, "entry", "AAPL", 100.0, 101.0, 2),
+        ),
+    )
+    with sqlite3.connect(database) as connection:
+        trigger_sql = connection.execute(
+            "SELECT sql FROM sqlite_schema "
+            "WHERE type='trigger' AND name='idea_output_seals_delete_guard'"
+        ).fetchone()[0]
+        connection.execute("DROP TRIGGER idea_output_seals_delete_guard")
+        connection.execute("DELETE FROM idea_output_seals WHERE output_id='proposal'")
+        connection.execute(str(trigger_sql))
+
+    with pytest.raises(RuntimeError, match="content seal"):
         ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=2)
     with connect_v2(database) as connection:
         assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
@@ -793,6 +826,7 @@ def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_rest
                 "target, quantity_value, currency) VALUES (?, 0, 'AAPL', 'buy', 'long', 1, 'USD')",
                 (output_id,),
             )
+            connection.execute("INSERT INTO idea_output_seals VALUES (?)", (output_id,))
     with connect_v2(database) as connection:
         for sequence in range(2, 303):
             _insert_quote(
@@ -883,10 +917,10 @@ def test_failed_positions_cannot_starve_healthy_proposal_33_and_incidents_stay_b
                 "payload_json, payload_hash, content_hash, data_class, authority_status) "
                 "SELECT ?, run_id, instance_id, output_kind, subject_instrument_id, emitted_at_us, "
                 "as_of_at_us, valid_until_at_us, direction, strength, confidence, horizon_us, "
-                "?, ?, "
-                "input_watermark, input_events_hash, ?, payload_json, payload_hash, ?, data_class, "
+                "?, ?, ?, "
+                "input_events_hash, ?, payload_json, payload_hash, ?, data_class, "
                 "authority_status FROM idea_outputs WHERE output_id='proposal'",
-                (output_id, boundary_id, boundary_id, ordinal, _hash(output_id)),
+                (output_id, boundary_id, boundary_id, boundary_id, ordinal, _hash(output_id)),
             )
             connection.execute(
                 "INSERT INTO idea_output_inputs VALUES (?, ?, 0)", (output_id, boundary_id)
@@ -896,6 +930,7 @@ def test_failed_positions_cannot_starve_healthy_proposal_33_and_incidents_stay_b
                 "target, quantity_value, currency) VALUES (?, 0, 'AAPL', 'buy', 'long', 1, 'USD')",
                 (output_id,),
             )
+            connection.execute("INSERT INTO idea_output_seals VALUES (?)", (output_id,))
     with connect_v2(database) as connection:
         _insert_quote(
             connection,
@@ -1841,6 +1876,7 @@ def test_one_shadow_failure_records_one_incident_and_other_proposal_advances(
             "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, target, "
             "quantity_value, currency) VALUES ('proposal-2', 0, 'AAPL', 'buy', 'long', 1, 'USD')"
         )
+        connection.execute("INSERT INTO idea_output_seals VALUES ('proposal-2')")
     with connect_v2(database) as connection:
         _insert_quote(
             connection,

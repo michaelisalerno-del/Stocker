@@ -328,6 +328,18 @@ class ShadowEngine:
     def _ensure_position(
         self, connection: sqlite3.Connection, proposal: sqlite3.Row, now_us: int
     ) -> sqlite3.Row:
+        commit_boundary = connection.execute(
+            "SELECT boundary.committed_after_source_sequence "
+            "FROM idea_output_commit_boundaries boundary "
+            "JOIN idea_output_seals seal ON seal.output_id=boundary.output_id "
+            "WHERE boundary.output_id=?",
+            (proposal["output_id"],),
+        ).fetchone()
+        if commit_boundary is None:
+            raise _CausalBoundaryInvariant(
+                "proposal durable commit boundary or content seal is unavailable"
+            )
+        boundary = int(commit_boundary[0])
         existing = connection.execute(
             "SELECT * FROM shadow_positions WHERE proposed_trade_output_id=?",
             (proposal["output_id"],),
@@ -367,14 +379,6 @@ class ShadowEngine:
                     "SELECT * FROM shadow_positions WHERE position_id=?", (position_id,)
                 ).fetchone(),
             )
-        commit_boundary = connection.execute(
-            "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries "
-            "WHERE output_id=?",
-            (proposal["output_id"],),
-        ).fetchone()
-        if commit_boundary is None:
-            raise _CausalBoundaryInvariant("proposal durable commit boundary is unavailable")
-        boundary = int(commit_boundary[0])
         connection.execute(
             "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
             "instance_id, lifecycle, cost_model_id, fill_model_id, currency, data_class, "

@@ -260,6 +260,55 @@ class OperationalRepository:
         connection = connect_v2(self.database_path)
         try:
             connection.execute("BEGIN IMMEDIATE")
+            existing_output = connection.execute(
+                "SELECT output.content_hash, seal.output_id AS sealed_output_id "
+                "FROM idea_outputs output "
+                "LEFT JOIN idea_output_seals seal ON seal.output_id=output.output_id "
+                "WHERE output.output_id=?",
+                (output_id,),
+            ).fetchone()
+            if existing_output is not None:
+                if str(existing_output["content_hash"]) != content_hash:
+                    raise IdentityCollisionError(
+                        f"output identity {output_id} already names different content"
+                    )
+                if existing_output["sealed_output_id"] is None:
+                    raise ProvenanceError(f"output identity {output_id} is not durably sealed")
+                stored_inputs = tuple(
+                    str(row["event_id"])
+                    for row in connection.execute(
+                        "SELECT event_id FROM idea_output_inputs WHERE output_id=? "
+                        "ORDER BY input_ordinal",
+                        (output_id,),
+                    )
+                )
+                stored_legs = tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        "SELECT instrument_id, action, target, quantity_value, notional_value, "
+                        "currency, price_hint FROM idea_output_legs WHERE output_id=? "
+                        "ORDER BY leg_number",
+                        (output_id,),
+                    )
+                )
+                expected_legs = tuple(
+                    (
+                        leg.instrument_id,
+                        leg.action,
+                        leg.target,
+                        leg.quantity_value,
+                        leg.notional_value,
+                        leg.currency,
+                        leg.price_hint,
+                    )
+                    for leg in record.legs
+                )
+                if stored_inputs != input_event_ids or stored_legs != expected_legs:
+                    raise IdentityCollisionError(
+                        f"output identity {output_id} has inconsistent sealed provenance"
+                    )
+                connection.commit()
+                return StoreResult(output_id=output_id, inserted=False)
             provenance = connection.execute(
                 """
                 SELECT instance.run_id, instance.data_class, instance.mode,
@@ -393,6 +442,10 @@ class OperationalRepository:
                         leg.price_hint,
                     ),
                 )
+            connection.execute(
+                "INSERT INTO idea_output_seals(output_id) VALUES (?) ON CONFLICT DO NOTHING",
+                (output_id,),
+            )
             connection.commit()
             return StoreResult(output_id=output_id, inserted=inserted)
         except Exception:

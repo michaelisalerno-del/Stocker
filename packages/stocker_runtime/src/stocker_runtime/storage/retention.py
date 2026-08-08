@@ -27,6 +27,29 @@ from stocker_runtime.storage.shadow import (
 
 DAY_US = 86_400_000_000
 MAX_MAINTENANCE_BATCH_ROWS = 10_000
+# Bounded forensic headroom lets ShadowEngine persist the reason it rejects >8-leg proposals.
+MAX_STORED_IDEA_OUTPUT_LEGS = 16
+MAX_IDEA_OUTPUT_CASCADE_ROWS = 1 + 256 + MAX_STORED_IDEA_OUTPUT_LEGS + 1 + 1 + 1
+MAX_IDEA_OUTPUT_PARENTS_PER_PASS = MAX_MAINTENANCE_BATCH_ROWS // MAX_IDEA_OUTPUT_CASCADE_ROWS
+
+IDEA_OUTPUT_RETENTION_CANDIDATES_SQL = (
+    "SELECT output.output_id, "
+    "1 + (SELECT count(*) FROM idea_output_inputs input "
+    "WHERE input.output_id=output.output_id) "
+    "+ (SELECT count(*) FROM idea_output_legs leg "
+    "WHERE leg.output_id=output.output_id) "
+    "+ (SELECT count(*) FROM idea_output_commit_boundaries boundary "
+    "WHERE boundary.output_id=output.output_id) "
+    "+ (SELECT count(*) FROM idea_output_seals seal "
+    "WHERE seal.output_id=output.output_id) "
+    "+ (SELECT count(*) FROM shadow_schedule schedule "
+    "WHERE schedule.output_id=output.output_id) AS cascade_rows "
+    "FROM idea_outputs output INDEXED BY idea_outputs_retention_idx "
+    "WHERE output.emitted_at_us<=? "
+    "AND NOT EXISTS (SELECT 1 FROM shadow_positions position "
+    "WHERE position.proposed_trade_output_id=output.output_id) "
+    "ORDER BY output.emitted_at_us, output.output_id LIMIT ?"
+)
 
 _RECEIPT_PROOF_SQL = """
 AND receipt_batch_id IS NOT NULL
@@ -631,6 +654,31 @@ class RetentionManager:
         )
         return len(candidates)
 
+    def _prune_idea_outputs(
+        self, connection: sqlite3.Connection, cutoff_us: int, remaining: int
+    ) -> int:
+        if remaining <= 0:
+            return 0
+        candidates = tuple(
+            connection.execute(
+                IDEA_OUTPUT_RETENTION_CANDIDATES_SQL,
+                (
+                    cutoff_us,
+                    min(remaining, MAX_IDEA_OUTPUT_PARENTS_PER_PASS),
+                ),
+            )
+        )
+        selected: list[tuple[str]] = []
+        deleted_rows = 0
+        for candidate in candidates:
+            cascade_rows = int(candidate["cascade_rows"])
+            if deleted_rows + cascade_rows > remaining:
+                break
+            selected.append((str(candidate["output_id"]),))
+            deleted_rows += cascade_rows
+        connection.executemany("DELETE FROM idea_outputs WHERE output_id=?", selected)
+        return deleted_rows
+
     def _prune_expired(self, connection: sqlite3.Connection, now_us: int, limit: int) -> int:
         deleted = 0
 
@@ -679,24 +727,10 @@ class RetentionManager:
             "WHERE l.position_id = shadow_positions.position_id)",
             protected_cutoff,
         )
-        prune(
-            "idea_output_legs",
-            "rowid",
-            "EXISTS (SELECT 1 FROM idea_outputs o "
-            "WHERE o.output_id = idea_output_legs.output_id "
-            "AND o.emitted_at_us <= ? "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_positions p "
-            "WHERE p.proposed_trade_output_id = o.output_id))",
+        deleted += self._prune_idea_outputs(
+            connection,
             protected_cutoff,
-        )
-        prune(
-            "idea_outputs",
-            "output_id",
-            "emitted_at_us <= ? AND NOT EXISTS (SELECT 1 FROM shadow_positions p "
-            "WHERE p.proposed_trade_output_id = idea_outputs.output_id) "
-            "AND NOT EXISTS (SELECT 1 FROM idea_output_legs l "
-            "WHERE l.output_id = idea_outputs.output_id)",
-            protected_cutoff,
+            limit - deleted,
         )
         prune(
             "market_event_derivations",

@@ -61,7 +61,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -167,7 +167,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (9, '0009_future.sql', ?, 2)",
+            "VALUES (10, '0010_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -238,7 +238,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8)
+    assert result.applied_versions == (7, 8, 9)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -323,13 +323,19 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8,)
+    assert result.applied_versions == (8, 9)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
                 "SELECT pending_evidence_drained, pending_expiry_active FROM shadow_progress"
             ).fetchone()
         ) == (1, 0)
+        assert (
+            connection.execute(
+                "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries"
+            ).fetchone()[0]
+            == 1
+        )
         assert (
             connection.execute(
                 "SELECT count(*) FROM shadow_progress "
@@ -343,6 +349,143 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
                 "UPDATE shadow_progress SET pending_expiry_active=1 "
                 "WHERE position_id='terminal-position'"
             )
+
+
+@pytest.mark.parametrize("lifecycle", ["open", "closed"])
+def test_commit_boundary_migration_rejects_completed_shadow_artifacts_atomically(
+    tmp_path: Path, lifecycle: str
+) -> None:
+    migration_root = tmp_path / f"v8-{lifecycle}-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:8]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    database = tmp_path / f"v8-{lifecycle}.sqlite3"
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    _seed_output_dependencies(database, verify_schema=False)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+            "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
+            "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+            "payload_json, payload_hash, content_hash, data_class, authority_status) "
+            "VALUES ('historical-proposal', 'run-1', 'instance-1', 'proposed_trade', "
+            "'instrument-1', 30, 25, 'event-1', 'event-1', 'event-1', ?, 0, '{}', ?, ?, "
+            "'shadow_protected', 'unapproved')",
+            ("3" * 64, "4" * 64, "5" * 64),
+        )
+        connection.execute(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, opened_at_us, closed_at_us, lifecycle, cost_model_id, fill_model_id, "
+            "currency, data_class, policy_json, policy_hash) VALUES "
+            "('historical-position', 'historical-proposal', 'run-1', 'instance-1', 31, ?, ?, "
+            "'cost', 'fill', 'USD', 'shadow_protected', '{}', ?)",
+            (40 if lifecycle == "closed" else None, lifecycle, "6" * 64),
+        )
+
+    with pytest.raises(
+        sqlite3.IntegrityError,
+        match="idea_output_commit_boundary_requires_shadow_recreation",
+    ):
+        migrate_database(database, applied_at_us=2)
+    with connect_v2(database, verify_schema=False) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_migrations").fetchone()[0] == 8
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_schema WHERE name='idea_output_commit_boundaries'"
+            ).fetchone()
+            is None
+        )
+
+
+def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_max(
+    tmp_path: Path,
+) -> None:
+    migration_root = tmp_path / "v8-pending-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:8]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    database = tmp_path / "v8-pending.sqlite3"
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    _seed_output_dependencies(database, verify_schema=False)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
+            "VALUES (2, 'precommit-quote', 'run-1', 1, 1, 'quote', 21, ?, 'pending')",
+            ("7" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "bid_value, ask_value, payload_json, payload_sha256) VALUES "
+            "('precommit-quote', 'run-1', 2, 'instrument-1', 'quotes', 'quote', 21, 21, 1, "
+            "100, 101, '{}', ?)",
+            ("8" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+            "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
+            "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+            "payload_json, payload_hash, content_hash, data_class, authority_status) "
+            "VALUES ('pending-proposal', 'run-1', 'instance-1', 'proposed_trade', "
+            "'instrument-1', 30, 20, 'event-1', 'event-1', 'event-1', ?, 0, '{}', ?, ?, "
+            "'shadow_protected', 'unapproved')",
+            ("3" * 64, "4" * 64, "5" * 64),
+        )
+        connection.execute(
+            "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, target, "
+            "quantity_value, currency) VALUES "
+            "('pending-proposal', 0, 'instrument-1', 'buy', 'long', 1, 'USD')"
+        )
+        connection.execute(
+            "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
+            "instance_id, lifecycle, cost_model_id, fill_model_id, currency, data_class, "
+            "policy_json, policy_hash) VALUES ('pending-position', 'pending-proposal', 'run-1', "
+            "'instance-1', 'pending', 'cost', 'fill', 'USD', 'shadow_protected', '{}', ?)",
+            ("6" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO shadow_progress(position_id, entry_after_source_sequence, "
+            "next_source_sequence, next_horizon_index, updated_at_us, "
+            "pending_retention_deadline_us, pending_evidence_drained, pending_expiry_active) "
+            "VALUES ('pending-position', 1, 3, 0, 30, 100, 0, 1)"
+        )
+        connection.execute(
+            "INSERT INTO shadow_quote_state(position_id, leg_number, instrument_id, "
+            "bid_event_id, bid_source_sequence, bid_at_us, bid_value, ask_event_id, "
+            "ask_source_sequence, ask_at_us, ask_value) VALUES "
+            "('pending-position', 0, 'instrument-1', 'precommit-quote', 2, 21, 100, "
+            "'precommit-quote', 2, 21, 101)"
+        )
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
+            "VALUES (3, 'durable-unprojected', 'run-1', 1, 1, 'quote', 22, ?, 'pending')",
+            ("9" * 64,),
+        )
+
+    assert migrate_database(database, applied_at_us=2).applied_versions == (9,)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries "
+                "WHERE output_id='pending-proposal'"
+            ).fetchone()[0]
+            == 3
+        )
+        assert tuple(
+            connection.execute(
+                "SELECT entry_after_source_sequence, next_source_sequence "
+                "FROM shadow_progress WHERE position_id='pending-position'"
+            ).fetchone()
+        ) == (3, 4)
+        assert tuple(
+            connection.execute(
+                "SELECT bid_event_id, bid_source_sequence, bid_value, "
+                "ask_event_id, ask_source_sequence, ask_value FROM shadow_quote_state "
+                "WHERE position_id='pending-position'"
+            ).fetchone()
+        ) == (None, None, None, None, None, None)
 
 
 def test_migration_plan_requires_order_and_failed_migration_is_atomic(tmp_path: Path) -> None:
@@ -877,6 +1020,179 @@ def test_repository_output_identity_is_deterministic_and_collision_checked(
     assert first.output_id == deterministic_output_id(_output())
     with pytest.raises(IdentityCollisionError, match="different content"):
         repository.put_idea_output(_output(emitted_at_us=31))
+
+
+def test_repository_commit_boundary_is_first_write_stable_and_plugin_uncontrolled(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "repository-boundary.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        cursor = connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
+            "VALUES ('callback-2', 'run-1', 1, 1, 'quote', 21, ?, 'pending')",
+            ("8" * 64,),
+        )
+        assert cursor.lastrowid == 2
+    base = _output()
+    record = IdeaOutputRecord(
+        **{
+            **base.__dict__,
+            "output_kind": "proposed_trade",
+            "payload": {"committed_after_source_sequence": 0},
+            "authority_status": "unapproved",
+            "legs": _proposal_legs(),
+        }
+    )
+    repository = OperationalRepository(database)
+
+    first = repository.put_idea_output(record)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries "
+                "WHERE output_id=?",
+                (first.output_id,),
+            ).fetchone()[0]
+            == 2
+        )
+        cursor = connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
+            "VALUES ('callback-3', 'run-1', 1, 1, 'quote', 22, ?, 'pending')",
+            ("9" * 64,),
+        )
+        assert cursor.lastrowid == 3
+
+    retry = repository.put_idea_output(record)
+    assert retry.inserted is False
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries "
+                "WHERE output_id=?",
+                (first.output_id,),
+            ).fetchone()[0]
+            == 2
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="idea_output_commit_boundary_immutable"):
+            connection.execute(
+                "UPDATE idea_output_commit_boundaries "
+                "SET committed_after_source_sequence=0 WHERE output_id=?",
+                (first.output_id,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="idea_output_commit_boundary_immutable"):
+            connection.execute(
+                "DELETE FROM idea_output_commit_boundaries WHERE output_id=?",
+                (first.output_id,),
+            )
+        connection.execute("DELETE FROM idea_outputs WHERE output_id=?", (first.output_id,))
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM idea_output_commit_boundaries WHERE output_id=?",
+                (first.output_id,),
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_commit_boundary_source_max_is_complete_and_uses_bounded_indexes(tmp_path: Path) -> None:
+    database = tmp_path / "boundary-source-max.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, event_at_us, "
+            "received_at_us, connection_generation, payload_json, payload_sha256) VALUES "
+            "('derived-5', 'run-1', NULL, 5, 'instrument-1', 'bars', 'bar_5m', 25, 25, 1, "
+            "'{}', ?)",
+            ("5" * 64,),
+        )
+    repository = OperationalRepository(database)
+    derived = repository.put_idea_output(
+        IdeaOutputRecord(**{**_output().__dict__, "payload": {"stage": "derived"}})
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_receipts(batch_id, run_id, first_source_sequence, "
+            "last_source_sequence, callback_count, first_received_at_us, last_received_at_us, "
+            "kind_counts_json, status_counts_json, callback_rows_hash, prior_chain_hash, "
+            "chained_payload_hash, created_at_us) VALUES "
+            "('receipt-7', 'run-1', 6, 7, 2, 26, 27, '{}', '{}', ?, ?, ?, 27)",
+            ("6" * 64, "7" * 64, "8" * 64),
+        )
+    receipt = repository.put_idea_output(
+        IdeaOutputRecord(
+            **{
+                **_output().__dict__,
+                "output_ordinal": 1,
+                "payload": {"stage": "receipt"},
+            }
+        )
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, compacted_through_sequence, "
+            "cumulative_callback_count, first_received_at_us, last_received_at_us, "
+            "rolled_receipt_chain_hash, last_receipt_chain_hash, updated_at_us) "
+            "VALUES ('run-1', 9, 9, 20, 29, ?, ?, 29)",
+            ("9" * 64, "a" * 64),
+        )
+    compacted = repository.put_idea_output(
+        IdeaOutputRecord(
+            **{
+                **_output().__dict__,
+                "output_ordinal": 2,
+                "payload": {"stage": "compacted"},
+            }
+        )
+    )
+
+    watermark_sql = (
+        "SELECT coalesce(max(sequence), 0) FROM ("
+        "SELECT max(callback.source_sequence) AS sequence FROM callback_inbox callback "
+        "INDEXED BY callback_inbox_run_sequence_idx WHERE callback.run_id=? UNION ALL "
+        "SELECT max(coalesce(event.source_sequence, event.derived_after_source_sequence)) "
+        "FROM market_events event INDEXED BY market_events_causal_sequence_idx "
+        "WHERE event.run_id=? UNION ALL "
+        "SELECT max(receipt.last_source_sequence) FROM callback_receipts receipt "
+        "INDEXED BY callback_receipts_run_sequence_idx WHERE receipt.run_id=? UNION ALL "
+        "SELECT max(watermark.compacted_through_sequence) "
+        "FROM callback_compaction_watermarks watermark WHERE watermark.run_id=?)"
+    )
+    with connect_v2(database) as connection:
+        assert tuple(
+            int(row[0])
+            for row in connection.execute(
+                "SELECT boundary.committed_after_source_sequence FROM idea_outputs output "
+                "JOIN idea_output_commit_boundaries boundary USING(output_id) "
+                "WHERE output.output_id IN (?, ?, ?) ORDER BY output.output_ordinal",
+                (derived.output_id, receipt.output_id, compacted.output_id),
+            )
+        ) == (5, 7, 9)
+        plan = tuple(
+            str(row[3])
+            for row in connection.execute(
+                f"EXPLAIN QUERY PLAN {watermark_sql}",
+                ("run-1", "run-1", "run-1", "run-1"),
+            )
+        )
+
+    assert any("callback_inbox_run_sequence_idx" in row for row in plan)
+    assert any("market_events_causal_sequence_idx" in row for row in plan)
+    assert any("callback_receipts_run_sequence_idx" in row for row in plan)
+    assert any("sqlite_autoindex_callback_compaction_watermarks_1" in row for row in plan)
+    assert all(
+        "USE TEMP B-TREE" not in row
+        and "SCAN callback" not in row
+        and "SCAN event" not in row
+        and "SCAN receipt" not in row
+        and "SCAN watermark" not in row
+        for row in plan
+    )
 
 
 def test_repository_persists_every_ordered_input_and_typed_trade_leg(tmp_path: Path) -> None:
@@ -2168,11 +2484,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8],
-        "current_version": 8,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "current_version": 9,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 8, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 9, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

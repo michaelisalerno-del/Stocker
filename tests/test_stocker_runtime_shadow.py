@@ -41,80 +41,11 @@ def _hash(value: str) -> str:
 
 
 def _seed(database: Path, *, quantity: float | None = 1.0) -> None:
-    initialize_database(database)
-    with connect_v2(database) as connection:
-        connection.execute(
-            "INSERT INTO runs VALUES ('run', 'shadow', 'ibkr', 1, NULL, ?, 'deadbee', "
-            "'shadow_protected', 'running', NULL)",
-            ("a" * 64,),
-        )
-        connection.execute(
-            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
-            "VALUES ('run', 1, 'fixture', 1)"
-        )
-        connection.execute(
-            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, "
-            "currency) "
-            "VALUES ('AAPL', ?, 'stock', 'AAPL', 'SMART', 'USD')",
-            (_hash("AAPL"),),
-        )
-        connection.execute(
-            "INSERT INTO idea_plugins VALUES ('idea', 'v1', 1, 'Idea', 'fixture', ?, ?, '{}', 1)",
-            ("b" * 64, "c" * 64),
-        )
-        connection.execute(
-            "INSERT INTO idea_instances(instance_id, idea_id, idea_version, run_id, mode, "
-            "parameters_json, parameters_hash, plugin_code_hash, manifest_hash, universe_json, "
-            "universe_hash, requirements_json, requirements_hash, activated_after_source_sequence, "
-            "activated_at_us, health, data_class) VALUES "
-            "('instance', 'idea', 'v1', 'run', 'shadow', "
-            "'{}', ?, ?, ?, '[\"AAPL\"]', ?, '[]', ?, 0, 1, 'healthy', 'shadow_protected')",
-            ("d" * 64, "c" * 64, "b" * 64, _hash('["AAPL"]'), _hash("[]")),
-        )
-        for sequence, event_id, bid, ask, event_at in (
-            (1, "input", 100.0, 101.0, 1),
-            (2, "entry", 102.0, 103.0, 2),
-            (3, "exit", 109.0, 110.0, 12),
-        ):
-            payload = json.dumps({}, separators=(",", ":"))
-            connection.execute(
-                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
-                "recorder_generation, "
-                "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
-                "VALUES (?, ?, 'run', 1, 1, 'quote', ?, ?, 'pending')",
-                (sequence, event_id, event_at, _hash(payload)),
-            )
-            connection.execute(
-                "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
-                "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
-                "bid_value, ask_value, payload_json, payload_sha256) VALUES "
-                "(?, 'run', ?, 'AAPL', 'quotes', 'quote', ?, ?, 1, ?, ?, ?, ?)",
-                (event_id, sequence, event_at, event_at, bid, ask, payload, _hash(payload)),
-            )
-        payload = "{}"
-        connection.execute(
-            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
-            "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
-            "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
-            "payload_json, payload_hash, content_hash, data_class, authority_status) VALUES "
-            "('proposal', 'run', 'instance', 'proposed_trade', 'AAPL', 1, 1, 'input', "
-            "'input', 'input', ?, 0, ?, ?, ?, 'shadow_protected', 'unapproved')",
-            (_hash('["input"]'), payload, _hash(payload), "e" * 64),
-        )
-        connection.execute("INSERT INTO idea_output_inputs VALUES ('proposal', 'input', 0)")
-        if quantity is None:
-            connection.execute(
-                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
-                "target, notional_value, currency) "
-                "VALUES ('proposal', 0, 'AAPL', 'buy', 'long', 100, 'USD')"
-            )
-        else:
-            connection.execute(
-                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
-                "target, quantity_value, currency) "
-                "VALUES ('proposal', 0, 'AAPL', 'buy', 'long', ?, 'USD')",
-                (quantity,),
-            )
+    _seed_case(
+        database,
+        quotes=DEFAULT_QUOTES,
+        legs=(("AAPL", "buy", quantity, "USD"),),
+    )
 
 
 def _insert_quote(
@@ -199,6 +130,8 @@ def _seed_case(
     *,
     quotes: tuple[QuoteSeed, ...],
     legs: tuple[LegSeed, ...] = DEFAULT_LEGS,
+    proposal_emitted_at_us: int = 1,
+    proposal_commit_after_source_sequence: int = 1,
 ) -> None:
     initialize_database(database)
     with connect_v2(database) as connection:
@@ -235,6 +168,8 @@ def _seed_case(
             ("d" * 64, "c" * 64, "b" * 64, universe, _hash(universe), _hash("[]")),
         )
         for sequence, event_id, instrument_id, bid, ask, event_at_us in quotes:
+            if sequence > proposal_commit_after_source_sequence:
+                continue
             _insert_quote(
                 connection,
                 sequence=sequence,
@@ -250,9 +185,9 @@ def _seed_case(
             "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
             "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
             "payload_json, payload_hash, content_hash, data_class, authority_status) "
-            "VALUES ('proposal', 'run', 'instance', 'proposed_trade', 'AAPL', 1, 1, "
+            "VALUES ('proposal', 'run', 'instance', 'proposed_trade', 'AAPL', ?, 1, "
             "'input', 'input', 'input', ?, 0, ?, ?, ?, 'shadow_protected', 'unapproved')",
-            (_hash('["input"]'), payload, _hash(payload), "e" * 64),
+            (proposal_emitted_at_us, _hash('["input"]'), payload, _hash(payload), "e" * 64),
         )
         connection.execute("INSERT INTO idea_output_inputs VALUES ('proposal', 'input', 0)")
         for leg_number, (instrument_id, action, quantity, currency) in enumerate(legs):
@@ -269,6 +204,19 @@ def _seed_case(
                     "target, quantity_value, currency) VALUES ('proposal', ?, ?, ?, ?, ?, ?)",
                     (leg_number, instrument_id, action, target, quantity, currency),
                 )
+    with connect_v2(database) as connection:
+        for sequence, event_id, instrument_id, bid, ask, event_at_us in quotes:
+            if sequence <= proposal_commit_after_source_sequence:
+                continue
+            _insert_quote(
+                connection,
+                sequence=sequence,
+                event_id=event_id,
+                instrument_id=instrument_id,
+                bid=bid,
+                ask=ask,
+                event_at_us=event_at_us,
+            )
 
 
 def test_shadow_uses_first_causal_ask_then_bid_and_closes_deterministically(tmp_path: Path) -> None:
@@ -297,6 +245,123 @@ def test_shadow_uses_first_causal_ask_then_bid_and_closes_deterministically(tmp_
     assert outcome[1] == pytest.approx(5.794)
     assert outcome[2] == outcome[3] == 6.0
     assert outcome[4] == "complete"
+
+
+def test_entry_uses_first_quote_committed_after_proposal_not_lineage_tail(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "proposal-commit-boundary.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 98.0, 99.0, 1),
+            (2, "precommit-quote", "AAPL", 100.0, 101.0, 2),
+            (3, "postcommit-quote", "AAPL", 102.0, 103.0, 101),
+        ),
+        proposal_emitted_at_us=100,
+        proposal_commit_after_source_sequence=2,
+    )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    engine = ShadowEngine(database, run_id="run", policy=policy)
+
+    assert engine.run_once(now_us=100) == 0
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, progress.entry_after_source_sequence, "
+                "progress.next_source_sequence FROM shadow_positions position "
+                "JOIN shadow_progress progress USING(position_id)"
+            ).fetchone()
+        ) == ("pending", 2, 3)
+        assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries "
+                "WHERE output_id='proposal'"
+            ).fetchone()[0]
+            == 2
+        )
+
+    restarted = ShadowEngine(database, run_id="run", policy=policy)
+    assert restarted.run_once(now_us=100) == 0
+    assert restarted.run_once(now_us=101) == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, leg.entry_market_event_id "
+                "FROM shadow_positions position JOIN shadow_legs leg USING(position_id)"
+            ).fetchone()
+        ) == ("open", "postcommit-quote")
+
+
+def test_missing_proposal_commit_boundary_is_global_fatal_not_scoped_incident(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "missing-proposal-commit-boundary.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 98.0, 99.0, 1),
+            (2, "entry", "AAPL", 100.0, 101.0, 2),
+        ),
+    )
+    with sqlite3.connect(database) as connection:
+        trigger_sql = connection.execute(
+            "SELECT sql FROM sqlite_schema "
+            "WHERE type='trigger' AND name='idea_output_commit_boundaries_delete_guard'"
+        ).fetchone()[0]
+        connection.execute("DROP TRIGGER idea_output_commit_boundaries_delete_guard")
+        connection.execute("DELETE FROM idea_output_commit_boundaries WHERE output_id='proposal'")
+        connection.execute(str(trigger_sql))
+
+    with pytest.raises(RuntimeError, match="durable commit boundary"):
+        ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=2)
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM shadow_positions").fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT schedule_count FROM shadow_schedule WHERE output_id='proposal'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_scheduled_proposal_recovers_after_lineage_event_compaction(tmp_path: Path) -> None:
+    database = tmp_path / "compacted-proposal-lineage.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 98.0, 99.0, 1),
+            (2, "entry", "AAPL", 100.0, 101.0, 100),
+        ),
+    )
+    RetentionManager(database, RetentionPolicy(raw_market_event_us=10)).run(
+        now_us=50,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+    with connect_v2(database) as connection:
+        assert tuple(
+            str(row[0]) for row in connection.execute("SELECT event_id FROM market_events")
+        ) == ("entry",)
+
+    restarted = ShadowEngine(database, run_id="run", policy=_policy())
+    assert restarted.run_once(now_us=100) == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, progress.entry_after_source_sequence, "
+                "leg.entry_market_event_id FROM shadow_positions position "
+                "JOIN shadow_progress progress USING(position_id) "
+                "JOIN shadow_legs leg USING(position_id)"
+            ).fetchone()
+        ) == ("open", 1, "entry")
+        assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
 
 
 def test_split_bid_ask_callbacks_form_causal_snapshots_with_exact_side_provenance(
@@ -703,12 +768,7 @@ def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_rest
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "fair-schedule.sqlite3"
-    quotes: list[QuoteSeed] = [(1, "input", "AAPL", 100.0, 101.0, 1)]
-    quotes.extend(
-        (sequence, f"quote-{sequence}", "AAPL", 100.0, 101.0, sequence)
-        for sequence in range(2, 303)
-    )
-    _seed_case(database, quotes=tuple(quotes))
+    _seed_case(database, quotes=((1, "input", "AAPL", 100.0, 101.0, 1),))
     with connect_v2(database) as connection:
         for ordinal in range(2, 34):
             output_id = f"proposal-{ordinal:02d}"
@@ -732,6 +792,17 @@ def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_rest
                 "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
                 "target, quantity_value, currency) VALUES (?, 0, 'AAPL', 'buy', 'long', 1, 'USD')",
                 (output_id,),
+            )
+    with connect_v2(database) as connection:
+        for sequence in range(2, 303):
+            _insert_quote(
+                connection,
+                sequence=sequence,
+                event_id=f"quote-{sequence}",
+                instrument_id="AAPL",
+                bid=100.0,
+                ask=101.0,
+                event_at_us=sequence,
             )
     policy = ShadowPolicy(
         fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
@@ -783,18 +854,23 @@ def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_rest
 
 
 def test_failed_positions_cannot_starve_healthy_proposal_33_and_incidents_stay_bounded(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "failed-fair-schedule.sqlite3"
     _seed_case(
         database,
-        quotes=(
-            (1, "input", "AAPL", 100.0, 101.0, 1),
-            (2, "healthy-input", "AAPL", 100.0, 101.0, 2),
-            (3, "healthy-entry", "AAPL", 100.0, 101.0, 3),
-        ),
+        quotes=((1, "input", "AAPL", 100.0, 101.0, 1),),
     )
     with connect_v2(database) as connection:
+        _insert_quote(
+            connection,
+            sequence=2,
+            event_id="healthy-input",
+            instrument_id="AAPL",
+            bid=100.0,
+            ask=101.0,
+            event_at_us=2,
+        )
         for ordinal in range(2, 34):
             output_id = f"proposal-{ordinal:02d}"
             healthy = ordinal == 33
@@ -820,19 +896,30 @@ def test_failed_positions_cannot_starve_healthy_proposal_33_and_incidents_stay_b
                 "target, quantity_value, currency) VALUES (?, 0, 'AAPL', 'buy', 'long', 1, 'USD')",
                 (output_id,),
             )
-    raw = sqlite3.connect(database)
-    try:
-        raw.execute("PRAGMA foreign_keys=OFF")
-        raw.execute("DELETE FROM market_events WHERE event_id='input'")
-        raw.commit()
-    finally:
-        raw.close()
+    with connect_v2(database) as connection:
+        _insert_quote(
+            connection,
+            sequence=3,
+            event_id="healthy-entry",
+            instrument_id="AAPL",
+            bid=100.0,
+            ask=101.0,
+            event_at_us=3,
+        )
     policy = ShadowPolicy(
         fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
         cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
         horizons_us=(1_000,),
     )
     engine = ShadowEngine(database, run_id="run", policy=policy)
+    original = engine._advance
+
+    def fail_first_32(connection: Any, proposal: Any, **kwargs: Any) -> tuple[int, int]:
+        if proposal["output_id"] != "proposal-33":
+            raise RuntimeError("fixture scoped failure")
+        return original(connection, proposal, **kwargs)
+
+    monkeypatch.setattr(engine, "_advance", fail_first_32)
 
     assert engine.run_once(now_us=3) == 0
     assert engine.run_once(now_us=3) == 1
@@ -1734,7 +1821,7 @@ def test_one_shadow_failure_records_one_incident_and_other_proposal_advances(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "isolated.sqlite3"
-    _seed(database)
+    _seed_case(database, quotes=((1, "input", "AAPL", 100.0, 101.0, 1),))
     with connect_v2(database) as connection:
         connection.execute(
             "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
@@ -1753,6 +1840,25 @@ def test_one_shadow_failure_records_one_incident_and_other_proposal_advances(
         connection.execute(
             "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, target, "
             "quantity_value, currency) VALUES ('proposal-2', 0, 'AAPL', 'buy', 'long', 1, 'USD')"
+        )
+    with connect_v2(database) as connection:
+        _insert_quote(
+            connection,
+            sequence=2,
+            event_id="entry",
+            instrument_id="AAPL",
+            bid=102.0,
+            ask=103.0,
+            event_at_us=2,
+        )
+        _insert_quote(
+            connection,
+            sequence=3,
+            event_id="exit",
+            instrument_id="AAPL",
+            bid=109.0,
+            ask=110.0,
+            event_at_us=12,
         )
     engine = ShadowEngine(database, run_id="run", policy=_policy())
     original = engine._advance

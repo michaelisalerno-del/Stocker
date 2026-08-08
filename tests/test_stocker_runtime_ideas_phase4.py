@@ -23,6 +23,7 @@ from stocker_runtime.domain import (
     MarketEvent,
     Observation,
     ProposedPosition,
+    ProposedTrade,
     ProposedTradeLeg,
     ProtectedDataClass,
     RuntimeMode,
@@ -594,6 +595,113 @@ def test_runner_has_no_backfill_and_commits_outputs_with_checkpoint(tmp_path: Pa
     assert [tuple(row) for row in legs] == [
         (outputs[-1]["subject_instrument_id"], "buy", "long", 1.0, "USD")
     ]
+
+
+class _EarlyLineageProposalPlugin:
+    def __init__(self, original: IdeaPlugin) -> None:
+        self._manifest = original.manifest
+
+    @property
+    def manifest(self) -> IdeaManifest:
+        return self._manifest
+
+    def requirements(self, activation: IdeaActivation) -> tuple[MarketDataRequirement, ...]:
+        del activation
+        return ()
+
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        del state
+        first = batch.events[0]
+        return IdeaEvaluation(
+            state={},
+            outputs=(
+                ProposedTrade(
+                    subject_instrument_id=first.instrument_id,
+                    as_of_at_us=first.event_at_us,
+                    payload={"reason": "early-lineage-fixture"},
+                    legs=(
+                        ProposedTradeLeg(
+                            instrument_id=first.instrument_id,
+                            action="buy",
+                            target="long",
+                            quantity_value=1,
+                            currency="USD",
+                        ),
+                    ),
+                ),
+            ),
+            output_input_event_ids=((first.event_id,),),
+        )
+
+
+def test_runner_commit_boundary_covers_batch_watermark_and_overlapping_callback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "runner-commit-boundary.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(
+        original,
+        plugin=_EarlyLineageProposalPlugin(original.plugin),
+        requirements=(requirement,),
+    )
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        _event(connection, 1, "AAL", 100.0)
+        _event(connection, 2, "AAL", 101.0)
+    original_commit = runner._commit_evaluation
+
+    def commit_with_overlapping_callback(
+        activation: IdeaActivation,
+        batch: IdeaBatch,
+        evaluation: IdeaEvaluation,
+        event_ids: tuple[str, ...],
+        starting_checkpoint: str | None,
+        now_us: int,
+    ) -> None:
+        with connect_v2(database) as connection:
+            _event(connection, 3, "AAL", 102.0)
+        original_commit(
+            activation,
+            batch,
+            evaluation,
+            event_ids,
+            starting_checkpoint,
+            now_us,
+        )
+
+    monkeypatch.setattr(runner, "_commit_evaluation", commit_with_overlapping_callback)
+
+    result = runner.run_once(now_us=1_000)[0]
+    with connect_v2(database) as connection:
+        output = connection.execute(
+            "SELECT output_id, first_input_event_id, last_input_event_id FROM idea_outputs"
+        ).fetchone()
+        checkpoint = connection.execute(
+            "SELECT last_market_event_id, last_source_sequence FROM idea_checkpoints "
+            "WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()
+        boundary = connection.execute(
+            "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries "
+            "WHERE output_id=?",
+            (output["output_id"],),
+        ).fetchone()[0]
+
+    assert result.advanced is True
+    assert result.output_count == 1
+    assert tuple(output)[1:] == ("event-1", "event-1")
+    assert tuple(checkpoint) == ("event-2", 2)
+    assert boundary == 3
 
 
 def test_one_plugin_failure_does_not_stop_other_instance(tmp_path: Path) -> None:

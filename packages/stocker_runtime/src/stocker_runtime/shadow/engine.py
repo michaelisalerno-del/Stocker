@@ -93,6 +93,10 @@ class _PolicyMismatch(ValueError):
     pass
 
 
+class _CausalBoundaryInvariant(RuntimeError):
+    pass
+
+
 class ShadowEngine:
     """One-writer, restart-safe virtual evidence projector for one shadow run."""
 
@@ -174,7 +178,7 @@ class ShadowEngine:
                 proposal = cast(
                     sqlite3.Row,
                     connection.execute(
-                        "SELECT output_id, instance_id, emitted_at_us, last_input_event_id "
+                        "SELECT output_id, instance_id, emitted_at_us "
                         "FROM idea_outputs WHERE output_id=? AND run_id=? "
                         "AND output_kind='proposed_trade' AND authority_status='unapproved' "
                         "AND data_class='shadow_protected'",
@@ -190,7 +194,7 @@ class ShadowEngine:
                         now_us=now_us,
                         sequence_limit=min(remaining, EVIDENCE_SEQUENCES_PER_POSITION),
                     )
-                except (sqlite3.Error, _PolicyMismatch):
+                except (sqlite3.Error, _PolicyMismatch, _CausalBoundaryInvariant):
                     connection.execute(f"ROLLBACK TO {savepoint}")  # noqa: S608
                     connection.execute(f"RELEASE {savepoint}")  # noqa: S608
                     raise
@@ -363,13 +367,14 @@ class ShadowEngine:
                     "SELECT * FROM shadow_positions WHERE position_id=?", (position_id,)
                 ).fetchone(),
             )
-        boundary = connection.execute(
-            "SELECT coalesce(source_sequence, derived_after_source_sequence) "
-            "FROM market_events WHERE event_id=? AND run_id=?",
-            (proposal["last_input_event_id"], self.run_id),
+        commit_boundary = connection.execute(
+            "SELECT committed_after_source_sequence FROM idea_output_commit_boundaries "
+            "WHERE output_id=?",
+            (proposal["output_id"],),
         ).fetchone()
-        if boundary is None or boundary[0] is None:
-            raise RuntimeError("proposal entry boundary evidence is unavailable")
+        if commit_boundary is None:
+            raise _CausalBoundaryInvariant("proposal durable commit boundary is unavailable")
+        boundary = int(commit_boundary[0])
         connection.execute(
             "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
             "instance_id, lifecycle, cost_model_id, fill_model_id, currency, data_class, "
@@ -393,8 +398,8 @@ class ShadowEngine:
             "pending_retention_deadline_us) VALUES (?, ?, ?, 0, ?, ?)",
             (
                 position_id,
-                int(boundary[0]),
-                int(boundary[0]) + 1,
+                boundary,
+                boundary + 1,
                 now_us,
                 int(proposal["emitted_at_us"]) + MAX_PENDING_RETENTION_US,
             ),

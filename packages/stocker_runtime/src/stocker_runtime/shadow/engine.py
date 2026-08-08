@@ -11,6 +11,7 @@ from typing import cast
 
 from stocker_runtime.domain import ShadowCostPolicy, ShadowFillPolicy
 from stocker_runtime.storage import connect_v2
+from stocker_runtime.storage.shadow import terminalize_expired_pending_positions
 
 MAX_PROPOSALS_PER_CALL = 32
 MAX_EVIDENCE_SEQUENCES_PER_CALL = 256
@@ -188,6 +189,13 @@ class ShadowEngine:
         sequence_limit: int,
     ) -> tuple[int, int]:
         position = self._ensure_position(connection, proposal, now_us)
+        if terminalize_expired_pending_positions(
+            connection,
+            now_us=now_us,
+            limit=1,
+            position_id=str(position["position_id"]),
+        ):
+            return 1, 0
         if str(position["lifecycle"]) == "invalid":
             return 1, 0
         if str(position["policy_hash"]) != self._policy_hash():
@@ -197,11 +205,6 @@ class ShadowEngine:
         ).fetchone()
         if progress is None:
             raise RuntimeError("shadow position is missing durable progress")
-        connection.execute(
-            "UPDATE shadow_progress SET schedule_count=schedule_count + 1, updated_at_us=? "
-            "WHERE position_id=?",
-            (now_us, position["position_id"]),
-        )
         legs = tuple(
             connection.execute(
                 "SELECT proposal.leg_number, proposal.instrument_id, proposal.action, "

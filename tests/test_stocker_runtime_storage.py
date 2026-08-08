@@ -61,7 +61,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -80,28 +80,36 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
 
-def test_shadow_event_fetch_uses_instrument_sequence_index_without_temp_sort(
+def test_shadow_runtime_keeps_only_authoritative_schedule_and_quote_indexes(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "stocker-v2.sqlite3"
     initialize_database(database)
 
     with connect_v2(database) as connection:
-        plan = tuple(
-            str(row[3])
-            for row in connection.execute(
-                "EXPLAIN QUERY PLAN SELECT source_sequence, event_id, event_at_us, "
-                "bid_value, ask_value FROM market_events "
-                "WHERE run_id=? AND instrument_id=? AND source_sequence>=? "
-                "AND source_sequence IS NOT NULL AND event_at_us<=? "
-                "AND (bid_value IS NOT NULL OR ask_value IS NOT NULL) "
-                "ORDER BY source_sequence, event_id LIMIT ?",
-                ("run", "AAPL", 1, 100, 8),
-            )
+        indexes = {
+            str(row[0])
+            for row in connection.execute("SELECT name FROM sqlite_schema WHERE type='index'")
+        }
+        schedule_columns = tuple(
+            str(row[2])
+            for row in connection.execute("PRAGMA index_info(shadow_schedule_run_count_idx)")
+        )
+        quote_columns = tuple(
+            str(row[2])
+            for row in connection.execute("PRAGMA index_info(market_events_shadow_raw_idx)")
         )
 
-    assert any("USING INDEX market_events_shadow_scan_idx" in detail for detail in plan)
-    assert all("USE TEMP B-TREE" not in detail for detail in plan)
+    assert "shadow_progress_schedule_idx" not in indexes
+    assert "market_events_shadow_scan_idx" not in indexes
+    assert schedule_columns == ("run_id", "schedule_count", "output_id")
+    assert quote_columns == (
+        "run_id",
+        "instrument_id",
+        "event_kind",
+        "source_sequence",
+        "event_id",
+    )
 
 
 def test_runtime_connection_state_is_constrained_and_defaults_disconnected(tmp_path: Path) -> None:
@@ -159,7 +167,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (6, '0006_future.sql', ?, 2)",
+            "VALUES (7, '0007_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -1996,11 +2004,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5],
-        "current_version": 5,
+        "applied_versions": [1, 2, 3, 4, 5, 6],
+        "current_version": 6,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 5, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 6, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

@@ -20,6 +20,7 @@ from stocker_runtime.storage.repository import (
     canonical_json_text,
     receipt_chain_hash,
 )
+from stocker_runtime.storage.shadow import terminalize_expired_pending_positions
 
 DAY_US = 86_400_000_000
 MAX_MAINTENANCE_BATCH_ROWS = 10_000
@@ -717,6 +718,7 @@ class RetentionManager:
             "JOIN shadow_positions position ON position.position_id=progress.position_id "
             "JOIN shadow_legs leg ON leg.position_id=position.position_id "
             "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
+            "AND market_events.event_kind='quote' "
             "AND leg.instrument_id=market_events.instrument_id "
             "AND market_events.source_sequence>=progress.next_source_sequence "
             "AND progress.final_target_at_us>=?) "
@@ -746,29 +748,8 @@ class RetentionManager:
             "json_each(checkpoint.state_input_event_ids_json) input "
             "WHERE input.value=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
-            "WHERE derivation.input_event_id=market_events.event_id) "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
-            "JOIN shadow_positions position ON position.position_id=progress.position_id "
-            "JOIN shadow_legs leg ON leg.position_id=position.position_id "
-            "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
-            "AND leg.instrument_id=market_events.instrument_id "
-            "AND coalesce(market_events.source_sequence, "
-            "market_events.derived_after_source_sequence)>=progress.next_source_sequence "
-            "AND progress.final_target_at_us>=?) "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
-            "JOIN shadow_positions position ON position.position_id=progress.position_id "
-            "JOIN idea_output_legs leg "
-            "ON leg.output_id=position.proposed_trade_output_id "
-            "WHERE position.run_id=market_events.run_id AND position.lifecycle='pending' "
-            "AND leg.instrument_id=market_events.instrument_id "
-            "AND coalesce(market_events.source_sequence, "
-            "market_events.derived_after_source_sequence)>=progress.next_source_sequence "
-            "AND coalesce(market_events.source_sequence, "
-            "market_events.derived_after_source_sequence)>progress.entry_after_source_sequence "
-            "AND progress.pending_retention_deadline_us>=?)",
+            "WHERE derivation.input_event_id=market_events.event_id)",
             now_us - self.policy.completed_bar_us,
-            now_us - self.policy.completed_bar_us,
-            now_us,
         )
         deleted += self._prune_callback_tombstones(
             connection,
@@ -837,6 +818,13 @@ class RetentionManager:
                 precondition(connection)
             check_deadline()
             remaining = self.policy.maintenance_batch_rows
+            terminalized = terminalize_expired_pending_positions(
+                connection,
+                now_us=now_us,
+                limit=remaining,
+            )
+            check_deadline()
+            remaining -= len(terminalized)
             payloads_compacted = self._compact_payloads(
                 connection, now_us - self.policy.callback_payload_us, remaining
             )

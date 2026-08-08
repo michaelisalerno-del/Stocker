@@ -18,6 +18,7 @@ from stocker_runtime.storage.backup import (
     create_backup,
     load_backup_manifest,
     read_backup_manifests,
+    record_backup_failure,
     restore_backup,
 )
 from stocker_runtime.storage.connection import (
@@ -105,6 +106,7 @@ __all__ = [
     "migration_plan",
     "load_backup_manifest",
     "read_backup_manifests",
+    "record_backup_failure",
     "receipt_chain_hash",
     "restore_backup",
     "verify_database",

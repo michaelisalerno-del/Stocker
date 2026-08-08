@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -802,17 +803,27 @@ def test_meta_and_diagnostics_are_bounded_and_authority_free(tmp_path: Path) -> 
                 "(?, 'run-live', 'sub-aapl', ?, ?, 'disconnect', 1, 1, ?)",
                 (f"gap-{number}", 200 + number, 201 + number, 202 + number),
             )
-    for number in range(3):
-        create_backup(
-            database,
-            backup_directory,
-            tier="daily",
-            created_at_us=300 + number,
-        )
+    now_us = time.time_ns() // 1_000
+    day_us = 24 * 60 * 60 * 1_000_000
+    for tier, timestamps in (
+        ("daily", (now_us - day_us, now_us)),
+        ("weekly", (now_us - 7 * day_us, now_us)),
+    ):
+        for created_at_us in timestamps:
+            create_backup(
+                database,
+                backup_directory,
+                tier=tier,  # type: ignore[arg-type]
+                created_at_us=created_at_us,
+            )
     (backup_directory / "callback-payload.json").write_text(
         '{"secret":"not diagnostics"}', encoding="utf-8"
     )
     client = TestClient(create_web_app(_config(database, backup_directory=backup_directory)))
+
+    live = client.get("/api/v2/live")
+    assert live.status_code == 200
+    assert live.json()["backup"]["entries"] == 4
 
     meta = client.get("/api/v2/meta")
     assert meta.status_code == 200

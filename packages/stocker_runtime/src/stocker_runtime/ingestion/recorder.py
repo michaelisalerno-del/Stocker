@@ -1589,6 +1589,16 @@ class Recorder:
             self._idea_runner.close()
             self._idea_runner = None
 
+    def abandon_unclean(self) -> None:
+        """Release process-local resources while leaving durable restart evidence unclean."""
+
+        self.state = None
+        with suppress(Exception):
+            self.adapter.disconnect()
+        if self._idea_runner is not None:
+            self._idea_runner.close()
+            self._idea_runner = None
+
     def _pause_optional(self, now_us: int) -> None:
         if self.state is None:
             return

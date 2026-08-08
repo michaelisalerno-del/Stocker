@@ -36,6 +36,7 @@ from stocker_runtime.storage import (
     create_backup,
     initialize_database,
     migrate_database,
+    record_backup_failure,
     restore_backup,
 )
 
@@ -163,7 +164,7 @@ def validate_recorder_command(config: Annotated[Path, typer.Argument()]) -> None
         loaded = load_recorder_config(config)
     except (OSError, ValueError) as error:
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
-        raise typer.Exit(code=1) from error
+        raise typer.Exit(code=78) from error
     _emit(
         {
             "host": loaded.host,
@@ -176,10 +177,13 @@ def validate_recorder_command(config: Annotated[Path, typer.Argument()]) -> None
 
 @backup_app.command("create")
 def backup_create_command(
-    database: Annotated[Path, typer.Option("--database", exists=True, dir_okay=False)],
+    database: Annotated[Path, typer.Option("--database", dir_okay=False)],
     destination: Annotated[Path, typer.Option("--destination", file_okay=False)],
     tier: Annotated[Literal["daily", "weekly"], typer.Option("--tier")],
     created_at_us: Annotated[int | None, typer.Option("--created-at-us", min=0)] = None,
+    working_directory: Annotated[
+        Path | None, typer.Option("--working-directory", file_okay=False)
+    ] = None,
 ) -> None:
     """Create one checked online backup under the frozen retention policy."""
 
@@ -190,8 +194,15 @@ def backup_create_command(
             tier=tier,
             created_at_us=created_at_us,
             policy=BackupPolicy(),
+            working_directory=working_directory,
         )
     except (BackupError, OSError, ValueError, sqlite3.Error) as error:
+        with suppress(Exception):
+            record_backup_failure(
+                destination,
+                code=type(error).__name__[:96],
+                checked_at_us=created_at_us,
+            )
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
         raise typer.Exit(code=1) from error
     _emit(
@@ -350,8 +361,7 @@ def recorder_run_command(
         recorder.stop(now_us=time.time_ns() // 1_000)
     except (OSError, ValueError, RuntimeError, sqlite3.Error, TypeError) as error:
         if recorder is not None and recorder.state is not None:
-            with suppress(Exception):
-                recorder.stop(now_us=time.time_ns() // 1_000)
+            recorder.abandon_unclean()
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
         raise typer.Exit(code=1) from error
     finally:

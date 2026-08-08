@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Stocker prospective database backup
+
+[Timer]
+OnCalendar=*-*-* 23:45:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+Unit=stocker-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -154,6 +154,10 @@ def test_restore_verifies_both_hashes_and_never_publishes_a_partial_database(
     compressed = bytearray(artifact.archive_path.read_bytes())
     compressed[-1] ^= 1
     artifact.archive_path.write_bytes(compressed)
+    os.utime(
+        artifact.archive_path,
+        ns=(artifact.manifest.archive_mtime_ns, artifact.manifest.archive_mtime_ns),
+    )
     destination = tmp_path / "tampered-restore.sqlite3"
 
     with pytest.raises(BackupIntegrityError, match="compressed hash"):
@@ -303,6 +307,136 @@ def test_rotation_enforces_daily_weekly_counts_and_preserves_floor_at_byte_cap(
     assert read_backup_manifests(floor_directory, limit=200).status.state == "degraded"
 
 
+def test_daily_and_weekly_backup_creation_share_one_destination_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    _seed_database(database)
+    real_online_copy = backup_module._online_copy
+    first_entered = threading.Event()
+    second_entered = threading.Event()
+    release_first = threading.Event()
+    call_lock = threading.Lock()
+    calls = 0
+    errors: list[BaseException] = []
+
+    def observed_online_copy(source: Path, destination: Path) -> None:
+        nonlocal calls
+        with call_lock:
+            calls += 1
+            call_number = calls
+        if call_number == 1:
+            first_entered.set()
+            assert release_first.wait(timeout=5)
+        else:
+            second_entered.set()
+        real_online_copy(source, destination)
+
+    monkeypatch.setattr(backup_module, "_online_copy", observed_online_copy)
+
+    def run(tier: str, created_at_us: int) -> None:
+        try:
+            create_backup(
+                database,
+                backups,
+                tier=tier,  # type: ignore[arg-type]
+                created_at_us=created_at_us,
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            errors.append(error)
+
+    daily = threading.Thread(target=run, args=("daily", 100))
+    weekly = threading.Thread(target=run, args=("weekly", 101))
+    daily.start()
+    assert first_entered.wait(timeout=5)
+    weekly.start()
+    overlapped = second_entered.wait(timeout=0.25)
+    release_first.set()
+    daily.join(timeout=5)
+    weekly.join(timeout=5)
+
+    assert overlapped is False
+    assert not daily.is_alive()
+    assert not weekly.is_alive()
+    assert errors == []
+    assert len(read_backup_manifests(backups, limit=200).items) == 2
+
+
+def test_backup_working_copies_stay_outside_the_capped_archive_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    working.mkdir()
+    _seed_database(database)
+    real_online_copy = backup_module._online_copy
+    observed_directories: list[Path] = []
+
+    def observed_online_copy(source: Path, destination: Path) -> None:
+        observed_directories.append(destination.parent)
+        real_online_copy(source, destination)
+
+    monkeypatch.setattr(backup_module, "_online_copy", observed_online_copy)
+    create_backup(
+        database,
+        backups,
+        tier="daily",
+        created_at_us=200,
+        working_directory=working,
+    )
+
+    assert observed_directories == [working.resolve()]
+    assert not tuple(backups.glob(".stocker-v2-database-*"))
+    assert not tuple(backups.glob(".stocker-v2-archive-*"))
+    assert not tuple(working.iterdir())
+
+
+def test_backup_health_requires_fresh_valid_tier_floors(tmp_path: Path) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    _seed_database(database)
+    day_us = 24 * 60 * 60 * 1_000_000
+    base = 20 * day_us
+    for tier, offsets in (("daily", (-day_us, 0)), ("weekly", (-7 * day_us, 0))):
+        for offset in offsets:
+            create_backup(
+                database,
+                backups,
+                tier=tier,  # type: ignore[arg-type]
+                created_at_us=base + offset,
+            )
+
+    healthy = read_backup_manifests(backups, limit=200, now_us=base)
+    assert healthy.status.state == "healthy"
+    assert healthy.status.code is None
+
+    weekly = next(item for item in healthy.items if item.tier == "weekly")
+    archive = backups / weekly.archive_filename
+    corrupted = bytearray(archive.read_bytes())
+    corrupted[-1] ^= 1
+    archive.write_bytes(corrupted)
+    invalid = read_backup_manifests(backups, limit=200, now_us=base)
+    assert invalid.status.state == "degraded"
+    assert invalid.status.code == "BACKUP_MANIFEST_INVALID"
+
+    stale_backups = tmp_path / "stale"
+    for tier, offsets in (("daily", (-day_us, 0)), ("weekly", (-7 * day_us, 0))):
+        for offset in offsets:
+            create_backup(
+                database,
+                stale_backups,
+                tier=tier,  # type: ignore[arg-type]
+                created_at_us=base + offset,
+            )
+    stale = read_backup_manifests(stale_backups, limit=200, now_us=base + 9 * day_us)
+    assert stale.status.state == "degraded"
+    assert stale.status.code == "BACKUP_DAILY_STALE"
+
+
 def test_manifest_is_atomic_and_diagnostics_ignore_arbitrary_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -325,7 +459,7 @@ def test_manifest_is_atomic_and_diagnostics_ignore_arbitrary_files(
 
     assert not tuple(backups.glob("*.sqlite3.gz"))
     assert not tuple(backups.glob("*.manifest.json"))
-    assert not tuple(backups.glob(".stocker-v2-*"))
+    assert {path.name for path in backups.glob(".stocker-v2-*")} == {".stocker-v2-backup.lock"}
 
     monkeypatch.setattr(backup_module.os, "replace", real_replace)
     valid = create_backup(database, backups, tier="daily", created_at_us=51)
@@ -379,3 +513,31 @@ def test_backup_cli_emits_machine_readable_create_and_restore_results(tmp_path: 
     assert restored_result.exit_code == 0, restored_result.output
     assert json.loads(restored_result.stdout)["status"] == "ok"
     assert restored.is_file()
+
+
+def test_backup_cli_records_degraded_status_when_creation_fails(tmp_path: Path) -> None:
+    backups = tmp_path / "backups"
+    runner = CliRunner()
+
+    failed = runner.invoke(
+        app,
+        [
+            "backup",
+            "create",
+            "--database",
+            str(tmp_path / "missing.sqlite3"),
+            "--destination",
+            str(backups),
+            "--tier",
+            "daily",
+            "--created-at-us",
+            "70",
+        ],
+    )
+
+    assert failed.exit_code == 1
+    assert json.loads(failed.stdout)["status"] == "error"
+    status = json.loads((backups / "backup-status.json").read_text(encoding="utf-8"))
+    assert status["state"] == "degraded"
+    assert status["code"] == "BackupError"
+    assert status["checked_at_us"] == 70

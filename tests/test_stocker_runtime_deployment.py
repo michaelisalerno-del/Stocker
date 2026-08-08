@@ -7,7 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from stocker_runtime.cli import app
-from stocker_runtime.ingestion import CallbackFence, load_recorder_config
+from stocker_runtime.ingestion import CallbackFence, Recorder, load_recorder_config
 from stocker_runtime.storage import connect_v2, initialize_database
 from stocker_runtime.web import WebConfig
 
@@ -20,10 +20,10 @@ def _unit(name: str) -> str:
 
 
 def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> None:
-    recorder = _unit("stocker-recorder.service")
-    web = _unit("stocker-web.service")
-    daily = _unit("stocker-backup-daily.service")
-    weekly = _unit("stocker-backup-weekly.service")
+    recorder = _unit("stocker-v2-recorder.service")
+    web = _unit("stocker-v2-web.service")
+    daily = _unit("stocker-v2-backup-daily.service")
+    weekly = _unit("stocker-v2-backup-weekly.service")
 
     assert "User=stocker-recorder" in recorder
     assert "User=stocker-web" in web
@@ -33,6 +33,10 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
     assert "ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime web run" in web
     assert "--tier daily" in daily
     assert "--tier weekly" in weekly
+    assert "--working-directory /var/cache/stocker-v2-backup-work" in daily
+    assert "CacheDirectory=stocker-v2-backup-work" in daily
+    assert "ExecCondition=" not in daily
+    assert "ExecCondition=" not in weekly
 
     assert "ReadWritePaths=/var/lib/stocker/v2" in recorder
     assert "ReadOnlyPaths=/var/lib/stocker/backups-v2" in recorder
@@ -56,8 +60,8 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
 
 
 def test_daily_and_weekly_timers_are_bounded_and_not_implicitly_enabled() -> None:
-    daily = _unit("stocker-backup-daily.timer")
-    weekly = _unit("stocker-backup-weekly.timer")
+    daily = _unit("stocker-v2-backup-daily.timer")
+    weekly = _unit("stocker-v2-backup-weekly.timer")
 
     assert "OnCalendar=*-*-* 23:45:00 UTC" in daily
     assert "OnCalendar=Sun *-*-* 22:45:00 UTC" in weekly
@@ -65,8 +69,16 @@ def test_daily_and_weekly_timers_are_bounded_and_not_implicitly_enabled() -> Non
     assert "Persistent=true" in weekly
     assert "RandomizedDelaySec=" in daily
     assert "RandomizedDelaySec=" in weekly
-    assert not (SYSTEMD / "stocker-backup.service").exists()
-    assert not (SYSTEMD / "stocker-backup.timer").exists()
+    assert (SYSTEMD / "stocker-backup.service").exists()
+    assert (SYSTEMD / "stocker-backup.timer").exists()
+
+
+def test_inactive_v2_rehearsal_preserves_the_active_v1_deployment_surface() -> None:
+    assert "stocker-prospective recorder run" in _unit("stocker-recorder.service")
+    assert "stocker-prospective web run" in _unit("stocker-web.service")
+    assert "stocker-prospective db backup" in _unit("stocker-backup.service")
+    assert (ROOT / "deploy/stocker.env.example").is_file()
+    assert (ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py").is_file()
 
 
 def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() -> None:
@@ -77,12 +89,15 @@ def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() 
         ROOT / "configs/runtime/recorder.example.json",
         ROOT / "configs/runtime/market-data.example.json",
         ROOT / "configs/runtime/web.example.json",
-        *SYSTEMD.glob("stocker-*.service"),
-        *SYSTEMD.glob("stocker-*.timer"),
+        SYSTEMD / "stocker-v2-recorder.service",
+        SYSTEMD / "stocker-v2-web.service",
+        SYSTEMD / "stocker-v2-backup-daily.service",
+        SYSTEMD / "stocker-v2-backup-weekly.service",
+        SYSTEMD / "stocker-v2-backup-daily.timer",
+        SYSTEMD / "stocker-v2-backup-weekly.timer",
     ]
     joined = "\n".join(path.read_text(encoding="utf-8") for path in deployment_files).lower()
 
-    assert not (ROOT / "deploy/stocker.env.example").exists()
     for forbidden in (
         "eodhd",
         "source_transfer",
@@ -138,7 +153,7 @@ def test_sqlite_boundary_preparation_targets_only_v2_and_backup_paths() -> None:
     script_path = ROOT / "deploy/scripts/prepare-v2-sqlite-boundary.py"
     source = script_path.read_text(encoding="utf-8")
 
-    assert not (ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py").exists()
+    assert (ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py").exists()
     assert 'DATABASE_DIRECTORY_NAME = "v2"' in source
     assert 'BACKUP_DIRECTORY_NAME = "backups-v2"' in source
     assert 'DATABASE_NAME = "stocker-v2.sqlite3"' in source
@@ -257,3 +272,81 @@ def test_recorder_service_command_handles_sigterm_as_a_clean_stop(
         "BACKUP_DEGRADED",
         '{"backup_status_code":"BackupCapacityError"}',
     )
+
+
+def test_recorder_service_failure_leaves_an_unclean_generation_for_restart(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backup_directory = tmp_path / "backups"
+    backup_directory.mkdir()
+    (backup_directory / "backup-status.json").write_text(
+        '{"checked_at_us":1,"code":"BackupCapacityError","format_version":1,'
+        '"latest_manifest_filename":null,"state":"degraded"}\n',
+        encoding="utf-8",
+    )
+    initialize_database(database)
+    config = tmp_path / "recorder.json"
+    inputs = tmp_path / "market-data.json"
+    config.write_text(
+        json.dumps(
+            {
+                "database": str(database),
+                "run_id": "run-restart",
+                "owner_id": "owner-restart",
+                "mode": "prospective_record",
+                "host": "127.0.0.1",
+                "port": 4003,
+                "client_id": 71,
+                "read_only": True,
+                "external_read_only_verified": True,
+                "config_hash": "b" * 64,
+                "git_commit": "0000000",
+                "backup_directory": str(backup_directory),
+            }
+        ),
+        encoding="utf-8",
+    )
+    inputs.write_text('{"instruments":[],"subscriptions":[]}', encoding="utf-8")
+    monkeypatch.setattr(
+        "stocker_runtime.cli.signal.signal",
+        lambda _signum, _handler: signal.SIG_DFL,
+    )
+    monkeypatch.setattr("stocker_runtime.cli.time.time_ns", lambda: 1_000_000_000)
+
+    monkeypatch.setattr(
+        "stocker_runtime.cli.IBKRMarketData.official",
+        lambda **_kwargs: _SignalMarketData(lambda _signum, _frame: None),
+    )
+    real_drain = Recorder.drain
+
+    def fail_drain(_recorder: Recorder, *, now_us: int) -> None:
+        raise RuntimeError(f"temporary drain failure at {now_us}")
+
+    monkeypatch.setattr(Recorder, "drain", fail_drain)
+    failed = CliRunner().invoke(
+        app,
+        ["recorder", "run", "--config", str(config), "--inputs", str(inputs)],
+    )
+
+    assert failed.exit_code == 1
+    with connect_v2(database) as connection:
+        run = connection.execute(
+            "SELECT status, ended_at_us FROM runs WHERE run_id='run-restart'"
+        ).fetchone()
+        generation = connection.execute(
+            "SELECT ended_at_us, clean_stop, termination_code FROM recorder_generations "
+            "WHERE run_id='run-restart' AND generation=1"
+        ).fetchone()
+    assert tuple(run) == ("running", None)
+    assert tuple(generation) == (None, 0, None)
+
+    monkeypatch.setattr(Recorder, "drain", real_drain)
+    restarted = Recorder(
+        load_recorder_config(config),
+        _SignalMarketData(lambda _signum, _frame: None),
+    )
+    state = restarted.start(now_us=62_000_000, instruments=(), subscriptions=())
+    assert state.recorder_generation == 2
+    restarted.stop(now_us=63_000_000)

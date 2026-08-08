@@ -1,6 +1,6 @@
 [Unit]
-Description=Stocker V2 market-data-only recorder
-Documentation=file:/opt/stocker/current/docs/plans/stocker-v2-platform.md
+Description=Stocker prospective market-data recorder
+Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -8,13 +8,11 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=stocker-recorder
-Group=stocker-readers
+User=stocker
+Group=stocker
 WorkingDirectory=/opt/stocker/current
-EnvironmentFile=-/etc/stocker/stocker-recorder.env
-ExecStartPre=+/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
-ExecStartPre=/opt/stocker/current/.venv/bin/stocker-runtime validate-recorder /etc/stocker/recorder.json
-ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime recorder run --config /etc/stocker/recorder.json --inputs /etc/stocker/market-data.json
+EnvironmentFile=/etc/stocker/stocker.env
+ExecStart=/opt/stocker/current/.venv/bin/stocker-prospective recorder run --config /etc/stocker/prospective.yaml --release-directory /opt/stocker/current
 Restart=on-failure
 RestartSec=15
 RestartPreventExitStatus=78
@@ -31,11 +29,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-IPAddressDeny=any
-IPAddressAllow=localhost
-ReadOnlyPaths=/var/lib/stocker/backups-v2
-ReadWritePaths=/var/lib/stocker/v2
+ReadWritePaths=/var/lib/stocker
 
 [Install]
 WantedBy=multi-user.target

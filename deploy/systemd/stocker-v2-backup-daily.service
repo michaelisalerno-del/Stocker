@@ -1,8 +1,7 @@
 [Unit]
 Description=Stocker V2 daily checked compressed backup
 Documentation=file:/opt/stocker/current/docs/plans/stocker-v2-platform.md
-After=stocker-recorder.service
-ConditionPathExists=/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
+After=stocker-v2-recorder.service
 
 [Service]
 Type=oneshot
@@ -10,8 +9,9 @@ User=stocker-backup
 Group=stocker-readers
 WorkingDirectory=/opt/stocker/current
 EnvironmentFile=-/etc/stocker/stocker-backup.env
-ExecCondition=+/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
-ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime backup create --database /var/lib/stocker/v2/stocker-v2.sqlite3 --destination /var/lib/stocker/backups-v2 --tier daily
+CacheDirectory=stocker-v2-backup-work
+CacheDirectoryMode=0750
+ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime backup create --database /var/lib/stocker/v2/stocker-v2.sqlite3 --destination /var/lib/stocker/backups-v2 --tier daily --working-directory /var/cache/stocker-v2-backup-work
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true
@@ -28,3 +28,4 @@ IPAddressDeny=any
 ReadOnlyPaths=/var/lib/stocker/v2
 ReadWritePaths=/var/lib/stocker/v2/stocker-v2.sqlite3-shm
 ReadWritePaths=/var/lib/stocker/backups-v2
+ReadWritePaths=/var/cache/stocker-v2-backup-work

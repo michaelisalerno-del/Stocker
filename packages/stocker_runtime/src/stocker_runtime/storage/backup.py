@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import gzip
 import hashlib
 import json
@@ -11,7 +12,8 @@ import sqlite3
 import stat
 import tempfile
 import time
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,10 +27,13 @@ BackupState = Literal["healthy", "degraded", "unavailable"]
 
 BACKUP_FORMAT_VERSION = 1
 BACKUP_STATUS_FILENAME = "backup-status.json"
+BACKUP_LOCK_FILENAME = ".stocker-v2-backup.lock"
 DEFAULT_BACKUP_BYTE_CAP = 8 * 1024**3
 DEFAULT_DAILY_RETENTION = 14
 DEFAULT_WEEKLY_RETENTION = 12
 DEFAULT_MINIMUM_PER_TIER = 2
+DAILY_MAX_AGE_US = 36 * 60 * 60 * 1_000_000
+WEEKLY_MAX_AGE_US = 8 * 24 * 60 * 60 * 1_000_000
 MAX_BACKUP_MANIFEST_BYTES = 64 * 1024
 MAX_BACKUP_STATUS_BYTES = 4 * 1024
 MAX_MANIFEST_SCAN = 200
@@ -38,6 +43,7 @@ _HASH_CHUNK_BYTES = 1024 * 1024
 _MANIFEST_FIELDS = frozenset(
     {
         "archive_filename",
+        "archive_mtime_ns",
         "compressed_bytes",
         "compressed_sha256",
         "created_at_us",
@@ -103,6 +109,7 @@ class BackupManifest:
     created_at_us: int
     source_database_filename: str
     archive_filename: str
+    archive_mtime_ns: int
     database_schema_version: int
     quick_check: Literal["ok"]
     uncompressed_bytes: int
@@ -117,6 +124,7 @@ class BackupManifest:
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "archive_filename": self.archive_filename,
+            "archive_mtime_ns": self.archive_mtime_ns,
             "compressed_bytes": self.compressed_bytes,
             "compressed_sha256": self.compressed_sha256,
             "created_at_us": self.created_at_us,
@@ -142,6 +150,7 @@ class BackupManifest:
             payload["uncompressed_bytes"], "uncompressed size"
         )
         compressed_bytes = _strict_nonnegative_int(payload["compressed_bytes"], "compressed size")
+        archive_mtime_ns = _strict_nonnegative_int(payload["archive_mtime_ns"], "archive mtime")
         tier = payload["tier"]
         source_name = payload["source_database_filename"]
         archive_name = payload["archive_filename"]
@@ -170,6 +179,7 @@ class BackupManifest:
             created_at_us=created_at_us,
             source_database_filename=cast(str, source_name),
             archive_filename=cast(str, archive_name),
+            archive_mtime_ns=archive_mtime_ns,
             database_schema_version=database_schema_version,
             quick_check="ok",
             uncompressed_bytes=uncompressed_bytes,
@@ -251,10 +261,10 @@ class BackupProjection:
     truncated: bool
     status: BackupStatus
 
-    def to_dict(self) -> dict[str, JsonValue]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "available": self.available,
-            "items": tuple(item.to_dict() for item in self.items),
+            "items": [item.to_dict() for item in self.items],
             "status": self.status.to_dict(),
             "truncated": self.truncated,
         }
@@ -351,6 +361,8 @@ def load_backup_manifest(
     metadata = _regular_file(archive, label="backup archive")
     if metadata.st_size != manifest.compressed_bytes:
         raise BackupIntegrityError("backup archive size does not match its manifest")
+    if metadata.st_mtime_ns != manifest.archive_mtime_ns:
+        raise BackupIntegrityError("backup archive modification time does not match its manifest")
     if verify_compressed_hash:
         compressed_sha256, compressed_bytes = _hash_file(archive)
         if (
@@ -402,6 +414,7 @@ def read_backup_manifests(
     directory: str | Path,
     *,
     limit: int = 200,
+    now_us: int | None = None,
 ) -> BackupProjection:
     """Read only strict bounded manifests for diagnostics; ignore all other files."""
 
@@ -425,15 +438,66 @@ def read_backup_manifests(
         return BackupProjection(False, (), False, BackupStatus("unavailable", None, None, None))
     candidates.sort(key=lambda path: path.name, reverse=True)
     items: list[BackupManifestEntry] = []
+    invalid_manifests = 0
     for path in candidates:
         try:
             manifest = load_backup_manifest(path)
         except BackupIntegrityError:
+            invalid_manifests += 1
             continue
         items.append(BackupManifestEntry.from_manifest(manifest))
     items.sort(key=lambda item: (item.created_at_us, item.archive_filename), reverse=True)
     truncated = truncated or len(items) > limit
-    return BackupProjection(True, tuple(items[:limit]), truncated, _read_status(root))
+    checked_at_us = time.time_ns() // 1_000 if now_us is None else now_us
+    if isinstance(checked_at_us, bool) or not isinstance(checked_at_us, int) or checked_at_us < 0:
+        raise ValueError("backup health time must be a nonnegative integer")
+    status = _project_backup_health(
+        persisted=_read_status(root),
+        items=tuple(items),
+        invalid_manifests=invalid_manifests,
+        now_us=checked_at_us,
+    )
+    return BackupProjection(True, tuple(items[:limit]), truncated, status)
+
+
+def _project_backup_health(
+    *,
+    persisted: BackupStatus,
+    items: tuple[BackupManifestEntry, ...],
+    invalid_manifests: int,
+    now_us: int,
+) -> BackupStatus:
+    def degraded(code: str) -> BackupStatus:
+        return BackupStatus(
+            "degraded",
+            persisted.checked_at_us,
+            code,
+            persisted.latest_manifest_filename,
+        )
+
+    if persisted.state == "unavailable":
+        return degraded("BACKUP_STATUS_UNAVAILABLE") if items else persisted
+    if persisted.state == "degraded":
+        return persisted
+    if invalid_manifests:
+        return degraded("BACKUP_MANIFEST_INVALID")
+    manifest_names = {item.manifest_filename for item in items}
+    if persisted.latest_manifest_filename not in manifest_names:
+        return degraded("BACKUP_LATEST_INVALID")
+    by_tier = {
+        tier: tuple(item for item in items if item.tier == tier) for tier in ("daily", "weekly")
+    }
+    if any(len(tier_items) < DEFAULT_MINIMUM_PER_TIER for tier_items in by_tier.values()):
+        return degraded("BACKUP_TIER_FLOOR_UNMET")
+    latest_daily = max(item.created_at_us for item in by_tier["daily"])
+    latest_weekly = max(item.created_at_us for item in by_tier["weekly"])
+    if latest_daily > now_us or latest_weekly > now_us:
+        return degraded("BACKUP_CLOCK_INVALID")
+    if now_us - latest_daily > DAILY_MAX_AGE_US:
+        return degraded("BACKUP_DAILY_STALE")
+    if now_us - latest_weekly > WEEKLY_MAX_AGE_US:
+        return degraded("BACKUP_WEEKLY_STALE")
+    return persisted
 
 
 def _fsync_directory(directory: Path) -> None:
@@ -497,6 +561,57 @@ def _prepare_backup_directory(path: Path) -> Path:
     else:
         path.mkdir(parents=True, mode=0o750)
     return path.resolve()
+
+
+def _prepare_working_directory(path: Path, *, backup_directory: Path) -> Path:
+    working = _prepare_backup_directory(path)
+    if working == backup_directory or backup_directory in working.parents:
+        raise BackupError("backup working directory must be outside the archive directory")
+    if working.stat().st_dev != backup_directory.stat().st_dev:
+        raise BackupError("backup working and archive directories must share a filesystem")
+    return working
+
+
+def record_backup_failure(
+    destination: str | Path,
+    *,
+    code: str,
+    checked_at_us: int | None = None,
+) -> None:
+    """Publish a stable degraded status for a failed backup service invocation."""
+
+    if not code or len(code) > 96 or not code.isascii():
+        raise ValueError("backup failure code must be bounded ASCII")
+    timestamp = time.time_ns() // 1_000 if checked_at_us is None else checked_at_us
+    if isinstance(timestamp, bool) or not isinstance(timestamp, int) or timestamp < 0:
+        raise ValueError("backup failure time must be a nonnegative integer")
+    root = _prepare_backup_directory(Path(destination))
+    with _destination_lock(root):
+        previous = _read_status(root)
+        _write_status(
+            root,
+            state="degraded",
+            checked_at_us=timestamp,
+            code=code,
+            latest_manifest_filename=previous.latest_manifest_filename,
+        )
+
+
+@contextmanager
+def _destination_lock(directory: Path) -> Iterator[None]:
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(directory / BACKUP_LOCK_FILENAME, flags, 0o640)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise BackupIntegrityError("backup destination lock must be one regular file")
+        os.fchmod(descriptor, 0o640)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        with suppress(OSError):
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def _online_copy(source: Path, destination: Path) -> None:
@@ -656,6 +771,34 @@ def create_backup(
     tier: BackupTier,
     created_at_us: int | None = None,
     policy: BackupPolicy | None = None,
+    working_directory: str | Path | None = None,
+) -> BackupArtifact:
+    """Serialize one checked online backup for a destination."""
+
+    root = _prepare_backup_directory(Path(destination))
+    working = _prepare_working_directory(
+        Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
+        backup_directory=root,
+    )
+    with _destination_lock(root):
+        return _create_backup_locked(
+            database,
+            root,
+            tier=tier,
+            created_at_us=created_at_us,
+            policy=policy,
+            working_directory=working,
+        )
+
+
+def _create_backup_locked(
+    database: str | Path,
+    destination: str | Path,
+    *,
+    tier: BackupTier,
+    created_at_us: int | None = None,
+    policy: BackupPolicy | None = None,
+    working_directory: Path,
 ) -> BackupArtifact:
     """Create one checked online backup and atomically commit its strict manifest."""
 
@@ -682,12 +825,12 @@ def create_backup(
         raise BackupError("backup identity already exists")
 
     database_descriptor, database_temporary_name = tempfile.mkstemp(
-        prefix=".stocker-v2-database-", suffix=".sqlite3", dir=root
+        prefix=".stocker-v2-database-", suffix=".sqlite3", dir=working_directory
     )
     os.close(database_descriptor)
     temporary_database = Path(database_temporary_name)
     archive_descriptor, archive_temporary_name = tempfile.mkstemp(
-        prefix=".stocker-v2-archive-", suffix=".gz", dir=root
+        prefix=".stocker-v2-archive-", suffix=".gz", dir=working_directory
     )
     os.close(archive_descriptor)
     temporary_archive = Path(archive_temporary_name)
@@ -721,6 +864,7 @@ def create_backup(
             created_at_us=timestamp,
             source_database_filename=source.name,
             archive_filename=archive_name,
+            archive_mtime_ns=temporary_archive.stat().st_mtime_ns,
             database_schema_version=schema_version,
             quick_check="ok",
             uncompressed_bytes=uncompressed_bytes,

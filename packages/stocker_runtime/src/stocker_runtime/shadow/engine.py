@@ -17,6 +17,7 @@ MAX_EVIDENCE_SEQUENCES_PER_CALL = 256
 EVIDENCE_SEQUENCES_PER_POSITION = MAX_EVIDENCE_SEQUENCES_PER_CALL // MAX_PROPOSALS_PER_CALL
 MAX_TRADE_LEGS = 8
 MAX_EVENTS_PER_INSTRUMENT_FETCH = EVIDENCE_SEQUENCES_PER_POSITION
+MAX_PENDING_RETENTION_US = 30 * 24 * 60 * 60 * 1_000_000
 
 
 @dataclass(frozen=True)
@@ -126,28 +127,34 @@ class ShadowEngine:
             ):
                 raise ValueError("shadow engine requires a shadow-protected shadow run")
             connection.execute("BEGIN IMMEDIATE")
-            proposals = tuple(
+            scheduled = tuple(
                 connection.execute(
-                    "SELECT output.output_id, output.instance_id, output.last_input_event_id "
-                    "FROM idea_outputs output LEFT JOIN shadow_positions position "
-                    "ON position.proposed_trade_output_id=output.output_id "
-                    "LEFT JOIN shadow_progress progress "
-                    "ON progress.position_id=position.position_id "
-                    "WHERE output.run_id=? AND output.output_kind='proposed_trade' "
-                    "AND output.authority_status='unapproved' "
-                    "AND output.data_class='shadow_protected' "
-                    "AND (position.position_id IS NULL "
-                    "OR position.lifecycle IN ('pending','open')) "
-                    "ORDER BY coalesce(progress.schedule_count, 0), "
-                    "output.emitted_at_us, output.output_id LIMIT ?",
+                    "SELECT output_id FROM shadow_schedule "
+                    "INDEXED BY shadow_schedule_run_count_idx WHERE run_id=? "
+                    "ORDER BY schedule_count, output_id LIMIT ?",
                     (self.run_id, MAX_PROPOSALS_PER_CALL),
                 )
             )
             changed = 0
             remaining = MAX_EVIDENCE_SEQUENCES_PER_CALL
-            for ordinal, proposal in enumerate(proposals):
+            for ordinal, schedule in enumerate(scheduled):
                 if remaining <= 0:
                     break
+                connection.execute(
+                    "UPDATE shadow_schedule SET schedule_count=schedule_count + 1 "
+                    "WHERE output_id=? AND run_id=?",
+                    (schedule["output_id"], self.run_id),
+                )
+                proposal = cast(
+                    sqlite3.Row,
+                    connection.execute(
+                        "SELECT output_id, instance_id, emitted_at_us, last_input_event_id "
+                        "FROM idea_outputs WHERE output_id=? AND run_id=? "
+                        "AND output_kind='proposed_trade' AND authority_status='unapproved' "
+                        "AND data_class='shadow_protected'",
+                        (schedule["output_id"], self.run_id),
+                    ).fetchone(),
+                )
                 savepoint = f"shadow_position_{ordinal}"
                 connection.execute(f"SAVEPOINT {savepoint}")  # noqa: S608
                 try:
@@ -216,12 +223,13 @@ class ShadowEngine:
             connection,
             legs,
             next_sequence=int(progress["next_source_sequence"]),
-            now_us=now_us,
             limit=sequence_limit,
         )
         changed = 0
         consumed = 0
         for event in events:
+            if int(event["received_at_us"]) > now_us:
+                break
             consumed += 1
             sequence = int(event["source_sequence"])
             self._apply_event(
@@ -334,8 +342,15 @@ class ShadowEngine:
         )
         connection.execute(
             "INSERT INTO shadow_progress(position_id, entry_after_source_sequence, "
-            "next_source_sequence, next_horizon_index, updated_at_us) VALUES (?, ?, ?, 0, ?)",
-            (position_id, int(boundary[0]), int(boundary[0]) + 1, now_us),
+            "next_source_sequence, next_horizon_index, updated_at_us, "
+            "pending_retention_deadline_us) VALUES (?, ?, ?, 0, ?, ?)",
+            (
+                position_id,
+                int(boundary[0]),
+                int(boundary[0]) + 1,
+                now_us,
+                int(proposal["emitted_at_us"]) + MAX_PENDING_RETENTION_US,
+            ),
         )
         connection.executemany(
             "INSERT INTO shadow_quote_state(position_id, leg_number, instrument_id) "
@@ -385,7 +400,6 @@ class ShadowEngine:
         legs: tuple[sqlite3.Row, ...],
         *,
         next_sequence: int,
-        now_us: int,
         limit: int,
     ) -> tuple[sqlite3.Row, ...]:
         fetched: list[sqlite3.Row] = []
@@ -394,17 +408,15 @@ class ShadowEngine:
             fetched.extend(
                 connection.execute(
                     "SELECT source_sequence, event_id, instrument_id, event_at_us, "
-                    "bid_value, ask_value FROM market_events "
-                    "INDEXED BY market_events_shadow_scan_idx "
-                    "WHERE run_id=? AND instrument_id=? AND source_sequence>=? "
-                    "AND source_sequence IS NOT NULL AND event_at_us<=? "
-                    "AND (bid_value IS NOT NULL OR ask_value IS NOT NULL) "
+                    "received_at_us, quality_bits, bid_value, ask_value FROM market_events "
+                    "INDEXED BY market_events_shadow_raw_idx "
+                    "WHERE run_id=? AND instrument_id=? AND event_kind='quote' "
+                    "AND source_sequence>=? AND source_sequence IS NOT NULL "
                     "ORDER BY source_sequence, event_id LIMIT ?",
                     (
                         self.run_id,
                         instrument_id,
                         next_sequence,
-                        now_us,
                         min(limit, MAX_EVENTS_PER_INSTRUMENT_FETCH),
                     ),
                 )
@@ -419,6 +431,10 @@ class ShadowEngine:
         states: list[_QuoteState],
         event: sqlite3.Row,
     ) -> None:
+        if int(event["quality_bits"]) != 0 or int(event["event_at_us"]) > int(
+            event["received_at_us"]
+        ):
+            return
         instrument_id = str(event["instrument_id"])
         event_id = str(event["event_id"])
         source_sequence = int(event["source_sequence"])

@@ -152,6 +152,47 @@ def _insert_quote(
     )
 
 
+def _insert_raw_market_event(
+    connection: sqlite3.Connection,
+    *,
+    sequence: int,
+    event_id: str,
+    event_kind: str,
+    event_at_us: int,
+    received_at_us: int,
+    bid: float | None = None,
+    ask: float | None = None,
+    last: float | None = None,
+    quality_bits: int = 0,
+) -> None:
+    payload = json.dumps({}, separators=(",", ":"))
+    connection.execute(
+        "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, recorder_generation, "
+        "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
+        "VALUES (?, ?, 'run', 1, 1, ?, ?, ?, 'pending')",
+        (sequence, event_id, event_kind, received_at_us, _hash(payload)),
+    )
+    connection.execute(
+        "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, feed_kind, "
+        "event_kind, event_at_us, received_at_us, connection_generation, quality_bits, "
+        "bid_value, ask_value, last_value, payload_json, payload_sha256) VALUES "
+        "(?, 'run', ?, 'AAPL', 'quotes', ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+        (
+            event_id,
+            sequence,
+            event_kind,
+            event_at_us,
+            received_at_us,
+            quality_bits,
+            bid,
+            ask,
+            last,
+            payload,
+            _hash(payload),
+        ),
+    )
+
+
 def _seed_case(
     database: Path,
     *,
@@ -738,6 +779,186 @@ def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_rest
         )
 
 
+def test_failed_positions_cannot_starve_healthy_proposal_33_and_incidents_stay_bounded(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "failed-fair-schedule.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 100.0, 101.0, 1),
+            (2, "healthy-input", "AAPL", 100.0, 101.0, 2),
+            (3, "healthy-entry", "AAPL", 100.0, 101.0, 3),
+        ),
+    )
+    with connect_v2(database) as connection:
+        for ordinal in range(2, 34):
+            output_id = f"proposal-{ordinal:02d}"
+            healthy = ordinal == 33
+            boundary_id = "healthy-input" if healthy else "input"
+            connection.execute(
+                "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+                "subject_instrument_id, emitted_at_us, as_of_at_us, valid_until_at_us, "
+                "direction, strength, confidence, horizon_us, first_input_event_id, "
+                "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+                "payload_json, payload_hash, content_hash, data_class, authority_status) "
+                "SELECT ?, run_id, instance_id, output_kind, subject_instrument_id, emitted_at_us, "
+                "as_of_at_us, valid_until_at_us, direction, strength, confidence, horizon_us, "
+                "?, ?, "
+                "input_watermark, input_events_hash, ?, payload_json, payload_hash, ?, data_class, "
+                "authority_status FROM idea_outputs WHERE output_id='proposal'",
+                (output_id, boundary_id, boundary_id, ordinal, _hash(output_id)),
+            )
+            connection.execute(
+                "INSERT INTO idea_output_inputs VALUES (?, ?, 0)", (output_id, boundary_id)
+            )
+            connection.execute(
+                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
+                "target, quantity_value, currency) VALUES (?, 0, 'AAPL', 'buy', 'long', 1, 'USD')",
+                (output_id,),
+            )
+    raw = sqlite3.connect(database)
+    try:
+        raw.execute("PRAGMA foreign_keys=OFF")
+        raw.execute("DELETE FROM market_events WHERE event_id='input'")
+        raw.commit()
+    finally:
+        raw.close()
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    engine = ShadowEngine(database, run_id="run", policy=policy)
+
+    assert engine.run_once(now_us=3) == 0
+    assert engine.run_once(now_us=3) == 1
+    assert engine.run_once(now_us=3) == 0
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 32
+        assert (
+            connection.execute(
+                "SELECT lifecycle FROM shadow_positions "
+                "WHERE proposed_trade_output_id='proposal-33'"
+            ).fetchone()[0]
+            == "open"
+        )
+
+
+def test_active_schedule_selector_uses_covering_index_without_temp_sort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "schedule-plan.sqlite3"
+    _seed(database)
+    statements: list[str] = []
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = connect_v2(path)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr("stocker_runtime.shadow.engine.connect_v2", traced_connect)
+    assert ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=2) == 1
+    selector = next(
+        statement
+        for statement in statements
+        if statement.startswith("SELECT") and "FROM shadow_schedule" in statement
+    )
+    with connect_v2(database) as connection:
+        plan = tuple(str(row[3]) for row in connection.execute(f"EXPLAIN QUERY PLAN {selector}"))
+
+    assert any("USING COVERING INDEX shadow_schedule_run_count_idx" in row for row in plan)
+    assert all("USE TEMP B-TREE" not in row and "SCAN idea_outputs" not in row for row in plan)
+    assert "JOIN idea_outputs" not in selector
+    assert "JOIN shadow_positions" not in selector
+
+
+def test_raw_quote_batch_is_bounded_and_future_provider_evidence_never_reappears(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "raw-quote-batch.sqlite3"
+    _seed_case(
+        database,
+        quotes=((1, "input", "AAPL", 100.0, 101.0, 1),),
+    )
+    with connect_v2(database) as connection:
+        for sequence in range(2, 102):
+            _insert_raw_market_event(
+                connection,
+                sequence=sequence,
+                event_id=f"trade-{sequence}",
+                event_kind="trade",
+                event_at_us=sequence,
+                received_at_us=sequence,
+                last=100.0,
+            )
+        for sequence in range(102, 110):
+            _insert_raw_market_event(
+                connection,
+                sequence=sequence,
+                event_id=f"future-quote-{sequence}",
+                event_kind="quote",
+                event_at_us=10_000 + sequence,
+                received_at_us=sequence,
+                bid=100.0,
+                ask=101.0,
+            )
+        _insert_raw_market_event(
+            connection,
+            sequence=110,
+            event_id="usable-entry",
+            event_kind="quote",
+            event_at_us=110,
+            received_at_us=110,
+            bid=100.0,
+            ask=101.0,
+        )
+    statements: list[str] = []
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = connect_v2(path)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr("stocker_runtime.shadow.engine.connect_v2", traced_connect)
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    engine = ShadowEngine(database, run_id="run", policy=policy)
+
+    assert engine.run_once(now_us=20_000) == 0
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, progress.next_source_sequence "
+                "FROM shadow_positions position JOIN shadow_progress progress USING(position_id)"
+            ).fetchone()
+        ) == ("pending", 110)
+    selector = next(
+        statement
+        for statement in statements
+        if statement.startswith("SELECT") and "INDEXED BY market_events_shadow_raw_idx" in statement
+    )
+    with connect_v2(database) as connection:
+        plan = tuple(str(row[3]) for row in connection.execute(f"EXPLAIN QUERY PLAN {selector}"))
+    assert any("USING INDEX market_events_shadow_raw_idx" in row for row in plan)
+    assert all("USE TEMP B-TREE" not in row for row in plan)
+    assert "LIMIT 8" in selector
+
+    restarted = ShadowEngine(database, run_id="run", policy=policy)
+    assert restarted.run_once(now_us=20_000) == 1
+    assert restarted.run_once(now_us=20_000) == 0
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT lifecycle, entry_market_event_id FROM shadow_positions "
+                "JOIN shadow_legs USING(position_id)"
+            ).fetchone()
+        ) == ("open", "usable-entry")
+
+
 def test_open_recovery_uses_durable_progress_after_entry_event_is_pruned(tmp_path: Path) -> None:
     database = tmp_path / "pruned-entry.sqlite3"
     _seed(database)
@@ -827,6 +1048,72 @@ def test_retention_does_not_preserve_unrelated_instrument_in_same_shadow_run(
             )
         }
     assert retained_ids == {"exit"}
+
+
+def test_pending_retention_preserves_all_unconsumed_entry_evidence_until_frozen_deadline(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "pending-retention.sqlite3"
+    quotes: list[QuoteSeed] = [(1, "input", "AAPL", 100.0, 101.0, 1)]
+    quotes.extend(
+        (sequence, f"crossed-{sequence}", "AAPL", 105.0, 104.0, sequence)
+        for sequence in range(2, 10)
+    )
+    quotes.extend(
+        (
+            (10, "valid-entry", "AAPL", 100.0, 101.0, 10),
+            (11, "later-crossed", "AAPL", 106.0, 105.0, 11),
+        )
+    )
+    _seed_case(database, quotes=tuple(quotes))
+    with connect_v2(database) as connection:
+        _insert_raw_market_event(
+            connection,
+            sequence=12,
+            event_id="same-symbol-trade",
+            event_kind="trade",
+            event_at_us=12,
+            received_at_us=12,
+            last=100.0,
+        )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    engine = ShadowEngine(database, run_id="run", policy=policy)
+    assert engine.run_once(now_us=11) == 0
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, progress.next_source_sequence, "
+                "progress.pending_retention_deadline_us "
+                "FROM shadow_positions position JOIN shadow_progress progress USING(position_id)"
+            ).fetchone()
+        ) == ("pending", 10, 2_592_000_000_001)
+
+    RetentionManager(database, RetentionPolicy(raw_market_event_us=1)).run(
+        now_us=100,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+
+    restarted = ShadowEngine(database, run_id="run", policy=policy)
+    assert restarted.run_once(now_us=100) == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT position.lifecycle, leg.entry_market_event_id "
+                "FROM shadow_positions position JOIN shadow_legs leg USING(position_id)"
+            ).fetchone()
+        ) == ("open", "valid-entry")
+        retained_ids = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT event_id FROM market_events WHERE source_sequence BETWEEN 2 AND 12"
+            )
+        }
+    assert retained_ids == {"valid-entry", "later-crossed"}
 
 
 def test_one_shadow_failure_records_one_incident_and_other_proposal_advances(

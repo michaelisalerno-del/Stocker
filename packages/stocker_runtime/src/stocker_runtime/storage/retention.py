@@ -719,9 +719,20 @@ class RetentionManager:
             "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
             "AND leg.instrument_id=market_events.instrument_id "
             "AND market_events.source_sequence>=progress.next_source_sequence "
-            "AND progress.final_target_at_us>=?)",
+            "AND progress.final_target_at_us>=?) "
+            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
+            "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "JOIN idea_output_legs leg "
+            "ON leg.output_id=position.proposed_trade_output_id "
+            "WHERE position.run_id=market_events.run_id AND position.lifecycle='pending' "
+            "AND market_events.event_kind='quote' "
+            "AND leg.instrument_id=market_events.instrument_id "
+            "AND market_events.source_sequence>=progress.next_source_sequence "
+            "AND market_events.source_sequence>progress.entry_after_source_sequence "
+            "AND progress.pending_retention_deadline_us>=?)",
             now_us - self.policy.raw_market_event_us,
             now_us - self.policy.raw_market_event_us,
+            now_us,
         )
         prune(
             "market_events",
@@ -743,9 +754,21 @@ class RetentionManager:
             "AND leg.instrument_id=market_events.instrument_id "
             "AND coalesce(market_events.source_sequence, "
             "market_events.derived_after_source_sequence)>=progress.next_source_sequence "
-            "AND progress.final_target_at_us>=?)",
+            "AND progress.final_target_at_us>=?) "
+            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
+            "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "JOIN idea_output_legs leg "
+            "ON leg.output_id=position.proposed_trade_output_id "
+            "WHERE position.run_id=market_events.run_id AND position.lifecycle='pending' "
+            "AND leg.instrument_id=market_events.instrument_id "
+            "AND coalesce(market_events.source_sequence, "
+            "market_events.derived_after_source_sequence)>=progress.next_source_sequence "
+            "AND coalesce(market_events.source_sequence, "
+            "market_events.derived_after_source_sequence)>progress.entry_after_source_sequence "
+            "AND progress.pending_retention_deadline_us>=?)",
             now_us - self.policy.completed_bar_us,
             now_us - self.policy.completed_bar_us,
+            now_us,
         )
         deleted += self._prune_callback_tombstones(
             connection,

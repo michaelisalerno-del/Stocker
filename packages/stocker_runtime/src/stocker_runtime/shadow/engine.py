@@ -52,6 +52,20 @@ class ShadowEngine:
     def _position_id(output_id: str) -> str:
         return hashlib.sha256(f"shadow-position-v1:{output_id}".encode()).hexdigest()
 
+    def _policy_json(self) -> str:
+        return json.dumps(
+            {
+                "cost": self.policy.cost.model_dump(mode="json"),
+                "fill": self.policy.fill.model_dump(mode="json"),
+                "horizons_us": self.policy.horizons_us,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    def _policy_hash(self) -> str:
+        return hashlib.sha256(self._policy_json().encode()).hexdigest()
+
     def run_once(self, *, now_us: int) -> int:
         """Advance every proposal once; exact retries are harmless and causal only."""
 
@@ -113,8 +127,9 @@ class ShadowEngine:
             connection.execute(
                 "INSERT INTO shadow_positions(position_id, proposed_trade_output_id, run_id, "
                 "instance_id, "
-                "lifecycle, cost_model_id, fill_model_id, currency, data_class) "
-                "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 'shadow_protected')",
+                "lifecycle, cost_model_id, fill_model_id, currency, data_class, policy_json, "
+                "policy_hash) "
+                "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 'shadow_protected', ?, ?)",
                 (
                     position_id,
                     output_id,
@@ -123,11 +138,15 @@ class ShadowEngine:
                     self.policy.cost.model_id,
                     self.policy.fill.model_id,
                     next(iter(currencies)),
+                    self._policy_json(),
+                    self._policy_hash(),
                 ),
             )
             position = connection.execute(
                 "SELECT * FROM shadow_positions WHERE position_id=?", (position_id,)
             ).fetchone()
+        if str(position["policy_hash"]) != self._policy_hash():
+            raise ValueError("shadow policy differs from the persisted position policy")
         if str(position["lifecycle"]) == "pending":
             return self._open_if_ready(connection, position, proposal, now_us)
         return self._mark_or_close(connection, position, now_us)
@@ -140,18 +159,32 @@ class ShadowEngine:
         now_us: int,
         *,
         latest: bool = False,
+        not_before_us: int = 0,
+        before_sequence: int | None = None,
     ) -> sqlite3.Row | None:
-        return cast(
-            sqlite3.Row | None,
+        upper_sequence = (
+            before_sequence if before_sequence is not None else 9_223_372_036_854_775_807
+        )
+        rows = tuple(
             connection.execute(
                 "SELECT event_id, source_sequence, event_at_us, bid_value, ask_value "
-                "FROM market_events "
-                "WHERE run_id=? AND instrument_id=? AND source_sequence>? AND event_at_us<=? "
-                "AND bid_value IS NOT NULL AND ask_value IS NOT NULL "
-                "ORDER BY source_sequence " + ("DESC" if latest else "ASC") + ", event_id LIMIT 1",
-                (self.run_id, instrument_id, after_sequence, now_us),
-            ).fetchone(),
+                "FROM market_events WHERE run_id=? AND instrument_id=? AND source_sequence>? "
+                "AND source_sequence<=? "
+                "AND event_at_us BETWEEN ? AND ? ORDER BY source_sequence, event_id",
+                (self.run_id, instrument_id, after_sequence, upper_sequence, not_before_us, now_us),
+            )
         )
+        valid = tuple(
+            row
+            for row in rows
+            if now_us - int(row["event_at_us"]) <= self.policy.fill.max_quote_age_us
+            and float(row["bid_value"] or 0) > 0
+            and float(row["ask_value"] or 0) > 0
+            and float(row["bid_value"]) <= float(row["ask_value"])
+        )
+        if not valid:
+            return None
+        return cast(sqlite3.Row, valid[-1] if latest else valid[0])
 
     def _open_if_ready(
         self,
@@ -234,8 +267,17 @@ class ShadowEngine:
             )
             for leg in legs
         )
+        self._record_causal_marks(connection, position, legs, entry_boundary, now_us)
+        horizon_at_us = int(position["opened_at_us"]) + self.policy.horizons_us[-1]
         quotes = tuple(
-            self._quote(connection, str(leg["instrument_id"]), entry_boundary, now_us, latest=True)
+            self._quote(
+                connection,
+                str(leg["instrument_id"]),
+                entry_boundary,
+                now_us,
+                latest=True,
+                not_before_us=horizon_at_us if now_us >= horizon_at_us else 0,
+            )
             for leg in legs
         )
         if any(quote is None for quote in quotes):
@@ -287,7 +329,7 @@ class ShadowEngine:
                 payload,
             ),
         )
-        if now_us < int(position["opened_at_us"]) + self.policy.horizons_us[-1]:
+        if now_us < horizon_at_us:
             return 1
         for leg, quote in zip(legs, quotes, strict=True):
             assert quote is not None
@@ -325,6 +367,75 @@ class ShadowEngine:
             ),
         )
         return 1
+
+    def _record_causal_marks(
+        self,
+        connection: sqlite3.Connection,
+        position: sqlite3.Row,
+        legs: tuple[sqlite3.Row, ...],
+        entry_boundary: int,
+        now_us: int,
+    ) -> None:
+        """Persist each complete causal quote snapshot, including excursions while offline."""
+
+        instrument_ids = tuple(str(leg["instrument_id"]) for leg in legs)
+        placeholders = ",".join("?" for _ in instrument_ids)
+        sequences = tuple(
+            connection.execute(
+                f"SELECT DISTINCT source_sequence FROM market_events WHERE run_id=? "  # noqa: S608
+                f"AND instrument_id IN ({placeholders}) AND source_sequence>? AND event_at_us<=? "
+                "ORDER BY source_sequence",
+                (self.run_id, *instrument_ids, entry_boundary, now_us),
+            )
+        )
+        for sequence_row in sequences:
+            sequence = int(sequence_row[0])
+            quotes = tuple(
+                self._quote(
+                    connection,
+                    str(leg["instrument_id"]),
+                    entry_boundary,
+                    now_us,
+                    latest=True,
+                    before_sequence=sequence,
+                )
+                for leg in legs
+            )
+            if any(quote is None for quote in quotes):
+                continue
+            gross = 0.0
+            entry_notional = 0.0
+            event_ids: list[str] = []
+            for leg, quote in zip(legs, quotes, strict=True):
+                assert quote is not None
+                entry = float(leg["entry_price"])
+                quantity = float(leg["quantity"])
+                value = float(
+                    quote["bid_value"] if str(leg["side"]) == "buy" else quote["ask_value"]
+                )
+                gross += (1.0 if str(leg["side"]) == "buy" else -1.0) * (value - entry) * quantity
+                entry_notional += entry * quantity
+                event_ids.append(str(quote["event_id"]))
+            marked_at = max(int(quote["event_at_us"]) for quote in quotes if quote is not None)
+            cost = entry_notional * self.policy.cost.per_side_bps / 10_000.0
+            payload = json.dumps(
+                {"market_event_ids": event_ids}, separators=(",", ":"), sort_keys=True
+            )
+            connection.execute(
+                "INSERT INTO shadow_marks(position_id, marked_at_us, gross_value, gross_pnl, "
+                "net_pnl, "
+                "return_value, quality_bits, payload_json) VALUES (?, ?, ?, ?, ?, ?, 0, ?) "
+                "ON CONFLICT(position_id, marked_at_us) DO NOTHING",
+                (
+                    position["position_id"],
+                    marked_at,
+                    entry_notional + gross,
+                    gross,
+                    gross - 2 * cost,
+                    gross / entry_notional if entry_notional else None,
+                    payload,
+                ),
+            )
 
     def _invalidate(
         self,

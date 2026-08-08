@@ -61,7 +61,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1,)
+    assert result.applied_versions == (1, 2)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -135,7 +135,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (2, '0002_future.sql', ?, 2)",
+                "VALUES (3, '0003_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -1971,8 +1971,8 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     init_payload = json.loads(initialized.stdout)
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
-    assert init_payload == {"applied_versions": [1], "current_version": 1, "status": "ok"}
-    assert migration_payload == {"applied_versions": [], "current_version": 1, "status": "ok"}
+    assert init_payload == {"applied_versions": [1, 2], "current_version": 2, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 2, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

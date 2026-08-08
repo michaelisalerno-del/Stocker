@@ -712,7 +712,13 @@ class RetentionManager:
             "json_each(checkpoint.state_input_event_ids_json) input "
             "WHERE input.value=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
-            "WHERE derivation.input_event_id=market_events.event_id)",
+            "WHERE derivation.input_event_id=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
+            "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
+            "AND market_events.source_sequence>=progress.next_source_sequence "
+            "AND progress.final_target_at_us>=?)",
+            now_us - self.policy.raw_market_event_us,
             now_us - self.policy.raw_market_event_us,
         )
         prune(
@@ -727,7 +733,14 @@ class RetentionManager:
             "json_each(checkpoint.state_input_event_ids_json) input "
             "WHERE input.value=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
-            "WHERE derivation.input_event_id=market_events.event_id)",
+            "WHERE derivation.input_event_id=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
+            "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
+            "AND coalesce(market_events.source_sequence, "
+            "market_events.derived_after_source_sequence)>=progress.next_source_sequence "
+            "AND progress.final_target_at_us>=?)",
+            now_us - self.policy.completed_bar_us,
             now_us - self.policy.completed_bar_us,
         )
         deleted += self._prune_callback_tombstones(

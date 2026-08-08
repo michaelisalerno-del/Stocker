@@ -55,6 +55,7 @@ EXPECTED_TABLES = frozenset(
         "idea_output_inputs",
         "idea_output_legs",
         "shadow_positions",
+        "shadow_progress",
         "shadow_legs",
         "shadow_marks",
         "shadow_outcomes",
@@ -179,7 +180,8 @@ def _verify_schema_structure(
     applied: set[int],
 ) -> None:
     if (
-        applied == {item.version for item in migrations}
+        migrations == migration_plan()
+        and applied == {item.version for item in migrations}
         and _schema_tables(connection) != EXPECTED_TABLES
     ):
         raise SchemaError("database table set is incompatible with immediate V2")

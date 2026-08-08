@@ -1,5 +1,4 @@
 """Phase 5 generic shadow valuation tests; these assert virtual evidence only."""
-# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -15,7 +14,12 @@ import pytest
 from stocker_runtime import ShadowCostPolicy, ShadowFillPolicy
 from stocker_runtime.ingestion import Recorder, RecorderConfig
 from stocker_runtime.shadow import ShadowEngine, ShadowPolicy
-from stocker_runtime.storage import connect_v2, initialize_database
+from stocker_runtime.storage import (
+    RetentionManager,
+    RetentionPolicy,
+    connect_v2,
+    initialize_database,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SHADOW_PACKAGE = ROOT / "packages/stocker_runtime/src/stocker_runtime/shadow"
@@ -48,7 +52,8 @@ def _seed(database: Path, *, quantity: float | None = 1.0) -> None:
             "VALUES ('run', 1, 'fixture', 1)"
         )
         connection.execute(
-            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, currency) "
+            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, "
+            "currency) "
             "VALUES ('AAPL', ?, 'stock', 'AAPL', 'SMART', 'USD')",
             (_hash("AAPL"),),
         )
@@ -60,7 +65,8 @@ def _seed(database: Path, *, quantity: float | None = 1.0) -> None:
             "INSERT INTO idea_instances(instance_id, idea_id, idea_version, run_id, mode, "
             "parameters_json, parameters_hash, plugin_code_hash, manifest_hash, universe_json, "
             "universe_hash, requirements_json, requirements_hash, activated_after_source_sequence, "
-            "activated_at_us, health, data_class) VALUES ('instance', 'idea', 'v1', 'run', 'shadow', "
+            "activated_at_us, health, data_class) VALUES "
+            "('instance', 'idea', 'v1', 'run', 'shadow', "
             "'{}', ?, ?, ?, '[\"AAPL\"]', ?, '[]', ?, 0, 1, 'healthy', 'shadow_protected')",
             ("d" * 64, "c" * 64, "b" * 64, _hash('["AAPL"]'), _hash("[]")),
         )
@@ -71,34 +77,40 @@ def _seed(database: Path, *, quantity: float | None = 1.0) -> None:
         ):
             payload = json.dumps({}, separators=(",", ":"))
             connection.execute(
-                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, recorder_generation, "
+                "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+                "recorder_generation, "
                 "connection_generation, callback_kind, received_at_us, payload_sha256, lifecycle) "
                 "VALUES (?, ?, 'run', 1, 1, 'quote', ?, ?, 'pending')",
                 (sequence, event_id, event_at, _hash(payload)),
             )
             connection.execute(
-                "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, feed_kind, "
-                "event_kind, event_at_us, received_at_us, connection_generation, bid_value, ask_value, "
-                "payload_json, payload_sha256) VALUES (?, 'run', ?, 'AAPL', 'quotes', 'quote', ?, ?, 1, ?, ?, ?, ?)",
+                "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+                "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+                "bid_value, ask_value, payload_json, payload_sha256) VALUES "
+                "(?, 'run', ?, 'AAPL', 'quotes', 'quote', ?, ?, 1, ?, ?, ?, ?)",
                 (event_id, sequence, event_at, event_at, bid, ask, payload, _hash(payload)),
             )
         payload = "{}"
         connection.execute(
-            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, subject_instrument_id, "
-            "emitted_at_us, as_of_at_us, first_input_event_id, last_input_event_id, input_watermark, "
-            "input_events_hash, output_ordinal, payload_json, payload_hash, content_hash, data_class, authority_status) "
-            "VALUES ('proposal', 'run', 'instance', 'proposed_trade', 'AAPL', 1, 1, 'input', 'input', 'input', ?, 0, ?, ?, ?, 'shadow_protected', 'unapproved')",
+            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+            "subject_instrument_id, emitted_at_us, as_of_at_us, first_input_event_id, "
+            "last_input_event_id, input_watermark, input_events_hash, output_ordinal, "
+            "payload_json, payload_hash, content_hash, data_class, authority_status) VALUES "
+            "('proposal', 'run', 'instance', 'proposed_trade', 'AAPL', 1, 1, 'input', "
+            "'input', 'input', ?, 0, ?, ?, ?, 'shadow_protected', 'unapproved')",
             (_hash('["input"]'), payload, _hash(payload), "e" * 64),
         )
         connection.execute("INSERT INTO idea_output_inputs VALUES ('proposal', 'input', 0)")
         if quantity is None:
             connection.execute(
-                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, target, notional_value, currency) "
+                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
+                "target, notional_value, currency) "
                 "VALUES ('proposal', 0, 'AAPL', 'buy', 'long', 100, 'USD')"
             )
         else:
             connection.execute(
-                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, target, quantity_value, currency) "
+                "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, "
+                "target, quantity_value, currency) "
                 "VALUES ('proposal', 0, 'AAPL', 'buy', 'long', ?, 'USD')",
                 (quantity,),
             )
@@ -158,12 +170,11 @@ def _seed_case(
             "VALUES ('run', 1, 'fixture', 1)"
         )
         instruments = tuple(
-            dict.fromkeys(
-                ["AAPL", *(quote[2] for quote in quotes), *(leg[0] for leg in legs)]
-            )
+            dict.fromkeys(["AAPL", *(quote[2] for quote in quotes), *(leg[0] for leg in legs)])
         )
         connection.executemany(
-            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, currency) "
+            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, "
+            "currency) "
             "VALUES (?, ?, 'stock', ?, 'SMART', 'USD')",
             ((instrument, _hash(instrument), instrument) for instrument in instruments),
         )
@@ -176,7 +187,8 @@ def _seed_case(
             "INSERT INTO idea_instances(instance_id, idea_id, idea_version, run_id, mode, "
             "parameters_json, parameters_hash, plugin_code_hash, manifest_hash, universe_json, "
             "universe_hash, requirements_json, requirements_hash, activated_after_source_sequence, "
-            "activated_at_us, health, data_class) VALUES ('instance', 'idea', 'v1', 'run', 'shadow', "
+            "activated_at_us, health, data_class) VALUES "
+            "('instance', 'idea', 'v1', 'run', 'shadow', "
             "'{}', ?, ?, ?, ?, ?, '[]', ?, 0, 1, 'healthy', 'shadow_protected')",
             ("d" * 64, "c" * 64, "b" * 64, universe, _hash(universe), _hash("[]")),
         )
@@ -232,7 +244,8 @@ def test_shadow_uses_first_causal_ask_then_bid_and_closes_deterministically(tmp_
     assert engine.run_once(now_us=12) == 0
     with connect_v2(database) as connection:
         leg = connection.execute(
-            "SELECT entry_market_event_id, entry_price, exit_market_event_id, exit_price FROM shadow_legs"
+            "SELECT entry_market_event_id, entry_price, exit_market_event_id, exit_price "
+            "FROM shadow_legs"
         ).fetchone()
         outcome = connection.execute(
             "SELECT gross_pnl, net_pnl, mfe, mae, completeness FROM shadow_outcomes"
@@ -250,9 +263,9 @@ def test_shadow_rejects_non_shadow_runs_and_invalid_quantity(tmp_path: Path) -> 
     engine = ShadowEngine(database, run_id="run")
     assert engine.run_once(now_us=2) == 1
     with connect_v2(database) as connection:
-        assert tuple(connection.execute(
-            "SELECT lifecycle, invalid_reason FROM shadow_positions"
-        ).fetchone()) == (
+        assert tuple(
+            connection.execute("SELECT lifecycle, invalid_reason FROM shadow_positions").fetchone()
+        ) == (
             "invalid",
             "quantity_unavailable",
         )
@@ -266,7 +279,7 @@ def _policy(*, max_quote_age_us: int = 100, per_side_bps: float = 10) -> ShadowP
     )
 
 
-def test_stale_first_entry_stays_pending_until_fresh_causal_quote(tmp_path: Path) -> None:
+def test_delayed_entry_matches_prompt_first_causal_snapshot(tmp_path: Path) -> None:
     database = tmp_path / "stale-entry.sqlite3"
     _seed_case(
         database,
@@ -277,32 +290,15 @@ def test_stale_first_entry_stays_pending_until_fresh_causal_quote(tmp_path: Path
     )
     engine = ShadowEngine(database, run_id="run", policy=_policy(max_quote_age_us=10))
 
-    assert engine.run_once(now_us=100) == 0
-    with connect_v2(database) as connection:
-        assert connection.execute("SELECT lifecycle FROM shadow_positions").fetchone()[0] == (
-            "pending"
-        )
-        assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
-        _insert_quote(
-            connection,
-            sequence=3,
-            event_id="fresh-entry",
-            instrument_id="AAPL",
-            bid=104.0,
-            ask=105.0,
-            event_at_us=101,
-        )
-
-    assert engine.run_once(now_us=101) == 1
+    assert engine.run_once(now_us=100) == 1
     with connect_v2(database) as connection:
         assert tuple(
-            connection.execute(
-                "SELECT lifecycle, opened_at_us FROM shadow_positions"
-            ).fetchone()
-        ) == ("open", 101)
-        assert connection.execute(
-            "SELECT entry_market_event_id FROM shadow_legs"
-        ).fetchone()[0] == "fresh-entry"
+            connection.execute("SELECT lifecycle, opened_at_us FROM shadow_positions").fetchone()
+        ) == ("open", 2)
+        assert (
+            connection.execute("SELECT entry_market_event_id FROM shadow_legs").fetchone()[0]
+            == "stale-entry"
+        )
 
 
 @pytest.mark.parametrize(("bid", "ask"), ((101.0, 100.0), (None, 100.0)))
@@ -340,9 +336,10 @@ def test_crossed_or_missing_entry_then_later_valid_quote_opens_atomically(
         assert connection.execute("SELECT lifecycle FROM shadow_positions").fetchone()[0] == (
             "open"
         )
-        assert connection.execute(
-            "SELECT entry_market_event_id FROM shadow_legs"
-        ).fetchone()[0] == "valid-entry"
+        assert (
+            connection.execute("SELECT entry_market_event_id FROM shadow_legs").fetchone()[0]
+            == "valid-entry"
+        )
 
 
 def test_crossed_only_entry_remains_incomplete(tmp_path: Path) -> None:
@@ -439,8 +436,8 @@ def test_marks_and_excursions_are_identical_across_cadence_and_restart(tmp_path:
     policy = _policy(max_quote_age_us=3, per_side_bps=0)
     online = ShadowEngine(online_database, run_id="run", policy=policy)
     assert online.run_once(now_us=2) == 1
-    assert online.run_once(now_us=4) == 1
-    assert online.run_once(now_us=6) == 1
+    assert online.run_once(now_us=4) == 0
+    assert online.run_once(now_us=6) == 0
     assert online.run_once(now_us=12) == 1
 
     assert ShadowEngine(restarted_database, run_id="run", policy=policy).run_once(now_us=2) == 1
@@ -450,6 +447,158 @@ def test_marks_and_excursions_are_identical_across_cadence_and_restart(tmp_path:
     restarted_snapshot = _cadence_snapshot(restarted_database)
     assert online_snapshot[1][2:4] == (19.0, -11.0)
     assert restarted_snapshot == online_snapshot
+
+
+def test_two_horizons_use_first_post_target_snapshot_and_ignore_later_extreme(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "two-horizons.sqlite3"
+    _seed_case(
+        database,
+        quotes=(
+            (1, "input", "AAPL", 100.0, 101.0, 1),
+            (2, "entry", "AAPL", 100.0, 101.0, 2),
+            (3, "first-horizon", "AAPL", 104.0, 105.0, 7),
+            (4, "between-extreme", "AAPL", 150.0, 151.0, 9),
+            (5, "final-horizon", "AAPL", 109.0, 110.0, 13),
+            (6, "post-exit-extreme", "AAPL", 200.0, 201.0, 14),
+        ),
+    )
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(5, 10),
+    )
+
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=14) == 1
+    with connect_v2(database) as connection:
+        marks = tuple(
+            (int(row["marked_at_us"]), json.loads(str(row["payload_json"])))
+            for row in connection.execute("SELECT * FROM shadow_marks ORDER BY marked_at_us")
+        )
+        outcome = connection.execute(
+            "SELECT outcome_at_us, gross_pnl, mfe FROM shadow_outcomes"
+        ).fetchone()
+    assert tuple(mark[0] for mark in marks) == (7, 12)
+    assert tuple(mark[1]["actual_quote_at_us"] for mark in marks) == (7, 13)
+    assert tuple(outcome) == (13, 8.0, 49.0)
+
+
+def test_evidence_projection_is_bounded_and_resumes_after_restart(tmp_path: Path) -> None:
+    database = tmp_path / "bounded.sqlite3"
+    quotes: list[QuoteSeed] = [(1, "input", "AAPL", 100.0, 101.0, 1)]
+    quotes.extend(
+        (sequence, f"quote-{sequence}", "AAPL", 100.0 + sequence, 101.0 + sequence, sequence)
+        for sequence in range(2, 303)
+    )
+    _seed_case(database, quotes=tuple(quotes))
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=1_000) == 1
+    with connect_v2(database) as connection:
+        first_cursor = int(
+            connection.execute("SELECT next_source_sequence FROM shadow_progress").fetchone()[0]
+        )
+    assert first_cursor == 258
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=1_000) == 0
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute("SELECT next_source_sequence FROM shadow_progress").fetchone()[0]
+            == 303
+        )
+        assert connection.execute("SELECT count(*) FROM shadow_marks").fetchone()[0] <= 8
+
+
+def test_open_recovery_uses_durable_progress_after_entry_event_is_pruned(tmp_path: Path) -> None:
+    database = tmp_path / "pruned-entry.sqlite3"
+    _seed(database)
+    policy = _policy()
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=2) == 1
+    raw = sqlite3.connect(database)
+    try:
+        raw.execute("PRAGMA foreign_keys=OFF")
+        raw.execute("DELETE FROM market_events WHERE event_id='entry'")
+        raw.commit()
+    finally:
+        raw.close()
+
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=12) == 1
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT lifecycle FROM shadow_positions").fetchone()[0] == (
+            "closed"
+        )
+
+
+def test_retention_preserves_unprocessed_open_evidence_until_final_horizon(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "open-retention.sqlite3"
+    _seed(database)
+    policy = ShadowPolicy(
+        fill=ShadowFillPolicy(model_id="quote-v1", max_quote_age_us=100),
+        cost=ShadowCostPolicy(model_id="cost-v1", per_side_bps=0),
+        horizons_us=(1_000,),
+    )
+    assert ShadowEngine(database, run_id="run", policy=policy).run_once(now_us=2) == 1
+
+    RetentionManager(database, RetentionPolicy(raw_market_event_us=10)).run(
+        now_us=100,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+
+    with connect_v2(database) as connection:
+        assert connection.execute(
+            "SELECT event_id FROM market_events WHERE event_id='exit'"
+        ).fetchone()[0] == "exit"
+
+
+def test_one_shadow_failure_records_one_incident_and_other_proposal_advances(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "isolated.sqlite3"
+    _seed(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO idea_outputs(output_id, run_id, instance_id, output_kind, "
+            "subject_instrument_id, emitted_at_us, as_of_at_us, valid_until_at_us, direction, "
+            "strength, confidence, horizon_us, first_input_event_id, last_input_event_id, "
+            "input_watermark, input_events_hash, output_ordinal, payload_json, payload_hash, "
+            "content_hash, data_class, authority_status) SELECT 'proposal-2', run_id, instance_id, "
+            "output_kind, subject_instrument_id, emitted_at_us, as_of_at_us, valid_until_at_us, "
+            "direction, strength, confidence, horizon_us, first_input_event_id, "
+            "last_input_event_id, "
+            "input_watermark, input_events_hash, 1, payload_json, payload_hash, ?, data_class, "
+            "authority_status FROM idea_outputs WHERE output_id='proposal'",
+            ("f" * 64,),
+        )
+        connection.execute("INSERT INTO idea_output_inputs VALUES ('proposal-2', 'input', 0)")
+        connection.execute(
+            "INSERT INTO idea_output_legs(output_id, leg_number, instrument_id, action, target, "
+            "quantity_value, currency) VALUES ('proposal-2', 0, 'AAPL', 'buy', 'long', 1, 'USD')"
+        )
+    engine = ShadowEngine(database, run_id="run", policy=_policy())
+    original = engine._advance
+
+    def isolated_failure(connection: Any, proposal: Any, **kwargs: Any) -> tuple[int, int]:
+        if proposal["output_id"] == "proposal":
+            raise RuntimeError("fixture failure")
+        return original(connection, proposal, **kwargs)
+
+    monkeypatch.setattr(engine, "_advance", isolated_failure)
+    assert engine.run_once(now_us=2) == 1
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT lifecycle FROM shadow_positions WHERE proposed_trade_output_id='proposal-2'"
+            ).fetchone()[0]
+            == "open"
+        )
 
 
 def test_policy_content_and_hash_survive_restart_and_changed_policy_is_rejected(
@@ -463,9 +612,7 @@ def test_policy_content_and_hash_survive_restart_and_changed_policy_is_rejected(
 
     with connect_v2(database) as connection:
         policy_json, policy_hash = tuple(
-            connection.execute(
-                "SELECT policy_json, policy_hash FROM shadow_positions"
-            ).fetchone()
+            connection.execute("SELECT policy_json, policy_hash FROM shadow_positions").fetchone()
         )
     assert json.loads(policy_json) == {
         "cost": policy.cost.model_dump(mode="json"),
@@ -504,9 +651,7 @@ def test_multileg_invalid_quantity_invalidates_whole_proposal_without_partial_le
     assert ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=2) == 1
     with connect_v2(database) as connection:
         assert tuple(
-            connection.execute(
-                "SELECT lifecycle, invalid_reason FROM shadow_positions"
-            ).fetchone()
+            connection.execute("SELECT lifecycle, invalid_reason FROM shadow_positions").fetchone()
         ) == ("invalid", "quantity_unavailable")
         assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
 
@@ -543,9 +688,7 @@ def test_multileg_entry_is_atomic_when_one_leg_quote_is_invalid(tmp_path: Path) 
     assert engine.run_once(now_us=4) == 1
     with connect_v2(database) as connection:
         assert tuple(
-            connection.execute(
-                "SELECT lifecycle, opened_at_us FROM shadow_positions"
-            ).fetchone()
+            connection.execute("SELECT lifecycle, opened_at_us FROM shadow_positions").fetchone()
         ) == ("open", 4)
         assert tuple(
             tuple(row)

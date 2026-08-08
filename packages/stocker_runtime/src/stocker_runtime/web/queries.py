@@ -193,31 +193,16 @@ class ReadModel:
     def _dictionary(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None if row is None else dict(row)
 
-    def _latest_run(
-        self,
-        connection: sqlite3.Connection,
-        *,
-        mode: str | None = None,
-    ) -> dict[str, Any] | None:
+    def _latest_run(self, connection: sqlite3.Connection) -> dict[str, Any] | None:
         if self.config.run_id is not None:
-            clauses = ["run_id = ?"]
-            parameters: list[object] = [self.config.run_id]
-            if mode is not None:
-                clauses.append("mode = ?")
-                parameters.append(mode)
             row = connection.execute(
-                "SELECT run_id, mode, status, started_at_us FROM runs WHERE "
-                + " AND ".join(clauses),
-                tuple(parameters),
+                "SELECT run_id, mode, status, started_at_us FROM runs WHERE run_id = ?",
+                (self.config.run_id,),
             ).fetchone()
         else:
-            where = "" if mode is None else "WHERE mode = ? "
-            query_parameters: tuple[object, ...] = () if mode is None else (mode,)
             row = connection.execute(
                 "SELECT run_id, mode, status, started_at_us FROM runs "
-                + where
-                + "ORDER BY started_at_us DESC, run_id DESC LIMIT 1",
-                query_parameters,
+                "ORDER BY started_at_us DESC, run_id DESC LIMIT 1"
             ).fetchone()
         return self._dictionary(row)
 
@@ -276,7 +261,7 @@ class ReadModel:
         position = None if cursor is None else _decode_cursor(cursor, route=route, filters=filters)
         _validate_cursor_window(position, maximum_us=None)
         with self._connection() as connection:
-            run = self._latest_run(connection, mode="prospective_record")
+            run = self._latest_run(connection)
             if run is None:
                 return {
                     "run": None,

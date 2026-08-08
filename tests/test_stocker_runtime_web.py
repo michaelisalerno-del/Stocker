@@ -340,12 +340,6 @@ def test_openapi_contains_exactly_seven_get_routes(tmp_path: Path) -> None:
 def test_live_reads_current_runtime_active_feeds_and_latest_values(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     _seed_live(database)
-    with connect_v2(database) as connection:
-        connection.execute(
-            "INSERT INTO runs VALUES ('newer-shadow', 'shadow', 'ibkr', 999, NULL, ?, "
-            "'c4bb701', 'shadow_protected', 'running', NULL)",
-            ("8" * 64,),
-        )
     payload = TestClient(create_web_app(_config(database))).get("/api/v2/live").json()
 
     assert payload["run"] == {
@@ -386,6 +380,84 @@ def test_live_reads_current_runtime_active_feeds_and_latest_values(tmp_path: Pat
     assert payload["gaps"] == {"unresolved": 0, "data_loss_possible": 0}
     assert payload["backup"] == {"available": False, "entries": 0, "latest": None}
     assert "order_capability" not in json.dumps(payload)
+
+
+def test_live_uses_the_configured_or_latest_shadow_recorder(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    _seed_live(database)
+    payload = "{}"
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs VALUES ('newer-shadow', 'shadow', 'ibkr', 900, NULL, ?, "
+            "'c4bb701', 'shadow_protected', 'running', NULL)",
+            ("8" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('newer-shadow', 1, 'shadow-recorder', 900)"
+        )
+        connection.execute(
+            "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle, reason, "
+            "process_heartbeat_at_us, callback_heartbeat_at_us, admission_heartbeat_at_us, "
+            "projection_heartbeat_at_us, connection_state, connection_generation, "
+            "inbox_nonterminal_count, inbox_bytes, database_bytes, wal_bytes) VALUES "
+            "('newer-shadow', 1, 'recording', NULL, 995, 996, 997, 998, 'connected', 8, "
+            "1, 64, 8192, 1024)"
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us) VALUES "
+            "('sub-shadow-aapl', 'newer-shadow', 1, 8, 'AAPL', 'quotes', 8, 'active', ?, 900)",
+            ("7" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_sha256, lifecycle) VALUES "
+            "(2, 'quote-shadow-aapl', 'newer-shadow', 1, 8, 'quote', 990, ?, 'pending')",
+            (_hash(payload),),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "bid_value, ask_value, last_value, payload_json, payload_sha256) VALUES "
+            "('quote-shadow-aapl', 'newer-shadow', 2, 'AAPL', 'quotes', 'quote', 989, 990, 8, "
+            "202.25, 202.30, 202.27, ?, ?)",
+            (payload, _hash(payload)),
+        )
+        connection.execute(
+            "DELETE FROM market_latest WHERE instrument_id = 'AAPL' AND feed_kind = 'quotes'"
+        )
+        connection.execute(
+            "INSERT INTO market_latest(run_id, instrument_id, feed_kind, event_id, "
+            "event_at_us, received_at_us, event_kind, quality_bits, bid_value, "
+            "bid_source_event_id, ask_value, ask_source_event_id, last_value, "
+            "last_source_event_id) VALUES "
+            "('newer-shadow', 'AAPL', 'quotes', 'quote-shadow-aapl', 989, 990, 'quote', 0, "
+            "202.25, 'quote-shadow-aapl', 202.30, 'quote-shadow-aapl', 202.27, "
+            "'quote-shadow-aapl')"
+        )
+
+    latest = TestClient(create_web_app(_config(database))).get("/api/v2/live").json()
+    assert latest["run"]["run_id"] == "newer-shadow"
+    assert latest["run"]["mode"] == "shadow"
+    assert latest["recorder"]["lifecycle"] == "recording"
+    assert latest["ibkr"]["connection_generation"] == 8
+    assert latest["feeds"] == {"active": 1, "by_kind": {"quotes": 1}}
+    assert latest["instruments"][0]["event_id"] == "quote-shadow-aapl"
+
+    pinned_shadow = TestClient(create_web_app(_config(database, run_id="newer-shadow"))).get(
+        "/api/v2/live"
+    )
+    assert pinned_shadow.status_code == 200
+    assert pinned_shadow.json()["run"]["mode"] == "shadow"
+
+    pinned_record = TestClient(create_web_app(_config(database, run_id="run-live"))).get(
+        "/api/v2/live"
+    )
+    assert pinned_record.status_code == 200
+    assert pinned_record.json()["run"]["mode"] == "prospective_record"
 
 
 def test_live_uses_filter_bound_keyset_cursors_and_default_limits(tmp_path: Path) -> None:

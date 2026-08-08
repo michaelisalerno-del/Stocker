@@ -48,11 +48,11 @@ jobs:
           uv run python -c "import stocker_prospective"
           uv run stocker-prospective --help
 
-      - name: Test dashboard polling concurrency and syntax
+      - name: Test compact V2 web API and polling
         run: |
-          node --check --input-type=module < packages/stocker_prospective/src/stocker_prospective/web_static/app.js
-          node --check packages/stocker_prospective/src/stocker_prospective/web_static/polling.mjs
-          node --test tests/js/test_dashboard_polling.mjs
+          uv run pytest tests/test_stocker_runtime_web.py
+          node --check --input-type=module < packages/stocker_runtime/src/stocker_runtime/web/static/app.js
+          node --test tests/js/test_v2_web_app.mjs
 
   repository-verification:
     name: Repository verification debt report (non-blocking)

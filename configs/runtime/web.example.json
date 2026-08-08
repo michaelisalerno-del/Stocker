@@ -1,0 +1,21 @@
+{
+  "database": "data/stocker-v2.sqlite3",
+  "backup_directory": null,
+  "run_id": null,
+  "host": "127.0.0.1",
+  "port": 8000,
+  "production": false,
+  "app_version": "0.1.0",
+  "git_commit": "0000000",
+  "config_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "query_budget_ms": 100,
+  "maximum_response_bytes": 524288,
+  "trust_proxy_headers": false,
+  "trusted_proxy_ips": [],
+  "authentication_enabled": false,
+  "auth_token_env": null,
+  "auth_cookie_name": "__Host-stocker_session",
+  "auth_cookie_secure": true,
+  "requests_per_minute": 120,
+  "allowed_hosts": ["127.0.0.1", "localhost"]
+}

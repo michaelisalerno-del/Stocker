@@ -8,8 +8,8 @@ export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
 uv sync --locked --no-editable --no-default-groups --group server
 uv run --no-sync stocker-prospective replay run \
   --config configs/prospective/replay.example.yaml
-uv run --no-sync stocker-prospective web run \
-  --config configs/prospective/replay.example.yaml
+uv run --no-sync stocker-runtime web run \
+  --config configs/runtime/web.example.json
 ```
 
 The recorder and web process are separate. Neither exposes a paper/live order

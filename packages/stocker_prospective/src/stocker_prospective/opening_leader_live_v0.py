@@ -301,12 +301,7 @@ def opening_leader_runtime_source_files_v0() -> dict[str, Path]:
         "partition_store": package / "partition_store.py",
         "project_configuration": repository_root / "pyproject.toml",
         "read_store": package / "read_store.py",
-        "static_app": package / "web_static" / "app.js",
-        "static_index": package / "web_static" / "index.html",
-        "static_polling": package / "web_static" / "polling.mjs",
-        "static_style": package / "web_static" / "app.css",
         "uv_lock": repository_root / "uv.lock",
-        "web": package / "web.py",
     }
 
 

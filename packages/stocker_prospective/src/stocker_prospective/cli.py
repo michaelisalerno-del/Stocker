@@ -1,4 +1,4 @@
-"""Operator CLI for immutable bundles, replay, migrations, recorder, and web."""
+"""Operator CLI for immutable bundles, replay, migrations, and recorder."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from typing import Any, NoReturn
 from zoneinfo import ZoneInfo
 
 import typer
-import uvicorn
 import yaml
 
 from stocker_prospective.backup import backup_database
@@ -84,7 +83,6 @@ from stocker_prospective.scientific_inputs import (
     acquire_eodhd_historical_activity_baseline,
 )
 from stocker_prospective.universe import UniverseError, load_registered_universe
-from stocker_prospective.web import create_web_app
 
 app = typer.Typer(
     name="stocker-prospective",
@@ -97,7 +95,6 @@ database_app = typer.Typer(help="Manage the prospective database schema.")
 replay_app = typer.Typer(help="Run the deterministic synthetic vertical slice.")
 recorder_app = typer.Typer(help="Run the market-data recorder process.")
 scientific_inputs_app = typer.Typer(help="Prepare immutable causal scientific inputs.")
-web_app = typer.Typer(help="Run the read-only web process.")
 ibkr_api_app = typer.Typer(help="Verify first-party IBKR API provenance and check for updates.")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(context_app, name="context")
@@ -105,7 +102,6 @@ app.add_typer(database_app, name="db")
 app.add_typer(replay_app, name="replay")
 app.add_typer(recorder_app, name="recorder")
 app.add_typer(scientific_inputs_app, name="scientific-inputs")
-app.add_typer(web_app, name="web")
 app.add_typer(ibkr_api_app, name="ibkr-api")
 
 
@@ -1185,28 +1181,3 @@ def recorder_run(
             )
         if repository is not None:
             repository.close_anchor()
-
-
-@web_app.command("run")
-def web_run(config_path: Path = typer.Option(..., "--config", exists=True)) -> None:
-    """Serve the browser UI and read-only API on the configured private bind."""
-
-    try:
-        config = load_prospective_config(config_path)
-        validate_runtime_safety(config, object())
-        application = create_web_app(config)
-        forwarded = ",".join(config.web.trusted_proxy_ips) if config.web.trust_proxy_headers else ""
-        uvicorn.run(
-            application,
-            host=config.web.host,
-            port=config.web.port,
-            proxy_headers=config.web.trust_proxy_headers,
-            forwarded_allow_ips=forwarded,
-            log_level="info",
-        )
-    except typer.Exit:
-        raise
-    except (RuntimeSafetyError, ValueError) as exc:
-        _fatal(str(exc), exit_code=78)
-    except Exception as exc:
-        _fatal(str(exc), exit_code=75)

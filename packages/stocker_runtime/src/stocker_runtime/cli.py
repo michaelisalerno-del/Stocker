@@ -36,6 +36,8 @@ app = typer.Typer(
     no_args_is_help=True,
     help="Initialize, verify, migrate, and retain an isolated Stocker V2 database.",
 )
+web_app = typer.Typer(help="Run the bounded read-only Stocker V2 web process.")
+app.add_typer(web_app, name="web")
 
 MAX_REPLAY_FILE_BYTES = 8 * 1024 * 1024
 MAX_REPLAY_INSTRUMENTS = 10_000
@@ -157,6 +159,31 @@ def validate_recorder_command(config: Annotated[Path, typer.Argument()]) -> None
             "status": "ok",
         }
     )
+
+
+@web_app.command("run")
+def web_run_command(config: Annotated[Path, typer.Option("--config", exists=True)]) -> None:
+    """Serve the three-view browser application on its configured loopback bind."""
+
+    try:
+        import uvicorn
+
+        from stocker_runtime.web import WebConfig, create_web_app
+
+        loaded = WebConfig.model_validate_json(config.read_text(encoding="utf-8"))
+        application = create_web_app(loaded)
+        forwarded = ",".join(loaded.trusted_proxy_ips) if loaded.trust_proxy_headers else ""
+        uvicorn.run(
+            application,
+            host=loaded.host,
+            port=loaded.port,
+            proxy_headers=loaded.trust_proxy_headers,
+            forwarded_allow_ips=forwarded,
+            log_level="info",
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=78) from error
 
 
 class _ReplayMarketData:

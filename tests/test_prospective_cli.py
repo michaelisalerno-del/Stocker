@@ -80,7 +80,7 @@ def test_cli_exposes_operational_commands_and_no_order_command() -> None:
     assert result.exit_code == 0
     assert "bundle" in result.stdout
     assert "recorder" in result.stdout
-    assert "web" in result.stdout
+    assert "\n│ web " not in result.stdout
     assert "replay" in result.stdout
     assert "ibkr-api" in result.stdout
     assert "scientific-inputs" in result.stdout

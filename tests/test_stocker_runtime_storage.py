@@ -67,7 +67,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -173,7 +173,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (11, '0011_future.sql', ?, 2)",
+            "VALUES (12, '0012_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -255,7 +255,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10)
+    assert result.applied_versions == (7, 8, 9, 10, 11)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -348,7 +348,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10)
+    assert result.applied_versions == (8, 9, 10, 11)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -492,7 +492,7 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
             ("9" * 64,),
         )
 
-    assert migrate_database(database, applied_at_us=2).applied_versions == (9, 10)
+    assert migrate_database(database, applied_at_us=2).applied_versions == (9, 10, 11)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -3041,11 +3041,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "current_version": 10,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        "current_version": 11,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 10, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 11, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

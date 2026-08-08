@@ -6,7 +6,7 @@ from pathlib import Path
 
 from stocker_prospective.ibkr import IBKRMarketDataAdapter
 from stocker_prospective.ibkr_official import OfficialMarketDataOnlyClient
-from stocker_prospective.web import create_web_app
+from stocker_runtime.web import create_web_app
 
 ROOT = Path(__file__).parents[1]
 PACKAGE = ROOT / "packages/stocker_prospective/src/stocker_prospective"

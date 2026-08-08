@@ -90,8 +90,8 @@ The dedicated prospective recorder has a separate, no-order process boundary:
 export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
 uv run --no-sync stocker-prospective replay run \
   --config configs/prospective/replay.example.yaml
-uv run --no-sync stocker-prospective web run \
-  --config configs/prospective/replay.example.yaml
+uv run --no-sync stocker-runtime web run \
+  --config configs/runtime/web.example.json
 ```
 
 See [the prospective architecture](docs/architecture/prospective-evidence-recorder.md)

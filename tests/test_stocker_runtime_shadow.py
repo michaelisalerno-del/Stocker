@@ -318,17 +318,20 @@ def test_split_bid_ask_callbacks_form_causal_snapshots_with_exact_side_provenanc
     assert outcome_payload["exit_quote_event_ids"] == expected_exit_quote_ids
     assert outcome_payload["mfe_quote_event_ids"] == expected_exit_quote_ids
     assert outcome_payload["mae_quote_event_ids"] == expected_exit_quote_ids
-    assert outcome_payload["policy_hash"] == hashlib.sha256(
-        json.dumps(
-            {
-                "cost": policy.cost.model_dump(mode="json"),
-                "fill": policy.fill.model_dump(mode="json"),
-                "horizons_us": policy.horizons_us,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
+    assert (
+        outcome_payload["policy_hash"]
+        == hashlib.sha256(
+            json.dumps(
+                {
+                    "cost": policy.cost.model_dump(mode="json"),
+                    "fill": policy.fill.model_dump(mode="json"),
+                    "horizons_us": policy.horizons_us,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+    )
 
 
 def test_split_quote_state_survives_restart_and_source_compaction_idempotently(
@@ -398,9 +401,7 @@ def test_shadow_rejects_more_than_eight_trade_legs_without_partial_state(tmp_pat
     assert ShadowEngine(database, run_id="run", policy=_policy()).run_once(now_us=1) == 1
     with connect_v2(database) as connection:
         assert tuple(
-            connection.execute(
-                "SELECT lifecycle, invalid_reason FROM shadow_positions"
-            ).fetchone()
+            connection.execute("SELECT lifecycle, invalid_reason FROM shadow_positions").fetchone()
         ) == ("invalid", "leg_count_exceeds_limit")
         assert connection.execute("SELECT count(*) FROM shadow_quote_state").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM shadow_legs").fetchone()[0] == 0
@@ -705,9 +706,12 @@ def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_rest
         ).fetchone()[0]
         assert first_cursor == 10
         assert connection.execute("SELECT count(*) FROM shadow_positions").fetchone()[0] == 32
-        assert connection.execute(
-            "SELECT 1 FROM shadow_positions WHERE proposed_trade_output_id='proposal-33'"
-        ).fetchone() is None
+        assert (
+            connection.execute(
+                "SELECT 1 FROM shadow_positions WHERE proposed_trade_output_id='proposal-33'"
+            ).fetchone()
+            is None
+        )
 
     restarted = ShadowEngine(database, run_id="run", policy=policy)
     assert restarted.run_once(now_us=1_000) == 1
@@ -730,8 +734,7 @@ def test_fair_schedule_admits_proposal_33_and_advances_busy_positions_after_rest
     assert restarted.run_once(now_us=1_000) == 0
     with connect_v2(database) as connection:
         assert (
-            connection.execute("SELECT min(schedule_count) FROM shadow_progress").fetchone()[0]
-            == 2
+            connection.execute("SELECT min(schedule_count) FROM shadow_progress").fetchone()[0] == 2
         )
 
 
@@ -774,9 +777,12 @@ def test_retention_preserves_unprocessed_open_evidence_until_final_horizon(
     )
 
     with connect_v2(database) as connection:
-        assert connection.execute(
-            "SELECT event_id FROM market_events WHERE event_id='exit'"
-        ).fetchone()[0] == "exit"
+        assert (
+            connection.execute(
+                "SELECT event_id FROM market_events WHERE event_id='exit'"
+            ).fetchone()[0]
+            == "exit"
+        )
 
 
 def test_retention_does_not_preserve_unrelated_instrument_in_same_shadow_run(

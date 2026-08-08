@@ -352,9 +352,7 @@ class ShadowEngine:
             ).fetchone(),
         )
 
-    def _quote_states(
-        self, connection: sqlite3.Connection, position_id: str
-    ) -> list[_QuoteState]:
+    def _quote_states(self, connection: sqlite3.Connection, position_id: str) -> list[_QuoteState]:
         rows = connection.execute(
             "SELECT leg_number, instrument_id, bid_event_id, bid_source_sequence, bid_at_us, "
             "bid_value, ask_event_id, ask_source_sequence, ask_at_us, ask_value "
@@ -367,17 +365,13 @@ class ShadowEngine:
                 instrument_id=str(row["instrument_id"]),
                 bid_event_id=None if row["bid_event_id"] is None else str(row["bid_event_id"]),
                 bid_source_sequence=(
-                    None
-                    if row["bid_source_sequence"] is None
-                    else int(row["bid_source_sequence"])
+                    None if row["bid_source_sequence"] is None else int(row["bid_source_sequence"])
                 ),
                 bid_at_us=None if row["bid_at_us"] is None else int(row["bid_at_us"]),
                 bid_value=None if row["bid_value"] is None else float(row["bid_value"]),
                 ask_event_id=None if row["ask_event_id"] is None else str(row["ask_event_id"]),
                 ask_source_sequence=(
-                    None
-                    if row["ask_source_sequence"] is None
-                    else int(row["ask_source_sequence"])
+                    None if row["ask_source_sequence"] is None else int(row["ask_source_sequence"])
                 ),
                 ask_at_us=None if row["ask_at_us"] is None else int(row["ask_at_us"]),
                 ask_value=None if row["ask_value"] is None else float(row["ask_value"]),
@@ -456,9 +450,7 @@ class ShadowEngine:
                 (event_id, source_sequence, event_at_us, ask_value, position_id, instrument_id),
             )
 
-    def _snapshot(
-        self, states: list[_QuoteState], *, at_sequence: int
-    ) -> _Snapshot | None:
+    def _snapshot(self, states: list[_QuoteState], *, at_sequence: int) -> _Snapshot | None:
         if len(states) == 0 or any(
             state.bid_event_id is None
             or state.bid_source_sequence is None
@@ -486,9 +478,7 @@ class ShadowEngine:
             for state in states
         )
         actual_at_us = max(
-            side_at_us
-            for quote in quotes
-            for side_at_us in (quote.bid_at_us, quote.ask_at_us)
+            side_at_us for quote in quotes for side_at_us in (quote.bid_at_us, quote.ask_at_us)
         )
         if any(
             actual_at_us - quote.bid_at_us > self.policy.fill.max_quote_age_us

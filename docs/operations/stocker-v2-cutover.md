@@ -153,6 +153,7 @@ read it yet. Section 3 adds and removes a recorder-only ACL immediately around t
 import:
 
 ```bash
+set -o pipefail
 export STOCKER_V1_SNAPSHOT=/var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
 export STOCKER_V1_ROLLBACK_DB=/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3
 export STOCKER_V1_RELEASE="$(readlink -f /opt/stocker/current)"
@@ -160,10 +161,17 @@ export STOCKER_V1_PRESERVATION=/var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_
 test "$STOCKER_V1_PRESERVATION" != \
   /var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation || exit 78
 sudo install -d -o root -g root -m 0700 "$STOCKER_V1_PRESERVATION"
-sudo getfacl -p /var/lib/stocker/backups "$STOCKER_V1_SNAPSHOT" | \
-  sudo tee "$STOCKER_V1_PRESERVATION/snapshot-access-control-before.txt" >/dev/null
-sudo getfacl -p "$STOCKER_V1_ROLLBACK_DB" | \
-  sudo tee "$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" >/dev/null
+snapshot_acl_before="$(sudo getfacl -p /var/lib/stocker/backups \
+  "$STOCKER_V1_SNAPSHOT")" || exit 78
+rollback_acl_before="$(sudo getfacl -p "$STOCKER_V1_ROLLBACK_DB")" || exit 78
+test -n "$snapshot_acl_before" || exit 78
+test -n "$rollback_acl_before" || exit 78
+sudo tee "$STOCKER_V1_PRESERVATION/snapshot-access-control-before.txt" \
+  >/dev/null <<<"$snapshot_acl_before" || exit 78
+sudo tee "$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" \
+  >/dev/null <<<"$rollback_acl_before" || exit 78
+sudo test -s "$STOCKER_V1_PRESERVATION/snapshot-access-control-before.txt" || exit 78
+sudo test -s "$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" || exit 78
 sudo chmod 0400 "$STOCKER_V1_SNAPSHOT"
 sudo -u stocker-recorder test ! -r \
   /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
@@ -190,6 +198,7 @@ Use a new, recorded change identifier, preserve the recorded pre-change metadata
 do not place credentials in the manifest output:
 
 ```bash
+set -o pipefail
 sudo chmod 0400 "$STOCKER_V1_ROLLBACK_DB"
 sudo sha256sum "$STOCKER_V1_SNAPSHOT" "$STOCKER_V1_ROLLBACK_DB" | \
   sudo tee "$STOCKER_V1_PRESERVATION/database-sha256.txt" >/dev/null
@@ -305,6 +314,7 @@ V2 configuration.
 Run every command below fail-closed and stop on any nonzero status:
 
 ```bash
+set -o pipefail
 export STOCKER_V1_RECOVERY_COPIES=/var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-copies
 test "$STOCKER_V1_RECOVERY_COPIES" != \
   /var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-copies || exit 78

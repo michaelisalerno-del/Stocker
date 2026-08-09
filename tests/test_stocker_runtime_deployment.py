@@ -207,6 +207,14 @@ def test_cutover_precreates_reader_boundary_before_import_and_verifies_afterward
     assert "setfacl -m u:stocker-recorder:r--" in runbook
     assert "snapshot-access-control-before.txt" in runbook
     assert "rollback-access-control-before.txt" in runbook
+    rollback_acl_capture = runbook.index('rollback_acl_before="$(sudo getfacl -p')
+    rollback_chmod = runbook.index('sudo chmod 0400 "$STOCKER_V1_ROLLBACK_DB"')
+    assert rollback_acl_capture < rollback_chmod
+    assert (
+        'rollback_acl_before="$(sudo getfacl -p "$STOCKER_V1_ROLLBACK_DB")" || exit 78' in runbook
+    )
+    assert 'test -n "$rollback_acl_before" || exit 78' in runbook
+    assert runbook.count("set -o pipefail") >= 3
     assert "chgrp stocker-readers /var/lib/stocker/backups" not in runbook
     assert "chown stocker:stocker-readers" not in runbook
     revoke = runbook.index("revoke_v1_snapshot_access")

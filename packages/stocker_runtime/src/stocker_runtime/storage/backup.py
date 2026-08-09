@@ -39,6 +39,7 @@ MAX_BACKUP_STATUS_BYTES = 4 * 1024
 MAX_MANIFEST_SCAN = 200
 MAX_DIRECTORY_ENTRIES = 4_096
 MAX_TIMESTAMP_US = 253_402_300_799_999_999
+ONLINE_BACKUP_TIMEOUT_SECONDS = 30 * 60
 _HASH_CHUNK_BYTES = 1024 * 1024
 _MANIFEST_FIELDS = frozenset(
     {
@@ -618,11 +619,17 @@ def _online_copy(source: Path, destination: Path) -> None:
     uri = source.resolve().as_uri() + "?mode=ro"
     reader = sqlite3.connect(uri, uri=True, isolation_level=None, timeout=5.0)
     writer = sqlite3.connect(destination, isolation_level=None, timeout=5.0)
+    deadline = time.monotonic() + ONLINE_BACKUP_TIMEOUT_SECONDS
+
+    def enforce_deadline(_status: int, _remaining: int, _total: int) -> None:
+        if time.monotonic() >= deadline:
+            raise BackupError("online backup exceeded its 30-minute time budget")
+
     try:
         reader.execute("PRAGMA query_only = ON")
         reader.execute("PRAGMA busy_timeout = 5000")
         writer.execute("PRAGMA synchronous = FULL")
-        reader.backup(writer, pages=256, sleep=0.01)
+        reader.backup(writer, pages=256, progress=enforce_deadline, sleep=0.01)
         writer.commit()
         writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         writer.execute("PRAGMA journal_mode = DELETE")

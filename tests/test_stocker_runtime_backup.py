@@ -14,6 +14,7 @@ import stocker_runtime.storage.backup as backup_module
 from stocker_runtime.cli import app
 from stocker_runtime.storage import (
     BackupCapacityError,
+    BackupError,
     BackupIntegrityError,
     BackupPolicy,
     connect_v2,
@@ -70,7 +71,7 @@ def test_online_backup_is_checked_deterministic_compressed_and_restorable_under_
             connection = connect_v2(database)
             number = 10_000
             try:
-                while not stop_writes.is_set():
+                while not stop_writes.is_set() and number < 11_000:
                     connection.execute(
                         "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
                         "opened_at_us, details_json) VALUES (?, 'run-backup', 'storage', "
@@ -79,6 +80,7 @@ def test_online_backup_is_checked_deterministic_compressed_and_restorable_under_
                     )
                     number += 1
                     writes_started.set()
+                    stop_writes.wait(0.001)
             finally:
                 connection.close()
         except BaseException as error:  # pragma: no cover - asserted below
@@ -141,6 +143,22 @@ def test_online_backup_is_checked_deterministic_compressed_and_restorable_under_
 
     with pytest.raises(FileExistsError):
         restore_backup(artifact.manifest_path, restored)
+
+
+def test_online_backup_fails_cleanly_when_its_time_budget_expires(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    _seed_database(database)
+    monkeypatch.setattr(backup_module, "ONLINE_BACKUP_TIMEOUT_SECONDS", 0)
+
+    with pytest.raises(BackupError, match="30-minute time budget"):
+        create_backup(database, backups, tier="daily", created_at_us=1)
+
+    assert not tuple(backups.glob("*.gz"))
+    assert not tuple(backups.glob("*.manifest.json"))
 
 
 def test_restore_verifies_both_hashes_and_never_publishes_a_partial_database(

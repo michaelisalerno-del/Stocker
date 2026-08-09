@@ -12,6 +12,7 @@ EnvironmentFile=-/etc/stocker/stocker-backup.env
 CacheDirectory=stocker-v2-backup-work
 CacheDirectoryMode=0750
 ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime backup create --database /var/lib/stocker/v2/stocker-v2.sqlite3 --destination /var/lib/stocker/backups-v2 --tier daily --working-directory /var/cache/stocker-v2-backup-work
+TimeoutStartSec=31min
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true

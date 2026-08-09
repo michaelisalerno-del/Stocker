@@ -310,18 +310,26 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert f"sudo -u stocker sqlite3 \\\n  {rollback_database}" in runbook
     assert exact_delete in runbook
     assert runbook.count(exact_delete) == 1
+    fence_start = runbook.index("install_v1_runtime_start_fence()")
     guarded_delete = runbook.index("retire_authorised_v1_candidate()")
     deletion = runbook.index(exact_delete)
     guard_call = runbook.index("retire_authorised_v1_candidate\n")
-    assert guarded_delete < deletion < guard_call
-    deletion_guard = runbook[guarded_delete:deletion]
-    assert "if ! sudo systemctl mask --runtime --now" in deletion_guard
+    assert fence_start < guarded_delete < deletion < guard_call
+    deletion_guard = runbook[fence_start:deletion]
+    assert "install_v1_runtime_start_fence || return 78" in deletion_guard
+    assert "RefuseManualStart=yes" in deletion_guard
+    assert "ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL" in deletion_guard
+    assert '*"ConditionPathExists"*"$STOCKER_V1_FENCE_SENTINEL"*' in deletion_guard
+    assert "--property=FragmentPath --value" in deletion_guard
+    assert "--property=RefuseManualStart --value" in deletion_guard
+    assert "--property=Conditions --value" in deletion_guard
+    assert "--property=DropInPaths --value" in deletion_guard
     assert "--property=ActiveState --value" in deletion_guard
-    assert "--property=LoadState --value" in deletion_guard
-    assert "--property=UnitFileState --value" in deletion_guard
-    assert 'active_state" != inactive' in deletion_guard
-    assert 'load_state" != masked' in deletion_guard
-    assert 'unit_file_state" != masked-runtime' in deletion_guard
+    assert 'test "$fragment_path" = "/etc/systemd/system/$unit"' in deletion_guard
+    assert 'test "$refuse_manual" = yes' in deletion_guard
+    assert 'if sudo systemctl start "$unit"' in deletion_guard
+    assert deletion_guard.count('test "$active_state" = inactive') >= 2
+    assert "systemctl mask" not in deletion_guard
     assert "lsof_status" in runbook[guarded_delete:deletion]
     assert 'test "$lsof_status" -ne 1' in runbook[guarded_delete:deletion]
     assert "without a glob" in runbook
@@ -347,15 +355,56 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     after_callback_rollback = runbook.index("### After first callback")
     assert common_rollback < before_callback_rollback < after_callback_rollback
     common_rollback_commands = runbook[common_rollback:before_callback_rollback]
-    assert "systemctl unmask --runtime" in common_rollback_commands
+    assert "systemctl unmask" not in common_rollback_commands
+    assert 'sudo rm -- "$dropin"' in common_rollback_commands
+    assert "rmdir " not in common_rollback_commands
+    assert 'sudo test ! -L "$dropin"' in common_rollback_commands
+    assert 'test "$actual_fence" = "$expected_fence"' in common_rollback_commands
+    assert "systemctl daemon-reload" in common_rollback_commands
     assert "active_state=" in common_rollback_commands
     assert "load_state=" in common_rollback_commands
-    assert "unit_file_state=" in common_rollback_commands
+    assert "fragment_path=" in common_rollback_commands
+    assert "refuse_manual=" in common_rollback_commands
+    assert "conditions=" in common_rollback_commands
+    assert "dropin_paths=" in common_rollback_commands
     assert "--property=LoadState --value" in common_rollback_commands
-    assert "masked|masked-runtime" in common_rollback_commands
+    assert "--property=DropInPaths --value" in common_rollback_commands
+    assert 'test "$refuse_manual" = no' in common_rollback_commands
     assert "setfacl --restore=" in common_rollback_commands
     assert "rollback-access-control-before.txt" in common_rollback_commands
     assert 'sudo -u stocker test -w "$STOCKER_V1_ROLLBACK_DB"' in common_rollback_commands
+
+
+def test_v1_runtime_start_fence_is_exact_reversible_and_preserves_unit_files() -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+    fence = runbook[
+        runbook.index("STOCKER_V1_FENCE_SENTINEL=") : runbook.index(
+            "retire_authorised_v1_candidate\n"
+        )
+    ]
+    units = (
+        "stocker-recorder.service",
+        "stocker-web.service",
+        "stocker-backup.service",
+        "stocker-backup.timer",
+        "stocker-recorder-session-readiness.service",
+        "stocker-recorder-session-readiness.timer",
+    )
+
+    assert "99-stocker-v1-cutover-start-fence.conf" in fence
+    assert "/run/systemd/system/${unit}.d" in fence
+    assert 'sudo test ! -e "$dropin"' in fence
+    assert "sudo install -d -o root -g root -m 0755" in fence
+    assert "'[Unit]'" in fence
+    assert "'RefuseManualStart=yes'" in fence
+    assert '"ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL"' in fence
+    assert 'sudo test -f "/etc/systemd/system/$unit"' in fence
+    assert 'sudo test ! -L "/etc/systemd/system/$unit"' in fence
+    assert 'sudo systemctl start "$unit"' in fence
+    assert "mv /etc/systemd/system" not in fence
+    assert "rm -- /etc/systemd/system" not in fence
+    for unit in units:
+        assert unit in fence
 
 
 def test_legacy_integrity_checks_use_immutable_uris_and_leave_no_sidecars(

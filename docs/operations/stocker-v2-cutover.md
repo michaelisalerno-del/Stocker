@@ -266,35 +266,69 @@ every remaining reference to the candidate is confined to preserved disabled V1
 material. Record that dependency inventory. Then, and only after the preservation,
 no-handle, dependency, and separately recorded owner-approval gates all pass, remove
 exactly these paths without a glob. A plain `lsof` invocation is not a gate: it exits
-zero when it finds the unsafe state. Runtime-mask the stopped V1 surface, assert every
-unit immediately before deletion, and invoke `rm` only from the guarded function:
+zero when it finds the unsafe state. Fence the stopped V1 surface with exact runtime
+drop-ins; do not move, replace, or overwrite any preserved `/etc/systemd/system` unit.
+`RefuseManualStart=yes` rejects operator starts, while an absent
+`ConditionPathExists` sentinel blocks dependency activation. Verify the properties
+parsed by systemd, prove an attempted start fails and every unit remains inactive, then
+invoke `rm` only from the guarded function. On any failure, leave the drop-ins in place:
 
 ```bash
-retire_authorised_v1_candidate() {
-  local unit active_state load_state unit_file_state handle_report lsof_status
-  if ! sudo systemctl mask --runtime --now \
-    stocker-recorder.service stocker-web.service \
-    stocker-backup.service stocker-backup.timer \
-    stocker-recorder-session-readiness.service \
-    stocker-recorder-session-readiness.timer; then
-    echo "refusing retirement: V1 runtime mask failed" >&2
-    return 78
-  fi
-  for unit in \
-    stocker-recorder.service stocker-web.service \
-    stocker-backup.service stocker-backup.timer \
-    stocker-recorder-session-readiness.service \
-    stocker-recorder-session-readiness.timer; do
+STOCKER_V1_FENCE_SENTINEL=/run/stocker-v1-cutover-start-authorised
+STOCKER_V1_FENCE_NAME=99-stocker-v1-cutover-start-fence.conf
+STOCKER_V1_UNITS="stocker-recorder.service stocker-web.service
+stocker-backup.service stocker-backup.timer
+stocker-recorder-session-readiness.service stocker-recorder-session-readiness.timer"
+
+install_v1_runtime_start_fence() {
+  local unit dropin_directory dropin active_state fragment_path refuse_manual conditions
+  local dropin_paths
+  sudo test ! -e "$STOCKER_V1_FENCE_SENTINEL" || return 78
+  for unit in $STOCKER_V1_UNITS; do
+    sudo test -f "/etc/systemd/system/$unit" || return 78
+    sudo test ! -L "/etc/systemd/system/$unit" || return 78
+    dropin_directory="/run/systemd/system/${unit}.d"
+    dropin="$dropin_directory/$STOCKER_V1_FENCE_NAME"
+    sudo test ! -e "$dropin" || return 78
+    sudo install -d -o root -g root -m 0755 "$dropin_directory" || return 78
+    printf '%s\n' \
+      '[Unit]' \
+      'RefuseManualStart=yes' \
+      "ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL" | \
+      sudo tee "$dropin" >/dev/null || return 78
+    sudo chmod 0644 "$dropin" || return 78
+  done
+  sudo systemctl daemon-reload || return 78
+  for unit in $STOCKER_V1_UNITS; do
     active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || return 78
-    load_state="$(sudo systemctl show --property=LoadState --value "$unit")" || return 78
-    unit_file_state="$(sudo systemctl show --property=UnitFileState --value "$unit")" || \
+    fragment_path="$(sudo systemctl show --property=FragmentPath --value "$unit")" || return 78
+    refuse_manual="$(sudo systemctl show --property=RefuseManualStart --value "$unit")" || \
       return 78
-    if test "$active_state" != inactive || test "$load_state" != masked || \
-      test "$unit_file_state" != masked-runtime; then
-      echo "refusing retirement: V1 unit is not inactive and runtime-masked: $unit" >&2
+    conditions="$(sudo systemctl show --property=Conditions --value "$unit")" || return 78
+    dropin_paths="$(sudo systemctl show --property=DropInPaths --value "$unit")" || return 78
+    test "$active_state" = inactive || return 78
+    test "$fragment_path" = "/etc/systemd/system/$unit" || return 78
+    test "$refuse_manual" = yes || return 78
+    case "$conditions" in
+      *"ConditionPathExists"*"$STOCKER_V1_FENCE_SENTINEL"*) ;;
+      *) return 78 ;;
+    esac
+    case "$dropin_paths" in
+      *"/run/systemd/system/${unit}.d/$STOCKER_V1_FENCE_NAME"*) ;;
+      *) return 78 ;;
+    esac
+    if sudo systemctl start "$unit"; then
+      echo "refusing retirement: fenced V1 unit started: $unit" >&2
       return 78
     fi
+    active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || return 78
+    test "$active_state" = inactive || return 78
   done
+}
+
+retire_authorised_v1_candidate() {
+  local handle_report lsof_status
+  install_v1_runtime_start_fence || return 78
   sudo test -f /var/lib/stocker/prospective/prospective.sqlite3 || return 78
   sudo test -f /var/lib/stocker/prospective/prospective.sqlite3-wal || return 78
   sudo test -f /var/lib/stocker/prospective/prospective.sqlite3-shm || return 78
@@ -546,33 +580,66 @@ release, its untouched database, and both recovery sets remain preserved.
 
 ## 8. Rollback
 
-For either rollback path, first remove every exact V1 runtime mask and verify the
-preserved unit files are loaded in their recorded pre-cutover state. A failed unmask or
-state query stops rollback before any V1 start attempt:
+For either rollback path, first verify and remove only the exact V1 runtime-fence
+drop-ins, reload systemd, and prove the preserved regular unit files are again parsed
+from `/etc/systemd/system` without the fence. Do not remove another drop-in or unit
+file. Any unexpected fence type/content, failed removal, stale parsed fence, or
+state-query failure stops rollback before any V1 start attempt. Removing some files
+cannot weaken the live fence before the one final successful `daemon-reload`; a failed
+cleanup therefore leaves systemd's already parsed fence in force:
 
 ```bash
 export STOCKER_V1_ROLLBACK_DB=/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3
 export STOCKER_V1_PRESERVATION=/var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation
 test "$STOCKER_V1_PRESERVATION" != \
   /var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation || exit 78
-sudo systemctl unmask --runtime \
-  stocker-recorder.service stocker-web.service \
-  stocker-backup.service stocker-backup.timer \
-  stocker-recorder-session-readiness.service \
-  stocker-recorder-session-readiness.timer || exit 78
+STOCKER_V1_FENCE_SENTINEL=/run/stocker-v1-cutover-start-authorised
+STOCKER_V1_FENCE_NAME=99-stocker-v1-cutover-start-fence.conf
+STOCKER_V1_UNITS="stocker-recorder.service stocker-web.service
+stocker-backup.service stocker-backup.timer
+stocker-recorder-session-readiness.service stocker-recorder-session-readiness.timer"
+sudo test ! -e "$STOCKER_V1_FENCE_SENTINEL" || exit 78
+expected_fence="$(printf '%s\n' \
+  '[Unit]' \
+  'RefuseManualStart=yes' \
+  "ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL")"
+for unit in $STOCKER_V1_UNITS; do
+  dropin="/run/systemd/system/${unit}.d/$STOCKER_V1_FENCE_NAME"
+  if sudo test -e "$dropin"; then
+    sudo test -f "$dropin" || exit 78
+    sudo test ! -L "$dropin" || exit 78
+    actual_fence="$(sudo cat "$dropin")" || exit 78
+    test "$actual_fence" = "$expected_fence" || exit 78
+  fi
+  sudo test -f "/etc/systemd/system/$unit" || exit 78
+  sudo test ! -L "/etc/systemd/system/$unit" || exit 78
+  active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || exit 78
+  test "$active_state" = inactive || exit 78
+done
+for unit in $STOCKER_V1_UNITS; do
+  dropin_directory="/run/systemd/system/${unit}.d"
+  dropin="$dropin_directory/$STOCKER_V1_FENCE_NAME"
+  if sudo test -e "$dropin"; then
+    sudo rm -- "$dropin" || exit 78
+  fi
+done
 sudo systemctl daemon-reload || exit 78
-for unit in \
-  stocker-recorder.service stocker-web.service \
-  stocker-backup.service stocker-backup.timer \
-  stocker-recorder-session-readiness.service \
-  stocker-recorder-session-readiness.timer; do
+for unit in $STOCKER_V1_UNITS; do
   active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || exit 78
   load_state="$(sudo systemctl show --property=LoadState --value "$unit")" || exit 78
-  unit_file_state="$(sudo systemctl show --property=UnitFileState --value "$unit")" || exit 78
+  fragment_path="$(sudo systemctl show --property=FragmentPath --value "$unit")" || exit 78
+  refuse_manual="$(sudo systemctl show --property=RefuseManualStart --value "$unit")" || exit 78
+  conditions="$(sudo systemctl show --property=Conditions --value "$unit")" || exit 78
+  dropin_paths="$(sudo systemctl show --property=DropInPaths --value "$unit")" || exit 78
   test "$active_state" = inactive || exit 78
   test "$load_state" = loaded || exit 78
-  case "$unit_file_state" in
-    masked|masked-runtime) exit 78 ;;
+  test "$fragment_path" = "/etc/systemd/system/$unit" || exit 78
+  test "$refuse_manual" = no || exit 78
+  case "$conditions" in
+    *"$STOCKER_V1_FENCE_SENTINEL"*) exit 78 ;;
+  esac
+  case "$dropin_paths" in
+    *"$STOCKER_V1_FENCE_NAME"*) exit 78 ;;
   esac
 done
 sudo setfacl --restore="$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" || exit 78

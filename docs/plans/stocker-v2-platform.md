@@ -721,8 +721,10 @@ Create:
 
 - before any retirement, a read-only preservation set that binds the already checked
   immutable import snapshot and untouched rollback database by path, identity, size,
-  hash, and integrity result, plus a root-only archive/hash inventory of the V1
-  release, configuration, units, and required reports;
+  hash, and integrity result, plus a deterministic full-tree hash inventory of the
+  intact V1 release and a root-only archive of its pointer, configuration, units, and
+  required reports without duplicating the multi-gigabyte release before capacity is
+  reclaimed;
 - after the separately authorised non-source aggregate is retired and capacity is
   available, checked compressed recovery copies of both preserved databases with
   disposable restore verification, all before import;

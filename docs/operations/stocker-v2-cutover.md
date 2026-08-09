@@ -189,12 +189,13 @@ Before deleting the retirement candidate, create and lock a **pre-deletion
 preservation manifest**. This first, read-only recovery set binds the existing immutable
 snapshot and untouched rollback database by exact path, device, inode, allocated size,
 mode, owner, SHA-256, `quick_check`, and `foreign_key_check`. It also contains a
-root-only archive and hash inventory of the current V1 release, configuration, and
-installed unit definitions. The two checked database files are themselves the
-preserved database members of this set: both are outside the three retirement paths,
-and neither may be deleted, replaced, or modified. This evidence-bound set must be
-complete and synced before deletion; it does not depend on a copy that can only fit
-after space is reclaimed.
+deterministic full-tree hash inventory of the intact current V1 release plus a root-only
+archive of its pointer, configuration, and installed unit definitions. Do not duplicate
+the multi-gigabyte release before capacity is reclaimed. The two checked database files
+and the existing immutable V1 release are themselves preserved members of this set:
+all are outside the three retirement paths, and none may be deleted, replaced, or
+modified. This evidence-bound set must be complete and synced before deletion; it does
+not depend on a copy that can only fit after space is reclaimed.
 
 Use a new, recorded change identifier, preserve the recorded pre-change metadata, and
 do not place credentials in the manifest output:
@@ -207,9 +208,15 @@ sudo sha256sum "$STOCKER_V1_SNAPSHOT" "$STOCKER_V1_ROLLBACK_DB" | \
 sudo stat -c '%n|%d|%i|%b|%B|%s|%U|%G|%a' \
   "$STOCKER_V1_SNAPSHOT" "$STOCKER_V1_ROLLBACK_DB" | \
   sudo tee "$STOCKER_V1_PRESERVATION/database-stat.txt" >/dev/null
+sudo find "$STOCKER_V1_RELEASE" -xdev -type f -print0 | sudo sort -z | \
+  sudo xargs -0 sha256sum | \
+  sudo tee "$STOCKER_V1_PRESERVATION/v1-release-sha256.txt" >/dev/null
+sudo test -s "$STOCKER_V1_PRESERVATION/v1-release-sha256.txt" || exit 78
+sudo sha256sum "$STOCKER_V1_PRESERVATION/v1-release-sha256.txt" | \
+  sudo tee "$STOCKER_V1_PRESERVATION/v1-release-manifest-sha256.txt" >/dev/null
 sudo tar --create --gzip \
   --file "$STOCKER_V1_PRESERVATION/v1-control-plane.tar.gz" -- \
-  /opt/stocker/current "$STOCKER_V1_RELEASE" /etc/stocker \
+  /opt/stocker/current /etc/stocker \
   /etc/systemd/system/stocker-recorder.service \
   /etc/systemd/system/stocker-web.service \
   /etc/systemd/system/stocker-backup.service \
@@ -231,6 +238,8 @@ sudo sha256sum --check --strict \
 sudo chmod 0440 "$STOCKER_V1_PRESERVATION/database-sha256.txt" \
   "$STOCKER_V1_PRESERVATION/database-stat.txt" \
   "$STOCKER_V1_PRESERVATION/control-plane-sha256.txt" \
+  "$STOCKER_V1_PRESERVATION/v1-release-sha256.txt" \
+  "$STOCKER_V1_PRESERVATION/v1-release-manifest-sha256.txt" \
   "$STOCKER_V1_PRESERVATION/snapshot-access-control-before.txt" \
   "$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" \
   "$STOCKER_V1_PRESERVATION/sqlite-integrity.txt" \

@@ -336,6 +336,11 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert "sudo cmp --silent" in runbook[compressed_copies:importer]
     assert "restore-integrity.txt" in runbook[compressed_copies:importer]
     assert retirement_database not in runbook[runbook.index("--source ") :]
+    control_archive = runbook[runbook.index("sudo tar --create --gzip") :]
+    control_archive = control_archive[: control_archive.index("sudo sha256sum")]
+    assert '"$STOCKER_V1_RELEASE"' not in control_archive
+    assert "v1-release-sha256.txt" in runbook[:deletion]
+    assert "v1-release-manifest-sha256.txt" in runbook[:deletion]
     common_rollback = runbook.index("For either rollback path")
     before_callback_rollback = runbook.index("### Before first callback")
     after_callback_rollback = runbook.index("### After first callback")

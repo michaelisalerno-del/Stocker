@@ -227,12 +227,19 @@ sudo sha256sum "$STOCKER_V1_PRESERVATION/v1-control-plane.tar.gz" | \
   sudo tee "$STOCKER_V1_PRESERVATION/control-plane-sha256.txt" >/dev/null
 {
   echo snapshot
-  sudo -u stocker sqlite3 -readonly "$STOCKER_V1_SNAPSHOT" \
+  sudo -u stocker sqlite3 -readonly \
+    "file:$STOCKER_V1_SNAPSHOT?mode=ro&immutable=1" \
     'PRAGMA quick_check; PRAGMA foreign_key_check;'
   echo rollback
-  sudo -u stocker sqlite3 -readonly "$STOCKER_V1_ROLLBACK_DB" \
+  sudo -u stocker sqlite3 -readonly \
+    "file:$STOCKER_V1_ROLLBACK_DB?mode=ro&immutable=1" \
     'PRAGMA quick_check; PRAGMA foreign_key_check;'
 } | sudo tee "$STOCKER_V1_PRESERVATION/sqlite-integrity.txt" >/dev/null
+for checked_db in "$STOCKER_V1_SNAPSHOT" "$STOCKER_V1_ROLLBACK_DB"; do
+  sudo test ! -e "${checked_db}-journal" || exit 78
+  sudo test ! -e "${checked_db}-wal" || exit 78
+  sudo test ! -e "${checked_db}-shm" || exit 78
+done
 sudo sha256sum --check --strict \
   "$STOCKER_V1_PRESERVATION/database-sha256.txt"
 sudo chmod 0440 "$STOCKER_V1_PRESERVATION/database-sha256.txt" \
@@ -249,8 +256,11 @@ sudo sync -f "$STOCKER_V1_PRESERVATION"
 ```
 
 Require `sqlite-integrity.txt` to contain exactly the two labels and one `ok` line for
-each database, with no foreign-key rows. Compare the hashes and stat identity with the
-locked manifest. Prove that no process has any of the three retirement paths open, that
+each database, with no foreign-key rows. `-readonly` alone is insufficient for a frozen
+WAL-mode database because SQLite may still materialise WAL/SHM beside it; every
+observational check therefore uses the explicit `mode=ro&immutable=1` URI and then
+reasserts that no journal, WAL, or SHM exists. Compare the hashes and stat identity with
+the locked manifest. Prove that no process has any of the three retirement paths open, that
 the V1 app, backup, and session-readiness units are inactive and disabled, and that
 every remaining reference to the candidate is confined to preserved disabled V1
 material. Record that dependency inventory. Then, and only after the preservation,
@@ -351,13 +361,20 @@ sudo cmp --silent "$STOCKER_V1_ROLLBACK_DB" \
 {
   echo snapshot_restore
   sudo sqlite3 -readonly \
-    "$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3" \
+    "file:$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3?mode=ro&immutable=1" \
     'PRAGMA quick_check; PRAGMA foreign_key_check;'
   echo rollback_restore
   sudo sqlite3 -readonly \
-    "$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3" \
+    "file:$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3?mode=ro&immutable=1" \
     'PRAGMA quick_check; PRAGMA foreign_key_check;'
 } | sudo tee "$STOCKER_V1_RECOVERY_COPIES/restore-integrity.txt" >/dev/null
+for checked_restore in \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3" \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3"; do
+  sudo test ! -e "${checked_restore}-journal" || exit 78
+  sudo test ! -e "${checked_restore}-wal" || exit 78
+  sudo test ! -e "${checked_restore}-shm" || exit 78
+done
 sudo sha256sum "$STOCKER_V1_RECOVERY_COPIES/import-snapshot.sqlite3.gz" \
   "$STOCKER_V1_RECOVERY_COPIES/rollback.sqlite3.gz" | sudo tee \
   "$STOCKER_V1_RECOVERY_COPIES/archive-sha256.txt" >/dev/null

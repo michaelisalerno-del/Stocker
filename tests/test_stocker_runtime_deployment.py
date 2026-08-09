@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import signal
+import sqlite3
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -355,6 +356,54 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert "setfacl --restore=" in common_rollback_commands
     assert "rollback-access-control-before.txt" in common_rollback_commands
     assert 'sudo -u stocker test -w "$STOCKER_V1_ROLLBACK_DB"' in common_rollback_commands
+
+
+def test_legacy_integrity_checks_use_immutable_uris_and_leave_no_sidecars(
+    tmp_path: Path,
+) -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+
+    prescribed_reads = (
+        '"file:$STOCKER_V1_SNAPSHOT?mode=ro&immutable=1"',
+        '"file:$STOCKER_V1_ROLLBACK_DB?mode=ro&immutable=1"',
+        '"file:$STOCKER_V1_RECOVERY_COPIES/restore-check/'
+        'import-snapshot.sqlite3?mode=ro&immutable=1"',
+        '"file:$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3?mode=ro&immutable=1"',
+    )
+    assert all(read in runbook for read in prescribed_reads)
+    assert runbook.count("sqlite3 -readonly") == len(prescribed_reads)
+    assert 'sqlite3 -readonly "$STOCKER_' not in runbook
+
+    original_checks = runbook.index("sqlite-integrity.txt")
+    original_sidecar_gate = runbook.index(
+        'for checked_db in "$STOCKER_V1_SNAPSHOT" "$STOCKER_V1_ROLLBACK_DB"'
+    )
+    restore_checks = runbook.index("restore-integrity.txt")
+    restore_sidecar_gate = runbook.index("for checked_restore in")
+    restore_removal = runbook.index(
+        'sudo rm -- "$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3"'
+    )
+    assert original_checks < original_sidecar_gate
+    assert restore_checks < restore_sidecar_gate < restore_removal
+    for suffix in ("-journal", "-wal", "-shm"):
+        assert f'"${{checked_db}}{suffix}"' in runbook[original_sidecar_gate:restore_checks]
+        assert f'"${{checked_restore}}{suffix}"' in runbook[restore_sidecar_gate:restore_removal]
+
+    database = tmp_path / "frozen-wal.sqlite3"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY)")
+        connection.execute("INSERT INTO evidence VALUES (1)")
+        connection.commit()
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    for suffix in ("-journal", "-wal", "-shm"):
+        Path(f"{database}{suffix}").unlink(missing_ok=True)
+
+    uri = f"{database.resolve().as_uri()}?mode=ro&immutable=1"
+    with sqlite3.connect(uri, uri=True) as connection:
+        assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        assert tuple(connection.execute("PRAGMA foreign_key_check")) == ()
+    assert all(not Path(f"{database}{suffix}").exists() for suffix in ("-journal", "-wal", "-shm"))
 
 
 def test_official_api_update_service_uses_the_v2_runtime_cli() -> None:

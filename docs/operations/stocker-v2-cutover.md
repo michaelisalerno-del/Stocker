@@ -72,8 +72,7 @@ pin with an unrelated protobuf release.
 Prepare the separate V2 pointer, users, and paths without starting services:
 
 ```bash
-set -euo pipefail
-
+bash -euo pipefail <<'STOCKER_V2_RELEASE_PREP' || exit 78
 export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT
 export STOCKER_IBAPI_SOURCE=/var/lib/stocker/ibkr-api/install/IBJts/source/pythonclient
 export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl
@@ -122,6 +121,8 @@ if not isinstance(EClient, type):
 PY
 sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current
 sudo test "$(readlink -f /opt/stocker/v2-current)" = "$STOCKER_V2_RELEASE"
+STOCKER_V2_RELEASE_PREP
+
 getent group stocker-readers >/dev/null || sudo groupadd --system stocker-readers
 id -u stocker-recorder >/dev/null 2>&1 || sudo useradd --system --gid stocker-readers \
   --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-recorder

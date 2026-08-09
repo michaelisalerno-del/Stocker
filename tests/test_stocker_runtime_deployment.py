@@ -210,9 +210,41 @@ exit 0
             timeout=5,
         )
 
-        assert completed.returncode != 0, failure
+        assert completed.returncode == 78, failure
         assert not published.exists(), failure
         assert "ln -s" not in trace.read_text(encoding="utf-8"), failure
+
+    published.unlink(missing_ok=True)
+    continued = tmp_path / "continued-after-accepted-nonzero"
+    success_environment = environment | {
+        "CONTINUED": str(continued),
+        "FAIL_MATCH": "",
+    }
+    successful_block = f"""set +e
+set +u
+set +o pipefail
+{block}
+case "$-" in
+  *e*|*u*) exit 91 ;;
+esac
+if shopt -qo pipefail; then
+  exit 92
+fi
+false
+: > "$CONTINUED"
+"""
+    completed = subprocess.run(
+        ["bash", "-c", successful_block],
+        check=False,
+        capture_output=True,
+        env=success_environment,
+        text=True,
+        timeout=5,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert published.exists()
+    assert continued.exists()
 
 
 def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() -> None:

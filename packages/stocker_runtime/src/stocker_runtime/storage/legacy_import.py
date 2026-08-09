@@ -1882,6 +1882,10 @@ def import_legacy_database(
     if not isinstance(accept_quiescent_unclean_generations, bool):
         raise LegacyImportError("unclean-generation assertion must be a boolean")
     before_stat = _validate_paths(source, target, report)
+    if accept_quiescent_unclean_generations and before_stat.st_mode & (
+        stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+    ):
+        raise LegacyImportError("attended unclean-generation import requires a read-only source")
     timestamp = (
         int(datetime.now(UTC).timestamp() * 1_000_000) if started_at_us is None else started_at_us
     )
@@ -1992,11 +1996,15 @@ def import_legacy_database(
             after_stat.st_ino,
             after_stat.st_size,
             after_stat.st_mtime_ns,
+            after_stat.st_mode,
+            after_stat.st_ctime_ns,
         ) != (
             before_stat.st_dev,
             before_stat.st_ino,
             before_stat.st_size,
             before_stat.st_mtime_ns,
+            before_stat.st_mode,
+            before_stat.st_ctime_ns,
         ) or after_hash != source_hash:
             raise LegacyImportError("legacy source changed during import")
         report_payload = {

@@ -203,6 +203,18 @@ def test_cutover_precreates_reader_boundary_before_import_and_verifies_afterward
     verifier = runbook.index("sudo /usr/local/libexec/stocker-prepare-v2-sqlite-boundary")
     assert runbook.index(install_verifier) < importer
     assert importer < verifier
+    assert "command -v setfacl" in runbook
+    assert "setfacl -m u:stocker-recorder:r--" in runbook
+    assert "access-control-before.txt" in runbook
+    assert "chgrp stocker-readers /var/lib/stocker/backups" not in runbook
+    assert "chown stocker:stocker-readers" not in runbook
+    revoke = runbook.index("revoke_v1_snapshot_access")
+    assert revoke < importer
+    assert runbook.index("setfacl -x u:stocker-recorder") < verifier
+    assert runbook.index("sudo -u stocker-web test ! -r") < importer
+    assert runbook.rindex("sudo -u stocker-web test ! -r") < verifier
+    assert runbook.index("sudo -u stocker-backup test ! -r") < importer
+    assert runbook.rindex("sudo -u stocker-backup test ! -r") < verifier
 
 
 def test_cutover_runbook_preserves_one_writer_and_two_distinct_rollback_paths() -> None:
@@ -282,8 +294,16 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert "without a glob" in runbook
     assert "no-handle/dependency" in runbook
     assert "does not authorise deletion of the import snapshot or rollback database" in runbook
-    assert runbook.index("Before deleting the retirement candidate") < runbook.index(exact_delete)
-    assert runbook.index("--source " + import_source) > runbook.index(exact_delete)
+    preservation = runbook.index("pre-deletion\npreservation manifest")
+    deletion = runbook.index(exact_delete)
+    compressed_copies = runbook.index("checked\ncompressed recovery copies")
+    recorder_grant = runbook.index("setfacl -m u:stocker-recorder:r--")
+    importer = runbook.index("--source " + import_source)
+    assert runbook.index("Before deleting the retirement candidate") < preservation
+    assert preservation < deletion < compressed_copies < recorder_grant < importer
+    assert "sudo gzip --test" in runbook[compressed_copies:importer]
+    assert "sudo cmp --silent" in runbook[compressed_copies:importer]
+    assert "restore-integrity.txt" in runbook[compressed_copies:importer]
     assert retirement_database not in runbook[runbook.index("--source ") :]
 
 

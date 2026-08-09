@@ -840,6 +840,14 @@ def test_attended_import_archives_quiescent_unclean_generations_without_mutating
             ((f"unbound-{number:03d}",) for number in range(55)),
         )
         legacy.commit()
+    with pytest.raises(LegacyImportError, match="requires a read-only source"):
+        import_legacy_database(
+            source,
+            tmp_path / "writable-target.sqlite3",
+            started_at_us=1,
+            accept_quiescent_unclean_generations=True,
+        )
+    source.chmod(0o440)
     source_bytes = source.read_bytes()
 
     result = import_legacy_database(
@@ -856,6 +864,7 @@ def test_attended_import_archives_quiescent_unclean_generations_without_mutating
     )
 
     assert source.read_bytes() == source_bytes
+    assert source.stat().st_mode & 0o777 == 0o440
     assert result.target_digest == second.target_digest
     report = json.loads(result.reconciliation_path.read_text(encoding="utf-8"))
     archive = report["quiescent_unclean_generations"]
@@ -900,6 +909,7 @@ def test_attended_unclean_assertion_never_bypasses_a_lease_or_sidecar(tmp_path: 
             "INSERT INTO recorder_lease VALUES ('recorder', 'run', 'owner', 'x', 'x', 1, 0)"
         )
         legacy.commit()
+    source.chmod(0o440)
 
     with pytest.raises(LegacyImportError, match="active recorder lease"):
         import_legacy_database(
@@ -909,9 +919,11 @@ def test_attended_unclean_assertion_never_bypasses_a_lease_or_sidecar(tmp_path: 
             accept_quiescent_unclean_generations=True,
         )
 
+    source.chmod(0o640)
     with sqlite3.connect(source) as legacy:
         legacy.execute("DELETE FROM recorder_lease")
         legacy.commit()
+    source.chmod(0o440)
     Path(f"{source}-shm").write_bytes(b"ambiguous")
     with pytest.raises(LegacyImportError, match="SHM"):
         import_legacy_database(
@@ -1067,6 +1079,7 @@ def test_legacy_import_cli_requires_the_explicit_quiescent_unclean_assertion(
             "'2026-01-02T14:30:00+00:00')"
         )
         legacy.commit()
+    source.chmod(0o440)
 
     rejected = CliRunner().invoke(
         app,

@@ -719,7 +719,13 @@ authorisation after preservation, no-handle, and dependency gates pass.
 
 Create:
 
-- a read-only legacy recovery set;
+- before any retirement, a read-only preservation set that binds the already checked
+  immutable import snapshot and untouched rollback database by path, identity, size,
+  hash, and integrity result, plus a root-only archive/hash inventory of the V1
+  release, configuration, units, and required reports;
+- after the separately authorised non-source aggregate is retired and capacity is
+  available, checked compressed recovery copies of both preserved databases with
+  disposable restore verification, all before import;
 - `/var/lib/stocker/v2/stocker-v2.sqlite3`; and
 - `/var/lib/stocker/backups-v2`.
 
@@ -757,20 +763,23 @@ rows.
 1. Pre-create V2 users, directories, configuration, release, and service units.
 2. Stop at a planned market-closed window.
 3. Reverify the selected import snapshot and checkpoint/reverify the distinct rollback
-   database; preserve both with SQLite/WAL, raw partitions, sidecars/staging/quarantine,
-   bundles, release/configuration/unit hashes, and required reports as one read-only
-   recovery set.
+   database. Before retirement, lock a read-only preservation manifest that binds both
+   intact files by path, identity, size, hash, and integrity result and archives/hashes
+   the V1 release, configuration, units, and required reports. Both database files are
+   outside the exact retirement paths and remain preserved members of that set.
 4. Stop V1 recorder and web; prove no writer/lease remains.
 5. After its separate exact approval gates pass, retire only the non-active aggregate
-   and its named sidecars; import the immutable snapshot into a temporary V2 database.
-6. Verify hashes, counts, foreign keys, `quick_check`, ownership, and byte cap.
-7. Atomically rename V2 into place.
-8. Install V2 units/config with no EODHD, transfer, report-ZIP, Parquet, paper, or live fields.
-9. Start V2 web and prove query-only behaviour.
-10. Start V2 recorder with a new run and connection generation.
-11. Verify loopback/read-only IBKR, callback durability, plugin discovery, and zero
+   and its named sidecars. Use the reclaimed capacity to create checked compressed
+   copies of both preserved databases and verify disposable restores before import.
+6. Import the immutable snapshot into a temporary V2 database.
+7. Verify hashes, counts, foreign keys, `quick_check`, ownership, and byte cap.
+8. Atomically rename V2 into place.
+9. Install V2 units/config with no EODHD, transfer, report-ZIP, Parquet, paper, or live fields.
+10. Start V2 web and prove query-only behaviour.
+11. Start V2 recorder with a new run and connection generation.
+12. Verify loopback/read-only IBKR, callback durability, plugin discovery, and zero
     order capability/broker mutation.
-12. Declare completion only after a bounded observation window and successful checked
+13. Declare completion only after a bounded observation window and successful checked
     V2 backup.
 
 There is no dual write.

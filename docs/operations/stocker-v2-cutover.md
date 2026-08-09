@@ -59,6 +59,8 @@ users, and paths without starting services:
 export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT
 test "$STOCKER_V2_RELEASE" != \
   /opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT || exit 78
+command -v setfacl >/dev/null || exit 78
+command -v getfacl >/dev/null || exit 78
 sudo test -d "$STOCKER_V2_RELEASE"
 sudo test "$(readlink -f /opt/stocker/current)" != "$STOCKER_V2_RELEASE"
 sudo test ! -e /opt/stocker/v2-current
@@ -142,29 +144,96 @@ unclosed generation rows. They are accepted only by the explicit attended assert
 Section 3 and must be archived by count, canonical full-row digest, bounded per-run
 summary, and a resolved migration incident.
 
-After recording the pre-change ownership and mode, make only the immutable snapshot
-readable to the V2 reader group. Retain `stocker` as owner, keep the backup directory
-non-world-accessible, and recheck the content hash after the metadata change:
+Record the pre-change ownership, mode, and ACL, then remove all write bits from the
+immutable snapshot. Do not grant the shared `stocker-readers` group access: that group
+also contains the web and backup identities, which must never be able to read legacy
+callback payloads or protected evidence. Retain `stocker` as owner and group, keep the
+backup directory non-world-accessible, and confirm that none of the V2 identities can
+read it yet. Section 3 adds and removes a recorder-only ACL immediately around the
+import:
 
 ```bash
-sudo chgrp stocker-readers /var/lib/stocker/backups
-sudo chmod 0750 /var/lib/stocker/backups
-sudo chown stocker:stocker-readers \
+export STOCKER_V1_SNAPSHOT=/var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
+export STOCKER_V1_ROLLBACK_DB=/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3
+export STOCKER_V1_RELEASE="$(readlink -f /opt/stocker/current)"
+export STOCKER_V1_PRESERVATION=/var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation
+test "$STOCKER_V1_PRESERVATION" != \
+  /var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation || exit 78
+sudo install -d -o root -g root -m 0700 "$STOCKER_V1_PRESERVATION"
+sudo getfacl -p /var/lib/stocker/backups "$STOCKER_V1_SNAPSHOT" \
+  "$STOCKER_V1_ROLLBACK_DB" | \
+  sudo tee "$STOCKER_V1_PRESERVATION/access-control-before.txt" >/dev/null
+sudo chmod 0400 "$STOCKER_V1_SNAPSHOT"
+sudo -u stocker-recorder test ! -r \
   /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
-sudo chmod 0440 /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
-sudo -u stocker-recorder test -r \
+sudo -u stocker-web test ! -r \
+  /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
+sudo -u stocker-backup test ! -r \
   /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
 echo '9672d119395e9f2946dcec1e1d8bd7a332a0cb031d3be7a56601117db4217d90  /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3' | \
   sudo sha256sum --check --strict
 ```
 
-Before deleting the retirement candidate, prove the import snapshot and rollback
-database still exist at the exact paths above with their recorded sizes and hashes.
-Prove that no process has any of the three retirement paths open, that the V1 app,
-backup, and session-readiness units are inactive and disabled, and that every remaining
-reference to the candidate is confined to preserved disabled V1 material. Record that
-dependency inventory. Then, and only under the separately recorded owner approval,
-remove exactly these paths without a glob:
+Before deleting the retirement candidate, create and lock a **pre-deletion
+preservation manifest**. This first, read-only recovery set binds the existing immutable
+snapshot and untouched rollback database by exact path, device, inode, allocated size,
+mode, owner, SHA-256, `quick_check`, and `foreign_key_check`. It also contains a
+root-only archive and hash inventory of the current V1 release, configuration, and
+installed unit definitions. The two checked database files are themselves the
+preserved database members of this set: both are outside the three retirement paths,
+and neither may be deleted, replaced, or modified. This evidence-bound set must be
+complete and synced before deletion; it does not depend on a copy that can only fit
+after space is reclaimed.
+
+Use a new, recorded change identifier, preserve the recorded pre-change metadata, and
+do not place credentials in the manifest output:
+
+```bash
+sudo chmod 0400 "$STOCKER_V1_ROLLBACK_DB"
+sudo sha256sum "$STOCKER_V1_SNAPSHOT" "$STOCKER_V1_ROLLBACK_DB" | \
+  sudo tee "$STOCKER_V1_PRESERVATION/database-sha256.txt" >/dev/null
+sudo stat -c '%n|%d|%i|%b|%B|%s|%U|%G|%a' \
+  "$STOCKER_V1_SNAPSHOT" "$STOCKER_V1_ROLLBACK_DB" | \
+  sudo tee "$STOCKER_V1_PRESERVATION/database-stat.txt" >/dev/null
+sudo tar --create --gzip \
+  --file "$STOCKER_V1_PRESERVATION/v1-control-plane.tar.gz" -- \
+  /opt/stocker/current "$STOCKER_V1_RELEASE" /etc/stocker \
+  /etc/systemd/system/stocker-recorder.service \
+  /etc/systemd/system/stocker-web.service \
+  /etc/systemd/system/stocker-backup.service \
+  /etc/systemd/system/stocker-backup.timer \
+  /etc/systemd/system/stocker-recorder-session-readiness.service \
+  /etc/systemd/system/stocker-recorder-session-readiness.timer
+sudo sha256sum "$STOCKER_V1_PRESERVATION/v1-control-plane.tar.gz" | \
+  sudo tee "$STOCKER_V1_PRESERVATION/control-plane-sha256.txt" >/dev/null
+{
+  echo snapshot
+  sudo -u stocker sqlite3 -readonly "$STOCKER_V1_SNAPSHOT" \
+    'PRAGMA quick_check; PRAGMA foreign_key_check;'
+  echo rollback
+  sudo -u stocker sqlite3 -readonly "$STOCKER_V1_ROLLBACK_DB" \
+    'PRAGMA quick_check; PRAGMA foreign_key_check;'
+} | sudo tee "$STOCKER_V1_PRESERVATION/sqlite-integrity.txt" >/dev/null
+sudo sha256sum --check --strict \
+  "$STOCKER_V1_PRESERVATION/database-sha256.txt"
+sudo chmod 0440 "$STOCKER_V1_PRESERVATION/database-sha256.txt" \
+  "$STOCKER_V1_PRESERVATION/database-stat.txt" \
+  "$STOCKER_V1_PRESERVATION/control-plane-sha256.txt" \
+  "$STOCKER_V1_PRESERVATION/access-control-before.txt" \
+  "$STOCKER_V1_PRESERVATION/sqlite-integrity.txt" \
+  "$STOCKER_V1_PRESERVATION/v1-control-plane.tar.gz"
+sudo chmod 0550 "$STOCKER_V1_PRESERVATION"
+sudo sync -f "$STOCKER_V1_PRESERVATION"
+```
+
+Require `sqlite-integrity.txt` to contain exactly the two labels and one `ok` line for
+each database, with no foreign-key rows. Compare the hashes and stat identity with the
+locked manifest. Prove that no process has any of the three retirement paths open, that
+the V1 app, backup, and session-readiness units are inactive and disabled, and that
+every remaining reference to the candidate is confined to preserved disabled V1
+material. Record that dependency inventory. Then, and only after the preservation,
+no-handle, dependency, and separately recorded owner-approval gates all pass, remove
+exactly these paths without a glob:
 
 ```bash
 sudo lsof -- /var/lib/stocker/prospective/prospective.sqlite3 \
@@ -176,16 +245,65 @@ sudo rm -- /var/lib/stocker/prospective/prospective.sqlite3 \
 ```
 
 The removal is irreversible and may lose evidence unique to that aggregate. It does
-not remove either rollback source. Recheck allocated free space before creating V2.
+not remove either preserved database member. Recheck allocated free space immediately.
+Using only the reclaimed capacity, augment the pre-deletion set with **checked
+compressed recovery copies** of both databases and a second manifest. Restore each copy
+to a disposable path, compare its SHA-256 with the corresponding original, and require
+`quick_check=ok` plus no `foreign_key_check` rows. Remove only the named disposable
+restores, remove write bits from the compressed-copy set, and sync it. All of this must
+finish before the importer in Section 3 runs. Preserve the original snapshot, original
+rollback database, preservation manifest, and compressed recovery copies until Michael
+closes the seven-day rollback window. Do not copy V1 credentials or vendor tokens into
+V2 configuration.
 
-Create one checked, read-only recovery set containing the database, a compressed
-copy of both the import snapshot and rollback database, SQLite/WAL state, raw
-partitions, sidecars, staging/quarantine, bundles, current V1 release/configuration/unit
-hashes, and required reports. Record file sizes and SHA-256 values in its manifest,
-verify disposable restores with `quick_check` and `foreign_key_check`, then remove write
-bits from the set. Preserve the original snapshot, original rollback database, and
-recovery set until Michael closes the seven-day rollback window. Do not copy V1
-credentials or vendor tokens into V2 configuration.
+Run every command below fail-closed and stop on any nonzero status:
+
+```bash
+export STOCKER_V1_RECOVERY_COPIES=/var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-copies
+test "$STOCKER_V1_RECOVERY_COPIES" != \
+  /var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-copies || exit 78
+sudo install -d -o root -g root -m 0700 "$STOCKER_V1_RECOVERY_COPIES"
+sudo gzip --stdout "$STOCKER_V1_SNAPSHOT" | sudo tee \
+  "$STOCKER_V1_RECOVERY_COPIES/import-snapshot.sqlite3.gz" >/dev/null
+sudo gzip --stdout "$STOCKER_V1_ROLLBACK_DB" | sudo tee \
+  "$STOCKER_V1_RECOVERY_COPIES/rollback.sqlite3.gz" >/dev/null
+sudo gzip --test "$STOCKER_V1_RECOVERY_COPIES/import-snapshot.sqlite3.gz"
+sudo gzip --test "$STOCKER_V1_RECOVERY_COPIES/rollback.sqlite3.gz"
+sudo install -d -o root -g root -m 0700 \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check"
+sudo gzip --decompress --stdout \
+  "$STOCKER_V1_RECOVERY_COPIES/import-snapshot.sqlite3.gz" | sudo tee \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3" >/dev/null
+sudo gzip --decompress --stdout \
+  "$STOCKER_V1_RECOVERY_COPIES/rollback.sqlite3.gz" | sudo tee \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3" >/dev/null
+sudo cmp --silent "$STOCKER_V1_SNAPSHOT" \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3"
+sudo cmp --silent "$STOCKER_V1_ROLLBACK_DB" \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3"
+{
+  echo snapshot_restore
+  sudo sqlite3 -readonly \
+    "$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3" \
+    'PRAGMA quick_check; PRAGMA foreign_key_check;'
+  echo rollback_restore
+  sudo sqlite3 -readonly \
+    "$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3" \
+    'PRAGMA quick_check; PRAGMA foreign_key_check;'
+} | sudo tee "$STOCKER_V1_RECOVERY_COPIES/restore-integrity.txt" >/dev/null
+sudo sha256sum "$STOCKER_V1_RECOVERY_COPIES/import-snapshot.sqlite3.gz" \
+  "$STOCKER_V1_RECOVERY_COPIES/rollback.sqlite3.gz" | sudo tee \
+  "$STOCKER_V1_RECOVERY_COPIES/archive-sha256.txt" >/dev/null
+sudo rm -- "$STOCKER_V1_RECOVERY_COPIES/restore-check/import-snapshot.sqlite3" \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-check/rollback.sqlite3"
+sudo rmdir "$STOCKER_V1_RECOVERY_COPIES/restore-check"
+sudo chmod 0440 "$STOCKER_V1_RECOVERY_COPIES/import-snapshot.sqlite3.gz" \
+  "$STOCKER_V1_RECOVERY_COPIES/rollback.sqlite3.gz" \
+  "$STOCKER_V1_RECOVERY_COPIES/restore-integrity.txt" \
+  "$STOCKER_V1_RECOVERY_COPIES/archive-sha256.txt"
+sudo chmod 0550 "$STOCKER_V1_RECOVERY_COPIES"
+sudo sync -f "$STOCKER_V1_RECOVERY_COPIES"
+```
 
 ## 3. One-way import into a new V2 target
 
@@ -196,14 +314,34 @@ following flag is a narrow attended assertion about preserved unclosed generatio
 evidence; it never permits a lease, journal, WAL, or SHM:
 
 ```bash
-sudo -u stocker-recorder /opt/stocker/v2-current/.venv/bin/stocker-runtime legacy import \
-  --source /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3 \
-  --target /var/lib/stocker/v2/stocker-v2.sqlite3 \
-  --accept-quiescent-unclean-generations
+sudo setfacl -m u:stocker-recorder:--x /var/lib/stocker/backups
+sudo setfacl -m u:stocker-recorder:r-- "$STOCKER_V1_SNAPSHOT"
+sudo -u stocker-recorder test -r "$STOCKER_V1_SNAPSHOT"
+sudo -u stocker-web test ! -r "$STOCKER_V1_SNAPSHOT"
+sudo -u stocker-backup test ! -r "$STOCKER_V1_SNAPSHOT"
+revoke_v1_snapshot_access() {
+  sudo setfacl -x u:stocker-recorder "$STOCKER_V1_SNAPSHOT"
+  sudo setfacl -x u:stocker-recorder /var/lib/stocker/backups
+  sudo chmod 0400 "$STOCKER_V1_SNAPSHOT"
+}
+if ! sudo -u stocker-recorder \
+  /opt/stocker/v2-current/.venv/bin/stocker-runtime legacy import \
+    --source /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3 \
+    --target /var/lib/stocker/v2/stocker-v2.sqlite3 \
+    --accept-quiescent-unclean-generations; then
+  revoke_v1_snapshot_access
+  exit 1
+fi
+revoke_v1_snapshot_access
+sudo -u stocker-recorder test ! -r "$STOCKER_V1_SNAPSHOT"
+sudo -u stocker-web test ! -r "$STOCKER_V1_SNAPSHOT"
+sudo -u stocker-backup test ! -r "$STOCKER_V1_SNAPSHOT"
 sudo /usr/local/libexec/stocker-prepare-v2-sqlite-boundary
 ```
 
-The setgid V2 directory makes the imported `0640` target inherit
+The temporary source ACL is revoked on both success and failure. Do not retry, run the
+boundary verifier, or start web/backup while `stocker-recorder` can still read the
+legacy snapshot. The setgid V2 directory makes the imported `0640` target inherit
 `stocker-recorder:stocker-readers`; the boundary verifier then confirms that ownership
 and creates only the coordinated WAL/SHM files. The target hard link is the atomic
 commit marker. On any failure, keep V1 stopped,
@@ -302,7 +440,9 @@ release, its untouched database, and both recovery sets remain preserved.
 
 If V2 has not admitted its first callback, stop V2, preserve its logs and failed import
 artifacts, restore the prior release/service pointer, and restart the untouched V1
-database. Do not copy any V2 row into V1.
+database. Restore the rollback database's recorded V1 owner, group, mode, and ACL from
+`access-control-before.txt` before starting its sole V1 writer. Do not copy any V2 row
+into V1.
 
 ### After first callback
 

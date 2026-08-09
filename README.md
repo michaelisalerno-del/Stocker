@@ -2,10 +2,9 @@
 
 ![CI](https://github.com/michaelisalerno-del/Stocker/actions/workflows/ci.yml/badge.svg)
 
-Stocker is a from-scratch trading research and prospective-evaluation foundation. The first goal is
-not to find an edge or place trades. The goal is to make bad ideas cheap to disprove on
-a Mac, while keeping any future server execution small, boring, and protected by hard
-risk boundaries.
+Stocker is a from-scratch trading research and prospective/shadow evaluation platform.
+Its first goal is not to find an edge or place trades. It makes bad ideas cheap to
+disprove while keeping future execution outside the current runtime.
 
 ## Repo Split
 
@@ -20,11 +19,11 @@ risk boundaries.
   and research reports.
 - `packages/stocker_backtest/`: cost models and transparent vectorized/event-driven
   backtest interfaces.
-- `packages/stocker_runtime/`: authority-free V2 domain DTOs and first-party idea-plugin
-  contracts for prospective recording and shadow evaluation.
-- `packages/stocker_prospective/`: isolated record-only/shadow evidence recorder,
-  immutable bundle contract, SQLite ledgers, optional market-data-only IBKR adapter,
-  deterministic replay, and read-only web application.
+- `packages/stocker_runtime/`: the V2 prospective-record/shadow recorder, generic idea
+  plugins, bounded SQLite read model, backups, one-way V1 importer, and read-only web
+  application.
+- `packages/stocker_research/legacy_prospective/`: frozen calculations retained only to
+  reproduce historical research; it has no recorder, database, broker, or web surface.
 
 ## Python And Dependency Management
 
@@ -84,18 +83,21 @@ The server bootstrap installs only core and `server` dependency groups:
 uv sync --locked --no-editable --no-default-groups --group server
 ```
 
-The dedicated prospective recorder has a separate, no-order process boundary:
+The V2 recorder and web application have separate least-privilege, no-order process
+boundaries:
 
 ```bash
-export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
-uv run --no-sync stocker-prospective replay run \
-  --config configs/prospective/replay.example.yaml
+uv run --no-sync stocker-runtime recorder run \
+  --config configs/runtime/recorder.example.json \
+  --inputs configs/runtime/market-data.example.json
 uv run --no-sync stocker-runtime web run \
   --config configs/runtime/web.example.json
 ```
 
-See [the prospective architecture](docs/architecture/prospective-evidence-recorder.md)
-and [dedicated-server runbook](docs/operations/prospective-server-runbook.md).
+The stopped V1 database can be imported once into a new V2 target with
+`stocker-runtime legacy import`; it is never modified in place. See the
+[platform architecture](docs/architecture/stocker-platform-purpose.md) and
+[V2 cutover runbook](docs/operations/stocker-v2-cutover.md).
 
 ## Tests And Checks
 

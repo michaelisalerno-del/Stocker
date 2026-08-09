@@ -1254,6 +1254,10 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
     monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
     monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
 
     bridge = create_official_bridge(
         host="127.0.0.1",

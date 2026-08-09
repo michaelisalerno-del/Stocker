@@ -1,6 +1,6 @@
 [Unit]
 Description=Private window manager for the market-data-only IB Gateway
-Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Documentation=file:/opt/stocker/current/docs/operations/stocker-v2-cutover.md
 Requires=stocker-ibgateway-display.service
 After=stocker-ibgateway-display.service
 PartOf=stocker-ibgateway.service

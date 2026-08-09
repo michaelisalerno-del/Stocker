@@ -6,8 +6,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from stocker_prospective.direction import FrozenDirectionRuntime
-from stocker_prospective.frozen_m1c import (
+from stocker_research.legacy_prospective.direction import FrozenDirectionRuntime
+from stocker_research.legacy_prospective.frozen_m1c import (
     M1C_THRESHOLD,
     FreshEpisodeTracker,
     FrozenM1CRuntime,

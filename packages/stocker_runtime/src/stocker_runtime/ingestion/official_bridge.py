@@ -8,6 +8,10 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
+from stocker_runtime.ingestion.ibkr_api import (
+    OfficialIBKRDependencyError,
+    require_official_ibkr_api,
+)
 from stocker_runtime.ingestion.ibkr_market_data import (
     IBKRSubscription,
     MarketDataAdapter,
@@ -62,11 +66,12 @@ def create_official_bridge(
     if len({item.request_id for item in subscriptions}) != len(subscriptions):
         raise OfficialBridgeUnavailable("IBKR request identifiers must be unique")
     try:
+        require_official_ibkr_api()
         from ibapi.client import EClient
         from ibapi.contract import Contract
         from ibapi.wrapper import EWrapper
-    except ImportError as error:
-        raise OfficialBridgeUnavailable("official IBKR API is not installed") from error
+    except (ImportError, OfficialIBKRDependencyError) as error:
+        raise OfficialBridgeUnavailable("official IBKR API is not verified") from error
 
     configured = {item.request_id: item for item in subscriptions}
     owner: _PrivateOfficialBridge | None = None

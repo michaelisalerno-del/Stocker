@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
@@ -28,12 +29,24 @@ from stocker_runtime.ingestion import (
     SubscriptionSpec,
     load_recorder_config,
 )
+from stocker_runtime.ingestion.ibkr_api import (
+    OfficialIBKRApiProvenanceError,
+    evaluate_official_ibkr_api_update,
+    fetch_latest_official_ibkr_api_release,
+    inspect_official_ibkr_api_archive,
+    load_official_ibkr_api_provenance,
+    require_official_ibkr_api,
+    write_immutable_official_ibkr_api_provenance,
+    write_official_ibkr_api_update_status,
+)
 from stocker_runtime.storage import (
     BackupError,
     BackupPolicy,
+    LegacyImportError,
     RetentionManager,
     SchemaError,
     create_backup,
+    import_legacy_database,
     initialize_database,
     migrate_database,
     record_backup_failure,
@@ -47,9 +60,13 @@ app = typer.Typer(
 web_app = typer.Typer(help="Run the bounded read-only Stocker V2 web process.")
 backup_app = typer.Typer(help="Create and restore checked compressed Stocker V2 backups.")
 recorder_app = typer.Typer(help="Run the sole market-data-only Stocker V2 recorder.")
+legacy_app = typer.Typer(help="Perform the one-way import from a stopped Stocker V1 database.")
+ibkr_api_app = typer.Typer(help="Verify official IBKR API provenance and check for updates.")
 app.add_typer(web_app, name="web")
 app.add_typer(backup_app, name="backup")
 app.add_typer(recorder_app, name="recorder")
+app.add_typer(legacy_app, name="legacy")
+app.add_typer(ibkr_api_app, name="ibkr-api")
 
 MAX_REPLAY_FILE_BYTES = 8 * 1024 * 1024
 MAX_REPLAY_INSTRUMENTS = 10_000
@@ -110,6 +127,99 @@ def _migration_payload(
         "current_version": current_version,
         "status": "ok",
     }
+
+
+@ibkr_api_app.command("verify")
+def ibkr_api_verify_command(
+    provenance: Annotated[Path, typer.Option("--provenance", exists=True, dir_okay=False)],
+) -> None:
+    """Verify the installed client tree against immutable official provenance."""
+
+    try:
+        require_official_ibkr_api(provenance)
+        record = load_official_ibkr_api_provenance(provenance)
+    except (OfficialIBKRApiProvenanceError, RuntimeError) as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=78) from error
+    _emit({"provenance": record.model_dump(mode="json"), "status": "ok"})
+
+
+@ibkr_api_app.command("register")
+def ibkr_api_register_command(
+    archive: Annotated[Path, typer.Option("--archive", exists=True, dir_okay=False)],
+    installed_package_root: Annotated[
+        Path, typer.Option("--installed-package-root", exists=True, file_okay=False)
+    ],
+    provenance: Annotated[Path, typer.Option("--provenance", dir_okay=False)],
+    operator: Annotated[str, typer.Option("--operator")],
+) -> None:
+    """Register a matching installed tree; never install broker code."""
+
+    try:
+        checked_at = datetime.now(UTC)
+        record = inspect_official_ibkr_api_archive(
+            archive,
+            installed_package_root=installed_package_root,
+            release=fetch_latest_official_ibkr_api_release(),
+            registered_by=operator,
+            checked_at=checked_at,
+        )
+        write_immutable_official_ibkr_api_provenance(provenance, record)
+    except OfficialIBKRApiProvenanceError as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=78) from error
+    _emit({"provenance": record.model_dump(mode="json"), "status": "ok"})
+
+
+@ibkr_api_app.command("check-update")
+def ibkr_api_check_update_command(
+    provenance: Annotated[Path, typer.Option("--provenance", exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", dir_okay=False)],
+) -> None:
+    """Record whether a newer official archive exists; never install it."""
+
+    try:
+        installed = load_official_ibkr_api_provenance(provenance)
+        status = evaluate_official_ibkr_api_update(
+            installed,
+            fetch_latest_official_ibkr_api_release(),
+            checked_at=datetime.now(UTC),
+        )
+        write_official_ibkr_api_update_status(output, status)
+    except OfficialIBKRApiProvenanceError as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=78) from error
+    _emit({"status": "ok", "update": status.model_dump(mode="json")})
+
+
+@legacy_app.command("import")
+def legacy_import_command(
+    source: Annotated[Path, typer.Option("--source", dir_okay=False)],
+    target: Annotated[Path, typer.Option("--target", dir_okay=False)],
+    started_at_us: Annotated[int | None, typer.Option("--started-at-us", min=0)] = None,
+) -> None:
+    """Import an immutable, stopped V1 database into one new V2 target."""
+
+    try:
+        result = import_legacy_database(source, target, started_at_us=started_at_us)
+    except LegacyImportError as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=1) from error
+    _emit(
+        {
+            "imported_row_count": result.imported_row_count,
+            "migration_id": result.migration_id,
+            "omitted_row_count": result.omitted_row_count,
+            "reconciliation_path": str(result.reconciliation_path),
+            "source_database_hash": result.source_database_hash,
+            "source_row_count": result.source_row_count,
+            "source_schema_digest": result.source_schema_digest,
+            "status": "ok",
+            "target_digest": result.target_digest,
+            "target_path": str(result.target_path),
+            "verification_status": result.verification_status,
+        }
+    )
 
 
 @app.command("init")

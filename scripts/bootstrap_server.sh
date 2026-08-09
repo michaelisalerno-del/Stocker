@@ -21,4 +21,4 @@ uv sync --locked --no-editable --no-default-groups --group server
 
 echo
 echo "Bootstrap complete."
-echo "Use the market-data-only prospective runbook for explicit recorder or web startup."
+echo "Use the Stocker V2 cutover runbook for explicit recorder or web startup."

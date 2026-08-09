@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from stocker_prospective.direction import FrozenDirectionRuntime
-from stocker_prospective.direction_features import (
+from stocker_research.legacy_prospective.direction import FrozenDirectionRuntime
+from stocker_research.legacy_prospective.direction_features import (
     DirectionFeatureBar,
     FrozenDirectionFeatureBuilder,
 )

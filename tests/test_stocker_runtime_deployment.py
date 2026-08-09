@@ -35,6 +35,8 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
     assert "--tier weekly" in weekly
     assert "--working-directory /var/cache/stocker-v2-backup-work" in daily
     assert "CacheDirectory=stocker-v2-backup-work" in daily
+    assert "TimeoutStartSec=31min" in daily
+    assert "TimeoutStartSec=31min" in weekly
     assert "ExecCondition=" not in daily
     assert "ExecCondition=" not in weekly
 
@@ -69,16 +71,28 @@ def test_daily_and_weekly_timers_are_bounded_and_not_implicitly_enabled() -> Non
     assert "Persistent=true" in weekly
     assert "RandomizedDelaySec=" in daily
     assert "RandomizedDelaySec=" in weekly
-    assert (SYSTEMD / "stocker-backup.service").exists()
-    assert (SYSTEMD / "stocker-backup.timer").exists()
+    assert not (SYSTEMD / "stocker-backup.service").exists()
+    assert not (SYSTEMD / "stocker-backup.timer").exists()
 
 
-def test_inactive_v2_rehearsal_preserves_the_active_v1_deployment_surface() -> None:
-    assert "stocker-prospective recorder run" in _unit("stocker-recorder.service")
-    assert "stocker-prospective web run" in _unit("stocker-web.service")
-    assert "stocker-prospective db backup" in _unit("stocker-backup.service")
-    assert (ROOT / "deploy/stocker.env.example").is_file()
-    assert (ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py").is_file()
+def test_cutover_release_contains_only_v2_stocker_application_services() -> None:
+    for retired in (
+        "stocker-recorder.service",
+        "stocker-web.service",
+        "stocker-backup.service",
+        "stocker-backup.timer",
+    ):
+        assert not (SYSTEMD / retired).exists()
+    assert not (ROOT / "deploy/stocker.env.example").exists()
+    assert not (ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py").exists()
+    assert (ROOT / "docs/operations/stocker-v2-cutover.md").is_file()
+    assert not (ROOT / "docs/operations/prospective-server-runbook.md").exists()
+
+    active_surface = "\n".join(
+        path.read_text(encoding="utf-8") for path in (ROOT / "deploy").rglob("*") if path.is_file()
+    ).lower()
+    assert "stocker-prospective" not in active_surface
+    assert "configs/prospective" not in active_surface
 
 
 def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() -> None:
@@ -153,7 +167,7 @@ def test_sqlite_boundary_preparation_targets_only_v2_and_backup_paths() -> None:
     script_path = ROOT / "deploy/scripts/prepare-v2-sqlite-boundary.py"
     source = script_path.read_text(encoding="utf-8")
 
-    assert (ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py").exists()
+    assert not (ROOT / "deploy/scripts/prepare-web-sqlite-boundary.py").exists()
     assert 'DATABASE_DIRECTORY_NAME = "v2"' in source
     assert 'BACKUP_DIRECTORY_NAME = "backups-v2"' in source
     assert 'DATABASE_NAME = "stocker-v2.sqlite3"' in source
@@ -163,6 +177,66 @@ def test_sqlite_boundary_preparation_targets_only_v2_and_backup_paths() -> None:
     assert 'READER_GROUP = "stocker-readers"' in source
     assert "prospective.sqlite3" not in source
     assert "bundles" not in source
+
+
+def test_cutover_runbook_preserves_one_writer_and_two_distinct_rollback_paths() -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+    lowered = runbook.lower()
+
+    for required in (
+        "market-closed",
+        "owner approval",
+        "read-only recovery set",
+        "quick_check",
+        "foreign_key_check",
+        "source_row_count",
+        "imported_row_count",
+        "omitted_row_count",
+        "query-only",
+        "first callback",
+        "zero order capability",
+        "observation window",
+        "checked v2 backup",
+        "there is no dual write",
+        "before first callback",
+        "after first callback",
+        "new v1 run and recorder generation",
+        "explicit gap",
+        "never reverse-import",
+        "owner closes the rollback window",
+    ):
+        assert required in lowered
+    assert lowered.index("start the v2 web") < lowered.index("start the v2 recorder")
+    assert "paper trading" not in lowered
+    assert "live trading" not in lowered
+
+
+def test_official_api_update_service_uses_the_v2_runtime_cli() -> None:
+    unit = _unit("stocker-ibkr-api-update.service")
+
+    assert "stocker-runtime ibkr-api check-update" in unit
+    assert "stocker-prospective" not in unit
+    assert "User=stocker-recorder" in unit
+    assert "Group=stocker-readers" in unit
+
+
+def test_installable_release_has_no_v1_runtime_or_entrypoint() -> None:
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    check_script = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    assert not tuple((ROOT / "packages/stocker_prospective").rglob("*.py"))
+    assert not (ROOT / "configs/prospective").exists()
+    assert "stocker-prospective" not in project
+    assert "packages/stocker_prospective" not in project
+    assert "check_prospective" not in workflow
+    assert "stocker-prospective" not in workflow
+    assert "check_prospective" not in check_script
+    final_fixture = (
+        ROOT
+        / "tests/fixtures/legacy_prospective_migrations/0026_opening_leader_continuation_v0.sql"
+    )
+    assert final_fixture.is_file()
 
 
 class _SignalMarketData:

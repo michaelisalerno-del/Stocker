@@ -1818,6 +1818,10 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
     monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
     monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
     monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
 
     database = tmp_path / "official-plugin.sqlite3"
     initialize_database(database)

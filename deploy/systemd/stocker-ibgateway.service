@@ -1,6 +1,6 @@
 [Unit]
 Description=Official IB Gateway for manually authenticated market-data-only access
-Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Documentation=file:/opt/stocker/current/docs/operations/stocker-v2-cutover.md
 Wants=network-online.target stocker-ibgateway-window-manager.service stocker-ibgateway-vnc.service stocker-ibgateway-loopback-proxy.socket
 Requires=stocker-ibgateway-display.service ufw.service
 After=network-online.target ufw.service stocker-ibgateway-display.service stocker-ibgateway-window-manager.service

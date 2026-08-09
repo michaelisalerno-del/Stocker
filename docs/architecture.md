@@ -49,7 +49,8 @@ Server responsibilities:
   labels, single-symbol and universe experiment runners, and research report indexes.
 - `stocker_backtest`: cost models, transparent vectorized evaluation, and future
   event-driven interfaces.
-- `stocker_runtime`: V2 authority-free domain DTOs and first-party plugin contracts.
+- `stocker_runtime`: the V2 prospective-record/shadow recorder, authority-free plugin
+  runtime, bounded SQLite store/read model, backup/import tooling, and read-only web app.
 
 ## Separation Rules
 

@@ -32,6 +32,13 @@ from stocker_runtime.storage.connection import (
     migration_plan,
     verify_database,
 )
+from stocker_runtime.storage.legacy_import import (
+    IMPORTER_VERSION,
+    LEGACY_SCHEMA_DIGESTS,
+    LegacyImportError,
+    LegacyImportResult,
+    import_legacy_database,
+)
 from stocker_runtime.storage.repository import (
     MAX_CALLBACK_PAYLOAD_BYTES,
     MAX_EXTENSION_JSON_BYTES,
@@ -77,7 +84,11 @@ __all__ = [
     "CallbackReceiptRecord",
     "IdentityCollisionError",
     "IdeaOutputRecord",
+    "IMPORTER_VERSION",
     "JsonAdmissionError",
+    "LEGACY_SCHEMA_DIGESTS",
+    "LegacyImportError",
+    "LegacyImportResult",
     "MAX_CALLBACK_PAYLOAD_BYTES",
     "MAX_EXTENSION_JSON_BYTES",
     "MAX_IDEA_OUTPUT_JSON_BYTES",
@@ -102,6 +113,7 @@ __all__ = [
     "create_backup",
     "deterministic_output_id",
     "initialize_database",
+    "import_legacy_database",
     "migrate_database",
     "migration_plan",
     "load_backup_manifest",

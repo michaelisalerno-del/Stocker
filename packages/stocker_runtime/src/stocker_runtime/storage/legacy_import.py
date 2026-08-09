@@ -152,6 +152,18 @@ LEGACY_SCHEMA_DIGESTS: tuple[tuple[str, str], ...] = (
     ),
 )
 
+# The deployed schema-0030 snapshot has one exact historical ledger ordering from
+# migrations that once shared numeric prefixes. Its final schema is byte-for-byte the
+# frozen 0030 schema, but rowid order differs at only these three entries. Admit this
+# complete ledger exactly; it is not a general permission to reorder migrations.
+_LEGACY_PRODUCTION_0030_LEDGER = (
+    *(name for name, _digest in LEGACY_SCHEMA_DIGESTS[:11]),
+    "0012_option_schedule_degradation_v0.sql",
+    "0011_m1c_tail_phase_v1.sql",
+    "0012_m1c_signed_market_shock_v1.sql",
+    *(name for name, _digest in LEGACY_SCHEMA_DIGESTS[14:]),
+)
+
 
 class LegacyImportError(RuntimeError):
     """The quiescent legacy source cannot be safely and completely reconciled."""
@@ -1831,10 +1843,16 @@ def _verify_legacy_source(
         for row in connection.execute("SELECT version FROM schema_migrations ORDER BY rowid")
     )
     expected_names = tuple(name for name, _digest in LEGACY_SCHEMA_DIGESTS[: len(names)])
-    if not names or names != expected_names:
+    production_0030_ledger = names == _LEGACY_PRODUCTION_0030_LEDGER
+    if not names or (names != expected_names and not production_0030_ledger):
         raise LegacyImportError("legacy schema migration history is not an accepted prefix")
     digest = _schema_digest(connection)
-    if digest != LEGACY_SCHEMA_DIGESTS[len(names) - 1][1]:
+    expected_digest = (
+        LEGACY_SCHEMA_DIGESTS[-1][1]
+        if production_0030_ledger
+        else LEGACY_SCHEMA_DIGESTS[len(names) - 1][1]
+    )
+    if digest != expected_digest:
         raise LegacyImportError("legacy schema digest does not match the frozen migration prefix")
     if (
         "recorder_lease" in tables

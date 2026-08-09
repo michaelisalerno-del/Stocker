@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 import stocker_runtime.storage.legacy_import as legacy_import_module
 from stocker_runtime.cli import app
 from stocker_runtime.storage import (
+    LEGACY_SCHEMA_DIGESTS,
     LegacyImportError,
     import_legacy_database,
     verify_database,
@@ -53,6 +54,13 @@ MIGRATION_NAMES = (
     "0029_m1c_diagnostic_quality_flags_v0.sql",
     "0030_quiet_checkpoint_quote_audit_v0.sql",
 )
+PRODUCTION_0030_LEDGER_NAMES = (
+    *MIGRATION_NAMES[:11],
+    "0012_option_schedule_degradation_v0.sql",
+    "0011_m1c_tail_phase_v1.sql",
+    "0012_m1c_signed_market_shock_v1.sql",
+    *MIGRATION_NAMES[14:],
+)
 LEGACY_SCIENTIFIC_CLASSIFICATION = (
     "Previous-close front-options context + current intraday H0 stock condition -> "
     "improved prediction that near-term underlying movement exceeds previous-close "
@@ -73,6 +81,18 @@ def _legacy_database(path: Path, prefix: int) -> sqlite3.Connection:
         )
     connection.commit()
     return connection
+
+
+def _replace_migration_ledger(
+    connection: sqlite3.Connection,
+    names: tuple[str, ...],
+) -> None:
+    connection.execute("DELETE FROM schema_migrations")
+    connection.executemany(
+        "INSERT INTO schema_migrations(version, applied_at_utc) VALUES (?, ?)",
+        ((name, "2026-01-01T00:00:00+00:00") for name in names),
+    )
+    connection.commit()
 
 
 def _seed_representative_legacy_rows(connection: sqlite3.Connection) -> None:
@@ -306,6 +326,32 @@ def test_import_accepts_every_frozen_legacy_schema_and_is_deterministic(
     assert first.source_row_count == first.imported_row_count + first.omitted_row_count
     assert first.verification_status == "verified"
     verify_database(first.target_path)
+
+
+def test_import_accepts_exact_deployed_schema_0030_ledger_variant(tmp_path: Path) -> None:
+    source = tmp_path / "production-ledger.sqlite3"
+    with _legacy_database(source, len(MIGRATION_NAMES)) as legacy:
+        _replace_migration_ledger(legacy, PRODUCTION_0030_LEDGER_NAMES)
+        assert legacy_import_module._schema_digest(legacy) == LEGACY_SCHEMA_DIGESTS[-1][1]
+    source_bytes = source.read_bytes()
+
+    result = import_legacy_database(source, tmp_path / "target.sqlite3", started_at_us=1)
+
+    assert source.read_bytes() == source_bytes
+    assert result.source_schema_digest == LEGACY_SCHEMA_DIGESTS[-1][1]
+    verify_database(result.target_path)
+
+
+def test_import_rejects_every_other_schema_0030_ledger_reordering(tmp_path: Path) -> None:
+    source = tmp_path / "reordered-ledger.sqlite3"
+    unsupported = list(PRODUCTION_0030_LEDGER_NAMES)
+    unsupported[-2], unsupported[-1] = unsupported[-1], unsupported[-2]
+    with _legacy_database(source, len(MIGRATION_NAMES)) as legacy:
+        _replace_migration_ledger(legacy, tuple(unsupported))
+        assert legacy_import_module._schema_digest(legacy) == LEGACY_SCHEMA_DIGESTS[-1][1]
+
+    with pytest.raises(LegacyImportError, match="not an accepted prefix"):
+        import_legacy_database(source, tmp_path / "target.sqlite3", started_at_us=1)
 
 
 def test_import_digest_does_not_depend_on_migration_clock(tmp_path: Path) -> None:

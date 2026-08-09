@@ -12,7 +12,7 @@ import sys
 import warnings
 import zipfile
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -121,7 +121,7 @@ def _secure_provenance(
     )
     target.chmod(0o644)
     link = trusted_root / "active-provenance.json"
-    link.symlink_to(target)
+    link.symlink_to(Path("provenance/10.49.1.json"))
     return link, target, trusted_root
 
 
@@ -240,6 +240,59 @@ def _rewrite_installed_record(site_packages: Path) -> None:
     (site_packages / DIST_INFO / "RECORD").write_bytes(_record_bytes(installed_contents))
 
 
+def _write_sha256_manifest(manifest: Path, artifact: Path) -> None:
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    manifest.write_text(f"{digest}  {artifact}\n", encoding="ascii")
+
+
+def _release_boundary_fixture(tmp_path: Path) -> dict[str, Path | int]:
+    install_root = tmp_path / "install"
+    source = install_root / "IBJts/source/pythonclient"
+    source_files = _source_files(source)
+    (source / "README.txt").write_text("reviewed source tree\n", encoding="utf-8")
+    link, target, trusted_root = _secure_provenance(tmp_path, source_files)
+
+    ibapi_wheel = install_root / "ibapi-10.49.1-py3-none-any.whl"
+    _write_wheel(ibapi_wheel, source_files)
+    ibapi_manifest = install_root / "ibapi-10.49.1-wheel.sha256"
+    _write_sha256_manifest(ibapi_manifest, ibapi_wheel)
+
+    protobuf_wheel = install_root / "protobuf-5.29.5-py3-none-any.whl"
+    protobuf_wheel.write_bytes(b"reviewed protobuf wheel")
+    protobuf_manifest = install_root / "protobuf-5.29.5-wheel.sha256"
+    _write_sha256_manifest(protobuf_manifest, protobuf_wheel)
+
+    release_root = tmp_path / "releases/reviewed"
+    verifier_path = release_root / "deploy/scripts/verify_v2_release_artifacts.py"
+    verifier_path.parent.mkdir(parents=True)
+    verifier_path.write_text("# reviewed verifier\n", encoding="utf-8")
+    venv = release_root / ".venv"
+    site_packages = venv / "lib/python3.12/site-packages"
+    site_packages.mkdir(parents=True)
+    (site_packages / "reviewed.pth").write_text("reviewed-release\n", encoding="utf-8")
+    runtime = venv / "bin/stocker-runtime"
+    runtime.parent.mkdir()
+    runtime.write_text("#!/bin/sh\n", encoding="utf-8")
+    (venv / "bin/python").symlink_to("stocker-runtime")
+
+    return {
+        "ibapi_wheel": ibapi_wheel,
+        "ibapi_manifest": ibapi_manifest,
+        "protobuf_wheel": protobuf_wheel,
+        "protobuf_manifest": protobuf_manifest,
+        "source_root": source,
+        "release_root": release_root,
+        "venv": venv,
+        "verifier_path": verifier_path,
+        "provenance_link": link,
+        "expected_link": link,
+        "expected_target": target,
+        "provenance_root": trusted_root,
+        "trust_anchor": tmp_path,
+        "required_uid": os.getuid(),
+    }
+
+
 def test_valid_wheel_and_installed_distribution_are_accepted(
     tmp_path: Path,
     verifier: ModuleType,
@@ -264,6 +317,146 @@ def test_valid_wheel_and_installed_distribution_are_accepted(
         trust_anchor=trusted_root.parent,
         required_uid=os.getuid(),
     )
+
+
+def test_release_boundary_accepts_exact_manifests_and_protected_paths(
+    tmp_path: Path,
+    verifier: ModuleType,
+) -> None:
+    boundary = _release_boundary_fixture(tmp_path)
+
+    verifier.verify_release_boundary(**boundary)
+
+
+@pytest.mark.parametrize(
+    "target_name",
+    (
+        "ibapi_wheel",
+        "ibapi_manifest",
+        "protobuf_wheel",
+        "protobuf_manifest",
+        "source_member",
+        "verifier_path",
+        "release_root",
+        "venv",
+        "venv_member",
+        "site_packages",
+        "site_member",
+        "artifact_ancestor",
+    ),
+)
+def test_release_boundary_rejects_writable_protected_paths(
+    tmp_path: Path,
+    verifier: ModuleType,
+    target_name: str,
+) -> None:
+    boundary = _release_boundary_fixture(tmp_path)
+    source_root = boundary["source_root"]
+    venv = boundary["venv"]
+    assert isinstance(source_root, Path)
+    assert isinstance(venv, Path)
+    targets = {
+        "ibapi_wheel": boundary["ibapi_wheel"],
+        "ibapi_manifest": boundary["ibapi_manifest"],
+        "protobuf_wheel": boundary["protobuf_wheel"],
+        "protobuf_manifest": boundary["protobuf_manifest"],
+        "source_member": source_root / "README.txt",
+        "verifier_path": boundary["verifier_path"],
+        "release_root": boundary["release_root"],
+        "venv": venv,
+        "venv_member": venv / "bin/stocker-runtime",
+        "site_packages": venv / "lib/python3.12/site-packages",
+        "site_member": venv / "lib/python3.12/site-packages/reviewed.pth",
+        "artifact_ancestor": Path(boundary["ibapi_wheel"]).parent,
+    }
+    target = Path(targets[target_name])
+    target.chmod(0o777 if target.is_dir() else 0o666)
+
+    with pytest.raises(verifier.ArtifactVerificationError):
+        verifier.verify_release_boundary(**boundary)
+
+
+def test_release_boundary_rejects_wrong_owner_and_non_root_group_write(
+    tmp_path: Path,
+    verifier: ModuleType,
+) -> None:
+    boundary = _release_boundary_fixture(tmp_path)
+    wrong_owner = boundary | {"required_uid": os.getuid() + 1}
+    with pytest.raises(verifier.ArtifactVerificationError):
+        verifier.verify_release_boundary(**wrong_owner)
+
+    if os.getgid() != 0:
+        wheel = Path(boundary["protobuf_wheel"])
+        wheel.chmod(0o660)
+        with pytest.raises(verifier.ArtifactVerificationError):
+            verifier.verify_release_boundary(**boundary)
+
+
+def test_root_control_mode_allows_only_root_group_write(verifier: ModuleType) -> None:
+    root_group_writable = SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o660,
+        st_uid=os.getuid(),
+        st_gid=0,
+    )
+    verifier._require_root_control(root_group_writable, "artifact", os.getuid())
+
+    for metadata in (
+        SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o660,
+            st_uid=os.getuid(),
+            st_gid=1,
+        ),
+        SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o606,
+            st_uid=os.getuid(),
+            st_gid=0,
+        ),
+        SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o600,
+            st_uid=os.getuid() + 1,
+            st_gid=0,
+        ),
+    ):
+        with pytest.raises(verifier.ArtifactVerificationError):
+            verifier._require_root_control(metadata, "artifact", os.getuid())
+
+
+@pytest.mark.parametrize(
+    "swap",
+    (
+        "protobuf_bytes",
+        "ibapi_manifest",
+        "protobuf_manifest",
+        "source_symlink",
+        "verifier_symlink",
+    ),
+)
+def test_release_boundary_revalidates_swapped_prerequisites(
+    tmp_path: Path,
+    verifier: ModuleType,
+    swap: str,
+) -> None:
+    boundary = _release_boundary_fixture(tmp_path)
+    verifier.verify_release_boundary(**boundary)
+
+    if swap == "protobuf_bytes":
+        Path(boundary["protobuf_wheel"]).write_bytes(b"swapped after preinstall")
+    elif swap in {"ibapi_manifest", "protobuf_manifest"}:
+        manifest = Path(boundary[swap])
+        manifest.write_bytes(manifest.read_bytes() + b"0" * 64 + b"  second\n")
+    elif swap == "source_symlink":
+        source_member = Path(boundary["source_root"]) / "README.txt"
+        source_member.unlink()
+        source_member.symlink_to(Path(boundary["protobuf_wheel"]))
+    else:
+        verifier_path = Path(boundary["verifier_path"])
+        replacement = verifier_path.with_name("replacement.py")
+        replacement.write_text("# replacement\n", encoding="utf-8")
+        verifier_path.unlink()
+        verifier_path.symlink_to(replacement)
+
+    with pytest.raises(verifier.ArtifactVerificationError):
+        verifier.verify_release_boundary(**boundary)
 
 
 @pytest.mark.parametrize(
@@ -339,6 +532,22 @@ def test_installed_distribution_rejects_tamper_and_extra(
             required_uid=os.getuid(),
         )
 
+    writable_venv = tmp_path / "writable-venv"
+    writable_site = _installed_fixture(writable_venv, wheel)
+    (writable_site / "ibapi/client.py").chmod(0o666)
+    with pytest.raises(verifier.ArtifactVerificationError):
+        verifier.verify_installed_distribution(
+            wheel,
+            source,
+            writable_venv,
+            provenance_link=link,
+            expected_link=link,
+            expected_target=target,
+            trusted_root=trusted_root,
+            trust_anchor=trusted_root.parent,
+            required_uid=os.getuid(),
+        )
+
     extra_venv = tmp_path / "extra-venv"
     extra_site = _installed_fixture(extra_venv, wheel)
     (extra_site / "ibapi/extra.pyc").write_bytes(b"extra")
@@ -391,6 +600,7 @@ def test_provenance_link_requires_exact_secure_root_owned_boundary(
     assert verifier.REQUIRED_OWNER_UID == 0
     assert Path("/var/lib/stocker/ibkr-api/active-provenance.json") == (verifier.ACTIVE_PROVENANCE)
     assert Path("/var/lib/stocker/ibkr-api/provenance/10.49.1.json") == (verifier.PROVENANCE_TARGET)
+    assert os.readlink(link) == "provenance/10.49.1.json"
 
     wrong_link = trusted_root / "wrong.json"
     wrong_link.symlink_to(target)
@@ -411,6 +621,37 @@ def test_provenance_link_requires_exact_secure_root_owned_boundary(
             trusted_root=trusted_root,
             trust_anchor=trusted_root.parent,
             required_uid=os.getuid() + 1,
+        )
+
+
+@pytest.mark.parametrize(
+    "literal",
+    (
+        "/var/lib/stocker/ibkr-api/provenance/10.49.1.json",
+        "./provenance/10.49.1.json",
+        "provenance/../provenance/10.49.1.json",
+        "provenance/other.json",
+        "../ibkr-api/provenance/10.49.1.json",
+    ),
+)
+def test_provenance_link_rejects_every_other_literal(
+    tmp_path: Path,
+    verifier: ModuleType,
+    literal: str,
+) -> None:
+    source_files = _source_files(tmp_path / "pythonclient")
+    link, target, trusted_root = _secure_provenance(tmp_path, source_files)
+    link.unlink()
+    link.symlink_to(literal)
+
+    with pytest.raises(verifier.ArtifactVerificationError):
+        verifier.verify_provenance_link(
+            link,
+            expected_link=link,
+            expected_target=target,
+            trusted_root=trusted_root,
+            trust_anchor=trusted_root.parent,
+            required_uid=os.getuid(),
         )
 
 
@@ -466,14 +707,26 @@ def test_cli_failure_output_is_bounded_and_secret_free(
     def fail(*args: object, **kwargs: object) -> None:
         raise OSError("/secret/operator/path")
 
-    monkeypatch.setattr(verifier, "verify_wheel_artifact", fail)
+    monkeypatch.setattr(verifier, "verify_release_boundary", fail)
     status = verifier.main(
         [
             "preinstall",
-            "--wheel",
-            str(tmp_path / "wheel"),
+            "--ibapi-wheel",
+            str(tmp_path / "ibapi-wheel"),
+            "--ibapi-manifest",
+            str(tmp_path / "ibapi-manifest"),
+            "--protobuf-wheel",
+            str(tmp_path / "protobuf-wheel"),
+            "--protobuf-manifest",
+            str(tmp_path / "protobuf-manifest"),
             "--official-source-root",
             str(tmp_path / "source"),
+            "--release-root",
+            str(ROOT),
+            "--verifier-path",
+            str(VERIFIER_PATH),
+            "--venv",
+            str(ROOT / ".venv"),
         ]
     )
 
@@ -482,3 +735,52 @@ def test_cli_failure_output_is_bounded_and_secret_free(
     assert captured.out == ""
     assert captured.err == "release artifact verification failed\n"
     assert "/secret" not in captured.err
+
+
+def test_cli_revalidates_the_protected_boundary_after_install(
+    tmp_path: Path,
+    verifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    boundary = _release_boundary_fixture(tmp_path)
+    verifier_path = Path(boundary["verifier_path"])
+    monkeypatch.setattr(verifier, "__file__", str(verifier_path))
+    boundary_calls: list[dict[str, object]] = []
+    installed_calls: list[tuple[object, ...]] = []
+
+    def record_boundary(**kwargs: object) -> None:
+        boundary_calls.append(kwargs)
+
+    def record_installed(*args: object, **kwargs: object) -> None:
+        installed_calls.append((*args, kwargs))
+
+    monkeypatch.setattr(verifier, "verify_release_boundary", record_boundary)
+    monkeypatch.setattr(verifier, "verify_installed_distribution", record_installed)
+    arguments = [
+        "--ibapi-wheel",
+        str(boundary["ibapi_wheel"]),
+        "--ibapi-manifest",
+        str(boundary["ibapi_manifest"]),
+        "--protobuf-wheel",
+        str(boundary["protobuf_wheel"]),
+        "--protobuf-manifest",
+        str(boundary["protobuf_manifest"]),
+        "--official-source-root",
+        str(boundary["source_root"]),
+        "--release-root",
+        str(boundary["release_root"]),
+        "--verifier-path",
+        str(verifier_path),
+        "--venv",
+        str(boundary["venv"]),
+    ]
+
+    assert verifier.main(["preinstall", *arguments]) == 0
+    assert verifier.main(["postinstall", *arguments]) == 0
+    assert len(boundary_calls) == 2
+    assert len(installed_calls) == 1
+    assert boundary_calls[0] == boundary_calls[1]
+    assert verifier.REQUIRED_OWNER_UID == 0
+    assert verifier.ROOT_GROUP_GID == 0
+    capsys.readouterr()

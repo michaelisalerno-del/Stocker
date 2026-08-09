@@ -27,6 +27,7 @@ WHEEL_NAME = "ibapi-10.49.1-py3-none-any.whl"
 DIST_INFO = "ibapi-10.49.1.dist-info"
 ACTIVE_PROVENANCE = Path("/var/lib/stocker/ibkr-api/active-provenance.json")
 PROVENANCE_TARGET = Path("/var/lib/stocker/ibkr-api/provenance/10.49.1.json")
+PROVENANCE_LITERAL_TARGET = "provenance/10.49.1.json"
 PROVENANCE_ROOT = Path("/var/lib/stocker/ibkr-api")
 PROVENANCE_TRUST_ANCHOR = Path("/")
 REQUIRED_OWNER_UID = 0
@@ -35,7 +36,10 @@ MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_METADATA_BYTES = 1024 * 1024
 MAX_ENTRIES = 2_048
+MAX_PROTECTED_ENTRIES = 100_000
 MAX_PATH_BYTES = 512
+ROOT_GROUP_GID = 0
+VERIFIER_RELATIVE_PATH = Path("deploy/scripts/verify_v2_release_artifacts.py")
 WHEEL_METADATA_MEMBERS = frozenset(
     {
         f"{DIST_INFO}/METADATA",
@@ -94,17 +98,39 @@ def _lstat(path: Path, label: str) -> os.stat_result:
         raise ArtifactVerificationError(f"{label} is unavailable") from error
 
 
+def _require_root_control(metadata: os.stat_result, label: str, required_uid: int) -> None:
+    mode = stat.S_IMODE(metadata.st_mode)
+    if metadata.st_uid != required_uid:
+        _raise(f"{label} owner is invalid")
+    if mode & stat.S_IWOTH:
+        _raise(f"{label} is world writable")
+    if mode & stat.S_IWGRP and metadata.st_gid != ROOT_GROUP_GID:
+        _raise(f"{label} is writable by a non-root group")
+
+
 def _require_secure_directory(path: Path, label: str, required_uid: int) -> None:
     metadata = _lstat(path, label)
     if not stat.S_ISDIR(metadata.st_mode):
         _raise(f"{label} is not a real directory")
-    if metadata.st_uid != required_uid:
-        _raise(f"{label} owner is invalid")
-    if stat.S_IMODE(metadata.st_mode) & 0o022:
-        _raise(f"{label} is group/world writable")
+    _require_root_control(metadata, label, required_uid)
+
+
+def _require_secure_regular(path: Path, label: str, required_uid: int) -> os.stat_result:
+    metadata = _lstat(path, label)
+    if not stat.S_ISREG(metadata.st_mode):
+        _raise(f"{label} is not a real file")
+    _require_root_control(metadata, label, required_uid)
+    return metadata
+
+
+def _require_canonical_absolute(path: Path, label: str) -> None:
+    if not path.is_absolute() or Path(os.path.normpath(path)) != path:
+        _raise(f"{label} path is not canonical and absolute")
 
 
 def _require_secure_ancestry(path: Path, anchor: Path, required_uid: int) -> None:
+    _require_canonical_absolute(path, "protected")
+    _require_canonical_absolute(anchor, "trust anchor")
     try:
         relative = path.relative_to(anchor)
     except ValueError as error:
@@ -114,6 +140,82 @@ def _require_secure_ancestry(path: Path, anchor: Path, required_uid: int) -> Non
     for part in relative.parts:
         current /= part
         _require_secure_directory(current, "provenance parent", required_uid)
+
+
+def _require_secure_file_boundary(
+    path: Path,
+    label: str,
+    *,
+    trust_anchor: Path,
+    required_uid: int,
+) -> os.stat_result:
+    _require_canonical_absolute(path, label)
+    _require_secure_ancestry(path.parent, trust_anchor, required_uid)
+    return _require_secure_regular(path, label, required_uid)
+
+
+def _reject_walk_error(error: OSError) -> None:
+    raise ArtifactVerificationError("protected tree is unreadable") from error
+
+
+def _require_secure_tree_entry(
+    path: Path,
+    label: str,
+    *,
+    trust_anchor: Path,
+    required_uid: int,
+) -> None:
+    metadata = _lstat(path, label)
+    if stat.S_ISLNK(metadata.st_mode):
+        if metadata.st_uid != required_uid:
+            _raise(f"{label} symlink owner is invalid")
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as error:
+            raise ArtifactVerificationError(f"{label} symlink is dangling") from error
+        _require_secure_ancestry(resolved.parent, trust_anchor, required_uid)
+        target_metadata = _lstat(resolved, f"{label} symlink target")
+        if not (stat.S_ISREG(target_metadata.st_mode) or stat.S_ISDIR(target_metadata.st_mode)):
+            _raise(f"{label} symlink target type is invalid")
+        _require_root_control(target_metadata, f"{label} symlink target", required_uid)
+    elif stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode):
+        _require_root_control(metadata, label, required_uid)
+    else:
+        _raise(f"{label} type is invalid")
+
+
+def _require_secure_tree(
+    root: Path,
+    label: str,
+    *,
+    trust_anchor: Path,
+    required_uid: int,
+) -> None:
+    visited = 0
+    for current, directories, filenames in os.walk(
+        root,
+        followlinks=False,
+        onerror=_reject_walk_error,
+    ):
+        current_path = Path(current)
+        _require_secure_directory(current_path, f"{label} directory", required_uid)
+        visited += 1 + len(directories) + len(filenames)
+        if visited > MAX_PROTECTED_ENTRIES:
+            _raise(f"{label} has too many entries")
+        for directory in directories:
+            _require_secure_tree_entry(
+                current_path / directory,
+                f"{label} directory",
+                trust_anchor=trust_anchor,
+                required_uid=required_uid,
+            )
+        for filename in filenames:
+            _require_secure_tree_entry(
+                current_path / filename,
+                f"{label} member",
+                trust_anchor=trust_anchor,
+                required_uid=required_uid,
+            )
 
 
 def _read_regular_bounded(
@@ -187,16 +289,13 @@ def verify_provenance_link(
         literal_target = os.readlink(provenance_link)
     except OSError as error:
         raise ArtifactVerificationError("active provenance link is unreadable") from error
-    if literal_target != str(expected_target):
+    if literal_target != PROVENANCE_LITERAL_TARGET:
         _raise("active provenance link literal target is invalid")
 
     target_metadata = _lstat(expected_target, "active provenance target")
     if not stat.S_ISREG(target_metadata.st_mode):
         _raise("active provenance target is not a real file")
-    if target_metadata.st_uid != required_uid:
-        _raise("active provenance target owner is invalid")
-    if stat.S_IMODE(target_metadata.st_mode) & 0o022:
-        _raise("active provenance target is group/world writable")
+    _require_root_control(target_metadata, "active provenance target", required_uid)
     try:
         resolved_link = provenance_link.resolve(strict=True)
         resolved_target = expected_target.resolve(strict=True)
@@ -257,7 +356,13 @@ def _canonical_member(name: str) -> str:
     return name
 
 
-def _source_tree(source_root: Path) -> tuple[dict[str, bytes], str]:
+def _source_tree(
+    source_root: Path,
+    *,
+    trust_anchor: Path,
+    required_uid: int,
+) -> tuple[dict[str, bytes], str]:
+    _require_secure_ancestry(source_root, trust_anchor, required_uid)
     source_metadata = _lstat(source_root, "official source root")
     package_root = source_root / "ibapi"
     package_metadata = _lstat(package_root, "official ibapi source")
@@ -270,25 +375,37 @@ def _source_tree(source_root: Path) -> tuple[dict[str, bytes], str]:
     digest_items: list[tuple[str, bytes]] = []
     total = 0
     visited = 0
-    for current, directories, filenames in os.walk(package_root, followlinks=False):
+    for current, directories, filenames in os.walk(
+        source_root,
+        followlinks=False,
+        onerror=_reject_walk_error,
+    ):
         current_path = Path(current)
+        _require_secure_directory(current_path, "official source directory", required_uid)
         visited += 1 + len(directories) + len(filenames)
         if visited > MAX_ENTRIES:
-            _raise("official ibapi source tree has too many entries")
+            _raise("official source tree has too many entries")
         for directory in directories:
-            if (current_path / directory).is_symlink():
-                _raise("official ibapi source contains a symlink")
+            directory_path = current_path / directory
+            _require_secure_directory(
+                directory_path,
+                "official source directory",
+                required_uid,
+            )
         for filename in filenames:
             path = current_path / filename
-            if path.is_symlink():
-                _raise("official ibapi source contains a symlink")
-            if path.suffix != ".py":
+            metadata = _require_secure_regular(path, "official source member", required_uid)
+            relative_source = path.relative_to(source_root).as_posix()
+            _canonical_member(relative_source)
+            total += metadata.st_size
+            if total > MAX_TOTAL_BYTES:
+                _raise("official source tree is too large")
+            relative_path = PurePosixPath(relative_source)
+            if not relative_path.parts or relative_path.parts[0] != "ibapi" or path.suffix != ".py":
                 continue
             relative = path.relative_to(package_root).as_posix()
-            _canonical_member(relative)
             payload = _read_regular_bounded(path, "official ibapi source member")
-            total += len(payload)
-            if total > MAX_TOTAL_BYTES or len(contents) >= MAX_ENTRIES:
+            if len(contents) >= MAX_ENTRIES:
                 _raise("official ibapi source tree is too large")
             contents[f"ibapi/{relative}"] = payload
             digest_items.append((relative, payload))
@@ -438,7 +555,17 @@ def verify_wheel_artifact(
         trust_anchor=trust_anchor,
         required_uid=required_uid,
     )
-    source_contents, source_hash = _source_tree(source_root)
+    _require_secure_file_boundary(
+        wheel,
+        "IBAPI wheel",
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    source_contents, source_hash = _source_tree(
+        source_root,
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
     if source_hash != provenance["source_tree_sha256"]:
         _raise("official source tree does not match active provenance")
     contents = _read_wheel(wheel)
@@ -457,7 +584,126 @@ def verify_wheel_artifact(
     return WheelEvidence(contents=contents, source_contents=source_contents)
 
 
-def _locate_site_packages(venv: Path) -> Path:
+def _verify_sha256_manifest(
+    artifact: Path,
+    manifest: Path,
+    label: str,
+    *,
+    trust_anchor: Path,
+    required_uid: int,
+) -> None:
+    _require_secure_file_boundary(
+        artifact,
+        label,
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    _require_secure_file_boundary(
+        manifest,
+        f"{label} manifest",
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    artifact_payload = _read_regular_bounded(
+        artifact,
+        label,
+        limit=MAX_WHEEL_BYTES,
+    )
+    manifest_payload = _read_regular_bounded(
+        manifest,
+        f"{label} manifest",
+        limit=MAX_METADATA_BYTES,
+    )
+    digest = hashlib.sha256(artifact_payload).hexdigest()
+    try:
+        expected = f"{digest}  {artifact}\n".encode("ascii")
+    except UnicodeEncodeError as error:
+        raise ArtifactVerificationError(f"{label} path is not ASCII") from error
+    if manifest_payload != expected:
+        _raise(f"{label} manifest is not the exact one-entry hash binding")
+
+
+def verify_release_boundary(
+    *,
+    ibapi_wheel: Path,
+    ibapi_manifest: Path,
+    protobuf_wheel: Path,
+    protobuf_manifest: Path,
+    source_root: Path,
+    release_root: Path,
+    venv: Path,
+    verifier_path: Path,
+    provenance_link: Path = ACTIVE_PROVENANCE,
+    expected_link: Path = ACTIVE_PROVENANCE,
+    expected_target: Path = PROVENANCE_TARGET,
+    provenance_root: Path = PROVENANCE_ROOT,
+    trust_anchor: Path = PROVENANCE_TRUST_ANCHOR,
+    required_uid: int = REQUIRED_OWNER_UID,
+) -> WheelEvidence:
+    """Bind immutable inputs and root-controlled execution paths for one phase."""
+
+    if verifier_path != release_root / VERIFIER_RELATIVE_PATH:
+        _raise("release verifier path is not exact")
+    if venv != release_root / ".venv":
+        _raise("V2 virtual environment path is not exact")
+    if len({ibapi_wheel, ibapi_manifest, protobuf_wheel, protobuf_manifest}) != 4:
+        _raise("release artifact paths are not distinct")
+    if not (
+        protobuf_wheel.name.startswith("protobuf-5.29.5-") and protobuf_wheel.name.endswith(".whl")
+    ):
+        _raise("protobuf wheel filename is invalid")
+
+    _require_secure_ancestry(release_root, trust_anchor, required_uid)
+    _require_secure_file_boundary(
+        verifier_path,
+        "release artifact verifier",
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    _locate_site_packages(
+        venv,
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    _require_secure_tree(
+        venv,
+        "V2 virtual environment",
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    _verify_sha256_manifest(
+        protobuf_wheel,
+        protobuf_manifest,
+        "protobuf wheel",
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    _verify_sha256_manifest(
+        ibapi_wheel,
+        ibapi_manifest,
+        "IBAPI wheel",
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    return verify_wheel_artifact(
+        ibapi_wheel,
+        source_root,
+        provenance_link=provenance_link,
+        expected_link=expected_link,
+        expected_target=expected_target,
+        trusted_root=provenance_root,
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+
+
+def _locate_site_packages(
+    venv: Path,
+    *,
+    trust_anchor: Path,
+    required_uid: int,
+) -> Path:
+    _require_secure_ancestry(venv, trust_anchor, required_uid)
     metadata = _lstat(venv, "V2 virtual environment")
     if not stat.S_ISDIR(metadata.st_mode):
         _raise("V2 virtual environment is not a real directory")
@@ -470,22 +716,35 @@ def _locate_site_packages(venv: Path) -> Path:
         _raise("V2 site-packages path is missing or ambiguous")
     site_packages = candidates[0]
     for path in (site_packages.parent, site_packages):
-        path_metadata = _lstat(path, "V2 site-packages boundary")
-        if not stat.S_ISDIR(path_metadata.st_mode):
-            _raise("V2 site-packages boundary is invalid")
+        _require_secure_directory(path, "V2 site-packages boundary", required_uid)
     return site_packages
 
 
-def _bounded_tree(root: Path, prefix: str) -> dict[str, bytes]:
+def _bounded_tree(
+    root: Path,
+    prefix: str,
+    *,
+    required_uid: int,
+) -> dict[str, bytes]:
     metadata = _lstat(root, f"installed {prefix}")
     if not stat.S_ISDIR(metadata.st_mode):
         _raise(f"installed {prefix} is not a real directory")
+    _require_root_control(metadata, f"installed {prefix}", required_uid)
     contents: dict[str, bytes] = {}
     actual_directories: set[str] = set()
     total = 0
     visited = 0
-    for current, directories, filenames in os.walk(root, followlinks=False):
+    for current, directories, filenames in os.walk(
+        root,
+        followlinks=False,
+        onerror=_reject_walk_error,
+    ):
         current_path = Path(current)
+        _require_secure_directory(
+            current_path,
+            f"installed {prefix} directory",
+            required_uid,
+        )
         visited += 1 + len(directories) + len(filenames)
         if visited > MAX_ENTRIES:
             _raise(f"installed {prefix} tree has too many entries")
@@ -493,12 +752,18 @@ def _bounded_tree(root: Path, prefix: str) -> dict[str, bytes]:
         if relative_directory != ".":
             actual_directories.add(f"{prefix}/{relative_directory}")
         for directory in directories:
-            if (current_path / directory).is_symlink():
-                _raise(f"installed {prefix} contains a symlink")
+            _require_secure_directory(
+                current_path / directory,
+                f"installed {prefix} directory",
+                required_uid,
+            )
         for filename in filenames:
             path = current_path / filename
-            if path.is_symlink():
-                _raise(f"installed {prefix} contains a symlink")
+            _require_secure_regular(
+                path,
+                f"installed {prefix} member",
+                required_uid,
+            )
             relative = path.relative_to(root).as_posix()
             name = _canonical_member(f"{prefix}/{relative}")
             payload = _read_regular_bounded(path, f"installed {prefix} member")
@@ -587,9 +852,21 @@ def verify_installed_distribution(
         trust_anchor=trust_anchor,
         required_uid=required_uid,
     )
-    site_packages = _locate_site_packages(venv)
-    package_contents = _bounded_tree(site_packages / "ibapi", "ibapi")
-    dist_contents = _bounded_tree(site_packages / DIST_INFO, DIST_INFO)
+    site_packages = _locate_site_packages(
+        venv,
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+    )
+    package_contents = _bounded_tree(
+        site_packages / "ibapi",
+        "ibapi",
+        required_uid=required_uid,
+    )
+    dist_contents = _bounded_tree(
+        site_packages / DIST_INFO,
+        DIST_INFO,
+        required_uid=required_uid,
+    )
     installed = package_contents | dist_contents
     expected_paths = (
         set(evidence.source_contents)
@@ -618,21 +895,35 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="operation", required=True)
     for operation in ("preinstall", "postinstall"):
         command = subparsers.add_parser(operation)
-        command.add_argument("--wheel", type=Path, required=True)
+        command.add_argument("--ibapi-wheel", type=Path, required=True)
+        command.add_argument("--ibapi-manifest", type=Path, required=True)
+        command.add_argument("--protobuf-wheel", type=Path, required=True)
+        command.add_argument("--protobuf-manifest", type=Path, required=True)
         command.add_argument("--official-source-root", type=Path, required=True)
-        if operation == "postinstall":
-            command.add_argument("--venv", type=Path, required=True)
+        command.add_argument("--release-root", type=Path, required=True)
+        command.add_argument("--verifier-path", type=Path, required=True)
+        command.add_argument("--venv", type=Path, required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
-        if arguments.operation == "preinstall":
-            verify_wheel_artifact(arguments.wheel, arguments.official_source_root)
-        else:
+        if Path(__file__) != arguments.verifier_path:
+            _raise("running release verifier path is not exact")
+        verify_release_boundary(
+            ibapi_wheel=arguments.ibapi_wheel,
+            ibapi_manifest=arguments.ibapi_manifest,
+            protobuf_wheel=arguments.protobuf_wheel,
+            protobuf_manifest=arguments.protobuf_manifest,
+            source_root=arguments.official_source_root,
+            release_root=arguments.release_root,
+            venv=arguments.venv,
+            verifier_path=arguments.verifier_path,
+        )
+        if arguments.operation == "postinstall":
             verify_installed_distribution(
-                arguments.wheel,
+                arguments.ibapi_wheel,
                 arguments.official_source_root,
                 arguments.venv,
             )

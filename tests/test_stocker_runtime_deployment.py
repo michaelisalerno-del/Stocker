@@ -136,6 +136,19 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     assert 'sudo test ! -L "$STOCKER_IBAPI_PROVENANCE"' not in runbook
     assert "export STOCKER_TRUSTED_PYTHON=/usr/bin/python3" in runbook
     assert (ROOT / "deploy/scripts/verify_v2_release_artifacts.py").is_file()
+    for protected_argument in (
+        '--ibapi-wheel "$STOCKER_IBAPI_WHEEL"',
+        '--ibapi-manifest "$STOCKER_IBAPI_WHEEL_SHA256"',
+        '--protobuf-wheel "$STOCKER_PROTOBUF_WHEEL"',
+        '--protobuf-manifest "$STOCKER_PROTOBUF_WHEEL_SHA256"',
+        '--official-source-root "$STOCKER_IBAPI_SOURCE"',
+        '--release-root "$STOCKER_V2_RELEASE"',
+        '--verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER"',
+        '--venv "$STOCKER_V2_RELEASE/.venv"',
+    ):
+        assert runbook.count(protected_argument) == 2
+    assert "literal target must be\n`provenance/10.49.1.json`" in runbook
+    assert "Group-write is admitted only\nfor group ID 0" in runbook
     assert "must not come from a package registry" in runbook
     assert "Do not vendor the derived wheel" in runbook
 

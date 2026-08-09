@@ -69,7 +69,13 @@ while the versioned release is still unpublished. The stdlib-only release-artifa
 verifier must run under trusted system Python both before and after IBAPI installation;
 do not execute Python or a CLI from the new environment first. It validates the
 complete wheel and installed RECORD/file set as well as the exact root-owned active
-provenance symlink. Only then verify metadata, concrete imports, and the installed
+provenance symlink, whose literal target must be
+`provenance/10.49.1.json`. Both phases revalidate the exact one-entry manifests and
+hashes for both wheels plus root ownership and non-writable trust boundaries for the
+artifacts, complete official source tree, reviewed release/verifier, virtual
+environment, site-packages, and installed distribution. Group-write is admitted only
+for group ID 0; world-write is never admitted. Only then verify metadata, concrete
+imports, and the installed
 `ibapi` Python tree through the new environment. Never modify the release environment
 after publishing the V2 pointer.
 
@@ -132,11 +138,24 @@ sudo awk -v expected="$STOCKER_IBAPI_WHEEL" \
   "$STOCKER_IBAPI_WHEEL_SHA256"
 sudo sha256sum --check "$STOCKER_IBAPI_WHEEL_SHA256"
 sudo "$STOCKER_TRUSTED_PYTHON" "$STOCKER_RELEASE_ARTIFACT_VERIFIER" preinstall \
-  --wheel "$STOCKER_IBAPI_WHEEL" --official-source-root "$STOCKER_IBAPI_SOURCE"
+  --ibapi-wheel "$STOCKER_IBAPI_WHEEL" \
+  --ibapi-manifest "$STOCKER_IBAPI_WHEEL_SHA256" \
+  --protobuf-wheel "$STOCKER_PROTOBUF_WHEEL" \
+  --protobuf-manifest "$STOCKER_PROTOBUF_WHEEL_SHA256" \
+  --official-source-root "$STOCKER_IBAPI_SOURCE" \
+  --release-root "$STOCKER_V2_RELEASE" \
+  --verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER" \
+  --venv "$STOCKER_V2_RELEASE/.venv"
 sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"
 sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_IBAPI_WHEEL"
 sudo "$STOCKER_TRUSTED_PYTHON" "$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall \
-  --wheel "$STOCKER_IBAPI_WHEEL" --official-source-root "$STOCKER_IBAPI_SOURCE" \
+  --ibapi-wheel "$STOCKER_IBAPI_WHEEL" \
+  --ibapi-manifest "$STOCKER_IBAPI_WHEEL_SHA256" \
+  --protobuf-wheel "$STOCKER_PROTOBUF_WHEEL" \
+  --protobuf-manifest "$STOCKER_PROTOBUF_WHEEL_SHA256" \
+  --official-source-root "$STOCKER_IBAPI_SOURCE" \
+  --release-root "$STOCKER_V2_RELEASE" \
+  --verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER" \
   --venv "$STOCKER_V2_RELEASE/.venv"
 sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
 from importlib.metadata import requires, version

@@ -568,8 +568,6 @@ def _prepare_working_directory(path: Path, *, backup_directory: Path) -> Path:
     working = _prepare_backup_directory(path)
     if working == backup_directory or backup_directory in working.parents:
         raise BackupError("backup working directory must be outside the archive directory")
-    if working.stat().st_dev != backup_directory.stat().st_dev:
-        raise BackupError("backup working and archive directories must share a filesystem")
     return working
 
 
@@ -618,7 +616,7 @@ def _remove_stale_backup_work(working_directory: Path) -> None:
     )
 
 
-def _remove_stale_atomic_metadata(destination: Path) -> None:
+def _remove_stale_atomic_files(destination: Path) -> None:
     _remove_stale_regular_files(
         destination,
         matches=lambda name: name.startswith(".stocker-v2-atomic-"),
@@ -889,12 +887,13 @@ def create_backup(
 
     root = _prepare_backup_directory(Path(destination))
     with _destination_lock(root):
-        _remove_stale_atomic_metadata(root)
+        _remove_stale_atomic_files(root)
         _remove_interrupted_publication_orphans(root, previous_status=_read_status(root))
         working = _prepare_working_directory(
             Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
             backup_directory=root,
         )
+        _remove_stale_backup_work(working)
         return _create_backup_locked(
             database,
             root,
@@ -946,7 +945,6 @@ def _create_backup_locked(
         code="BACKUP_IN_PROGRESS",
         latest_manifest_filename=previous_status.latest_manifest_filename,
     )
-    _remove_stale_backup_work(working_directory)
     temporary_database: Path | None = None
     temporary_archive: Path | None = None
     published_archive = False
@@ -959,7 +957,7 @@ def _create_backup_locked(
         os.close(database_descriptor)
         temporary_database = Path(database_temporary_name)
         archive_descriptor, archive_temporary_name = tempfile.mkstemp(
-            prefix=".stocker-v2-archive-", suffix=".gz", dir=working_directory
+            prefix=".stocker-v2-atomic-", suffix=".gz", dir=root
         )
         os.close(archive_descriptor)
         temporary_archive = Path(archive_temporary_name)

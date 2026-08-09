@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -412,6 +413,80 @@ def test_backup_working_copies_stay_outside_the_capped_archive_directory(
     assert not tuple(backups.glob(".stocker-v2-database-*"))
     assert not tuple(backups.glob(".stocker-v2-archive-*"))
     assert not tuple(working.iterdir())
+
+
+def test_backup_publication_uses_a_destination_local_atomic_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    working.mkdir()
+    _seed_database(database)
+    real_replace = backup_module.os.replace
+    replacements: list[tuple[Path, Path]] = []
+
+    def reject_cross_device_replace(
+        source: str | os.PathLike[str], destination: str | os.PathLike[str]
+    ) -> None:
+        source_path = Path(source).resolve()
+        destination_path = Path(destination).resolve()
+        replacements.append((source_path, destination_path))
+        if source_path.parent == working.resolve() and destination_path.parent == backups.resolve():
+            raise OSError(errno.EXDEV, os.strerror(errno.EXDEV), str(source_path))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(backup_module.os, "replace", reject_cross_device_replace)
+    artifact = create_backup(
+        database,
+        backups,
+        tier="daily",
+        created_at_us=200,
+        working_directory=working,
+    )
+
+    archive_publications = [
+        (source, destination)
+        for source, destination in replacements
+        if destination == artifact.archive_path.resolve()
+    ]
+    assert len(archive_publications) == 1
+    assert archive_publications[0][0].parent == backups.resolve()
+    assert artifact.archive_path.is_file()
+    assert artifact.manifest_path.is_file()
+    assert not tuple(backups.glob(".stocker-v2-atomic-*"))
+    assert not tuple(working.iterdir())
+
+
+def test_backup_retry_cleans_all_temporary_namespaces_before_source_validation(
+    tmp_path: Path,
+) -> None:
+    missing_database = tmp_path / "missing.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    backups.mkdir()
+    working.mkdir()
+    destination_orphan = backups / ".stocker-v2-atomic-abandoned"
+    work_orphans = (
+        working / ".stocker-v2-database-abandoned.sqlite3",
+        working / ".stocker-v2-archive-abandoned.gz",
+    )
+    destination_orphan.write_bytes(b"abandoned-by-sigkill")
+    for orphan in work_orphans:
+        orphan.write_bytes(b"abandoned-by-sigkill")
+
+    with pytest.raises(BackupError, match="backup source"):
+        create_backup(
+            missing_database,
+            backups,
+            tier="daily",
+            created_at_us=201,
+            working_directory=working,
+        )
+
+    assert not destination_orphan.exists()
+    assert all(not orphan.exists() for orphan in work_orphans)
 
 
 def test_backup_recovers_terminated_work_and_marks_the_attempt_in_progress(

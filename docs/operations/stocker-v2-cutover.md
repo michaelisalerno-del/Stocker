@@ -160,9 +160,10 @@ export STOCKER_V1_PRESERVATION=/var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_
 test "$STOCKER_V1_PRESERVATION" != \
   /var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation || exit 78
 sudo install -d -o root -g root -m 0700 "$STOCKER_V1_PRESERVATION"
-sudo getfacl -p /var/lib/stocker/backups "$STOCKER_V1_SNAPSHOT" \
-  "$STOCKER_V1_ROLLBACK_DB" | \
-  sudo tee "$STOCKER_V1_PRESERVATION/access-control-before.txt" >/dev/null
+sudo getfacl -p /var/lib/stocker/backups "$STOCKER_V1_SNAPSHOT" | \
+  sudo tee "$STOCKER_V1_PRESERVATION/snapshot-access-control-before.txt" >/dev/null
+sudo getfacl -p "$STOCKER_V1_ROLLBACK_DB" | \
+  sudo tee "$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" >/dev/null
 sudo chmod 0400 "$STOCKER_V1_SNAPSHOT"
 sudo -u stocker-recorder test ! -r \
   /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
@@ -219,7 +220,8 @@ sudo sha256sum --check --strict \
 sudo chmod 0440 "$STOCKER_V1_PRESERVATION/database-sha256.txt" \
   "$STOCKER_V1_PRESERVATION/database-stat.txt" \
   "$STOCKER_V1_PRESERVATION/control-plane-sha256.txt" \
-  "$STOCKER_V1_PRESERVATION/access-control-before.txt" \
+  "$STOCKER_V1_PRESERVATION/snapshot-access-control-before.txt" \
+  "$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" \
   "$STOCKER_V1_PRESERVATION/sqlite-integrity.txt" \
   "$STOCKER_V1_PRESERVATION/v1-control-plane.tar.gz"
 sudo chmod 0550 "$STOCKER_V1_PRESERVATION"
@@ -511,6 +513,10 @@ preserved unit files are loaded in their recorded pre-cutover state. A failed un
 state query stops rollback before any V1 start attempt:
 
 ```bash
+export STOCKER_V1_ROLLBACK_DB=/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3
+export STOCKER_V1_PRESERVATION=/var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation
+test "$STOCKER_V1_PRESERVATION" != \
+  /var/lib/stocker/recovery-v1/REPLACE_WITH_CHANGE_ID-preservation || exit 78
 sudo systemctl unmask --runtime \
   stocker-recorder.service stocker-web.service \
   stocker-backup.service stocker-backup.timer \
@@ -522,11 +528,18 @@ for unit in \
   stocker-backup.service stocker-backup.timer \
   stocker-recorder-session-readiness.service \
   stocker-recorder-session-readiness.timer; do
-  test "$(sudo systemctl show --property=LoadState --value "$unit")" = loaded || exit 78
-  case "$(sudo systemctl show --property=UnitFileState --value "$unit")" in
+  active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || exit 78
+  load_state="$(sudo systemctl show --property=LoadState --value "$unit")" || exit 78
+  unit_file_state="$(sudo systemctl show --property=UnitFileState --value "$unit")" || exit 78
+  test "$active_state" = inactive || exit 78
+  test "$load_state" = loaded || exit 78
+  case "$unit_file_state" in
     masked|masked-runtime) exit 78 ;;
   esac
 done
+sudo setfacl \
+  --restore="$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" || exit 78
+sudo -u stocker test -w "$STOCKER_V1_ROLLBACK_DB" || exit 78
 ```
 
 ### Before first callback
@@ -534,8 +547,8 @@ done
 If V2 has not admitted its first callback, stop V2, preserve its logs and failed import
 artifacts, restore the prior release/service pointer, and restart the untouched V1
 database. Restore the rollback database's recorded V1 owner, group, mode, and ACL from
-`access-control-before.txt` before starting its sole V1 writer. Do not copy any V2 row
-into V1.
+the common rollback gate before starting its sole V1 writer. Do not copy any V2 row into
+V1.
 
 ### After first callback
 

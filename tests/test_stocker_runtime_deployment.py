@@ -205,7 +205,8 @@ def test_cutover_precreates_reader_boundary_before_import_and_verifies_afterward
     assert importer < verifier
     assert "command -v setfacl" in runbook
     assert "setfacl -m u:stocker-recorder:r--" in runbook
-    assert "access-control-before.txt" in runbook
+    assert "snapshot-access-control-before.txt" in runbook
+    assert "rollback-access-control-before.txt" in runbook
     assert "chgrp stocker-readers /var/lib/stocker/backups" not in runbook
     assert "chown stocker:stocker-readers" not in runbook
     revoke = runbook.index("revoke_v1_snapshot_access")
@@ -328,8 +329,14 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert common_rollback < before_callback_rollback < after_callback_rollback
     common_rollback_commands = runbook[common_rollback:before_callback_rollback]
     assert "systemctl unmask --runtime" in common_rollback_commands
+    assert "active_state=" in common_rollback_commands
+    assert "load_state=" in common_rollback_commands
+    assert "unit_file_state=" in common_rollback_commands
     assert "--property=LoadState --value" in common_rollback_commands
     assert "masked|masked-runtime" in common_rollback_commands
+    assert "setfacl --restore=" in common_rollback_commands
+    assert "rollback-access-control-before.txt" in common_rollback_commands
+    assert 'sudo -u stocker test -w "$STOCKER_V1_ROLLBACK_DB"' in common_rollback_commands
 
 
 def test_official_api_update_service_uses_the_v2_runtime_cli() -> None:

@@ -101,7 +101,7 @@ def test_cutover_release_contains_only_v2_stocker_application_services() -> None
 def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() -> None:
     deployment_files = [
         ROOT / "deploy/stocker-recorder.env.example",
-        ROOT / "deploy/stocker-web.env.example",
+        ROOT / "deploy/stocker-v2-web.env.example",
         ROOT / "deploy/stocker-backup.env.example",
         ROOT / "configs/runtime/recorder.example.json",
         ROOT / "configs/runtime/market-data.example.json",
@@ -128,6 +128,11 @@ def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() 
         "live_enabled",
     ):
         assert forbidden not in joined
+
+    v2_web_unit = (SYSTEMD / "stocker-v2-web.service").read_text(encoding="utf-8")
+    assert "EnvironmentFile=/etc/stocker/stocker-v2-web.env" in v2_web_unit
+    assert "EnvironmentFile=/etc/stocker/stocker-web.env" not in v2_web_unit
+    assert not (ROOT / "deploy/stocker-web.env.example").exists()
     assert "ibkr_read_only" not in joined
     assert "credential" not in joined
 

@@ -89,7 +89,9 @@ sudo systemctl is-enabled stocker-v2-recorder.service stocker-v2-web.service || 
 
 Both services and both backup timers must still be disabled. Validate the reviewed
 configuration files, their hashes, the release commit, the 8 GiB database/backup caps,
-and that there are no broker account, credential, order, paper, or live fields.
+and that there are no broker account, credential, order, paper, or live fields. Install
+the V2 web environment only as `/etc/stocker/stocker-v2-web.env`; never overwrite the
+preserved V1 `/etc/stocker/stocker-web.env`, which remains part of rollback evidence.
 
 ## 2. Quiesce and preserve the distinct V1 sources
 

@@ -21,6 +21,7 @@ from stocker_runtime.storage import (
     create_backup,
     initialize_database,
     read_backup_manifests,
+    record_backup_failure,
     restore_backup,
 )
 
@@ -493,6 +494,26 @@ def test_backup_status_stays_degraded_until_rotation_finishes(
     assert states_during_rotation
     assert all(item["state"] == "degraded" for item in states_during_rotation)
     assert all(item["code"] == "BACKUP_IN_PROGRESS" for item in states_during_rotation)
+
+
+def test_backup_recovers_orphaned_publication_and_rotation_files(tmp_path: Path) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    _seed_database(database)
+    record_backup_failure(backups, code="BACKUP_IN_PROGRESS", checked_at_us=1)
+    orphan_archive_name = backup_module._archive_filename("daily", 1)
+    orphan_manifest_archive_name = backup_module._archive_filename("weekly", 2)
+    orphan_archive = backups / orphan_archive_name
+    orphan_manifest = backups / f"{orphan_manifest_archive_name}.manifest.json"
+    orphan_archive.write_bytes(b"published-before-sigkill")
+    orphan_manifest.write_text("{}\n", encoding="utf-8")
+
+    artifact = create_backup(database, backups, tier="daily", created_at_us=3)
+
+    assert not orphan_archive.exists()
+    assert not orphan_manifest.exists()
+    assert artifact.archive_path.exists()
+    assert artifact.manifest_path.exists()
 
 
 def test_backup_health_requires_fresh_valid_tier_floors(tmp_path: Path) -> None:

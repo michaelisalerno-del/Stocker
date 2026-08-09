@@ -1015,11 +1015,15 @@ Implementation note (2026-08-09): the owner authorized Phase 8. The release now 
 one-way immutable V1 importer with exact frozen-schema admission, deterministic generic
 mapping, complete row disposition hashes, and atomic reconciliation/target publication.
 Only V2 application units, configuration, CLI, web, and backup surfaces remain
-installable. The old recorder, web, transfer, Parquet, report-package, migrations, and
-idea-specific runtime were deleted; reusable frozen calculations moved into a
-research-only namespace. The operator cutover remains an explicit market-closed runbook
-operation and was not performed from development. Paper/live, accounts, orders, risk,
-execution, and protected-data boundaries did not change. No Phase 9 work began.
+installable from the V2 release. The old recorder, web, transfer, Parquet,
+report-package, migrations, and idea-specific runtime were deleted from that release;
+reusable frozen calculations moved into a research-only namespace. The complete
+installed V1 versioned release, units, configuration, database, and recovery set remain
+untouched and restorable while V2 runs through a separate release pointer. They may be
+retired only after the owner closes the rollback window. The operator cutover remains
+an explicit market-closed runbook operation and was not performed from development.
+Paper/live, accounts, orders, risk, execution, and protected-data boundaries did not
+change. No Phase 9 work began.
 
 - **Objective:** migrate once, cut over safely, and delete superseded active code.
 - **Files/packages:** legacy importer, migration fixtures/scripts, deployment/runbooks.

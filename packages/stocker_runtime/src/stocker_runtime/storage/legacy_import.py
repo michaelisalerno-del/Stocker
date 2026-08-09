@@ -524,6 +524,9 @@ def _import_runs(context: _ImportContext) -> None:
         if legacy_mode not in {"record_only", "shadow"}:
             tracker.record(key, imported=False, reason="unsupported_legacy_mode")
             continue
+        if not _run_has_ibkr_market_evidence(context, run_id):
+            tracker.record(key, imported=False, reason="source_provenance_not_ibkr")
+            continue
         mode = "shadow" if legacy_mode == "shadow" else "prospective_record"
         data_class = "shadow_protected" if mode == "shadow" else "prospective_protected"
         config_hash = _sha(
@@ -562,6 +565,26 @@ def _import_runs(context: _ImportContext) -> None:
         )
         context.run_modes[run_id] = (mode, data_class, started_at_us)
         tracker.record(key, imported=True, target_refs=(f"runs:{run_id}",))
+
+
+def _run_has_ibkr_market_evidence(context: _ImportContext, run_id: str) -> bool:
+    providers = tuple(sorted(_IBKR_SOURCE_NAMES))
+    placeholders = ",".join("?" for _ in providers)
+    sources = (
+        ("underlying_bar", "bar_source"),
+        ("option_quote", "computation_source"),
+    )
+    for table, column in sources:
+        if not context.source.has_column(table, column):
+            continue
+        found = context.source.connection.execute(
+            f'SELECT 1 FROM "{table}" WHERE run_id=? '
+            f'AND lower(trim("{column}")) IN ({placeholders}) LIMIT 1',
+            (run_id, *providers),
+        ).fetchone()
+        if found is not None:
+            return True
+    return False
 
 
 def _import_instruments(context: _ImportContext) -> None:
@@ -673,55 +696,12 @@ def _import_market_events(context: _ImportContext) -> None:
         tracker.record(key, imported=True, target_refs=(f"market_events:{event_id}",))
 
     tracker = context.tracker("underlying_quote")
-    for key, row in context.source.rows("underlying_quote"):
-        run_id = str(row["run_id"])
-        symbol = str(_row_value(row, "symbol") or "")
-        if not symbol and _row_value(row, "signal_episode_id"):
-            episode = context.source.connection.execute(
-                "SELECT symbol FROM signal_episode WHERE id=?",
-                (row["signal_episode_id"],),
-            ).fetchone()
-            symbol = str(episode[0]) if episode else ""
-        if run_id not in context.run_modes or not symbol:
-            tracker.record(key, imported=False, reason="incomplete_quote_identity")
-            continue
-        timestamp_value = _row_value(row, "actual_quote_timestamp_utc") or _row_value(
-            row, "target_timestamp_utc"
+    for key, _row in context.source.rows("underlying_quote"):
+        tracker.record(
+            key,
+            imported=False,
+            reason="source_provenance_unverifiable",
         )
-        receive_value = _row_value(row, "receive_timestamp_utc") or timestamp_value
-        try:
-            event_at_us = _timestamp_us(timestamp_value, label="quote event")
-            received_at_us = _timestamp_us(receive_value, label="quote receive")
-            provider_at_us = (
-                _timestamp_us(row["provider_timestamp_utc"], label="quote provider")
-                if _row_value(row, "provider_timestamp_utc") is not None
-                else None
-            )
-        except LegacyImportError:
-            tracker.record(key, imported=False, reason="invalid_market_timestamp")
-            continue
-        instrument_id = _ensure_symbol_instrument(context, run_id, symbol)
-        event_id, _sequence = _insert_callback_event(
-            context,
-            run_id=run_id,
-            instrument_id=instrument_id,
-            feed_kind="quotes",
-            event_kind="quote",
-            event_at_us=event_at_us,
-            received_at_us=received_at_us,
-            provider_at_us=provider_at_us,
-            source_table="underlying_quote",
-            source_key=key,
-            values={
-                "bid": _finite_float(row["bid"]),
-                "ask": _finite_float(row["ask"]),
-                "bid_size": _finite_float(row["bid_size"]),
-                "ask_size": _finite_float(row["ask_size"]),
-                "last": _finite_float(row["last"]),
-                "size": _finite_float(row["last_size"]),
-            },
-        )
-        tracker.record(key, imported=True, target_refs=(f"market_events:{event_id}",))
 
     tracker = context.tracker("option_quote")
     for key, row in context.source.rows("option_quote"):
@@ -1368,8 +1348,13 @@ def _import_shadow(context: _ImportContext) -> None:
                 imported=True,
                 target_refs=(f"shadow_marks:{position_id}:{marked_at_us}",),
             )
-        if importable_valuations:
-            final, outcome_at_us, final_references = importable_valuations[-1]
+        outcome_valuation = (
+            closing_valuation
+            if closing_valuation is not None
+            else (importable_valuations[-1] if importable_valuations else None)
+        )
+        if outcome_valuation is not None:
+            final, outcome_at_us, final_references = outcome_valuation
             gross_pnl = _finite_float(final["gross_pnl"])
             fees = _finite_float(final["estimated_fees"]) or 0.0
             completeness = (

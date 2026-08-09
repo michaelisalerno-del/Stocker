@@ -492,6 +492,120 @@ def test_import_does_not_close_shadow_without_exact_exit_market_events(tmp_path:
         assert target.execute("SELECT count(*) FROM shadow_outcomes").fetchone()[0] == 0
 
 
+def test_import_closed_shadow_outcome_uses_the_same_evidence_as_leg_exits(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "legacy-mixed-horizons.sqlite3"
+    with _legacy_database(source, 1) as legacy:
+        _seed_representative_legacy_rows(legacy)
+        envelope_id = legacy.execute("SELECT id FROM evidence_envelope").fetchone()[0]
+        option_id = legacy.execute("SELECT id FROM option_contract").fetchone()[0]
+        later = "2026-01-02T14:40:00+00:00"
+        capture_id = legacy.execute(
+            """
+            INSERT INTO option_surface_capture(
+                envelope_id, run_id, signal_episode_id, dte_bucket, target_timestamp_utc,
+                actual_quote_timestamp_utc, capture_lag_seconds, market_data_type,
+                quote_freshness, completeness, connection_status, budget_status,
+                missing_contract_reason, missing_quote_reason, subscription_error,
+                capture_status
+            ) VALUES (?, 'legacy-shadow', 'episode-1', '1DTE', ?, ?, 0, 'real_time',
+                      'fresh', 'incomplete', 'connected', 'within_budget', NULL, NULL,
+                      NULL, 'captured')
+            """,
+            (envelope_id, later, later),
+        ).lastrowid
+        assert capture_id is not None
+        legacy.execute(
+            """
+            INSERT INTO option_quote(
+                envelope_id, run_id, surface_capture_id, option_contract_id, bid, ask,
+                bid_size, ask_size, last, last_size, volume, open_interest,
+                computation_source, provider_timestamp_utc, receive_timestamp_utc,
+                market_data_type, staleness_seconds, completeness, permission_error
+            ) VALUES (?, 'legacy-shadow', ?, ?, 0.8, 1.0, 5, 6, 0.9, 2, 100, 200,
+                      'ibkr', ?, ?, 'real_time', 0, 'incomplete', NULL)
+            """,
+            (envelope_id, capture_id, option_id, later, later),
+        )
+        legacy.execute(
+            """
+            INSERT INTO shadow_horizon_valuation(
+                envelope_id, run_id, shadow_structure_id, horizon_minutes,
+                target_timestamp_utc, actual_quote_timestamp_utc, capture_lag_seconds,
+                exit_credit, gross_return_on_debit, gross_pnl, estimated_fees,
+                market_data_type, completeness, rejection_reason
+            ) VALUES (?, 'legacy-shadow', 'shadow-1', 30, ?, ?, 0, 0.8, -0.33, -40, 1,
+                      'real_time', 'incomplete', 'PARTIAL_QUOTE')
+            """,
+            (envelope_id, later, later),
+        )
+        legacy.commit()
+
+    result = import_legacy_database(
+        source,
+        tmp_path / "stocker-v2.sqlite3",
+        started_at_us=1_800_000_000_000_000,
+    )
+
+    with sqlite3.connect(result.target_path) as target:
+        target.row_factory = sqlite3.Row
+        position = target.execute("SELECT lifecycle, closed_at_us FROM shadow_positions").fetchone()
+        leg = target.execute("SELECT exit_market_event_id FROM shadow_legs").fetchone()
+        outcome = target.execute(
+            "SELECT outcome_at_us, completeness, payload_json FROM shadow_outcomes"
+        ).fetchone()
+        assert position["lifecycle"] == "closed"
+        assert position["closed_at_us"] == outcome["outcome_at_us"]
+        assert outcome["completeness"] == "complete"
+        assert json.loads(outcome["payload_json"])["source_market_event_ids"] == [
+            leg["exit_market_event_id"]
+        ]
+
+
+def test_import_rejects_replay_run_and_unverifiable_underlying_quote(tmp_path: Path) -> None:
+    source = tmp_path / "legacy-replay.sqlite3"
+    with _legacy_database(source, 1) as legacy:
+        _seed_representative_legacy_rows(legacy)
+        envelope_id = legacy.execute("SELECT id FROM evidence_envelope").fetchone()[0]
+        legacy.execute("UPDATE underlying_bar SET bar_source='deterministic_replay'")
+        legacy.execute("UPDATE option_quote SET computation_source='replay'")
+        legacy.execute(
+            """
+            INSERT INTO underlying_quote(
+                envelope_id, run_id, signal_episode_id, target_timestamp_utc,
+                actual_quote_timestamp_utc, capture_lag_seconds, bid, ask, bid_size,
+                ask_size, last, last_size, midpoint, spread, provider_timestamp_utc,
+                receive_timestamp_utc, market_data_type, freshness, completeness,
+                capture_status, missing_quote_reason
+            ) VALUES (?, 'legacy-shadow', 'episode-1', ?, ?, 0, 10, 11, 1, 1, 10.5, 1,
+                      10.5, 1, ?, ?, 'real_time', 'fresh', 'complete', 'captured', NULL)
+            """,
+            (
+                envelope_id,
+                "2026-01-02T14:35:00+00:00",
+                "2026-01-02T14:35:00+00:00",
+                "2026-01-02T14:35:00+00:00",
+                "2026-01-02T14:35:00+00:00",
+            ),
+        )
+        legacy.commit()
+
+    result = import_legacy_database(
+        source,
+        tmp_path / "stocker-v2.sqlite3",
+        started_at_us=1_800_000_000_000_000,
+    )
+    report = json.loads(result.reconciliation_path.read_text(encoding="utf-8"))
+    tables = {item["table"]: item for item in report["tables"]}
+
+    assert tables["prospective_run"]["omission_reasons"] == {"source_provenance_not_ibkr": 1}
+    assert tables["underlying_quote"]["omission_reasons"] == {"source_provenance_unverifiable": 1}
+    with sqlite3.connect(result.target_path) as target:
+        assert target.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+        assert target.execute("SELECT count(*) FROM market_events").fetchone()[0] == 0
+
+
 def test_import_preserves_closed_diagnostics_and_archives_active_rows(tmp_path: Path) -> None:
     source = tmp_path / "legacy-diagnostics.sqlite3"
     prefix = MIGRATION_NAMES.index("0016_prospective_recorder_hardening_v1.sql") + 1

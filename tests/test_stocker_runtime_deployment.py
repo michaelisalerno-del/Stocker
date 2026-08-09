@@ -29,8 +29,11 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
     assert "User=stocker-web" in web
     assert "User=stocker-backup" in daily
     assert "User=stocker-backup" in weekly
-    assert "ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime recorder run" in recorder
-    assert "ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime web run" in web
+    assert "ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime recorder run" in recorder
+    assert "ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime web run" in web
+    for unit in (recorder, web, daily, weekly):
+        assert "/opt/stocker/current" not in unit
+        assert "/opt/stocker/v2-current" in unit
     assert "--tier daily" in daily
     assert "--tier weekly" in weekly
     assert "--working-directory /var/cache/stocker-v2-backup-work" in daily
@@ -192,8 +195,13 @@ def test_cutover_precreates_reader_boundary_before_import_and_verifies_afterward
         "install -d -o stocker-backup -g stocker-readers -m 2750 "
         "/var/lib/stocker/backups-v2" in runbook
     )
+    install_verifier = "sudo install -o root -g root -m 0755"
+    assert install_verifier in runbook
+    assert "/opt/stocker/v2-current/deploy/scripts/prepare-v2-sqlite-boundary.py" in runbook
+    assert "/usr/local/libexec/stocker-prepare-v2-sqlite-boundary" in runbook
     importer = runbook.index("stocker-runtime legacy import")
-    verifier = runbook.index("prepare-v2-sqlite-boundary.py")
+    verifier = runbook.index("sudo /usr/local/libexec/stocker-prepare-v2-sqlite-boundary")
+    assert runbook.index(install_verifier) < importer
     assert importer < verifier
 
 
@@ -222,9 +230,18 @@ def test_cutover_runbook_preserves_one_writer_and_two_distinct_rollback_paths() 
         "explicit gap",
         "never reverse-import",
         "owner closes the rollback window",
+        "owner-only rollback-window closure",
+        "installed v1 units",
+        "/opt/stocker/v2-current",
+        "/opt/stocker/current",
     ):
         assert required in lowered
     assert lowered.index("start the v2 web") < lowered.index("start the v2 recorder")
+    assert lowered.index("declare v2 admission operational") < lowered.index(
+        "owner-only rollback-window closure"
+    )
+    assert "never remove the v1 units" in lowered
+    assert "never repoint\n`/opt/stocker/current`, before the owner" in lowered
     assert "paper trading" not in lowered
     assert "live trading" not in lowered
 
@@ -234,6 +251,8 @@ def test_official_api_update_service_uses_the_v2_runtime_cli() -> None:
 
     assert "stocker-runtime ibkr-api check-update" in unit
     assert "stocker-prospective" not in unit
+    assert "/opt/stocker/v2-current" in unit
+    assert "/opt/stocker/current" not in unit
     assert "User=stocker-recorder" in unit
     assert "Group=stocker-readers" in unit
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Stocker V2 query-only web application
-Documentation=file:/opt/stocker/current/docs/plans/stocker-v2-platform.md
+Documentation=file:/opt/stocker/v2-current/docs/plans/stocker-v2-platform.md
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -11,10 +11,10 @@ ConditionPathExists=/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
 Type=simple
 User=stocker-web
 Group=stocker-readers
-WorkingDirectory=/opt/stocker/current
+WorkingDirectory=/opt/stocker/v2-current
 EnvironmentFile=/etc/stocker/stocker-web.env
 ExecCondition=+/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
-ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime web run --config /etc/stocker/web.json
+ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime web run --config /etc/stocker/web.json
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=78

@@ -14,16 +14,23 @@ There is no dual write.
 - immutable V1 recovery sets: `/var/lib/stocker/recovery-v1/`
 - new V2 database: `/var/lib/stocker/v2/stocker-v2.sqlite3`
 - V2 backups: `/var/lib/stocker/backups-v2/`
+- preserved V1 release pointer: `/opt/stocker/current`
+- immutable V2 release: `/opt/stocker/releases/<release-commit>`
+- V2 service pointer: `/opt/stocker/v2-current`
 - recorder identity: `stocker-recorder`
 - web identity: `stocker-web`
 - backup identity: `stocker-backup`
 - read group: `stocker-readers`
 - Stocker IBKR proxy: `127.0.0.1:4003`
 
-The release contains only `stocker-v2-recorder.service`, `stocker-v2-web.service`,
-and the V2 daily/weekly backup units for the Stocker application. Gateway units remain
-market-data-only infrastructure. Never install a V1 recorder, web, or backup unit from
-an earlier release over these files.
+The reviewed V2 release contains only `stocker-v2-recorder.service`,
+`stocker-v2-web.service`, and the V2 daily/weekly backup units for the Stocker
+application. Gateway units remain market-data-only infrastructure. Stage V2 under its
+immutable versioned path and point `/opt/stocker/v2-current` at that exact release.
+The V2 units execute through this separate pointer. `/opt/stocker/current` must continue
+to identify the complete, runnable V1 release throughout the rollback window. Preserve
+the installed V1 units, V1 configuration, V1 database, and recovery set for the same
+period; do not copy them into the V2 release tree.
 
 ## 1. Approval and preflight
 
@@ -32,9 +39,19 @@ intended V2 mode, and rollback-window owner in the change record. Confirm the ma
 closed and no unattended start is pending. The only allowed V2 modes are
 `prospective_record` and `shadow`.
 
-Prepare users and paths from the reviewed release without starting services:
+Record the exact V1 path returned by `readlink -f /opt/stocker/current`. Replace the
+placeholder below with the reviewed V2 commit, then prepare the separate V2 pointer,
+users, and paths without starting services:
 
 ```bash
+export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT
+test "$STOCKER_V2_RELEASE" != \
+  /opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT || exit 78
+sudo test -d "$STOCKER_V2_RELEASE"
+sudo test "$(readlink -f /opt/stocker/current)" != "$STOCKER_V2_RELEASE"
+sudo test ! -e /opt/stocker/v2-current
+sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current
+sudo test "$(readlink -f /opt/stocker/v2-current)" = "$STOCKER_V2_RELEASE"
 getent group stocker-readers >/dev/null || sudo groupadd --system stocker-readers
 id -u stocker-recorder >/dev/null 2>&1 || sudo useradd --system --gid stocker-readers \
   --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-recorder
@@ -48,6 +65,10 @@ sudo usermod --append --groups stocker-readers stocker-backup
 sudo install -d -o root -g stocker-readers -m 0750 /var/lib/stocker
 sudo install -d -o stocker-recorder -g stocker-readers -m 2750 /var/lib/stocker/v2
 sudo install -d -o stocker-backup -g stocker-readers -m 2750 /var/lib/stocker/backups-v2
+sudo install -d -o root -g root -m 0755 /usr/local/libexec
+sudo install -o root -g root -m 0755 \
+  /opt/stocker/v2-current/deploy/scripts/prepare-v2-sqlite-boundary.py \
+  /usr/local/libexec/stocker-prepare-v2-sqlite-boundary
 sudo systemctl daemon-reload
 sudo systemctl is-enabled stocker-v2-recorder.service stocker-v2-web.service || true
 ```
@@ -99,10 +120,10 @@ SQLite `mode=ro&immutable=1`, accepts only frozen schema prefixes through `0026`
 writes a new temporary V2 database in the target directory:
 
 ```bash
-sudo -u stocker-recorder /opt/stocker/current/.venv/bin/stocker-runtime legacy import \
+sudo -u stocker-recorder /opt/stocker/v2-current/.venv/bin/stocker-runtime legacy import \
   --source /var/lib/stocker/prospective/prospective.sqlite3 \
   --target /var/lib/stocker/v2/stocker-v2.sqlite3
-sudo /opt/stocker/current/deploy/scripts/prepare-v2-sqlite-boundary.py
+sudo /usr/local/libexec/stocker-prepare-v2-sqlite-boundary
 ```
 
 The setgid V2 directory makes the imported `0640` target inherit
@@ -129,20 +150,24 @@ Do not proceed if the source hash changed, a WAL appeared, any row is unreconcil
 the target contains an account, order, fill, broker-position, transfer, report-package,
 or legacy vendor runtime surface.
 
-## 4. Install the V2-only service surface
+## 4. Install the V2 service surface beside the stopped V1 surface
 
-Install the reviewed V2 units under their exact names and remove installed V1 Stocker
-application unit files. Do not alias old names to new services. Install configuration
-with root ownership and least-privilege read access. Confirm:
+Install the reviewed V2 units under their exact names without overwriting or removing
+the installed V1 Stocker application unit files. Do not alias old names to new
+services. Keep every V1 application unit stopped and disabled, and keep its release and
+configuration intact for rollback. Install V2 configuration with root ownership and
+least-privilege read access. Confirm:
 
 ```bash
 systemctl list-unit-files 'stocker*' --no-pager
 systemctl is-active stocker-recorder.service stocker-web.service stocker-backup.timer
+systemctl is-enabled stocker-recorder.service stocker-web.service stocker-backup.timer
 systemctl is-enabled stocker-v2-recorder.service stocker-v2-web.service \
   stocker-v2-backup-daily.timer stocker-v2-backup-weekly.timer
 ```
 
-The three V1 checks must report absent/inactive and the four V2 checks must remain
+The three V1 checks must report inactive and disabled; their unit definitions remain
+installed until the owner closes the rollback window. The four V2 checks must remain
 disabled until the next two sections. Only the recorder may write the database or WAL.
 Web and backup hold read-only database/WAL paths plus the narrow SQLite SHM permission
 defined in their reviewed units.
@@ -168,7 +193,7 @@ run. Verify the official IBKR API provenance record and loopback/read-only bound
 then start the V2 recorder:
 
 ```bash
-sudo -u stocker-recorder /opt/stocker/current/.venv/bin/stocker-runtime ibkr-api verify \
+sudo -u stocker-recorder /opt/stocker/v2-current/.venv/bin/stocker-runtime ibkr-api verify \
   --provenance /var/lib/stocker/ibkr-api/active-provenance.json
 sudo /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 sudo systemctl start stocker-v2-recorder.service
@@ -186,7 +211,9 @@ Keep the deployment attended for the bounded observation window recorded in the 
 approval. Review recorder lifecycle, freshness, gaps, incidents, plugin isolation,
 callback backlog, database/WAL size, and web query-only behaviour. Run one checked V2
 backup and a disposable restore verification. Only then enable the reviewed V2 daily
-and weekly timers and declare cutover complete.
+and weekly timers and declare V2 admission operational. This does not close the
+rollback window: `/opt/stocker/current`, the installed V1 units, the complete V1
+release, its untouched database, and both recovery sets remain preserved.
 
 ## 8. Rollback
 
@@ -206,7 +233,23 @@ or claim uninterrupted scientific continuity. Prefer roll-forward repair.
 In both paths, preserve both recovery sets and releases until the owner closes the
 rollback window.
 
-## 9. Market-data-only IB Gateway boundary
+## 9. Owner-only rollback-window closure
+
+Closing the rollback window is a separate recorded owner decision made only after the
+observation window and a checked V2 backup and restore have succeeded. It is not an
+automatic consequence of starting V2. Only after that decision may the operator:
+
+1. atomically repoint `/opt/stocker/current` to the exact release already selected by
+   `/opt/stocker/v2-current` and verify that both resolve to the same immutable path;
+2. remove the stopped V1 application unit definitions and V1-only configuration, then
+   run `systemctl daemon-reload`; and
+3. retire the versioned V1 release under the approved recovery-retention policy.
+
+Never remove the V1 units, release, database, or recovery set, and never repoint
+`/opt/stocker/current`, before the owner records this decision. The V2 release contains
+no compatibility copy of V1.
+
+## 10. Market-data-only IB Gateway boundary
 
 Gateway login is manual. Use an SSH tunnel:
 
@@ -247,7 +290,7 @@ sha256sum --check ibgateway-release.sha256
 sudo test ! -e "$PROVENANCE"
 sudo ln "$PROVENANCE_TMP" "$PROVENANCE"
 sudo ln "$INSTALLER_TMP" "$INSTALLER"
-sudo /opt/stocker/current/deploy/scripts/verify-ibgateway-installation.sh
+sudo /opt/stocker/v2-current/deploy/scripts/verify-ibgateway-installation.sh
 sudo install -d -o root -g ibgateway -m 0710 /etc/ibgateway
 ```
 

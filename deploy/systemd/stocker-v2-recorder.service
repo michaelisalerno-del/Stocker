@@ -1,6 +1,6 @@
 [Unit]
 Description=Stocker V2 market-data-only recorder
-Documentation=file:/opt/stocker/current/docs/plans/stocker-v2-platform.md
+Documentation=file:/opt/stocker/v2-current/docs/plans/stocker-v2-platform.md
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -10,11 +10,11 @@ StartLimitBurst=5
 Type=simple
 User=stocker-recorder
 Group=stocker-readers
-WorkingDirectory=/opt/stocker/current
+WorkingDirectory=/opt/stocker/v2-current
 EnvironmentFile=-/etc/stocker/stocker-recorder.env
 ExecStartPre=+/usr/local/libexec/stocker-prepare-v2-sqlite-boundary
-ExecStartPre=/opt/stocker/current/.venv/bin/stocker-runtime validate-recorder /etc/stocker/recorder.json
-ExecStart=/opt/stocker/current/.venv/bin/stocker-runtime recorder run --config /etc/stocker/recorder.json --inputs /etc/stocker/market-data.json
+ExecStartPre=/opt/stocker/v2-current/.venv/bin/stocker-runtime validate-recorder /etc/stocker/recorder.json
+ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime recorder run --config /etc/stocker/recorder.json --inputs /etc/stocker/market-data.json
 Restart=on-failure
 RestartSec=15
 RestartPreventExitStatus=78

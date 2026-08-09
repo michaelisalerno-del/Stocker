@@ -626,6 +626,58 @@ def _remove_stale_atomic_metadata(destination: Path) -> None:
     )
 
 
+def _is_managed_archive_filename(name: str) -> bool:
+    for tier in ("daily", "weekly"):
+        prefix = f"stocker-v2-{tier}-"
+        suffix = ".sqlite3.gz"
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        timestamp = name[len(prefix) : -len(suffix)]
+        try:
+            instant = datetime.strptime(timestamp, "%Y%m%dT%H%M%S.%fZ").replace(tzinfo=UTC)
+        except ValueError:
+            return False
+        epoch = datetime(1970, 1, 1, tzinfo=UTC)
+        elapsed = instant - epoch
+        created_at_us = (elapsed.days * 86_400 + elapsed.seconds) * 1_000_000 + elapsed.microseconds
+        if not 0 <= created_at_us <= MAX_TIMESTAMP_US:
+            return False
+        return _archive_filename(tier, created_at_us) == name
+    return False
+
+
+def _remove_interrupted_publication_orphans(
+    destination: Path,
+    *,
+    previous_status: BackupStatus,
+) -> None:
+    if previous_status.state != "degraded" or previous_status.code != "BACKUP_IN_PROGRESS":
+        return
+    names: set[str] = set()
+    with os.scandir(destination) as entries:
+        for scanned, entry in enumerate(entries, start=1):
+            if scanned > MAX_DIRECTORY_ENTRIES:
+                raise BackupCapacityError("backup destination directory entry bound exceeded")
+            names.add(entry.name)
+    orphan_names: set[str] = set()
+    for name in names:
+        if _is_managed_archive_filename(name):
+            if f"{name}.manifest.json" not in names:
+                orphan_names.add(name)
+            continue
+        manifest_suffix = ".manifest.json"
+        if name.endswith(manifest_suffix):
+            archive_name = name[: -len(manifest_suffix)]
+            if _is_managed_archive_filename(archive_name) and archive_name not in names:
+                orphan_names.add(name)
+    if orphan_names:
+        _remove_stale_regular_files(
+            destination,
+            matches=orphan_names.__contains__,
+            label="interrupted backup publication",
+        )
+
+
 def record_backup_failure(
     destination: str | Path,
     *,
@@ -886,6 +938,7 @@ def _create_backup_locked(
 
     _remove_stale_atomic_metadata(root)
     previous_status = _read_status(root)
+    _remove_interrupted_publication_orphans(root, previous_status=previous_status)
     _write_status(
         root,
         state="degraded",

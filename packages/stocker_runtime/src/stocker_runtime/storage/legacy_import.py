@@ -18,10 +18,11 @@ from typing import Literal, Protocol, cast
 
 from stocker_runtime.storage.connection import connect_v2, initialize_database, verify_database
 
-IMPORTER_VERSION = "stocker-v2-legacy-import/1"
+IMPORTER_VERSION = "stocker-v2-legacy-import/2"
 MAX_TARGET_BYTES = 8 * 1024**3
 MAX_JSON_BYTES = 16 * 1024
 MAX_RECONCILIATION_BYTES = 256 * 1024
+MAX_UNCLOSED_GENERATION_RUN_SUMMARY = 50
 _IBKR_BAR_SOURCE_NAMES = frozenset({"ibkr_realtime_bar_5_second_aggregation"})
 
 # Schema structure, not mutable data, is frozen for every historically deployed prefix.
@@ -133,11 +134,27 @@ LEGACY_SCHEMA_DIGESTS: tuple[tuple[str, str], ...] = (
         "0026_opening_leader_continuation_v0.sql",
         "ba8ef7830b5a6fafa2b297250a3d9206b7d756c30ea15f10e408eb54c58e3497",
     ),
+    (
+        "0027_option_risk_accounting_v0.sql",
+        "1326438ca6ac196c0a71df64ded75212e3b8ef4d8b36306bb7d5afbdc7894290",
+    ),
+    (
+        "0028_web_latest_subscription_state_v0.sql",
+        "152959a5cf4cd751d085ccec23cb7ccac930d1d536972740fa87af639e2e91f7",
+    ),
+    (
+        "0029_m1c_diagnostic_quality_flags_v0.sql",
+        "40121e046376b49d1a5c35c2d295b5c5f390527f9662cf06861af573d74ac7f4",
+    ),
+    (
+        "0030_quiet_checkpoint_quote_audit_v0.sql",
+        "afb0e2d62ddd671daaaa9fbab7b2100be7efa7649443b47f358acb2f36319d59",
+    ),
 )
 
 
 class LegacyImportError(RuntimeError):
-    """The stopped legacy source cannot be safely and completely reconciled."""
+    """The quiescent legacy source cannot be safely and completely reconciled."""
 
 
 @dataclass(frozen=True)
@@ -152,6 +169,30 @@ class LegacyImportResult:
     omitted_row_count: int
     target_digest: str
     verification_status: Literal["verified"] = "verified"
+
+
+@dataclass(frozen=True)
+class _UnclosedGenerationArchive:
+    row_count: int
+    row_content_digest: str
+    run_count: int
+    run_summary: tuple[Mapping[str, object], ...]
+
+    @property
+    def present(self) -> bool:
+        return self.row_count > 0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "disposition": "archived_quiescent_unclean" if self.present else "none",
+            "row_count": self.row_count,
+            "row_content_digest": self.row_content_digest,
+            "run_count": self.run_count,
+            "run_summary": list(self.run_summary),
+            "run_summary_limit": MAX_UNCLOSED_GENERATION_RUN_SUMMARY,
+            "run_summary_truncated": self.run_count > len(self.run_summary),
+            "source_rows_modified": False,
+        }
 
 
 class _Digest(Protocol):
@@ -338,6 +379,21 @@ class _LegacyReader:
         )
         for row in cursor:
             yield (row["__rowid__"],), row
+
+    def keys(self, table: str) -> Iterator[tuple[object, ...]]:
+        """Stream only stable row identities for a wholly omitted table."""
+
+        primary_keys = self._primary_keys[table]
+        if primary_keys:
+            selection = ", ".join(f'"{name}"' for name in primary_keys)
+            cursor = self.connection.execute(
+                f'SELECT {selection} FROM "{table}" ORDER BY {selection}'
+            )
+            for row in cursor:
+                yield tuple(row)
+            return
+        for row in self.connection.execute(f'SELECT rowid FROM "{table}" ORDER BY rowid'):
+            yield (row[0],)
 
     def count(self, table: str) -> int:
         return int(self.connection.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0])
@@ -565,14 +621,33 @@ def _import_runs(context: _ImportContext) -> None:
                 data_class,
             ),
         )
+        unclean_generation = (
+            context.source.has_table("recorder_generation_v1")
+            and context.source.connection.execute(
+                "SELECT 1 FROM recorder_generation_v1 "
+                "WHERE run_id=? AND stopped_at_utc IS NULL LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            is not None
+        )
         context.target.execute(
             """
             INSERT INTO recorder_generations(
                 run_id, generation, owner_id, started_at_us, ended_at_us, clean_stop,
                 termination_code
-            ) VALUES (?, 0, 'legacy-import', ?, ?, 1, 'MIGRATED_STOPPED')
+            ) VALUES (?, 0, 'legacy-import', ?, ?, ?, ?)
             """,
-            (run_id, started_at_us, started_at_us),
+            (
+                run_id,
+                started_at_us,
+                started_at_us,
+                0 if unclean_generation else 1,
+                (
+                    "MIGRATED_QUIESCENT_UNCLEAN_ARCHIVED"
+                    if unclean_generation
+                    else "MIGRATED_STOPPED"
+                ),
+            ),
         )
         context.run_modes[run_id] = (mode, data_class, started_at_us)
         context.run_scientific_classifications[run_id] = scientific_classification
@@ -1530,8 +1605,44 @@ def _reconcile_omitted_tables(context: _ImportContext) -> None:
                 if any(token in table for token in immutable_archive_tokens)
                 else "legacy_runtime_only"
             )
-        for key, _row in context.source.rows(table):
+        for key in context.source.keys(table):
             tracker.record(key, imported=False, reason=reason)
+
+
+def _archive_unclean_generation_incident(
+    context: _ImportContext,
+    archive: _UnclosedGenerationArchive,
+) -> None:
+    if not archive.present:
+        return
+    if not context.run_modes:
+        raise LegacyImportError(
+            "unclosed legacy generations cannot be archived without an imported run"
+        )
+    anchor_run_id = min(context.run_modes)
+    evidence_at_us = context.run_modes[anchor_run_id][2]
+    incident_id = _stable_id(
+        "incident",
+        "quiescent-unclean-generations",
+        archive.row_content_digest,
+    )
+    details = _canonical_json(
+        {
+            **archive.to_dict(),
+            "attended_assertion": "accept_quiescent_unclean_generations",
+        }
+    )
+    context.target.execute(
+        """
+        INSERT INTO incidents(
+            incident_id, run_id, scope, severity, code, plugin_instance_id,
+            subscription_id, opened_at_us, resolved_at_us, details_json
+        ) VALUES (?, ?, 'migration', 'degraded',
+                  'LEGACY_QUIESCENT_UNCLEAN_GENERATIONS_ARCHIVED',
+                  NULL, NULL, ?, ?, ?)
+        """,
+        (incident_id, anchor_run_id, evidence_at_us, evidence_at_us, details),
+    )
 
 
 def _verify_reconciliation(context: _ImportContext) -> tuple[int, int, int]:
@@ -1632,7 +1743,66 @@ def _require_no_legacy_sidecars(source: Path) -> None:
             )
 
 
-def _verify_legacy_source(connection: sqlite3.Connection) -> tuple[tuple[str, ...], str]:
+def _unclosed_generation_archive(
+    connection: sqlite3.Connection,
+    tables: set[str],
+) -> _UnclosedGenerationArchive:
+    digest = hashlib.sha256()
+    if "recorder_generation_v1" not in tables:
+        digest.update(_canonical_bytes({"columns": [], "table": "recorder_generation_v1"}))
+        return _UnclosedGenerationArchive(0, digest.hexdigest(), 0, ())
+    columns = tuple(
+        str(row[1]) for row in connection.execute("PRAGMA table_info(recorder_generation_v1)")
+    )
+    digest.update(_canonical_bytes({"columns": list(columns), "table": "recorder_generation_v1"}))
+    digest.update(b"\n")
+    row_count = 0
+    selection = ", ".join(f'"{column}"' for column in columns)
+    for row in connection.execute(
+        f"SELECT {selection} FROM recorder_generation_v1 "
+        "WHERE stopped_at_utc IS NULL ORDER BY run_id, recorder_generation"
+    ):
+        digest.update(_canonical_bytes(dict(zip(columns, tuple(row), strict=True))))
+        digest.update(b"\n")
+        row_count += 1
+    run_count = int(
+        connection.execute(
+            "SELECT count(DISTINCT run_id) FROM recorder_generation_v1 WHERE stopped_at_utc IS NULL"
+        ).fetchone()[0]
+    )
+    summary: list[Mapping[str, object]] = []
+    for row in connection.execute(
+        "SELECT run_id, count(*), min(recorder_generation), max(recorder_generation) "
+        "FROM recorder_generation_v1 WHERE stopped_at_utc IS NULL "
+        "GROUP BY run_id ORDER BY run_id LIMIT ?",
+        (MAX_UNCLOSED_GENERATION_RUN_SUMMARY,),
+    ):
+        run_id = str(row[0])
+        summary.append(
+            {
+                "generation_count": int(row[1]),
+                "maximum_generation": int(row[3]),
+                "minimum_generation": int(row[2]),
+                "run_id": (
+                    run_id
+                    if len(run_id) <= 128
+                    else f"sha256:{hashlib.sha256(run_id.encode()).hexdigest()}"
+                ),
+            }
+        )
+    return _UnclosedGenerationArchive(
+        row_count=row_count,
+        row_content_digest=digest.hexdigest(),
+        run_count=run_count,
+        run_summary=tuple(summary),
+    )
+
+
+def _verify_legacy_source(
+    connection: sqlite3.Connection,
+    *,
+    accept_quiescent_unclean_generations: bool,
+) -> tuple[tuple[str, ...], str, _UnclosedGenerationArchive]:
     if connection.execute("PRAGMA query_only").fetchone()[0] != 1:
         raise LegacyImportError("legacy source connection is not query-only")
     if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
@@ -1671,14 +1841,10 @@ def _verify_legacy_source(connection: sqlite3.Connection) -> tuple[tuple[str, ..
         and connection.execute("SELECT count(*) FROM recorder_lease").fetchone()[0]
     ):
         raise LegacyImportError("legacy source still has an active recorder lease")
-    if (
-        "recorder_generation_v1" in tables
-        and connection.execute(
-            "SELECT count(*) FROM recorder_generation_v1 WHERE stopped_at_utc IS NULL"
-        ).fetchone()[0]
-    ):
+    archive = _unclosed_generation_archive(connection, tables)
+    if archive.present and not accept_quiescent_unclean_generations:
         raise LegacyImportError("legacy source still has an active recorder generation")
-    return names, digest
+    return names, digest, archive
 
 
 def _write_exclusive(path: Path, content: bytes) -> None:
@@ -1706,12 +1872,15 @@ def import_legacy_database(
     target_database: str | Path,
     *,
     started_at_us: int | None = None,
+    accept_quiescent_unclean_generations: bool = False,
 ) -> LegacyImportResult:
-    """Import one stopped V1 database into a new V2 file; never alter the source."""
+    """Import one quiescent V1 database into a new V2 file; never alter the source."""
 
     source = Path(source_database)
     target = Path(target_database)
     report = target.with_suffix(target.suffix + ".migration-reconciliation.json")
+    if not isinstance(accept_quiescent_unclean_generations, bool):
+        raise LegacyImportError("unclean-generation assertion must be a boolean")
     before_stat = _validate_paths(source, target, report)
     timestamp = (
         int(datetime.now(UTC).timestamp() * 1_000_000) if started_at_us is None else started_at_us
@@ -1734,7 +1903,10 @@ def import_legacy_database(
     published_report = False
     try:
         with _read_only_legacy(source) as legacy:
-            _names, schema_digest = _verify_legacy_source(legacy)
+            _names, schema_digest, unclosed_archive = _verify_legacy_source(
+                legacy,
+                accept_quiescent_unclean_generations=accept_quiescent_unclean_generations,
+            )
             initialize_database(temporary_database, applied_at_us=timestamp)
             with connect_v2(temporary_database) as target_connection:
                 page_size = int(target_connection.execute("PRAGMA page_size").fetchone()[0])
@@ -1748,6 +1920,7 @@ def import_legacy_database(
                     trackers={table: _TableTracker(table) for table in reader.tables},
                 )
                 _import_runs(context)
+                _archive_unclean_generation_incident(context, unclosed_archive)
                 _import_instruments(context)
                 _import_option_instruments(context)
                 _import_market_events(context)
@@ -1760,13 +1933,14 @@ def import_legacy_database(
                 source_rows, imported_rows, omitted_rows = _verify_reconciliation(context)
                 database_digest = _logical_database_digest(target_connection)
                 report_core = {
-                    "format_version": 1,
+                    "format_version": 2,
                     "importer_version": IMPORTER_VERSION,
                     "source_database_hash": source_hash,
                     "source_schema_digest": schema_digest,
                     "source_row_count": source_rows,
                     "imported_row_count": imported_rows,
                     "omitted_row_count": omitted_rows,
+                    "quiescent_unclean_generations": unclosed_archive.to_dict(),
                     "tables": [context.trackers[name].to_dict() for name in reader.tables],
                 }
                 reconciliation_digest = hashlib.sha256(_canonical_bytes(report_core)).hexdigest()

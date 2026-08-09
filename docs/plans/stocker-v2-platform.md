@@ -705,7 +705,17 @@ retry policy.
 
 ### One-way legacy import
 
-Do not alter `/var/lib/stocker/prospective/prospective.sqlite3` in place.
+The attended production cutover uses three non-interchangeable V1 paths:
+
+- import snapshot: `/var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3`;
+- rollback database: `/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3`;
+  and
+- non-active retirement candidate: `/var/lib/stocker/prospective/prospective.sqlite3`
+  plus its exact `-wal` and `-shm` sidecars.
+
+Do not alter either import or rollback database in place. The retirement candidate is
+not an import or rollback source and may be deleted only under its separate exact owner
+authorisation after preservation, no-handle, and dependency gates pass.
 
 Create:
 
@@ -733,19 +743,26 @@ Mapping policy:
 
 Do not expose an active legacy-table wrapper from V2.
 
-Rehearse against copied databases at every schema state through `0026`. Require source
+Rehearse against copied databases at every schema state through `0030`. Require source
 byte identity, deterministic target digest, imported-plus-omitted counts, foreign-key
 checks, `quick_check`, golden generic projections, protected-class preservation, and
-absence of EODHD credentials/config in the target.
+absence of EODHD credentials/config in the target. Default-reject unclosed V1 recorder
+generations. A narrow attended assertion may archive them only for a lease-free source
+with no SQLite sidecars, binding their count, canonical full-row digest, bounded per-run
+summary, and resolved migration incident without modifying or falsely closing source
+rows.
 
 ### Cutover
 
 1. Pre-create V2 users, directories, configuration, release, and service units.
 2. Stop at a planned market-closed window.
-3. Take a checked compressed V1 database backup and preserve SQLite/WAL, raw partitions,
-   sidecars/staging/quarantine, bundles, and required reports as one read-only recovery set.
+3. Reverify the selected import snapshot and checkpoint/reverify the distinct rollback
+   database; preserve both with SQLite/WAL, raw partitions, sidecars/staging/quarantine,
+   bundles, release/configuration/unit hashes, and required reports as one read-only
+   recovery set.
 4. Stop V1 recorder and web; prove no writer/lease remains.
-5. Import from stopped V1 into a temporary V2 database.
+5. After its separate exact approval gates pass, retire only the non-active aggregate
+   and its named sidecars; import the immutable snapshot into a temporary V2 database.
 6. Verify hashes, counts, foreign keys, `quick_check`, ownership, and byte cap.
 7. Atomically rename V2 into place.
 8. Install V2 units/config with no EODHD, transfer, report-ZIP, Parquet, paper, or live fields.
@@ -1025,13 +1042,21 @@ an explicit market-closed runbook operation and was not performed from developme
 Paper/live, accounts, orders, risk, execution, and protected-data boundaries did not
 change. No Phase 9 work began.
 
+Attended-cutover decision (2026-08-09): use the checked 2026-08-05T14:12:03Z snapshot
+as import source, preserve the 2026-08-06T16:31:00Z recorder/web database as rollback,
+and treat the 61 GiB aggregate as a separate retirement candidate. The owner accepted
+loss unique to that aggregate and authorised deletion of only its exact database/WAL/SHM
+paths after preservation and no-handle/dependency proof. The new run mode is
+`prospective_record`; Michael owns the seven-day rollback window. Import and rollback
+sources remain preserved throughout that window.
+
 - **Objective:** migrate once, cut over safely, and delete superseded active code.
 - **Files/packages:** legacy importer, migration fixtures/scripts, deployment/runbooks.
 - **Schema/API:** migration manifest populated; V2 API only.
 - **Modes:** new protected V2 run after cutover.
 - **Paper/live:** still absent.
 - **Deletions:** all post-cutover surfaces listed in Section 9 after the rollback window.
-- **Tests:** every schema through `0026`, deterministic import, source identity,
+- **Tests:** every schema through `0030`, deterministic import, source identity,
   count/hash reconciliation, omissions, cutover/rollback rehearsal, one writer, full
   repository checks, no forbidden active references.
 - **Completion:** only V2 services are active and no prospective runtime reference remains
@@ -1202,10 +1227,13 @@ Owner approval is required before implementation for:
    versioned costs, at most eight horizons, and 30-day maximum.
 6. **IBKR market-data environment:** choose account/environment and verify entitlements
    plus Read-Only API externally. This never authorizes paper execution.
-7. **Cutover:** approve date, downtime, rollback window, and new-run/explicit-gap rule
-   after any V2 callback admission.
-8. **Legacy deletion timing:** delete superseded active source only after rollback window,
-   retaining Git history and the recovery set.
+7. **Cutover (resolved 2026-08-09):** use `prospective_record`; Michael owns a seven-day
+   rollback window; any post-callback rollback creates a new run and explicit gap.
+8. **Legacy deletion timing (partially resolved 2026-08-09):** the exact non-active
+   61 GiB aggregate database/WAL/SHM may be deleted after the recorded preservation,
+   no-handle, and dependency gates. The selected import snapshot, active rollback
+   database, V1 release/configuration/units, and recovery set remain until Michael
+   separately closes the rollback window.
 9. **Web exposure:** retain loopback/SSH as recommended or approve authenticated access
    behind a same-host TLS proxy.
 10. **Hard-cap response:** approve fail-stop instead of deleting unexpired evidence.

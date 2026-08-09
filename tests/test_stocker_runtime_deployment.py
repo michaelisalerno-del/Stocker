@@ -234,6 +234,10 @@ def test_cutover_runbook_preserves_one_writer_and_two_distinct_rollback_paths() 
         "installed v1 units",
         "/opt/stocker/v2-current",
         "/opt/stocker/current",
+        "prospective_record",
+        "michael owns a seven-day rollback",
+        "accept-quiescent-unclean-generations",
+        "canonical full-row digest",
     ):
         assert required in lowered
     assert lowered.index("start the v2 web") < lowered.index("start the v2 recorder")
@@ -243,13 +247,44 @@ def test_cutover_runbook_preserves_one_writer_and_two_distinct_rollback_paths() 
     assert "never remove the v1 units" in lowered
     assert "never repoint\n`/opt/stocker/current`, before the owner" in lowered
     assert "id -u stocker >/dev/null 2>&1" in lowered
-    assert "stat -c '%u' /var/lib/stocker/prospective/prospective.sqlite3" in lowered
-    assert "sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3" in lowered
+    assert (
+        "stat -c '%u' \\\n  /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3"
+        in lowered
+    )
+    assert (
+        "sudo -u stocker sqlite3 \\\n"
+        "  /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3" in lowered
+    )
     assert "disable --now stocker-backup.timer" in lowered
+    assert "stocker-recorder-session-readiness.timer" in lowered
     assert "stocker-backup-daily.timer" not in lowered
     assert "stocker-backup-weekly.timer" not in lowered
     assert "paper trading" not in lowered
     assert "live trading" not in lowered
+
+
+def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+
+    import_source = "/var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3"
+    rollback_database = "/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3"
+    retirement_database = "/var/lib/stocker/prospective/prospective.sqlite3"
+    exact_delete = (
+        "sudo rm -- /var/lib/stocker/prospective/prospective.sqlite3 \\\n"
+        "  /var/lib/stocker/prospective/prospective.sqlite3-wal \\\n"
+        "  /var/lib/stocker/prospective/prospective.sqlite3-shm"
+    )
+
+    assert f"--source {import_source}" in runbook
+    assert f"sudo -u stocker sqlite3 \\\n  {rollback_database}" in runbook
+    assert exact_delete in runbook
+    assert runbook.count(exact_delete) == 1
+    assert "without a glob" in runbook
+    assert "no-handle/dependency" in runbook
+    assert "does not authorise deletion of the import snapshot or rollback database" in runbook
+    assert runbook.index("Before deleting the retirement candidate") < runbook.index(exact_delete)
+    assert runbook.index("--source " + import_source) > runbook.index(exact_delete)
+    assert retirement_database not in runbook[runbook.index("--source ") :]
 
 
 def test_official_api_update_service_uses_the_v2_runtime_cli() -> None:

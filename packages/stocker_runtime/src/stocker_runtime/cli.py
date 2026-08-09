@@ -197,11 +197,26 @@ def legacy_import_command(
     source: Annotated[Path, typer.Option("--source", dir_okay=False)],
     target: Annotated[Path, typer.Option("--target", dir_okay=False)],
     started_at_us: Annotated[int | None, typer.Option("--started-at-us", min=0)] = None,
+    accept_quiescent_unclean_generations: Annotated[
+        bool,
+        typer.Option(
+            "--accept-quiescent-unclean-generations",
+            help=(
+                "Attended cutover assertion for an immutable source with unclosed legacy "
+                "generations; leases and SQLite sidecars still fail closed."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Import an immutable, stopped V1 database into one new V2 target."""
+    """Import an immutable, quiescent V1 database into one new V2 target."""
 
     try:
-        result = import_legacy_database(source, target, started_at_us=started_at_us)
+        result = import_legacy_database(
+            source,
+            target,
+            started_at_us=started_at_us,
+            accept_quiescent_unclean_generations=accept_quiescent_unclean_generations,
+        )
     except LegacyImportError as error:
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
         raise typer.Exit(code=1) from error

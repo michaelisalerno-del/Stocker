@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,10 @@ MIGRATION_NAMES = (
     "0024_m1c_validity_separation_v1.sql",
     "0025_parallel_source_capture_recovery_v1.sql",
     "0026_opening_leader_continuation_v0.sql",
+    "0027_option_risk_accounting_v0.sql",
+    "0028_web_latest_subscription_state_v0.sql",
+    "0029_m1c_diagnostic_quality_flags_v0.sql",
+    "0030_quiet_checkpoint_quote_audit_v0.sql",
 )
 LEGACY_SCIENTIFIC_CLASSIFICATION = (
     "Previous-close front-options context + current intraday H0 stock condition -> "
@@ -240,6 +245,38 @@ def _seed_representative_legacy_rows(connection: sqlite3.Connection) -> None:
         (envelope_id,),
     )
     connection.commit()
+
+
+@pytest.mark.parametrize(
+    ("migration_name", "expected_digest"),
+    (
+        (
+            "0027_option_risk_accounting_v0.sql",
+            "1326438ca6ac196c0a71df64ded75212e3b8ef4d8b36306bb7d5afbdc7894290",
+        ),
+        (
+            "0028_web_latest_subscription_state_v0.sql",
+            "152959a5cf4cd751d085ccec23cb7ccac930d1d536972740fa87af639e2e91f7",
+        ),
+        (
+            "0029_m1c_diagnostic_quality_flags_v0.sql",
+            "40121e046376b49d1a5c35c2d295b5c5f390527f9662cf06861af573d74ac7f4",
+        ),
+        (
+            "0030_quiet_checkpoint_quote_audit_v0.sql",
+            "afb0e2d62ddd671daaaa9fbab7b2100be7efa7649443b47f358acb2f36319d59",
+        ),
+    ),
+)
+def test_import_fixtures_match_the_deployed_schema_prefix_digests(
+    tmp_path: Path,
+    migration_name: str,
+    expected_digest: str,
+) -> None:
+    source = tmp_path / f"{migration_name}.sqlite3"
+    prefix = MIGRATION_NAMES.index(migration_name) + 1
+    with _legacy_database(source, prefix) as legacy:
+        assert legacy_import_module._schema_digest(legacy) == expected_digest
 
 
 @pytest.mark.parametrize("prefix", range(1, len(MIGRATION_NAMES) + 1))
@@ -783,6 +820,133 @@ def test_import_rejects_an_active_legacy_recorder_generation(tmp_path: Path) -> 
         import_legacy_database(source, tmp_path / "target.sqlite3", started_at_us=1)
 
 
+def test_attended_import_archives_quiescent_unclean_generations_without_mutating_source(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "legacy-quiescent-unclean.sqlite3"
+    prefix = MIGRATION_NAMES.index("0030_quiet_checkpoint_quote_audit_v0.sql") + 1
+    with _legacy_database(source, prefix) as legacy:
+        _seed_representative_legacy_rows(legacy)
+        legacy.execute(
+            "INSERT INTO recorder_generation_v1("
+            "run_id, recorder_generation, owner_id, started_at_utc"
+            ") VALUES ('legacy-shadow', 7, 'legacy-owner', "
+            "'2026-01-02T14:30:00+00:00')"
+        )
+        legacy.executemany(
+            "INSERT INTO recorder_generation_v1("
+            "run_id, recorder_generation, owner_id, started_at_utc"
+            ") VALUES (?, 1, 'legacy-owner', '2026-01-01T00:00:00+00:00')",
+            ((f"unbound-{number:03d}",) for number in range(55)),
+        )
+        legacy.commit()
+    source_bytes = source.read_bytes()
+
+    result = import_legacy_database(
+        source,
+        tmp_path / "target.sqlite3",
+        started_at_us=1_800_000_000_000_000,
+        accept_quiescent_unclean_generations=True,
+    )
+    second = import_legacy_database(
+        source,
+        tmp_path / "second-target.sqlite3",
+        started_at_us=1_800_000_000_000_001,
+        accept_quiescent_unclean_generations=True,
+    )
+
+    assert source.read_bytes() == source_bytes
+    assert result.target_digest == second.target_digest
+    report = json.loads(result.reconciliation_path.read_text(encoding="utf-8"))
+    archive = report["quiescent_unclean_generations"]
+    assert archive["disposition"] == "archived_quiescent_unclean"
+    assert archive["row_count"] == 56
+    assert archive["run_count"] == 56
+    assert len(archive["run_summary"]) == 50
+    assert archive["run_summary_truncated"] is True
+    assert archive["source_rows_modified"] is False
+    assert len(archive["row_content_digest"]) == 64
+    with sqlite3.connect(result.target_path) as target:
+        target.row_factory = sqlite3.Row
+        generation = target.execute(
+            "SELECT clean_stop, termination_code FROM recorder_generations "
+            "WHERE run_id='legacy-shadow'"
+        ).fetchone()
+        assert tuple(generation) == (0, "MIGRATED_QUIESCENT_UNCLEAN_ARCHIVED")
+        incident = target.execute(
+            "SELECT resolved_at_us, details_json FROM incidents "
+            "WHERE code='LEGACY_QUIESCENT_UNCLEAN_GENERATIONS_ARCHIVED'"
+        ).fetchone()
+        assert incident["resolved_at_us"] == legacy_import_module._timestamp_us(
+            "2026-01-02T14:30:00+00:00",
+            label="test",
+        )
+        details = json.loads(incident["details_json"])
+        assert details["row_content_digest"] == archive["row_content_digest"]
+        assert details["attended_assertion"] == "accept_quiescent_unclean_generations"
+
+
+def test_attended_unclean_assertion_never_bypasses_a_lease_or_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "legacy-unsafe.sqlite3"
+    prefix = MIGRATION_NAMES.index("0016_prospective_recorder_hardening_v1.sql") + 1
+    with _legacy_database(source, prefix) as legacy:
+        legacy.execute(
+            "INSERT INTO recorder_generation_v1("
+            "run_id, recorder_generation, owner_id, started_at_utc"
+            ") VALUES ('unbound-startup', 1, 'legacy-owner', "
+            "'2026-01-01T00:00:00+00:00')"
+        )
+        legacy.execute(
+            "INSERT INTO recorder_lease VALUES ('recorder', 'run', 'owner', 'x', 'x', 1, 0)"
+        )
+        legacy.commit()
+
+    with pytest.raises(LegacyImportError, match="active recorder lease"):
+        import_legacy_database(
+            source,
+            tmp_path / "lease-target.sqlite3",
+            started_at_us=1,
+            accept_quiescent_unclean_generations=True,
+        )
+
+    with sqlite3.connect(source) as legacy:
+        legacy.execute("DELETE FROM recorder_lease")
+        legacy.commit()
+    Path(f"{source}-shm").write_bytes(b"ambiguous")
+    with pytest.raises(LegacyImportError, match="SHM"):
+        import_legacy_database(
+            source,
+            tmp_path / "sidecar-target.sqlite3",
+            started_at_us=1,
+            accept_quiescent_unclean_generations=True,
+        )
+
+
+def test_wholly_omitted_tables_are_reconciled_without_loading_payload_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "legacy-omitted.sqlite3"
+    with _legacy_database(source, 1) as legacy:
+        _seed_representative_legacy_rows(legacy)
+    original_rows = legacy_import_module._LegacyReader.rows
+
+    def guarded_rows(
+        reader: legacy_import_module._LegacyReader, table: str
+    ) -> Iterator[tuple[tuple[object, ...], sqlite3.Row]]:
+        if table == "audit_event":
+            raise AssertionError("omitted payload table must use primary-key-only iteration")
+        yield from original_rows(reader, table)
+
+    monkeypatch.setattr(legacy_import_module._LegacyReader, "rows", guarded_rows)
+
+    result = import_legacy_database(source, tmp_path / "target.sqlite3", started_at_us=1)
+    report = json.loads(result.reconciliation_path.read_text(encoding="utf-8"))
+    audit = next(item for item in report["tables"] if item["table"] == "audit_event")
+    assert audit["source_rows"] == 1
+    assert audit["omission_reasons"] == {"legacy_runtime_only": 1}
+
+
 def test_import_rejects_schema_tampering_and_publishes_atomically(tmp_path: Path) -> None:
     source = tmp_path / "legacy.sqlite3"
     with _legacy_database(source, 1) as legacy:
@@ -887,3 +1051,53 @@ def test_legacy_import_cli_emits_verified_manifest(tmp_path: Path) -> None:
     assert payload["status"] == "ok"
     assert payload["verification_status"] == "verified"
     assert payload["target_path"] == str(target)
+
+
+def test_legacy_import_cli_requires_the_explicit_quiescent_unclean_assertion(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "legacy-unclean.sqlite3"
+    prefix = MIGRATION_NAMES.index("0016_prospective_recorder_hardening_v1.sql") + 1
+    with _legacy_database(source, prefix) as legacy:
+        _seed_representative_legacy_rows(legacy)
+        legacy.execute(
+            "INSERT INTO recorder_generation_v1("
+            "run_id, recorder_generation, owner_id, started_at_utc"
+            ") VALUES ('legacy-shadow', 1, 'legacy-owner', "
+            "'2026-01-02T14:30:00+00:00')"
+        )
+        legacy.commit()
+
+    rejected = CliRunner().invoke(
+        app,
+        [
+            "legacy",
+            "import",
+            "--source",
+            str(source),
+            "--target",
+            str(tmp_path / "rejected.sqlite3"),
+            "--started-at-us",
+            "1800000000000000",
+        ],
+    )
+    assert rejected.exit_code == 1
+    assert "active recorder generation" in rejected.stdout
+
+    target = tmp_path / "accepted.sqlite3"
+    accepted = CliRunner().invoke(
+        app,
+        [
+            "legacy",
+            "import",
+            "--source",
+            str(source),
+            "--target",
+            str(target),
+            "--started-at-us",
+            "1800000000000000",
+            "--accept-quiescent-unclean-generations",
+        ],
+    )
+    assert accepted.exit_code == 0, accepted.output
+    assert json.loads(accepted.stdout)["verification_status"] == "verified"

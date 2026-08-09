@@ -10,7 +10,13 @@ There is no dual write.
 
 ## Fixed paths and identities
 
-- stopped V1 database: `/var/lib/stocker/prospective/prospective.sqlite3`
+- immutable V1 import snapshot:
+  `/var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3`
+- preserved V1 rollback database:
+  `/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3`
+- separately authorised retirement candidate:
+  `/var/lib/stocker/prospective/prospective.sqlite3` and its exact `-wal` and `-shm`
+  sidecars
 - immutable V1 recovery sets: `/var/lib/stocker/recovery-v1/`
 - new V2 database: `/var/lib/stocker/v2/stocker-v2.sqlite3`
 - V2 backups: `/var/lib/stocker/backups-v2/`
@@ -35,9 +41,14 @@ period; do not copy them into the V2 release tree.
 
 ## 1. Approval and preflight
 
-Record the owner approval, release commit, operator, UTC window, V1 database path,
-intended V2 mode, and rollback-window owner in the change record. Confirm the market is
-closed and no unattended start is pending. The only allowed V2 modes are
+Record the owner approval, release commit, operator, UTC window, all three V1 paths,
+intended V2 mode, and rollback-window owner in the change record. For this attended
+cutover the approved mode is `prospective_record`; Michael owns a seven-day rollback
+window. The owner separately authorised irreversible deletion of only the three exact
+retirement-candidate paths above after the no-handle/dependency and preservation gates
+in Section 2 pass, accepting loss of evidence unique to that aggregate. That approval
+does not authorise deletion of the import snapshot or rollback database. Confirm the
+market is closed and no unattended start is pending. The only allowed V2 modes remain
 `prospective_record` and `shadow`.
 
 Record the exact V1 path returned by `readlink -f /opt/stocker/current`. Replace the
@@ -78,56 +89,117 @@ Both services and both backup timers must still be disabled. Validate the review
 configuration files, their hashes, the release commit, the 8 GiB database/backup caps,
 and that there are no broker account, credential, order, paper, or live fields.
 
-## 2. Preserve the complete V1 recovery set
+## 2. Quiesce and preserve the distinct V1 sources
 
-Stop all V1 scheduling and application processes before copying anything:
+Stop and disable all V1 scheduling and application processes before checking any
+source. The session-readiness timer has a persistent start and requires the recorder,
+so leaving it enabled can restart V1 during import:
 
 ```bash
-sudo systemctl disable --now stocker-backup.timer
-sudo systemctl stop stocker-recorder.service stocker-web.service stocker-backup.service
+sudo systemctl disable --now stocker-backup.timer \
+  stocker-recorder-session-readiness.timer \
+  stocker-recorder.service stocker-web.service
+sudo systemctl stop stocker-backup.service stocker-recorder-session-readiness.service
 sudo systemctl reset-failed stocker-recorder.service stocker-web.service
 ```
 
-Prove that no V1 process has the database open. Checkpoint it, then require both SQLite
-checks to pass and no rollback journal, `-wal`, or `-shm` sidecar to remain:
+The rollback database is the database named by the stopped recorder and web
+configuration; it is not the import source and is never a retirement target. Prove no
+process has it open. Checkpoint it as the preserved V1 writer, require both SQLite
+checks to pass, hash it into the change record, and require no sidecar:
 
 ```bash
 id -u stocker >/dev/null 2>&1
-sudo test "$(stat -c '%U' /var/lib/stocker/prospective/prospective.sqlite3)" = stocker
-sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
+sudo test "$(stat -c '%U' \
+  /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3)" = stocker
+sudo -u stocker sqlite3 \
+  /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3 \
   'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA quick_check; PRAGMA foreign_key_check;'
-sudo lsof -- /var/lib/stocker/prospective/prospective.sqlite3
-sudo test ! -e /var/lib/stocker/prospective/prospective.sqlite3-journal
-sudo test ! -e /var/lib/stocker/prospective/prospective.sqlite3-wal
-sudo test ! -e /var/lib/stocker/prospective/prospective.sqlite3-shm
+sudo lsof -- /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3
+sudo test ! -e \
+  /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3-journal
+sudo test ! -e \
+  /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3-wal
+sudo test ! -e \
+  /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3-shm
+sudo sha256sum /var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3
 ```
 
 The `lsof` command must print no open handle (its normal no-match exit status is
 acceptable). The preserved V1 writer performs the write-requiring checkpoint; the new
 V2 recorder identity is only a read-group member at this point. Do not change V1
 ownership and do not proceed merely because the service manager reports the unit as
-stopped.
+stopped. Preserve its unclosed generation rows unchanged as rollback provenance; do not
+close or rewrite them.
 
-Query `recorder_lease` and `recorder_generation_v1`; there must be no lease and no
-generation with a null stop timestamp. If either exists, abort rather than deleting it.
+Independently verify the selected import snapshot against its manifest. Its SHA-256 is
+`9672d119395e9f2946dcec1e1d8bd7a332a0cb031d3be7a56601117db4217d90` and its
+frozen schema-0030 digest is
+`afb0e2d62ddd671daaaa9fbab7b2100be7efa7649443b47f358acb2f36319d59`.
+Require `quick_check=ok`, no foreign-key rows, no `recorder_lease` row, no SQLite
+sidecar, and byte identity before and after import. Do not update the snapshot's 254
+unclosed generation rows. They are accepted only by the explicit attended assertion in
+Section 3 and must be archived by count, canonical full-row digest, bounded per-run
+summary, and a resolved migration incident.
+
+After recording the pre-change ownership and mode, make only the immutable snapshot
+readable to the V2 reader group. Retain `stocker` as owner, keep the backup directory
+non-world-accessible, and recheck the content hash after the metadata change:
+
+```bash
+sudo chgrp stocker-readers /var/lib/stocker/backups
+sudo chmod 0750 /var/lib/stocker/backups
+sudo chown stocker:stocker-readers \
+  /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
+sudo chmod 0440 /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
+sudo -u stocker-recorder test -r \
+  /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3
+echo '9672d119395e9f2946dcec1e1d8bd7a332a0cb031d3be7a56601117db4217d90  /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3' | \
+  sudo sha256sum --check --strict
+```
+
+Before deleting the retirement candidate, prove the import snapshot and rollback
+database still exist at the exact paths above with their recorded sizes and hashes.
+Prove that no process has any of the three retirement paths open, that the V1 app,
+backup, and session-readiness units are inactive and disabled, and that every remaining
+reference to the candidate is confined to preserved disabled V1 material. Record that
+dependency inventory. Then, and only under the separately recorded owner approval,
+remove exactly these paths without a glob:
+
+```bash
+sudo lsof -- /var/lib/stocker/prospective/prospective.sqlite3 \
+  /var/lib/stocker/prospective/prospective.sqlite3-wal \
+  /var/lib/stocker/prospective/prospective.sqlite3-shm
+sudo rm -- /var/lib/stocker/prospective/prospective.sqlite3 \
+  /var/lib/stocker/prospective/prospective.sqlite3-wal \
+  /var/lib/stocker/prospective/prospective.sqlite3-shm
+```
+
+The removal is irreversible and may lose evidence unique to that aggregate. It does
+not remove either rollback source. Recheck allocated free space before creating V2.
 
 Create one checked, read-only recovery set containing the database, a compressed
-database copy, SQLite/WAL state, raw partitions, sidecars, staging/quarantine, bundles,
-and required reports. Record file sizes and SHA-256 values in its manifest, verify the
-compressed database with `quick_check` and `foreign_key_check`, then remove write bits
-from the set. Preserve it until the owner closes the rollback window. Do not copy V1
+copy of both the import snapshot and rollback database, SQLite/WAL state, raw
+partitions, sidecars, staging/quarantine, bundles, current V1 release/configuration/unit
+hashes, and required reports. Record file sizes and SHA-256 values in its manifest,
+verify disposable restores with `quick_check` and `foreign_key_check`, then remove write
+bits from the set. Preserve the original snapshot, original rollback database, and
+recovery set until Michael closes the seven-day rollback window. Do not copy V1
 credentials or vendor tokens into V2 configuration.
 
 ## 3. One-way import into a new V2 target
 
-The target and its reconciliation file must not exist. The importer opens V1 with
-SQLite `mode=ro&immutable=1`, accepts only frozen schema prefixes through `0026`, and
-writes a new temporary V2 database in the target directory:
+The target and its reconciliation file must not exist. The importer opens the selected
+snapshot with SQLite `mode=ro&immutable=1`, accepts only exact frozen schema prefixes
+through `0030`, and writes a new temporary V2 database in the target directory. The
+following flag is a narrow attended assertion about preserved unclosed generation
+evidence; it never permits a lease, journal, WAL, or SHM:
 
 ```bash
 sudo -u stocker-recorder /opt/stocker/v2-current/.venv/bin/stocker-runtime legacy import \
-  --source /var/lib/stocker/prospective/prospective.sqlite3 \
-  --target /var/lib/stocker/v2/stocker-v2.sqlite3
+  --source /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3 \
+  --target /var/lib/stocker/v2/stocker-v2.sqlite3 \
+  --accept-quiescent-unclean-generations
 sudo /usr/local/libexec/stocker-prepare-v2-sqlite-boundary
 ```
 
@@ -145,13 +217,17 @@ Review `<target>.migration-reconciliation.json` and the matching
 - the frozen source schema digest matches the recorded prefix;
 - `source_row_count = imported_row_count + omitted_row_count` globally and per table;
 - every omission has a fixed reason and every table has a row-classification hash;
+- the quiescent-unclean archive records 254 rows, its canonical full-row digest, its
+  bounded per-run summary, no source mutation, and the matching resolved migration
+  incident;
 - the manifest reconciliation digest and target digest match the sidecar;
 - `PRAGMA quick_check` returns `ok` and `PRAGMA foreign_key_check` returns no rows;
 - the target is owned by `stocker-recorder:stocker-readers`, mode `0640`, and no larger
   than 8 GiB; and
 - imported runs preserve protected data classes and are stopped.
 
-Do not proceed if the source hash changed, a WAL appeared, any row is unreconciled, or
+Do not proceed if the source hash changed, a lease or SQLite sidecar appeared, any row
+is unreconciled, or
 the target contains an account, order, fill, broker-position, transfer, report-package,
 or legacy vendor runtime surface.
 

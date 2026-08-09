@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import stat
 import sys
 import zipfile
@@ -79,6 +80,7 @@ PROVENANCE_KEYS = frozenset(
         "registered_by",
     }
 )
+PROTOBUF_REQUIREMENT = re.compile(r"protobuf[ \t]*==[ \t]*5\.29\.5", flags=re.ASCII)
 
 
 class ArtifactVerificationError(RuntimeError):
@@ -540,7 +542,7 @@ def _validate_metadata(contents: dict[str, bytes]) -> None:
     ):
         _raise("wheel package identity is invalid")
     requirements = [str(value).strip() for value in metadata.get_all("Requires-Dist", [])]
-    if requirements != ["protobuf==5.29.5"]:
+    if len(requirements) != 1 or PROTOBUF_REQUIREMENT.fullmatch(requirements[0]) is None:
         _raise("wheel dependency declaration is invalid")
 
     wheel_metadata = BytesParser(policy=default).parsebytes(contents[wheel_path])

@@ -132,16 +132,20 @@ def _secure_provenance(
     return link, target, trusted_root
 
 
-def _wheel_contents(source_files: dict[str, bytes]) -> dict[str, bytes]:
+def _wheel_contents(
+    source_files: dict[str, bytes],
+    *,
+    requirement: str = "protobuf==5.29.5",
+) -> dict[str, bytes]:
     return {
         **source_files,
         f"{DIST_INFO}/METADATA": (
-            b"Metadata-Version: 2.4\n"
-            b"Name: ibapi\n"
-            b"Version: 10.49.1\n"
-            b"Requires-Dist: protobuf==5.29.5\n"
-            b"\n"
-        ),
+            "Metadata-Version: 2.4\n"
+            "Name: ibapi\n"
+            "Version: 10.49.1\n"
+            f"Requires-Dist: {requirement}\n"
+            "\n"
+        ).encode("ascii"),
         f"{DIST_INFO}/WHEEL": (
             b"Wheel-Version: 1.0\n"
             b"Generator: reviewed-test-builder\n"
@@ -161,8 +165,9 @@ def _write_wheel(
     bad_record_path: str | None = None,
     symlink_name: str | None = None,
     duplicate_name: str | None = None,
+    requirement: str = "protobuf==5.29.5",
 ) -> None:
-    contents = _wheel_contents(source_files)
+    contents = _wheel_contents(source_files, requirement=requirement)
     if extra is not None:
         contents[extra[0]] = extra[1]
     contents[f"{DIST_INFO}/RECORD"] = _record_bytes(
@@ -341,6 +346,60 @@ def test_valid_wheel_and_installed_distribution_are_accepted(
         trust_anchor=trusted_root.parent,
         required_uid=os.getuid(),
     )
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    (
+        "protobuf ==5.29.5",
+        "protobuf== 5.29.5",
+        "protobuf == 5.29.5",
+        "protobuf\t==\t5.29.5",
+    ),
+)
+def test_wheel_accepts_only_semantically_exact_protobuf_pin_whitespace(
+    tmp_path: Path,
+    verifier: ModuleType,
+    requirement: str,
+) -> None:
+    source = tmp_path / "pythonclient"
+    source_files = _source_files(source)
+    link, target, trusted_root = _secure_provenance(tmp_path, source_files)
+    wheel = tmp_path / "case/ibapi-10.49.1-py3-none-any.whl"
+    wheel.parent.mkdir()
+    _write_wheel(wheel, source_files, requirement=requirement)
+
+    _verify_wheel(verifier, wheel, source, link, target, trusted_root)
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    (
+        "Protobuf==5.29.5",
+        "google-protobuf==5.29.5",
+        "protobuf>=5.29.5",
+        "protobuf===5.29.5",
+        "protobuf==5.29.4",
+        "protobuf[extra]==5.29.5",
+        "protobuf==5.29.5; python_version >= '3.12'",
+        "protobuf @ https://example.invalid/protobuf.whl",
+        "protobuf==5.29.5\nRequires-Dist: other==1.0",
+    ),
+)
+def test_wheel_rejects_every_non_exact_protobuf_requirement(
+    tmp_path: Path,
+    verifier: ModuleType,
+    requirement: str,
+) -> None:
+    source = tmp_path / "pythonclient"
+    source_files = _source_files(source)
+    link, target, trusted_root = _secure_provenance(tmp_path, source_files)
+    wheel = tmp_path / "case/ibapi-10.49.1-py3-none-any.whl"
+    wheel.parent.mkdir()
+    _write_wheel(wheel, source_files, requirement=requirement)
+
+    with pytest.raises(verifier.ArtifactVerificationError):
+        _verify_wheel(verifier, wheel, source, link, target, trusted_root)
 
 
 def test_release_boundary_accepts_exact_manifests_and_protected_paths(

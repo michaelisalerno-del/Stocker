@@ -233,15 +233,59 @@ the V1 app, backup, and session-readiness units are inactive and disabled, and t
 every remaining reference to the candidate is confined to preserved disabled V1
 material. Record that dependency inventory. Then, and only after the preservation,
 no-handle, dependency, and separately recorded owner-approval gates all pass, remove
-exactly these paths without a glob:
+exactly these paths without a glob. A plain `lsof` invocation is not a gate: it exits
+zero when it finds the unsafe state. Runtime-mask the stopped V1 surface, assert every
+unit immediately before deletion, and invoke `rm` only from the guarded function:
 
 ```bash
-sudo lsof -- /var/lib/stocker/prospective/prospective.sqlite3 \
-  /var/lib/stocker/prospective/prospective.sqlite3-wal \
-  /var/lib/stocker/prospective/prospective.sqlite3-shm
-sudo rm -- /var/lib/stocker/prospective/prospective.sqlite3 \
-  /var/lib/stocker/prospective/prospective.sqlite3-wal \
-  /var/lib/stocker/prospective/prospective.sqlite3-shm
+sudo systemctl mask --runtime --now \
+  stocker-recorder.service stocker-web.service \
+  stocker-backup.service stocker-backup.timer \
+  stocker-recorder-session-readiness.service \
+  stocker-recorder-session-readiness.timer
+retire_authorised_v1_candidate() {
+  local unit handle_report lsof_status
+  for unit in \
+    stocker-recorder.service stocker-web.service \
+    stocker-backup.service stocker-backup.timer \
+    stocker-recorder-session-readiness.service \
+    stocker-recorder-session-readiness.timer; do
+    if sudo systemctl is-active --quiet "$unit"; then
+      echo "refusing retirement: active V1 unit $unit" >&2
+      return 78
+    fi
+  done
+  for unit in \
+    stocker-recorder.service stocker-web.service \
+    stocker-backup.timer stocker-recorder-session-readiness.timer; do
+    if sudo systemctl is-enabled --quiet "$unit"; then
+      echo "refusing retirement: enabled V1 unit $unit" >&2
+      return 78
+    fi
+  done
+  sudo test -f /var/lib/stocker/prospective/prospective.sqlite3 || return 78
+  sudo test -f /var/lib/stocker/prospective/prospective.sqlite3-wal || return 78
+  sudo test -f /var/lib/stocker/prospective/prospective.sqlite3-shm || return 78
+  if handle_report="$(sudo lsof -Fn -- \
+    /var/lib/stocker/prospective/prospective.sqlite3 \
+    /var/lib/stocker/prospective/prospective.sqlite3-wal \
+    /var/lib/stocker/prospective/prospective.sqlite3-shm 2>&1)"; then
+    echo "refusing retirement: open V1 handle detected" >&2
+    printf '%s\n' "$handle_report" >&2
+    return 78
+  else
+    lsof_status=$?
+  fi
+  if test "$lsof_status" -ne 1 || test -n "$handle_report"; then
+    echo "refusing retirement: lsof could not prove an empty handle set" >&2
+    printf '%s\n' "$handle_report" >&2
+    return 78
+  fi
+  sudo rm -- /var/lib/stocker/prospective/prospective.sqlite3 \
+    /var/lib/stocker/prospective/prospective.sqlite3-wal \
+    /var/lib/stocker/prospective/prospective.sqlite3-shm
+}
+retire_authorised_v1_candidate
 ```
 
 The removal is irreversible and may lose evidence unique to that aggregate. It does
@@ -314,28 +358,54 @@ following flag is a narrow attended assertion about preserved unclosed generatio
 evidence; it never permits a lease, journal, WAL, or SHM:
 
 ```bash
-sudo setfacl -m u:stocker-recorder:--x /var/lib/stocker/backups
-sudo setfacl -m u:stocker-recorder:r-- "$STOCKER_V1_SNAPSHOT"
-sudo -u stocker-recorder test -r "$STOCKER_V1_SNAPSHOT"
-sudo -u stocker-web test ! -r "$STOCKER_V1_SNAPSHOT"
-sudo -u stocker-backup test ! -r "$STOCKER_V1_SNAPSHOT"
 revoke_v1_snapshot_access() {
-  sudo setfacl -x u:stocker-recorder "$STOCKER_V1_SNAPSHOT"
-  sudo setfacl -x u:stocker-recorder /var/lib/stocker/backups
-  sudo chmod 0400 "$STOCKER_V1_SNAPSHOT"
+  local snapshot_acl backup_acl
+  snapshot_acl="$(sudo getfacl -cp "$STOCKER_V1_SNAPSHOT")" || return 78
+  case "$snapshot_acl" in
+    *"user:stocker-recorder:"*)
+      sudo setfacl -x u:stocker-recorder "$STOCKER_V1_SNAPSHOT" || return 78
+      ;;
+  esac
+  backup_acl="$(sudo getfacl -cp /var/lib/stocker/backups)" || return 78
+  case "$backup_acl" in
+    *"user:stocker-recorder:"*)
+      sudo setfacl -x u:stocker-recorder /var/lib/stocker/backups || return 78
+      ;;
+  esac
+  sudo chmod 0400 "$STOCKER_V1_SNAPSHOT" || return 78
+  snapshot_acl="$(sudo getfacl -cp "$STOCKER_V1_SNAPSHOT")" || return 78
+  backup_acl="$(sudo getfacl -cp /var/lib/stocker/backups)" || return 78
+  case "$snapshot_acl$backup_acl" in
+    *"user:stocker-recorder:"*) return 78 ;;
+  esac
+  sudo -u stocker-recorder test ! -r "$STOCKER_V1_SNAPSHOT" || return 78
+  sudo -u stocker-web test ! -r "$STOCKER_V1_SNAPSHOT" || return 78
+  sudo -u stocker-backup test ! -r "$STOCKER_V1_SNAPSHOT" || return 78
 }
+fail_after_snapshot_revoke() {
+  if ! revoke_v1_snapshot_access; then
+    echo "cutover stopped: legacy snapshot ACL cleanup failed" >&2
+  fi
+  exit 78
+}
+sudo setfacl -m u:stocker-recorder:--x /var/lib/stocker/backups || \
+  fail_after_snapshot_revoke
+sudo setfacl -m u:stocker-recorder:r-- "$STOCKER_V1_SNAPSHOT" || \
+  fail_after_snapshot_revoke
+sudo -u stocker-recorder test -r "$STOCKER_V1_SNAPSHOT" || \
+  fail_after_snapshot_revoke
+sudo -u stocker-web test ! -r "$STOCKER_V1_SNAPSHOT" || \
+  fail_after_snapshot_revoke
+sudo -u stocker-backup test ! -r "$STOCKER_V1_SNAPSHOT" || \
+  fail_after_snapshot_revoke
 if ! sudo -u stocker-recorder \
   /opt/stocker/v2-current/.venv/bin/stocker-runtime legacy import \
     --source /var/lib/stocker/backups/prospective-20260805T141203Z.sqlite3 \
     --target /var/lib/stocker/v2/stocker-v2.sqlite3 \
     --accept-quiescent-unclean-generations; then
-  revoke_v1_snapshot_access
-  exit 1
+  fail_after_snapshot_revoke
 fi
-revoke_v1_snapshot_access
-sudo -u stocker-recorder test ! -r "$STOCKER_V1_SNAPSHOT"
-sudo -u stocker-web test ! -r "$STOCKER_V1_SNAPSHOT"
-sudo -u stocker-backup test ! -r "$STOCKER_V1_SNAPSHOT"
+revoke_v1_snapshot_access || exit 78
 sudo /usr/local/libexec/stocker-prepare-v2-sqlite-boundary
 ```
 
@@ -441,8 +511,8 @@ release, its untouched database, and both recovery sets remain preserved.
 If V2 has not admitted its first callback, stop V2, preserve its logs and failed import
 artifacts, restore the prior release/service pointer, and restart the untouched V1
 database. Restore the rollback database's recorded V1 owner, group, mode, and ACL from
-`access-control-before.txt` before starting its sole V1 writer. Do not copy any V2 row
-into V1.
+`access-control-before.txt`, and remove the V1 units' runtime masks, before starting its
+sole V1 writer. Do not copy any V2 row into V1.
 
 ### After first callback
 

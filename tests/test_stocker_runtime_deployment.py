@@ -209,7 +209,11 @@ def test_cutover_precreates_reader_boundary_before_import_and_verifies_afterward
     assert "chgrp stocker-readers /var/lib/stocker/backups" not in runbook
     assert "chown stocker:stocker-readers" not in runbook
     revoke = runbook.index("revoke_v1_snapshot_access")
+    grant = runbook.index("setfacl -m u:stocker-recorder:r--")
     assert revoke < importer
+    assert revoke < grant < importer
+    assert "fail_after_snapshot_revoke" in runbook[revoke:importer]
+    assert "getfacl -cp" in runbook[revoke:importer]
     assert runbook.index("setfacl -x u:stocker-recorder") < verifier
     assert runbook.index("sudo -u stocker-web test ! -r") < importer
     assert runbook.rindex("sudo -u stocker-web test ! -r") < verifier
@@ -283,19 +287,27 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     retirement_database = "/var/lib/stocker/prospective/prospective.sqlite3"
     exact_delete = (
         "sudo rm -- /var/lib/stocker/prospective/prospective.sqlite3 \\\n"
-        "  /var/lib/stocker/prospective/prospective.sqlite3-wal \\\n"
-        "  /var/lib/stocker/prospective/prospective.sqlite3-shm"
+        "    /var/lib/stocker/prospective/prospective.sqlite3-wal \\\n"
+        "    /var/lib/stocker/prospective/prospective.sqlite3-shm"
     )
 
     assert f"--source {import_source}" in runbook
     assert f"sudo -u stocker sqlite3 \\\n  {rollback_database}" in runbook
     assert exact_delete in runbook
     assert runbook.count(exact_delete) == 1
+    guarded_delete = runbook.index("retire_authorised_v1_candidate()")
+    deletion = runbook.index(exact_delete)
+    guard_call = runbook.index("retire_authorised_v1_candidate\n")
+    assert guarded_delete < deletion < guard_call
+    assert "systemctl mask --runtime --now" in runbook[:deletion]
+    assert "systemctl is-active --quiet" in runbook[guarded_delete:deletion]
+    assert "systemctl is-enabled --quiet" in runbook[guarded_delete:deletion]
+    assert "lsof_status" in runbook[guarded_delete:deletion]
+    assert 'test "$lsof_status" -ne 1' in runbook[guarded_delete:deletion]
     assert "without a glob" in runbook
     assert "no-handle/dependency" in runbook
     assert "does not authorise deletion of the import snapshot or rollback database" in runbook
     preservation = runbook.index("pre-deletion\npreservation manifest")
-    deletion = runbook.index(exact_delete)
     compressed_copies = runbook.index("checked\ncompressed recovery copies")
     recorder_grant = runbook.index("setfacl -m u:stocker-recorder:r--")
     importer = runbook.index("--source " + import_source)

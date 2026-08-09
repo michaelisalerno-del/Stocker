@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import sys
@@ -24,6 +25,18 @@ from stocker_runtime.ingestion.ibkr_api import (
 )
 
 ROOT = Path(__file__).parents[1]
+
+
+def _install_fake_concrete_client(
+    package: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_path = package / "client.py"
+    client_path.write_text("class EClient:\n    pass\n", encoding="utf-8")
+    client_module = ModuleType("ibapi.client")
+    client_module.__file__ = str(client_path)
+    client_module.EClient = type("EClient", (), {})
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
 
 
 def test_installed_ibapi_without_official_provenance_is_rejected(
@@ -165,6 +178,7 @@ def test_matching_installed_ibapi_and_provenance_are_accepted(
     fake_ibapi.__file__ = str(module_path)
     fake_ibapi.__version__ = "10.48.1"
     monkeypatch.setitem(sys.modules, "ibapi", fake_ibapi)
+    _install_fake_concrete_client(package, monkeypatch)
     monkeypatch.setattr(ibkr_module, "official_ibkr_api_available", lambda: True)
     tree_hash = python_package_tree_sha256(package)
     provenance = tmp_path / "provenance.json"
@@ -194,6 +208,69 @@ def test_matching_installed_ibapi_and_provenance_are_accepted(
     )
 
     assert ibkr_module.require_official_ibkr_api(provenance) is fake_ibapi
+
+
+def test_verified_ibapi_root_with_unimportable_concrete_client_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "ibapi"
+    package.mkdir()
+    module_path = package / "__init__.py"
+    module_path.write_text('__version__ = "10.49.1"\n', encoding="utf-8")
+    fake_ibapi = ModuleType("ibapi")
+    fake_ibapi.__file__ = str(module_path)
+    fake_ibapi.__version__ = "10.49.1"
+    monkeypatch.setitem(sys.modules, "ibapi", fake_ibapi)
+    monkeypatch.setattr(ibkr_module, "official_ibkr_api_available", lambda: True)
+    tree_hash = python_package_tree_sha256(package)
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(
+        OfficialIBKRApiProvenance(
+            schema_version="1",
+            source="interactive_brokers_official_tws_api",
+            release_channel="latest",
+            platform="mac_unix",
+            api_version="10.49.1",
+            release_date=date(2026, 8, 4),
+            official_page_url="https://interactivebrokers.github.io/",
+            official_page_checked_at_utc=datetime(2026, 8, 8, 9, tzinfo=UTC),
+            source_url=(
+                "https://interactivebrokers.github.io/downloads/twsapi_macunix.1049.01.zip"
+            ),
+            archive_filename="twsapi_macunix.1049.01.zip",
+            archive_sha256="0" * 64,
+            source_tree_sha256=tree_hash,
+            installed_tree_sha256=tree_hash,
+            registered_at_utc=datetime(2026, 8, 8, 9, 5, tzinfo=UTC),
+            registered_by="test-operator",
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    real_import = builtins.__import__
+    attempted: list[str] = []
+
+    def import_without_protobuf(
+        name: str,
+        globals_: object = None,
+        locals_: object = None,
+        fromlist: object = (),
+        level: int = 0,
+    ) -> object:
+        if name == "ibapi.client":
+            attempted.append(name)
+            raise ModuleNotFoundError("No module named 'google.protobuf'")
+        return real_import(name, globals_, locals_, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_protobuf)
+
+    with pytest.raises(
+        ibkr_module.OfficialIBKRDependencyError,
+        match="verified ibapi client import failed",
+    ):
+        ibkr_module.require_official_ibkr_api(provenance)
+
+    assert attempted == ["ibapi.client"]
 
 
 def test_installed_ibapi_version_must_match_official_provenance(
@@ -456,6 +533,7 @@ def test_update_status_for_another_install_is_rejected(
     fake_ibapi.__file__ = str(module_path)
     fake_ibapi.__version__ = "10.48.1"
     monkeypatch.setitem(sys.modules, "ibapi", fake_ibapi)
+    _install_fake_concrete_client(package, monkeypatch)
     monkeypatch.setattr(ibkr_module, "official_ibkr_api_available", lambda: True)
     tree_hash = python_package_tree_sha256(package)
     provenance = tmp_path / "provenance.json"
@@ -519,6 +597,7 @@ def test_verified_ibapi_without_update_status_is_not_reported_current(
     fake_ibapi.__file__ = str(module_path)
     fake_ibapi.__version__ = "10.48.1"
     monkeypatch.setitem(sys.modules, "ibapi", fake_ibapi)
+    _install_fake_concrete_client(package, monkeypatch)
     monkeypatch.setattr(ibkr_module, "official_ibkr_api_available", lambda: True)
     tree_hash = python_package_tree_sha256(package)
     provenance = tmp_path / "provenance.json"
@@ -574,6 +653,7 @@ def test_stale_or_future_update_status_is_blocked(
     fake_ibapi.__file__ = str(module_path)
     fake_ibapi.__version__ = "10.48.1"
     monkeypatch.setitem(sys.modules, "ibapi", fake_ibapi)
+    _install_fake_concrete_client(package, monkeypatch)
     monkeypatch.setattr(ibkr_module, "official_ibkr_api_available", lambda: True)
     tree_hash = python_package_tree_sha256(package)
     provenance_record = OfficialIBKRApiProvenance(

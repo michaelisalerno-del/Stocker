@@ -99,6 +99,27 @@ def test_cutover_release_contains_only_v2_stocker_application_services() -> None
     assert "configs/prospective" not in active_surface
 
 
+def test_cutover_builds_official_client_dependencies_offline_before_release_publish() -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+    regular_wheel = runbook.index('sudo test -f "$STOCKER_PROTOBUF_WHEEL"')
+    exact_wheel = runbook.index("protobuf-5.29.5-*.whl")
+    manifest_binding = runbook.index("NR == 1 && length($1) == 64")
+    protobuf_hash = runbook.index('sha256sum --check "$STOCKER_PROTOBUF_WHEEL_SHA256"')
+    protobuf_install = runbook.index('--offline --no-deps "$STOCKER_PROTOBUF_WHEEL"')
+    ibapi_install = runbook.index('--offline --no-deps "$STOCKER_IBAPI_SOURCE"')
+    metadata_gate = runbook.index('requires("ibapi")')
+    concrete_import_gate = runbook.index("from ibapi.client import EClient")
+    publish = runbook.index('sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current')
+
+    assert "--offline" in runbook[protobuf_hash:ibapi_install]
+    assert "--no-deps" in runbook[protobuf_hash:ibapi_install]
+    assert regular_wheel < exact_wheel < manifest_binding < protobuf_hash
+    assert protobuf_hash < protobuf_install < ibapi_install
+    assert ibapi_install < metadata_gate < concrete_import_gate < publish
+    assert 'version("ibapi") != "10.49.1"' in runbook[metadata_gate:publish]
+    assert 'version("protobuf") != "5.29.5"' in runbook[metadata_gate:publish]
+
+
 def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() -> None:
     deployment_files = [
         ROOT / "deploy/stocker-recorder.env.example",

@@ -447,6 +447,33 @@ def require_official_ibkr_api(provenance_path: str | Path | None = None) -> Modu
         raise OfficialIBKRDependencyError(
             f"{IBKR_PROVENANCE_BLOCKER}: installed ibapi version mismatch"
         )
+    try:
+        client_module = __import__("ibapi.client", fromlist=("EClient",))
+    except Exception as error:
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_DEPENDENCY_BLOCKER}: verified ibapi client import failed"
+        ) from error
+    if not isinstance(client_module, ModuleType) or not isinstance(
+        getattr(client_module, "EClient", None), type
+    ):
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_DEPENDENCY_BLOCKER}: verified ibapi client is invalid"
+        )
+    try:
+        client_root = _module_package_root(client_module)
+        client_tree_sha256 = python_package_tree_sha256(client_root)
+    except OfficialIBKRApiProvenanceError as error:
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: imported ibapi client path is invalid"
+        ) from error
+    if client_root.resolve() != imported_root.resolve():
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: imported ibapi client path changed during verification"
+        )
+    if client_tree_sha256 != provenance.installed_tree_sha256:
+        raise OfficialIBKRDependencyError(
+            f"{IBKR_PROVENANCE_BLOCKER}: imported ibapi tree changed during client verification"
+        )
     return module
 
 

@@ -52,18 +52,64 @@ market is closed and no unattended start is pending. The only allowed V2 modes r
 `prospective_record` and `shadow`.
 
 Record the exact V1 path returned by `readlink -f /opt/stocker/current`. Replace the
-placeholder below with the reviewed V2 commit, then prepare the separate V2 pointer,
-users, and paths without starting services:
+placeholder below with the reviewed V2 commit. The selected official
+`ibapi==10.49.1` distribution declares exactly `protobuf==5.29.5`. The release
+builder must receive that protobuf wheel as a separately reviewed offline artifact;
+the uv cache is not evidence that the artifact exists. Record an exact regular wheel
+path and a checked SHA-256 manifest whose entry names that exact path. Install both
+artifacts while the versioned release is still unpublished, then verify installed
+metadata and concrete imports. Never modify the release environment after publishing
+the V2 pointer.
+
+Prepare the separate V2 pointer, users, and paths without starting services:
 
 ```bash
 export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT
+export STOCKER_IBAPI_SOURCE=/var/lib/stocker/ibkr-api/install/IBJts/source/pythonclient
+export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl
+export STOCKER_PROTOBUF_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/protobuf-5.29.5-wheel.sha256
+export STOCKER_UV_BIN="$(command -v uv)"
 test "$STOCKER_V2_RELEASE" != \
   /opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT || exit 78
 command -v setfacl >/dev/null || exit 78
 command -v getfacl >/dev/null || exit 78
+test -x "$STOCKER_UV_BIN" || exit 78
+test "${STOCKER_PROTOBUF_WHEEL##*/}" != REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl || exit 78
 sudo test -d "$STOCKER_V2_RELEASE"
+sudo test -x "$STOCKER_V2_RELEASE/.venv/bin/python"
 sudo test "$(readlink -f /opt/stocker/current)" != "$STOCKER_V2_RELEASE"
 sudo test ! -e /opt/stocker/v2-current
+sudo test -d "$STOCKER_IBAPI_SOURCE"
+sudo test ! -L "$STOCKER_IBAPI_SOURCE"
+sudo test -f "$STOCKER_PROTOBUF_WHEEL"
+sudo test ! -L "$STOCKER_PROTOBUF_WHEEL"
+sudo test -f "$STOCKER_PROTOBUF_WHEEL_SHA256"
+sudo test ! -L "$STOCKER_PROTOBUF_WHEEL_SHA256"
+case "${STOCKER_PROTOBUF_WHEEL##*/}" in
+  protobuf-5.29.5-*.whl) ;;
+  *) exit 78 ;;
+esac
+sudo awk -v expected="$STOCKER_PROTOBUF_WHEEL" \
+  'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ && $2 == expected { ok = 1 } END { exit !(NR == 1 && ok) }' \
+  "$STOCKER_PROTOBUF_WHEEL_SHA256"
+sudo sha256sum --check "$STOCKER_PROTOBUF_WHEEL_SHA256"
+sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps "$STOCKER_PROTOBUF_WHEEL"
+sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps "$STOCKER_IBAPI_SOURCE"
+sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
+from importlib.metadata import requires, version
+
+if "protobuf==5.29.5" not in (requires("ibapi") or ()):
+    raise SystemExit("ibapi declared dependency mismatch")
+if version("ibapi") != "10.49.1":
+    raise SystemExit("ibapi installed version mismatch")
+if version("protobuf") != "5.29.5":
+    raise SystemExit("protobuf installed version mismatch")
+import google.protobuf
+from ibapi.client import EClient
+
+if not isinstance(EClient, type):
+    raise SystemExit("ibapi concrete client is invalid")
+PY
 sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current
 sudo test "$(readlink -f /opt/stocker/v2-current)" = "$STOCKER_V2_RELEASE"
 getent group stocker-readers >/dev/null || sudo groupadd --system stocker-readers

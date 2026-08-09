@@ -310,25 +310,34 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert f"sudo -u stocker sqlite3 \\\n  {rollback_database}" in runbook
     assert exact_delete in runbook
     assert runbook.count(exact_delete) == 1
-    fence_start = runbook.index("assert_v1_fence_condition_false()")
-    fence_install = runbook.index("install_v1_runtime_start_fence()")
+    fence_start = runbook.index("install_v1_runtime_start_fence()")
     guarded_delete = runbook.index("retire_authorised_v1_candidate()")
     deletion = runbook.index(exact_delete)
     guard_call = runbook.index("retire_authorised_v1_candidate\n")
-    assert fence_start < fence_install < guarded_delete < deletion < guard_call
+    assert fence_start < guarded_delete < deletion < guard_call
     deletion_guard = runbook[fence_start:deletion]
     assert "install_v1_runtime_start_fence || return 78" in deletion_guard
     assert "RefuseManualStart=yes" in deletion_guard
     assert "ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL" in deletion_guard
-    assert "systemd-analyze condition" in deletion_guard
-    assert 'systemd-analyze condition "ConditionPathExists=/"' in deletion_guard
-    assert "sudo systemd-analyze condition" not in deletion_guard
+    verify_command = 'LC_ALL=C systemd-analyze verify "$unit" >/dev/null 2>&1 || return 78'
+    condition_command = 'LC_ALL=C systemd-analyze condition --unit="$unit"'
+    assert verify_command in deletion_guard
+    assert condition_command in deletion_guard
+    assert "condition_output=" in deletion_guard
+    assert '*"ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL failed."*) ;;' in deletion_guard
     assert 'test "$condition_status" -eq 1' in deletion_guard
+    assert "assert_v1_fence_condition_false" not in deletion_guard
+    assert 'ConditionPathExists=/"' not in deletion_guard
     assert "--property=FragmentPath --value" in deletion_guard
     assert "--property=RefuseManualStart --value" in deletion_guard
     assert "--property=DropInPaths --value" in deletion_guard
     assert "--property=ActiveState --value" in deletion_guard
     assert "--property=Conditions --value" not in deletion_guard
+    assert (
+        deletion_guard.index(verify_command)
+        < deletion_guard.index(condition_command)
+        < deletion_guard.index("--property=RefuseManualStart --value")
+    )
     assert 'test "$fragment_path" = "/etc/systemd/system/$unit"' in deletion_guard
     assert 'test "$refuse_manual" = yes' in deletion_guard
     assert 'if sudo systemctl start "$unit"' in deletion_guard
@@ -369,15 +378,23 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert "load_state=" in common_rollback_commands
     assert "fragment_path=" in common_rollback_commands
     assert "refuse_manual=" in common_rollback_commands
-    assert "condition_status=" in common_rollback_commands
+    assert "merged_unit=" in common_rollback_commands
     assert "dropin_paths=" in common_rollback_commands
     assert "--property=LoadState --value" in common_rollback_commands
     assert "--property=DropInPaths --value" in common_rollback_commands
     assert "--property=Conditions --value" not in common_rollback_commands
-    assert "systemd-analyze condition" in common_rollback_commands
-    assert 'systemd-analyze condition "ConditionPathExists=/"' in common_rollback_commands
-    assert "sudo systemd-analyze condition" not in common_rollback_commands
-    assert 'test "$condition_status" -eq 1' in common_rollback_commands
+    rollback_verify = 'LC_ALL=C systemd-analyze verify "$unit" >/dev/null 2>&1 || exit 78'
+    assert rollback_verify in common_rollback_commands
+    assert 'merged_unit="$(sudo systemctl cat "$unit")"' in common_rollback_commands
+    assert '*"$STOCKER_V1_FENCE_SENTINEL"*) exit 78' in common_rollback_commands
+    assert "systemd-analyze condition" not in common_rollback_commands
+    assert "assert_v1_fence_condition_false" not in common_rollback_commands
+    assert (
+        common_rollback_commands.index("sudo systemctl daemon-reload")
+        < common_rollback_commands.index(rollback_verify)
+        < common_rollback_commands.index('merged_unit="$(sudo systemctl cat "$unit")"')
+        < common_rollback_commands.index("--property=RefuseManualStart --value")
+    )
     assert 'test "$refuse_manual" = no' in common_rollback_commands
     assert "setfacl --restore=" in common_rollback_commands
     assert "rollback-access-control-before.txt" in common_rollback_commands
@@ -410,8 +427,13 @@ def test_v1_runtime_start_fence_is_exact_reversible_and_preserves_unit_files() -
     assert 'sudo test -f "$dropin"' in fence
     assert 'sudo test ! -L "$dropin"' in fence
     assert 'test "$actual_fence" = "$expected_fence"' in fence
-    assert "systemd-analyze condition" in fence
+    assert 'LC_ALL=C systemd-analyze verify "$unit"' in fence
+    assert 'LC_ALL=C systemd-analyze condition --unit="$unit"' in fence
+    assert "condition_output=" in fence
+    assert '*"ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL failed."*) ;;' in fence
     assert 'test "$condition_status" -eq 1' in fence
+    assert "assert_v1_fence_condition_false" not in fence
+    assert 'ConditionPathExists=/"' not in fence
     assert "--property=Conditions --value" not in fence
     assert 'sudo test -f "/etc/systemd/system/$unit"' in fence
     assert 'sudo test ! -L "/etc/systemd/system/$unit"' in fence

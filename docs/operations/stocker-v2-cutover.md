@@ -272,11 +272,14 @@ drop-ins; do not move, replace, or overwrite any preserved `/etc/systemd/system`
 `ConditionPathExists` sentinel blocks dependency activation. Verify the properties
 parsed by systemd, the exact regular drop-in content, and the false condition result.
 Do not use `systemctl show Conditions` for this gate: systemd 255 can serialize that
-property as `[unprintable]` while returning success. Instead, require
-`systemd-analyze condition` to return exactly status 1 for the absent sentinel; status
-0 or any command-error status fails closed. Prove an attempted start fails and every
-unit remains inactive, then invoke `rm` only from the guarded function. On any
-failure, leave the drop-ins in place:
+property as `[unprintable]` while returning success, and a standalone
+`systemd-analyze condition` does not load the merged unit. For each unit, require
+`systemd-analyze verify` to return status 0, then require
+`systemd-analyze condition --unit` to return exactly status 1 with the C-locale output
+line naming the failed sentinel condition. A true condition, command error, or another
+false condition cannot satisfy the gate. Prove an attempted start fails and every unit
+remains inactive, then invoke `rm` only from the guarded function. On any failure,
+leave the drop-ins in place:
 
 ```bash
 STOCKER_V1_FENCE_SENTINEL=/run/stocker-v1-cutover-start-authorised
@@ -285,32 +288,14 @@ STOCKER_V1_UNITS="stocker-recorder.service stocker-web.service
 stocker-backup.service stocker-backup.timer
 stocker-recorder-session-readiness.service stocker-recorder-session-readiness.timer"
 
-assert_v1_fence_condition_false() {
-  local condition_status
-  sudo test ! -e "$STOCKER_V1_FENCE_SENTINEL" || return 78
-  systemd-analyze condition "ConditionPathExists=/" >/dev/null 2>&1 || return 78
-  if systemd-analyze condition \
-    "ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL" >/dev/null 2>&1; then
-    echo "refusing retirement: V1 fence sentinel condition is true" >&2
-    return 78
-  else
-    condition_status=$?
-  fi
-  test "$condition_status" -eq 1 || {
-    echo "refusing retirement: cannot evaluate V1 fence condition (status $condition_status)" \
-      >&2
-    return 78
-  }
-}
-
 install_v1_runtime_start_fence() {
   local unit dropin_directory dropin active_state fragment_path refuse_manual
-  local dropin_paths actual_fence expected_fence
+  local dropin_paths actual_fence expected_fence condition_output condition_status
+  sudo test ! -e "$STOCKER_V1_FENCE_SENTINEL" || return 78
   expected_fence="$(printf '%s\n' \
     '[Unit]' \
     'RefuseManualStart=yes' \
     "ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL")"
-  assert_v1_fence_condition_false || return 78
   for unit in $STOCKER_V1_UNITS; do
     sudo test -f "/etc/systemd/system/$unit" || return 78
     sudo test ! -L "/etc/systemd/system/$unit" || return 78
@@ -326,13 +311,34 @@ install_v1_runtime_start_fence() {
     sudo chmod 0644 "$dropin" || return 78
   done
   sudo systemctl daemon-reload || return 78
-  assert_v1_fence_condition_false || return 78
   for unit in $STOCKER_V1_UNITS; do
     dropin="/run/systemd/system/${unit}.d/$STOCKER_V1_FENCE_NAME"
     sudo test -f "$dropin" || return 78
     sudo test ! -L "$dropin" || return 78
     actual_fence="$(sudo cat "$dropin")" || return 78
     test "$actual_fence" = "$expected_fence" || return 78
+    LC_ALL=C systemd-analyze verify "$unit" >/dev/null 2>&1 || return 78
+    if condition_output="$(
+      LC_ALL=C systemd-analyze condition --unit="$unit" 2>&1
+    )"; then
+      echo "refusing retirement: merged V1 fence condition is true: $unit" >&2
+      return 78
+    else
+      condition_status=$?
+    fi
+    test "$condition_status" -eq 1 || {
+      echo "refusing retirement: cannot evaluate merged V1 condition for $unit" >&2
+      printf '%s\n' "$condition_output" >&2
+      return 78
+    }
+    case "$condition_output" in
+      *"ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL failed."*) ;;
+      *)
+        echo "refusing retirement: sentinel condition did not fail for $unit" >&2
+        printf '%s\n' "$condition_output" >&2
+        return 78
+        ;;
+    esac
     active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || return 78
     fragment_path="$(sudo systemctl show --property=FragmentPath --value "$unit")" || return 78
     refuse_manual="$(sudo systemctl show --property=RefuseManualStart --value "$unit")" || \
@@ -614,7 +620,9 @@ from `/etc/systemd/system` without the fence. Do not remove another drop-in or u
 file. Any unexpected fence type/content, failed removal, stale parsed fence, or
 state-query failure stops rollback before any V1 start attempt. Removing some files
 cannot weaken the live fence before the one final successful `daemon-reload`; a failed
-cleanup therefore leaves systemd's already parsed fence in force:
+cleanup therefore leaves systemd's already parsed fence in force. After the reload,
+syntax-check each merged unit and inspect `systemctl cat` output for the absence of
+the sentinel; do not require unrelated normal unit conditions to be true:
 
 ```bash
 export STOCKER_V1_ROLLBACK_DB=/var/lib/stocker/prospective/prospective-20260806t163100z.sqlite3
@@ -626,24 +634,7 @@ STOCKER_V1_FENCE_NAME=99-stocker-v1-cutover-start-fence.conf
 STOCKER_V1_UNITS="stocker-recorder.service stocker-web.service
 stocker-backup.service stocker-backup.timer
 stocker-recorder-session-readiness.service stocker-recorder-session-readiness.timer"
-assert_v1_fence_condition_false() {
-  local condition_status
-  sudo test ! -e "$STOCKER_V1_FENCE_SENTINEL" || return 78
-  systemd-analyze condition "ConditionPathExists=/" >/dev/null 2>&1 || return 78
-  if systemd-analyze condition \
-    "ConditionPathExists=$STOCKER_V1_FENCE_SENTINEL" >/dev/null 2>&1; then
-    echo "refusing rollback: V1 fence sentinel condition is true" >&2
-    return 78
-  else
-    condition_status=$?
-  fi
-  test "$condition_status" -eq 1 || {
-    echo "refusing rollback: cannot evaluate V1 fence condition (status $condition_status)" \
-      >&2
-    return 78
-  }
-}
-assert_v1_fence_condition_false || exit 78
+sudo test ! -e "$STOCKER_V1_FENCE_SENTINEL" || exit 78
 expected_fence="$(printf '%s\n' \
   '[Unit]' \
   'RefuseManualStart=yes' \
@@ -669,8 +660,12 @@ for unit in $STOCKER_V1_UNITS; do
   fi
 done
 sudo systemctl daemon-reload || exit 78
-assert_v1_fence_condition_false || exit 78
 for unit in $STOCKER_V1_UNITS; do
+  LC_ALL=C systemd-analyze verify "$unit" >/dev/null 2>&1 || exit 78
+  merged_unit="$(sudo systemctl cat "$unit")" || exit 78
+  case "$merged_unit" in
+    *"$STOCKER_V1_FENCE_SENTINEL"*) exit 78 ;;
+  esac
   active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || exit 78
   load_state="$(sudo systemctl show --property=LoadState --value "$unit")" || exit 78
   fragment_path="$(sudo systemctl show --property=FragmentPath --value "$unit")" || exit 78

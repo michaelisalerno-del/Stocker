@@ -113,8 +113,10 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     )
     ibapi_manifest_binding = runbook.index('sudo awk -v expected="$STOCKER_IBAPI_WHEEL"')
     ibapi_hash = runbook.index('sha256sum --check "$STOCKER_IBAPI_WHEEL_SHA256"')
+    preinstall_gate = runbook.index('"$STOCKER_RELEASE_ARTIFACT_VERIFIER" preinstall')
     protobuf_install = runbook.index('--offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"')
     ibapi_install = runbook.index('--offline --no-deps --reinstall "$STOCKER_IBAPI_WHEEL"')
+    postinstall_gate = runbook.index('"$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall')
     metadata_gate = runbook.index('requires("ibapi")')
     concrete_import_gate = runbook.index("from ibapi.client import EClient")
     provenance_gate = runbook.index('ibkr-api verify --provenance "$STOCKER_IBAPI_PROVENANCE"')
@@ -125,11 +127,15 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     assert regular_wheel < exact_wheel < manifest_binding < protobuf_hash
     assert protobuf_hash < regular_ibapi_wheel < exact_ibapi_wheel
     assert exact_ibapi_wheel < ibapi_manifest_binding < ibapi_hash
-    assert ibapi_hash < protobuf_install < ibapi_install
-    assert ibapi_install < metadata_gate < concrete_import_gate < provenance_gate < publish
+    assert ibapi_hash < preinstall_gate < protobuf_install < ibapi_install
+    assert ibapi_install < postinstall_gate < metadata_gate
+    assert metadata_gate < concrete_import_gate < provenance_gate < publish
     assert 'version("ibapi") != "10.49.1"' in runbook[metadata_gate:publish]
     assert 'version("protobuf") != "5.29.5"' in runbook[metadata_gate:publish]
     assert '--reinstall "$STOCKER_IBAPI_SOURCE"' not in runbook
+    assert 'sudo test ! -L "$STOCKER_IBAPI_PROVENANCE"' not in runbook
+    assert "export STOCKER_TRUSTED_PYTHON=/usr/bin/python3" in runbook
+    assert (ROOT / "deploy/scripts/verify_v2_release_artifacts.py").is_file()
     assert "must not come from a package registry" in runbook
     assert "Do not vendor the derived wheel" in runbook
 
@@ -214,6 +220,7 @@ exit 0
     failures = (
         "sha256sum --check",
         f"sha256sum --check {ibapi_manifest}",
+        "verify_v2_release_artifacts.py preinstall",
         (
             f"pip install --python {release}/.venv/bin/python --offline --no-deps "
             f"--reinstall {protobuf_wheel}"
@@ -222,6 +229,7 @@ exit 0
             f"pip install --python {release}/.venv/bin/python --offline --no-deps "
             f"--reinstall {ibapi_wheel}"
         ),
+        "verify_v2_release_artifacts.py postinstall",
         f"{release}/.venv/bin/python -",
         f"stocker-runtime ibkr-api verify --provenance {provenance}",
     )

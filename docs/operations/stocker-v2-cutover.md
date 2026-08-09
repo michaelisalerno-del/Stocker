@@ -65,10 +65,13 @@ The release builder must receive that derived IBAPI wheel and the exact protobuf
 as separately reviewed offline artifacts; the uv cache is not evidence that either
 artifact exists. Record an exact regular path and a checked one-entry SHA-256 manifest
 for each wheel, with the manifest entry naming that exact path. Install both wheels
-while the versioned release is still unpublished. Then verify metadata, concrete
-imports, and the installed `ibapi` Python tree against active official provenance
-before publishing the pointer. Never modify the release environment after publishing
-the V2 pointer.
+while the versioned release is still unpublished. The stdlib-only release-artifact
+verifier must run under trusted system Python both before and after IBAPI installation;
+do not execute Python or a CLI from the new environment first. It validates the
+complete wheel and installed RECORD/file set as well as the exact root-owned active
+provenance symlink. Only then verify metadata, concrete imports, and the installed
+`ibapi` Python tree through the new environment. Never modify the release environment
+after publishing the V2 pointer.
 
 Security review note: `protobuf==5.29.5` is named in
 GHSA-7gcm-g887-7qv7 / CVE-2026-0994. The reviewed official IBKR client source does not
@@ -89,6 +92,8 @@ export STOCKER_IBAPI_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/ibapi-10.49.
 export STOCKER_IBAPI_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json
 export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl
 export STOCKER_PROTOBUF_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/protobuf-5.29.5-wheel.sha256
+export STOCKER_TRUSTED_PYTHON=/usr/bin/python3
+export STOCKER_RELEASE_ARTIFACT_VERIFIER="$STOCKER_V2_RELEASE/deploy/scripts/verify_v2_release_artifacts.py"
 export STOCKER_UV_BIN="$(command -v uv)"
 test "$STOCKER_V2_RELEASE" != \
   /opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT || exit 78
@@ -98,6 +103,9 @@ test -x "$STOCKER_UV_BIN" || exit 78
 test "${STOCKER_PROTOBUF_WHEEL##*/}" != REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl || exit 78
 sudo test -d "$STOCKER_V2_RELEASE"
 sudo test -x "$STOCKER_V2_RELEASE/.venv/bin/python"
+sudo test -x "$STOCKER_TRUSTED_PYTHON"
+sudo test -f "$STOCKER_RELEASE_ARTIFACT_VERIFIER"
+sudo test ! -L "$STOCKER_RELEASE_ARTIFACT_VERIFIER"
 sudo test "$(readlink -f /opt/stocker/current)" != "$STOCKER_V2_RELEASE"
 sudo test ! -e /opt/stocker/v2-current
 sudo test -d "$STOCKER_IBAPI_SOURCE"
@@ -118,15 +126,18 @@ sudo test -f "$STOCKER_IBAPI_WHEEL"
 sudo test ! -L "$STOCKER_IBAPI_WHEEL"
 sudo test -f "$STOCKER_IBAPI_WHEEL_SHA256"
 sudo test ! -L "$STOCKER_IBAPI_WHEEL_SHA256"
-sudo test -f "$STOCKER_IBAPI_PROVENANCE"
-sudo test ! -L "$STOCKER_IBAPI_PROVENANCE"
 test "${STOCKER_IBAPI_WHEEL##*/}" = ibapi-10.49.1-py3-none-any.whl || exit 78
 sudo awk -v expected="$STOCKER_IBAPI_WHEEL" \
   'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ && $2 == expected { ok = 1 } END { exit !(NR == 1 && ok) }' \
   "$STOCKER_IBAPI_WHEEL_SHA256"
 sudo sha256sum --check "$STOCKER_IBAPI_WHEEL_SHA256"
+sudo "$STOCKER_TRUSTED_PYTHON" "$STOCKER_RELEASE_ARTIFACT_VERIFIER" preinstall \
+  --wheel "$STOCKER_IBAPI_WHEEL" --official-source-root "$STOCKER_IBAPI_SOURCE"
 sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"
 sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_IBAPI_WHEEL"
+sudo "$STOCKER_TRUSTED_PYTHON" "$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall \
+  --wheel "$STOCKER_IBAPI_WHEEL" --official-source-root "$STOCKER_IBAPI_SOURCE" \
+  --venv "$STOCKER_V2_RELEASE/.venv"
 sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
 from importlib.metadata import requires, version
 

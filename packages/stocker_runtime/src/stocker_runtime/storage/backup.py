@@ -28,6 +28,7 @@ BackupState = Literal["healthy", "degraded", "unavailable"]
 BACKUP_FORMAT_VERSION = 1
 BACKUP_STATUS_FILENAME = "backup-status.json"
 BACKUP_LOCK_FILENAME = ".stocker-v2-backup.lock"
+BACKUP_WORK_LOCK_FILENAME = ".stocker-v2-work.lock"
 DEFAULT_BACKUP_BYTE_CAP = 8 * 1024**3
 DEFAULT_DAILY_RETENTION = 14
 DEFAULT_WEEKLY_RETENTION = 12
@@ -543,16 +544,19 @@ def _write_status(
     checked_at_us: int,
     code: str | None,
     latest_manifest_filename: str | None,
+    byte_cap: int | None = None,
 ) -> None:
-    _write_atomic(
-        directory / BACKUP_STATUS_FILENAME,
-        _status_payload(
-            state=state,
-            checked_at_us=checked_at_us,
-            code=code,
-            latest_manifest_filename=latest_manifest_filename,
-        ),
+    payload = _status_payload(
+        state=state,
+        checked_at_us=checked_at_us,
+        code=code,
+        latest_manifest_filename=latest_manifest_filename,
     )
+    if byte_cap is not None and (
+        _directory_bytes(directory, excluded=frozenset()) + len(payload) > byte_cap
+    ):
+        raise BackupCapacityError("backup status update exceeds the total byte cap")
+    _write_atomic(directory / BACKUP_STATUS_FILENAME, payload)
 
 
 def _prepare_backup_directory(path: Path) -> Path:
@@ -698,17 +702,18 @@ def record_backup_failure(
             checked_at_us=timestamp,
             code=code,
             latest_manifest_filename=previous.latest_manifest_filename,
+            byte_cap=DEFAULT_BACKUP_BYTE_CAP,
         )
 
 
 @contextmanager
-def _destination_lock(directory: Path) -> Iterator[None]:
+def _regular_file_lock(path: Path, *, label: str) -> Iterator[None]:
     flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(directory / BACKUP_LOCK_FILENAME, flags, 0o640)
+    descriptor = os.open(path, flags, 0o640)
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-            raise BackupIntegrityError("backup destination lock must be one regular file")
+            raise BackupIntegrityError(f"{label} lock must be one regular file")
         os.fchmod(descriptor, 0o640)
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         yield
@@ -716,6 +721,29 @@ def _destination_lock(directory: Path) -> Iterator[None]:
         with suppress(OSError):
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+
+
+@contextmanager
+def _destination_lock(directory: Path) -> Iterator[None]:
+    with _regular_file_lock(
+        directory / BACKUP_LOCK_FILENAME,
+        label="backup destination",
+    ):
+        yield
+
+
+@contextmanager
+def _backup_locks(destination: Path, working_directory: Path) -> Iterator[None]:
+    locks = (
+        (destination / BACKUP_LOCK_FILENAME, "backup destination"),
+        (working_directory / BACKUP_WORK_LOCK_FILENAME, "backup working"),
+    )
+    first, second = sorted(locks, key=lambda item: os.fsencode(item[0]))
+    with (
+        _regular_file_lock(first[0], label=first[1]),
+        _regular_file_lock(second[0], label=second[1]),
+    ):
+        yield
 
 
 def _online_copy(source: Path, destination: Path) -> None:
@@ -755,6 +783,27 @@ def _compress(source: Path, destination: Path) -> None:
             shutil.copyfileobj(source_handle, compressed, length=_HASH_CHUNK_BYTES)
         raw_destination.flush()
         os.fsync(raw_destination.fileno())
+
+
+def _copy_archive_for_publication(
+    source: Path,
+    descriptor: int,
+    *,
+    mtime_ns: int,
+) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    copied_bytes = 0
+    with os.fdopen(descriptor, "wb") as destination:
+        with source.open("rb") as candidate:
+            while chunk := candidate.read(_HASH_CHUNK_BYTES):
+                destination.write(chunk)
+                digest.update(chunk)
+                copied_bytes += len(chunk)
+        destination.flush()
+        os.fchmod(destination.fileno(), 0o640)
+        os.utime(destination.fileno(), ns=(mtime_ns, mtime_ns))
+        os.fsync(destination.fileno())
+    return digest.hexdigest(), copied_bytes
 
 
 def _managed_backups(directory: Path) -> tuple[_ManagedBackup, ...]:
@@ -866,12 +915,78 @@ def _rotation_victims(
             counts[tier] -= 1
             projected -= item.bytes
     if projected > policy.byte_cap:
-        floor = policy.minimum_per_tier
-        floor_word = "two" if floor == 2 else str(floor)
-        raise BackupCapacityError(
-            f"new backup exceeds the byte cap while preserving {floor_word} valid archives per tier"
-        )
+        raise _capacity_error(policy)
     return tuple(victims)
+
+
+def _capacity_error(policy: BackupPolicy) -> BackupCapacityError:
+    floor = policy.minimum_per_tier
+    floor_word = "two" if floor == 2 else str(floor)
+    return BackupCapacityError(
+        f"new backup exceeds the byte cap while preserving {floor_word} valid archives per tier"
+    )
+
+
+def _partition_rotation_victims(
+    managed: tuple[_ManagedBackup, ...],
+    victims: tuple[_ManagedBackup, ...],
+    *,
+    candidate_tier: BackupTier,
+    minimum_per_tier: int,
+) -> tuple[tuple[_ManagedBackup, ...], tuple[_ManagedBackup, ...]]:
+    tiers: tuple[BackupTier, BackupTier] = ("daily", "weekly")
+    remaining = {tier: sum(item.manifest.tier == tier for item in managed) for tier in tiers}
+    before_publication: list[_ManagedBackup] = []
+    after_publication: list[_ManagedBackup] = []
+    for victim in victims:
+        tier = victim.manifest.tier
+        if remaining[tier] > minimum_per_tier:
+            before_publication.append(victim)
+            remaining[tier] -= 1
+            continue
+        if tier != candidate_tier or any(item.manifest.tier == tier for item in after_publication):
+            raise BackupCapacityError("rotation plan cannot preserve the valid backup tier floor")
+        after_publication.append(victim)
+    return tuple(before_publication), tuple(after_publication)
+
+
+def _status_publication_reserve(
+    *,
+    candidate: BackupManifest,
+    previous_status: BackupStatus,
+    healthy_status_bytes: int,
+) -> int:
+    latest_names = tuple(
+        name
+        for name in (candidate.manifest_filename, previous_status.latest_manifest_filename)
+        if name is not None
+    )
+    longest_latest = max(latest_names, key=len)
+    maximum_failure = _status_payload(
+        state="degraded",
+        checked_at_us=MAX_TIMESTAMP_US,
+        code="X" * 96,
+        latest_manifest_filename=longest_latest,
+    )
+    next_in_progress = _status_payload(
+        state="degraded",
+        checked_at_us=MAX_TIMESTAMP_US,
+        code="BACKUP_IN_PROGRESS",
+        latest_manifest_filename=candidate.manifest_filename,
+    )
+    return max(healthy_status_bytes, len(maximum_failure), len(next_in_progress))
+
+
+def _remove_managed_backups(
+    victims: tuple[_ManagedBackup, ...],
+    *,
+    directory: Path,
+) -> None:
+    for victim in victims:
+        victim.manifest_path.unlink()
+        victim.archive_path.unlink()
+    if victims:
+        _fsync_directory(directory)
 
 
 def create_backup(
@@ -886,13 +1001,13 @@ def create_backup(
     """Serialize one checked online backup for a destination."""
 
     root = _prepare_backup_directory(Path(destination))
-    with _destination_lock(root):
+    working = _prepare_working_directory(
+        Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
+        backup_directory=root,
+    )
+    with _backup_locks(root, working):
         _remove_stale_atomic_files(root)
         _remove_interrupted_publication_orphans(root, previous_status=_read_status(root))
-        working = _prepare_working_directory(
-            Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
-            backup_directory=root,
-        )
         _remove_stale_backup_work(working)
         return _create_backup_locked(
             database,
@@ -938,15 +1053,45 @@ def _create_backup_locked(
         raise BackupError("backup identity already exists")
 
     previous_status = _read_status(root)
+    status_path = root / BACKUP_STATUS_FILENAME
+    current_status_bytes = (
+        status_path.lstat().st_size
+        if status_path.exists() and stat.S_ISREG(status_path.lstat().st_mode)
+        else 0
+    )
+    in_progress_payload = _status_payload(
+        state="degraded",
+        checked_at_us=timestamp,
+        code="BACKUP_IN_PROGRESS",
+        latest_manifest_filename=previous_status.latest_manifest_filename,
+    )
+    maximum_failure_payload = _status_payload(
+        state="degraded",
+        checked_at_us=MAX_TIMESTAMP_US,
+        code="X" * 96,
+        latest_manifest_filename=previous_status.latest_manifest_filename,
+    )
+    directory_bytes = _directory_bytes(root, excluded=frozenset())
+    initial_status_peak = max(
+        directory_bytes + len(in_progress_payload),
+        directory_bytes
+        - current_status_bytes
+        + len(in_progress_payload)
+        + len(maximum_failure_payload),
+    )
+    if initial_status_peak > frozen_policy.byte_cap:
+        raise _capacity_error(frozen_policy)
     _write_status(
         root,
         state="degraded",
         checked_at_us=timestamp,
         code="BACKUP_IN_PROGRESS",
         latest_manifest_filename=previous_status.latest_manifest_filename,
+        byte_cap=frozen_policy.byte_cap,
     )
     temporary_database: Path | None = None
     temporary_archive: Path | None = None
+    temporary_publication: Path | None = None
     published_archive = False
     published_manifest = False
     committed = False
@@ -957,7 +1102,7 @@ def _create_backup_locked(
         os.close(database_descriptor)
         temporary_database = Path(database_temporary_name)
         archive_descriptor, archive_temporary_name = tempfile.mkstemp(
-            prefix=".stocker-v2-atomic-", suffix=".gz", dir=root
+            prefix=".stocker-v2-archive-", suffix=".gz", dir=working_directory
         )
         os.close(archive_descriptor)
         temporary_archive = Path(archive_temporary_name)
@@ -1002,7 +1147,6 @@ def _create_backup_locked(
             code=None,
             latest_manifest_filename=manifest.manifest_filename,
         )
-        status_path = root / BACKUP_STATUS_FILENAME
         current_status_bytes = (
             status_path.lstat().st_size
             if status_path.exists() and stat.S_ISREG(status_path.lstat().st_mode)
@@ -1014,32 +1158,66 @@ def _create_backup_locked(
             candidate=manifest,
             candidate_manifest_bytes=len(manifest_payload),
             candidate_status_bytes=len(status_payload),
-            directory_bytes=_directory_bytes(
-                root,
-                excluded=frozenset({temporary_database, temporary_archive}),
-            ),
+            directory_bytes=_directory_bytes(root, excluded=frozenset()),
             current_status_bytes=current_status_bytes,
             policy=frozen_policy,
         )
-        os.chmod(temporary_archive, 0o640)
-        os.replace(temporary_archive, archive_path)
+        before_publication, after_publication = _partition_rotation_victims(
+            managed,
+            victims,
+            candidate_tier=manifest.tier,
+            minimum_per_tier=frozen_policy.minimum_per_tier,
+        )
+        publication_peak = (
+            _directory_bytes(root, excluded=frozenset())
+            - sum(item.bytes for item in before_publication)
+            + manifest.compressed_bytes
+            + len(manifest_payload)
+            + _status_publication_reserve(
+                candidate=manifest,
+                previous_status=previous_status,
+                healthy_status_bytes=len(status_payload),
+            )
+        )
+        if publication_peak > frozen_policy.byte_cap:
+            raise _capacity_error(frozen_policy)
+        _remove_managed_backups(before_publication, directory=root)
+        publication_descriptor, publication_temporary_name = tempfile.mkstemp(
+            prefix=".stocker-v2-atomic-",
+            suffix=".gz",
+            dir=root,
+        )
+        temporary_publication = Path(publication_temporary_name)
+        published_sha256, published_bytes = _copy_archive_for_publication(
+            temporary_archive,
+            publication_descriptor,
+            mtime_ns=manifest.archive_mtime_ns,
+        )
+        if (
+            published_bytes != manifest.compressed_bytes
+            or published_sha256 != manifest.compressed_sha256
+        ):
+            raise BackupIntegrityError("backup archive changed during publication copy")
+        os.replace(temporary_publication, archive_path)
         published_archive = True
         _fsync_directory(root)
         _write_atomic(manifest_path, manifest_payload)
         published_manifest = True
         committed = True
-        for victim in victims:
-            victim.manifest_path.unlink()
-            victim.archive_path.unlink()
-        _fsync_directory(root)
+        _remove_managed_backups(after_publication, directory=root)
         _write_atomic(status_path, status_payload)
         return BackupArtifact(manifest, archive_path, manifest_path)
     except Exception as error:
+        removed_publication = False
         if not committed:
             if published_manifest:
                 manifest_path.unlink(missing_ok=True)
+                removed_publication = True
             if published_archive:
                 archive_path.unlink(missing_ok=True)
+                removed_publication = True
+        if removed_publication:
+            _fsync_directory(root)
         with suppress(Exception):
             _write_status(
                 root,
@@ -1049,6 +1227,7 @@ def _create_backup_locked(
                 latest_manifest_filename=(
                     manifest_path.name if committed else previous_status.latest_manifest_filename
                 ),
+                byte_cap=frozen_policy.byte_cap,
             )
         raise
     finally:
@@ -1059,6 +1238,8 @@ def _create_backup_locked(
             Path(f"{temporary_database}-shm").unlink(missing_ok=True)
         if temporary_archive is not None:
             temporary_archive.unlink(missing_ok=True)
+        if temporary_publication is not None:
+            temporary_publication.unlink(missing_ok=True)
 
 
 def restore_backup(manifest: str | Path, destination: str | Path) -> RestoreResult:

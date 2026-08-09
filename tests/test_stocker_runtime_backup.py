@@ -57,6 +57,116 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _regular_directory_bytes(directory: Path) -> int:
+    return sum(
+        path.stat(follow_symlinks=False).st_size
+        for path in directory.iterdir()
+        if path.is_file() and not path.is_symlink()
+    )
+
+
+def _assert_only_work_lock(working: Path) -> None:
+    entries = tuple(working.iterdir())
+    assert [path.name for path in entries] == [backup_module.BACKUP_WORK_LOCK_FILENAME]
+    lock = entries[0]
+    assert lock.is_file()
+    assert not lock.is_symlink()
+    assert stat.S_IMODE(lock.stat().st_mode) == 0o640
+
+
+def _seed_rotation_set(database: Path, backups: Path, working: Path) -> BackupPolicy:
+    policy = BackupPolicy(
+        daily_retention=3,
+        weekly_retention=2,
+        minimum_per_tier=2,
+        byte_cap=64 * 1024 * 1024,
+    )
+    for tier, timestamps in (("daily", (1, 2, 3)), ("weekly", (10, 11))):
+        for created_at_us in timestamps:
+            create_backup(
+                database,
+                backups,
+                tier=tier,  # type: ignore[arg-type]
+                created_at_us=created_at_us,
+                policy=policy,
+                working_directory=working,
+            )
+    return policy
+
+
+def _tight_rotation_cap(
+    database: Path,
+    backups: Path,
+    probe: Path,
+    probe_working: Path,
+) -> tuple[int, str, str]:
+    candidate = create_backup(
+        database,
+        probe,
+        tier="daily",
+        created_at_us=4,
+        working_directory=probe_working,
+    )
+    projection = read_backup_manifests(backups, limit=200)
+    oldest_daily = min(
+        (item for item in projection.items if item.tier == "daily"),
+        key=lambda item: item.created_at_us,
+    )
+    victim_bytes = (
+        backups.joinpath(oldest_daily.archive_filename).stat().st_size
+        + backups.joinpath(oldest_daily.manifest_filename).stat().st_size
+    )
+    status_path = backups / backup_module.BACKUP_STATUS_FILENAME
+    current_status_bytes = status_path.stat().st_size
+    persisted_status = json.loads(status_path.read_text(encoding="utf-8"))
+    previous_latest = persisted_status["latest_manifest_filename"]
+    in_progress_bytes = len(
+        backup_module._status_payload(
+            state="degraded",
+            checked_at_us=4,
+            code="BACKUP_IN_PROGRESS",
+            latest_manifest_filename=previous_latest,
+        )
+    )
+    healthy_status = backup_module._status_payload(
+        state="healthy",
+        checked_at_us=4,
+        code=None,
+        latest_manifest_filename=candidate.manifest.manifest_filename,
+    )
+    longest_latest = max(
+        (previous_latest, candidate.manifest.manifest_filename),
+        key=len,
+    )
+    maximum_failure_status = backup_module._status_payload(
+        state="degraded",
+        checked_at_us=backup_module.MAX_TIMESTAMP_US,
+        code="X" * 96,
+        latest_manifest_filename=longest_latest,
+    )
+    next_in_progress_status = backup_module._status_payload(
+        state="degraded",
+        checked_at_us=backup_module.MAX_TIMESTAMP_US,
+        code="BACKUP_IN_PROGRESS",
+        latest_manifest_filename=candidate.manifest.manifest_filename,
+    )
+    status_reserve = max(
+        len(healthy_status),
+        len(maximum_failure_status),
+        len(next_in_progress_status),
+    )
+    cap = (
+        _regular_directory_bytes(backups)
+        - current_status_bytes
+        - victim_bytes
+        + in_progress_bytes
+        + candidate.archive_path.stat().st_size
+        + candidate.manifest_path.stat().st_size
+        + status_reserve
+    )
+    return cap, candidate.manifest.archive_filename, oldest_daily.archive_filename
+
+
 def test_online_backup_is_checked_deterministic_compressed_and_restorable_under_writes(
     tmp_path: Path,
 ) -> None:
@@ -412,7 +522,7 @@ def test_backup_working_copies_stay_outside_the_capped_archive_directory(
     assert observed_directories == [working.resolve()]
     assert not tuple(backups.glob(".stocker-v2-database-*"))
     assert not tuple(backups.glob(".stocker-v2-archive-*"))
-    assert not tuple(working.iterdir())
+    _assert_only_work_lock(working)
 
 
 def test_backup_publication_uses_a_destination_local_atomic_rename(
@@ -456,7 +566,256 @@ def test_backup_publication_uses_a_destination_local_atomic_rename(
     assert artifact.archive_path.is_file()
     assert artifact.manifest_path.is_file()
     assert not tuple(backups.glob(".stocker-v2-atomic-*"))
-    assert not tuple(working.iterdir())
+    _assert_only_work_lock(working)
+
+
+def test_cross_destination_backups_lock_shared_work_before_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    missing_database = tmp_path / "missing.sqlite3"
+    first_backups = tmp_path / "first-backups"
+    second_backups = tmp_path / "second-backups"
+    working = tmp_path / "working"
+    working.mkdir()
+    _seed_database(database)
+    real_online_copy = backup_module._online_copy
+    first_copy_ready = threading.Event()
+    release_first = threading.Event()
+    second_finished = threading.Event()
+    first_errors: list[BaseException] = []
+    second_errors: list[BaseException] = []
+    first_completed = threading.Event()
+
+    def paused_online_copy(source: Path, destination: Path) -> None:
+        real_online_copy(source, destination)
+        first_copy_ready.set()
+        assert release_first.wait(timeout=5)
+
+    monkeypatch.setattr(backup_module, "_online_copy", paused_online_copy)
+
+    def run_first() -> None:
+        try:
+            create_backup(
+                database,
+                first_backups,
+                tier="daily",
+                created_at_us=200,
+                working_directory=working,
+            )
+            first_completed.set()
+        except BaseException as error:  # pragma: no cover - asserted below
+            first_errors.append(error)
+
+    def run_invalid_second() -> None:
+        try:
+            create_backup(
+                missing_database,
+                second_backups,
+                tier="daily",
+                created_at_us=201,
+                working_directory=working,
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            second_errors.append(error)
+        finally:
+            second_finished.set()
+
+    first = threading.Thread(target=run_first)
+    second = threading.Thread(target=run_invalid_second)
+    first.start()
+    assert first_copy_ready.wait(timeout=5)
+    second.start()
+    try:
+        assert not second_finished.wait(timeout=0.25)
+    finally:
+        release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert first_errors == []
+    assert first_completed.is_set()
+    assert len(second_errors) == 1
+    assert isinstance(second_errors[0], BackupError)
+
+
+def test_rotation_never_exceeds_the_physical_destination_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    probe = tmp_path / "probe"
+    probe_working = tmp_path / "probe-working"
+    working.mkdir()
+    probe_working.mkdir()
+    _seed_database(database)
+    _seed_rotation_set(database, backups, working)
+    cap, candidate_name, victim_name = _tight_rotation_cap(
+        database,
+        backups,
+        probe,
+        probe_working,
+    )
+    policy = BackupPolicy(
+        daily_retention=3,
+        weekly_retention=2,
+        minimum_per_tier=2,
+        byte_cap=cap,
+    )
+    real_replace = backup_module.os.replace
+    observed_bytes: list[int] = []
+
+    def observe_destination_peak(
+        source: str | os.PathLike[str], destination: str | os.PathLike[str]
+    ) -> None:
+        source_path = Path(source).resolve()
+        destination_path = Path(destination).resolve()
+        if source_path.parent == backups.resolve() or destination_path.parent == backups.resolve():
+            observed_bytes.append(_regular_directory_bytes(backups))
+        real_replace(source, destination)
+        if destination_path.parent == backups.resolve():
+            observed_bytes.append(_regular_directory_bytes(backups))
+
+    monkeypatch.setattr(backup_module.os, "replace", observe_destination_peak)
+    artifact = create_backup(
+        database,
+        backups,
+        tier="daily",
+        created_at_us=4,
+        policy=policy,
+        working_directory=working,
+    )
+
+    assert artifact.archive_path.name == candidate_name
+    assert observed_bytes
+    assert max(observed_bytes) <= cap
+    assert _regular_directory_bytes(backups) <= cap
+    assert not (backups / victim_name).exists()
+    projection = read_backup_manifests(backups, limit=200)
+    assert [item.tier for item in projection.items].count("daily") == 3
+    assert [item.tier for item in projection.items].count("weekly") == 2
+
+
+def test_failed_publication_after_planned_rotation_preserves_tier_floors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    probe = tmp_path / "probe"
+    probe_working = tmp_path / "probe-working"
+    working.mkdir()
+    probe_working.mkdir()
+    _seed_database(database)
+    _seed_rotation_set(database, backups, working)
+    cap, candidate_name, victim_name = _tight_rotation_cap(
+        database,
+        backups,
+        probe,
+        probe_working,
+    )
+    policy = BackupPolicy(
+        daily_retention=3,
+        weekly_retention=2,
+        minimum_per_tier=2,
+        byte_cap=cap,
+    )
+    real_replace = backup_module.os.replace
+
+    def fail_archive_publish(
+        source: str | os.PathLike[str], destination: str | os.PathLike[str]
+    ) -> None:
+        if Path(destination).resolve() == (backups / candidate_name).resolve():
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(destination))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(backup_module.os, "replace", fail_archive_publish)
+    with pytest.raises(OSError, match="No space left"):
+        create_backup(
+            database,
+            backups,
+            tier="daily",
+            created_at_us=4,
+            policy=policy,
+            working_directory=working,
+        )
+
+    projection = read_backup_manifests(backups, limit=200)
+    assert [item.tier for item in projection.items].count("daily") == 2
+    assert [item.tier for item in projection.items].count("weekly") == 2
+    assert not (backups / victim_name).exists()
+    assert not (backups / candidate_name).exists()
+    assert not (backups / f"{candidate_name}.manifest.json").exists()
+    assert not tuple(backups.glob(".stocker-v2-atomic-*"))
+    assert not tuple(
+        path for path in working.iterdir() if backup_module._is_backup_work_file(path.name)
+    )
+    assert projection.status.state == "degraded"
+
+
+def test_interruption_after_manifest_leaves_a_bounded_complete_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SimulatedSigkill(BaseException):
+        pass
+
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    probe = tmp_path / "probe"
+    probe_working = tmp_path / "probe-working"
+    working.mkdir()
+    probe_working.mkdir()
+    _seed_database(database)
+    _seed_rotation_set(database, backups, working)
+    cap, candidate_name, victim_name = _tight_rotation_cap(
+        database,
+        backups,
+        probe,
+        probe_working,
+    )
+    policy = BackupPolicy(
+        daily_retention=3,
+        weekly_retention=2,
+        minimum_per_tier=2,
+        byte_cap=cap,
+    )
+    real_write_atomic = backup_module._write_atomic
+
+    def interrupt_after_manifest(
+        path: Path,
+        payload: bytes,
+        *,
+        mode: int = 0o640,
+    ) -> None:
+        real_write_atomic(path, payload, mode=mode)
+        if path.name == f"{candidate_name}.manifest.json":
+            raise SimulatedSigkill
+
+    monkeypatch.setattr(backup_module, "_write_atomic", interrupt_after_manifest)
+    with pytest.raises(SimulatedSigkill):
+        create_backup(
+            database,
+            backups,
+            tier="daily",
+            created_at_us=4,
+            policy=policy,
+            working_directory=working,
+        )
+
+    assert _regular_directory_bytes(backups) <= cap
+    assert (backups / candidate_name).is_file()
+    assert (backups / f"{candidate_name}.manifest.json").is_file()
+    assert not (backups / victim_name).exists()
+    assert not tuple(backups.glob(".stocker-v2-atomic-*"))
+    assert read_backup_manifests(backups, limit=200).status.code == "BACKUP_IN_PROGRESS"
 
 
 def test_backup_retry_cleans_all_temporary_namespaces_before_source_validation(
@@ -528,7 +887,7 @@ def test_backup_recovers_terminated_work_and_marks_the_attempt_in_progress(
         working_directory=working,
     )
 
-    assert not tuple(working.iterdir())
+    _assert_only_work_lock(working)
     status = json.loads(
         (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
     )

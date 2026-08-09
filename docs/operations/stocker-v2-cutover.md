@@ -53,12 +53,21 @@ market is closed and no unattended start is pending. The only allowed V2 modes r
 
 Record the exact V1 path returned by `readlink -f /opt/stocker/current`. Replace the
 placeholder below with the reviewed V2 commit. The selected official
-`ibapi==10.49.1` distribution declares exactly `protobuf==5.29.5`. The release
-builder must receive that protobuf wheel as a separately reviewed offline artifact;
-the uv cache is not evidence that the artifact exists. Record an exact regular wheel
-path and a checked SHA-256 manifest whose entry names that exact path. Install both
-artifacts while the versioned release is still unpublished, then verify installed
-metadata and concrete imports. Never modify the release environment after publishing
+`ibapi==10.49.1` source declares exactly `protobuf==5.29.5`, but the official archive
+contains no wheel. Before cutover, use a separate reviewed packaging environment to
+build exactly `ibapi-10.49.1-py3-none-any.whl` from the already hash-verified official
+source tree. Review its unpacked `ibapi` Python tree against the immutable official
+provenance. The derived wheel must not come from a package registry; it is only an
+offline transport artifact and does not replace the official archive as provenance.
+Do not vendor the derived wheel in this repository.
+
+The release builder must receive that derived IBAPI wheel and the exact protobuf wheel
+as separately reviewed offline artifacts; the uv cache is not evidence that either
+artifact exists. Record an exact regular path and a checked one-entry SHA-256 manifest
+for each wheel, with the manifest entry naming that exact path. Install both wheels
+while the versioned release is still unpublished. Then verify metadata, concrete
+imports, and the installed `ibapi` Python tree against active official provenance
+before publishing the pointer. Never modify the release environment after publishing
 the V2 pointer.
 
 Security review note: `protobuf==5.29.5` is named in
@@ -75,6 +84,9 @@ Prepare the separate V2 pointer, users, and paths without starting services:
 bash -euo pipefail <<'STOCKER_V2_RELEASE_PREP' || exit 78
 export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT
 export STOCKER_IBAPI_SOURCE=/var/lib/stocker/ibkr-api/install/IBJts/source/pythonclient
+export STOCKER_IBAPI_WHEEL=/var/lib/stocker/ibkr-api/install/ibapi-10.49.1-py3-none-any.whl
+export STOCKER_IBAPI_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/ibapi-10.49.1-wheel.sha256
+export STOCKER_IBAPI_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json
 export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl
 export STOCKER_PROTOBUF_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/protobuf-5.29.5-wheel.sha256
 export STOCKER_UV_BIN="$(command -v uv)"
@@ -102,8 +114,19 @@ sudo awk -v expected="$STOCKER_PROTOBUF_WHEEL" \
   'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ && $2 == expected { ok = 1 } END { exit !(NR == 1 && ok) }' \
   "$STOCKER_PROTOBUF_WHEEL_SHA256"
 sudo sha256sum --check "$STOCKER_PROTOBUF_WHEEL_SHA256"
+sudo test -f "$STOCKER_IBAPI_WHEEL"
+sudo test ! -L "$STOCKER_IBAPI_WHEEL"
+sudo test -f "$STOCKER_IBAPI_WHEEL_SHA256"
+sudo test ! -L "$STOCKER_IBAPI_WHEEL_SHA256"
+sudo test -f "$STOCKER_IBAPI_PROVENANCE"
+sudo test ! -L "$STOCKER_IBAPI_PROVENANCE"
+test "${STOCKER_IBAPI_WHEEL##*/}" = ibapi-10.49.1-py3-none-any.whl || exit 78
+sudo awk -v expected="$STOCKER_IBAPI_WHEEL" \
+  'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ && $2 == expected { ok = 1 } END { exit !(NR == 1 && ok) }' \
+  "$STOCKER_IBAPI_WHEEL_SHA256"
+sudo sha256sum --check "$STOCKER_IBAPI_WHEEL_SHA256"
 sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"
-sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_IBAPI_SOURCE"
+sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_IBAPI_WHEEL"
 sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
 from importlib.metadata import requires, version
 
@@ -119,6 +142,8 @@ from ibapi.client import EClient
 if not isinstance(EClient, type):
     raise SystemExit("ibapi concrete client is invalid")
 PY
+sudo test -x "$STOCKER_V2_RELEASE/.venv/bin/stocker-runtime"
+sudo "$STOCKER_V2_RELEASE/.venv/bin/stocker-runtime" ibkr-api verify --provenance "$STOCKER_IBAPI_PROVENANCE"
 sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current
 sudo test "$(readlink -f /opt/stocker/v2-current)" = "$STOCKER_V2_RELEASE"
 STOCKER_V2_RELEASE_PREP

@@ -107,19 +107,31 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     exact_wheel = runbook.index("protobuf-5.29.5-*.whl")
     manifest_binding = runbook.index("NR == 1 && length($1) == 64")
     protobuf_hash = runbook.index('sha256sum --check "$STOCKER_PROTOBUF_WHEEL_SHA256"')
+    regular_ibapi_wheel = runbook.index('sudo test -f "$STOCKER_IBAPI_WHEEL"')
+    exact_ibapi_wheel = runbook.index(
+        'test "${STOCKER_IBAPI_WHEEL##*/}" = ibapi-10.49.1-py3-none-any.whl'
+    )
+    ibapi_manifest_binding = runbook.index('sudo awk -v expected="$STOCKER_IBAPI_WHEEL"')
+    ibapi_hash = runbook.index('sha256sum --check "$STOCKER_IBAPI_WHEEL_SHA256"')
     protobuf_install = runbook.index('--offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"')
-    ibapi_install = runbook.index('--offline --no-deps --reinstall "$STOCKER_IBAPI_SOURCE"')
+    ibapi_install = runbook.index('--offline --no-deps --reinstall "$STOCKER_IBAPI_WHEEL"')
     metadata_gate = runbook.index('requires("ibapi")')
     concrete_import_gate = runbook.index("from ibapi.client import EClient")
+    provenance_gate = runbook.index('ibkr-api verify --provenance "$STOCKER_IBAPI_PROVENANCE"')
     publish = runbook.index('sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current')
 
     assert "--offline" in runbook[protobuf_hash:ibapi_install]
     assert "--no-deps" in runbook[protobuf_hash:ibapi_install]
     assert regular_wheel < exact_wheel < manifest_binding < protobuf_hash
-    assert protobuf_hash < protobuf_install < ibapi_install
-    assert ibapi_install < metadata_gate < concrete_import_gate < publish
+    assert protobuf_hash < regular_ibapi_wheel < exact_ibapi_wheel
+    assert exact_ibapi_wheel < ibapi_manifest_binding < ibapi_hash
+    assert ibapi_hash < protobuf_install < ibapi_install
+    assert ibapi_install < metadata_gate < concrete_import_gate < provenance_gate < publish
     assert 'version("ibapi") != "10.49.1"' in runbook[metadata_gate:publish]
     assert 'version("protobuf") != "5.29.5"' in runbook[metadata_gate:publish]
+    assert '--reinstall "$STOCKER_IBAPI_SOURCE"' not in runbook
+    assert "must not come from a package registry" in runbook
+    assert "Do not vendor the derived wheel" in runbook
 
 
 def test_cutover_dependency_failures_cannot_reach_release_pointer(tmp_path: Path) -> None:
@@ -131,8 +143,11 @@ def test_cutover_dependency_failures_cannot_reach_release_pointer(tmp_path: Path
 
     release = tmp_path / "reviewed-release"
     source = tmp_path / "reviewed-ibapi-source"
-    wheel = tmp_path / "protobuf-5.29.5-reviewed.whl"
-    manifest = tmp_path / "protobuf-5.29.5-reviewed.sha256"
+    protobuf_wheel = tmp_path / "protobuf-5.29.5-reviewed.whl"
+    protobuf_manifest = tmp_path / "protobuf-5.29.5-reviewed.sha256"
+    ibapi_wheel = tmp_path / "ibapi-10.49.1-py3-none-any.whl"
+    ibapi_manifest = tmp_path / "ibapi-10.49.1-reviewed.sha256"
+    provenance = tmp_path / "active-provenance.json"
     replacements = {
         "export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT": (
             f'export STOCKER_V2_RELEASE="{release}"'
@@ -144,11 +159,22 @@ def test_cutover_dependency_failures_cannot_reach_release_pointer(tmp_path: Path
         (
             "export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/"
             "REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl"
-        ): f'export STOCKER_PROTOBUF_WHEEL="{wheel}"',
+        ): f'export STOCKER_PROTOBUF_WHEEL="{protobuf_wheel}"',
         (
             "export STOCKER_PROTOBUF_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/"
             "protobuf-5.29.5-wheel.sha256"
-        ): f'export STOCKER_PROTOBUF_WHEEL_SHA256="{manifest}"',
+        ): f'export STOCKER_PROTOBUF_WHEEL_SHA256="{protobuf_manifest}"',
+        (
+            "export STOCKER_IBAPI_WHEEL=/var/lib/stocker/ibkr-api/install/"
+            "ibapi-10.49.1-py3-none-any.whl"
+        ): f'export STOCKER_IBAPI_WHEEL="{ibapi_wheel}"',
+        (
+            "export STOCKER_IBAPI_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/"
+            "ibapi-10.49.1-wheel.sha256"
+        ): f'export STOCKER_IBAPI_WHEEL_SHA256="{ibapi_manifest}"',
+        (
+            "export STOCKER_IBAPI_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json"
+        ): f'export STOCKER_IBAPI_PROVENANCE="{provenance}"',
     }
     for original, replacement in replacements.items():
         assert original in block
@@ -187,15 +213,17 @@ exit 0
     )
     failures = (
         "sha256sum --check",
+        f"sha256sum --check {ibapi_manifest}",
         (
             f"pip install --python {release}/.venv/bin/python --offline --no-deps "
-            f"--reinstall {wheel}"
+            f"--reinstall {protobuf_wheel}"
         ),
         (
             f"pip install --python {release}/.venv/bin/python --offline --no-deps "
-            f"--reinstall {source}"
+            f"--reinstall {ibapi_wheel}"
         ),
         f"{release}/.venv/bin/python -",
+        f"stocker-runtime ibkr-api verify --provenance {provenance}",
     )
     for failure in failures:
         published.unlink(missing_ok=True)

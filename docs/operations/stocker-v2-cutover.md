@@ -109,7 +109,7 @@ export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/REPLACE_WITH_REV
 export STOCKER_PROTOBUF_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/protobuf-5.29.5-wheel.sha256
 export STOCKER_TRUSTED_PYTHON=/usr/bin/python3
 export STOCKER_RELEASE_ARTIFACT_VERIFIER="$STOCKER_V2_RELEASE/deploy/scripts/verify_v2_release_artifacts.py"
-export STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256=62d33f7de9dcb271537c057c770f5a82730ef6a1bce99088915802025d0d997e
+export STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256=8ef0a90776f7604fa406997d3e2aff619c81abf111197037959c834fcb0feded
 export STOCKER_UV_BIN=/usr/local/bin/uv
 export STOCKER_UV_SHA256=/var/lib/stocker/ibkr-api/install/uv-0.11.32.sha256
 test "$STOCKER_V2_RELEASE" != \
@@ -228,7 +228,7 @@ sudo "$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinsta
   --verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER" \
   --verifier-sha256 "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256" \
   --venv "$STOCKER_V2_RELEASE/.venv"
-sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
+sudo env PYTHONDONTWRITEBYTECODE=1 "$STOCKER_V2_RELEASE/.venv/bin/python" -B - <<'PY'
 import re
 from importlib.metadata import requires, version
 
@@ -255,7 +255,19 @@ if not isinstance(EClient, type):
     raise SystemExit("ibapi concrete client is invalid")
 PY
 sudo test -x "$STOCKER_V2_RELEASE/.venv/bin/stocker-runtime"
-sudo "$STOCKER_V2_RELEASE/.venv/bin/stocker-runtime" ibkr-api verify --provenance "$STOCKER_IBAPI_PROVENANCE"
+sudo env PYTHONDONTWRITEBYTECODE=1 "$STOCKER_V2_RELEASE/.venv/bin/python" -B "$STOCKER_V2_RELEASE/.venv/bin/stocker-runtime" ibkr-api verify --provenance "$STOCKER_IBAPI_PROVENANCE"
+sudo "$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall \
+  --ibapi-wheel "$STOCKER_IBAPI_WHEEL" \
+  --ibapi-manifest "$STOCKER_IBAPI_WHEEL_SHA256" \
+  --protobuf-wheel "$STOCKER_PROTOBUF_WHEEL" \
+  --protobuf-manifest "$STOCKER_PROTOBUF_WHEEL_SHA256" \
+  --uv-bin "$STOCKER_UV_BIN" \
+  --uv-manifest "$STOCKER_UV_SHA256" \
+  --official-source-root "$STOCKER_IBAPI_SOURCE" \
+  --release-root "$STOCKER_V2_RELEASE" \
+  --verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER" \
+  --verifier-sha256 "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256" \
+  --venv "$STOCKER_V2_RELEASE/.venv"
 sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current
 sudo test "$(readlink -f /opt/stocker/v2-current)" = "$STOCKER_V2_RELEASE"
 STOCKER_V2_RELEASE_PREP

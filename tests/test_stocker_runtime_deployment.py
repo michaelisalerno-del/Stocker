@@ -124,6 +124,7 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     metadata_gate = runbook.index('requires("ibapi")')
     concrete_import_gate = runbook.index("from ibapi.client import EClient")
     provenance_gate = runbook.index('ibkr-api verify --provenance "$STOCKER_IBAPI_PROVENANCE"')
+    final_postinstall_gate = runbook.rindex('"$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall')
     publish = runbook.index('sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current')
 
     assert "--offline" in runbook[protobuf_hash:ibapi_install]
@@ -133,7 +134,18 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     assert exact_ibapi_wheel < ibapi_manifest_binding < ibapi_hash
     assert ibapi_hash < preinstall_gate < protobuf_install < ibapi_install
     assert ibapi_install < postinstall_gate < metadata_gate
-    assert metadata_gate < concrete_import_gate < provenance_gate < publish
+    assert metadata_gate < concrete_import_gate < provenance_gate < final_postinstall_gate < publish
+    assert postinstall_gate != final_postinstall_gate
+    assert runbook.count('"$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall') == 2
+    assert (
+        "sudo env PYTHONDONTWRITEBYTECODE=1 \"$STOCKER_V2_RELEASE/.venv/bin/python\" -B - <<'PY'"
+    ) in runbook[postinstall_gate:provenance_gate]
+    assert (
+        "sudo env PYTHONDONTWRITEBYTECODE=1 "
+        '"$STOCKER_V2_RELEASE/.venv/bin/python" -B '
+        '"$STOCKER_V2_RELEASE/.venv/bin/stocker-runtime" '
+        'ibkr-api verify --provenance "$STOCKER_IBAPI_PROVENANCE"'
+    ) in runbook[concrete_import_gate:final_postinstall_gate]
     assert "len(declared_dependencies) != 1" in runbook[metadata_gate:publish]
     assert r'r"protobuf[ \t]*==[ \t]*5\.29\.5"' in runbook[metadata_gate:publish]
     assert "flags=re.ASCII" in runbook[metadata_gate:publish]
@@ -147,7 +159,7 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     assert "da15297d6879b2cfbe5ea3cb03725c1613d51ba72892cc996468d871f0a532fb" in runbook
     assert "uv 0.11.32 (x86_64-unknown-linux-gnu)" in runbook
     assert '"$STOCKER_TRUSTED_PYTHON" -I -' in runbook
-    assert runbook.count('"$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER"') == 2
+    assert runbook.count('"$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER"') == 3
     verifier = ROOT / "deploy/scripts/verify_v2_release_artifacts.py"
     assert verifier.is_file()
     verifier_sha256 = hashlib.sha256(verifier.read_bytes()).hexdigest()
@@ -165,7 +177,7 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
         '--verifier-sha256 "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256"',
         '--venv "$STOCKER_V2_RELEASE/.venv"',
     ):
-        assert runbook.count(protected_argument) == 2
+        assert runbook.count(protected_argument) == 3
     assert "literal target must be\n`provenance/10.49.1.json`" in runbook
     assert "Group-write is admitted only\nfor group ID 0" in runbook
     assert "must not come from a package registry" in runbook
@@ -238,6 +250,18 @@ printf '%s\\n' "$*" >> "$TRACE"
 if [[ -n "${FAIL_MATCH:-}" && "$*" == *"$FAIL_MATCH"* ]]; then
   exit 23
 fi
+if [[ "${FAIL_FINAL_POSTINSTALL:-}" == 1 ]] &&
+  [[ "$*" == *"verify_v2_release_artifacts.py postinstall"* ]]; then
+  postinstall_count=0
+  if [[ -f "$POSTINSTALL_COUNT" ]]; then
+    IFS= read -r postinstall_count < "$POSTINSTALL_COUNT"
+  fi
+  postinstall_count=$((postinstall_count + 1))
+  printf '%s\n' "$postinstall_count" > "$POSTINSTALL_COUNT"
+  if [[ "$postinstall_count" -eq 2 ]]; then
+    exit 24
+  fi
+fi
 if [[ "$1" == "ln" && "$2" == "-s" ]]; then
   : > "$PUBLISHED"
 fi
@@ -252,9 +276,11 @@ exit 0
 
     trace = tmp_path / "trace"
     published = tmp_path / "published"
+    postinstall_count = tmp_path / "postinstall-count"
     environment = os.environ.copy()
     environment.update(
         PATH=f"{fake_bin}:{environment['PATH']}",
+        POSTINSTALL_COUNT=str(postinstall_count),
         PUBLISHED=str(published),
         TRACE=str(trace),
     )
@@ -274,7 +300,7 @@ exit 0
         ),
         "verify_v2_release_artifacts.py postinstall",
         f"{uv_bin} --version",
-        f"{release}/.venv/bin/python -",
+        f"{release}/.venv/bin/python -B -",
         f"stocker-runtime ibkr-api verify --provenance {provenance}",
     )
     for failure in failures:
@@ -293,6 +319,24 @@ exit 0
         assert completed.returncode == 78, failure
         assert not published.exists(), failure
         assert "ln -s" not in trace.read_text(encoding="utf-8"), failure
+
+    published.unlink(missing_ok=True)
+    postinstall_count.unlink(missing_ok=True)
+    trace.write_text("", encoding="utf-8")
+    completed = subprocess.run(
+        ["bash", "-c", block],
+        check=False,
+        capture_output=True,
+        env=environment | {"FAIL_FINAL_POSTINSTALL": "1", "FAIL_MATCH": ""},
+        text=True,
+        timeout=5,
+    )
+    final_trace = trace.read_text(encoding="utf-8")
+    assert completed.returncode == 78
+    assert final_trace.count("verify_v2_release_artifacts.py postinstall") == 2
+    assert final_trace.count("verify_v2_release_artifacts.py preinstall") == 1
+    assert not published.exists()
+    assert "ln -s" not in final_trace
 
     published.unlink(missing_ok=True)
     continued = tmp_path / "continued-after-accepted-nonzero"
@@ -331,7 +375,9 @@ def test_cutover_runtime_dependency_gate_accepts_only_exact_semantic_pin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
-    marker = "sudo \"$STOCKER_V2_RELEASE/.venv/bin/python\" - <<'PY'\n"
+    marker = (
+        "sudo env PYTHONDONTWRITEBYTECODE=1 \"$STOCKER_V2_RELEASE/.venv/bin/python\" -B - <<'PY'\n"
+    )
     gate_start = runbook.index(marker) + len(marker)
     gate_end = runbook.index("\nPY\n", gate_start)
     gate = runbook[gate_start:gate_end]
@@ -379,6 +425,118 @@ def test_cutover_runtime_dependency_gate_accepts_only_exact_semantic_pin(
         dependency_result["value"] = rejected
         with pytest.raises(SystemExit, match="ibapi declared dependency mismatch"):
             exec(compile(gate, "<cutover-runtime-dependency-gate>", "exec"), {})
+
+
+def test_cutover_import_and_console_probes_leave_no_generated_bytecode(
+    tmp_path: Path,
+) -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+    marker = (
+        "sudo env PYTHONDONTWRITEBYTECODE=1 \"$STOCKER_V2_RELEASE/.venv/bin/python\" -B - <<'PY'\n"
+    )
+    gate_start = runbook.index(marker) + len(marker)
+    gate_end = runbook.index("\nPY\n", gate_start)
+    gate = runbook[gate_start:gate_end]
+
+    venv = tmp_path / "probe-venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    site_packages = next((venv / "lib").glob("python*/site-packages"))
+    for package in ("google", "google/protobuf", "ibapi", "stocker_runtime"):
+        package_root = site_packages / package
+        package_root.mkdir(parents=True, exist_ok=True)
+        (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (site_packages / "ibapi/client.py").write_text(
+        "class EClient:\n    pass\n",
+        encoding="utf-8",
+    )
+    (site_packages / "stocker_runtime/cli_probe.py").write_text(
+        """import os
+import sys
+from pathlib import Path
+
+import google.protobuf
+from ibapi.client import EClient
+
+def main():
+    if not isinstance(EClient, type):
+        raise SystemExit(31)
+    if sys.argv[1:] != ["ibkr-api", "verify", "--provenance", os.environ["PROVENANCE"]]:
+        raise SystemExit(32)
+    Path(os.environ["PROBE_MARKER"]).write_text("verified", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    for distribution, metadata in (
+        (
+            "ibapi-10.49.1.dist-info",
+            "Name: ibapi\nVersion: 10.49.1\nRequires-Dist: protobuf ==5.29.5\n",
+        ),
+        (
+            "protobuf-5.29.5.dist-info",
+            "Name: protobuf\nVersion: 5.29.5\n",
+        ),
+    ):
+        dist_info = site_packages / distribution
+        dist_info.mkdir()
+        (dist_info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\n{metadata}\n",
+            encoding="utf-8",
+        )
+    console = venv / "bin/stocker-runtime"
+    console.write_text(
+        "from stocker_runtime.cli_probe import main\nmain()\n",
+        encoding="utf-8",
+    )
+    console.chmod(0o755)
+    provenance = tmp_path / "active-provenance.json"
+    provenance.write_text("{}\n", encoding="utf-8")
+    probe_marker = tmp_path / "probe-complete"
+    environment = os.environ | {
+        "PROBE_MARKER": str(probe_marker),
+        "PROVENANCE": str(provenance),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    python = venv / "bin/python"
+
+    subprocess.run(
+        [str(python), "-B", "-"],
+        input=gate,
+        check=True,
+        capture_output=True,
+        env=environment,
+        text=True,
+        timeout=5,
+    )
+    subprocess.run(
+        [
+            str(python),
+            "-B",
+            str(console),
+            "ibkr-api",
+            "verify",
+            "--provenance",
+            str(provenance),
+        ],
+        check=True,
+        capture_output=True,
+        env=environment,
+        text=True,
+        timeout=5,
+    )
+
+    assert probe_marker.read_text(encoding="utf-8") == "verified"
+    generated = [
+        path
+        for path in venv.rglob("*")
+        if path.name == "__pycache__" or path.suffix in {".pyc", ".pyo"}
+    ]
+    assert generated == []
 
 
 def test_cutover_verifier_bootstrap_rejects_trust_boundary_mutations(

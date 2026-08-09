@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -135,15 +137,27 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     assert '--reinstall "$STOCKER_IBAPI_SOURCE"' not in runbook
     assert 'sudo test ! -L "$STOCKER_IBAPI_PROVENANCE"' not in runbook
     assert "export STOCKER_TRUSTED_PYTHON=/usr/bin/python3" in runbook
-    assert (ROOT / "deploy/scripts/verify_v2_release_artifacts.py").is_file()
+    assert "export STOCKER_UV_BIN=/usr/local/bin/uv" in runbook
+    assert "command -v uv" not in runbook
+    assert "da15297d6879b2cfbe5ea3cb03725c1613d51ba72892cc996468d871f0a532fb" in runbook
+    assert "uv 0.11.32 (x86_64-unknown-linux-gnu)" in runbook
+    assert '"$STOCKER_TRUSTED_PYTHON" -I -' in runbook
+    assert runbook.count('"$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER"') == 2
+    verifier = ROOT / "deploy/scripts/verify_v2_release_artifacts.py"
+    assert verifier.is_file()
+    verifier_sha256 = hashlib.sha256(verifier.read_bytes()).hexdigest()
+    assert f"export STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256={verifier_sha256}" in runbook
     for protected_argument in (
         '--ibapi-wheel "$STOCKER_IBAPI_WHEEL"',
         '--ibapi-manifest "$STOCKER_IBAPI_WHEEL_SHA256"',
         '--protobuf-wheel "$STOCKER_PROTOBUF_WHEEL"',
         '--protobuf-manifest "$STOCKER_PROTOBUF_WHEEL_SHA256"',
+        '--uv-bin "$STOCKER_UV_BIN"',
+        '--uv-manifest "$STOCKER_UV_SHA256"',
         '--official-source-root "$STOCKER_IBAPI_SOURCE"',
         '--release-root "$STOCKER_V2_RELEASE"',
         '--verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER"',
+        '--verifier-sha256 "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256"',
         '--venv "$STOCKER_V2_RELEASE/.venv"',
     ):
         assert runbook.count(protected_argument) == 2
@@ -166,6 +180,8 @@ def test_cutover_dependency_failures_cannot_reach_release_pointer(tmp_path: Path
     protobuf_manifest = tmp_path / "protobuf-5.29.5-reviewed.sha256"
     ibapi_wheel = tmp_path / "ibapi-10.49.1-py3-none-any.whl"
     ibapi_manifest = tmp_path / "ibapi-10.49.1-reviewed.sha256"
+    uv_bin = tmp_path / "bin/uv"
+    uv_manifest = tmp_path / "uv-0.11.32.sha256"
     provenance = tmp_path / "active-provenance.json"
     replacements = {
         "export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT": (
@@ -194,6 +210,10 @@ def test_cutover_dependency_failures_cannot_reach_release_pointer(tmp_path: Path
         (
             "export STOCKER_IBAPI_PROVENANCE=/var/lib/stocker/ibkr-api/active-provenance.json"
         ): f'export STOCKER_IBAPI_PROVENANCE="{provenance}"',
+        "export STOCKER_UV_BIN=/usr/local/bin/uv": f'export STOCKER_UV_BIN="{uv_bin}"',
+        (
+            "export STOCKER_UV_SHA256=/var/lib/stocker/ibkr-api/install/uv-0.11.32.sha256"
+        ): f'export STOCKER_UV_SHA256="{uv_manifest}"',
     }
     for original, replacement in replacements.items():
         assert original in block
@@ -216,6 +236,9 @@ fi
 if [[ "$1" == "ln" && "$2" == "-s" ]]; then
   : > "$PUBLISHED"
 fi
+if [[ "$1" == */uv && "${2:-}" == "--version" ]]; then
+  printf '%s\n' 'uv 0.11.32 (x86_64-unknown-linux-gnu)'
+fi
 exit 0
 """,
         encoding="utf-8",
@@ -233,6 +256,8 @@ exit 0
     failures = (
         "sha256sum --check",
         f"sha256sum --check {ibapi_manifest}",
+        f"sha256sum --check {uv_manifest}",
+        "/usr/bin/python3 -I -",
         "verify_v2_release_artifacts.py preinstall",
         (
             f"pip install --python {release}/.venv/bin/python --offline --no-deps "
@@ -243,6 +268,7 @@ exit 0
             f"--reinstall {ibapi_wheel}"
         ),
         "verify_v2_release_artifacts.py postinstall",
+        f"{uv_bin} --version",
         f"{release}/.venv/bin/python -",
         f"stocker-runtime ibkr-api verify --provenance {provenance}",
     )
@@ -294,6 +320,94 @@ false
     assert completed.returncode == 0, completed.stderr
     assert published.exists()
     assert continued.exists()
+
+
+def test_cutover_verifier_bootstrap_rejects_trust_boundary_mutations(
+    tmp_path: Path,
+) -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+    bootstrap_command = runbook.index('"$STOCKER_TRUSTED_PYTHON" -I -')
+    bootstrap_start = runbook.index("import hashlib", bootstrap_command)
+    bootstrap_end = runbook.index(
+        '\nPY\nsudo "$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER"',
+        bootstrap_start,
+    )
+    bootstrap = runbook[bootstrap_start:bootstrap_end]
+
+    release = tmp_path / "releases/reviewed"
+    verifier = release / "deploy/scripts/verify_v2_release_artifacts.py"
+    verifier.parent.mkdir(parents=True)
+    reviewed_payload = b"# reviewed verifier\n"
+    verifier.write_bytes(reviewed_payload)
+    verifier.chmod(0o644)
+    expected_hash = hashlib.sha256(reviewed_payload).hexdigest()
+    reached_verifier = tmp_path / "reached-verifier"
+    compatibility_prefix = """
+import os
+import pathlib
+
+_real_lstat = pathlib.Path.lstat
+def _controlled_test_lstat(path):
+    metadata = _real_lstat(path)
+    values = list(metadata)
+    values[4] = 1 if os.environ.get("WRONG_OWNER") == str(path) else 0
+    values[5] = 0
+    return os.stat_result(values)
+pathlib.Path.lstat = _controlled_test_lstat
+os.listxattr = lambda path, *, follow_symlinks=False: []
+"""
+    program = (
+        compatibility_prefix
+        + bootstrap
+        + '\nPath(os.environ["REACHED_VERIFIER"]).write_text("reached", encoding="utf-8")\n'
+    )
+
+    def run_bootstrap(
+        *,
+        verifier_argument: Path = verifier,
+        reviewed_hash: str = expected_hash,
+        wrong_owner: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        reached_verifier.unlink(missing_ok=True)
+        environment = os.environ.copy()
+        environment["REACHED_VERIFIER"] = str(reached_verifier)
+        environment["WRONG_OWNER"] = "" if wrong_owner is None else str(wrong_owner)
+        return subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-",
+                str(verifier_argument),
+                str(release),
+                reviewed_hash,
+            ],
+            input=program,
+            check=False,
+            capture_output=True,
+            env=environment,
+            text=True,
+            timeout=5,
+        )
+
+    assert run_bootstrap().returncode == 0
+    assert reached_verifier.exists()
+
+    failures: list[subprocess.CompletedProcess[str]] = [
+        run_bootstrap(reviewed_hash="0" * 64),
+        run_bootstrap(wrong_owner=verifier),
+    ]
+    verifier.chmod(0o666)
+    failures.append(run_bootstrap())
+    verifier.chmod(0o644)
+    verifier.write_bytes(b"# verifier changed after review\n")
+    failures.append(run_bootstrap())
+    verifier.write_bytes(reviewed_payload)
+    alternate = verifier.with_name("alternate.py")
+    alternate.write_bytes(reviewed_payload)
+    failures.append(run_bootstrap(verifier_argument=alternate))
+
+    assert all(completed.returncode != 0 for completed in failures)
+    assert not reached_verifier.exists()
 
 
 def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() -> None:

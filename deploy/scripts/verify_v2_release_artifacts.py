@@ -31,7 +31,10 @@ PROVENANCE_LITERAL_TARGET = "provenance/10.49.1.json"
 PROVENANCE_ROOT = Path("/var/lib/stocker/ibkr-api")
 PROVENANCE_TRUST_ANCHOR = Path("/")
 REQUIRED_OWNER_UID = 0
+UV_PATH = Path("/usr/local/bin/uv")
+UV_SHA256 = "da15297d6879b2cfbe5ea3cb03725c1613d51ba72892cc996468d871f0a532fb"
 MAX_WHEEL_BYTES = 64 * 1024 * 1024
+MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_METADATA_BYTES = 1024 * 1024
@@ -39,6 +42,7 @@ MAX_ENTRIES = 2_048
 MAX_PROTECTED_ENTRIES = 100_000
 MAX_PATH_BYTES = 512
 ROOT_GROUP_GID = 0
+POSIX_ACL_XATTRS = frozenset({"system.posix_acl_access", "system.posix_acl_default"})
 VERIFIER_RELATIVE_PATH = Path("deploy/scripts/verify_v2_release_artifacts.py")
 WHEEL_METADATA_MEMBERS = frozenset(
     {
@@ -108,11 +112,27 @@ def _require_root_control(metadata: os.stat_result, label: str, required_uid: in
         _raise(f"{label} is writable by a non-root group")
 
 
+def _require_no_extended_posix_acl(path: Path, label: str) -> None:
+    listxattr: Any = getattr(os, "listxattr", None)
+    if listxattr is None:
+        _raise(f"{label} ACL inspection is unavailable")
+    try:
+        names = listxattr(path, follow_symlinks=False)
+    except (OSError, TypeError, NotImplementedError) as error:
+        raise ArtifactVerificationError(f"{label} ACL inspection failed") from error
+    normalized = {
+        name.decode("ascii", errors="strict") if isinstance(name, bytes) else name for name in names
+    }
+    if normalized & POSIX_ACL_XATTRS:
+        _raise(f"{label} has an extended POSIX ACL")
+
+
 def _require_secure_directory(path: Path, label: str, required_uid: int) -> None:
     metadata = _lstat(path, label)
     if not stat.S_ISDIR(metadata.st_mode):
         _raise(f"{label} is not a real directory")
     _require_root_control(metadata, label, required_uid)
+    _require_no_extended_posix_acl(path, label)
 
 
 def _require_secure_regular(path: Path, label: str, required_uid: int) -> os.stat_result:
@@ -120,6 +140,7 @@ def _require_secure_regular(path: Path, label: str, required_uid: int) -> os.sta
     if not stat.S_ISREG(metadata.st_mode):
         _raise(f"{label} is not a real file")
     _require_root_control(metadata, label, required_uid)
+    _require_no_extended_posix_acl(path, label)
     return metadata
 
 
@@ -169,6 +190,7 @@ def _require_secure_tree_entry(
     if stat.S_ISLNK(metadata.st_mode):
         if metadata.st_uid != required_uid:
             _raise(f"{label} symlink owner is invalid")
+        _require_no_extended_posix_acl(path, label)
         try:
             resolved = path.resolve(strict=True)
         except OSError as error:
@@ -178,10 +200,35 @@ def _require_secure_tree_entry(
         if not (stat.S_ISREG(target_metadata.st_mode) or stat.S_ISDIR(target_metadata.st_mode)):
             _raise(f"{label} symlink target type is invalid")
         _require_root_control(target_metadata, f"{label} symlink target", required_uid)
+        _require_no_extended_posix_acl(resolved, f"{label} symlink target")
     elif stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode):
         _require_root_control(metadata, label, required_uid)
+        _require_no_extended_posix_acl(path, label)
     else:
         _raise(f"{label} type is invalid")
+
+
+def _require_exact_lib64_symlink(
+    path: Path,
+    root: Path,
+    label: str,
+    required_uid: int,
+) -> None:
+    if path != root / ".venv/lib64":
+        _raise(f"{label} directory symlink is not admitted")
+    metadata = _lstat(path, label)
+    if not stat.S_ISLNK(metadata.st_mode) or metadata.st_uid != required_uid:
+        _raise(f"{label} directory symlink identity is invalid")
+    _require_no_extended_posix_acl(path, label)
+    try:
+        literal = os.readlink(path)
+        resolved = path.resolve(strict=True)
+    except OSError as error:
+        raise ArtifactVerificationError(f"{label} directory symlink is invalid") from error
+    expected = root / ".venv/lib"
+    if literal != "lib" or resolved != expected:
+        _raise(f"{label} directory symlink target is invalid")
+    _require_secure_directory(expected, f"{label} directory symlink target", required_uid)
 
 
 def _require_secure_tree(
@@ -203,12 +250,22 @@ def _require_secure_tree(
         if visited > MAX_PROTECTED_ENTRIES:
             _raise(f"{label} has too many entries")
         for directory in directories:
-            _require_secure_tree_entry(
-                current_path / directory,
-                f"{label} directory",
-                trust_anchor=trust_anchor,
-                required_uid=required_uid,
-            )
+            directory_path = current_path / directory
+            directory_metadata = _lstat(directory_path, f"{label} directory")
+            if stat.S_ISLNK(directory_metadata.st_mode):
+                _require_exact_lib64_symlink(
+                    directory_path,
+                    root,
+                    f"{label} directory",
+                    required_uid,
+                )
+            else:
+                _require_secure_tree_entry(
+                    directory_path,
+                    f"{label} directory",
+                    trust_anchor=trust_anchor,
+                    required_uid=required_uid,
+                )
         for filename in filenames:
             _require_secure_tree_entry(
                 current_path / filename,
@@ -285,6 +342,7 @@ def verify_provenance_link(
         _raise("active provenance path is not a symlink")
     if link_metadata.st_uid != required_uid:
         _raise("active provenance link owner is invalid")
+    _require_no_extended_posix_acl(provenance_link, "active provenance link")
     try:
         literal_target = os.readlink(provenance_link)
     except OSError as error:
@@ -296,6 +354,7 @@ def verify_provenance_link(
     if not stat.S_ISREG(target_metadata.st_mode):
         _raise("active provenance target is not a real file")
     _require_root_control(target_metadata, "active provenance target", required_uid)
+    _require_no_extended_posix_acl(expected_target, "active provenance target")
     try:
         resolved_link = provenance_link.resolve(strict=True)
         resolved_target = expected_target.resolve(strict=True)
@@ -591,8 +650,11 @@ def _verify_sha256_manifest(
     *,
     trust_anchor: Path,
     required_uid: int,
+    artifact_limit: int = MAX_WHEEL_BYTES,
+    expected_sha256: str | None = None,
+    require_executable: bool = False,
 ) -> None:
-    _require_secure_file_boundary(
+    artifact_metadata = _require_secure_file_boundary(
         artifact,
         label,
         trust_anchor=trust_anchor,
@@ -607,7 +669,7 @@ def _verify_sha256_manifest(
     artifact_payload = _read_regular_bounded(
         artifact,
         label,
-        limit=MAX_WHEEL_BYTES,
+        limit=artifact_limit,
     )
     manifest_payload = _read_regular_bounded(
         manifest,
@@ -615,6 +677,10 @@ def _verify_sha256_manifest(
         limit=MAX_METADATA_BYTES,
     )
     digest = hashlib.sha256(artifact_payload).hexdigest()
+    if expected_sha256 is not None and digest != expected_sha256:
+        _raise(f"{label} hash is not the reviewed value")
+    if require_executable and not stat.S_IMODE(artifact_metadata.st_mode) & 0o111:
+        _raise(f"{label} is not executable")
     try:
         expected = f"{digest}  {artifact}\n".encode("ascii")
     except UnicodeEncodeError as error:
@@ -623,22 +689,39 @@ def _verify_sha256_manifest(
         _raise(f"{label} manifest is not the exact one-entry hash binding")
 
 
+def _verify_exact_sha256(path: Path, label: str, expected: str) -> None:
+    if (
+        len(expected) != 64
+        or any(character not in "0123456789abcdef" for character in expected)
+        or hashlib.sha256(
+            _read_regular_bounded(path, label, limit=MAX_EXECUTABLE_BYTES)
+        ).hexdigest()
+        != expected
+    ):
+        _raise(f"{label} hash is not the reviewed value")
+
+
 def verify_release_boundary(
     *,
     ibapi_wheel: Path,
     ibapi_manifest: Path,
     protobuf_wheel: Path,
     protobuf_manifest: Path,
+    uv_bin: Path,
+    uv_manifest: Path,
     source_root: Path,
     release_root: Path,
     venv: Path,
     verifier_path: Path,
+    expected_verifier_sha256: str,
     provenance_link: Path = ACTIVE_PROVENANCE,
     expected_link: Path = ACTIVE_PROVENANCE,
     expected_target: Path = PROVENANCE_TARGET,
     provenance_root: Path = PROVENANCE_ROOT,
     trust_anchor: Path = PROVENANCE_TRUST_ANCHOR,
     required_uid: int = REQUIRED_OWNER_UID,
+    expected_uv: Path = UV_PATH,
+    expected_uv_sha256: str = UV_SHA256,
 ) -> WheelEvidence:
     """Bind immutable inputs and root-controlled execution paths for one phase."""
 
@@ -646,7 +729,21 @@ def verify_release_boundary(
         _raise("release verifier path is not exact")
     if venv != release_root / ".venv":
         _raise("V2 virtual environment path is not exact")
-    if len({ibapi_wheel, ibapi_manifest, protobuf_wheel, protobuf_manifest}) != 4:
+    if uv_bin != expected_uv:
+        _raise("uv executable path is not exact")
+    if (
+        len(
+            {
+                ibapi_wheel,
+                ibapi_manifest,
+                protobuf_wheel,
+                protobuf_manifest,
+                uv_bin,
+                uv_manifest,
+            }
+        )
+        != 6
+    ):
         _raise("release artifact paths are not distinct")
     if not (
         protobuf_wheel.name.startswith("protobuf-5.29.5-") and protobuf_wheel.name.endswith(".whl")
@@ -660,16 +757,31 @@ def verify_release_boundary(
         trust_anchor=trust_anchor,
         required_uid=required_uid,
     )
+    _verify_exact_sha256(
+        verifier_path,
+        "release artifact verifier",
+        expected_verifier_sha256,
+    )
     _locate_site_packages(
         venv,
         trust_anchor=trust_anchor,
         required_uid=required_uid,
     )
     _require_secure_tree(
-        venv,
-        "V2 virtual environment",
+        release_root,
+        "V2 release",
         trust_anchor=trust_anchor,
         required_uid=required_uid,
+    )
+    _verify_sha256_manifest(
+        uv_bin,
+        uv_manifest,
+        "uv executable",
+        trust_anchor=trust_anchor,
+        required_uid=required_uid,
+        artifact_limit=MAX_EXECUTABLE_BYTES,
+        expected_sha256=expected_uv_sha256,
+        require_executable=True,
     )
     _verify_sha256_manifest(
         protobuf_wheel,
@@ -899,9 +1011,12 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--ibapi-manifest", type=Path, required=True)
         command.add_argument("--protobuf-wheel", type=Path, required=True)
         command.add_argument("--protobuf-manifest", type=Path, required=True)
+        command.add_argument("--uv-bin", type=Path, required=True)
+        command.add_argument("--uv-manifest", type=Path, required=True)
         command.add_argument("--official-source-root", type=Path, required=True)
         command.add_argument("--release-root", type=Path, required=True)
         command.add_argument("--verifier-path", type=Path, required=True)
+        command.add_argument("--verifier-sha256", required=True)
         command.add_argument("--venv", type=Path, required=True)
     return parser
 
@@ -916,10 +1031,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             ibapi_manifest=arguments.ibapi_manifest,
             protobuf_wheel=arguments.protobuf_wheel,
             protobuf_manifest=arguments.protobuf_manifest,
+            uv_bin=arguments.uv_bin,
+            uv_manifest=arguments.uv_manifest,
             source_root=arguments.official_source_root,
             release_root=arguments.release_root,
             venv=arguments.venv,
             verifier_path=arguments.verifier_path,
+            expected_verifier_sha256=arguments.verifier_sha256,
         )
         if arguments.operation == "postinstall":
             verify_installed_distribution(

@@ -71,13 +71,22 @@ do not execute Python or a CLI from the new environment first. It validates the
 complete wheel and installed RECORD/file set as well as the exact root-owned active
 provenance symlink, whose literal target must be
 `provenance/10.49.1.json`. Both phases revalidate the exact one-entry manifests and
-hashes for both wheels plus root ownership and non-writable trust boundaries for the
+hashes for both wheels plus root ownership and ACL-free, non-writable trust boundaries for the
 artifacts, complete official source tree, reviewed release/verifier, virtual
 environment, site-packages, and installed distribution. Group-write is admitted only
-for group ID 0; world-write is never admitted. Only then verify metadata, concrete
+for group ID 0; world-write is never admitted. The only admitted directory symlink is
+the host-shaped internal `.venv/lib64 -> lib`; its real `.venv/lib` target tree is
+scanned in full. Only then verify metadata, concrete
 imports, and the installed
 `ibapi` Python tree through the new environment. Never modify the release environment
 after publishing the V2 pointer.
+
+The reviewed installer is exactly `/usr/local/bin/uv`, SHA-256
+`da15297d6879b2cfbe5ea3cb03725c1613d51ba72892cc996468d871f0a532fb`, reporting
+`uv 0.11.32 (x86_64-unknown-linux-gnu)`. Do not select it through `PATH`. Before
+the release verifier is executed as root, isolated system Python checks its exact
+reviewed hash and its root-owned, ACL-free, non-writable ancestry; the verifier then
+rechecks the complete release and all installer inputs in both phases.
 
 Security review note: `protobuf==5.29.5` is named in
 GHSA-7gcm-g887-7qv7 / CVE-2026-0994. The reviewed official IBKR client source does not
@@ -100,7 +109,9 @@ export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/REPLACE_WITH_REV
 export STOCKER_PROTOBUF_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/protobuf-5.29.5-wheel.sha256
 export STOCKER_TRUSTED_PYTHON=/usr/bin/python3
 export STOCKER_RELEASE_ARTIFACT_VERIFIER="$STOCKER_V2_RELEASE/deploy/scripts/verify_v2_release_artifacts.py"
-export STOCKER_UV_BIN="$(command -v uv)"
+export STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256=c9c015774c08a748ba99775e571f21afe24169444d375ab6b2828bf0e49ca6fc
+export STOCKER_UV_BIN=/usr/local/bin/uv
+export STOCKER_UV_SHA256=/var/lib/stocker/ibkr-api/install/uv-0.11.32.sha256
 test "$STOCKER_V2_RELEASE" != \
   /opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT || exit 78
 command -v setfacl >/dev/null || exit 78
@@ -137,25 +148,85 @@ sudo awk -v expected="$STOCKER_IBAPI_WHEEL" \
   'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ && $2 == expected { ok = 1 } END { exit !(NR == 1 && ok) }' \
   "$STOCKER_IBAPI_WHEEL_SHA256"
 sudo sha256sum --check "$STOCKER_IBAPI_WHEEL_SHA256"
-sudo "$STOCKER_TRUSTED_PYTHON" "$STOCKER_RELEASE_ARTIFACT_VERIFIER" preinstall \
+sudo test -f "$STOCKER_UV_SHA256"
+sudo test ! -L "$STOCKER_UV_SHA256"
+sudo awk -v expected="$STOCKER_UV_BIN" \
+  'NR == 1 && length($1) == 64 && $1 == "da15297d6879b2cfbe5ea3cb03725c1613d51ba72892cc996468d871f0a532fb" && $2 == expected { ok = 1 } END { exit !(NR == 1 && ok) }' \
+  "$STOCKER_UV_SHA256"
+sudo /usr/bin/sha256sum --check "$STOCKER_UV_SHA256"
+sudo "$STOCKER_TRUSTED_PYTHON" -I - \
+  "$STOCKER_RELEASE_ARTIFACT_VERIFIER" "$STOCKER_V2_RELEASE" \
+  "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+from pathlib import Path
+
+verifier = Path(sys.argv[1])
+release = Path(sys.argv[2])
+expected_hash = sys.argv[3]
+acl_names = {"system.posix_acl_access", "system.posix_acl_default"}
+listxattr = getattr(os, "listxattr", None)
+if listxattr is None:
+    raise SystemExit("verifier bootstrap ACL inspection unavailable")
+
+
+def require_controlled(path: Path, *, directory: bool) -> None:
+    metadata = path.lstat()
+    expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+    mode = stat.S_IMODE(metadata.st_mode)
+    if not expected_type(metadata.st_mode) or metadata.st_uid != 0:
+        raise SystemExit("verifier bootstrap identity failure")
+    if mode & stat.S_IWOTH or (mode & stat.S_IWGRP and metadata.st_gid != 0):
+        raise SystemExit("verifier bootstrap mode failure")
+    names = set(listxattr(path, follow_symlinks=False))
+    if names & acl_names:
+        raise SystemExit("verifier bootstrap ACL failure")
+
+
+if (
+    not verifier.is_absolute()
+    or Path(os.path.normpath(verifier)) != verifier
+    or Path(os.path.normpath(release)) != release
+    or verifier != release / "deploy/scripts/verify_v2_release_artifacts.py"
+):
+    raise SystemExit("verifier bootstrap path failure")
+current = Path("/")
+require_controlled(current, directory=True)
+for part in verifier.parent.relative_to(current).parts:
+    current /= part
+    require_controlled(current, directory=True)
+require_controlled(verifier, directory=False)
+if hashlib.sha256(verifier.read_bytes()).hexdigest() != expected_hash:
+    raise SystemExit("verifier bootstrap hash failure")
+PY
+sudo "$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER" preinstall \
   --ibapi-wheel "$STOCKER_IBAPI_WHEEL" \
   --ibapi-manifest "$STOCKER_IBAPI_WHEEL_SHA256" \
   --protobuf-wheel "$STOCKER_PROTOBUF_WHEEL" \
   --protobuf-manifest "$STOCKER_PROTOBUF_WHEEL_SHA256" \
+  --uv-bin "$STOCKER_UV_BIN" \
+  --uv-manifest "$STOCKER_UV_SHA256" \
   --official-source-root "$STOCKER_IBAPI_SOURCE" \
   --release-root "$STOCKER_V2_RELEASE" \
   --verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER" \
+  --verifier-sha256 "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256" \
   --venv "$STOCKER_V2_RELEASE/.venv"
+test "$(sudo "$STOCKER_UV_BIN" --version)" = "uv 0.11.32 (x86_64-unknown-linux-gnu)"
 sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"
 sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_IBAPI_WHEEL"
-sudo "$STOCKER_TRUSTED_PYTHON" "$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall \
+sudo "$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinstall \
   --ibapi-wheel "$STOCKER_IBAPI_WHEEL" \
   --ibapi-manifest "$STOCKER_IBAPI_WHEEL_SHA256" \
   --protobuf-wheel "$STOCKER_PROTOBUF_WHEEL" \
   --protobuf-manifest "$STOCKER_PROTOBUF_WHEEL_SHA256" \
+  --uv-bin "$STOCKER_UV_BIN" \
+  --uv-manifest "$STOCKER_UV_SHA256" \
   --official-source-root "$STOCKER_IBAPI_SOURCE" \
   --release-root "$STOCKER_V2_RELEASE" \
   --verifier-path "$STOCKER_RELEASE_ARTIFACT_VERIFIER" \
+  --verifier-sha256 "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256" \
   --venv "$STOCKER_V2_RELEASE/.venv"
 sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
 from importlib.metadata import requires, version

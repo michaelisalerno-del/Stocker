@@ -61,6 +61,12 @@ INSTALLER_METADATA_MEMBERS = frozenset(
         f"{DIST_INFO}/uv_cache.json",
     }
 )
+TOP_LEVEL_DECLARATIONS = frozenset(
+    {
+        b"ibapi\n",
+        b"ibapi\nibapi/protobuf\n",
+    }
+)
 PROVENANCE_KEYS = frozenset(
     {
         "schema_version",
@@ -555,7 +561,7 @@ def _validate_metadata(contents: dict[str, bytes]) -> None:
     tags = [str(value).strip() for value in wheel_metadata.get_all("Tag", [])]
     if tags != ["py3-none-any"]:
         _raise("wheel compatibility tag is invalid")
-    if contents[f"{DIST_INFO}/top_level.txt"] != b"ibapi\n":
+    if contents[f"{DIST_INFO}/top_level.txt"] not in TOP_LEVEL_DECLARATIONS:
         _raise("wheel top-level declaration is invalid")
 
 

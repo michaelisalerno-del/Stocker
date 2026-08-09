@@ -136,6 +136,7 @@ def _wheel_contents(
     source_files: dict[str, bytes],
     *,
     requirement: str = "protobuf==5.29.5",
+    top_level: bytes = b"ibapi\n",
 ) -> dict[str, bytes]:
     return {
         **source_files,
@@ -153,7 +154,7 @@ def _wheel_contents(
             b"Tag: py3-none-any\n"
             b"\n"
         ),
-        f"{DIST_INFO}/top_level.txt": b"ibapi\n",
+        f"{DIST_INFO}/top_level.txt": top_level,
     }
 
 
@@ -166,8 +167,13 @@ def _write_wheel(
     symlink_name: str | None = None,
     duplicate_name: str | None = None,
     requirement: str = "protobuf==5.29.5",
+    top_level: bytes = b"ibapi\n",
 ) -> None:
-    contents = _wheel_contents(source_files, requirement=requirement)
+    contents = _wheel_contents(
+        source_files,
+        requirement=requirement,
+        top_level=top_level,
+    )
     if extra is not None:
         contents[extra[0]] = extra[1]
     contents[f"{DIST_INFO}/RECORD"] = _record_bytes(
@@ -397,6 +403,54 @@ def test_wheel_rejects_every_non_exact_protobuf_requirement(
     wheel = tmp_path / "case/ibapi-10.49.1-py3-none-any.whl"
     wheel.parent.mkdir()
     _write_wheel(wheel, source_files, requirement=requirement)
+
+    with pytest.raises(verifier.ArtifactVerificationError):
+        _verify_wheel(verifier, wheel, source, link, target, trusted_root)
+
+
+def test_wheel_accepts_production_official_builder_top_level_declaration(
+    tmp_path: Path,
+    verifier: ModuleType,
+) -> None:
+    source = tmp_path / "pythonclient"
+    source_files = _source_files(source)
+    link, target, trusted_root = _secure_provenance(tmp_path, source_files)
+    wheel = tmp_path / "case/ibapi-10.49.1-py3-none-any.whl"
+    wheel.parent.mkdir()
+    _write_wheel(
+        wheel,
+        source_files,
+        top_level=b"ibapi\nibapi/protobuf\n",
+    )
+
+    _verify_wheel(verifier, wheel, source, link, target, trusted_root)
+
+
+@pytest.mark.parametrize(
+    "top_level",
+    (
+        b"ibapi/protobuf\nibapi\n",
+        b"ibapi\nother\n",
+        b"ibapi/protobuf\n",
+        b"ibapi\nibapi.protobuf\n",
+        b"ibapi\nibapi//protobuf\n",
+        b"ibapi\r\nibapi/protobuf\r\n",
+        b"ibapi\nibapi/protobuf\n\n",
+        b"ibapi\nibapi/protobuf",
+        b"ibapi\nibapi/protobuf/\n",
+    ),
+)
+def test_wheel_rejects_every_other_top_level_declaration(
+    tmp_path: Path,
+    verifier: ModuleType,
+    top_level: bytes,
+) -> None:
+    source = tmp_path / "pythonclient"
+    source_files = _source_files(source)
+    link, target, trusted_root = _secure_provenance(tmp_path, source_files)
+    wheel = tmp_path / "case/ibapi-10.49.1-py3-none-any.whl"
+    wheel.parent.mkdir()
+    _write_wheel(wheel, source_files, top_level=top_level)
 
     with pytest.raises(verifier.ArtifactVerificationError):
         _verify_wheel(verifier, wheel, source, link, target, trusted_root)

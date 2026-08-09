@@ -299,9 +299,14 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     deletion = runbook.index(exact_delete)
     guard_call = runbook.index("retire_authorised_v1_candidate\n")
     assert guarded_delete < deletion < guard_call
-    assert "systemctl mask --runtime --now" in runbook[:deletion]
-    assert "systemctl is-active --quiet" in runbook[guarded_delete:deletion]
-    assert "systemctl is-enabled --quiet" in runbook[guarded_delete:deletion]
+    deletion_guard = runbook[guarded_delete:deletion]
+    assert "if ! sudo systemctl mask --runtime --now" in deletion_guard
+    assert "--property=ActiveState --value" in deletion_guard
+    assert "--property=LoadState --value" in deletion_guard
+    assert "--property=UnitFileState --value" in deletion_guard
+    assert 'active_state" != inactive' in deletion_guard
+    assert 'load_state" != masked' in deletion_guard
+    assert 'unit_file_state" != masked-runtime' in deletion_guard
     assert "lsof_status" in runbook[guarded_delete:deletion]
     assert 'test "$lsof_status" -ne 1' in runbook[guarded_delete:deletion]
     assert "without a glob" in runbook
@@ -317,6 +322,14 @@ def test_attended_cutover_keeps_import_rollback_and_retirement_paths_distinct() 
     assert "sudo cmp --silent" in runbook[compressed_copies:importer]
     assert "restore-integrity.txt" in runbook[compressed_copies:importer]
     assert retirement_database not in runbook[runbook.index("--source ") :]
+    common_rollback = runbook.index("For either rollback path")
+    before_callback_rollback = runbook.index("### Before first callback")
+    after_callback_rollback = runbook.index("### After first callback")
+    assert common_rollback < before_callback_rollback < after_callback_rollback
+    common_rollback_commands = runbook[common_rollback:before_callback_rollback]
+    assert "systemctl unmask --runtime" in common_rollback_commands
+    assert "--property=LoadState --value" in common_rollback_commands
+    assert "masked|masked-runtime" in common_rollback_commands
 
 
 def test_official_api_update_service_uses_the_v2_runtime_cli() -> None:

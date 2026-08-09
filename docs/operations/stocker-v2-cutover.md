@@ -238,28 +238,28 @@ zero when it finds the unsafe state. Runtime-mask the stopped V1 surface, assert
 unit immediately before deletion, and invoke `rm` only from the guarded function:
 
 ```bash
-sudo systemctl mask --runtime --now \
-  stocker-recorder.service stocker-web.service \
-  stocker-backup.service stocker-backup.timer \
-  stocker-recorder-session-readiness.service \
-  stocker-recorder-session-readiness.timer
 retire_authorised_v1_candidate() {
-  local unit handle_report lsof_status
+  local unit active_state load_state unit_file_state handle_report lsof_status
+  if ! sudo systemctl mask --runtime --now \
+    stocker-recorder.service stocker-web.service \
+    stocker-backup.service stocker-backup.timer \
+    stocker-recorder-session-readiness.service \
+    stocker-recorder-session-readiness.timer; then
+    echo "refusing retirement: V1 runtime mask failed" >&2
+    return 78
+  fi
   for unit in \
     stocker-recorder.service stocker-web.service \
     stocker-backup.service stocker-backup.timer \
     stocker-recorder-session-readiness.service \
     stocker-recorder-session-readiness.timer; do
-    if sudo systemctl is-active --quiet "$unit"; then
-      echo "refusing retirement: active V1 unit $unit" >&2
+    active_state="$(sudo systemctl show --property=ActiveState --value "$unit")" || return 78
+    load_state="$(sudo systemctl show --property=LoadState --value "$unit")" || return 78
+    unit_file_state="$(sudo systemctl show --property=UnitFileState --value "$unit")" || \
       return 78
-    fi
-  done
-  for unit in \
-    stocker-recorder.service stocker-web.service \
-    stocker-backup.timer stocker-recorder-session-readiness.timer; do
-    if sudo systemctl is-enabled --quiet "$unit"; then
-      echo "refusing retirement: enabled V1 unit $unit" >&2
+    if test "$active_state" != inactive || test "$load_state" != masked || \
+      test "$unit_file_state" != masked-runtime; then
+      echo "refusing retirement: V1 unit is not inactive and runtime-masked: $unit" >&2
       return 78
     fi
   done
@@ -506,13 +506,36 @@ release, its untouched database, and both recovery sets remain preserved.
 
 ## 8. Rollback
 
+For either rollback path, first remove every exact V1 runtime mask and verify the
+preserved unit files are loaded in their recorded pre-cutover state. A failed unmask or
+state query stops rollback before any V1 start attempt:
+
+```bash
+sudo systemctl unmask --runtime \
+  stocker-recorder.service stocker-web.service \
+  stocker-backup.service stocker-backup.timer \
+  stocker-recorder-session-readiness.service \
+  stocker-recorder-session-readiness.timer || exit 78
+sudo systemctl daemon-reload || exit 78
+for unit in \
+  stocker-recorder.service stocker-web.service \
+  stocker-backup.service stocker-backup.timer \
+  stocker-recorder-session-readiness.service \
+  stocker-recorder-session-readiness.timer; do
+  test "$(sudo systemctl show --property=LoadState --value "$unit")" = loaded || exit 78
+  case "$(sudo systemctl show --property=UnitFileState --value "$unit")" in
+    masked|masked-runtime) exit 78 ;;
+  esac
+done
+```
+
 ### Before first callback
 
 If V2 has not admitted its first callback, stop V2, preserve its logs and failed import
 artifacts, restore the prior release/service pointer, and restart the untouched V1
 database. Restore the rollback database's recorded V1 owner, group, mode, and ACL from
-`access-control-before.txt`, and remove the V1 units' runtime masks, before starting its
-sole V1 writer. Do not copy any V2 row into V1.
+`access-control-before.txt` before starting its sole V1 writer. Do not copy any V2 row
+into V1.
 
 ### After first callback
 

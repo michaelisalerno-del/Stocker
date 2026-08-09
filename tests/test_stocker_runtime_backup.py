@@ -516,6 +516,22 @@ def test_backup_recovers_orphaned_publication_and_rotation_files(tmp_path: Path)
     assert artifact.manifest_path.exists()
 
 
+def test_backup_recovers_orphan_before_a_failed_retry_overwrites_status(tmp_path: Path) -> None:
+    missing_database = tmp_path / "missing.sqlite3"
+    backups = tmp_path / "backups"
+    record_backup_failure(backups, code="BACKUP_IN_PROGRESS", checked_at_us=1)
+    orphan_name = backup_module._archive_filename("daily", 1)
+    orphan = backups / orphan_name
+    orphan.write_bytes(b"published-before-sigkill")
+
+    with pytest.raises(BackupError, match="backup source"):
+        create_backup(missing_database, backups, tier="daily", created_at_us=2)
+    record_backup_failure(backups, code="BackupError", checked_at_us=2)
+
+    assert not orphan.exists()
+    assert read_backup_manifests(backups, now_us=2).status.code == "BackupError"
+
+
 def test_backup_health_requires_fresh_valid_tier_floors(tmp_path: Path) -> None:
     database = tmp_path / "stocker-v2.sqlite3"
     backups = tmp_path / "backups"

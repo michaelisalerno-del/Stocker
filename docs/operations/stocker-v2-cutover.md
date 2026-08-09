@@ -17,6 +17,7 @@ There is no dual write.
 - preserved V1 release pointer: `/opt/stocker/current`
 - immutable V2 release: `/opt/stocker/releases/<release-commit>`
 - V2 service pointer: `/opt/stocker/v2-current`
+- preserved V1 writer identity: `stocker`
 - recorder identity: `stocker-recorder`
 - web identity: `stocker-web`
 - backup identity: `stocker-backup`
@@ -91,7 +92,9 @@ Prove that no V1 process has the database open. Checkpoint it, then require both
 checks to pass and no rollback journal, `-wal`, or `-shm` sidecar to remain:
 
 ```bash
-sudo -u stocker-recorder sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
+id -u stocker >/dev/null 2>&1
+sudo test "$(stat -c '%U' /var/lib/stocker/prospective/prospective.sqlite3)" = stocker
+sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3 \
   'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA quick_check; PRAGMA foreign_key_check;'
 sudo lsof -- /var/lib/stocker/prospective/prospective.sqlite3
 sudo test ! -e /var/lib/stocker/prospective/prospective.sqlite3-journal
@@ -100,7 +103,9 @@ sudo test ! -e /var/lib/stocker/prospective/prospective.sqlite3-shm
 ```
 
 The `lsof` command must print no open handle (its normal no-match exit status is
-acceptable). Do not proceed merely because the service manager reports the unit as
+acceptable). The preserved V1 writer performs the write-requiring checkpoint; the new
+V2 recorder identity is only a read-group member at this point. Do not change V1
+ownership and do not proceed merely because the service manager reports the unit as
 stopped.
 
 Query `recorder_lease` and `recorder_generation_v1`; there must be no lease and no

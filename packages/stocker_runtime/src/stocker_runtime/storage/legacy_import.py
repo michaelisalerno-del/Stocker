@@ -22,7 +22,7 @@ IMPORTER_VERSION = "stocker-v2-legacy-import/1"
 MAX_TARGET_BYTES = 8 * 1024**3
 MAX_JSON_BYTES = 16 * 1024
 MAX_RECONCILIATION_BYTES = 256 * 1024
-_IBKR_SOURCE_NAMES = frozenset({"ibkr", "interactive_brokers", "tws"})
+_IBKR_BAR_SOURCE_NAMES = frozenset({"ibkr_realtime_bar_5_second_aggregation"})
 
 # Schema structure, not mutable data, is frozen for every historically deployed prefix.
 # Duplicate 0011/0012 prefixes retain their exact original full-name ordering.
@@ -349,6 +349,7 @@ class _ImportContext:
     target: sqlite3.Connection
     trackers: dict[str, _TableTracker]
     run_modes: dict[str, tuple[str, str, int]] = field(default_factory=dict)
+    run_scientific_classifications: dict[str, str] = field(default_factory=dict)
     instrument_by_underlying: dict[int, str] = field(default_factory=dict)
     instrument_by_option: dict[int, str] = field(default_factory=dict)
     symbol_instruments: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -527,6 +528,15 @@ def _import_runs(context: _ImportContext) -> None:
         if not _run_has_ibkr_market_evidence(context, run_id):
             tracker.record(key, imported=False, reason="source_provenance_not_ibkr")
             continue
+        scientific_classification = row["scientific_classification"]
+        if not isinstance(scientific_classification, str) or not scientific_classification:
+            tracker.record(key, imported=False, reason="scientific_classification_invalid")
+            continue
+        try:
+            _canonical_json({"legacy_scientific_classification": scientific_classification})
+        except LegacyImportError:
+            tracker.record(key, imported=False, reason="scientific_classification_unbounded")
+            continue
         mode = "shadow" if legacy_mode == "shadow" else "prospective_record"
         data_class = "shadow_protected" if mode == "shadow" else "prospective_protected"
         config_hash = _sha(
@@ -534,6 +544,7 @@ def _import_runs(context: _ImportContext) -> None:
                 "app_version": row["app_version"],
                 "cohort": row["cohort"],
                 "model_artifact_id": row["model_artifact_id"],
+                "scientific_classification": scientific_classification,
                 "universe_id": row["universe_id"],
             }
         )
@@ -564,27 +575,21 @@ def _import_runs(context: _ImportContext) -> None:
             (run_id, started_at_us, started_at_us),
         )
         context.run_modes[run_id] = (mode, data_class, started_at_us)
+        context.run_scientific_classifications[run_id] = scientific_classification
         tracker.record(key, imported=True, target_refs=(f"runs:{run_id}",))
 
 
 def _run_has_ibkr_market_evidence(context: _ImportContext, run_id: str) -> bool:
-    providers = tuple(sorted(_IBKR_SOURCE_NAMES))
-    placeholders = ",".join("?" for _ in providers)
-    sources = (
-        ("underlying_bar", "bar_source"),
-        ("option_quote", "computation_source"),
-    )
-    for table, column in sources:
-        if not context.source.has_column(table, column):
-            continue
-        found = context.source.connection.execute(
-            f'SELECT 1 FROM "{table}" WHERE run_id=? '
-            f'AND lower(trim("{column}")) IN ({placeholders}) LIMIT 1',
-            (run_id, *providers),
-        ).fetchone()
-        if found is not None:
-            return True
-    return False
+    if not context.source.has_column("underlying_bar", "bar_source"):
+        return False
+    sources = tuple(sorted(_IBKR_BAR_SOURCE_NAMES))
+    placeholders = ",".join("?" for _ in sources)
+    found = context.source.connection.execute(
+        "SELECT 1 FROM underlying_bar WHERE run_id=? "
+        f"AND lower(trim(bar_source)) IN ({placeholders}) LIMIT 1",
+        (run_id, *sources),
+    ).fetchone()
+    return found is not None
 
 
 def _import_instruments(context: _ImportContext) -> None:
@@ -654,8 +659,8 @@ def _import_market_events(context: _ImportContext) -> None:
     tracker = context.tracker("underlying_bar")
     for key, row in context.source.rows("underlying_bar"):
         run_id = str(row["run_id"])
-        source_name = str(_row_value(row, "bar_source") or "").lower()
-        if source_name not in _IBKR_SOURCE_NAMES:
+        source_name = str(_row_value(row, "bar_source") or "").strip().lower()
+        if source_name not in _IBKR_BAR_SOURCE_NAMES:
             tracker.record(key, imported=False, reason="non_ibkr_market_data")
             continue
         if run_id not in context.run_modes:
@@ -708,10 +713,9 @@ def _import_market_events(context: _ImportContext) -> None:
         run_id = str(row["run_id"])
         option_id = int(row["option_contract_id"])
         option_instrument_id = context.instrument_by_option.get(option_id)
-        provider = str(_row_value(row, "computation_source") or "").lower()
-        if provider not in _IBKR_SOURCE_NAMES:
-            tracker.record(key, imported=False, reason="non_ibkr_market_data")
-            continue
+        # V1's computation_source is a quote role (bid/ask/last/model), not a vendor.
+        # Provider admission is therefore fixed once per run by the exact active IBKR
+        # bar-source label; deterministic replay runs cannot reach this mapping.
         if run_id not in context.run_modes or option_instrument_id is None:
             tracker.record(key, imported=False, reason="instrument_not_imported")
             continue
@@ -830,7 +834,10 @@ def _install_legacy_idea_instances(context: _ImportContext) -> None:
     for run_id, (mode, data_class, started_at_us) in sorted(context.run_modes.items()):
         universe = sorted(context.run_instruments[run_id])
         universe_json = _canonical_json(universe, maximum_bytes=64 * 1024)
-        parameters_json = "{}"
+        parameters = {
+            "legacy_scientific_classification": context.run_scientific_classifications[run_id]
+        }
+        parameters_json = _canonical_json(parameters)
         requirements_json = "[]"
         context.target.execute(
             """
@@ -848,7 +855,7 @@ def _install_legacy_idea_instances(context: _ImportContext) -> None:
                 run_id,
                 mode,
                 parameters_json,
-                _sha({}),
+                _sha(parameters),
                 code_hash,
                 manifest_hash,
                 universe_json,
@@ -1140,7 +1147,12 @@ def _import_shadow(context: _ImportContext) -> None:
         for leg in source_legs:
             instrument_id = context.instrument_by_option.get(int(leg["option_contract_id"]))
             quantity = _finite_float(leg["quantity"])
-            action = str(leg["entry_side"]).lower()
+            leg_role = str(leg["leg_role"]).strip().lower()
+            entry_side = str(leg["entry_side"]).strip().lower()
+            action = {
+                ("long", "ask"): "buy",
+                ("short", "bid"): "sell",
+            }.get((leg_role, entry_side))
             try:
                 quote_at_us = _timestamp_us(leg["quote_timestamp_utc"], label="shadow entry")
             except LegacyImportError:
@@ -1153,11 +1165,7 @@ def _import_shadow(context: _ImportContext) -> None:
                 and quantity is not None
                 and quantity > 0
                 and len(entry_events) == 1
-                and action
-                in {
-                    "buy",
-                    "sell",
-                }
+                and action is not None
             ):
                 valid_legs.append(
                     (

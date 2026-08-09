@@ -888,11 +888,13 @@ def create_backup(
     """Serialize one checked online backup for a destination."""
 
     root = _prepare_backup_directory(Path(destination))
-    working = _prepare_working_directory(
-        Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
-        backup_directory=root,
-    )
     with _destination_lock(root):
+        _remove_stale_atomic_metadata(root)
+        _remove_interrupted_publication_orphans(root, previous_status=_read_status(root))
+        working = _prepare_working_directory(
+            Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
+            backup_directory=root,
+        )
         return _create_backup_locked(
             database,
             root,
@@ -936,9 +938,7 @@ def _create_backup_locked(
     if archive_path.exists() or manifest_path.exists():
         raise BackupError("backup identity already exists")
 
-    _remove_stale_atomic_metadata(root)
     previous_status = _read_status(root)
-    _remove_interrupted_publication_orphans(root, previous_status=previous_status)
     _write_status(
         root,
         state="degraded",

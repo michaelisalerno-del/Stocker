@@ -242,6 +242,12 @@ def test_cutover_runbook_preserves_one_writer_and_two_distinct_rollback_paths() 
     )
     assert "never remove the v1 units" in lowered
     assert "never repoint\n`/opt/stocker/current`, before the owner" in lowered
+    assert "id -u stocker >/dev/null 2>&1" in lowered
+    assert "stat -c '%u' /var/lib/stocker/prospective/prospective.sqlite3" in lowered
+    assert "sudo -u stocker sqlite3 /var/lib/stocker/prospective/prospective.sqlite3" in lowered
+    assert "disable --now stocker-backup.timer" in lowered
+    assert "stocker-backup-daily.timer" not in lowered
+    assert "stocker-backup-weekly.timer" not in lowered
     assert "paper trading" not in lowered
     assert "live trading" not in lowered
 

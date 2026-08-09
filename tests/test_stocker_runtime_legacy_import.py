@@ -48,6 +48,11 @@ MIGRATION_NAMES = (
     "0025_parallel_source_capture_recovery_v1.sql",
     "0026_opening_leader_continuation_v0.sql",
 )
+LEGACY_SCIENTIFIC_CLASSIFICATION = (
+    "Previous-close front-options context + current intraday H0 stock condition -> "
+    "improved prediction that near-term underlying movement exceeds previous-close "
+    "option-implied movement."
+)
 
 
 def _legacy_database(path: Path, prefix: int) -> sqlite3.Connection:
@@ -81,7 +86,7 @@ def _seed_representative_legacy_rows(connection: sqlite3.Connection) -> None:
             timestamp,
             "shadow",
             "stopped",
-            "prospective_protected",
+            LEGACY_SCIENTIFIC_CLASSIFICATION,
         ),
     )
     envelope_id = connection.execute(
@@ -123,7 +128,8 @@ def _seed_representative_legacy_rows(connection: sqlite3.Connection) -> None:
             m0_probability, m1_probability, frozen_threshold, model_bundle_id,
             feature_schema_hash, eligibility, rejection_reason
         ) VALUES (?, 'legacy-shadow', 'ABC', 101, ?, ?, '2026-01-02', 10, 12, 9, 11,
-                  1000, 'volume', 'ibkr', ?, ?, 'complete', ?, 0.1, 0.8, 0.7,
+                  1000, 'volume', 'ibkr_realtime_bar_5_second_aggregation', ?, ?,
+                  'complete', ?, 0.1, 0.8, 0.7,
                   'model-v1', ?, 1, NULL)
         """,
         (envelope_id, timestamp, later, later, later, later, "f" * 64),
@@ -191,7 +197,7 @@ def _seed_representative_legacy_rows(connection: sqlite3.Connection) -> None:
             ask_size, last, last_size, volume, open_interest, computation_source,
             provider_timestamp_utc, receive_timestamp_utc, market_data_type,
             staleness_seconds, completeness, permission_error
-        ) VALUES (?, 'legacy-shadow', ?, ?, 1.0, 1.2, 5, 6, 1.1, 2, 100, 200, 'ibkr',
+        ) VALUES (?, 'legacy-shadow', ?, ?, 1.0, 1.2, 5, 6, 1.1, 2, 100, 200, NULL,
                   ?, ?, 'real_time', 0, 'complete', NULL)
         """,
         (envelope_id, capture_id, option_id, later, later),
@@ -212,7 +218,7 @@ def _seed_representative_legacy_rows(connection: sqlite3.Connection) -> None:
         INSERT INTO shadow_leg(
             envelope_id, run_id, shadow_structure_id, option_contract_id, leg_role,
             quantity, entry_side, entry_price, quote_timestamp_utc
-        ) VALUES (?, 'legacy-shadow', 'shadow-1', ?, 'long_call', 1, 'buy', 1.2, ?)
+        ) VALUES (?, 'legacy-shadow', 'shadow-1', ?, 'long', 1, 'ask', 1.2, ?)
         """,
         (envelope_id, option_id, later),
     )
@@ -312,8 +318,21 @@ def test_import_maps_generic_v2_rows_and_reconciles_every_source_row(tmp_path: P
 
     with sqlite3.connect(result.target_path) as target:
         target.row_factory = sqlite3.Row
-        run = target.execute("SELECT mode, data_class, status FROM runs").fetchone()
-        assert tuple(run) == ("shadow", "shadow_protected", "stopped")
+        run = target.execute("SELECT mode, data_class, status, config_hash FROM runs").fetchone()
+        assert tuple(run[:3]) == ("shadow", "shadow_protected", "stopped")
+        assert run[3] == legacy_import_module._sha(
+            {
+                "app_version": "1.0",
+                "cohort": "cohort-a",
+                "model_artifact_id": "model-v1",
+                "scientific_classification": LEGACY_SCIENTIFIC_CLASSIFICATION,
+                "universe_id": "universe-v1",
+            }
+        )
+        parameters = json.loads(
+            target.execute("SELECT parameters_json FROM idea_instances").fetchone()[0]
+        )
+        assert parameters == {"legacy_scientific_classification": LEGACY_SCIENTIFIC_CLASSIFICATION}
         assert target.execute("SELECT count(*) FROM instruments").fetchone()[0] == 2
         assert (
             target.execute(
@@ -335,21 +354,22 @@ def test_import_maps_generic_v2_rows_and_reconciles_every_source_row(tmp_path: P
         position = target.execute("SELECT lifecycle, data_class FROM shadow_positions").fetchone()
         assert tuple(position) == ("closed", "shadow_protected")
         leg = target.execute(
-            "SELECT entry_market_event_id, exit_market_event_id, exit_price FROM shadow_legs"
+            "SELECT side, entry_market_event_id, exit_market_event_id, exit_price FROM shadow_legs"
         ).fetchone()
-        assert leg[0] is not None
-        assert leg[1] == leg[0]
-        assert leg[2] == 1.0
+        assert leg[0] == "buy"
+        assert leg[1] is not None
+        assert leg[2] == leg[1]
+        assert leg[3] == 1.0
         assert target.execute("SELECT count(*) FROM shadow_marks").fetchone()[0] == 1
         mark_payload = json.loads(
             target.execute("SELECT payload_json FROM shadow_marks").fetchone()[0]
         )
-        assert mark_payload["source_market_event_ids"] == [leg[1]]
+        assert mark_payload["source_market_event_ids"] == [leg[2]]
         outcome = target.execute(
             "SELECT completeness, gross_pnl, net_pnl, payload_json FROM shadow_outcomes"
         ).fetchone()
         assert tuple(outcome[:3]) == ("complete", 30.0, 29.0)
-        assert json.loads(outcome[3])["source_market_event_ids"] == [leg[1]]
+        assert json.loads(outcome[3])["source_market_event_ids"] == [leg[2]]
         manifest = target.execute(
             "SELECT source_row_count, imported_row_count, omitted_row_count, "
             "verification_status, target_digest, importer_version FROM migration_manifests"
@@ -370,6 +390,25 @@ def test_import_maps_generic_v2_rows_and_reconciles_every_source_row(tmp_path: P
         )
     assert b"eodhd" not in result.target_path.read_bytes().lower()
     assert result.target_path.stat().st_mode & 0o777 == 0o640
+
+
+def test_import_maps_production_short_bid_leg_to_sell(tmp_path: Path) -> None:
+    source = tmp_path / "legacy-short-leg.sqlite3"
+    with _legacy_database(source, 1) as legacy:
+        _seed_representative_legacy_rows(legacy)
+        legacy.execute("UPDATE shadow_leg SET leg_role='short', entry_side='bid', entry_price=1.0")
+        legacy.commit()
+
+    result = import_legacy_database(
+        source,
+        tmp_path / "stocker-v2.sqlite3",
+        started_at_us=1_800_000_000_000_000,
+    )
+
+    with sqlite3.connect(result.target_path) as target:
+        assert target.execute(
+            "SELECT side, entry_price, exit_price FROM shadow_legs"
+        ).fetchone() == ("sell", 1.0, 1.2)
 
 
 def test_import_omits_shadow_rows_from_a_record_only_run(tmp_path: Path) -> None:
@@ -524,7 +563,7 @@ def test_import_closed_shadow_outcome_uses_the_same_evidence_as_leg_exits(
                 computation_source, provider_timestamp_utc, receive_timestamp_utc,
                 market_data_type, staleness_seconds, completeness, permission_error
             ) VALUES (?, 'legacy-shadow', ?, ?, 0.8, 1.0, 5, 6, 0.9, 2, 100, 200,
-                      'ibkr', ?, ?, 'real_time', 0, 'incomplete', NULL)
+                      NULL, ?, ?, 'real_time', 0, 'incomplete', NULL)
             """,
             (envelope_id, capture_id, option_id, later, later),
         )
@@ -569,7 +608,6 @@ def test_import_rejects_replay_run_and_unverifiable_underlying_quote(tmp_path: P
         _seed_representative_legacy_rows(legacy)
         envelope_id = legacy.execute("SELECT id FROM evidence_envelope").fetchone()[0]
         legacy.execute("UPDATE underlying_bar SET bar_source='deterministic_replay'")
-        legacy.execute("UPDATE option_quote SET computation_source='replay'")
         legacy.execute(
             """
             INSERT INTO underlying_quote(

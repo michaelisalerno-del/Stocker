@@ -179,6 +179,24 @@ def test_sqlite_boundary_preparation_targets_only_v2_and_backup_paths() -> None:
     assert "bundles" not in source
 
 
+def test_cutover_precreates_reader_boundary_before_import_and_verifies_afterward() -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+
+    assert "groupadd --system stocker-readers" in runbook
+    assert runbook.count("--gid stocker-readers") == 3
+    assert "install -d -o root -g stocker-readers -m 0750 /var/lib/stocker" in runbook
+    assert (
+        "install -d -o stocker-recorder -g stocker-readers -m 2750 /var/lib/stocker/v2" in runbook
+    )
+    assert (
+        "install -d -o stocker-backup -g stocker-readers -m 2750 "
+        "/var/lib/stocker/backups-v2" in runbook
+    )
+    importer = runbook.index("stocker-runtime legacy import")
+    verifier = runbook.index("prepare-v2-sqlite-boundary.py")
+    assert importer < verifier
+
+
 def test_cutover_runbook_preserves_one_writer_and_two_distinct_rollback_paths() -> None:
     runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
     lowered = runbook.lower()

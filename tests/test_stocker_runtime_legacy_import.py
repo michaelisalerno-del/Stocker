@@ -323,13 +323,33 @@ def test_import_maps_generic_v2_rows_and_reconciles_every_source_row(tmp_path: P
         )
         kinds = {row[0] for row in target.execute("SELECT output_kind FROM idea_outputs")}
         assert {"observation", "signal", "proposed_trade"}.issubset(kinds)
+        inputs = target.execute(
+            "SELECT output.output_kind, event.feed_kind, event.event_id "
+            "FROM idea_outputs output "
+            "JOIN idea_output_inputs input ON input.output_id=output.output_id "
+            "JOIN market_events event ON event.event_id=input.event_id "
+            "ORDER BY output.output_id, input.input_ordinal"
+        ).fetchall()
+        assert inputs
+        assert all(row[1] != "migration" for row in inputs)
         position = target.execute("SELECT lifecycle, data_class FROM shadow_positions").fetchone()
         assert tuple(position) == ("closed", "shadow_protected")
-        assert target.execute("SELECT count(*) FROM shadow_marks").fetchone()[0] == 1
-        outcome = target.execute(
-            "SELECT completeness, gross_pnl, net_pnl FROM shadow_outcomes"
+        leg = target.execute(
+            "SELECT entry_market_event_id, exit_market_event_id, exit_price FROM shadow_legs"
         ).fetchone()
-        assert tuple(outcome) == ("complete", 30.0, 29.0)
+        assert leg[0] is not None
+        assert leg[1] == leg[0]
+        assert leg[2] == 1.0
+        assert target.execute("SELECT count(*) FROM shadow_marks").fetchone()[0] == 1
+        mark_payload = json.loads(
+            target.execute("SELECT payload_json FROM shadow_marks").fetchone()[0]
+        )
+        assert mark_payload["source_market_event_ids"] == [leg[1]]
+        outcome = target.execute(
+            "SELECT completeness, gross_pnl, net_pnl, payload_json FROM shadow_outcomes"
+        ).fetchone()
+        assert tuple(outcome[:3]) == ("complete", 30.0, 29.0)
+        assert json.loads(outcome[3])["source_market_event_ids"] == [leg[1]]
         manifest = target.execute(
             "SELECT source_row_count, imported_row_count, omitted_row_count, "
             "verification_status, target_digest, importer_version FROM migration_manifests"
@@ -408,6 +428,68 @@ def test_import_omits_shadow_position_without_exact_entry_market_event(tmp_path:
             ).fetchone()[0]
             == 0
         )
+
+
+def test_import_omits_outputs_without_exact_market_event_provenance(tmp_path: Path) -> None:
+    source = tmp_path / "legacy-output-provenance.sqlite3"
+    with _legacy_database(source, 1) as legacy:
+        _seed_representative_legacy_rows(legacy)
+        legacy.execute("DELETE FROM underlying_bar")
+        legacy.commit()
+
+    result = import_legacy_database(
+        source,
+        tmp_path / "stocker-v2.sqlite3",
+        started_at_us=1_800_000_000_000_000,
+    )
+    report = json.loads(result.reconciliation_path.read_text(encoding="utf-8"))
+    tables = {item["table"]: item for item in report["tables"]}
+
+    for table in ("model_score", "signal_episode", "signal_checkpoint"):
+        assert tables[table]["imported_rows"] == 0
+        assert tables[table]["omission_reasons"] == {"output_provenance_incomplete": 1}
+    with sqlite3.connect(result.target_path) as target:
+        assert (
+            target.execute(
+                "SELECT count(*) FROM idea_output_inputs input "
+                "JOIN market_events event ON event.event_id=input.event_id "
+                "WHERE event.feed_kind='migration'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_import_does_not_close_shadow_without_exact_exit_market_events(tmp_path: Path) -> None:
+    source = tmp_path / "legacy-missing-exit-event.sqlite3"
+    with _legacy_database(source, 1) as legacy:
+        _seed_representative_legacy_rows(legacy)
+        legacy.execute(
+            "UPDATE shadow_horizon_valuation "
+            "SET target_timestamp_utc=?, actual_quote_timestamp_utc=?",
+            ("2026-01-02T14:40:00+00:00", "2026-01-02T14:40:00+00:00"),
+        )
+        legacy.commit()
+
+    result = import_legacy_database(
+        source,
+        tmp_path / "stocker-v2.sqlite3",
+        started_at_us=1_800_000_000_000_000,
+    )
+    report = json.loads(result.reconciliation_path.read_text(encoding="utf-8"))
+    tables = {item["table"]: item for item in report["tables"]}
+
+    assert tables["shadow_horizon_valuation"]["omission_reasons"] == {
+        "shadow_mark_evidence_incomplete": 1
+    }
+    with sqlite3.connect(result.target_path) as target:
+        assert target.execute(
+            "SELECT lifecycle, closed_at_us FROM shadow_positions"
+        ).fetchone() == ("open", None)
+        assert target.execute(
+            "SELECT exit_market_event_id, exit_price FROM shadow_legs"
+        ).fetchone() == (None, None)
+        assert target.execute("SELECT count(*) FROM shadow_marks").fetchone()[0] == 0
+        assert target.execute("SELECT count(*) FROM shadow_outcomes").fetchone()[0] == 0
 
 
 def test_import_preserves_closed_diagnostics_and_archives_active_rows(tmp_path: Path) -> None:

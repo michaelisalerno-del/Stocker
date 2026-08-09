@@ -35,10 +35,19 @@ closed and no unattended start is pending. The only allowed V2 modes are
 Prepare users and paths from the reviewed release without starting services:
 
 ```bash
-sudo useradd --system --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-recorder
-sudo useradd --system --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-web
-sudo useradd --system --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-backup
-sudo /opt/stocker/current/deploy/scripts/prepare-v2-sqlite-boundary.py
+getent group stocker-readers >/dev/null || sudo groupadd --system stocker-readers
+id -u stocker-recorder >/dev/null 2>&1 || sudo useradd --system --gid stocker-readers \
+  --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-recorder
+id -u stocker-web >/dev/null 2>&1 || sudo useradd --system --gid stocker-readers \
+  --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-web
+id -u stocker-backup >/dev/null 2>&1 || sudo useradd --system --gid stocker-readers \
+  --home-dir /var/lib/stocker --shell /usr/sbin/nologin stocker-backup
+sudo usermod --append --groups stocker-readers stocker-recorder
+sudo usermod --append --groups stocker-readers stocker-web
+sudo usermod --append --groups stocker-readers stocker-backup
+sudo install -d -o root -g stocker-readers -m 0750 /var/lib/stocker
+sudo install -d -o stocker-recorder -g stocker-readers -m 2750 /var/lib/stocker/v2
+sudo install -d -o stocker-backup -g stocker-readers -m 2750 /var/lib/stocker/backups-v2
 sudo systemctl daemon-reload
 sudo systemctl is-enabled stocker-v2-recorder.service stocker-v2-web.service || true
 ```
@@ -93,9 +102,13 @@ writes a new temporary V2 database in the target directory:
 sudo -u stocker-recorder /opt/stocker/current/.venv/bin/stocker-runtime legacy import \
   --source /var/lib/stocker/prospective/prospective.sqlite3 \
   --target /var/lib/stocker/v2/stocker-v2.sqlite3
+sudo /opt/stocker/current/deploy/scripts/prepare-v2-sqlite-boundary.py
 ```
 
-The target hard link is the atomic commit marker. On any failure, keep V1 stopped,
+The setgid V2 directory makes the imported `0640` target inherit
+`stocker-recorder:stocker-readers`; the boundary verifier then confirms that ownership
+and creates only the coordinated WAL/SHM files. The target hard link is the atomic
+commit marker. On any failure, keep V1 stopped,
 remove no recovery evidence, and investigate before retrying with a new target path.
 Never import into an existing V2 database and never reverse-import V2 rows into V1.
 

@@ -413,6 +413,88 @@ def test_backup_working_copies_stay_outside_the_capped_archive_directory(
     assert not tuple(working.iterdir())
 
 
+def test_backup_recovers_terminated_work_and_marks_the_attempt_in_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    working.mkdir()
+    _seed_database(database)
+    stale_names = (
+        ".stocker-v2-database-abandoned.sqlite3",
+        ".stocker-v2-database-abandoned.sqlite3-wal",
+        ".stocker-v2-database-abandoned.sqlite3-shm",
+        ".stocker-v2-database-abandoned.sqlite3-journal",
+        ".stocker-v2-archive-abandoned.gz",
+    )
+    for name in stale_names:
+        (working / name).write_bytes(b"abandoned-by-sigkill")
+
+    real_online_copy = backup_module._online_copy
+
+    def observed_online_copy(source: Path, destination: Path) -> None:
+        assert all(not (working / name).exists() for name in stale_names)
+        status = json.loads(
+            (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
+        )
+        assert status["state"] == "degraded"
+        assert status["code"] == "BACKUP_IN_PROGRESS"
+        real_online_copy(source, destination)
+
+    monkeypatch.setattr(backup_module, "_online_copy", observed_online_copy)
+    create_backup(
+        database,
+        backups,
+        tier="daily",
+        created_at_us=201,
+        working_directory=working,
+    )
+
+    assert not tuple(working.iterdir())
+    status = json.loads(
+        (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
+    )
+    assert status["state"] == "healthy"
+    assert status["code"] is None
+
+
+def test_backup_status_stays_degraded_until_rotation_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    _seed_database(database)
+    policy = BackupPolicy(
+        daily_retention=2,
+        weekly_retention=2,
+        minimum_per_tier=2,
+        byte_cap=64 * 1024 * 1024,
+    )
+    create_backup(database, backups, tier="daily", created_at_us=1, policy=policy)
+    create_backup(database, backups, tier="daily", created_at_us=2, policy=policy)
+    real_unlink = Path.unlink
+    states_during_rotation: list[dict[str, object]] = []
+
+    def observed_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path.parent == backups.resolve() and path.name.startswith("stocker-v2-daily-"):
+            states_during_rotation.append(
+                json.loads(
+                    (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
+                )
+            )
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", observed_unlink)
+    create_backup(database, backups, tier="daily", created_at_us=3, policy=policy)
+
+    assert states_during_rotation
+    assert all(item["state"] == "degraded" for item in states_during_rotation)
+    assert all(item["code"] == "BACKUP_IN_PROGRESS" for item in states_during_rotation)
+
+
 def test_backup_health_requires_fresh_valid_tier_floors(tmp_path: Path) -> None:
     database = tmp_path / "stocker-v2.sqlite3"
     backups = tmp_path / "backups"

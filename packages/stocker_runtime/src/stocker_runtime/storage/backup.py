@@ -12,7 +12,7 @@ import sqlite3
 import stat
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -511,7 +511,7 @@ def _fsync_directory(directory: Path) -> None:
 
 
 def _write_atomic(path: Path, payload: bytes, *, mode: int = 0o640) -> None:
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".stocker-v2-", dir=path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".stocker-v2-atomic-", dir=path.parent)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as handle:
@@ -571,6 +571,59 @@ def _prepare_working_directory(path: Path, *, backup_directory: Path) -> Path:
     if working.stat().st_dev != backup_directory.stat().st_dev:
         raise BackupError("backup working and archive directories must share a filesystem")
     return working
+
+
+def _remove_stale_regular_files(
+    directory: Path,
+    *,
+    matches: Callable[[str], bool],
+    label: str,
+) -> None:
+    removed = False
+    scanned = 0
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            scanned += 1
+            if scanned > MAX_DIRECTORY_ENTRIES:
+                raise BackupCapacityError(f"{label} directory entry bound exceeded")
+            if not matches(entry.name):
+                continue
+            metadata = entry.stat(follow_symlinks=False)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise BackupIntegrityError(f"{label} contains an unsafe managed path")
+            (directory / entry.name).unlink()
+            removed = True
+    if removed:
+        _fsync_directory(directory)
+
+
+def _is_backup_work_file(name: str) -> bool:
+    database_prefix = ".stocker-v2-database-"
+    database_suffixes = (
+        ".sqlite3",
+        ".sqlite3-journal",
+        ".sqlite3-shm",
+        ".sqlite3-wal",
+    )
+    return (name.startswith(database_prefix) and name.endswith(database_suffixes)) or (
+        name.startswith(".stocker-v2-archive-") and name.endswith(".gz")
+    )
+
+
+def _remove_stale_backup_work(working_directory: Path) -> None:
+    _remove_stale_regular_files(
+        working_directory,
+        matches=_is_backup_work_file,
+        label="backup working",
+    )
+
+
+def _remove_stale_atomic_metadata(destination: Path) -> None:
+    _remove_stale_regular_files(
+        destination,
+        matches=lambda name: name.startswith(".stocker-v2-atomic-"),
+        label="backup destination",
+    )
 
 
 def record_backup_failure(
@@ -831,21 +884,33 @@ def _create_backup_locked(
     if archive_path.exists() or manifest_path.exists():
         raise BackupError("backup identity already exists")
 
-    database_descriptor, database_temporary_name = tempfile.mkstemp(
-        prefix=".stocker-v2-database-", suffix=".sqlite3", dir=working_directory
+    _remove_stale_atomic_metadata(root)
+    previous_status = _read_status(root)
+    _write_status(
+        root,
+        state="degraded",
+        checked_at_us=timestamp,
+        code="BACKUP_IN_PROGRESS",
+        latest_manifest_filename=previous_status.latest_manifest_filename,
     )
-    os.close(database_descriptor)
-    temporary_database = Path(database_temporary_name)
-    archive_descriptor, archive_temporary_name = tempfile.mkstemp(
-        prefix=".stocker-v2-archive-", suffix=".gz", dir=working_directory
-    )
-    os.close(archive_descriptor)
-    temporary_archive = Path(archive_temporary_name)
-    temporary_archive.unlink()
+    _remove_stale_backup_work(working_directory)
+    temporary_database: Path | None = None
+    temporary_archive: Path | None = None
     published_archive = False
     published_manifest = False
     committed = False
     try:
+        database_descriptor, database_temporary_name = tempfile.mkstemp(
+            prefix=".stocker-v2-database-", suffix=".sqlite3", dir=working_directory
+        )
+        os.close(database_descriptor)
+        temporary_database = Path(database_temporary_name)
+        archive_descriptor, archive_temporary_name = tempfile.mkstemp(
+            prefix=".stocker-v2-archive-", suffix=".gz", dir=working_directory
+        )
+        os.close(archive_descriptor)
+        temporary_archive = Path(archive_temporary_name)
+        temporary_archive.unlink()
         _online_copy(source, temporary_database)
         try:
             verify_database(temporary_database)
@@ -911,12 +976,12 @@ def _create_backup_locked(
         _fsync_directory(root)
         _write_atomic(manifest_path, manifest_payload)
         published_manifest = True
-        _write_atomic(status_path, status_payload)
         committed = True
         for victim in victims:
             victim.manifest_path.unlink()
             victim.archive_path.unlink()
         _fsync_directory(root)
+        _write_atomic(status_path, status_payload)
         return BackupArtifact(manifest, archive_path, manifest_path)
     except Exception as error:
         if not committed:
@@ -930,14 +995,19 @@ def _create_backup_locked(
                 state="degraded",
                 checked_at_us=timestamp,
                 code=type(error).__name__[:96],
-                latest_manifest_filename=(manifest_path.name if committed else None),
+                latest_manifest_filename=(
+                    manifest_path.name if committed else previous_status.latest_manifest_filename
+                ),
             )
         raise
     finally:
-        temporary_database.unlink(missing_ok=True)
-        Path(f"{temporary_database}-wal").unlink(missing_ok=True)
-        Path(f"{temporary_database}-shm").unlink(missing_ok=True)
-        temporary_archive.unlink(missing_ok=True)
+        if temporary_database is not None:
+            temporary_database.unlink(missing_ok=True)
+            Path(f"{temporary_database}-journal").unlink(missing_ok=True)
+            Path(f"{temporary_database}-wal").unlink(missing_ok=True)
+            Path(f"{temporary_database}-shm").unlink(missing_ok=True)
+        if temporary_archive is not None:
+            temporary_archive.unlink(missing_ok=True)
 
 
 def restore_backup(manifest: str | Path, destination: str | Path) -> RestoreResult:

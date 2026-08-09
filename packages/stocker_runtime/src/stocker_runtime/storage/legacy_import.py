@@ -353,7 +353,9 @@ class _ImportContext:
     instrument_by_option: dict[int, str] = field(default_factory=dict)
     symbol_instruments: dict[tuple[str, str], str] = field(default_factory=dict)
     run_instruments: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
-    marker_events: dict[str, tuple[str, int]] = field(default_factory=dict)
+    underlying_bar_events: dict[tuple[str, str, int], set[str]] = field(
+        default_factory=lambda: defaultdict(set)
+    )
     option_events: dict[tuple[int, int], set[str]] = field(default_factory=dict)
     output_ordinals: dict[tuple[str, str, int], int] = field(default_factory=dict)
     handled_tables: set[str] = field(default_factory=set)
@@ -589,7 +591,7 @@ def _import_instruments(context: _ImportContext) -> None:
         tracker.record(key, imported=True, target_refs=(f"instruments:{instrument_id}",))
 
 
-def _import_option_instruments_and_install_markers(context: _ImportContext) -> None:
+def _import_option_instruments(context: _ImportContext) -> None:
     tracker = context.tracker("option_contract")
     for key, row in context.source.rows("option_contract"):
         run_id = str(row["run_id"])
@@ -623,27 +625,6 @@ def _import_option_instruments_and_install_markers(context: _ImportContext) -> N
         context.instrument_by_option[int(row["id"])] = instrument_id
         context.run_instruments[run_id].add(instrument_id)
         tracker.record(key, imported=True, target_refs=(f"instruments:{instrument_id}",))
-
-    for run_id, (_mode, _data_class, started_at_us) in sorted(context.run_modes.items()):
-        instruments = sorted(context.run_instruments[run_id])
-        instrument_id = (
-            instruments[0]
-            if instruments
-            else _ensure_symbol_instrument(context, run_id, "__MIGRATION__")
-        )
-        context.marker_events[run_id] = _insert_callback_event(
-            context,
-            run_id=run_id,
-            instrument_id=instrument_id,
-            feed_kind="migration",
-            event_kind="status",
-            event_at_us=started_at_us,
-            received_at_us=started_at_us,
-            provider_at_us=None,
-            source_table="prospective_run",
-            source_key=(run_id,),
-            values={},
-        )
 
 
 def _import_market_events(context: _ImportContext) -> None:
@@ -688,6 +669,7 @@ def _import_market_events(context: _ImportContext) -> None:
                 "volume": _finite_float(row["activity_value"]),
             },
         )
+        context.underlying_bar_events[(run_id, str(row["symbol"]), event_at_us)].add(event_id)
         tracker.record(key, imported=True, target_refs=(f"market_events:{event_id}",))
 
     tracker = context.tracker("underlying_quote")
@@ -917,21 +899,41 @@ def _insert_output(
     symbol: str,
     emitted_at_us: int,
     payload: Mapping[str, object],
+    input_event_ids: Sequence[str],
     strength: float | None = None,
     direction: str | None = None,
     legs: Sequence[tuple[str, str, float, float | None]] = (),
 ) -> str:
     mode_data = context.run_modes.get(run_id)
-    marker = context.marker_events.get(run_id)
-    if mode_data is None or marker is None:
+    if mode_data is None:
         raise LegacyImportError("idea output references a run that was not imported")
     _mode, data_class, _started = mode_data
-    marker_id, _marker_sequence = marker
+    unique_input_ids = tuple(dict.fromkeys(input_event_ids))
+    if not unique_input_ids or len(unique_input_ids) > 256:
+        raise LegacyImportError("idea output has incomplete or unbounded market provenance")
+    placeholders = ",".join("?" for _ in unique_input_ids)
+    input_rows = context.target.execute(
+        "SELECT event_id, run_id, "
+        "coalesce(source_sequence, derived_after_source_sequence) AS sequence "
+        f"FROM market_events WHERE event_id IN ({placeholders})",
+        unique_input_ids,
+    ).fetchall()
+    if len(input_rows) != len(unique_input_ids) or any(
+        row["run_id"] != run_id or row["sequence"] is None for row in input_rows
+    ):
+        raise LegacyImportError("idea output market provenance does not match its run")
+    ordered_input_ids = tuple(
+        row["event_id"]
+        for row in sorted(input_rows, key=lambda row: (int(row["sequence"]), row["event_id"]))
+    )
+    first_input_id = ordered_input_ids[0]
+    last_input_id = ordered_input_ids[-1]
     subject = _ensure_symbol_instrument(context, run_id, symbol)
     payload_json = _canonical_json(
         {
             "legacy_fields": dict(sorted(payload.items())),
             "migration_source": {"key": list(source_key), "table": source_table},
+            "source_market_event_ids": list(ordered_input_ids),
             "virtual_only": True,
         }
     )
@@ -960,10 +962,10 @@ def _insert_output(
             emitted_at_us,
             direction,
             strength,
-            marker_id,
-            marker_id,
-            marker_id,
-            _sha([marker_id]),
+            first_input_id,
+            last_input_id,
+            last_input_id,
+            _sha(ordered_input_ids),
             ordinal,
             payload_json,
             payload_hash,
@@ -979,9 +981,9 @@ def _insert_output(
             "unapproved" if output_kind == "proposed_trade" else "recorded",
         ),
     )
-    context.target.execute(
-        "INSERT INTO idea_output_inputs(output_id, event_id, input_ordinal) VALUES (?, ?, 0)",
-        (output_id, marker_id),
+    context.target.executemany(
+        "INSERT INTO idea_output_inputs(output_id, event_id, input_ordinal) VALUES (?, ?, ?)",
+        ((output_id, event_id, ordinal) for ordinal, event_id in enumerate(ordered_input_ids)),
     )
     for leg_number, (instrument_id, action, quantity, price_hint) in enumerate(legs):
         context.target.execute(
@@ -1003,6 +1005,33 @@ def _insert_output(
         )
     context.target.execute("INSERT INTO idea_output_seals(output_id) VALUES (?)", (output_id,))
     return output_id
+
+
+def _generic_output_input_events(
+    context: _ImportContext,
+    *,
+    table: str,
+    row: sqlite3.Row,
+    run_id: str,
+    symbol: str,
+    emitted_at_us: int,
+) -> tuple[str, ...]:
+    input_symbol = symbol
+    input_at_us = emitted_at_us
+    if table == "signal_checkpoint":
+        score = context.source.connection.execute(
+            "SELECT run_id, symbol, bar_end_utc FROM model_score WHERE id=?",
+            (row["model_score_id"],),
+        ).fetchone()
+        if score is None or str(score["run_id"]) != run_id:
+            return ()
+        input_symbol = str(score["symbol"])
+        try:
+            input_at_us = _timestamp_us(score["bar_end_utc"], label="model score input")
+        except LegacyImportError:
+            return ()
+    events = context.underlying_bar_events.get((run_id, input_symbol, input_at_us), set())
+    return tuple(events) if len(events) == 1 else ()
 
 
 def _import_generic_outputs(context: _ImportContext) -> None:
@@ -1041,6 +1070,17 @@ def _import_generic_outputs(context: _ImportContext) -> None:
                 tracker.record(key, imported=False, reason="invalid_output_timestamp")
                 continue
             strength = _finite_float(_row_value(row, strength_column)) if strength_column else None
+            input_event_ids = _generic_output_input_events(
+                context,
+                table=table,
+                row=row,
+                run_id=run_id,
+                symbol=symbol,
+                emitted_at_us=emitted_at_us,
+            )
+            if not input_event_ids:
+                tracker.record(key, imported=False, reason="output_provenance_incomplete")
+                continue
             payload = {
                 name: _row_value(row, name)
                 for name in (
@@ -1064,9 +1104,36 @@ def _import_generic_outputs(context: _ImportContext) -> None:
                 symbol=symbol,
                 emitted_at_us=emitted_at_us,
                 payload=payload,
+                input_event_ids=input_event_ids,
                 strength=strength,
             )
             tracker.record(key, imported=True, target_refs=(f"idea_outputs:{output_id}",))
+
+
+def _shadow_exit_references(
+    context: _ImportContext,
+    legs: Sequence[tuple[sqlite3.Row, str, str, float, float | None, str, int]],
+    marked_at_us: int,
+) -> tuple[tuple[str, float], ...]:
+    references: list[tuple[str, float]] = []
+    for source_leg, _instrument_id, action, _quantity, _entry_price, _event_id, _entry_at in legs:
+        events = context.option_events.get(
+            (int(source_leg["option_contract_id"]), marked_at_us), set()
+        )
+        if len(events) != 1:
+            return ()
+        event_id = next(iter(events))
+        event = context.target.execute(
+            "SELECT bid_value, ask_value FROM market_events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        if event is None:
+            return ()
+        exit_price = _finite_float(event["bid_value"] if action == "buy" else event["ask_value"])
+        if exit_price is None or exit_price < 0:
+            return ()
+        references.append((event_id, exit_price))
+    return tuple(references)
 
 
 def _import_shadow(context: _ImportContext) -> None:
@@ -1146,11 +1213,32 @@ def _import_shadow(context: _ImportContext) -> None:
                 )
             continue
         opened_at_us = valid_legs[0][6]
+        importable_valuations: list[tuple[sqlite3.Row, int, tuple[tuple[str, float], ...]]] = []
+        for valuation in source_valuations:
+            timestamp_value = (
+                valuation["actual_quote_timestamp_utc"] or valuation["target_timestamp_utc"]
+            )
+            try:
+                marked_at_us = _timestamp_us(timestamp_value, label="shadow mark")
+            except LegacyImportError:
+                valuation_tracker.record(
+                    (valuation["id"],), imported=False, reason="invalid_shadow_timestamp"
+                )
+                continue
+            references = _shadow_exit_references(context, valid_legs, marked_at_us)
+            if not references:
+                valuation_tracker.record(
+                    (valuation["id"],),
+                    imported=False,
+                    reason="shadow_mark_evidence_incomplete",
+                )
+                continue
+            importable_valuations.append((valuation, marked_at_us, references))
         completed = [
-            row
-            for row in source_valuations
-            if str(row["completeness"]).lower() == "complete"
-            and row["actual_quote_timestamp_utc"] is not None
+            item
+            for item in importable_valuations
+            if str(item[0]["completeness"]).lower() == "complete"
+            and item[0]["actual_quote_timestamp_utc"] is not None
         ]
         invalid = bool(structure["rejection_reason"]) or str(
             structure["completeness"]
@@ -1159,12 +1247,12 @@ def _import_shadow(context: _ImportContext) -> None:
             "completed",
         }
         lifecycle = "invalid" if invalid else ("closed" if completed else "open")
-        closed_at_us = None
-        if completed:
-            closed_at_us = max(
-                _timestamp_us(row["actual_quote_timestamp_utc"], label="shadow valuation")
-                for row in completed
-            )
+        closing_valuation = (
+            max(completed, key=lambda item: (item[1], int(item[0]["id"])))
+            if (lifecycle == "closed")
+            else None
+        )
+        closed_at_us = closing_valuation[1] if closing_valuation is not None else None
         output_id = _insert_output(
             context,
             source_table="shadow_structure",
@@ -1178,6 +1266,7 @@ def _import_shadow(context: _ImportContext) -> None:
                 "dte_bucket": structure["dte_bucket"],
                 "structure_type": structure["structure_type"],
             },
+            input_event_ids=tuple(item[5] for item in valid_legs),
             legs=tuple((item[1], item[2], item[3], item[4]) for item in valid_legs),
         )
         position_id = _stable_id("position", "shadow_structure", *structure_key)
@@ -1213,12 +1302,18 @@ def _import_shadow(context: _ImportContext) -> None:
             event_id,
             _quote_at_us,
         ) in enumerate(valid_legs):
+            exit_event_id = (
+                closing_valuation[2][leg_number][0] if closing_valuation is not None else None
+            )
+            exit_price = (
+                closing_valuation[2][leg_number][1] if closing_valuation is not None else None
+            )
             context.target.execute(
                 """
                 INSERT INTO shadow_legs(
                     position_id, leg_number, instrument_id, side, quantity,
                     entry_market_event_id, entry_price, exit_market_event_id, exit_price
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     position_id,
@@ -1228,6 +1323,8 @@ def _import_shadow(context: _ImportContext) -> None:
                     quantity,
                     event_id,
                     entry_price,
+                    exit_event_id,
+                    exit_price,
                 ),
             )
             leg_tracker.record(
@@ -1235,17 +1332,7 @@ def _import_shadow(context: _ImportContext) -> None:
                 imported=True,
                 target_refs=(f"shadow_legs:{position_id}:{leg_number}",),
             )
-        for valuation in source_valuations:
-            timestamp_value = (
-                valuation["actual_quote_timestamp_utc"] or valuation["target_timestamp_utc"]
-            )
-            try:
-                marked_at_us = _timestamp_us(timestamp_value, label="shadow mark")
-            except LegacyImportError:
-                valuation_tracker.record(
-                    (valuation["id"],), imported=False, reason="invalid_shadow_timestamp"
-                )
-                continue
+        for valuation, marked_at_us, references in importable_valuations:
             gross_pnl = _finite_float(valuation["gross_pnl"])
             fees = _finite_float(valuation["estimated_fees"]) or 0.0
             payload_json = _canonical_json(
@@ -1255,6 +1342,7 @@ def _import_shadow(context: _ImportContext) -> None:
                         "key": [valuation["id"]],
                         "table": "shadow_horizon_valuation",
                     },
+                    "source_market_event_ids": [item[0] for item in references],
                     "virtual_only": True,
                 }
             )
@@ -1280,10 +1368,8 @@ def _import_shadow(context: _ImportContext) -> None:
                 imported=True,
                 target_refs=(f"shadow_marks:{position_id}:{marked_at_us}",),
             )
-        if source_valuations:
-            final = source_valuations[-1]
-            timestamp_value = final["actual_quote_timestamp_utc"] or final["target_timestamp_utc"]
-            outcome_at_us = _timestamp_us(timestamp_value, label="shadow outcome")
+        if importable_valuations:
+            final, outcome_at_us, final_references = importable_valuations[-1]
             gross_pnl = _finite_float(final["gross_pnl"])
             fees = _finite_float(final["estimated_fees"]) or 0.0
             completeness = (
@@ -1311,6 +1397,7 @@ def _import_shadow(context: _ImportContext) -> None:
                                 "key": [final["id"]],
                                 "table": "shadow_horizon_valuation",
                             },
+                            "source_market_event_ids": [item[0] for item in final_references],
                             "virtual_only": True,
                         }
                     ),
@@ -1669,7 +1756,7 @@ def import_legacy_database(
                 )
                 _import_runs(context)
                 _import_instruments(context)
-                _import_option_instruments_and_install_markers(context)
+                _import_option_instruments(context)
                 _import_market_events(context)
                 _project_market_latest(context)
                 _install_legacy_idea_instances(context)

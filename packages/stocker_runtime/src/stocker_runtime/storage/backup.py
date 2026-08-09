@@ -648,13 +648,7 @@ def _is_managed_archive_filename(name: str) -> bool:
     return False
 
 
-def _remove_interrupted_publication_orphans(
-    destination: Path,
-    *,
-    previous_status: BackupStatus,
-) -> None:
-    if previous_status.state != "degraded" or previous_status.code != "BACKUP_IN_PROGRESS":
-        return
+def _managed_publication_orphan_names(destination: Path) -> frozenset[str]:
     names: set[str] = set()
     with os.scandir(destination) as entries:
         for scanned, entry in enumerate(entries, start=1):
@@ -672,12 +666,25 @@ def _remove_interrupted_publication_orphans(
             archive_name = name[: -len(manifest_suffix)]
             if _is_managed_archive_filename(archive_name) and archive_name not in names:
                 orphan_names.add(name)
+    return frozenset(orphan_names)
+
+
+def _remove_interrupted_publication_orphans(
+    destination: Path,
+    *,
+    previous_status: BackupStatus,
+) -> None:
+    if previous_status.state != "degraded" or previous_status.code != "BACKUP_IN_PROGRESS":
+        return
+    orphan_names = _managed_publication_orphan_names(destination)
     if orphan_names:
         _remove_stale_regular_files(
             destination,
             matches=orphan_names.__contains__,
             label="interrupted backup publication",
         )
+    if _managed_publication_orphan_names(destination):
+        raise BackupIntegrityError("interrupted backup publication cleanup is incomplete")
 
 
 def record_backup_failure(
@@ -696,6 +703,7 @@ def record_backup_failure(
     root = _prepare_backup_directory(Path(destination))
     with _destination_lock(root):
         previous = _read_status(root)
+        _remove_interrupted_publication_orphans(root, previous_status=previous)
         _write_status(
             root,
             state="degraded",
@@ -954,6 +962,7 @@ def _status_publication_reserve(
     *,
     candidate: BackupManifest,
     previous_status: BackupStatus,
+    current_status_bytes: int,
     healthy_status_bytes: int,
 ) -> int:
     latest_names = tuple(
@@ -962,19 +971,32 @@ def _status_publication_reserve(
         if name is not None
     )
     longest_latest = max(latest_names, key=len)
-    maximum_failure = _status_payload(
+    previous_failure = _status_payload(
+        state="degraded",
+        checked_at_us=MAX_TIMESTAMP_US,
+        code="X" * 96,
+        latest_manifest_filename=previous_status.latest_manifest_filename,
+    )
+    candidate_failure = _status_payload(
         state="degraded",
         checked_at_us=MAX_TIMESTAMP_US,
         code="X" * 96,
         latest_manifest_filename=longest_latest,
     )
-    next_in_progress = _status_payload(
+    committed_in_progress = _status_payload(
         state="degraded",
         checked_at_us=MAX_TIMESTAMP_US,
         code="BACKUP_IN_PROGRESS",
         latest_manifest_filename=candidate.manifest_filename,
     )
-    return max(healthy_status_bytes, len(maximum_failure), len(next_in_progress))
+    committed_in_progress_bytes = len(committed_in_progress)
+    return max(
+        committed_in_progress_bytes,
+        committed_in_progress_bytes + healthy_status_bytes - current_status_bytes,
+        len(previous_failure),
+        len(candidate_failure),
+        committed_in_progress_bytes + len(candidate_failure) - current_status_bytes,
+    )
 
 
 def _remove_managed_backups(
@@ -1092,8 +1114,6 @@ def _create_backup_locked(
     temporary_database: Path | None = None
     temporary_archive: Path | None = None
     temporary_publication: Path | None = None
-    published_archive = False
-    published_manifest = False
     committed = False
     try:
         database_descriptor, database_temporary_name = tempfile.mkstemp(
@@ -1176,6 +1196,7 @@ def _create_backup_locked(
             + _status_publication_reserve(
                 candidate=manifest,
                 previous_status=previous_status,
+                current_status_bytes=current_status_bytes,
                 healthy_status_bytes=len(status_payload),
             )
         )
@@ -1199,25 +1220,39 @@ def _create_backup_locked(
         ):
             raise BackupIntegrityError("backup archive changed during publication copy")
         os.replace(temporary_publication, archive_path)
-        published_archive = True
         _fsync_directory(root)
         _write_atomic(manifest_path, manifest_payload)
-        published_manifest = True
         committed = True
+        _write_status(
+            root,
+            state="degraded",
+            checked_at_us=timestamp,
+            code="BACKUP_IN_PROGRESS",
+            latest_manifest_filename=manifest.manifest_filename,
+            byte_cap=frozen_policy.byte_cap,
+        )
         _remove_managed_backups(after_publication, directory=root)
         _write_atomic(status_path, status_payload)
         return BackupArtifact(manifest, archive_path, manifest_path)
     except Exception as error:
-        removed_publication = False
+        removed_candidate = False
         if not committed:
-            if published_manifest:
-                manifest_path.unlink(missing_ok=True)
-                removed_publication = True
-            if published_archive:
-                archive_path.unlink(missing_ok=True)
-                removed_publication = True
-        if removed_publication:
-            _fsync_directory(root)
+            for candidate_path in (manifest_path, archive_path):
+                if candidate_path.exists():
+                    removed_candidate = True
+                with suppress(OSError):
+                    candidate_path.unlink(missing_ok=True)
+        try:
+            _remove_interrupted_publication_orphans(
+                root,
+                previous_status=_read_status(root),
+            )
+            if not committed and (manifest_path.exists() or archive_path.exists()):
+                raise BackupIntegrityError("uncommitted backup publication cleanup is incomplete")
+            if removed_candidate:
+                _fsync_directory(root)
+        except Exception as cleanup_error:
+            raise cleanup_error from error
         with suppress(Exception):
             _write_status(
                 root,

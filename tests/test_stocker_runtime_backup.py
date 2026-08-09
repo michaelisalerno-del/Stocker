@@ -94,6 +94,73 @@ def _seed_rotation_set(database: Path, backups: Path, working: Path) -> BackupPo
     return policy
 
 
+def _seed_floor_rotation_set(
+    database: Path,
+    backups: Path,
+    working: Path,
+    *,
+    post_publication_victim: bool,
+) -> BackupPolicy:
+    daily_timestamps = (1, 2) if post_publication_victim else (1, 2, 3)
+    policy = BackupPolicy(
+        daily_retention=2 if post_publication_victim else 3,
+        weekly_retention=2,
+        minimum_per_tier=2,
+        byte_cap=64 * 1024 * 1024,
+    )
+    for tier, timestamps in (("daily", daily_timestamps), ("weekly", (10, 11))):
+        for created_at_us in timestamps:
+            create_backup(
+                database,
+                backups,
+                tier=tier,  # type: ignore[arg-type]
+                created_at_us=created_at_us,
+                policy=policy,
+                working_directory=working,
+            )
+    return policy
+
+
+def _managed_one_sided_names(directory: Path) -> set[str]:
+    names = {path.name for path in directory.iterdir()}
+    one_sided: set[str] = set()
+    manifest_suffix = ".manifest.json"
+    for name in names:
+        if backup_module._is_managed_archive_filename(name):
+            if f"{name}{manifest_suffix}" not in names:
+                one_sided.add(name)
+            continue
+        if name.endswith(manifest_suffix):
+            archive_name = name[: -len(manifest_suffix)]
+            if (
+                backup_module._is_managed_archive_filename(archive_name)
+                and archive_name not in names
+            ):
+                one_sided.add(name)
+    return one_sided
+
+
+def _inject_victim_archive_unlink_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    victim_archive: Path,
+    *,
+    persistent: bool,
+) -> tuple[list[int], dict[str, bool]]:
+    real_unlink = Path.unlink
+    attempts: list[int] = []
+    state = {"enabled": True}
+
+    def failing_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path == victim_archive and state["enabled"]:
+            attempts.append(len(attempts) + 1)
+            if persistent or len(attempts) == 1:
+                raise OSError(errno.EIO, os.strerror(errno.EIO), str(path))
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    return attempts, state
+
+
 def _tight_rotation_cap(
     database: Path,
     backups: Path,
@@ -134,26 +201,11 @@ def _tight_rotation_cap(
         code=None,
         latest_manifest_filename=candidate.manifest.manifest_filename,
     )
-    longest_latest = max(
-        (previous_latest, candidate.manifest.manifest_filename),
-        key=len,
-    )
-    maximum_failure_status = backup_module._status_payload(
-        state="degraded",
-        checked_at_us=backup_module.MAX_TIMESTAMP_US,
-        code="X" * 96,
-        latest_manifest_filename=longest_latest,
-    )
-    next_in_progress_status = backup_module._status_payload(
-        state="degraded",
-        checked_at_us=backup_module.MAX_TIMESTAMP_US,
-        code="BACKUP_IN_PROGRESS",
-        latest_manifest_filename=candidate.manifest.manifest_filename,
-    )
-    status_reserve = max(
-        len(healthy_status),
-        len(maximum_failure_status),
-        len(next_in_progress_status),
+    status_reserve = backup_module._status_publication_reserve(
+        candidate=candidate.manifest,
+        previous_status=backup_module._read_status(backups),
+        current_status_bytes=in_progress_bytes,
+        healthy_status_bytes=len(healthy_status),
     )
     cap = (
         _regular_directory_bytes(backups)
@@ -757,6 +809,176 @@ def test_failed_publication_after_planned_rotation_preserves_tier_floors(
         path for path in working.iterdir() if backup_module._is_backup_work_file(path.name)
     )
     assert projection.status.state == "degraded"
+
+
+@pytest.mark.parametrize(
+    "post_publication_victim",
+    (False, True),
+    ids=("pre-publication-victim", "post-publication-victim"),
+)
+def test_partial_rotation_delete_is_recovered_before_terminal_failure_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    post_publication_victim: bool,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    working.mkdir()
+    _seed_database(database)
+    policy = _seed_floor_rotation_set(
+        database,
+        backups,
+        working,
+        post_publication_victim=post_publication_victim,
+    )
+    previous_status = json.loads(
+        (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
+    )
+    victim_name = backup_module._archive_filename("daily", 1)
+    victim_archive = backups / victim_name
+    victim_manifest = backups / f"{victim_name}.manifest.json"
+    candidate_name = backup_module._archive_filename("daily", 4)
+    candidate_archive = backups / candidate_name
+    candidate_manifest = backups / f"{candidate_name}.manifest.json"
+    attempts, _state = _inject_victim_archive_unlink_failure(
+        monkeypatch,
+        victim_archive,
+        persistent=False,
+    )
+
+    with pytest.raises(OSError, match="Input/output"):
+        create_backup(
+            database,
+            backups,
+            tier="daily",
+            created_at_us=4,
+            policy=policy,
+            working_directory=working,
+        )
+
+    assert attempts == [1, 2]
+    assert not victim_archive.exists()
+    assert not victim_manifest.exists()
+    assert _managed_one_sided_names(backups) == set()
+    assert candidate_archive.exists() is post_publication_victim
+    assert candidate_manifest.exists() is post_publication_victim
+    failed_status = json.loads(
+        (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
+    )
+    assert failed_status["code"] == "OSError"
+    assert failed_status["latest_manifest_filename"] == (
+        candidate_manifest.name
+        if post_publication_victim
+        else previous_status["latest_manifest_filename"]
+    )
+    failed_projection = read_backup_manifests(backups, limit=200, now_us=11)
+    assert [item.tier for item in failed_projection.items].count("daily") == 2
+    assert [item.tier for item in failed_projection.items].count("weekly") == 2
+    assert _regular_directory_bytes(backups) <= policy.byte_cap
+
+    artifact = create_backup(
+        database,
+        backups,
+        tier="daily",
+        created_at_us=5,
+        policy=policy,
+        working_directory=working,
+    )
+
+    assert _managed_one_sided_names(backups) == set()
+    recovered = read_backup_manifests(backups, limit=200, now_us=11)
+    assert [item.tier for item in recovered.items].count("daily") == policy.daily_retention
+    assert [item.tier for item in recovered.items].count("weekly") == 2
+    assert _regular_directory_bytes(backups) <= policy.byte_cap
+    assert artifact.manifest.manifest_filename == recovered.status.latest_manifest_filename
+    assert recovered.status.state == "healthy"
+
+
+@pytest.mark.parametrize(
+    "post_publication_victim",
+    (False, True),
+    ids=("pre-publication-victim", "post-publication-victim"),
+)
+def test_persistent_rotation_cleanup_failure_keeps_recovery_gate_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    post_publication_victim: bool,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    working.mkdir()
+    _seed_database(database)
+    policy = _seed_floor_rotation_set(
+        database,
+        backups,
+        working,
+        post_publication_victim=post_publication_victim,
+    )
+    previous_status = json.loads(
+        (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
+    )
+    victim_name = backup_module._archive_filename("daily", 1)
+    victim_archive = backups / victim_name
+    candidate_manifest_name = f"{backup_module._archive_filename('daily', 4)}.manifest.json"
+    attempts, failure_state = _inject_victim_archive_unlink_failure(
+        monkeypatch,
+        victim_archive,
+        persistent=True,
+    )
+
+    with pytest.raises(OSError, match="Input/output"):
+        create_backup(
+            database,
+            backups,
+            tier="daily",
+            created_at_us=4,
+            policy=policy,
+            working_directory=working,
+        )
+
+    assert attempts == [1, 2]
+    assert victim_archive.exists()
+    assert _managed_one_sided_names(backups) == {victim_name}
+    interrupted_status = json.loads(
+        (backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8")
+    )
+    assert interrupted_status["code"] == "BACKUP_IN_PROGRESS"
+    assert interrupted_status["latest_manifest_filename"] == (
+        candidate_manifest_name
+        if post_publication_victim
+        else previous_status["latest_manifest_filename"]
+    )
+
+    with pytest.raises(OSError, match="Input/output"):
+        record_backup_failure(backups, code="BackupError", checked_at_us=5)
+
+    assert attempts == [1, 2, 3]
+    assert (
+        json.loads((backups / backup_module.BACKUP_STATUS_FILENAME).read_text(encoding="utf-8"))
+        == interrupted_status
+    )
+    assert _regular_directory_bytes(backups) <= policy.byte_cap
+
+    failure_state["enabled"] = False
+    artifact = create_backup(
+        database,
+        backups,
+        tier="daily",
+        created_at_us=5,
+        policy=policy,
+        working_directory=working,
+    )
+
+    assert not victim_archive.exists()
+    assert _managed_one_sided_names(backups) == set()
+    recovered = read_backup_manifests(backups, limit=200, now_us=11)
+    assert [item.tier for item in recovered.items].count("daily") == policy.daily_retention
+    assert [item.tier for item in recovered.items].count("weekly") == 2
+    assert _regular_directory_bytes(backups) <= policy.byte_cap
+    assert artifact.manifest.manifest_filename == recovered.status.latest_manifest_filename
+    assert recovered.status.state == "healthy"
 
 
 def test_interruption_after_manifest_leaves_a_bounded_complete_pair(

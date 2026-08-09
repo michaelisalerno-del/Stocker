@@ -61,9 +61,19 @@ artifacts while the versioned release is still unpublished, then verify installe
 metadata and concrete imports. Never modify the release environment after publishing
 the V2 pointer.
 
+Security review note: `protobuf==5.29.5` is named in
+GHSA-7gcm-g887-7qv7 / CVE-2026-0994. The reviewed official IBKR client source does not
+call the affected `json_format.ParseDict` path; it uses generated binary message
+modules and `text_format.MessageToString`. Keep the exact compatibility pin until a
+separately reviewed official IBKR client/dependency update supplies refreshed
+artifacts, hashes, provenance, and regression evidence. Do not silently override the
+pin with an unrelated protobuf release.
+
 Prepare the separate V2 pointer, users, and paths without starting services:
 
 ```bash
+set -euo pipefail
+
 export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT
 export STOCKER_IBAPI_SOURCE=/var/lib/stocker/ibkr-api/install/IBJts/source/pythonclient
 export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl
@@ -93,8 +103,8 @@ sudo awk -v expected="$STOCKER_PROTOBUF_WHEEL" \
   'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ && $2 == expected { ok = 1 } END { exit !(NR == 1 && ok) }' \
   "$STOCKER_PROTOBUF_WHEEL_SHA256"
 sudo sha256sum --check "$STOCKER_PROTOBUF_WHEEL_SHA256"
-sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps "$STOCKER_PROTOBUF_WHEEL"
-sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps "$STOCKER_IBAPI_SOURCE"
+sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"
+sudo "$STOCKER_UV_BIN" pip install --python "$STOCKER_V2_RELEASE/.venv/bin/python" --offline --no-deps --reinstall "$STOCKER_IBAPI_SOURCE"
 sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
 from importlib.metadata import requires, version
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import sqlite3
+import subprocess
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -105,8 +107,8 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     exact_wheel = runbook.index("protobuf-5.29.5-*.whl")
     manifest_binding = runbook.index("NR == 1 && length($1) == 64")
     protobuf_hash = runbook.index('sha256sum --check "$STOCKER_PROTOBUF_WHEEL_SHA256"')
-    protobuf_install = runbook.index('--offline --no-deps "$STOCKER_PROTOBUF_WHEEL"')
-    ibapi_install = runbook.index('--offline --no-deps "$STOCKER_IBAPI_SOURCE"')
+    protobuf_install = runbook.index('--offline --no-deps --reinstall "$STOCKER_PROTOBUF_WHEEL"')
+    ibapi_install = runbook.index('--offline --no-deps --reinstall "$STOCKER_IBAPI_SOURCE"')
     metadata_gate = runbook.index('requires("ibapi")')
     concrete_import_gate = runbook.index("from ibapi.client import EClient")
     publish = runbook.index('sudo ln -s "$STOCKER_V2_RELEASE" /opt/stocker/v2-current')
@@ -118,6 +120,99 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     assert ibapi_install < metadata_gate < concrete_import_gate < publish
     assert 'version("ibapi") != "10.49.1"' in runbook[metadata_gate:publish]
     assert 'version("protobuf") != "5.29.5"' in runbook[metadata_gate:publish]
+
+
+def test_cutover_dependency_failures_cannot_reach_release_pointer(tmp_path: Path) -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+    block_start = runbook.index("```bash", runbook.index("Prepare the separate V2 pointer"))
+    block_start += len("```bash\n")
+    block_end = runbook.index("getent group stocker-readers", block_start)
+    block = runbook[block_start:block_end]
+
+    release = tmp_path / "reviewed-release"
+    source = tmp_path / "reviewed-ibapi-source"
+    wheel = tmp_path / "protobuf-5.29.5-reviewed.whl"
+    manifest = tmp_path / "protobuf-5.29.5-reviewed.sha256"
+    replacements = {
+        "export STOCKER_V2_RELEASE=/opt/stocker/releases/REPLACE_WITH_REVIEWED_COMMIT": (
+            f'export STOCKER_V2_RELEASE="{release}"'
+        ),
+        (
+            "export STOCKER_IBAPI_SOURCE="
+            "/var/lib/stocker/ibkr-api/install/IBJts/source/pythonclient"
+        ): f'export STOCKER_IBAPI_SOURCE="{source}"',
+        (
+            "export STOCKER_PROTOBUF_WHEEL=/var/lib/stocker/ibkr-api/install/"
+            "REPLACE_WITH_REVIEWED_PROTOBUF_5_29_5_WHEEL.whl"
+        ): f'export STOCKER_PROTOBUF_WHEEL="{wheel}"',
+        (
+            "export STOCKER_PROTOBUF_WHEEL_SHA256=/var/lib/stocker/ibkr-api/install/"
+            "protobuf-5.29.5-wheel.sha256"
+        ): f'export STOCKER_PROTOBUF_WHEEL_SHA256="{manifest}"',
+    }
+    for original, replacement in replacements.items():
+        assert original in block
+        block = block.replace(original, replacement, 1)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for command in ("getfacl", "readlink", "setfacl", "uv"):
+        executable = fake_bin / command
+        executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        executable.chmod(0o755)
+    fake_sudo = fake_bin / "sudo"
+    fake_sudo.write_text(
+        """#!/usr/bin/env bash
+set -u
+printf '%s\\n' "$*" >> "$TRACE"
+if [[ -n "${FAIL_MATCH:-}" && "$*" == *"$FAIL_MATCH"* ]]; then
+  exit 23
+fi
+if [[ "$1" == "ln" && "$2" == "-s" ]]; then
+  : > "$PUBLISHED"
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    fake_sudo.chmod(0o755)
+
+    trace = tmp_path / "trace"
+    published = tmp_path / "published"
+    environment = os.environ.copy()
+    environment.update(
+        PATH=f"{fake_bin}:{environment['PATH']}",
+        PUBLISHED=str(published),
+        TRACE=str(trace),
+    )
+    failures = (
+        "sha256sum --check",
+        (
+            f"pip install --python {release}/.venv/bin/python --offline --no-deps "
+            f"--reinstall {wheel}"
+        ),
+        (
+            f"pip install --python {release}/.venv/bin/python --offline --no-deps "
+            f"--reinstall {source}"
+        ),
+        f"{release}/.venv/bin/python -",
+    )
+    for failure in failures:
+        published.unlink(missing_ok=True)
+        trace.write_text("", encoding="utf-8")
+        failed_environment = environment | {"FAIL_MATCH": failure}
+        completed = subprocess.run(
+            ["bash", "-c", block],
+            check=False,
+            capture_output=True,
+            env=failed_environment,
+            text=True,
+            timeout=5,
+        )
+
+        assert completed.returncode != 0, failure
+        assert not published.exists(), failure
+        assert "ln -s" not in trace.read_text(encoding="utf-8"), failure
 
 
 def test_v2_deployment_contains_no_legacy_vendor_transfer_or_execution_fields() -> None:

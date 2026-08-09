@@ -229,9 +229,20 @@ sudo "$STOCKER_TRUSTED_PYTHON" -I "$STOCKER_RELEASE_ARTIFACT_VERIFIER" postinsta
   --verifier-sha256 "$STOCKER_RELEASE_ARTIFACT_VERIFIER_SHA256" \
   --venv "$STOCKER_V2_RELEASE/.venv"
 sudo "$STOCKER_V2_RELEASE/.venv/bin/python" - <<'PY'
+import re
 from importlib.metadata import requires, version
 
-if "protobuf==5.29.5" not in (requires("ibapi") or ()):
+declared_dependencies = requires("ibapi")
+if (
+    declared_dependencies is None
+    or len(declared_dependencies) != 1
+    or re.fullmatch(
+        r"protobuf[ \t]*==[ \t]*5\.29\.5",
+        declared_dependencies[0],
+        flags=re.ASCII,
+    )
+    is None
+):
     raise SystemExit("ibapi declared dependency mismatch")
 if version("ibapi") != "10.49.1":
     raise SystemExit("ibapi installed version mismatch")

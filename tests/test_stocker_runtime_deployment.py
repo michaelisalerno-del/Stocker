@@ -8,7 +8,9 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
+import pytest
 from typer.testing import CliRunner
 
 from stocker_runtime.cli import app
@@ -132,6 +134,9 @@ def test_cutover_builds_official_client_dependencies_offline_before_release_publ
     assert ibapi_hash < preinstall_gate < protobuf_install < ibapi_install
     assert ibapi_install < postinstall_gate < metadata_gate
     assert metadata_gate < concrete_import_gate < provenance_gate < publish
+    assert "len(declared_dependencies) != 1" in runbook[metadata_gate:publish]
+    assert r'r"protobuf[ \t]*==[ \t]*5\.29\.5"' in runbook[metadata_gate:publish]
+    assert "flags=re.ASCII" in runbook[metadata_gate:publish]
     assert 'version("ibapi") != "10.49.1"' in runbook[metadata_gate:publish]
     assert 'version("protobuf") != "5.29.5"' in runbook[metadata_gate:publish]
     assert '--reinstall "$STOCKER_IBAPI_SOURCE"' not in runbook
@@ -320,6 +325,60 @@ false
     assert completed.returncode == 0, completed.stderr
     assert published.exists()
     assert continued.exists()
+
+
+def test_cutover_runtime_dependency_gate_accepts_only_exact_semantic_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runbook = (ROOT / "docs/operations/stocker-v2-cutover.md").read_text(encoding="utf-8")
+    marker = "sudo \"$STOCKER_V2_RELEASE/.venv/bin/python\" - <<'PY'\n"
+    gate_start = runbook.index(marker) + len(marker)
+    gate_end = runbook.index("\nPY\n", gate_start)
+    gate = runbook[gate_start:gate_end]
+
+    dependency_result: dict[str, list[str] | None] = {"value": ["protobuf ==5.29.5"]}
+    metadata = ModuleType("importlib.metadata")
+    metadata.requires = lambda name: dependency_result["value"]
+    metadata.version = lambda name: {
+        "ibapi": "10.49.1",
+        "protobuf": "5.29.5",
+    }[name]
+    google = ModuleType("google")
+    google.__path__ = []
+    protobuf = ModuleType("google.protobuf")
+    google.protobuf = protobuf
+    ibapi = ModuleType("ibapi")
+    ibapi.__path__ = []
+    client = ModuleType("ibapi.client")
+    client.EClient = type("EClient", (), {})
+    ibapi.client = client
+    for name, module in (
+        ("importlib.metadata", metadata),
+        ("google", google),
+        ("google.protobuf", protobuf),
+        ("ibapi", ibapi),
+        ("ibapi.client", client),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+
+    for accepted in (
+        ["protobuf ==5.29.5"],
+        ["protobuf==5.29.5"],
+        ["protobuf\t==\t5.29.5"],
+    ):
+        dependency_result["value"] = accepted
+        exec(compile(gate, "<cutover-runtime-dependency-gate>", "exec"), {})
+
+    for rejected in (
+        None,
+        [],
+        ["protobuf>=5.29.5"],
+        ["Protobuf==5.29.5"],
+        ["protobuf ==5.29.5", "other==1"],
+    ):
+        dependency_result["value"] = rejected
+        with pytest.raises(SystemExit, match="ibapi declared dependency mismatch"):
+            exec(compile(gate, "<cutover-runtime-dependency-gate>", "exec"), {})
 
 
 def test_cutover_verifier_bootstrap_rejects_trust_boundary_mutations(

@@ -537,8 +537,7 @@ for unit in \
     masked|masked-runtime) exit 78 ;;
   esac
 done
-sudo setfacl \
-  --restore="$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" || exit 78
+sudo setfacl --restore="$STOCKER_V1_PRESERVATION/rollback-access-control-before.txt" || exit 78
 sudo -u stocker test -w "$STOCKER_V1_ROLLBACK_DB" || exit 78
 ```
 

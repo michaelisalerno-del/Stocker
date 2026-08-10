@@ -324,6 +324,7 @@ def _prerequisites_are_terminal(
             if capture or terminal_status in {"denied", "window_elapsed", "late"}:
                 continue
             terminal[right] = "window_elapsed"
+            terminal[f"{right}_k"] = f"m1c:d1:{baseline_session}:{symbol}:{right}"
             terminal[f"{right}_x"] = expiry
             terminal[f"{right}_a"] = cohort_available
         option_terminal[symbol] = terminal
@@ -357,6 +358,25 @@ def _evaluate_exact_cohort(
         raise ValueError("exact continuation checkpoint is invalid")
     current_session = session_value
     checkpoint = checkpoint_value
+    market_available = max(market_event.event_at_us, market_event.received_at_us)
+    for symbol in COHORT:
+        baseline = baselines.get(symbol)
+        if baseline is None:
+            continue
+        baseline_session = baseline.get("s")
+        if not isinstance(baseline_session, str) or baseline_session >= current_session:
+            continue
+        expiry = _baseline_expiry(baseline)
+        current_event = events_by_symbol[symbol]
+        cohort_available = max(
+            market_available,
+            current_event.event_at_us,
+            current_event.received_at_us,
+        )
+        if expiry is None:
+            raise ValueError("M1C exact cohort option cutoff is unavailable")
+        if expiry > cohort_available:
+            raise ValueError("exact M1C cohort precedes its D-1 option cutoff")
     outputs: list[IdeaOutput] = []
     output_lineages: list[tuple[str, ...]] = []
     for symbol in sorted(COHORT):
@@ -424,27 +444,67 @@ def _evaluate_exact_cohort(
         terminal = option_terminal.get(symbol)
         baseline_session = None if baseline is None else baseline.get("s")
         if terminal is not None and terminal.get("s") == baseline_session:
-            elapsed_rights = tuple(
+            terminal_rights = tuple(
                 right
                 for right in _OPTION_RIGHTS
-                if terminal.get(right) in {"window_elapsed", "late"}
+                if terminal.get(right) in {"denied", "window_elapsed", "late"}
             )
-            if elapsed_rights:
+            if terminal_rights:
                 expiry = _baseline_expiry({} if baseline is None else baseline)
                 cohort_available = max(
                     max(current_event.event_at_us, current_event.received_at_us),
                     max(market_event.event_at_us, market_event.received_at_us),
                 )
                 if expiry is not None:
+                    terminal_statuses: dict[str, JsonValue] = {
+                        str(right): cast(str, terminal[right]) for right in terminal_rights
+                    }
+                    status_values = set(terminal_statuses.values())
+                    if status_values == {"denied"}:
+                        terminal_basis = "explicit_discovery_denial"
+                    elif status_values == {"late"}:
+                        terminal_basis = "capture_at_or_after_cutoff"
+                    elif status_values == {"window_elapsed"}:
+                        terminal_basis = "causal_window_elapsed_without_capture"
+                    else:
+                        terminal_basis = "mixed_terminal_option_evidence"
                     status_details = {
-                        "terminal_basis": "causal_window_elapsed_without_capture",
+                        "terminal_basis": terminal_basis,
                         "interest_keys": tuple(
-                            f"m1c:d1:{baseline_session}:{symbol}:{right}"
-                            for right in elapsed_rights
+                            str(
+                                terminal.get(
+                                    f"{right}_k",
+                                    f"m1c:d1:{baseline_session}:{symbol}:{right}",
+                                )
+                            )
+                            for right in terminal_rights
                         ),
                         "interest_expires_at_us": expiry,
                         "cohort_available_at_us": cohort_available,
+                        "terminal_statuses": terminal_statuses,
                     }
+                    late_available: dict[str, JsonValue] = {
+                        str(right): cast(int, terminal[f"{right}_a"])
+                        for right in terminal_rights
+                        if terminal.get(right) == "late"
+                        and _integer(terminal.get(f"{right}_a")) is not None
+                    }
+                    if late_available:
+                        status_details = {
+                            **status_details,
+                            "capture_available_at_us": late_available,
+                        }
+                    denial_reasons: dict[str, JsonValue] = {
+                        str(right): cast(str, terminal[f"{right}_r"])
+                        for right in terminal_rights
+                        if terminal.get(right) == "denied"
+                        and isinstance(terminal.get(f"{right}_r"), str)
+                    }
+                    if denial_reasons:
+                        status_details = {
+                            **status_details,
+                            "denial_reason_codes": denial_reasons,
+                        }
         as_of_at_us = max(selected_times)
         status = statuses.get(symbol)
         if reason is not None:
@@ -655,6 +715,9 @@ class FrozenM1CSignalV0:
                         terminal = {"s": receipt_session}
                     if terminal.get("s") == receipt_session:
                         terminal[right] = receipt.status
+                        terminal[f"{right}_k"] = receipt.interest_key
+                        if receipt.reason_code is not None:
+                            terminal[f"{right}_r"] = receipt.reason_code
                         option_terminal[symbol] = terminal
             if receipt.status == "resolved" and receipt.instrument_id is not None:
                 receipts_by_instrument.setdefault(receipt.instrument_id, []).append(receipt)
@@ -730,6 +793,7 @@ class FrozenM1CSignalV0:
                                     terminal = {"s": receipt_session}
                                 if terminal.get("s") == receipt_session:
                                     terminal[right] = "late"
+                                    terminal[f"{right}_k"] = receipt.interest_key
                                     terminal[f"{right}_x"] = capture_expiry
                                     terminal[f"{right}_a"] = capture_available
                                     option_terminal[symbol] = terminal
@@ -760,6 +824,9 @@ class FrozenM1CSignalV0:
                                     terminal = {"s": receipt_session}
                                 if terminal.get("s") == receipt_session:
                                     terminal[right] = "captured"
+                                    terminal[f"{right}_k"] = receipt.interest_key
+                                    terminal[f"{right}_x"] = capture_expiry
+                                    terminal[f"{right}_a"] = capture_available
                                     option_terminal[symbol] = terminal
                     continue
                 if (

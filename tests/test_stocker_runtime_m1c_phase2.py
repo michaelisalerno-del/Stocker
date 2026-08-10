@@ -1161,14 +1161,14 @@ def test_frozen_m1c_consumes_exact_resolved_snapshot_pair_and_scores() -> None:
         "aal-current",
         "AAL",
         "bar_5m_session_prefix",
-        10_000_000,
+        2_000_000_000,
         _prefix_fixture(session="2026-08-10", checkpoint=6),
     )
     market = _event(
         "vti-current",
         "VTI",
         "bar_5m_session_prefix",
-        10_000_001,
+        2_000_000_001,
         _prefix_fixture(session="2026-08-10", checkpoint=6, base=250.0),
     )
     continuation_state, retained, events, requests = _exact_continuation_fixture(
@@ -1267,6 +1267,54 @@ def test_frozen_m1c_rejects_capture_at_or_after_the_frozen_interest_cutoff(
     assert terminal["AAL"]["call_x"] == 1_801_000_000
     assert "late-capture-call" not in captured.retained_input_event_ids
 
+    session = "2026-08-10"
+    current_events = tuple(
+        _event(
+            f"late-06-{symbol}",
+            symbol,
+            "bar_5m_session_prefix",
+            2_000_000_000 + sorted(UNIVERSE).index(symbol),
+            _prefix_fixture(
+                session=session,
+                checkpoint=6,
+                base=250.0 if symbol == "VTI" else 100.0,
+            ),
+        )
+        for symbol in UNIVERSE
+    )
+    evaluation = plugin.evaluate(
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=current_events,
+            input_watermark=current_events[-1].event_id,
+            causal_from_at_us=current_events[0].event_at_us,
+            causal_through_at_us=current_events[-1].event_at_us,
+            prior_state_input_event_ids=captured.retained_input_event_ids,
+        ),
+        captured.state,
+    )
+    assert isinstance(evaluation.continuation, AncestorPageContinuation)
+    continuation_state, exact_retained, events, requests = _exact_continuation_fixture(
+        state=evaluation.state,
+        session=session,
+        checkpoints=(6,),
+        prior_ids=evaluation.retained_input_event_ids,
+        event_overrides={(event.instrument_id, 6): event for event in current_events},
+    )
+    completed = plugin.evaluate(
+        _exact_batch(events=events[6], request=requests[6], retained=exact_retained),
+        continuation_state,
+    )
+    aal_output = next(
+        output for output in completed.outputs if output.subject_instrument_id == "AAL"
+    )
+    assert aal_output.payload["terminal_basis"] == "mixed_terminal_option_evidence"
+    assert aal_output.payload["terminal_statuses"] == {
+        "call": "late",
+        "put": "window_elapsed",
+    }
+    assert aal_output.payload["capture_available_at_us"] == {"call": capture_at_us}
+
 
 @pytest.mark.parametrize(
     ("call_completeness", "put_strike", "reason"),
@@ -1284,14 +1332,14 @@ def test_frozen_m1c_fails_closed_for_invalid_option_pair(
         "aal-current",
         "AAL",
         "bar_5m_session_prefix",
-        10_000_000,
+        2_000_000_000,
         _prefix_fixture(session="2026-08-10", checkpoint=6),
     )
     market = _event(
         "vti-current",
         "VTI",
         "bar_5m_session_prefix",
-        10_000_001,
+        2_000_000_001,
         _prefix_fixture(session="2026-08-10", checkpoint=6, base=250.0),
     )
     state = cast(
@@ -1409,14 +1457,14 @@ def test_fresh_m1c_emits_real_labelled_classifications_only_as_generic_evidence(
         "aal-current",
         "AAL",
         "bar_5m_session_prefix",
-        10_000_000,
+        2_000_000_000,
         _prefix_fixture(session=session, checkpoint=6),
     )
     market = _event(
         "vti-current",
         "VTI",
         "bar_5m_session_prefix",
-        10_000_001,
+        2_000_000_001,
         _prefix_fixture(session=session, checkpoint=6, base=250.0),
     )
     state = {
@@ -1588,7 +1636,7 @@ def test_frozen_m1c_backlog_batch_preserves_every_checkpoint(
             f"{instrument_id.lower()}-{checkpoint}",
             instrument_id,
             "bar_5m_session_prefix",
-            checkpoint * 1_000_000 + (1 if instrument_id == "VTI" else 0),
+            2_000_000_000 + checkpoint * 1_000_000 + (1 if instrument_id == "VTI" else 0),
             _prefix_fixture(
                 session=session,
                 checkpoint=checkpoint,
@@ -2306,6 +2354,92 @@ def test_frozen_m1c_rejects_complete_cohort_before_d1_interest_cutoff(
         )
 
 
+def test_frozen_m1c_exact_cutoff_rejects_advanced_roots_masking_early_cohort() -> None:
+    plugin = FrozenM1CSignalV0()
+    state, _ = _full_cohort_context_state()
+    mutable_state = cast(dict[str, JsonValue], state)
+    mutable_state["option_context"] = {}
+    mutable_state["option_terminal"] = {}
+    retained = tuple(f"baseline-{symbol}" for symbol in COHORT)
+    session = "2026-08-10"
+    stock_six = tuple(
+        _event(
+            f"skew-06-{symbol}",
+            symbol,
+            "bar_5m_session_prefix",
+            10_000_000 + sorted(COHORT).index(symbol),
+            _prefix_fixture(session=session, checkpoint=6),
+        )
+        for symbol in COHORT
+    )
+    stock_eight = tuple(
+        _event(
+            f"skew-08-{symbol}",
+            symbol,
+            "bar_5m_session_prefix",
+            2_000_000_000 + sorted(COHORT).index(symbol),
+            _prefix_fixture(session=session, checkpoint=8),
+        )
+        for symbol in COHORT
+    )
+    market_six = _event(
+        "skew-06-VTI",
+        "VTI",
+        "bar_5m_session_prefix",
+        10_000_100,
+        _prefix_fixture(session=session, checkpoint=6, base=250.0),
+    )
+    candidate_events = (*stock_six, *stock_eight, market_six)
+    candidate = IdeaBatch(
+        mode=RuntimeMode.SHADOW,
+        events=candidate_events,
+        input_watermark=market_six.event_id,
+        causal_from_at_us=stock_six[0].event_at_us,
+        causal_through_at_us=stock_eight[-1].event_at_us,
+        prior_state_input_event_ids=retained,
+    )
+
+    selected = plugin.select_input_prefix(candidate, state)
+    ordinary_events = candidate_events[:selected]
+    evaluation = plugin.evaluate(
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=ordinary_events,
+            input_watermark=ordinary_events[-1].event_id,
+            causal_from_at_us=min(event.event_at_us for event in ordinary_events),
+            causal_through_at_us=max(event.event_at_us for event in ordinary_events),
+            prior_state_input_event_ids=retained,
+        ),
+        state,
+    )
+
+    assert selected == len(candidate_events)
+    request = cast(AncestorPageContinuation, evaluation.continuation)
+    latest = cast(dict[str, JsonValue], json.loads(canonical_json_bytes(evaluation.state)))
+    exact_ids = {event.instrument_id: event.event_id for event in (*stock_six, market_six)}
+    latest["prefix_index"] = {"2026-08-10|06": {symbol: exact_ids[symbol] for symbol in UNIVERSE}}
+    exact_request = ExactEventsContinuation(
+        root_event_ids=request.root_event_ids,
+        event_ids=tuple(exact_ids[symbol] for symbol in sorted(UNIVERSE)),
+        event_kind="bar_5m_session_prefix",
+        input_roles=("prior_receipt",),
+    )
+    exact_events = tuple(
+        next(event for event in (*stock_six, market_six) if event.event_id == event_id)
+        for event_id in exact_request.event_ids
+    )
+
+    with pytest.raises(ValueError, match="exact M1C cohort precedes"):
+        plugin.evaluate(
+            _exact_batch(
+                events=exact_events,
+                request=exact_request,
+                retained=evaluation.retained_input_event_ids,
+            ),
+            cast(JsonValue, latest),
+        )
+
+
 def test_frozen_m1c_drains_complete_cohort_after_explicit_option_denial() -> None:
     plugin = FrozenM1CSignalV0()
     state, retained = _full_cohort_context_state()
@@ -2359,6 +2493,9 @@ def test_frozen_m1c_drains_complete_cohort_after_explicit_option_denial() -> Non
     )
     assert aal_output.payload["status"] == "unavailable"
     assert aal_output.payload["reason"] == "prior_session_option_pair_incomplete"
+    assert aal_output.payload["terminal_basis"] == "explicit_discovery_denial"
+    assert aal_output.payload["interest_keys"] == ("m1c:d1:2026-08-07:AAL:call",)
+    assert aal_output.payload["terminal_statuses"] == {"call": "denied"}
 
 
 def test_frozen_m1c_source_graph_includes_reviewed_generated_data() -> None:

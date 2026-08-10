@@ -47,6 +47,7 @@ research = [
 ]
 server = [
   "fastapi>=0.111",
+  "pandas-market-calendars>=4.4",
   "uvicorn>=0.30",
 ]
 dev = [

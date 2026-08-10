@@ -98,6 +98,10 @@ def create_official_bridge(
             if owner is not None:
                 owner.connection_closed()
 
+        def nextValidId(self, _order_id: int) -> None:  # noqa: N802
+            if owner is not None:
+                owner._session_ready_callback()
+
         def tickPrice(self, reqId: int, tickType: int, price: float, _attrib: Any) -> None:  # noqa: N802
             if owner is not None:
                 owner.tick_price(reqId, tickType, float(price))
@@ -207,6 +211,7 @@ class _PrivateOfficialBridge:
     """The sole Phase 3 holder of the official client instance."""
 
     _THREAD_STOP_TIMEOUT_SECONDS = 5.0
+    _SESSION_READY_TIMEOUT_SECONDS = 5.0
 
     def __init__(
         self,
@@ -237,6 +242,8 @@ class _PrivateOfficialBridge:
         self._callback_context = threading.local()
         self._connection_epoch = 0
         self._active_connection_epoch: int | None = None
+        self._ready_connection_epoch: int | None = None
+        self._session_ready_event = threading.Event()
         self._metadata_operation_lock = threading.Lock()
         self._metadata_state_lock = threading.Lock()
         self._metadata_waiters: dict[int, _MetadataWaiter] = {}
@@ -262,6 +269,8 @@ class _PrivateOfficialBridge:
             self._connection_epoch += 1
             connection_epoch = self._connection_epoch
             self._active_connection_epoch = connection_epoch
+            self._ready_connection_epoch = None
+            self._session_ready_event.clear()
         try:
             result = self.__client.connect(self._host, self._port, self._client_id)
         except Exception:
@@ -298,16 +307,38 @@ class _PrivateOfficialBridge:
             self._configured.clear()
             self._contracts.clear()
             raise
+        if not self._session_ready_event.wait(timeout=self._SESSION_READY_TIMEOUT_SECONDS):
+            self.disconnect()
+            raise OfficialBridgeUnavailable("official IBKR session readiness timed out")
+        with self._connection_state_lock:
+            ready = (
+                self._active_connection_epoch == connection_epoch
+                and self._ready_connection_epoch == connection_epoch
+            )
+        if not ready:
+            self.disconnect()
+            raise OfficialBridgeUnavailable("official IBKR session closed before readiness")
 
     def _run_connection(self, connection_epoch: int) -> None:
         self._callback_context.connection_epoch = connection_epoch
         try:
             self.__client.run()
         finally:
-            del self._callback_context.connection_epoch
-            with self._connection_state_lock:
-                if self._thread is threading.current_thread():
-                    self._thread = None
+            try:
+                self.connection_closed()
+            finally:
+                del self._callback_context.connection_epoch
+                with self._connection_state_lock:
+                    if self._thread is threading.current_thread():
+                        self._thread = None
+
+    def _session_ready_callback(self) -> None:
+        callback_epoch = getattr(self._callback_context, "connection_epoch", None)
+        with self._connection_state_lock:
+            if callback_epoch is None or callback_epoch != self._active_connection_epoch:
+                return
+            self._ready_connection_epoch = callback_epoch
+            self._session_ready_event.set()
 
     def _callback_is_current_connection(self) -> bool:
         callback_epoch = getattr(self._callback_context, "connection_epoch", None)
@@ -318,6 +349,8 @@ class _PrivateOfficialBridge:
     def disconnect(self) -> None:
         with self._connection_state_lock:
             self._active_connection_epoch = None
+            self._ready_connection_epoch = None
+            self._session_ready_event.set()
             thread = self._thread
         try:
             self.__client.disconnect()
@@ -660,6 +693,8 @@ class _PrivateOfficialBridge:
             if active_epoch is None or callback_epoch != active_epoch:
                 return
             self._active_connection_epoch = None
+            self._ready_connection_epoch = None
+            self._session_ready_event.set()
             callback = self._disconnect_callback
         self._fences.clear()
         if callback is not None:

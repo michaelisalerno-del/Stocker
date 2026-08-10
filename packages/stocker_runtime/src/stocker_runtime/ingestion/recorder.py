@@ -2957,6 +2957,23 @@ class Recorder:
                     )
                 }
                 connection.execute(
+                    "UPDATE gaps SET ended_at_us=max(started_at_us, ?), "
+                    "resolved_at_us=max(started_at_us, ?) WHERE run_id=? "
+                    "AND resolved_at_us IS NULL AND reason IN ("
+                    "'IBKR_CONNECT_FAILED','IBKR_DISCONNECT','IBKR_SUBSCRIBE_FAILED',"
+                    "'RECONNECT_UNCERTAINTY','STREAM_STALE') AND subscription_id IN ("
+                    "SELECT subscription_id FROM subscriptions WHERE run_id=? "
+                    "AND recorder_generation=? AND connection_generation=?)",
+                    (
+                        now_us,
+                        now_us,
+                        self.config.run_id,
+                        self.config.run_id,
+                        old.recorder_generation,
+                        old.connection_generation,
+                    ),
+                )
+                connection.execute(
                     "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? "
                     "WHERE run_id=? AND connection_generation=? AND lifecycle!='closed'",
                     (now_us, self.config.run_id, old.connection_generation),

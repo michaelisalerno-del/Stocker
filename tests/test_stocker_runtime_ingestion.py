@@ -711,8 +711,10 @@ def test_recorder_disconnect_reconnect_and_staleness_are_scoped(tmp_path: Path) 
     with connect_v2(database) as connection:
         gaps = tuple(
             connection.execute(
-                "SELECT subscription_id, reason, continuity_required, resolved_at_us "
-                "FROM gaps ORDER BY started_at_us, gap_id"
+                "SELECT gap.subscription_id, gap.reason, gap.continuity_required, "
+                "gap.resolved_at_us, subscription.feed_kind FROM gaps gap "
+                "JOIN subscriptions subscription USING(subscription_id) "
+                "ORDER BY gap.started_at_us, gap.gap_id"
             )
         )
     assert required.connection_generation == optional.connection_generation == 1
@@ -720,6 +722,19 @@ def test_recorder_disconnect_reconnect_and_staleness_are_scoped(tmp_path: Path) 
     assert any(row["reason"] == "STREAM_STALE" and row["continuity_required"] == 1 for row in gaps)
     assert any(row["reason"] == "IBKR_DISCONNECT" for row in gaps)
     assert any(row["resolved_at_us"] == 115 for row in gaps)
+    quote_gaps = tuple(row for row in gaps if row["feed_kind"] == "quotes")
+    assert {row["reason"] for row in quote_gaps} == {
+        "IBKR_DISCONNECT",
+        "RECONNECT_UNCERTAINTY",
+        "STREAM_STALE",
+    }
+    assert all(row["resolved_at_us"] is not None for row in quote_gaps)
+    assert (
+        next(
+            row["resolved_at_us"] for row in quote_gaps if row["reason"] == "RECONNECT_UNCERTAINTY"
+        )
+        == 115
+    )
 
 
 def test_recorder_recovery_is_automatic_backed_off_and_bounded(tmp_path: Path) -> None:
@@ -759,12 +774,54 @@ def test_recorder_recovery_backoff_caps_at_sixty_seconds(tmp_path: Path) -> None
     for delay_seconds in (1, 2, 4, 8, 16, 32, 60, 60):
         assert recorder.recover_connection(now_us=attempt_at_us) is False
         calls_after_attempt = adapter.connect_calls
+        with connect_v2(database) as connection:
+            unresolved_during_outage = connection.execute(
+                "SELECT count(*) FROM gaps WHERE resolved_at_us IS NULL"
+            ).fetchone()[0]
+        assert unresolved_during_outage <= 2 * len(specs)
         attempt_at_us += delay_seconds * 1_000_000
         assert recorder.recover_connection(now_us=attempt_at_us - 1) is False
         assert adapter.connect_calls == calls_after_attempt
 
     assert adapter.connect_calls == 9
-    recorder.stop(now_us=attempt_at_us)
+    adapter.fail_connect = False
+    assert recorder.recover_connection(now_us=attempt_at_us) is True
+    current = recorder.state
+    assert current is not None
+    adapter.emit(
+        current.fences[0],
+        MarketDataCallback(
+            "quote",
+            attempt_at_us + 1,
+            attempt_at_us + 1,
+            {"event_at_us": attempt_at_us + 1, "bid": 1.0},
+        ),
+    )
+    adapter.emit(
+        current.fences[1],
+        MarketDataCallback(
+            "bar",
+            attempt_at_us + 1,
+            attempt_at_us + 1,
+            {
+                "event_at_us": attempt_at_us + 1,
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 1.0,
+            },
+        ),
+    )
+    assert recorder.drain(now_us=attempt_at_us + 2) == 2
+    with connect_v2(database) as connection:
+        unresolved = connection.execute(
+            "SELECT count(*) FROM gaps WHERE resolved_at_us IS NULL AND reason IN "
+            "('IBKR_CONNECT_FAILED','IBKR_DISCONNECT','IBKR_SUBSCRIBE_FAILED',"
+            "'RECONNECT_UNCERTAINTY','STREAM_STALE')"
+        ).fetchone()[0]
+    assert unresolved == 0
+    recorder.stop(now_us=attempt_at_us + 3)
 
 
 def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Path) -> None:
@@ -1271,6 +1328,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     from stocker_runtime.ingestion.official_bridge import create_official_bridge
 
     clients: list[object] = []
+    release_reader = threading.Event()
 
     class EWrapper:
         pass
@@ -1291,10 +1349,12 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
             return True
 
         def run(self) -> None:
-            return None
+            self.wrapper.nextValidId(1)
+            assert release_reader.wait(timeout=5)
 
         def disconnect(self) -> None:
             self.disconnected = True
+            release_reader.set()
 
         def reqMktData(self, request_id: int, *_args: object) -> None:  # noqa: N802
             self.requests.append(("market", request_id))
@@ -1444,6 +1504,7 @@ def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses
             index = self.run_count
             self.run_count += 1
             self.active_run = index
+            self.wrapper.nextValidId(1)
             run_started[index].set()
             if index == 0:
 
@@ -1543,6 +1604,152 @@ def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses
     bridge.disconnect()
 
 
+def test_official_bridge_waits_for_session_ready_and_reports_reader_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.ingestion.official_bridge import create_official_bridge
+
+    run_started = threading.Event()
+    release_ready = threading.Event()
+    release_reader = threading.Event()
+
+    class EWrapper:
+        pass
+
+    class Contract:
+        pass
+
+    class EClient:
+        def __init__(self, wrapper: object) -> None:
+            self.wrapper: Any = wrapper
+
+        def connect(self, _host: str, _port: int, _client_id: int) -> bool:
+            return True
+
+        def run(self) -> None:
+            run_started.set()
+            assert release_ready.wait(timeout=5)
+            self.wrapper.nextValidId(1)
+            assert release_reader.wait(timeout=5)
+
+        def disconnect(self) -> None:
+            release_reader.set()
+
+    package = types.ModuleType("ibapi")
+    client_module = types.ModuleType("ibapi.client")
+    contract_module = types.ModuleType("ibapi.contract")
+    wrapper_module = types.ModuleType("ibapi.wrapper")
+    client_module.EClient = EClient  # type: ignore[attr-defined]
+    contract_module.Contract = Contract  # type: ignore[attr-defined]
+    wrapper_module.EWrapper = EWrapper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ibapi", package)
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
+    monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
+
+    bridge = create_official_bridge(
+        host="127.0.0.1",
+        port=4001,
+        client_id=71,
+        read_only=True,
+        external_read_only_verified=True,
+    )
+    connect_finished = threading.Event()
+    connect_errors: list[BaseException] = []
+    disconnected = threading.Event()
+    bridge.set_disconnect_callback(lambda _at_us: disconnected.set())
+
+    def connect() -> None:
+        try:
+            bridge.connect()
+        except BaseException as error:
+            connect_errors.append(error)
+        finally:
+            connect_finished.set()
+
+    connecting = threading.Thread(target=connect)
+    connecting.start()
+    assert run_started.wait(timeout=5)
+    returned_before_ready = connect_finished.wait(timeout=0.25)
+    release_ready.set()
+    connecting.join(timeout=5)
+    assert not connecting.is_alive()
+    assert returned_before_ready is False
+    assert connect_errors == []
+
+    release_reader.set()
+    assert disconnected.wait(timeout=5)
+    private_bridge = cast(Any, bridge)
+    assert private_bridge._active_connection_epoch is None
+    assert private_bridge._thread is None
+    bridge.disconnect()
+
+
+def test_official_bridge_session_readiness_timeout_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.ingestion.official_bridge import (
+        OfficialBridgeUnavailable,
+        create_official_bridge,
+    )
+
+    release_reader = threading.Event()
+
+    class EWrapper:
+        pass
+
+    class Contract:
+        pass
+
+    class EClient:
+        def __init__(self, _wrapper: object) -> None:
+            return None
+
+        def connect(self, _host: str, _port: int, _client_id: int) -> bool:
+            return True
+
+        def run(self) -> None:
+            release_reader.wait(timeout=5)
+
+        def disconnect(self) -> None:
+            release_reader.set()
+
+    package = types.ModuleType("ibapi")
+    client_module = types.ModuleType("ibapi.client")
+    contract_module = types.ModuleType("ibapi.contract")
+    wrapper_module = types.ModuleType("ibapi.wrapper")
+    client_module.EClient = EClient  # type: ignore[attr-defined]
+    contract_module.Contract = Contract  # type: ignore[attr-defined]
+    wrapper_module.EWrapper = EWrapper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ibapi", package)
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
+    monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
+
+    bridge = create_official_bridge(
+        host="127.0.0.1",
+        port=4001,
+        client_id=71,
+        read_only=True,
+        external_read_only_verified=True,
+    )
+    private_bridge = cast(Any, bridge)
+    private_bridge._SESSION_READY_TIMEOUT_SECONDS = 0.01
+
+    with pytest.raises(OfficialBridgeUnavailable, match="session readiness timed out"):
+        bridge.connect()
+    assert private_bridge._active_connection_epoch is None
+    assert private_bridge._thread is None
+
+
 def test_official_bridge_unwinds_reader_thread_start_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1612,6 +1819,7 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
     from stocker_runtime.ingestion.official_bridge import create_official_bridge
 
     clients: list[object] = []
+    release_reader = threading.Event()
 
     class EWrapper:
         pass
@@ -1631,10 +1839,11 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
             return True
 
         def run(self) -> None:
-            return None
+            self.wrapper.nextValidId(1)
+            assert release_reader.wait(timeout=5)
 
         def disconnect(self) -> None:
-            return None
+            release_reader.set()
 
         def reqSecDefOptParams(  # noqa: N802
             self, request_id: int, symbol: str, *_args: object
@@ -2135,6 +2344,8 @@ def test_acknowledgement_resolves_only_causal_allowlisted_gap_for_exact_subscrip
     resolved = {(str(row[0]), str(row[1]), int(row[2])): (row[3], row[4]) for row in rows}
     assert resolved[(required, "STREAM_STALE", 102)] == (150, 153)
     assert resolved[(required, "RECONNECT_UNCERTAINTY", 103)] == (150, 153)
+    assert resolved[(required, "IBKR_DISCONNECT", 102)] == (150, 153)
+    assert resolved[(required, "IBKR_SUBSCRIBE_FAILED", 102)] == (150, 153)
     assert resolved[(required, "STREAM_STALE", 200)] == (None, None)
     assert resolved[(optional, "STREAM_STALE", 102)] == (None, None)
     assert resolved[("future-subscription", "STREAM_STALE", 102)] == (None, None)
@@ -2142,9 +2353,7 @@ def test_acknowledgement_resolves_only_causal_allowlisted_gap_for_exact_subscrip
         "STORAGE_DEGRADED_OPTIONAL_PAUSED",
         "IBKR_FARM_2103_DEGRADED",
         "IBKR_STATUS_420_PACING",
-        "IBKR_DISCONNECT",
         "UNCLEAN_RECORDER_RESTART",
-        "IBKR_SUBSCRIBE_FAILED",
     ):
         assert resolved[(required, reason, 102)] == (None, None)
 

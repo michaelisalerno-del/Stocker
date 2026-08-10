@@ -2218,6 +2218,7 @@ research = [
 ]
 server = [
     { name = "fastapi" },
+    { name = "pandas-market-calendars" },
     { name = "uvicorn" },
 ]
 
@@ -2262,6 +2263,7 @@ research = [
 ]
 server = [
     { name = "fastapi", specifier = ">=0.111" },
+    { name = "pandas-market-calendars", specifier = ">=4.4" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 

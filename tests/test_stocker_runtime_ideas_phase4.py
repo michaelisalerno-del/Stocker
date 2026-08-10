@@ -2385,6 +2385,7 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     clients: list[object] = []
+    release_reader = threading.Event()
 
     class EWrapper:
         pass
@@ -2402,10 +2403,12 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
             return True
 
         def run(self) -> None:
-            return None
+            self.wrapper.nextValidId(1)
+            while not release_reader.wait(timeout=1):
+                pass
 
         def disconnect(self) -> None:
-            return None
+            release_reader.set()
 
         def reqRealTimeBars(self, request_id: int, *_args: object) -> None:  # noqa: N802
             self.requests.append(request_id)

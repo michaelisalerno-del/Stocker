@@ -47,6 +47,9 @@ class NormalizationError(ValueError):
 
 CALLBACK_RECOVERABLE_GAP_REASONS = frozenset(
     {
+        "IBKR_CONNECT_FAILED",
+        "IBKR_DISCONNECT",
+        "IBKR_SUBSCRIBE_FAILED",
         "RECONNECT_UNCERTAINTY",
         "STREAM_STALE",
     }
@@ -871,14 +874,21 @@ class CallbackInbox:
                 evidence_at_us = event_received_at_us
                 connection.execute(
                     "UPDATE gaps SET ended_at_us=?, resolved_at_us=? "
-                    "WHERE run_id=? AND subscription_id=? "
-                    "AND reason IN (?, ?) AND started_at_us<=? AND ?<=? "
+                    "WHERE run_id=? AND subscription_id IN (SELECT prior.subscription_id "
+                    "FROM subscriptions prior WHERE prior.run_id=? "
+                    "AND prior.instrument_id=? AND prior.feed_kind=? "
+                    "AND prior.recorder_generation=? AND prior.connection_generation<=?) "
+                    "AND reason IN (?, ?, ?, ?, ?) AND started_at_us<=? AND ?<=? "
                     "AND resolved_at_us IS NULL",
                     (
                         evidence_at_us,
                         acknowledged_at_us,
                         leased.run_id,
-                        str(subscription["subscription_id"]),
+                        leased.run_id,
+                        str(subscription["instrument_id"]),
+                        str(subscription["feed_kind"]),
+                        leased.recorder_generation,
+                        leased.connection_generation,
                         *sorted(CALLBACK_RECOVERABLE_GAP_REASONS),
                         evidence_at_us,
                         evidence_at_us,

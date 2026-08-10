@@ -7,6 +7,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
@@ -1104,6 +1105,15 @@ def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
     assert _market_data_expected_since_us(early_open) == early_open
     assert _market_data_expected_since_us(early_close - 1) == early_open
     assert _market_data_expected_since_us(early_close) is None
+
+
+def test_server_dependency_closure_includes_the_runtime_market_calendar() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    server_dependencies = project["dependency-groups"]["server"]
+    bootstrap = (ROOT / "scripts/bootstrap_server.sh").read_text(encoding="utf-8")
+
+    assert "pandas-market-calendars>=4.4" in server_dependencies
+    assert "uv sync --locked --no-editable --no-default-groups --group server" in bootstrap
 
 
 def test_recorder_health_tick_marks_expected_staleness_and_always_recovers(

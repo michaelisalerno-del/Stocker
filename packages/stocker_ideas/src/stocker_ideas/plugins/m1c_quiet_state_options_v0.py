@@ -1465,7 +1465,7 @@ class M1CQuietStateOptionsV0:
                 episode = {"s": prefix_session, "p": None, "l": None, "c": 0}
             previous = _number(episode.get("p"))
             last = _integer(episode.get("l"))
-            elapsed = None if last is None else (as_of - last) / 60_000_000.0
+            elapsed = None if last is None else (event.event_at_us - last) / 60_000_000.0
             quiet = classify_quiet_state(
                 probability=probability,
                 previous_probability=previous,
@@ -1476,7 +1476,7 @@ class M1CQuietStateOptionsV0:
             candidate: dict[str, object] | None = None
             if quiet.fresh_episode:
                 count += 1
-                episode["l"] = as_of
+                episode["l"] = event.event_at_us
                 episode["c"] = count
                 candidate = {
                     "i": event.event_id,

@@ -2042,6 +2042,51 @@ def test_quiet_state_uses_the_frozen_inclusive_downward_crossing() -> None:
     assert too_close.fresh_episode is False
 
 
+def test_quiet_episode_spacing_uses_market_bar_time_across_restart_and_receipt_skew() -> None:
+    plugin = M1CQuietStateOptionsV0()
+    state, retained = _prime_low_tail_context(plugin, all_cohort_low=True)
+    seeded = dict(cast(Mapping[str, JsonValue], state))
+    seeded["episodes"] = {
+        "RGTI": {
+            "s": "2026-08-10",
+            "p": 0.20,
+            "l": 800_000_000,
+            "c": 1,
+        }
+    }
+    delayed = _event(
+        "prefix-rgti-delayed-before-spacing",
+        "RGTI",
+        "bar_5m_session_prefix",
+        2_000_000_000,
+        _prefix_payload(symbol="RGTI", session="2026-08-10"),
+    )
+    delayed = _replace_event(delayed, received_at_us=3_860_000_000)
+
+    before_spacing = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((delayed,), retained=retained),
+        cast(JsonValue, seeded),
+    )
+
+    assert before_spacing.outputs[0].payload["fresh_episode"] is False
+    assert before_spacing.state["episodes"]["RGTI"]["l"] == 800_000_000
+    assert before_spacing.state["pending"] == {}
+
+    at_spacing = _replace_event(
+        delayed,
+        event_id="prefix-rgti-delayed-at-spacing",
+        event_at_us=2_600_000_000,
+        received_at_us=4_000_000_000,
+    )
+    admitted = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((at_spacing,), retained=retained),
+        cast(JsonValue, seeded),
+    )
+    assert admitted.outputs[0].payload["fresh_episode"] is True
+    assert admitted.state["episodes"]["RGTI"]["l"] == 2_600_000_000
+    assert admitted.state["pending"]["y"] == "RGTI"
+
+
 def test_defined_risk_selection_matches_the_frozen_protective_contracts() -> None:
     attempts = select_defined_risk_structures(
         contracts=_bucket_contracts(),
